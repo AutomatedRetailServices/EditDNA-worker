@@ -109,6 +109,32 @@ on:
         required: false
         default: ""
         type: string
+      zone_usability_v2_diagnostics_enabled:
+        # D-170: "1" enables a SEPARATE, LATE-STAGE, tail-safe summary step
+        # that reconstructs D-167's Watch+Listen Zone-Usability V2
+        # (cutsell_worker/watch_listen_zone_usability_v2.py, DIAGNOSTIC-ONLY,
+        # unwired) from evidence THIS workflow's existing, unconditional
+        # `case_b_evidence` (D-122) per-clip DELIVERY-zone event records
+        # already carries in artifact/video00-modal.json -- zero
+        # cutsell_worker editorial change, no new runtime env var into the
+        # pipeline itself, no RunPod shared template edit. Reads real
+        # per-event kind/start/end/confidence/duration already computed
+        # this run; recomputes no perception, no BestTake decision, no
+        # selected_clip_id. ENTRY/EXIT zone EVENT data is not serialized
+        # anywhere today (D-122's own explicit DELIVERY-zone-only scope),
+        # so this step honestly reports ENTRY/EXIT zone durations (derived
+        # from each clip's own real start/end vs. its measured delivery
+        # span -- never fabricated) with zero reconstructable event
+        # evidence, not a confirmed absence of defects -- see the summary's
+        # own `entry_exit_event_data_available: false` field. Recommended
+        # alongside watch_listen_besttake_evidence_enabled=1 above so the
+        # D-163 guard's own fields are present for the same-run comparison
+        # this qualification requires. Empty (default) = OFF, byte-
+        # identical to every run before D-170.
+        description: "Optional: '1' enables the D-170 Zone-Usability V2 diagnostic summary (reconstructed from existing D-122 case_b_evidence). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -1694,6 +1720,232 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: Print compact D-170 Watch+Listen Zone-Usability V2 diagnostic qualification summary (tail-safe)
+        # D-170: reconstructs cutsell_worker.watch_listen_zone_usability_v2
+        # (D-167, DIAGNOSTIC-ONLY, still not wired to any authority) from
+        # this workflow's own already-present, UNCONDITIONAL `case_b_
+        # evidence` (D-122) per-clip DELIVERY-zone event records in
+        # artifact/video00-modal.json -- zero cutsell_worker editorial
+        # change, no new pipeline env var, no RunPod template edit. Uses
+        # the real, unmodified `watch_listen_zone_usability_v2.py`/
+        # `positioned_performance_evidence.py`/`raw_understanding_map.py`
+        # classes as a pure, read-only analysis library only -- recomputes
+        # no perception, mutates no selected_clip_id, grants no authority.
+        # DELIVERY zone is a faithful reconstruction (real event kind/
+        # start/end/confidence/duration, real delivery span). ENTRY/EXIT
+        # zone_duration is derived from each clip's own real start/end
+        # (from the selected/alternates/discarded buckets) vs. its measured
+        # delivery span -- genuine, not fabricated -- but ENTRY/EXIT EVENT
+        # data was never serialized (D-122's own explicit DELIVERY-zone-
+        # only scope), so ENTRY/EXIT event_count is honestly 0 here: this
+        # reflects a data-availability limit of this offline reconstruction,
+        # never a confirmed absence of an entry/exit defect. Span-level
+        # conflict_flags (D-157) are likewise unavailable here, so
+        # zone_conflict is honestly reported as unavailable-hence-False,
+        # never a fabricated confirmation of no conflict. Input-gated
+        # (default OFF): the underlying case_b_evidence this step reads is
+        # itself unconditional, so this flag governs only whether the
+        # extra, optional D-170 analysis step runs at all this dispatch --
+        # never a change to what the pipeline itself computes.
+        if: ${{ always() && github.event.inputs.zone_usability_v2_diagnostics_enabled == '1' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os, sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          summary = {"schema_version": "cutsell.video00.d170_zone_usability_v2_summary.v1"}
+          summary["entry_exit_event_data_available"] = False
+          summary["conflict_flag_data_available"] = False
+
+          try:
+              from cutsell_worker.positioned_performance_evidence import (
+                  DeliverySpan, PositionedEvent, PositionAwarePerformanceEvidence,
+                  ZONE_DELIVERY,
+              )
+              from cutsell_worker.raw_understanding_map import RawUnderstandingSpan
+              from cutsell_worker.watch_listen_zone_usability_v2 import (
+                  build_zone_usability_v2, zone_usability_v2_dominates,
+                  candidate_zone_usability_v2_row, zone_usability_v2_diagnostics,
+                  CASE_A_BOUNDARY_ONLY, CASE_B_DELIVERY_OWNED, CASE_C_AMBIGUOUS, CASE_CLEAN,
+              )
+              import_ok = True
+              import_error = None
+          except Exception as e:
+              import_ok = False
+              import_error = f"{type(e).__name__}: {e}"
+
+          summary["import_status"] = "ok" if import_ok else "failed"
+          if not import_ok:
+              summary["import_error"] = import_error
+              os.makedirs("artifact", exist_ok=True)
+              out_path = "artifact/video00-modal-d170-zone-usability-v2-summary.json"
+              with open(out_path, "w") as f:
+                  json.dump(summary, f, indent=2, sort_keys=True)
+              print("--- D-170 Zone-Usability V2 diagnostic summary: IMPORT FAILED, no reconstruction attempted ---")
+              print(json.dumps(summary, indent=2, sort_keys=True))
+              raise SystemExit(0)
+
+          engine = load("artifact/video00-modal.json")
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          clip_meta = {}
+          groups = []
+          if isinstance(engine, dict):
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          clip_meta[clip["clip_id"]] = {
+                              "start": clip.get("start"), "end": clip.get("end"),
+                              "text": str(clip.get("text") or ""),
+                          }
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_groups = diag.get("take_judge_groups")
+                  if isinstance(raw_groups, list):
+                      groups = [r for r in raw_groups if isinstance(r, dict)]
+
+          def build_span(clip_id, ev, clip_start, clip_end):
+              d_avail = bool(ev.get("delivery_available"))
+              d_start = ev.get("delivery_start")
+              d_end = ev.get("delivery_end")
+              delivery = DeliverySpan(
+                  start=d_start, end=d_end, available=d_avail,
+                  source="d170_reconstruction_from_case_b_evidence",
+              )
+              events = []
+              for e in ev.get("delivery_events") or []:
+                  events.append(PositionedEvent(
+                      kind=e.get("kind"), start=e.get("start"), end=e.get("end"),
+                      confidence=e.get("confidence"), zone=ZONE_DELIVERY,
+                      overlaps_delivery=None, starts_before_delivery=None,
+                      ends_after_delivery=None,
+                      evidence_source=e.get("evidence_source") or "unknown",
+                  ))
+              positioned = PositionAwarePerformanceEvidence(
+                  candidate_id=clip_id, source_asset_id=ev.get("source_asset_id") or "",
+                  source_start=clip_start if clip_start is not None else (d_start or 0.0),
+                  source_end=clip_end if clip_end is not None else (d_end or 0.0),
+                  delivery_span=delivery, positioned_events=tuple(events),
+              )
+              # source_start/source_end on the SPAN itself (used by D-167's
+              # own ENTRY/EXIT duration derivation, d_start - source_start /
+              # source_end - d_end) come from the real clip start/end when
+              # available -- never fabricated; fall back to the delivery
+              # span's own bounds (zero-width entry/exit) when the clip's
+              # own start/end is missing from this run's JSON.
+              return RawUnderstandingSpan(
+                  span_id=clip_id, source_asset_id=ev.get("source_asset_id") or "",
+                  source_start=clip_start if clip_start is not None else (d_start if d_start is not None else 0.0),
+                  source_end=clip_end if clip_end is not None else (d_end if d_end is not None else 0.0),
+                  transcript="", word_timings=(), positioned_evidence=positioned,
+                  behavior_hypotheses=(), conflict_flags=(), evidence_provenance={},
+              )
+
+          zone_v2_by_candidate = {}
+          for row in groups:
+              case_b = row.get("case_b_evidence")
+              if not isinstance(case_b, dict) or not case_b:
+                  continue
+              for clip_id, ev in case_b.items():
+                  if not isinstance(ev, dict):
+                      continue
+                  meta = clip_meta.get(clip_id) or {}
+                  try:
+                      span = build_span(clip_id, ev, meta.get("start"), meta.get("end"))
+                      result = build_zone_usability_v2(clip_id, span)
+                  except Exception as e:
+                      print(f"WARNING: V2 reconstruction failed for {clip_id}: {e}", file=sys.stderr)
+                      continue
+                  if result is not None:
+                      zone_v2_by_candidate[clip_id] = result
+
+          per_candidate_rows = []
+          for clip_id, result in sorted(zone_v2_by_candidate.items()):
+              row = {"candidate_id": clip_id, "case_classification": result.case_classification}
+              row.update(candidate_zone_usability_v2_row(result))
+              per_candidate_rows.append(row)
+
+          global_summary = zone_usability_v2_diagnostics(list(zone_v2_by_candidate.values()))
+          global_summary["families_with_v2_evidence"] = sum(
+              1 for row in groups
+              if isinstance(row.get("case_b_evidence"), dict)
+              and any(cid in zone_v2_by_candidate for cid in row["case_b_evidence"])
+          )
+
+          # V1-vs-V2 saturation replay: families where >=2 members' D-163 V1
+          # candidate_usability_summary already reports UNUSABLE (real,
+          # already-computed field -- watch_listen_besttake_evidence_
+          # enabled must also be "1" for this to be non-empty).
+          saturation_families = []
+          for row in groups:
+              v1_summary = row.get("candidate_usability_summary")
+              if not isinstance(v1_summary, dict):
+                  continue
+              unusable_v1_ids = [cid for cid, u in v1_summary.items() if u == "UNUSABLE"]
+              if len(unusable_v1_ids) < 2:
+                  continue
+              v2_states = {cid: zone_v2_by_candidate[cid].overall_usability for cid in unusable_v1_ids if cid in zone_v2_by_candidate}
+              distinguishable = len(set(v2_states.values())) > 1
+              # Also check ordinal dominance between the saturated pair(s).
+              dominance_pairs = []
+              ids_with_v2 = [cid for cid in unusable_v1_ids if cid in zone_v2_by_candidate]
+              for i in range(len(ids_with_v2)):
+                  for j in range(len(ids_with_v2)):
+                      if i == j:
+                          continue
+                      a, b = ids_with_v2[i], ids_with_v2[j]
+                      try:
+                          if zone_usability_v2_dominates(zone_v2_by_candidate[a], zone_v2_by_candidate[b]):
+                              dominance_pairs.append({"alternative": a, "winner": b})
+                      except Exception:
+                          pass
+              saturation_families.append({
+                  "group_id": row.get("group_id"),
+                  "v1_unusable_ids": unusable_v1_ids,
+                  "v1_indistinguishable": True,
+                  "v2_states": v2_states,
+                  "v2_distinguishable": distinguishable,
+                  "v2_dominance_pairs": dominance_pairs,
+                  "v1_dominant_candidate": row.get("watch_listen_besttake_dominant_candidate"),
+                  "winner_before": row.get("watch_listen_besttake_winner_before") or row.get("selected_clip_id"),
+                  "winner_after": row.get("watch_listen_besttake_winner_after") or row.get("selected_clip_id"),
+              })
+
+          summary["global_v2_summary"] = global_summary
+          summary["per_candidate_v2_trace"] = per_candidate_rows
+          summary["v1_saturation_family_count"] = len(saturation_families)
+          summary["v2_separation_count"] = sum(1 for f in saturation_families if f["v2_distinguishable"])
+          summary["saturation_families"] = saturation_families
+          summary["winner_immutability_check"] = "OK" if all(
+              f["winner_before"] == f["winner_after"] for f in saturation_families
+          ) else "REGRESSION_WINNER_CHANGED"
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d170-zone-usability-v2-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True, default=str)
+
+          size = os.path.getsize(out_path)
+          print("--- D-170 Zone-Usability V2 diagnostic qualification summary (reconstructed from existing D-122 case_b_evidence -- recomputes no perception, mutates no winner) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -1711,6 +1963,7 @@ jobs:
             artifact/video00-modal-d123-qualification-summary.json
             artifact/video00-modal-d152-semantic-authority-summary.json
             artifact/video00-modal-d164-watch-listen-besttake-summary.json
+            artifact/video00-modal-d170-zone-usability-v2-summary.json
           retention-days: 14
           if-no-files-found: warn
 
