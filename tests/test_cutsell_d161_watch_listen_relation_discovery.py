@@ -936,7 +936,14 @@ def test_61_pipeline_wiring_present_and_gated_by_either_flag():
     import cutsell_worker.pipeline as pipeline_mod
     source = open(pipeline_mod.__file__, encoding="utf-8").read()
     assert "watch_listen_relation_discovery_enabled" in source
-    assert "watch_listen_family_evidence_enabled() or watch_listen_relation_discovery_enabled()" in source
+    # D-163 additively widened this same condition to a third flag
+    # (watch_listen_besttake_evidence_enabled) -- check the two D-161-owned
+    # disjuncts are still both present in the (now multi-line) expression,
+    # not the exact original one-line string.
+    idx = source.index("watch_listen_spans_by_id = (")
+    block = source[idx: idx + 600]
+    assert "watch_listen_family_evidence_enabled()" in block
+    assert "watch_listen_relation_discovery_enabled()" in block
 
 
 def test_62_no_besttake_deliveryscorer_boundary_pacing_module_imports_discovery():

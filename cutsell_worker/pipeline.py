@@ -74,6 +74,13 @@ from .attempt_relationship_authority import (
 # `watch_listen_relation_discovery.py` sits in the SAME dependency chain
 # (`attempt_reconstruction -> session_boundaries -> take_grouping_
 # provider`), which never imports `pipeline.py` back at module load time.
+from .watch_listen_besttake_evidence import (
+    build_watch_listen_besttake_evidence,
+    evaluate_watch_listen_besttake_guard,
+    watch_listen_besttake_diagnostics,
+    watch_listen_besttake_evidence_enabled,
+    watch_listen_besttake_group_row,
+)
 from .watch_listen_relation_discovery import watch_listen_relation_discovery_enabled
 from .watch_listen_understanding import WatchListenUnderstanding
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
@@ -982,9 +989,17 @@ def build_flow_b_draft(
     # candidates from. Build the index when EITHER flag is ON so that
     # discovery works even when the family-evidence flag stays OFF; both
     # flags OFF (the shared default) still skips the build entirely.
+    # D-163: the BestTake evidence guard is a THIRD, separate authority
+    # (docs/CUTSELL_DECISIONS.md D-163) that reuses this SAME span index
+    # (per-member entry/delivery/exit usability, behavior hypotheses,
+    # conflict flags) -- never a fourth recomputation.
     watch_listen_spans_by_id = (
         build_understanding_span_index(watch_listen_understandings)
-        if (watch_listen_family_evidence_enabled() or watch_listen_relation_discovery_enabled())
+        if (
+            watch_listen_family_evidence_enabled()
+            or watch_listen_relation_discovery_enabled()
+            or watch_listen_besttake_evidence_enabled()
+        )
         and watch_listen_understandings
         else None
     )
@@ -1039,6 +1054,7 @@ def build_flow_b_draft(
     alternate_group_count = 0
     semantic_best_take_override_count = 0
     judge_group_diagnostics = []
+    watch_listen_besttake_results: list = []
     no_usable_realization_ids: set[str] = set()
     events_by_source: dict[str, tuple] = {}
     if whole_video_context is not None:
@@ -1223,6 +1239,32 @@ def build_flow_b_draft(
                 case_b_evidence_by_id=case_b_evidence_objects,
                 safety_excluded_ids=fallback_safety_excluded_ids,
             )
+            # D-163 Phase D (docs/CUTSELL_DECISIONS.md D-163): Watch+Listen
+            # PERFORMANCE/USABILITY evidence, diagnostic-only in this task
+            # (see watch_listen_besttake_evidence.py's own module docstring
+            # for the full "why diagnostic, not action" contract). Default
+            # OFF (CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED) -- a total
+            # no-op (byte-identical selected_clip_id/ranked/membership) when
+            # off or when no Watch+Listen span exists for a member.
+            watch_listen_besttake_row: dict = {}
+            if watch_listen_besttake_evidence_enabled() and watch_listen_spans_by_id:
+                _wlbt_evidence_by_id = {
+                    member.clip_id: build_watch_listen_besttake_evidence(
+                        member.clip_id,
+                        watch_listen_spans_by_id.get(member.clip_id),
+                        meaning_sufficient=member.clip_id in meaning_sufficient_ids,
+                    )
+                    for member in members
+                }
+                if any(ev is not None for ev in _wlbt_evidence_by_id.values()):
+                    _wlbt_result = evaluate_watch_listen_besttake_guard(
+                        winner_id=selected_clip_id or None,
+                        meaning_sufficient_ids=meaning_sufficient_ids,
+                        evidence_by_id=_wlbt_evidence_by_id,
+                        ranked=[{"clip_id": item.clip_id, "score": item.score} for item in ranked],
+                    )
+                    watch_listen_besttake_row = watch_listen_besttake_group_row(_wlbt_result, selected_clip_id)
+                    watch_listen_besttake_results.append(_wlbt_result)
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -1317,6 +1359,10 @@ def build_flow_b_draft(
                 # never consulted above this line, never changes
                 # selected_clip_id/ranked/membership/grouping/Boundary.
                 **fallback_trigger_diagnostics(fallback_trigger_decision),
+                # D-163: Watch+Listen BestTake evidence guard -- diagnostic
+                # only in this task; empty dict when the flag is off or no
+                # Watch+Listen evidence exists for this family.
+                **watch_listen_besttake_row,
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
@@ -1500,6 +1546,18 @@ def build_flow_b_draft(
             "take_judge_status_counts": dict(judge_statuses),
             "take_judge_fallback_reasons": dict(judge_reasons),
             "take_judge_groups": judge_group_diagnostics[:50],
+            # D-163 (docs/CUTSELL_DECISIONS.md D-163): tail-safe, counts-only
+            # summary of the Watch+Listen BestTake evidence guard -- same
+            # pattern as D-158/D-161's own compact summaries. {"status":
+            # "disabled"} when the flag is off; the per-family fields
+            # already live on each take_judge_groups row above.
+            "watch_listen_besttake_evidence": (
+                {"status": "disabled"} if not watch_listen_besttake_evidence_enabled()
+                else (
+                    {"status": "no_families_evaluated"} if not watch_listen_besttake_results
+                    else {"status": "evaluated", **watch_listen_besttake_diagnostics(watch_listen_besttake_results)}
+                )
+            ),
             "composer_status": composition.status.__dict__,
             "composer_reason": composition.reason,
             "composer_order": list(composition.ordered_clip_ids),

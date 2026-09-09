@@ -25223,3 +25223,250 @@ preserved CLOSED/unchanged; this entry does not rewrite D-161.
 further real-media attempt at exercising Watch+Listen Discovery's
 mechanism value, and/or whether to authorize Phase D despite this run's
 inertness, are Product Owner decisions.
+
+
+==================================================
+D-163 -- WATCH+LISTEN PERFORMANCE/USABILITY EVIDENCE IN BESTTAKE (PHASE D)
+==================================================
+
+**STATUS: OFFLINE PROVEN (Verdict A), DIAGNOSTIC-ONLY THIS TASK.**
+Implements the Phase D capability D-162 named as the next gate after
+Watch+Listen Discovery's real-media qualification: fused Watch+Listen
+PERFORMANCE/USABILITY evidence now participates in BestTake decision
+QUALITY -- as a bounded, structured GUARD, never a replacement for
+DeliveryScorer, never a new terminal authority, and never a mutation of
+`selected_clip_id` in this task. Branch `feature/runpod-pod-on-demand`,
+built on D-162's HEAD `f899aec`.
+
+**Core principle (unchanged from the directive, now code):**
+
+    WATCH+LISTEN PERFORMANCE EVIDENCE CAN DISQUALIFY OR DEMOTE A POORLY-
+    USABLE REALIZATION. IT DOES NOT AUTOMATICALLY SELECT THE MOST ACTIVE
+    OR MOST EXPRESSIVE TAKE. CLARITY AND USABILITY BEFORE ENERGY.
+
+**Files changed:** `cutsell_worker/watch_listen_besttake_evidence.py`
+(new), `cutsell_worker/pipeline.py` (additive wiring only), `tests/
+test_cutsell_d163_watch_listen_besttake_evidence.py` (new, 64 tests),
+`tests/test_cutsell_d161_watch_listen_relation_discovery.py` (one
+source-text assertion widened to match the now-three-flag disjunct it
+checks -- no behavior change).
+
+## BestTake evidence contract: `WatchListenBestTakeEvidence`
+
+One normalized per-candidate structure, built PURELY from an already-
+computed `watch_listen_understanding.UnderstandingSpan` (D-157,
+unchanged) plus one caller-supplied fact (`meaning_sufficient`, read from
+the EXISTING `meaning_sufficient_candidates` field, D-089, unchanged):
+`candidate_id`, `meaning_sufficient`, `overall_performance_usability`,
+`entry_usability`, `delivery_usability`, `exit_usability`, `delivery_
+defect_present`, `entry_only_defect`, `exit_only_defect`, `breaking_
+character_during_delivery`, `reset_or_fumble_during_delivery`,
+`performance_continuity_status`, `audio_signal_usability`, `visual_
+signal_usability`, `editability_status`, `conflict_flags`, `evidence_
+provenance`, `case_classification`. No `final_winner` field (proven by
+`test_10`) -- evidence, never a decision.
+
+## Authority seam
+
+The guard is invoked inside `pipeline.py`'s existing per-family
+`take_judge_groups` loop, AFTER `_semantic_best_take`, D-150's gate, and
+D-122/D-123's CASE B evidence are all already computed (reusing the SAME
+`watch_listen_spans_by_id` D-158/D-161 already build -- no new span
+index). It is PURELY ADDITIVE: computed fields are spread into the
+existing `judge_group_diagnostics` row and a tail-safe `watch_listen_
+besttake_evidence` summary is added to the outer diagnostics dict.
+`selected_clip_id`, `ranked`, `groups`, and every downstream consumer
+(Boundary, render, Pacing) are completely untouched by this task --
+verified structurally (`test_44`: no `selected_clip_id =` or `groups.
+append` assignment anywhere in the D-163 wiring block).
+
+## Feature flag
+
+`CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED`, default OFF, a THIRD,
+separate flag from D-158's `CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED`
+and D-161's `CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED` -- three
+different authorities (merge-veto, relation-discovery, BestTake-
+evidence). The existing `watch_listen_spans_by_id` build condition
+(`pipeline.py`) was widened to build the index when ANY of the three
+flags is on; all three OFF (the shared default) still skips the build
+entirely -- byte-identical to every run before D-158.
+
+## Meaning firewall
+
+`build_watch_listen_besttake_evidence` takes `meaning_sufficient` as a
+caller-supplied fact; the guard's own `evaluate_watch_listen_besttake_
+guard` immediately routes a meaning-insufficient winner to `NO_ACTION`
+(`winner_not_meaning_sufficient_upstream_owned`) and NEVER treats a
+meaning-insufficient candidate as an eligible alternative (`test_23`,
+`test_38`) -- no code path in this module can set `dominant_candidate_id`
+to a meaning-insufficient candidate.
+
+## CASE A/B/C ownership (D-107/D-115, reused, never re-derived)
+
+`_case_for(entry, delivery, exit)` reuses the EXISTING three-zone
+usability fields verbatim: `CASE_B_DELIVERY_OWNED` (delivery ==
+UNUSABLE, this module's own legitimate territory), `CASE_A_BOUNDARY_ONLY`
+(delivery acceptable, entry or exit QUESTIONABLE -- NEVER sufficient
+alone to demote a candidate; `test_20`/`test_21`/`test_26` prove entry-
+only and exit-only defects always PRESERVE the structured winner), `CASE_
+C_AMBIGUOUS` (delivery UNKNOWN -- preserve/uncertain, `test_09`).
+
+## Performance dominance contract
+
+`_performance_dominates(alternative, winner)`: B dominates A only if (1)
+B is no worse than A on every trusted zone (ordinal USABLE > QUESTIONABLE
+~ UNKNOWN > UNUSABLE), (2) B is strictly better on DELIVERY specifically,
+(3) A's inferiority is not CASE_A_BOUNDARY_ONLY (Boundary-removable
+debris never counts), (4) neither carries a `conflict_flags` entry. No
+arbitrary numeric threshold -- pure ordinal comparison (`test_19`,
+`test_26`, `test_33`, `test_34`).
+
+## DeliveryScorer role
+
+DeliveryScorer (`take_judge.py`) is NOT replaced or reweighted. The
+EXISTING `ranked` scores are reused ONLY as a deterministic tie-break
+among candidates the dominance check has ALREADY narrowed to (`test_38b`)
+-- never as an input to the dominance decision itself. When the guard
+finds a dominant alternative, it checks whether `deterministic_best_take_
+authority.clear_retry_family_winner` (D-123's own existing, unchanged,
+>=0.30-gap deterministic ladder) ALREADY independently supports that same
+candidate (`existing_ladder_agrees`) -- a confirmation, never a new
+mutation (`test_32`/`test_32b`). Per this task's own "no new terminal
+absolute authority" instruction, this guard produces DIAGNOSTICS ONLY:
+`watch_listen_besttake_winner_after` always equals `winner_before` and
+`watch_listen_besttake_action_applied` is always `False` in this task
+(`test_41`) -- the guard's judgment is visible for QA/Product Owner
+review, never a silent auto-correction.
+
+## Double-counting audit (this task's own explicit requirement)
+
+`DOUBLE_COUNTING_AUDIT` (a static, code-derived mapping, `test_17`) names
+every dimension this module reads against the existing chain: the four
+real Track C event kinds (`camera_disengagement_candidate`, `facial_
+expression_shift_candidate`, `body_reset_candidate`, `hand_motion_reset_
+candidate`) already independently feed (a) `local_performance.apply_
+local_performance_to_takes` -> MediaSignals -> `take_judge.score_take`'s
+composite, and (b) `take_judge.delivery_cleanliness_evidence` (D-097, a
+confidence-floored >=0.88/>=0.76, BOTH-signals-required penalty already
+subtracted from `ranked`). `entry_usability`/`delivery_usability`/`exit_
+usability`/`overall_performance_usability`/`reset_or_fumble_during_
+delivery` are classified `PARTIALLY_CORRELATED` with that existing
+evidence (same root events, un-floored categorical aggregation, never
+identical). `visual_signal_usability` is classified `SAME_SOURCE_
+DUPLICATE` (a direct relabeling of the zone fields, never a second
+independent read). `breaking_character_during_delivery` and `conflict_
+flags` are classified `INDEPENDENT` -- D-100's own `wrong_take`/`retry_
+setup` corroboration and the meaning-vs-behavior cross-check neither
+`case_b_performance_evidence.py` nor MediaSignals perform today.
+
+## Boundary firewall
+
+An ENTRY/EXIT-only defect NEVER causes this module to demote or bypass a
+candidate (`_performance_dominates` returns `False` outright when the
+winner's own case is `CASE_A_BOUNDARY_ONLY`); the guard annotates
+`editability_status=BOUNDARY_ONLY` but preserves the candidate's
+viability throughout (`test_07`/`test_08`/`test_20`/`test_21`/`test_26`).
+
+## Audio honesty
+
+`audio_signal_usability` is `UNKNOWN` for every candidate in V1
+(`test_15`, `test_28`) -- no live producer feeds pure audio-signal
+behavior hypotheses into `WatchListenUnderstanding` today (confirmed by
+direct code read of `raw_understanding_map.py`/`watch_listen_
+understanding.py`); reporting tone/prosody/emotion-from-voice here would
+be an overclaim this task explicitly forbids. `visual_signal_usability`
+honestly mirrors the real, already-computed zone usability instead.
+
+## Abstract D-162 replay
+
+`test_32_semantic_nondecisive_deliveryscore_bad_winner_abstract_d162_
+replay` builds the generic fixture the directive names: family {A, B},
+both meaning-sufficient, DeliveryScorer picks A with only a thin (non-
+decisive, < 0.30) score gap over B, Watch+Listen shows A's DELIVERY
+UNUSABLE and B USABLE. Result: `PERFORMANCE_DOMINANT_ALTERNATIVE`,
+dominant candidate B, `existing_ladder_agrees=False` (the existing
+D-123 deterministic ladder does NOT independently support B at that gap)
+-- proving the guard surfaces exactly the D-162 real-media shape
+(DeliveryScorer agreed with a both-references-rejected take, and no
+existing mechanism caught it) as visible, structured evidence. No
+candidate name is encoded in production logic; only the fixture's own
+fabricated ids are used.
+
+## D-123 compatibility (no duplicated authority)
+
+D-123's own gate (`semantic_fast_path_candidate` + meaning-sufficient
+alternative + DeliveryScorer disagreement + factual CASE B evidence) is
+completely untouched -- this module runs strictly AFTER it, on its
+OUTPUT (`selected_clip_id`), and the remaining shape D-163 targets
+(semantic non-decisive OR semantic+DeliveryScorer AGREE, but Watch+
+Listen usability shows the result is materially inferior) is exactly the
+complementary case D-123 does not cover. `test_31` proves D-163 fires
+even when semantic and DeliveryScorer AGREE (D-126/D-162: agreement is
+not absolute).
+
+## Tests
+
+64 new tests (`tests/test_cutsell_d163_watch_listen_besttake_evidence.
+py`): flag (3), evidence contract/CASE ownership/fail-open (7), behavior-
+derived flags (4), audio honesty (3), the guard's required 20-item
+fixture list -- clean-vs-clean, delivery-unusable winner, entry-only,
+exit-only, both-bad, meaning-insufficient alt, visual fumble, breaking
+character, post-delivery-reset-boundary-only, camera disengagement,
+audio pause, ordinary motion, energy non-authority, semantic+
+DeliveryScorer-agreement conflict, the abstract D-162 replay, existing-
+ladder-agreement, conflict-flag fail-opens (winner and alternative),
+missing/None evidence fail-open, no-winner-id fail-open, meaning-firewall
+fail-open, deterministic tie-break ordering -- plus diagnostics/group-row
+field-name and no-transcript-leak tests, and 10 module-leaf structural
+tests (no Family Formation/semantic-authority/Boundary/Pacing/render/
+provider import anywhere, D-150/`take_judge`/`deterministic_best_take_
+authority` unaware of this module, the >=0.30 gap constant reused not
+re-typed, no opaque weighted-sum score in the actual code). One existing
+D-161 test (`test_61`) updated to match the now-three-flag disjunct its
+own source-text assertion checks -- no behavior change, confirmed by the
+identical `watch_listen_spans_by_id` build condition still gating on
+exactly the same two D-161-owned flags plus the new third one.
+
+**Regression battery.** `python -m compileall` clean. Targeted D-163
+suite (64) plus D-161 (90) + D-158 (66) + D-157 (19) + D-123 + D-128 +
+D-150 + Boundary (3 files) + D-142 pacing + render (2 files) all green:
+373 tests, zero failures. Full offline suite (`tests/`, excluding the
+pre-existing, unrelated `test_semantic_stitch.py` collection error,
+confirmed identical since before D-161): 3693 passed (delta +64 = exactly
+the new D-163 test count), 13 subtests passed, the SAME 5 pre-existing
+failures (`test_hybrid_story_guard_incomplete_retry.py` one case,
+`test_video00_modal_hybrid_semantic_parity.py` four cases -- all
+infrastructure/workflow-YAML and unrelated editorial tests, confirmed
+identical to the D-161/D-162 baseline) -- zero new failures.
+
+**Phase-D Verdict: A. WATCH+LISTEN BESTTAKE EVIDENCE OFFLINE PROVEN**
+(as a diagnostic guard; the guard's own judgment is correct, deterministic,
+fail-open throughout, and structurally incapable of overriding meaning/
+safety or Boundary-only defects -- proven by all 64 tests above; no
+action is taken on a real selection in this task by design, so this
+verdict certifies the EVIDENCE/GUARD layer, not yet a live BestTake
+action).
+
+**Next gate (per the directive, NOT authorized here):** ONE Video00
+real-media qualification with Watch+Listen perception/understanding
+enabled, Family Evidence enabled as appropriate, Relation Discovery state
+preserved, and `CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=1` --
+measuring family topology, D-150, DeliveryScorer, BestTake, the pimples
+winner, Cut.ai F1, and Gold F1, to determine whether the guard's real-
+media judgments would have correctly flagged D-162's own pimples/
+ginecóloga shapes. No RAW authorized or run in this task.
+
+**Confirmations:** NO RAW. NO provider/network call anywhere in the new
+or changed code (verified structurally). NO Family Formation change (D-158/
+D-161/`take_grouping_provider.py` family topology untouched -- `watch_
+listen_spans_by_id`'s build condition widened, never its consumption by
+those authorities). NO Proposition/Attempt Relation change. NO semantic-
+authority change (D-150's own gate module unaware of this new module,
+`test_50`). NO Boundary/Pacing/render change (confirmed via module-leaf
+tests and the unchanged Boundary/D-142/render regression suites). D-123/
+D-128 untouched (their own modules unaware of this new module, `test_51`;
+D-123's gate itself never called or duplicated).
+
+**HUMAN ACTION REQUIRED:** YES (condition C) -- authorization for the ONE
+real-media Video00 qualification run named above is a Product Owner
+decision.
