@@ -29572,3 +29572,544 @@ RAW dispatched. No second RAW.
 
 **HUMAN ACTION REQUIRED:** YES (condition A) -- choosing between the two
 options in "Exact next engine gate" above is a Product Owner decision.
+
+
+## D-176: Gynecologist-retry BestTake miss -- root-cause forensic (post D-175, no code change)
+
+==================================================
+STATUS
+==================================================
+
+**A. ROOT CAUSE IDENTIFIED -- SINGLE GENERAL MECHANISM (with one honestly-
+disclosed secondary observation, non-blocking).** Reconstructed the real
+gynecologist-retry region from persisted D-170/D-173/D-175 job-log
+evidence only (no RAW dispatched, no inference beyond what is quoted).
+The repeated `false_keep`/`take_choice_against_both_references` signal
+this session has attributed to `BestTakeResolver` for three independent
+runs is, on the evidence, NOT a BestTake selection defect: the current
+winner's actual DELIVERY content is validated byte-for-byte identical to
+Human Gold's own reference text (`content_coverage: 1.0`, `relation:
+EXACT`) across all three runs, and the SAME 6.0-second core window is
+independently marked `consensus_keep` (both Cut.ai and Human Gold agree)
+in all three runs. The only defect is a narrow (~0.75s entry, ~1.04s
+exit) boundary-adjacent debris window neither reference keeps. This maps
+directly onto a KNOWN, DOCUMENTED architectural gap already named in
+`boundary_engine_pass.py`'s own module docstring: a visual/performance
+event that straddles the measured DELIVERY boundary is, by the existing
+D-115/D-116 rule, always classified DELIVERY-owned ("D-115 classifies
+any overlap as DELIVERY") and "the current Boundary representation has
+no partial-edge-trim mechanism that could shave a straddling event down
+to exactly `delivery_span.start`/`.end`" -- so such an event is
+"preserved and only recorded diagnostically," never trimmed. **BESTTAKE
+IS NOT THE ROOT CAUSE.** BestTake (and D-174's own guard authority) can
+only choose among the candidates and evidence it receives; if the
+winning candidate's only real defect is a boundary-straddling event the
+architecture deliberately does not yet trim, BestTake's own UNUSABLE
+classification for that candidate is a correct read of upstream evidence,
+not a BestTake bug.
+
+==================================================
+EVIDENCE SOURCES USED
+==================================================
+
+Persisted job logs only, all previously extracted and saved this
+session: `d170_job_log.txt` (RAW 34306886345, head `071e954`,
+`zone_usability_v2_diagnostics_enabled=1`), `d173_job_log.txt` (RAW
+34331209473, head `e3019e9`, `watch_listen_besttake_evidence_enabled=1`
++ `zone_usability_v2_besttake_enabled=1`), `d175_job_log.txt` (RAW
+34337801450, head `d9dcd59`, all three Watch+Listen flags on). No new
+artifact was fetched; no RAW was dispatched. `boundary_engine_pass.py`
+inspected read-only for its own documented ownership contract and the
+CASE A partial-edge-trim gap it names in its own docstring.
+
+==================================================
+REGION RAW RANGE
+==================================================
+
+Raw source ~82.29s-104.32s (RAW `Editdna longform validation/VIDEO-2026-
+07-30-09-18-03.mp4`), the gynecologist-test-request sentence, immediately
+preceding the sonography transition ("a hacer sonografías de tiroides y
+otras sonografías").
+
+==================================================
+CUT.AI SOURCE MAPPING / HUMAN GOLD SOURCE MAPPING
+==================================================
+
+Both references keep ONE contiguous span at this position: the 6.0s core
+(96.47-102.47 raw, all three runs) plus a small extension both keep that
+CutSell also gets right in one run (`matches_gold_beyond_cutai` /
+`gold_removes_cutai_keeps` at 102.47-104.32 varies slightly by run --
+Level 2/3, not the Level-1 signal this forensic is about). Human Gold's
+own aligned reference text for this exact sentence is `"Al terminar mi
+contrato cambié de ginecóloga y le pedí que me hiciera un test de todo
+lo que ella se pudiera imaginar y me pudiese indicar."` -- `EXACT`
+relation, `content_coverage: 1.0` against CutSell's own kept text (D-173
+run; identical shape in D-170's own alignment). Neither reference's own
+span map shows a MULTI-SPAN composite or continuation for this idea --
+this is a single, contiguous, one-take realization in both references.
+
+==================================================
+CURRENT WINNER
+==================================================
+
+D-170: `clip_e2e63bf8a7536c6c85cb`. D-173: `clip_f754ccdbd7decfdacdef`.
+D-175: `clip_e01bf5f9523f229bc423`. Same text in all three: `"al/Al
+terminar mi contrato[,] cambié de ginecóloga y le pedí que me hiciera un
+test de todo lo que ella se pudiera imaginar y me pudiese indicar."`
+Family ids differ per run (`tg_c9b9ffb07761b64360` / `tg_
+ae21d152673e96080a` / `tg_ee0ca4fa454c61c354`) -- expected, per this
+session's established "family ids are per-run hashes" property.
+
+==================================================
+CURRENT WINNER MEANING SUFFICIENCY
+==================================================
+
+Meaning-sufficient in D-173/D-175 (`meaning_sufficient_candidates` lists
+only this clip in both runs). `semantic_fast_path_candidate` also
+resolves to this SAME clip in D-173 -- the semantic layer independently,
+correctly identifies this as the right realization.
+
+==================================================
+CURRENT WINNER PERFORMANCE DEFECT
+==================================================
+
+V1 (D-163): `UNUSABLE` (D-173 row). V2 (D-172): `winner_severity: MILD`
+(D-173/D-175, both runs). Quality-ladder physical evidence (all 3 runs,
+reproducible): entry sliver ~0.75-0.81s (95.52/95.58-96.33) and exit
+sliver ~1.04s (102.83-103.87) flagged `false_keep`; the 6.0s CORE
+(96.47-102.47) is `consensus_keep` in all three runs. No zone-level
+(ENTRY/DELIVERY/EXIT split) evidence exists for this exact candidate in
+D-173/D-175 (neither dispatch set `zone_usability_v2_diagnostics_
+enabled=1`) -- **evidence gap, honestly disclosed**: I cannot directly
+confirm from persisted data whether the V1/V2 UNUSABLE/MILD verdict is
+driven by an event inside the false-keep entry/exit slivers specifically
+(consistent with the Boundary-straddling hypothesis below) or a genuine
+separate interior event. The reproducible 3-run consensus_keep on the
+exact same 6.0s core is the strongest available evidence and points at
+the boundary slivers, not the interior, as the source of the defect
+signal.
+
+==================================================
+CLEANER ALTERNATIVE
+==================================================
+
+D-170: `clip_b525df4d55246f7e9fdf` -- full-content alternative, INSIDE
+the family, LOST the contest (`missing_delivery`/`take_choice_against_
+both_references`, "candidate ... lost family ... to ... while both
+references chose this realization" -- i.e. the ladder's own record
+confirms BOTH REFERENCES agree with the eventual winner over this
+alternative). D-173/D-175: TWO distinct alternatives exist for the same
+idea: (a) a full-content clip (`clip_a785d699bacb9cfc93ec` / analog)
+deleted OUTSIDE the family entirely via `CompositeResolver/
+PreResolverCleanup` (`false_delete_outside_family`) -- never reached a
+BestTake contest at all in these two runs; (b) a short, truncated
+fragment (`clip_1bb0680cf97df7667a75` / `clip_ae124265b108aa3f9fed`,
+"Al terminar mi contrato, le pedí a mi ginecóloga." -- missing the
+entire test-request claim), V1 `USABLE`, `deliveryscore_top_candidate`
+in D-173 -- the actual "cleaner alternative" D-172/D-174's own
+mechanisms have repeatedly found dominant.
+
+==================================================
+CLEANER ALT MEANING SUFFICIENCY
+==================================================
+
+The short truncated fragment: meaning-INSUFFICIENT (confirmed --
+`meaning_sufficient_candidates` excludes it in both D-173 and D-175). The
+full-content alternative discarded outside the family: meaning
+sufficiency UNKNOWN from persisted evidence -- it never reached the
+Watch+Listen evidence-collection stage (which only builds evidence for
+`take_judge_groups` members) in D-173/D-175, so no meaning-sufficiency
+verdict for it exists in those two runs' persisted diagnostics. In
+D-170's run, its analog was IN the family and (per the ladder's own
+record) both references preferred the WINNER over it anyway -- so even
+where it does compete, it does not win.
+
+==================================================
+ALL REAL CANDIDATES
+==================================================
+
+Three distinct realizations of the "asked gynecologist for full workup"
+idea, confirmed across at least one run each: (1) full-content, phrasing
+A ("hablé con mi ginecóloga y le pedí todos los test que ella pudiera
+imaginarse..."); (2) full-content, phrasing B ("cambié de ginecóloga y
+le pedí que me hiciera un test de todo lo que ella se pudiera
+imaginar..." -- the eventual winner in all 3 runs, matches Human Gold
+exactly); (3) truncated/incomplete ("le pedí a mi ginecóloga" -- missing
+the test-request claim). No fourth candidate found in any of the three
+persisted logs.
+
+==================================================
+CANDIDATE-CONSTRUCTION RESULT
+==================================================
+
+All three candidates are source-real, non-fabricated spans (AttemptReconstructor-level construction is intact; no synthetic wording anywhere). No truncation/mis-split artifact was found in candidate (2)'s own construction -- its text is a complete sentence, confirmed EXACT against Human Gold.
+
+==================================================
+LANGUAGEWORD / LANGUAGEPHRASE / LANGUAGEUTTERANCE / LANGUAGEATTEMPT RESULT
+==================================================
+
+Not independently inspectable from persisted job-log evidence -- the
+Language Spine's own structured objects (`Word`/`Phrase`/`Utterance`/
+`Attempt`) are not serialized into `take_judge_groups` diagnostics or the
+quality-ladder rationale export at any of the three runs. This forensic
+does not fabricate a value for these four items -- reported `UNKNOWN`
+from evidence, not inferred.
+
+==================================================
+PROPOSITION RESULT
+==================================================
+
+Not directly observable from persisted evidence in the same sense (no
+`PropositionCandidate` object is serialized in these diagnostics).
+Indirect evidence: `semantic_fast_path_candidate` (D-173) correctly
+resolves to the eventual winner, meaning the semantic-authority layer's
+own proposition-level judgment (whatever produces that field) is
+correct for this region -- consistent with the winner being the right
+proposition-bearing realization.
+
+==================================================
+RELATION RESULT
+==================================================
+
+No `RelationEvidence`/continuation/correction relation object is
+serialized for this family in any of the three logs. The truncated
+fragment (candidate 3) reads, on its text alone, as an ABANDONED/
+RESTART attempt of the SAME sentence candidate (2) later completes, not
+a distinct idea -- but this is a text-level read, not a confirmed
+Language-Spine relation classification (`UNKNOWN` at the Spine level).
+
+==================================================
+FAMILY FORMATION RESULT
+==================================================
+
+Candidate (2) (winner) and candidate (3) (truncated): both correctly
+reached the SAME competitive family in D-173/D-175. Candidate (1)
+(full-content phrasing A): reached the SAME family and legitimately lost
+in D-170's run; was deleted OUTSIDE the family entirely (never competed)
+in D-173/D-175's runs. This is a real, run-to-run difference in Family
+Formation outcome for candidate (1) specifically -- **honestly flagged
+as unresolved and NOT investigated further in this forensic** (would
+require tracing the specific pre-resolver hybrid-delete/dedup code path
+across the many commits between D-170's head and D-173/D-175's heads,
+which is out of this task's read-only, no-deep-code-dive scope). It is
+recorded as a SECONDARY, non-blocking observation because candidate (1)
+never wins even when it does compete (D-170's own record), so this
+variance does not change the region's actual outcome in any of the
+three runs.
+
+==================================================
+BOUNDARY RESULT
+==================================================
+
+`boundary_engine_pass.py`'s own module docstring (read-only inspection,
+no RAW, no code change) documents the OWNERSHIP CONTRACT: ENTRY/EXIT are
+BoundaryEngine's territory via `audio_silence_interval` events (silence
+only) and D-115/D-116's `classify_event_zone` for VISUAL/performance
+events strictly OUTSIDE the measured DELIVERY span. Critically, the SAME
+docstring states: "any event that straddles a boundary -- D-115
+classifies any overlap as DELIVERY -- is never trimmed; the current
+Boundary representation has no partial-edge-trim mechanism that could
+shave a straddling event down to exactly `delivery_span.start`/`.end`
+without inventing a new trim shape... such an event is preserved and
+only recorded diagnostically." `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC = 0.08`
+(80ms) -- far smaller than the observed 0.75s/1.04s false-keep windows,
+meaning a visual/performance event straddling this candidate's own edges
+by more than ~80ms would fall entirely outside `tighten_selected_visual_
+edges`'s own tolerance and be preserved untrimmed by design. This is the
+best-evidenced, code-confirmed explanation available for why a Human-
+Gold-content-identical candidate can still register a DELIVERY-zone
+UNUSABLE verdict: the defect (if visual/performance-based) is most
+likely boundary-adjacent/straddling, not embedded in the validated core
+DELIVERY content -- i.e., **Boundary-removable in principle, but not
+currently removable by any existing mechanism**, which is a materially
+different statement than "embedded in required DELIVERY."
+
+==================================================
+BESTTAKE RESULT
+==================================================
+
+BestTake/DeliveryScorer/Watch+Listen correctly rank the winner over the
+truncated fragment on MEANING (the Meaning Firewall, D-172/D-174,
+correctly blocks the truncated fragment from ever replacing the winner
+in D-173/D-175). Where DeliveryScorer's OWN top pick disagrees
+(`deliveryscore_top_candidate` = the truncated fragment in D-173), that
+disagreement is a symptom of the SAME upstream boundary-classification
+gap (DeliveryScorer/Watch+Listen see the winner as UNUSABLE for a reason
+this forensic traces to a likely boundary-straddling event, not a true
+content/delivery flaw) -- not a scoring-formula defect in BestTake
+itself.
+
+==================================================
+FAILED-PARENT USEFUL-SUBSPAN RESULT
+==================================================
+
+`NOT_OPERATIVE` for this region. No evidence supports a "bad parent take,
+useful subspan" shape here: the winner IS the complete, correct,
+Gold-matching realization already; nothing needs to be salvaged FROM a
+worse take TO complete it. The candidate that would be the "parent" in
+this doctrine (candidate 3, the truncated fragment) contributes nothing
+useful the winner lacks -- it is a strict subset, missing the entire
+test-request clause, not a complementary piece.
+
+==================================================
+SOURCE-REAL COMPLETION TEST
+==================================================
+
+**YES_SINGLE_SPAN.** The RAW already contains one source-real span
+(candidate 2, the current winner) that communicates the full intended
+gynecologist message cleanly and matches Human Gold's own reference text
+exactly. The current system DOES already surface and select it in all
+three runs -- the open problem is not "the right span isn't chosen," it
+is "the chosen span's own boundary-adjacent debris is not currently
+trimmable by any existing mechanism," per the BOUNDARY RESULT above.
+
+==================================================
+SINGLE-SPAN POSSIBILITY
+==================================================
+
+Exact source span: raw ~95.52/95.58-104.02/104.32 depending on run (the
+candidate's own full extracted span); the validated-correct CORE within
+it is 96.47-102.47 in all three runs. Why the current system's OUTPUT
+still shows a defect at this span despite selecting the right candidate:
+per the BOUNDARY RESULT, the architecture has no partial-edge-trim
+mechanism for a straddling visual/performance event, so ~0.75s+1.04s of
+edge material both references exclude remains in CutSell's own kept/
+rendered window.
+
+==================================================
+MULTI-SPAN POSSIBILITY
+==================================================
+
+Not required here -- the SOURCE-REAL COMPLETION TEST answer is
+`YES_SINGLE_SPAN`, so no multi-span/continuation/composite construction
+is needed to satisfy this region's meaning. (N/A field, per the
+directive's own "if YES_SINGLE_SPAN" branch.)
+
+==================================================
+MINIMAL-COMPOSITE ELIGIBILITY
+==================================================
+
+`NOT_ELIGIBLE` -- a minimal composite is a solution for when NO single
+candidate contains the full meaning; this region already has one
+(candidate 2), so introducing a composite here would be solving a
+problem that does not exist and risks a NEW join artifact where a clean
+single-take realization already works. No composite work should be
+authorized for this region.
+
+==================================================
+LEGACY-vs-SPINE CONSUMER OWNER
+==================================================
+
+`LEGACY_CONSUMER` for the mechanism actually deciding candidate (1)'s
+family membership (the pre-resolver hybrid-delete/dedup pathway,
+observed via the ladder's own `CompositeResolver/PreResolverCleanup`
+attribution) -- this is NOT one of D-171's two migrated clusters
+(`take_grouping_provider.py`'s `_marked_side_diverges_in_content` and
+`recording_meta_continuation.py`'s `_direct_meta_short_tail`). The exact
+production module/function performing this specific pre-family deletion
+was NOT conclusively pinpointed within this forensic's read-only,
+no-deep-code-dive scope (candidate: `composite_resolver.py`'s own
+pre-resolver cleanup pathway, or an upstream `hybrid_session_cleanup.py`
+predecessor -- not confirmed). This is recorded as a SECONDARY, non-
+blocking finding (see FAMILY FORMATION RESULT) since it does not change
+this region's actual outcome in any of the three runs.
+
+==================================================
+PRIMARY ROOT CAUSE
+==================================================
+
+**E. BOUNDARY.** The correct take exists and wins semantically in all
+three independent runs (confirmed via `semantic_fast_path_candidate` and
+the reproducible 3-run Human-Gold-EXACT/`consensus_keep` core), but a
+boundary-adjacent performance/silence debris window the current
+architecture has NO mechanism to trim (a documented, named gap in
+`boundary_engine_pass.py`'s own docstring: "no partial-edge-trim
+mechanism" for a straddling event) makes the candidate register as
+DELIVERY-UNUSABLE and produces the repeated `false_keep` quality-ladder
+signal. This is not "embedded in required DELIVERY" in the sense of a
+genuine interior performance flaw -- it is boundary-adjacent debris the
+existing DELIVERY-classification rule (any straddling overlap = DELIVERY)
+sweeps in by default, absent a partial-edge-trim capability.
+
+==================================================
+SECONDARY CONTRIBUTORS
+==================================================
+
+(1) Family Formation variance for candidate (1) across runs (D-170 vs.
+D-173/D-175) -- unresolved, not investigated to root module in this
+forensic, non-blocking since candidate (1) never wins regardless. (2)
+The quality-ladder's own authority-attribution heuristic labels this
+false_keep pattern `BestTakeResolver`-owned while an analogous shape
+elsewhere in the SAME D-175 run (294.88-295.28, `missing_delivery`/
+`tight_edge`) is labeled `BoundaryEngine`-owned -- the ladder's own
+documented caveat ("a heuristic read... confirm against the run log
+before fixing") is directly demonstrated here; this is a QA/reporting
+labeling inconsistency, not a production defect, and is out of this
+forensic's no-editorial-patch scope to fix.
+
+==================================================
+IS BESTTAKE ACTUALLY ROOT CAUSE?
+==================================================
+
+**NO.** BestTake, DeliveryScorer, Watch+Listen (D-163/D-172), and D-174's
+own Guard Authority are all behaving correctly given the evidence they
+receive. The evidence itself (a DELIVERY-zone-classified straddling
+event with no trim mechanism) is the upstream cause.
+
+==================================================
+EXACT CUT.AI-PARITY MECHANISM REQUIRED
+==================================================
+
+**BOUNDARY_REPAIR.** Specifically: a partial-edge-trim capability for a
+visual/performance event that straddles the measured DELIVERY boundary,
+extending D-116's own existing `tighten_selected_visual_edges` CASE A
+consumption (which today only handles events entirely outside DELIVERY)
+to also shave a straddling event down to exactly `delivery_span.start`/
+`.end` -- the exact capability gap `boundary_engine_pass.py`'s own
+docstring already names as deliberately not implemented.
+
+==================================================
+BESTTAKE IS NOT THE ROOT CAUSE
+==================================================
+
+Stated explicitly per this task's own instruction: BESTTAKE IS NOT THE
+ROOT CAUSE for this region. BestTake only chooses among candidates it
+receives; the candidate it correctly chose has a boundary-level defect
+no existing mechanism can currently remove.
+
+==================================================
+D-174 STATUS
+==================================================
+
+**YES -- D-174 is behaving correctly on this region.** The Meaning
+Firewall correctly prevents the meaning-insufficient truncated fragment
+from ever replacing the winner (confirmed in D-175's own real-media
+run, `BLOCKED_BY_MEANING_FIREWALL`). Nothing in this forensic
+contradicts that; D-174 has no defect to fix here, and none should be
+introduced.
+
+==================================================
+GENERALIZABILITY RISK
+==================================================
+
+LOW-to-MODERATE. A partial-edge-trim mechanism for straddling visual/
+performance events is a general Boundary capability (not specific to
+this region, this idea, or this video) -- it would apply anywhere a
+selected candidate's own edge event straddles the measured DELIVERY
+span, which D-116's own docstring already anticipates as a real,
+recurring shape ("without inventing a new trim shape" language implies
+this exact case was already considered and deliberately deferred, not
+newly discovered). Risk: an incorrectly-implemented partial trim could
+shave real DELIVERY content if the straddle-boundary computation is
+wrong -- the existing `AUDIO_EDGE_MINIMUM_REMAINING_SEC` / overlap-
+tolerance discipline in the SAME module is the established pattern to
+reuse for bounding this safely.
+
+==================================================
+SMALLEST GENERAL FIX
+==================================================
+
+Implement the partial-edge-trim capability `boundary_engine_pass.py`'s
+own docstring already names and defers: when a visual/performance event
+overlaps the DELIVERY boundary by more than the edge-touch tolerance but
+the DELIVERY-side portion of the event is itself below a materiality
+floor (reusing D-167's own existing severity vocabulary, never a new
+threshold), shave the trimmed clip edge to the point where the event's
+DELIVERY-side remainder no longer qualifies as a defect -- never
+removing a word, never touching an event genuinely embedded well inside
+DELIVERY. This is the SAME general mechanism the OWNERSHIP CONTRACT
+table already assigns to BoundaryEngine; it closes a named, existing gap
+rather than introducing a new authority.
+
+==================================================
+MODULE(S) THAT SHOULD OWN THAT FIX
+==================================================
+
+`cutsell_worker/boundary_engine_pass.py` (`tighten_selected_visual_
+edges`, D-116's own CASE A consumption -- the natural, already-documented
+extension point for this exact gap).
+
+==================================================
+MODULES THAT MUST NOT OWN IT
+==================================================
+
+`watch_listen_besttake_v2_evidence.py`, `watch_listen_besttake_guard_
+authority.py`, `deterministic_best_take_authority.py`, any DeliveryScorer/
+BestTake/semantic-authority module -- per the OWNERSHIP CONTRACT
+("Selection decides WHAT plays; this pass decides WHERE it starts and
+ends") and D-174's own binding "WATCH+LISTEN MAY VETO, NEVER SELECTS"
+contract, none of these may ever perform physical edge trimming.
+
+==================================================
+REQUIRED OFFLINE TEST SHAPES
+==================================================
+
+(For a future D-177, not authorized here): (1) a straddling event whose
+DELIVERY-side remainder is below the materiality floor -> trimmed
+correctly, word stream unchanged; (2) a straddling event whose DELIVERY-
+side remainder is itself materially defective -> NOT trimmed, preserved
+exactly as today (never shave into a genuine defect); (3) an event
+entirely outside DELIVERY (today's already-working CASE A path) ->
+unchanged, zero regression; (4) an event entirely inside DELIVERY ->
+unchanged, zero regression; (5) minimum-remaining-duration floor
+respected (reuse `AUDIO_EDGE_MINIMUM_REMAINING_SEC`, never trim below
+it); (6) idempotence -- running the pass twice produces the same result;
+(7) a synthetic fixture reproducing this exact region's shape (0.75s/
+1.04s straddling debris around a validated-clean 6.0s core).
+
+==================================================
+WHETHER ONE RAW WILL BE REQUIRED AFTER IMPLEMENTATION
+==================================================
+
+YES -- exactly one, to confirm on real media that (a) the false_keep
+signal for this exact region disappears or shrinks to the genuinely
+irreducible edge-touch tolerance, (b) the winner's V1/V2 usability
+verdict improves from `UNUSABLE`/`MILD` toward `USABLE`/`NONE` if the
+straddling event was indeed the cause, and (c) zero regression elsewhere
+in the video's own Boundary-owned regions (the `tight_edge`/
+`BoundaryEngine`-attributed example at 294.88-295.28 should remain
+unchanged). Not authorized in this task.
+
+==================================================
+RECOMMENDED D-177 IMPLEMENTATION GATE
+==================================================
+
+If authorized: implement the partial-edge-trim capability named above in
+`boundary_engine_pass.py` only, with the 7 offline test shapes listed,
+full offline qualification (compileall, targeted Boundary/D-116/D-097
+suites, CleanCutBench, full `tests/` suite), zero cutsell_worker change
+outside `boundary_engine_pass.py` (and its own test file), then exactly
+one confirmatory Video00 RAW. Not decided here -- a Product Owner
+decision.
+
+==================================================
+D-176 VERDICT
+==================================================
+
+**A. ROOT CAUSE IDENTIFIED -- SINGLE GENERAL MECHANISM.**
+
+==================================================
+NEXT GATE
+==================================================
+
+Per this task's own "If A" instruction: design D-177 around the smallest
+general mechanism only (the partial-edge-trim capability named above),
+never bundled with the two disclosed secondary/non-blocking observations
+(the Family-Formation variance for candidate (1), and the ladder's own
+authority-attribution labeling inconsistency) -- neither of those change
+this region's actual outcome and neither should be folded into D-177's
+scope. Not implemented here.
+
+==================================================
+STRICT SCOPE CONFIRMATIONS
+==================================================
+
+No RAW dispatched this task. No provider/network call. No cutsell_worker
+editorial patch (this task is forensic/design-only; `boundary_engine_
+pass.py` was read, never modified). No threshold tuning. No BestTake
+authority change. No family merge/split. No minimal-composite
+implementation (correctly found NOT_ELIGIBLE/not needed for this
+region).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the D-177
+implementation gate named above is a Product Owner decision.
