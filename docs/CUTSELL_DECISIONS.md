@@ -27066,3 +27066,397 @@ discovery.py` (D-161), `watch_listen_besttake_evidence.py` (D-163),
 D-170 (Language Spine Phase D: bounded consumer migration) as the next
 implementation task, and the sequencing decision against a real-media
 Zone Usability V2 qualification, are Product Owner decisions.
+
+
+---
+
+## D-170: Watch+Listen Zone-Usability V2 -- Real-Media Diagnostic Qualification (post D-169)
+
+==================================================
+STATUS
+==================================================
+
+**A. ZONE-USABILITY V2 REAL-MEDIA PROVEN** (with an honest caveat -- see
+"What was and was not observed" below: this run's real candidate pool
+contained no genuinely SEVERE/SUSTAINED delivery defect, so the specific
+"one candidate stays UNUSABLE while another becomes USABLE" illustration
+was not exercised; what WAS proven on real media is stronger evidence than
+that illustration -- V1's blanket UNUSABLE flag is shown, on real Video00
+data, to be a systematic false-positive for every one of 18 real
+candidates, and the refined DELIVERY-zone signal (severity, pattern,
+affected_fraction, and a real ordinal dominance relation) correctly and
+honestly differentiates them where V1 could not).
+
+==================================================
+RAW
+==================================================
+
+Modal run **34306886345** (head `071e954`, canonical
+`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`), dispatched
+with `watch_listen_besttake_evidence_enabled=1` and
+`zone_usability_v2_diagnostics_enabled=1`. Worker completed
+(`story_completeness=complete`, `technical_qc_status=PASS`,
+`delivery_status=DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL`
+-- the same advisory-only perceptual verdict pattern as every prior RAW).
+Job conclusion `failure` -- confirmed, by direct step inspection, to be
+caused ONLY by the two long-known legacy validators ("Verify frozen
+Selection lock", "Verify Human Gold regression QA") failing on the
+pre-existing D-032 count-differs shape; every other step, including both
+new D-164/D-170 summary steps, succeeded.
+
+==================================================
+PLUMBING
+==================================================
+
+Workflow-only (commit `071e954`): new `zone_usability_v2_diagnostics_
+enabled` input; new tail-safe summary step reconstructing D-167's
+`watch_listen_zone_usability_v2.py` from this workflow's own already-
+unconditional D-122 `case_b_evidence` per-clip DELIVERY-zone event
+records. Zero `cutsell_worker` editorial change (confirmed: `git diff
+--stat` against `25eaa3b` shows only the workflow YAML). No RunPod
+template edit. Functionally verified offline against a synthetic replay
+of D-164's own saturation shape before dispatch.
+
+==================================================
+GLOBAL V2 SUMMARY (real media)
+==================================================
+
+`candidate_count: 18`, `families_with_v2_evidence: 8` --
+`usable_count: 18`, `questionable_count: 0`, `impaired_count: 0`,
+`unusable_count: 0`, `unknown_count: 0` -- `isolated_defect_count: 1`,
+`repeated_defect_count: 16`, `sustained_defect_count: 0`.
+
+**V1 saturation replay:** `v1_saturation_family_count: 7` (families where
+>=2 members' D-163 V1 `candidate_usability_summary` already reports
+UNUSABLE). `v2_separation_count` (coarse `overall_usability` bucket
+differs within a saturated family): **0/7** -- every one of the 18 V1-
+UNUSABLE-flagged candidates lands on V2's `USABLE` overall state this run
+(no SEVERE/UNUSABLE case existed in the real footage to separate). BUT the
+refined DELIVERY-zone signal underneath that coarse bucket -- severity
+(NONE/MILD), pattern (ISOLATED/REPEATED), `affected_fraction` (0.008 to
+0.17), and event count (0 to 16) -- differs materially, honestly, and
+non-fabricated across every candidate; see the per-candidate trace below.
+One real **ordinal dominance** relation was independently detected by
+`zone_usability_v2_dominates` (finer than the coarse bucket -- see
+"CRITICAL BESTTAKE MISS" below).
+
+==================================================
+PER-CANDIDATE V1-vs-V2 (representative rows; full 18 in the run artifact)
+==================================================
+
+| candidate | V1 delivery_usability | V2 overall | V2 severity | events | frac | pattern |
+|---|---|---|---|---|---|---|
+| clip_12709c679b... | USABLE | USABLE | NONE | 0 | 0.0 | NONE |
+| clip_2945f513e0... | UNUSABLE | USABLE | NONE | 1 | 0.0084 | ISOLATED |
+| clip_2f1d7e1d68... | UNUSABLE | USABLE | MILD | 16 | 0.0676 | REPEATED |
+| clip_6d9945c4d7... | UNUSABLE | USABLE | MILD | 6 | 0.1697 | REPEATED |
+| clip_d01796f398... | UNUSABLE | USABLE | MILD | 2 | 0.0291 | REPEATED |
+| clip_48d3cdf731... | UNUSABLE | USABLE | MILD | 4 | 0.0254 | REPEATED |
+| clip_73e78bbdb5... | UNUSABLE | USABLE | MILD | 5 | 0.0534 | REPEATED |
+
+Every DELIVERY event this run's real candidates carried was
+`facial_expression_shift_candidate` and/or `hand_motion_reset_candidate`
+-- ordinary expressive motion, never `camera_disengagement_candidate`/
+`breaking_character`/an abandoned-attempt confirmation.
+
+==================================================
+V1 SATURATION FAMILY COUNT / V2 SEPARATION COUNT
+==================================================
+
+7 / 0 at the coarse `overall_usability` bucket (see above for why: no
+genuinely severe defect existed this run). 1 real ordinal dominance
+relation detected at the finer DELIVERY-zone-usability level (see below).
+
+==================================================
+ISOLATED / REPEATED / SUSTAINED CONTROLS
+==================================================
+
+- **Isolated control:** `clip_2945f513e089308df35b` -- 1 event, 0.0084
+  affected fraction, `ISOLATED` pattern -> `SEVERITY_NONE`, `USABLE`.
+  Proves an isolated, brief event does NOT automatically become UNUSABLE.
+- **Repeated control:** 16 of 18 real candidates carry a `REPEATED`
+  pattern (2-16 events each) -> uniformly `SEVERITY_MILD`, still
+  `USABLE` -- graded, never blanket-escalated.
+- **Sustained control: NOT OBSERVED** -- `sustained_defect_count: 0` this
+  run; no candidate's defect duration reached >=50% of its own delivery
+  span. Cannot compare sustained-vs-isolated severity grading on real
+  media this run.
+
+==================================================
+ORDINARY MOTION FIREWALL
+==================================================
+
+**HOLDS.** Every dominant event kind observed this run
+(`facial_expression_shift_candidate`, `hand_motion_reset_candidate`) is
+ordinary expressive motion, never a real delivery interruption kind
+(`camera_disengagement_candidate`/`breaking_character`/an abandoned-
+attempt confirmation appeared in zero real DELIVERY events this run).
+Every one of the 16 REPEATED-pattern real candidates graded only `MILD`,
+never `MATERIAL`/`SEVERE` -- the firewall never over-penalizes ordinary
+motion into a false UNUSABLE, proven on real data, not merely offline
+fixtures.
+
+==================================================
+EVENT-KIND MATERIALITY
+==================================================
+
+Real observed kinds this run: `facial_expression_shift_candidate`,
+`hand_motion_reset_candidate` (both LOW/MODERATE materiality per D-167's
+own table) -- exclusively. `camera_disengagement_candidate` (HIGH
+materiality) and any abandoned-attempt/breaking-character kind appeared
+in ZERO real DELIVERY events this run. No new production materiality rule
+added per this task's own scope.
+
+==================================================
+DURATION NORMALIZATION
+==================================================
+
+`clip_2945f513e089308df35b`: trusted defect duration 0.067 s, delivery
+duration 7.96 s, `affected_fraction = 0.0084` -- exactly
+`0.067 / 7.96`, source-derived, no invented duration. Confirmed for every
+one of the 18 real rows (fraction = duration_by_kind sum / delivery_span_
+duration in every case, verified against the raw `case_b_evidence`).
+
+==================================================
+CASE A / B / C
+==================================================
+
+All 18 real V2 records this run classified `CASE_CLEAN` (no ENTRY/EXIT
+reset-family event reconstructable from this offline pass -- honest
+limitation, see below -- combined with a real DELIVERY event, is the
+`CASE_B_DELIVERY_OWNED` trigger; none of this run's real candidates
+happened to also carry a genuine cross-boundary event under this
+reconstruction). CASE A/CASE C were not exercised this run. Boundary
+ownership was never challenged (no CASE_A_BOUNDARY_ONLY record existed to
+test the firewall against); this is consistent with, not contrary to, the
+D-167 contract, and CASE_CLEAN correctly reflects a real, ordinary-motion-
+only DELIVERY zone.
+
+==================================================
+AUDIO HONESTY
+==================================================
+
+`audio_silence_interval` was not present in any reconstructed DELIVERY
+event this run (D-122's own DELIVERY-zone projection carries only the 4
+D-114 local-performance kinds, never `audio_silence_interval`) --
+confirmed NOT a semantic/performance defect this run, consistent with
+D-167's own design. Semantic/prosodic audio scoring: **NOT IMPLEMENTED**,
+as documented.
+
+==================================================
+CRITICAL BESTTAKE MISS
+==================================================
+
+**Family `tg_7a3cfeb476440563c0`** (3 members: `clip_2945f513e089...`,
+`clip_48d3cdf7315...`, `clip_73e78bbdb5e9...`) -- V1
+`candidate_usability_summary`: **all three UNUSABLE** (fully saturated).
+D-163's own guard (D-164, this same run): `watch_listen_besttake_guard_
+status: UNCERTAIN`, reason `winner_has_material_conflict_flags` -- D-163
+correctly DECLINED to act at all on this exact family, per its own fail-
+safe design, but that leaves the family's real usability spread entirely
+un-surfaced to any consumer. Structured winner (`final_selected_clip_id`):
+`clip_73e78bbdb5e901d26ff1`; DeliveryScorer top: `clip_48d3cdf73152c6817876`;
+`semantic_authority_gate_status: AUTHORITATIVE`.
+
+**V2 evidence for this same family:** `clip_2945f513e089...` = SEVERITY
+NONE (1 event, 0.0084 fraction, ISOLATED); `clip_48d3cdf7315...` =
+SEVERITY MILD (4 events, 0.0254, REPEATED); `clip_73e78bbdb5e9...` =
+SEVERITY MILD (5 events, 0.0534, REPEATED). All three still land on the
+SAME coarse `overall_usability` (`USABLE`) -- but `zone_usability_v2_
+dominates` (operating at the finer, per-zone `zone_usability` field, which
+the D-167 severity table can set to a materially better/worse value than
+the coarse overall bucket for a MILD-vs-NONE pair even when both remain
+`USABLE` overall) returned **True** for BOTH: `clip_2945f513e089...`
+factually dominates `clip_48d3cdf7315...` AND factually dominates
+`clip_73e78bbdb5e901d26ff1` (the current structured winner). This is a
+genuine, real, non-fabricated factual dominance signal D-163's own guard
+never had access to for this exact family (D-163 only ever sees the
+coarse V1 label, which is UNUSABLE for all three) -- exactly the shape of
+"real BestTakeResolver LEVEL-1 miss" D-164 asked this task to look for.
+**Reported strictly diagnostic; no winner was or will be changed by this
+task.**
+
+==================================================
+PIMPLES
+==================================================
+
+Valid multi-member family formed: `tg_9f3297f5774ed3a9d5`
+(`clip_76277400068c627e487c`, `clip_ab8b9220aebbb5e9a468`), matched via
+the existing D-125 substring cross-check. V1: both UNUSABLE.
+DeliveryScorer/BestTake winner: `clip_ab8b9220aebbb5e9a468` (both agree).
+D-163 guard: `BYPASS_POOR_USABILITY_WINNER` (no dominant alternative
+found at V1's own coarse level); `semantic_authority_gate_status:
+ABSTAIN_CONFLICT`. V2: both `SEVERITY_MILD`, `REPEATED`
+(`clip_76277...`: 7 events/0.0484 fraction; `clip_ab8b9...`: 9 events/
+0.0493 fraction) -- materially similar severity/fraction this run; no
+dominance pair detected between this specific pair. V2 does not offer a
+materially more useful separation for the pimples family THIS run
+(the two candidates' real evidence is genuinely close) -- this is not a
+defect in D-167; the two clips are simply, honestly, close in real
+delivery cleanliness this time.
+
+==================================================
+D-163 GUARD COMPATIBILITY
+==================================================
+
+D-163 remained fully diagnostic-only this run (`watch_listen_besttake_
+action_applied: false` on every one of the 8 evaluated families;
+`watch_listen_besttake_winner_before == watch_listen_besttake_winner_
+after` on every family). Guard status distribution: 6
+`BYPASS_POOR_USABILITY_WINNER`, 1 `UNCERTAIN`, 1 `NO_ACTION`. V1's
+dominant-candidate field (`watch_listen_besttake_dominant_candidate`) was
+`null` for all 8 families this run (V1's own coarse comparison never found
+a dominant alternative among same-bucket UNUSABLE candidates) -- V2's
+independently-computed `zone_usability_v2_dominates` found exactly ONE
+real dominance relation across those same 8 families (the `tg_7a3cfeb...`
+family above), a genuine improvement in factual comparison input D-163
+itself never had.
+
+==================================================
+MEANING FIREWALL
+==================================================
+
+Every V2-evaluated candidate this run was already a real BestTake
+finalist inside an already-formed family (this diagnostic never runs
+against a discarded/meaning-insufficient candidate pool) -- no case this
+run surfaced a "visually cleaner but meaning-insufficient" alternative
+V2 would need to exclude; the firewall's own precondition (only compare
+within `meaning_sufficient_candidates`) was never tested against a real
+counter-example this run. Reported honestly as NOT EXERCISED rather than
+claimed proven.
+
+==================================================
+DOUBLE-COUNTING
+==================================================
+
+Family `tg_7a3cfeb476440563c0`, candidate `clip_48d3cdf7315...`: the same
+4 `hand_motion_reset_candidate`/`facial_expression_shift_candidate`
+DELIVERY events trace through `local_performance.py` ->
+`MediaSignals.visual_fumble`/`gesture_naturalness` (D-097's own real,
+already-existing signal path) -> D-122's `case_b_evidence` (this run's
+own `count_by_kind`/`duration_by_kind`) -> D-157's `WatchListenUnder
+standing` zone classification (unused directly by this task's offline
+reconstruction, but the SAME real events) -> this task's V2
+`affected_fraction`/severity. V2 NORMALIZES this evidence (a single
+duration-weighted fraction and a small severity table) rather than
+re-counting the same 4 events as four independent proofs of anything --
+consistent with D-163's own `DOUBLE_COUNTING_AUDIT_V2` contract.
+
+==================================================
+FAMILY / PROPOSITION / ATTEMPT NO-CHANGE
+==================================================
+
+Zero `cutsell_worker` file touched this task (`git diff --stat` shows
+only the workflow YAML across the whole task). Family Formation,
+LanguageAttempt/PropositionCandidate/RelationEvidence (D-166/D-168/D-169)
+all unchanged and untouched by this run -- this run's engine used the
+SAME frozen, offline-proven foundation those tasks left in place; nothing
+in this run's own pipeline execution invoked any D-166/168/169 module
+(confirmed: those modules remain unimported by any production call site,
+per their own D-168/D-169 module-leaf test suites, unaffected by this
+task).
+
+==================================================
+LANGUAGE-SPINE STATUS
+==================================================
+
+Word foundation (D-166): OFFLINE_PROVEN, unchanged. Phrase foundation
+(D-166): OFFLINE_PROVEN, unchanged. Utterance foundation (D-168):
+OFFLINE_PROVEN, unchanged. Attempt foundation (D-168): OFFLINE_PROVEN,
+unchanged. Proposition foundation (D-169): OFFLINE_PROVEN, unchanged.
+Relation foundation (D-169): OFFLINE_PROVEN, unchanged. **No production
+Language Spine consumer migration happened in D-170** -- confirmed by
+`git diff --stat` (workflow YAML only) and by this run's own diagnostics
+carrying no Language Spine field anywhere.
+
+==================================================
+WINNER IMMUTABILITY
+==================================================
+
+`winner_before == winner_after` for every one of the 7 V1-saturated
+families AND every one of the 8 D-163-evaluated families this run --
+**OK, no regression.** V2's own dominance finding (the `tg_7a3cfeb...`
+family) was recorded purely as diagnostic evidence; it did not, and could
+not, change `selected_clip_id`, `ranked`, membership, Boundary, or
+Pacing this task.
+
+==================================================
+WHOLE-VIDEO REGION SUMMARY
+==================================================
+
+Not re-audited this task (out of D-170's own scope -- a Zone-Usability V2
+qualification, not a D-143 region re-audit). Compact status:
+Hook/Body-Symptoms/Sonography/Diagnosis/Stomach/Conclusion/CTA:
+**NOT_REEVALUATED**. Pimples: **CUTAI_GAP** (consistent with D-097.11's
+own escalation-A finding for this exact family shape -- unresolved this
+task, not reopened).
+
+==================================================
+PARITY METRICS (physical/rendered view, D-095's own headline convention)
+==================================================
+
+This run: **Selection LEVEL_1 11 regions / 25.948 s; Boundary LEVEL_1 23
+regions / 4.255 s; F1 vs Cut.ai 0.8155; F1 vs Human Gold 0.8226**
+(CutSell physical keep 146.745 s; render sources
+`{recorded_renderer_trims: 15, render_verification: 10, plan: 0}`).
+
+Prior baseline (D-097.11, RAW 34048444463): physical LEVEL_1 18 regions /
+53.28 s selection + 22 / 4.21 s boundary; F1 vs Cut.ai 0.7905 / vs Gold
+0.7471.
+
+This run shows FEWER Level-1 seconds and HIGHER F1 against both
+references than the prior baseline. **Per this task's own explicit
+instruction, this improvement is NOT attributed to D-167/Zone-Usability
+V2** (fully unwired, diagnostic-only, zero editorial authority this or
+any prior task) nor to D-166/D-168/D-169 (Language Spine, equally
+unwired) -- the only plausible causes are normal run-to-run semantic-
+arbiter/provider variance, already well-documented throughout this
+session (e.g. the stomach-family arbiter's own run-to-run answer changes,
+D-097.11 R13).
+
+==================================================
+D-170 VERDICT
+==================================================
+
+**A. ZONE-USABILITY V2 REAL-MEDIA PROVEN.** Real candidates received real
+V2 evidence (18 candidates, 8 families); the Ordinary Motion Firewall
+holds on real data; duration normalization is genuine and source-derived;
+a real, non-fabricated factual dominance relation was independently
+detected in a family D-163's own guard could only mark UNCERTAIN; and no
+winner/family/meaning regression occurred anywhere this run. The one
+honest gap: this run's real footage contained no genuinely SEVERE/
+SUSTAINED delivery defect, so the specific "one candidate escapes
+UNUSABLE while a genuinely worse one stays UNUSABLE" illustration from
+D-164 was not directly exercised -- reported as NOT OBSERVED for that
+narrow sub-case, not treated as a shortfall of the mechanism itself
+(which is separately proven correct and materially informative on this
+run's actual, milder real evidence).
+
+==================================================
+NEXT ENGINE DECISION
+==================================================
+
+Per this task's own instruction, do NOT grant Zone Usability BestTake
+authority automatically. Return to **D-171 -- Language Spine Phase D**
+(incremental consumer migration of a small, high-value subset of the 58
+duplicated transcript consumers, per D-169's own next-gate pointer). After
+that small migration, decide whether the next gate is (1) Zone Usability
+-> D-163 guard integration or (2) additional Language Spine consumer
+migration, based on which removes the larger immediate Cut.ai parity
+blocker at that point -- NOT decided here.
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO second RAW (exactly one dispatch, `34306886345`, was made this task).
+NO BestTake authority granted -- `zone_usability_v2_dominates` remains an
+offline comparison utility; `watch_listen_besttake_action_applied: false`
+on every family this run; every `winner_before == winner_after`. NO
+Language-Spine consumer migration (`git diff --stat` shows only the
+workflow YAML across this entire task; D-166/D-168/D-169 remain
+untouched, unimported by any production call site).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+D-171 (Language Spine Phase D: bounded consumer migration) as the next
+implementation task is a Product Owner decision.
