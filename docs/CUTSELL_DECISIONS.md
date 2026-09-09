@@ -26666,3 +26666,199 @@ evidence.py` (D-163) both confirmed at literal zero diff.
 D-168 (Language Spine Phase B) as the next implementation task, and/or
 whether to qualify Zone Usability V2 on Video00 real media in a future,
 separately-scoped task, are Product Owner decisions.
+
+
+---
+
+## D-168: Language / Transcript Spine, Phase B -- LanguageUtterance + LanguageAttempt
+
+==================================================
+STATUS
+==================================================
+
+**A. LANGUAGE UTTERANCE / ATTEMPT FOUNDATION OFFLINE PROVEN.**
+
+==================================================
+SCOPE
+==================================================
+
+Post D-167. Pure, additive foundation implementation -- extends D-166's
+Word/Phrase rungs of the D-165 canonical hierarchy with the third and
+fourth: `LanguageWord -> LanguagePhrase -> LanguageUtterance ->
+LanguageAttempt`. No engine behavior change, no RAW, no provider call, no
+Family/BestTake/Proposition/final-Relation/Boundary/Pacing/Zone-Usability
+authority change. `PropositionCandidate`/`RelationEvidence` (D-165's own
+Phase C gate) remain explicitly unimplemented -- no `proposition_id`/
+`retry_family_id` is minted anywhere in the new module.
+
+==================================================
+NEW MODULE
+==================================================
+
+`cutsell_worker/language_utterance_attempt.py` -- fully additive, not
+wired into any production call site. Confirmed unaware-of by
+`pipeline.py`, `flow_b.py`, `take_segmentation.py`,
+`attempt_reconstruction.py`, `take_grouping.py`,
+`take_grouping_provider.py`, `hybrid_session_cleanup.py`,
+`semantic_idea_equivalence.py`, `deterministic_best_take_authority.py`,
+`take_judge.py`, `watch_listen_besttake_evidence.py`,
+`watch_listen_zone_usability_v2.py`, `boundary_engine_pass.py`,
+`dialogue_pacing_transition.py`, `semantic_authority_observability.py`
+(module-leaf grep tests).
+
+- `LanguageUtterance` -- one bounded, editorially-meaningful spoken unit
+  (NOT necessarily a grammatical sentence). Minimum fields:
+  `source_asset_id`, `utterance_id`, `phrase_start_index`,
+  `phrase_end_index`, `source_start`, `source_end`, `text_raw`,
+  `text_normalized`, `utterance_state`
+  (`COMPLETE`/`INCOMPLETE`/`ABANDONED`/`RESTARTED`/`CORRECTED`/
+  `UNCERTAIN`), `meaning_completion`
+  (`COMPLETE`/`INCOMPLETE`/`UNCERTAIN`), `boundary_start_kind`,
+  `boundary_end_kind`, `confidence`, `provenance`.
+- `LanguageAttempt` -- one attempt to communicate one editorial unit (one
+  clean utterance, or several joined by restart/correction/continuation
+  evidence). Minimum fields: `source_asset_id`, `attempt_id`,
+  `utterance_ids`, `source_start`, `source_end`, `text_raw`,
+  `text_normalized`, `attempt_state`
+  (`CLEAN_ATTEMPT`/`FALSE_START`/`ABANDONED_ATTEMPT`/`CORRECTION`/
+  `CONTINUATION`/`RECORDING_PROCESS`/`UNCERTAIN`), `meaning_completion`,
+  `restart_evidence`, `correction_evidence`, `continuation_evidence`,
+  `recording_process_evidence` (all bool), `confidence`, `provenance`.
+- `utterance_id`/`attempt_id`: deterministic, minted here (not registered
+  in `canonical_identity.py` -- D-050A's own "no consumer yet" precedent,
+  the same choice D-166's `phrase_id` already made). `utterance_id`
+  mirrors `mint_source_span_id`'s physical-observation shape (timestamp-
+  sensitive); `attempt_id` mirrors `mint_attempt_id`'s membership-anchored
+  shape (sorted member-id set, never timestamp-anchored) -- both under
+  distinct prefixes (`lutt_`/`latt_`) so neither is confusable with
+  `attempt_reconstruction.py`'s own, unrelated `attempt_id`.
+
+==================================================
+CONSTRUCTION DESIGN
+==================================================
+
+Two-pass, deterministic, no dict/set-ordering dependence:
+
+1. **Phrase -> Utterance (structural cut, then semantic classification).**
+   Boundaries are cut ONLY at strong structural signals
+   (`RESTART_BOUNDARY`/`PAUSE`/`END_OF_UTTERANCE`); weak signals
+   (`SPEECH_BOUNDARY`/`PUNCTUATION`) never force a cut alone. Each closed
+   run's `meaning_completion` is then classified INDEPENDENTLY by asking
+   `take_segmentation._looks_complete_idea` (reused verbatim, never a
+   competing completion engine) about the accumulated text -- this is
+   exactly this task's own "Do not equate punctuation with utterance
+   completion" requirement: an `END_OF_UTTERANCE` cut can still classify
+   `INCOMPLETE` (proven, `test_03`).
+2. **Utterance -> Utterance relation (pairwise, sequential).** Reuses
+   `attempt_reconstruction._restart_evidence` verbatim (no exact-lexical-
+   duplication requirement, per this task's own instruction) to
+   disambiguate: restart evidence + prior `INCOMPLETE` -> prior becomes
+   `ABANDONED` (a false start/dropped attempt); restart evidence + prior
+   `COMPLETE` -> prior becomes `RESTARTED` and the new one `CORRECTED`
+   (a repair of an already-complete statement, never flattened into an
+   ordinary retry). No restart evidence -> each utterance's `utterance_
+   state` is simply its own `meaning_completion`.
+3. **Utterance -> Attempt grouping.** `ABANDONED` never merges forward
+   (its own attempt, `FALSE_START` if brief -- reusing `take_segmentation.
+   _looks_complete_idea`'s OWN length-heuristic numbers, >=6 words/>=3.0s,
+   inverted, no new threshold zoo -- else `ABANDONED_ATTEMPT`); a
+   `CORRECTED` utterance always joins its predecessor
+   (`CORRECTION`); an `INCOMPLETE` predecessor always joins its successor
+   (`CONTINUATION`, utterances stay physically distinct, joined only at
+   the attempt level per this task's own "do not merge them physically");
+   two `COMPLETE` utterances join into one `CLEAN_ATTEMPT` only when the
+   boundary between them was NOT a real measured `PAUSE` and the gap is
+   within `attempt_reconstruction.reconstruct_delivery_attempts`'s own
+   already-vetted 1.20s continuation ceiling (reused, not reinvented) --
+   otherwise they are a `NEW_AUDIENCE_BEAT`, kept as two separate
+   attempts, never merged merely because temporally adjacent (this task's
+   own explicit requirement, proven `test_15`). `RECORDING_PROCESS` is
+   populated ONLY from an explicit caller-supplied index set -- this
+   module invents no meta-speech/self-instruction phrase vocabulary of
+   its own (this task's own "do not create person-specific phrases").
+
+==================================================
+COMPATIBILITY
+==================================================
+
+`raw_understanding_compatibility_reference`/`watch_listen_compatibility_
+reference`: two small, additive, JSON-safe row-builders letting a future
+task associate a `RawUnderstandingSpan.span_id` (D-155) or
+`UnderstandingSpan.span_id` (D-157) with this task's own `utterance_id`/
+`attempt_id`, WITHOUT modifying either CLOSED module -- confirmed at
+literal zero diff (`git diff --stat`). No production call site constructs
+or consumes these rows; a future, separately-authorized task may.
+
+==================================================
+TESTS
+==================================================
+
+`tests/test_cutsell_d168_language_utterance_attempt.py`: 55 new tests
+covering all 42 directive-required fixture categories (simple/incomplete/
+punctuation-is-not-completion/pause/restart boundaries, false start,
+abandoned-not-brief, clean retry as new attempt, continuation, correction,
+recording process via explicit evidence only, filler/partial-word
+preservation, multi-sentence one attempt, two beats separate, conclusion
+continuation, CTA-like/no-punctuation/long-pause/short-pause fixtures,
+meaning/negation/number/factual-term/source-id preservation, exact phrase/
+utterance span mapping, deterministic ids/order, categorical confidence,
+provenance, no-proposition/no-final-relation minting, and 9 no-authority-
+change module-leaf/git-diff proofs -- Family/BestTake/D-150/D-163/D-167/
+Boundary/Pacing/render) plus additional structural/contract/diagnostics
+tests (empty input, uncertain/empty-text utterance, diagnostics shape,
+compatibility-reference shape, gap-exceeds-continuation-ceiling proof,
+bounded state vocabularies).
+
+Two fixture corrections during development (documented in test comments):
+an "abandoned, not brief" fixture originally satisfied `take_segmentation.
+_looks_complete_idea`'s own length-heuristic fallback (>=6 words) and was
+correctly classified `COMPLETE`+`RESTARTED` rather than `ABANDONED` --
+fixed by ending the fragment on a genuine grammatically-open tail (a
+bridge connector), which the completion checker evaluates BEFORE its
+length fallback; a "continuation" fixture's word gap was below
+`segment_language_phrases`'s own `split_gap_sec` default and therefore
+never actually split into two phrases -- fixed with a real audio-silence-
+confirmed pause so the utterance segmenter genuinely produces two
+utterances for the continuation-attempt rule to join. Neither was a defect
+in the new module; both were fixture-design corrections to match already-
+correct reused behavior.
+
+Targeted regression battery (D-168 x55 + D-166 x48 + D-167 x49 + D-163 x64
++ D-157 + D-155 + D-150 + D-123 + D-128 + D-158 attempt-relationship-
+authority + take_segmentation-longform + D-052 canonical ASR evidence +
+D-142 pacing + D-097.C boundary engine pass + boundary/render suites) =
+507/507 pass. Full offline suite: 3845 passed, 13 subtests passed, same 5 pre-existing unrelated
+failures (Modal env-secret masking/hybrid story guard, confirmed identical
+across this session) -- zero new failures, delta +55 = exactly the new test
+count. compileall clean.
+
+==================================================
+NEXT ENGINE STEP (NOT authorized here)
+==================================================
+
+Per this task's own instruction, do NOT implement PropositionCandidate/
+RelationEvidence automatically. Next canonical build task, pending Product
+Owner authorization, is **D-169 -- Language Spine Phase C**
+(`PropositionCandidate` + `RelationEvidence`, built on this task's
+Utterance/Attempt foundation), which is also the natural point to resolve
+the documented `semantic_idea_id`/`retry_family_id` conflation (D-050
+Phase 3, restated D-165 14.2).
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO RAW. NO provider/network call anywhere in the new module (verified
+structurally). NO Family/Proposition/Attempt-Relation/BestTake/Boundary/
+Pacing/D-150/Zone-Usability-V2 authority change -- the module mints no
+`proposition_id`/`retry_family_id` and is imported by nothing in any of
+those authorities. `language_spine.py` (D-166), `take_segmentation.py`,
+`attempt_reconstruction.py`, `raw_understanding_map.py` (D-155),
+`watch_listen_understanding.py` (D-157), `watch_listen_besttake_
+evidence.py` (D-163), and `watch_listen_zone_usability_v2.py` (D-167) are
+all confirmed at literal zero diff (`git diff --stat`).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+D-169 (Language Spine Phase C: PropositionCandidate + RelationEvidence,
+and the semantic_idea_id/retry_family_id conflation resolution) as the
+next implementation task is a Product Owner decision.
