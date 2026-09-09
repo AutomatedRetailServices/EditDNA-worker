@@ -32534,3 +32534,180 @@ reporting gap now fixed, not a new capability.
 
 **HUMAN ACTION REQUIRED:** YES (condition C: whether to authorize the
 one confirmatory Video00 RAW named above).
+
+---
+
+D-186B: D-183/D-184 CONFIRMATORY REAL-MEDIA QUALIFICATION (post D-186A,
+ONE RAW: 34392120109)
+
+D-186A PROVEN LIVE: the dedicated "D-186A D-183 D-184 compact
+diagnostics" step (job 102602737612, step 32) ran to `success` and its
+full JSON (16413 bytes, self-reported and byte-verified against the
+retrieved log text) was read DIRECTLY from the GitHub Actions job log --
+no artifact download, no large engine-JSON dump needed as the primary
+source. The observability repair works exactly as designed.
+
+RUN-LEVEL SUMMARIES (from the dedicated step, verbatim):
+D-183: evaluated=8, decisive=5, non_decisive=2, tied=0, conflicted=0,
+unknown=1. D-184: evaluated=8, preference_supported=1, abstain=7,
+near_equal=1, conflicted=0, insufficient_evidence=0, not_eligible=6.
+
+PIMPLES REIDENTIFICATION (by source span + text + meaning sufficiency,
+not prior clip ids): the checked-in regression fixture's own
+`pimples_*` substrings matched only ONE, uncontested "micro" idea this
+run (`clip_96e17a03e097338aa0a0`, 192.36-197.52s, "También me salían
+espinillas, era como un rush, una alergia.") -- a true singleton, never
+in `take_judge_groups` at all (D-183/D-184 do not apply; consensus_keep
+against BOTH references, no LEVEL-1 issue). Cross-checking the SAME
+run's quality-ladder trace (secondary corroboration, per this task's own
+allowance) surfaced the REAL contested Pimples family the fixture's
+narrower substrings missed: **`tg_1ec3d449794d0fc72b`**, meaning-
+sufficient candidates `clip_ece41f0771df6ad100f6` (winner, "También me
+salían espinillas en esta parte de aquí, detrás de la oreja...") and
+`clip_a6027a4fd08d6aa7ec66` ("Otro síntoma era que me salían espinillas
+como si fuera una alergia de..."). D-183: `NON_DECISIVE`
+(`raw_score_difference_without_structured_dominance`, top_score=0.6846,
+runner_up_score=0.6742, margin=0.0104 -- razor-thin). D-184:
+`NEAR_EQUAL` / `ABSTAIN` (`structured_evidence_near_equal_no_dominance_
+found`; meaning_parity `CONSISTENT`; performance_status `NEAR_EQUAL`;
+editability `NO_EVIDENCE`; `action_applied=False`). The quality ladder's
+own region trace CONFIRMS both Cut.ai and Human Gold keep
+`clip_a6027a4fd08d6aa7ec66`'s realization (213.55-221.55s,
+`missing_delivery`/`equivalent_realization_parity_mismatch`) while
+CutSell's ACTUAL winner is the other, non-reference-preferred
+realization -- the current winner is against both references, D-184
+correctly abstained rather than compounding or silently fixing it.
+
+**PIMPLES RESULT: `NEAR_EQUAL_ABSTAIN`** (current winner against both
+references; V2/visual evidence genuinely cannot distinguish the two
+meaning-sufficient realizations -- this is CONFIRMED, not merely
+reasoned, this round).
+
+GYNECOLOGIST REIDENTIFICATION (by the same GYNECOLOGIST_SPAN
+82.4-109.0s the dedicated step's own region-mapping computes): family
+**`tg_ced6d5f374402fd630`**, meaning-sufficient candidate
+`clip_c105fdbbcae40b0f4a53` ("Al terminar mi contrato, cambié de
+ginecóloga y le pedí que me hiciera un test..."), the OTHER member
+(`clip_81d1c8b38727f9f8df11`, cross-confirmed via the quality-ladder
+trace) not meaning-sufficient this run. D-183: `DECISIVE`
+(`single_semantic_winner`; no score fields -- never set on this path).
+D-184: `NOT_ELIGIBLE` (`terminal_confidence_state_not_eligible`;
+`action_applied=False`). Quality-ladder cross-check: the CORE segment
+(96.47-102.47s) is a full `consensus_keep` (matches both references);
+two brief EDGE regions (95.58-96.33s, 102.83-103.87s) are flagged
+`take_choice_against_both_references`/`BestTakeResolver` -- a
+Boundary/BestTakeResolver-owned trim-edge finding on the SAME chosen
+take, not a wrong semantic candidate pick, and entirely outside D-183/
+D-184's own scope.
+
+**GYNECOLOGIST RESULT: `DECISIVE_NOT_ELIGIBLE_MATCHES_BOTH`** (core
+content matches both references; the noted edge deviations are pre-
+existing Boundary-level, unrelated to D-184, D-177 status unchanged).
+
+OTHER D-184-ELIGIBLE FAMILIES (2 of the 8; both fields taken verbatim
+from the dedicated step, no source range available for unflagged
+families since only the two named regions carry span data in this
+step's output):
+
+- `tg_d742d280ba692f2019` (family-history/hereditary-cancer region,
+  identified via the SAME quality-ladder cross-check): D-183
+  `NON_DECISIVE` (top_score=0.731, runner_up=0.6913, margin=0.0397).
+  D-184 **`PREFERENCE_SUPPORTED`** / `PREFER_CANDIDATE`, preferred
+  `clip_eae3a5141530041d6454`, performance_status `DOMINANT`,
+  editability `NO_EVIDENCE`, `action_applied=False`. PREFERENCE-
+  SUPPORTED CONTROL: `performance_status=DOMINANT` is produced ONLY by
+  `_v2_preferred_candidate` finding a real `zone_usability_v2_dominates`
+  relation (D-172) -- the ONE structured source this arbiter ever
+  consults for a preference; D-184's own code never reads
+  `terminal_scores` in its decision logic (confirmed by construction and
+  by D-184's own offline tests) -- this is genuine V2 factual dominance,
+  never "better raw score." Quality-ladder cross-check: the preferred
+  candidate's realization matches Cut.ai's own keep; Human Gold omits
+  this specific sentence from its edit entirely (an editorial-length
+  choice, not a preference signal either way) -- QA mapping:
+  `PREFERENCE_SUPPORTED_MATCHES_CUTAI_ONLY` (Gold: not a comparable
+  signal here).
+- `tg_1ec3d449794d0fc72b`: see PIMPLES above (`NEAR_EQUAL`/`ABSTAIN`).
+
+ABSTENTION CONTROL (all 7 ABSTAINs this run): 1 `NEAR_EQUAL`
+(structured evidence present, no dominance found -- Pimples, above); 6
+`NOT_ELIGIBLE` (5 `DECISIVE`-gated + 1 `UNKNOWN`-gated, the latter being
+`tg_ccac94b0d8eeaebe23`'s pre-existing `no_usable_realization` outcome,
+unrelated to D-184). Zero `CONFLICTED`, zero `INSUFFICIENT_EVIDENCE`,
+zero meaning-conflict ABSTAINs this run.
+
+WINNER IMMUTABILITY: `bounded_finalist_arbiter_action_applied = False`
+confirmed for every one of the 8 families (verbatim in the dedicated
+step's own output) -- no current winner changed due to D-184. NO
+REGRESSION.
+
+RAW-SCORE NON-AUTHORITY: confirmed both structurally (D-184's own code
+never reads `terminal_scores`) and by this run's own evidence -- the
+ONE `PREFERENCE_SUPPORTED` family is grounded in V2 `DOMINANT` status,
+not score; the razor-thin-margin Pimples family (0.0104) correctly did
+NOT produce a forced preference despite having a nonzero raw-score
+gap.
+
+MEANING FIREWALL: held (every evaluated family this run reports
+`meaning_parity: CONSISTENT`; zero meaning-conflict ABSTAINs). BOUNDARY
+FIREWALL: held (the Gynecologist family's own ENTRY/EXIT-adjacent edge
+issues never produced a D-184 preference -- D-184 was `NOT_ELIGIBLE`
+for that family entirely, on the DECISIVE gate, before performance
+evidence was ever read).
+
+PROSODIC AUDIO ROADMAP: the real, confirmed Pimples family
+(`tg_1ec3d449794d0fc72b`) satisfies the roadmap trigger on CONFIRMED
+evidence, not reasoned projection: D-183 `NON_DECISIVE`, D-184
+`NEAR_EQUAL`, meaning already safe (`CONSISTENT`), and the quality-
+ladder's own independent cross-check confirms the current (D-184-
+unaffected) winner is against both oracles while V2/visual evidence
+found no dominance between the two meaning-sufficient realizations. No
+DECISIVE-wrong-label upstream blocker was found this round (Gynecologist
+and every other DECISIVE family's core content matches both
+references) -- so this is not a misdiagnosis of an upstream
+decisiveness problem; it is a genuine local comparative-evidence gap.
+
+**PROSODIC ROADMAP RESULT: A. PROMOTE_PROSODIC_AUDIO_BEFORE_P1.**
+
+WHOLE-VIDEO REGION SUMMARY (regression-QA 16/18 passed this run, cross-
+checked against the ladder trace): Hook `CUTAI_PASS`; Sonography
+`CUTAI_PASS`; Diagnosis `CUTAI_PASS`; Body/Symptoms `CUTAI_GAP`
+(`acne_back_preserved` failed this run, `missing_required_segment` --
+a NEW failure vs D-185's own run, run-to-run family-shape variance, NOT
+attributable to D-184); Gynecologist `CUTAI_PASS` (core content, per
+above); Pimples `CUTAI_GAP` (the coarse regression fixture's own micro-
+checks all pass, but the deeper contested-family finding above is a
+real Level-1 miss the fixture doesn't check for); Stomach `CUTAI_PASS`;
+Family/Conclusion `CUTAI_PASS`; CTA `CUTAI_PASS`; story order
+(`sonography_good_before_diagnosis`) `CUTAI_GAP` (same pre-existing
+StoryValidator ordering issue as D-185's run, unrelated to D-184).
+
+PARITY METRICS (selection-plan scope; the physical/rendered headline
+was not reachable within this round's log window and is NOT required
+since D-186A's own dedicated step, not the ladder, was this task's
+primary evidence source): Selection LEVEL-1: 18 regions / 13.25s.
+Boundary LEVEL-1: 18 regions / 3.897s. F1 vs Cut.ai: 0.8216. F1 vs
+Human Gold: 0.7936. None of this is attributed to D-184 (zero
+selection/render authority, confirmed).
+
+D-186B VERDICT: **A. D-183/D-184 REAL-MEDIA QUALIFICATION PROVEN --
+PROSODIC AUDIO PROMOTED.**
+
+EXACT NEXT ENGINE GATE: **D-187 -- PROSODIC AUDIO V2 PHASE A (PERCEPTION
+/ EVIDENCE ONLY)**, scoped to speech rate, pause structure, hesitation,
+vocal restart, continuity, emphasis dynamics, energy variation,
+flat/expressive delivery indicators, and interruption/fumble patterns
+-- explicitly NO emotion inference, NO lying/confidence-psychology
+inference, NO winner mutation. NOT implemented here; a future,
+separately-authorized task.
+
+STRICT SCOPE CONFIRMATIONS: no `cutsell_worker` edit. No workflow change
+after dispatch. No winner authority. No Prosodic Audio implementation.
+No P1 implementation. No provider/model change. No Family Formation/
+Boundary/Pacing change. Exactly ONE RAW dispatched (34392120109). No
+second RAW. No post-result patch.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize
+D-187 -- Prosodic Audio V2 Phase A, perception/evidence only, no
+BestTake authority, no winner mutation -- as the next canonical
+engineering gate ahead of resuming P1).
