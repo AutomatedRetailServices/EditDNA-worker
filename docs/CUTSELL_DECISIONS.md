@@ -43636,3 +43636,196 @@ implemented D-212 Pacing V2 architecture/forensic task, which is Product
 Owner coordination territory per this entry's own "Then STOP" instruction.
 
 ---
+
+## D-212: D-177 Synthetic Target-Shape Qualification (post D-211, controlled synthetic fixture only, no RAW, no provider)
+
+**Status: VERDICT B -- D-177 TARGET SHAPE PROVEN AT STRUCTURED FIXTURE
+LEVEL, BOUNDARY READY TO PROCEED TO PACING V2. New test file
+`tests/test_cutsell_d212_boundary_synthetic_target_shape.py` (30 tests, all
+passing on first run). No `cutsell_worker/*.py` file touched. No RAW, no
+Modal, no RunPod, no provider, no network. No Boundary redesign, no new
+threshold.**
+
+### 1. Scope discipline
+CONTROLLED SYNTHETIC MEDIA / FIXTURE ONLY, per directive. Verified at
+start: branch `feature/runpod-pod-on-demand`, HEAD `ad20d87`, clean tree.
+The only change this task makes is one new test file; `boundary_engine_
+pass.py`, `positioned_performance_evidence.py`, `selection_boundary_
+contract.py` and every other production module are read-only inputs, never
+edited.
+
+### 2. Step 1 -- exact D-177 target geometry (derived from code, not assumed)
+`positioned_performance_evidence.py::classify_event_zone` computes
+`overlaps = event_start < d_end and event_end > d_start`,
+`starts_before = event_start < d_start`, `ends_after = event_end > d_end`,
+zone=DELIVERY whenever `overlaps`. `boundary_engine_pass.py::tighten_
+selected_visual_edges` treats `before=True, after=False` as an ENTRY
+straddle and `before=False, after=True` as an EXIT straddle. Substituting
+gives the exact supported geometry:
+
+```
+ENTRY straddle:  event_start < delivery_start < event_end <= delivery_end
+EXIT  straddle:  delivery_start <= event_start < delivery_end < event_end
+```
+
+D-177's own eligibility test (no new constant; reuses `AUDIO_EDGE_OVERLAP_
+TOLERANCE_SEC = 0.08`):
+
+```
+ENTRY:  (event_end - delivery_start)  <= AUDIO_EDGE_OVERLAP_TOLERANCE_SEC
+EXIT:   (delivery_end - event_start)  <= AUDIO_EDGE_OVERLAP_TOLERANCE_SEC
+```
+
+**Answer: C -- both directions are implemented, symmetrically, in the same
+function** (the ENTRY and EXIT partial-edge-trim loops in `tighten_
+selected_visual_edges`), so both were exercised as mirrored variants.
+
+### 3. Step 2 -- lowest honest input seam (derived, not guessed)
+`tighten_selected_visual_edges` (and the real orchestrator that calls it,
+`apply_post_freeze_boundary_pass`) consumes exactly two things: a
+`DraftClip`'s own already-aligned `words` (feeding `compute_delivery_span`)
+and structured event dicts under `diagnostics["whole_video_context"]
+["sources"][].events` (D-114's `TemporalEvent` schema). **Answer: B --
+already-produced structured visual events + delivery timings** (never raw
+pixels/audio -- Answer A -- and never a CanonicalEditPlan-segment
+representation -- Answer C, which does not exist at this stage of the
+pipeline). No MP4 was generated: D-177 never touches pixels, so an MP4
+would not exercise this mechanism any more than the structured evidence
+already does, and reproducing the actual CV/audio detectors that would
+consume such an MP4 (`local_performance.py`, `audio_silence.py`) is D-116's
+own already-separately-tested upstream dependency -- out of D-212's
+authorized scope, and explicitly not required by the directive's own
+conditional "if actual MP4 media is required" language.
+
+### 4. Fixture construction and Boundary seam exercised
+The fixture is built at exactly that seam (hand-authored `Word`/event
+evidence, matching the exact existing D-116/D-177 test convention) and run
+through the REAL live sequence -- `freeze_selection_contract` ->
+`apply_post_freeze_boundary_pass` -> `enforce_selection_contract` -- not an
+isolated call to `tighten_selected_visual_edges` alone. This is the
+directive's own required distinction: not "calling the final trim function
+with an already-computed desired answer," but supplying only the raw
+evidence and letting the real orchestrator decide. Synthetic source id:
+`synthetic_d177_target`; generic five-token transcript; no Video00
+timestamps, regions, or labels anywhere (verified by a dedicated test,
+item 28 below).
+
+**Positive ENTRY fixture (`PRE_EDGE_STRADDLE`):** delivery span
+`[10.0, 19.0]` (5 words evenly spaced); clip `[9.5, 20.0]` (0.5 s of
+leading debris entirely outside delivery); event
+`camera_disengagement_candidate` `[9.5, 10.04]` (inside-delivery portion
+0.04 s <= 0.08 tolerance, touches the clip's own current leading edge).
+
+**Positive EXIT fixture (`POST_EDGE_STRADDLE`):** same delivery span; clip
+`[10.0, 19.5]` (0.5 s of trailing debris); event `facial_expression_shift_
+candidate` `[18.96, 19.5]` (inside-delivery portion 0.04 s <= 0.08
+tolerance, touches the clip's own current trailing edge).
+
+**Negative control A:** event `body_reset_candidate` `[12.0, 12.5]`
+wholly inside delivery -- no straddle at all.
+**Negative control B:** event straddling ENTRY with a 0.5 s inside-delivery
+portion (> 0.08 tolerance) -- a real DELIVERY defect, must never be
+trimmed by this mechanism.
+
+### 5. Results (all 30 tests pass; see `test_cutsell_d212_boundary_synthetic_target_shape.py`)
+- ENTRY: evaluated=True, applied=True, reason=`visual_entry_partial_edge_trim`;
+  before `[9.5, 20.0]` -> after `[10.0, 20.0]`; 0.5 s of external debris
+  removed; the 0.04 s DELIVERY-side sliver `[10.0, 10.04]` left inside the
+  kept clip, never shaved.
+- EXIT: evaluated=True, applied=True, reason=`visual_exit_partial_edge_trim`;
+  before `[10.0, 19.5]` -> after `[10.0, 19.0]`; 0.5 s of external debris
+  removed; the 0.04 s sliver `[18.96, 19.0]` untouched.
+- Both: new boundary clamps exactly at `delivery_start`/`delivery_end`,
+  never crosses it; required delivery (`[10.0, 19.0]`) fully retained
+  (`after.start <= delivery_start and after.end >= delivery_end`); every
+  word in the kept clip satisfies `word.start >= after.start` and
+  `word.end <= after.end` (no partial token, no half-word trim); source
+  identity (`clip_id`, `source_asset_id`) unchanged; `enforce_selection_
+  contract` completes with `status: "verified"` (the ordered spoken token
+  stream, the selection contract's own authority, never moved); a second,
+  untouched control clip in the same call is byte-identical before/after
+  (no unrelated boundary change).
+- Negative controls: both correctly declined
+  (`visual_event_overlaps_delivery_no_trim`, `trim_applied: False`); the
+  wholly-inside-delivery event never even enters the D-177 partial-edge
+  summary (correctly filtered, since `inside_delivery_overlap_sec` is only
+  set for straddle-eligible rows).
+- Determinism: both positive variants re-run twice from fresh, independently
+  built fixtures produce byte-identical clip boundaries and audit rows.
+- Discipline: `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC` reused unchanged (no new
+  threshold); an AST-level import check (test 29) confirms the file
+  imports no network/provider library and no Ordering/P1/P2/Pacing/
+  Renderer/BestTake module; a string check (test 28) confirms no Video00
+  identifier appears anywhere in the fixture.
+
+### 6. Regression
+`python -m compileall cutsell_worker tests`: clean. D-116 (19), D-177
+(34), D-097.C (15), `post_selection_edge_only_boundary` (4), `human_
+boundary_polish_v5` (5), `selection_boundary_contract` (4), `final_
+boundary_authority_refresh` (1), plus the new D-212 suite (30): **112/112
+passed** in one combined run. Full offline suite (`tests/`, excluding the
+one pre-existing, unrelated collection error in `test_semantic_stitch.py`
+-- `score_take() missing 1 required positional argument: 'slot'`, present
+before this task and untouched by it): **5029 passed, 5 failed, 13 subtests
+passed.** All 5 failures are pre-existing and unrelated to Boundary/D-212
+(`test_hybrid_story_guard_incomplete_retry.py` and
+`test_video00_modal_hybrid_semantic_parity.py` -- Modal-workflow-env-masking
+and hybrid-story-guard concerns, confirmed identical to the failure set
+already present before this task started). **Zero new failures caused by
+this task's one added file.**
+
+### 7. Achieved proof level
+**`STRUCTURED_INTEGRATION_FIXTURE_PROVEN`.** Stronger than
+`UNIT_LEVEL_ONLY` because the fixture runs through the real `apply_post_
+freeze_boundary_pass` orchestrator (Freeze -> the full four-step Boundary
+pass -> contract verification), not an isolated function call, and
+reproduces D-177's true missing geometry end-to-end for the first time in
+this codebase's history (offline or real). Not
+`SYNTHETIC_MEDIA_INTEGRATION_PROVEN` (no MP4/pixels/audio samples were
+generated or consumed -- see Section 3's honest justification for why that
+would not exercise this specific mechanism any further). Not, and never
+claimed to be, `REAL_MEDIA_TARGET_SHAPE_PROVEN` -- natural real-media
+observation of this exact shape remains `NOT_YET_OBSERVED`, unchanged from
+D-211, and stays purely opportunistic per D-211's own policy.
+
+### 8. D-212 verdict
+**B. D-177 TARGET SHAPE PROVEN AT STRUCTURED FIXTURE LEVEL -- BOUNDARY
+READY TO PROCEED TO PACING V2.**
+
+### 9. Boundary status after this success
+Boundary canonical status remains `BOUNDARY_SUFFICIENT_FOR_PACING` (D-211,
+unchanged), with the qualification note now upgraded from D-211's
+`D177_TARGET_SHAPE_REAL_MEDIA_OBSERVATION_PENDING_OPPORTUNISTICALLY` to
+also carry `D177_TARGET_SHAPE_SYNTHETIC_INTEGRATION_PROVEN`. Natural
+real-media observation of the same shape remains OPTIONAL / OPPORTUNISTIC
+/ NON-BLOCKING, exactly as D-211 set it -- this entry adds proof, it does
+not remove the opportunistic policy.
+
+### 10. Next gate
+**D-213 -- PACING V2 ARCHITECTURE / FORENSIC**, named in D-211, scope
+unchanged: audit `pacing.py`, `dialogue_pacing_transition.py` (D-142's
+live Phase 1: `HARD_CUT`/`TIGHT_CUT` `SUPPORTED_NOW`; `J_CUT`/`L_CUT`/
+`MICRO_AUDIO_OVERLAP` `REQUIRES_RENDERER_EXTENSION`), the D-097.E
+ownership contract, and existing gap/transition logic; design (not
+implement) inter-segment rhythm, silence/gap treatment, dialogue
+continuity, audio transitions, J-cut, L-cut, micro-overlap. **Not
+implemented by this entry.** No further Boundary gate is authorized unless
+new evidence surfaces a real defect -- D-210/D-211/D-212 together found
+none.
+
+### 11. Confirmation
+NO RAW dispatched. NO Modal/RunPod/provider call. NO network access. NO
+Boundary redesign (every constant and decision path reused verbatim from
+existing, already-shipped code). NO new threshold. NO D-180 authority
+imported (BestTake/Selection Condition-4b remains untouched and
+unreferenced by this fixture). NO P1/P2/Ordering/Pacing/Renderer/BestTake
+module imported by the new test file (verified by AST, test 29). D-116,
+D-177, D-178A, D-178A.1, D-178B, D-179, D-180, D-210, D-211, and the
+D-097.E `PHYSICAL_OWNERSHIP_CONTRACT` are preserved, unmodified,
+unrewritten by this entry.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-213 (Pacing
+V2 Architecture/Forensic) itself is Product Owner coordination territory,
+per this entry's own "Then STOP" instruction.
+
+---
