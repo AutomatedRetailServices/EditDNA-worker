@@ -15,7 +15,7 @@ from .media_overlay_render import (
     build_final_overlay_command,
     write_text_overlay_ass as _write_text_overlay_ass,
 )
-from .media_probe import probe_media
+from .media_probe import MediaProbe, probe_media
 from .render_plan import RenderSegment
 
 _SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9.]+)")
@@ -360,3 +360,342 @@ def render_preview(
     if not destination.exists() or destination.stat().st_size <= 0:
         raise RuntimeError("ffmpeg_render_missing_output")
     return str(destination)
+
+
+# =============================================================================
+# D-214 -- PACING V2 RENDERER / TIMELINE CONTRACT EXTENSION (OFFLINE ONLY)
+# =============================================================================
+#
+# D-213's own forensic (docs/CUTSELL_DECISIONS.md) named the ONE renderer gap
+# blocking J_CUT/L_CUT/MICRO_AUDIO_OVERLAP: `_concat_render_command` trims
+# every segment's audio to the SAME exact duration as its video before the
+# `concat` filter, so audio and video can never diverge. This section closes
+# that gap at the EXECUTION layer only.
+#
+# ## Ownership contract (binding, structurally enforced below)
+#
+# Pacing decides transition semantics; the renderer only ever realizes
+# whatever `RenderSegment.audio_start`/`.audio_end` geometry it is handed --
+# it never inspects a `mode` string, never picks a transition type, never
+# runs any eligibility/safety check. `dialogue_pacing_transition_execution_
+# diagnostics` below is READ-ONLY reporting (it infers a descriptive mode
+# label from the geometry it is given, purely for observability) and can
+# never influence what `render_timeline_with_audio_windows` actually
+# builds -- the two functions never call each other.
+#
+# ## NOT live-wired
+#
+# Nothing in this section is imported or called by `render_preview`,
+# `universal_clean_cut.py`, `pipeline.py`, or any other production call
+# site. Production's only two live modes remain HARD_CUT/TIGHT_CUT via the
+# existing, completely unmodified `render_preview`/`_concat_render_command`
+# above. This is test-only execution CAPABILITY, per the D-214 directive's
+# own "no live wiring" instruction.
+#
+# ## Backward compatibility (structural, not incidental)
+#
+# `RenderSegment.audio_start`/`.audio_end` default to `None` on every
+# existing call site (`render_plan.build_render_plan` never sets them).
+# `_concat_render_command_with_audio_windows` below detects this (`not
+# any(segment.has_independent_audio_window for segment in segments)`) and
+# delegates to the EXISTING, byte-for-byte-unchanged `_concat_render_
+# command` in that case -- there is no parallel reimplementation of the
+# HARD_CUT/TIGHT_CUT path to silently drift from the live one.
+
+AUDIO_TIMELINE_EPSILON_SEC = 1e-6
+
+
+def validate_audio_window(segment: RenderSegment, *, probe: MediaProbe | None = None) -> None:
+    """Fail-closed validation of one segment's own AUDIO source window.
+    Raises `ValueError` with an explicit reason; never silently clamps a
+    window into range (per D-214's own "no silent semantic clamp"
+    instruction). A segment with a default (non-divergent) audio window
+    always passes trivially -- this only ever constrains an EXPLICIT
+    `audio_start`/`audio_end`."""
+    if not segment.has_independent_audio_window:
+        return
+    audio_start = segment.effective_audio_start
+    audio_end = segment.effective_audio_end
+    if audio_start < -AUDIO_TIMELINE_EPSILON_SEC:
+        raise ValueError(f"invalid_audio_window_negative_start:{segment.clip_id}")
+    if audio_end <= audio_start + AUDIO_TIMELINE_EPSILON_SEC:
+        raise ValueError(f"malformed_audio_window_end_not_after_start:{segment.clip_id}")
+    probe = probe if probe is not None else probe_media(segment.source_path)
+    if not probe.has_audio:
+        raise ValueError(f"independent_audio_window_requires_source_audio_track:{segment.clip_id}")
+    if audio_end > probe.duration_sec + AUDIO_TIMELINE_EPSILON_SEC:
+        raise ValueError(
+            f"audio_window_exceeds_source_availability:{segment.clip_id}:"
+            f"requested_end={audio_end:.3f}:source_duration={probe.duration_sec:.3f}"
+        )
+
+
+def _video_timeline_positions(segments: tuple[RenderSegment, ...], *, fps: int) -> tuple[float, ...]:
+    """Cumulative OUTPUT-timeline start position of each segment's own VIDEO
+    window -- a pure function of the (already frame-rounded) video
+    durations, never of any audio window. This is the one authoritative
+    timeline reference both the video graph and the audio graph below are
+    placed against; no audio decision on join N can ever move where segment
+    N+1's own video (or audio placement baseline) begins (D-214's own
+    "multi-join isolation" requirement, satisfied structurally)."""
+    positions = [0.0]
+    for segment in segments[:-1]:
+        positions.append(positions[-1] + rendered_segment_duration_sec(segment.duration_sec, fps=fps))
+    return tuple(positions)
+
+
+def _audio_placement_sec(segment: RenderSegment, video_position_sec: float) -> float:
+    """Where this segment's own AUDIO window begins on the output timeline.
+    Identical to `video_position_sec` for every segment with a default
+    (non-divergent) audio window -- i.e. today's only behavior. A LEADING
+    audio window (`audio_start < start`, the per-segment J-cut primitive)
+    shifts this segment's own audio earlier by exactly that lead amount; a
+    TRAILING audio window (`audio_end > end`, the per-segment L-cut
+    primitive) never changes this segment's OWN placement, only how far its
+    audio continues past it. Micro-overlap is simply a small lead and/or
+    trail on the same join."""
+    lead = max(0.0, segment.start - segment.effective_audio_start)
+    return video_position_sec - lead
+
+
+def _validate_audio_placements(segments: tuple[RenderSegment, ...], *, fps: int) -> tuple[float, ...]:
+    """Validate every segment's audio window, then return each segment's
+    output-timeline audio placement. Fails closed (raises) if any
+    segment's own lead would need to start before timeline zero -- i.e. it
+    claims more pre-roll than the entire preceding timeline provides."""
+    for segment in segments:
+        validate_audio_window(segment)
+    video_positions = _video_timeline_positions(segments, fps=fps)
+    placements = []
+    for segment, video_position in zip(segments, video_positions):
+        placement = _audio_placement_sec(segment, video_position)
+        if placement < -AUDIO_TIMELINE_EPSILON_SEC:
+            raise ValueError(
+                f"audio_lead_exceeds_available_timeline:{segment.clip_id}:"
+                f"requested_placement={placement:.3f}"
+            )
+        placements.append(max(0.0, placement))
+    return tuple(placements)
+
+
+def _concat_render_command_with_audio_windows(
+    segments: tuple[RenderSegment, ...],
+    output: Path,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    workdir: Path,
+) -> list[str]:
+    """D-214: like `_concat_render_command`, but each segment's AUDIO window
+    may diverge from its VIDEO window. VIDEO is built EXACTLY as the
+    existing function (same `concat` filter, same frame-exact per-segment
+    trim) -- visual cut instants are never affected by any audio decision.
+    AUDIO is built as an independent per-segment `adelay`-placed stream,
+    combined with `amix(normalize=0)`: `normalize=0` is the load-bearing
+    correctness property here -- with it, a segment that shares no overlap
+    with any neighbor plays at its own unmodified volume for its own full
+    duration, mathematically identical to a plain sequential concat; only
+    the seconds two segments' own windows actually overlap are ever summed.
+    This is why a HARD_CUT/TIGHT_CUT-only plan produces the exact same
+    audible result either way, and why one join's overlap can never bleed
+    into a join it does not touch."""
+    if not any(segment.has_independent_audio_window for segment in segments):
+        return _concat_render_command(segments, output, width=width, height=height, fps=fps, workdir=workdir)
+
+    audio_placements = _validate_audio_placements(segments, fps=fps)
+
+    command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    video_filters: list[str] = []
+    audio_filters: list[str] = []
+    input_index = 0
+
+    for index, segment in enumerate(segments):
+        probe = probe_media(segment.source_path)
+        exact_video = rendered_segment_duration_sec(segment.duration_sec, fps=fps)
+
+        # --- video input + chain (identical shape to _concat_render_command) ---
+        command += ["-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}", "-i", segment.source_path]
+        video_input = input_index
+        input_index += 1
+        video_chain = [
+            f"[{video_input}:v]scale={width}:{height}:force_original_aspect_ratio=decrease",
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+            "setsar=1",
+            f"fps={fps}",
+        ]
+        caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
+        if caption:
+            video_chain.append(caption)
+        video_chain += [f"trim=duration={exact_video:.6f}", "setpts=PTS-STARTPTS", f"format=yuv420p[v{index}]"]
+        video_filters.append(",".join(video_chain))
+
+        # --- audio input + chain (independent window, adelay-placed) ---
+        audio_start = segment.effective_audio_start
+        audio_end = segment.effective_audio_end
+        audio_duration = max(AUDIO_TIMELINE_EPSILON_SEC, audio_end - audio_start)
+        placement_ms = max(0, round(audio_placements[index] * 1000.0))
+        effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
+        audio_format = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+        if probe.has_audio:
+            command += ["-ss", f"{audio_start:.3f}", "-to", f"{audio_end:.3f}", "-i", segment.source_path]
+            audio_input = input_index
+            input_index += 1
+            audio_chain = [
+                f"[{audio_input}:a]volume={effective_volume:.3f}",
+                *_audio_join_fade_filters(audio_duration),
+                audio_format,
+                f"atrim=duration={audio_duration:.6f}",
+                "asetpts=PTS-STARTPTS",
+                f"adelay={placement_ms}|{placement_ms}[a{index}]",
+            ]
+        else:
+            command += ["-f", "lavfi", "-t", f"{audio_duration:.6f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+            audio_input = input_index
+            input_index += 1
+            audio_chain = [
+                f"[{audio_input}:a]{audio_format}",
+                f"atrim=duration={audio_duration:.6f}",
+                "asetpts=PTS-STARTPTS",
+                f"adelay={placement_ms}|{placement_ms}[a{index}]",
+            ]
+        audio_filters.append(",".join(audio_chain))
+
+    video_filters.append(
+        "".join(f"[v{index}]" for index in range(len(segments))) + f"concat=n={len(segments)}:v=1:a=0[vout]"
+    )
+    audio_filters.append(
+        "".join(f"[a{index}]" for index in range(len(segments)))
+        + f"amix=inputs={len(segments)}:duration=longest:dropout_transition=0:normalize=0[aout]"
+    )
+    command += [
+        "-filter_complex", ";".join(video_filters + audio_filters),
+        "-map", "[vout]", "-map", "[aout]",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
+        "-movflags", "+faststart",
+        str(output),
+    ]
+    return command
+
+
+def render_timeline_with_audio_windows(
+    segments: Iterable[RenderSegment],
+    output_path: str,
+    *,
+    width: int = 1080,
+    height: int = 1920,
+    fps: int = RENDER_FPS_DEFAULT,
+) -> str:
+    """D-214's own render entrypoint -- realizes independent per-segment
+    audio/video windows (HARD_CUT/TIGHT_CUT/J_CUT/L_CUT/MICRO_AUDIO_OVERLAP
+    geometry alike). NOT called by `render_preview` or any production call
+    site (see this section's own module-level docstring); test-only
+    execution capability. No captions/overlays -- out of this offline
+    mechanism-proof task's scope; use `render_preview` for the live,
+    fully-featured path."""
+    segment_tuple = tuple(segments)
+    if not segment_tuple:
+        raise ValueError("render requires at least one segment")
+    if width <= 0 or height <= 0 or fps <= 0:
+        raise ValueError("invalid render geometry")
+    for segment in segment_tuple:
+        if segment.end <= segment.start:
+            raise ValueError(f"invalid render segment {segment.clip_id}")
+
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="cutsell-render-timeline-") as directory:
+        _run(_concat_render_command_with_audio_windows(
+            segment_tuple, destination, width=width, height=height, fps=fps, workdir=Path(directory),
+        ))
+    if not destination.exists() or destination.stat().st_size <= 0:
+        raise RuntimeError("ffmpeg_render_missing_output")
+    return str(destination)
+
+
+# --- D-214 execution diagnostics (read-only, never consumed for a decision) --
+
+TRANSITION_HARD_CUT = "HARD_CUT"
+TRANSITION_TIGHT_CUT = "TIGHT_CUT"
+TRANSITION_J_CUT = "J_CUT"
+TRANSITION_L_CUT = "L_CUT"
+TRANSITION_MICRO_AUDIO_OVERLAP = "MICRO_AUDIO_OVERLAP"
+
+EXECUTION_STATUS_EXECUTABLE = "EXECUTABLE"
+EXECUTION_STATUS_REJECTED = "REJECTED"
+
+
+def _infer_transition_mode(left: RenderSegment, right: RenderSegment) -> str:
+    """A purely DESCRIPTIVE label inferred from geometry already present on
+    the two segments -- never a decision. `TIGHT_CUT` vs `HARD_CUT` here is
+    a placeholder distinction at the execution layer only (this module has
+    no access to Boundary's own already-applied-trim diagnostics the way
+    `dialogue_pacing_transition.py`'s live TIGHT_CUT attribution does); real
+    Pacing V2 mode selection remains entirely out of this task's scope."""
+    right_leads = right.start - right.effective_audio_start > AUDIO_TIMELINE_EPSILON_SEC
+    left_trails = left.effective_audio_end - left.end > AUDIO_TIMELINE_EPSILON_SEC
+    if right_leads and left_trails:
+        return TRANSITION_MICRO_AUDIO_OVERLAP
+    if right_leads:
+        return TRANSITION_J_CUT
+    if left_trails:
+        return TRANSITION_L_CUT
+    return TRANSITION_HARD_CUT
+
+
+def dialogue_pacing_transition_execution_diagnostics(
+    segments: Iterable[RenderSegment], *, fps: int = RENDER_FPS_DEFAULT,
+) -> dict:
+    """One row per adjacent pair describing what `render_timeline_with_
+    audio_windows` would (or, on a validation failure, would NOT) actually
+    execute for that join -- requested vs. actual timing, exact placements,
+    and an explicit rejection reason where applicable. Read-only; building
+    this diagnostic never renders anything and never mutates `segments`."""
+    segment_tuple = tuple(segments)
+    rows: list[dict] = []
+    try:
+        video_positions = _video_timeline_positions(segment_tuple, fps=fps)
+        placements = _validate_audio_placements(segment_tuple, fps=fps)
+        execution_status = EXECUTION_STATUS_EXECUTABLE
+        rejection_reason = None
+    except ValueError as exc:
+        video_positions = tuple(
+            sum(rendered_segment_duration_sec(s.duration_sec, fps=fps) for s in segment_tuple[:i])
+            for i in range(len(segment_tuple))
+        )
+        placements = tuple(video_positions)
+        execution_status = EXECUTION_STATUS_REJECTED
+        rejection_reason = str(exc)
+
+    for index in range(len(segment_tuple) - 1):
+        left, right = segment_tuple[index], segment_tuple[index + 1]
+        left_audio_end_placement = placements[index] + left.audio_duration_sec
+        right_audio_start_placement = placements[index + 1]
+        overlap_sec = max(0.0, left_audio_end_placement - right_audio_start_placement)
+        rows.append({
+            "transition_index": index,
+            "left_clip_id": left.clip_id,
+            "right_clip_id": right.clip_id,
+            "mode": _infer_transition_mode(left, right),
+            "video_switch_time": round(video_positions[index + 1], 3),
+            "left_audio_end_source": round(left.effective_audio_end, 3),
+            "right_audio_start_source": round(right.effective_audio_start, 3),
+            "left_audio_end_timeline": round(left_audio_end_placement, 3),
+            "right_audio_start_timeline": round(right_audio_start_placement, 3),
+            "requested_overlap_sec": round(
+                max(0.0, (right.start - right.effective_audio_start)) + max(0.0, (left.effective_audio_end - left.end)),
+                3,
+            ),
+            "actual_overlap_sec": round(overlap_sec, 3),
+            "timeline_gap_sec": round(max(0.0, right_audio_start_placement - left_audio_end_placement), 3),
+            "execution_status": execution_status,
+            "fallback_reason": rejection_reason,
+        })
+    return {
+        "schema_version": "cutsell.render_timeline_execution_diagnostics.v1",
+        "segment_count": len(segment_tuple),
+        "execution_status": execution_status,
+        "rejection_reason": rejection_reason,
+        "transitions": rows,
+    }

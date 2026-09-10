@@ -44232,3 +44232,311 @@ renderer/timeline contract extension, offline only) is Product Owner
 coordination territory, per this entry's own "Then STOP" instruction.
 
 ---
+
+## D-214: Pacing V2 Renderer/Timeline Contract Extension -- OFFLINE ONLY (post D-213)
+
+**Status: VERDICT A -- PACING V2 RENDERER/TIMELINE CONTRACT OFFLINE PROVEN,
+J/L/MICRO-OVERLAP EXECUTION CAPABILITY READY. No live wiring. No RAW, no
+provider, no Boundary/Ordering/BestTake/Pacing-authority change.**
+
+### 1. Scope discipline
+Verified at start: branch `feature/runpod-pod-on-demand`, HEAD `d69a7f4`,
+clean tree. Files changed: `cutsell_worker/render_plan.py` (extended,
+backward-compatible), `cutsell_worker/render.py` (extended, additive
+section), `tests/test_cutsell_d214_pacing_v2_renderer_timeline_contract.py`
+(new, 44 tests), `docs/CUTSELL_DECISIONS.md` (this entry). No other file
+touched. No RAW, no provider, no Boundary/Ordering/BestTake file modified.
+
+### 2. Previous renderer timeline model
+`RenderSegment` carried exactly one `start`/`end` pair, used identically
+for both the video AND audio filter chains in `_concat_render_command`
+(every segment trimmed to the SAME exact frame-rounded duration before one
+`concat=v=1:a=1` filter) -- audio and video could never diverge in time.
+
+### 3. New renderer timeline model
+`RenderSegment` gains two optional fields, `audio_start`/`audio_end`
+(default `None`), plus `effective_audio_start`/`effective_audio_end`/
+`has_independent_audio_window`/`audio_duration_sec` properties.
+`start`/`end` remain the canonical VIDEO source window, unchanged in
+meaning. `audio_start < start` = a leading audio window (the per-segment
+J-cut primitive, from the RIGHT segment's own point of view);
+`audio_end > end` = a trailing audio window (the per-segment L-cut
+primitive, from the LEFT segment's own point of view). Both together on
+the same join = a bounded micro-overlap. This is a pure DATA contract --
+no mode label, no eligibility decision, no new threshold.
+
+### 4. Independent video window / 5. Independent audio window
+Video: unchanged -- built exactly as `_concat_render_command`'s existing
+per-segment `trim=duration=exact` chain, concatenated with `concat`. Audio
+(new, `_concat_render_command_with_audio_windows`): each segment's own
+`[audio_start, audio_end]` window is seeked independently (`-ss/-to` on
+its own dedicated input), trimmed to its own natural duration, then placed
+on the OUTPUT timeline via `adelay` at `video_position - lead`, where
+`video_position` is the segment's own cumulative VIDEO-only timeline
+position (never influenced by any audio decision) and `lead = max(0,
+start - effective_audio_start)`. All N placed audio streams are combined
+via `amix(inputs=N, duration=longest, dropout_transition=0, normalize=0)`.
+
+### 6. Backward compatibility
+Structural, not incidental: when no segment in a plan has
+`has_independent_audio_window`, `_concat_render_command_with_audio_windows`
+returns the EXACT SAME ffmpeg command list as the existing, byte-for-byte
+unmodified `_concat_render_command` (proven by direct equality assertion,
+test 4). `build_render_plan` never sets `audio_start`/`audio_end`, so every
+production-produced `RenderSegment` takes this path unconditionally.
+
+### 7. HARD_CUT result / 8. TIGHT_CUT result
+Both are mechanically IDENTICAL at the execution layer (both have no
+independent audio window) -- confirmed by test 5: a pair carrying
+Boundary's own `boundary_reason` (TIGHT_CUT's real live label, e.g.
+`tighten_audio_exit`) with no divergent `audio_start`/`audio_end` produces
+the exact same command as a plain HARD_CUT pair. The TIGHT_CUT/HARD_CUT
+distinction remains a Pacing-level ATTRIBUTION about Boundary's own prior
+work, never a different renderer execution path -- unchanged from D-142.
+
+### 9. J-cut representation / 10/11. J-cut execution
+`RenderSegment(..., audio_start=<earlier than start>)` on the RIGHT
+segment. Executed and PROVEN with real synthetic media (two ffmpeg-
+generated tone sources, 220 Hz / 1760 Hz, D-097.2's own precedent):
+Goertzel-based frequency-presence measurement on the rendered MP4 confirms
+the 1760 Hz tone begins exactly at the computed timeline placement,
+*before* the measured visual switch instant, matching the diagnostics'
+own `right_audio_start_timeline` to within 0.03 s (test 7).
+
+### 12/13. L-cut representation / execution
+`RenderSegment(..., audio_end=<later than end>)` on the LEFT segment.
+Proven identically: the 220 Hz tone measurably persists past the visual
+switch instant, matching `left_audio_end_timeline` (test 9).
+
+### 14/15. Micro-overlap representation / execution
+Both a small leading window (right segment) and a small trailing window
+(left segment) on the same join. Proven: both tones are simultaneously
+measurably present for a bounded interval matching the diagnostics'
+`actual_overlap_sec` to within 0.05 s (test 11).
+
+### 16. Requested vs. actual timing
+`dialogue_pacing_transition_execution_diagnostics` reports
+`requested_overlap_sec` (derived purely from the input geometry) and
+`actual_overlap_sec` (re-derived from the same placement math the
+renderer itself uses); tests 16 and the three execution tests (7/9/11)
+confirm requested == actual whenever the plan is `EXECUTABLE`, and confirm
+the *rendered, measured* audio matches both.
+
+### 17. Exact visual switch result
+`video_switch_time` = cumulative sum of `rendered_segment_duration_sec`
+video durations -- a pure function of video-only durations, verified
+against direct ffprobe-independent Goertzel measurement (test 13) and
+never moved by any audio decision (tests 27/28/29).
+
+### 18/19. Left-audio-tail / right-audio-lead result
+Both confirmed exact (within 0.03 s ffmpeg-boundary tolerance) against
+real rendered, measured audio (tests 7, 9, 14, 15).
+
+### 20. Overlap result / 21. No-overlap control
+Positive overlap measured and matched (tests 11, 16); a plain HARD_CUT
+negative control shows provably ZERO simultaneous tone presence anywhere
+in the rendered output (test 12).
+
+### 22. Source identity
+`clip_id`/`source_asset_id` preserved through the whole plan and echoed
+in diagnostics (test 17); `RenderSegment` identity fields are never
+touched by the new code path.
+
+### 23/24. Same-source / multi-source behavior
+Same-source J-cut (two windows into the SAME file) uses two fully
+independent `-ss/-to` seek pairs -- never a shared or confused seek (test
+18, asserts the exact two distinct seek ranges appear). Multi-source
+J-cut across two different files executes and measures correctly (test
+19).
+
+### 25/26. Invalid-window / no-silent-clamp result
+`validate_audio_window` (fail-closed, raises `ValueError`, never returns
+a value) rejects: a negative `audio_start` (test 20), an `audio_end`
+beyond the source's own probed duration (test 21), a malformed window
+where `audio_end <= audio_start` (test 22), and an audio lead exceeding
+the entire available preceding timeline (`_validate_audio_placements`).
+Structural "no clamp" proof (test 24): `audio_start`/`audio_end` are each
+assigned at most once in the function body (a straight read, never a
+second reassignment to an adjusted value) and every failure path only
+ever raises.
+
+### 27. Multi-join isolation
+Three-segment fixture (A->B->C) with a nontrivial J-cut ONLY at the A/B
+join: the B/C join's own `video_switch_time` and `right_audio_start_
+timeline` are BYTE-IDENTICAL whether or not the A/B overlap exists (test
+27) -- proven both at the diagnostics/math layer and (test 29) at the
+REAL rendered/measured audio layer (segment C's own tone onset lands at
+the identical instant either way).
+
+### 28. Join-scoped filtergraph
+Segment C's own `adelay` value in the built ffmpeg command equals exactly
+its own cumulative video-only position -- never shifted by the A/B join's
+own overlap decision (test 28, direct command-string assertion).
+
+### 29. No global-audio-smear result
+Confirmed by real rendered-audio measurement (test 29), not just command
+inspection: `amix(..., normalize=0)` is the load-bearing correctness
+property -- a segment sharing no overlap with any neighbor plays at its
+own unmodified volume for its own full duration, mathematically identical
+to plain sequential concat, and one join's overlap decision never bleeds
+into a join it does not touch.
+
+### 30. 12 ms fade status
+Unchanged and reused verbatim (`_AUDIO_JOIN_FADE_SEC = 0.012`, test 30);
+the divergent-audio chain still applies the SAME existing
+`_audio_join_fade_filters` helper to each segment's own (possibly
+widened) audio window edges (test 31) -- never repurposed as a crossfade
+or dialogue overlap; it remains pure click-avoidance.
+
+### 31. Coalesce interaction
+`render_plan._can_coalesce` now additionally refuses to coalesce across
+any join where either segment carries `has_independent_audio_window`
+(test 33) -- a deliberate Pacing V2 transition plan physically realized on
+that exact pair is never silently erased by the renderer's own micro-
+continuity optimization. Existing same-source, non-divergent coalescing
+is completely unchanged (test 32) -- no live segment ever sets these
+fields, so this guard changes nothing about today's production behavior.
+
+### 32. Diagnostics
+`dialogue_pacing_transition_execution_diagnostics` reports, per join:
+`mode` (descriptive only), `video_switch_time`, `left_audio_end_source/
+timeline`, `right_audio_start_source/timeline`, `requested_overlap_sec`,
+`actual_overlap_sec`, `timeline_gap_sec`, `execution_status`
+(`EXECUTABLE`/`REJECTED`), `fallback_reason` (the exact `ValueError`
+message on rejection). No semantic confidence field -- purely geometric/
+executional, matching the directive's own "no semantic confidence"
+instruction.
+
+### 33. Deterministic result
+Two independent builds of the same plan produce byte-identical commands
+(test 25) and byte-identical diagnostics dicts (test 44); segment order in
+the built command matches input order exactly, never silently reordered
+(test 26).
+
+### 34. Synthetic fixture method
+Two local ffmpeg-generated tone sources (`testsrc` video + `sine`
+audio at 220 Hz / 1760 Hz, matching D-097.2's own precedent exactly) --
+no downloaded media, no provider, no ASR. A Goertzel-style per-10ms-block
+frequency-energy measurement on the rendered output (`_tone_presence`/
+`_presence_mask`) provides deterministic, non-OCR, non-provider proof of
+exactly which tone(s) are audible at any timeline instant.
+
+### 35. Render runtime
+Recorded (test 43), not thresholded, per the directive's own "no arbitrary
+performance threshold" instruction -- the full 44-test suite (including 6
+real ffmpeg renders) completes in ~7.6 s on this runner.
+
+### 36. Existing renderer regressions
+`test_cutsell_clean_worker_render.py`, `..._caption_render.py`,
+`..._render_versions.py`, `d094_3_render_qc_placement_labels.py`,
+`d097_10_segments_as_rendered_and_physical_ladder.py`,
+`d097_2_render_timeline_and_evidence_completeness.py`,
+`live_render_qc.py`, `post_render_media_qc.py`,
+`post_render_structural_cross_check.py`, `render_boundary_tightening.py`,
+`universal_clean_cut_validation_live_render_qc.py`,
+`video00_render_path_regressions.py`, `multi_file_render_foundation.py`:
+**all pass, 269/269** combined with D-116/D-177/D-097.C/D-212's own 112
+Boundary tests and this task's own 44 -- zero regressions.
+
+### 37. D-142 regression
+`test_cutsell_d142_dialogue_pacing_transition_phase1.py`: pass, unchanged
+(this task never modifies `dialogue_pacing_transition.py`).
+
+### 38. Boundary regression
+D-116 (19), D-177 (34), D-097.C (15), D-212 (30): all pass, unchanged.
+
+### 39. Ordering regression
+D-206/D-207/D-208 (167 combined): all pass, unchanged.
+
+### 40. Full offline suite
+5071 passed, 5 failed (pre-existing, unrelated: 4x
+`test_video00_modal_hybrid_semantic_parity.py`, 1x
+`test_hybrid_story_guard_incomplete_retry.py` -- confirmed identical to
+the failure set already present before this task), plus two EXPECTED,
+self-resolving pre-commit "no diff against HEAD" checks
+(`test_cutsell_d171_language_spine_consumer_migration.py::test_27_render_
+unchanged`, `test_cutsell_d172_watch_listen_besttake_v2_evidence.py::
+test_33_render_unchanged` -- both assert `git diff --stat render*.py`
+is empty relative to the CURRENT git HEAD, which is trivially true again
+immediately after this task's own commit; re-verified green post-commit
+below, same self-resolving pattern as prior D-1xx turns' own pre-commit
+`git diff` checks).
+
+### 41. New failures
+**ZERO genuine new failures.**
+
+### 42. Live Pacing modes unchanged
+`dialogue_pacing_transition.PHASE_1_EXECUTABLE_MODES == (HARD_CUT,
+TIGHT_CUT)`, confirmed unchanged (test 35). `universal_clean_cut.py`,
+`pipeline.py`, and `dialogue_pacing_transition.py` contain NONE of
+`render_timeline_with_audio_windows`, `_concat_render_command_with_
+audio_windows`, `has_independent_audio_window`, or `dialogue_pacing_
+transition_execution_diagnostics` (test 34, direct text-search proof) --
+zero live wiring.
+
+### 43. No provider/RAW
+No RAW dispatched, no Modal/RunPod call, no provider call anywhere in
+this task.
+
+### 44. No Boundary/Ordering/BestTake change
+`boundary_engine_pass.py`, `positioned_performance_evidence.py`,
+`post_selection_edge_only_boundary.py`, `post_selection_interior_gap_
+trim.py`, `ordering_realization_plan.py`, `ordering_composer_adapter.py`,
+`ordering_live_diagnostics_integration.py`, `take_judge.py`,
+`deterministic_best_take_authority.py`, `multimodal_besttake_arbiter.py`,
+`realization_resolver.py` are all untouched and unimported by the new
+test file (test 36, AST-verified).
+
+### 45. D-214 verdict
+**A. PACING V2 RENDERER/TIMELINE CONTRACT OFFLINE PROVEN -- J/L/MICRO-
+OVERLAP EXECUTION CAPABILITY READY.**
+
+### 46. Canonical Pacing status
+`PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_PROVEN`. Live Phase 1
+(D-142) unchanged: `HARD_CUT`/`TIGHT_CUT` remain production's only two
+executable modes; J_CUT/L_CUT/MICRO_AUDIO_OVERLAP now have PROVEN
+execution capability at the renderer layer, still selected by nothing
+live.
+
+### 47. Exact D-215 gate (named, not implemented)
+**D-215 -- PACING V2 TRANSITION DECISION FOUNDATION, OFFLINE ONLY.** Build
+the logic that DECIDES `HARD_CUT`/`TIGHT_CUT`/`KEEP_PAUSE`/`J_CUT`/
+`L_CUT`/`MICRO_AUDIO_OVERLAP`/`NO_OVERLAP_REQUIRED`/`UNKNOWN` using word
+timings (`DraftClip.words`, already available), Boundary-finalized clip
+edges, transition-local Prosodic evidence where available (D-187's own
+`ProsodicDeliveryEvidence`, invoked over a narrow edge-local span -- a new
+call site, no change to D-187 itself, per D-213's own forensic), meaning
+safety (D-038/D-040 criticality reuse), and double-speech safety
+(`SAFE_OVERLAP`/`SAFE_J_CUT`/`SAFE_L_CUT`/`NO_OVERLAP_REQUIRED`/
+`CONFLICTED`/`UNKNOWN`, per D-213's own proposed vocabulary) -- still no
+live authority. **Not implemented by this entry.**
+
+### 48. Renderer status
+Extended, offline-proven, NOT live-wired. `render_preview`/
+`_concat_render_command` (the live path) completely unmodified --
+confirmed byte-identical for every non-divergent plan (test 4) and
+directly exercised unaffected (test 42).
+
+### 49. Unseen-RAW status
+None dispatched, none needed for this task's own conclusion.
+
+### 50. App-roadmap status
+Boundary closed -> Pacing V2 architecture/forensic complete (D-213) ->
+renderer/timeline contract now OFFLINE PROVEN (D-214) -> next: D-215
+transition decision foundation (offline only, named, not authorized) ->
+live diagnostic integration -> one Video00 qualification -> unseen-RAW
+generalization / Cut.ai parity -> production hardening -> TestFlight ->
+App Store.
+
+### 51. Confirmation
+NO RAW dispatched. NO provider called. NO Pacing live-authority change
+(Phase 1 modes unchanged, zero live wiring). NO Boundary/Ordering/
+BestTake file touched. D-116, D-177, D-142, D-187, D-206 through D-213,
+and the D-097.E `PHYSICAL_OWNERSHIP_CONTRACT` are preserved, unmodified,
+unrewritten by this entry.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-215 (Pacing
+V2 Transition Decision Foundation) is Product Owner coordination
+territory, per this entry's own "Then STOP" instruction.
+
+---
