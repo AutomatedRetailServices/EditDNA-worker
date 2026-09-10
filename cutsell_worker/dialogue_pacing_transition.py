@@ -226,6 +226,20 @@ class DialogueTransitionPlan:
     safety_status: str = SAFETY_SAFE
     fallback_reason: Optional[str] = None
     provenance: Tuple[str, ...] = ()
+    # D-215 (Pacing V2 Transition Decision Foundation, OFFLINE ONLY) -- all
+    # optional, all default to `None`/`()` so `plan_dialogue_pacing_
+    # transitions` (Phase 1, live, unchanged above) never sets them and
+    # every live-produced `DialogueTransitionPlan` -- and `_plan_row`'s own
+    # hand-picked dict, which never reads these fields -- stays exactly as
+    # it is today. Populated only by `pacing_transition_decision.py`'s own,
+    # separate, not-live-wired `decide_transition`.
+    pacing_gap_decision: Optional[str] = None
+    speech_overlap_status: Optional[str] = None
+    double_speech_status: Optional[str] = None
+    meaning_safety_status: Optional[str] = None
+    word_safety_status: Optional[str] = None
+    decision_status: Optional[str] = None
+    conflict_flags: Tuple[str, ...] = ()
 
 
 def _boundary_pass_diagnostics(diagnostics: Mapping) -> Mapping:

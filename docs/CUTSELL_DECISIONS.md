@@ -44540,3 +44540,339 @@ V2 Transition Decision Foundation) is Product Owner coordination
 territory, per this entry's own "Then STOP" instruction.
 
 ---
+
+## D-215: Pacing V2 Transition Decision Foundation -- OFFLINE ONLY (post D-214)
+
+**Status: VERDICT A -- PACING V2 TRANSITION DECISION FOUNDATION OFFLINE
+PROVEN. No live wiring. No RAW, no provider, no live Pacing authority
+expansion, no Boundary/Ordering/Renderer/BestTake change.**
+
+### 1. Scope discipline
+Verified at start: branch `feature/runpod-pod-on-demand`, HEAD `9336750`,
+clean tree. Files changed: `cutsell_worker/dialogue_pacing_transition.py`
+(extended, backward-compatible, 14 lines), new
+`cutsell_worker/pacing_transition_decision.py`, new
+`tests/test_cutsell_d215_pacing_transition_decision_foundation.py` (46
+tests), `docs/CUTSELL_DECISIONS.md`. No RAW, no provider, no Boundary/
+Ordering/Renderer/Family/BestTake file touched.
+
+### 2. Decision module/type
+New module `cutsell_worker/pacing_transition_decision.py`, one public
+entry point `decide_transition(left, right, *, dialogue_overlap_enabled,
+boundary_diagnostics=None, left_words=None, right_words=None,
+left_prosody=None, right_prosody=None, candidate_audio_lead_sec=None,
+candidate_audio_tail_sec=None, relationship_hint=None,
+transition_index=0) -> DialogueTransitionPlan`. Plus two diagnostics
+helpers: `sequence_consistency_diagnostics` and `dialogue_pacing_
+transition_decision_run_summary`.
+
+### 3. Existing DialogueTransitionPlan reuse
+Extended (not parallel-typed) per this task's own "do not build a
+parallel type unless unavoidable": `dialogue_pacing_transition.py`'s
+`DialogueTransitionPlan` gained 7 new OPTIONAL fields (`pacing_gap_
+decision`, `speech_overlap_status`, `double_speech_status`, `meaning_
+safety_status`, `word_safety_status`, `decision_status`, `conflict_
+flags`), all defaulting to `None`/`()`. `plan_dialogue_pacing_transitions`
+(D-142, live) never sets them, and `_plan_row`'s own hand-picked dict
+never reads them, so the live diagnostics dict is byte-identical --
+confirmed by `test_cutsell_d142_dialogue_pacing_transition_phase1.py`
+(26/26 unchanged) and a dedicated backward-compatibility test (item 40).
+
+### 4. Input contract
+`left`/`right`: two adjacent, already Boundary-finalized `DraftClip`s
+(`.start`/`.end` read-only). `boundary_diagnostics`: passed straight
+through to the live `plan_dialogue_pacing_transitions` to obtain the
+baseline HARD_CUT/TIGHT_CUT attribution (Boundary's own already-applied
+trims) -- never a second, divergent implementation. `left_words`/
+`right_words` default to each clip's own `.words`. `left_prosody`/
+`right_prosody`: optional `ProsodicDeliveryEvidence` (D-187), never
+computed here. `candidate_audio_lead_sec`/`candidate_audio_tail_sec`: the
+ONLY numeric timing inputs this module ever inspects -- always caller-
+supplied, never invented. `relationship_hint`: optional upstream
+evidence (`correction`/`continuation`/`retry`), never computed here.
+
+### 5. Mode vocabulary
+Reused verbatim from `dialogue_pacing_transition.py`: `HARD_CUT`,
+`TIGHT_CUT`, `J_CUT`, `L_CUT`, `MICRO_AUDIO_OVERLAP`. No duplicate enum.
+
+### 6. Gap-decision vocabulary
+New (D-215): `KEEP_PAUSE`, `TIGHTEN`, `OVERLAP`, `UNKNOWN`.
+
+### 7. Overlap-safety vocabulary
+New (D-215): word/meaning safety -- `SAFE`/`BLOCKED`/`UNKNOWN`. Double-
+speech firewall -- `SAFE_NO_OVERLAP`/`SAFE_J_CUT`/`SAFE_L_CUT`/
+`SAFE_MICRO_OVERLAP`/`NO_OVERLAP_REQUIRED`/`CONFLICTED`/`UNKNOWN`
+(`CONFLICTED` reserved for the retry-relationship hard gate; the ordinary
+geometric double-speech-found path returns `NO_OVERLAP_REQUIRED`, matching
+this task's own literal "if both speakers ... occupying the same timeline
+interval: NO_OVERLAP_REQUIRED" instruction -- confirmed by test 46).
+
+### 8/9/10. HARD_CUT / TIGHT_CUT / KEEP_PAUSE decisions
+`HARD_CUT`: the safe fallback baseline whenever overlap is disabled, no
+candidate offered, evidence is missing/UNKNOWN, or any firewall blocks
+(tests 1, 19, 30). `TIGHT_CUT`: a pure re-attribution of the live
+`plan_dialogue_pacing_transitions`'s own already-applied Boundary-trim
+determination -- never a second physical retrim (test 2). `KEEP_PAUSE`:
+set only when the baseline is `HARD_CUT` (no Boundary trim occurred) AND
+the left clip's own trailing text classifies `CRITICAL` via D-038's
+`classify_claim` (test 3) -- pause GEOMETRY (does one exist at all,
+already decided by Boundary) combined with MEANING (should it be kept),
+never an invented duration.
+
+### 11/12. J_CUT eligibility / block conditions
+Eligible when: the lead falls entirely within the RIGHT segment's own
+leading silence (no real word of either side sounds during the actual
+double-speech window), AND no `CRITICAL` claim (D-038) falls inside that
+window, AND no blocking Prosodic signal. Blocked by: outgoing speech
+(LEFT's own trailing words reaching into the lead window -- real double
+speech, test 6), a meaning-critical word landing in the overlap (test 7),
+missing word timing (`UNKNOWN`, test 19), a `correction`/`retry`
+relationship hint (tests 16/18), or a Prosodic restart/discontinuity
+signal (test 22).
+
+### 13/14. L_CUT eligibility / block conditions
+Symmetric to J-cut: eligible when the tail falls entirely within LEFT's
+own trailing silence with no critical content and no competing speech
+(test 8); blocked by incoming speech (test 9) or meaning conflict (test
+10).
+
+### 15/16. MICRO_AUDIO_OVERLAP eligibility / block conditions
+Both a lead and a tail requested together; eligible only when NEITHER
+side's own real words fall inside the (small) double-speech window (test
+11); blocked the instant either side's words are present there (real
+double speech, test 12). No overlap duration is ever invented -- every
+test supplies its own candidate amount.
+
+### 17. Meaning firewall
+Reuses `semantic_claims.classify_claim` (D-038) VERBATIM -- no new
+negation/number/correction/diagnosis detector. Whatever words fall inside
+the relevant window (double-speech window when words are present there,
+else the pre-cut lead/tail window) are joined and classified; a `CRITICAL`
+claim type blocks the candidate. Proven against real classifier output
+(not assumed) for negation (test 13), a digit-anchored measurement/unit
+marker (test 14 -- `classify_claim` requires an actual digit, not a
+spelled-out number, confirmed by direct inspection before writing the
+fixture), and a `STATE_RESULT` factual qualifier (test 15).
+
+### 18. Word firewall
+A candidate window is `BLOCKED` if it provably overlaps a real word from
+the relevant clip's own (or caller-supplied wider) word-timing evidence;
+`UNKNOWN` (not `SAFE`) whenever that evidence is empty/missing -- an empty
+`words` tuple is treated identically to `None` (a real bug caught and
+fixed during this task's own verification: an empty tuple was initially,
+incorrectly, treated as "confirmed nothing to overlap" rather than "no
+evidence to check against").
+
+### 19. Double-speech firewall
+Computes the actual overlap window on EACH side (source-time span that
+would sound simultaneously) and checks each side's own real words against
+it independently -- both present = `NO_OVERLAP_REQUIRED` (blocked); only
+one present = the matching `SAFE_*` label for the requested shape; neither
+present = `SAFE_NO_OVERLAP`/`SAFE_MICRO_OVERLAP`; either side's evidence
+missing = `UNKNOWN`.
+
+### 20. Correction handling
+A `correction` relationship hint ALWAYS falls back to the baseline
+HARD_CUT/TIGHT_CUT mode with `decision_status=SAFE_FALLBACK`, per this
+task's own "prefer explicit sequential clarity unless strong safe evidence
+exists" instruction -- implemented as the conservative default since
+"strong safe evidence" is not itself a defined bar in this task (test 16).
+
+### 21. Continuation handling
+No special restriction -- a `continuation` hint proceeds through the
+ordinary eligibility path unchanged (test 17), confirming genuine
+continuations are never forced apart.
+
+### 22. Retry handling
+A `retry` relationship hint always yields `HARD_CUT` with `decision_
+status=CONFLICTED` (not `SAFE_FALLBACK`) -- Pacing never resolves an
+unresolved retry ambiguity itself (test 18).
+
+### 23/24. Prosodic input / optionality
+`ProsodicDeliveryEvidence` (D-187) consumed VERBATIM, never computed by
+this module (`analyze_prosodic_delivery` is never called here -- that
+would require real decoded audio, out of this offline task's scope).
+Reused dimensions: `vocal_continuity_state` (`CONTINUOUS` corroborates,
+recorded in `provenance`) and `restart_or_interruption_state` (a real
+restart BLOCKS an otherwise-safe overlap, test 22) -- never `BestTake`
+ranking behavior, never emotion/psychology inference. Fully optional:
+`None` on both sides still produces a correct `SUPPORTED` decision with no
+Prosodic provenance recorded (test 20).
+
+### 25. Pause geometry
+Derived structurally from `left`'s own last aligned word end vs.
+`left.end`, and `right`'s own first aligned word start vs. `right.start`
+-- no arbitrary "ideal gap" duration introduced; whether a pause is kept
+or tightened depends on Boundary's own baseline attribution plus D-038's
+meaning classification, never a numeric pause-length threshold.
+
+### 26. Timing-duration policy
+Explicitly NOT decided here, per this task's own "decision vs. timing
+amount" instruction: this module answers WHICH mode is safe/appropriate
+given a caller-supplied candidate amount; it never proposes the amount
+itself. Confirmed by a dedicated structural test (item 31) asserting no
+duration constant (`_MS =`, `_SEC = 0.`, `THRESHOLD`, `tight_cut_ms`,
+`j_cut_ms`, `l_cut_ms`, `overlap_ms`) exists anywhere in the module.
+
+### 27. Renderer contract reuse
+Three tests (27/28/29) translate a J_CUT/L_CUT/MICRO_AUDIO_OVERLAP
+decision directly into D-214's own `RenderSegment.audio_start`/
+`audio_end` contract and confirm `has_independent_audio_window` becomes
+`True` exactly as D-214 requires for execution -- proving the two
+contracts compose without any renderer redesign.
+
+### 28-30. Same-source / multi-source / composite result
+Same-source (test 25) and multi-source (test 26) pairs are both evaluated
+identically -- the decision never depends on shared source identity, only
+on each side's own word-timing/silence geometry. Composite components:
+not specially handled, matching D-210's own composite-independence
+precedent (a composite is fully resolved into concrete `DraftClip`s
+upstream of Boundary/Pacing, so a composite-internal join and a between-
+realization join already go through the exact same pairwise mechanism --
+no separate code path needed or added).
+
+### 31/32. Fallback / abstention behavior
+`decision_status` is always one of `SUPPORTED`/`SAFE_FALLBACK`/
+`CONFLICTED`/`UNKNOWN` -- `HARD_CUT` is the physical fallback mode
+whenever uncertain, but `decision_status` never collapses to `SUPPORTED`
+merely because the physical mode happens to be `HARD_CUT` (confirmed:
+`UNKNOWN` word-timing evidence yields `mode=HARD_CUT` with `decision_
+status=UNKNOWN`, test 19, never mislabeled as editorial certainty).
+
+### 33/34. Deterministic / input-order behavior
+Two independently constructed, identical fixtures produce an
+`==`-identical `DialogueTransitionPlan` (test 32); `left_clip_id`/
+`right_clip_id` are never swapped (test 33).
+
+### 35. Diagnostics
+`DialogueTransitionPlan`'s own new fields (Section 3) carry every item
+this task's own "diagnostics" section named: `left_segment_id`/
+`right_segment_id` (via `left_clip_id`/`right_clip_id`), `selected_mode`
+(`mode`), `pacing_gap_decision`, `speech_overlap_status`, `meaning_
+safety_status`, `word_safety_status`, `candidate_audio_lead`/`candidate_
+audio_tail`/`candidate_overlap` (via `overlap_duration` plus the caller's
+own inputs), `decision_status`, `fallback_reason`, `conflict_flags`,
+`provenance`. No transcript dump, no semantic confidence score.
+
+### 36. Run summary
+`dialogue_pacing_transition_decision_run_summary` returns exactly the
+named counts (`transition_count`, `hard_cut_count`, `tight_cut_count`,
+`keep_pause_count`, `j_cut_count`, `l_cut_count`, `micro_overlap_count`,
+`no_overlap_required_count`, `fallback_count`, `conflicted_count`,
+`unknown_count`, `meaning_block_count`, `word_safety_block_count`,
+`double_speech_block_count`, `prosodic_support_count`) -- no master score
+(test 41, 43).
+
+### 37/38/39/40/41. No ASR/provider/Boundary/Ordering/BestTake
+Confirmed by AST-based import checks (tests 34, 35): the module imports
+no network/provider library, no ASR/audio-silence module, and none of
+`boundary_engine_pass`/`post_selection_edge_only_boundary`/`post_
+selection_interior_gap_trim`/`ordering_realization_plan`/`ordering_
+composer_adapter`/`ordering_live_diagnostics_integration`/`take_judge`/
+`deterministic_best_take_authority`/`multimodal_besttake_arbiter`/
+`realization_resolver`/`bounded_finalist_arbiter`.
+
+### 42. No renderer semantic decision
+Confirmed (test 36): the module never references `_concat_render_
+command`, `render_timeline_with_audio_windows`, or `ffmpeg` -- it emits
+data, never executes anything.
+
+### 43. No QA/commercial/funnel inputs
+Confirmed (test 37): no `commercial_moment`/`sales_funnel`/Cut.ai/Human
+Gold/Video00 reference anywhere in the module.
+
+### 44. New tests
+`tests/test_cutsell_d215_pacing_transition_decision_foundation.py`: 46
+tests, all passing on first corrected run (two authoring bugs -- fixture
+word timings not actually landing inside the tested window, and an
+overly-broad text-substring live-wiring check -- were found and fixed
+during verification, not shipped).
+
+### 45. D-214 regression
+44/44 pass, unchanged.
+
+### 46. D-142 regression
+26/26 pass, unchanged (live diagnostics dict byte-identical, confirmed by
+Section 3's backward-compatibility analysis and this suite).
+
+### 47. Boundary regression
+D-116 (19) + D-177 (34) + D-097.C (15) + D-212 (30) = 98/98 pass,
+unchanged.
+
+### 48. Ordering regression
+D-206/D-207/D-208 = 167/167 pass, unchanged.
+
+### 49. Renderer regression
+Covered by D-214's own 44 (Section 45); `render.py`/`render_plan.py`
+untouched by this task.
+
+### 50. Prosodic regression
+`test_cutsell_semantic_claims.py`, `test_cutsell_d187_prosodic_audio_v2.py`,
+`test_cutsell_d188_prosodic_finalist_fusion.py`, `test_cutsell_d066_
+negation_semantic_role.py`, `test_cutsell_d066_hindsight_alignment.py` =
+185/185 pass, unchanged.
+
+### 51. Full offline suite
+5116 passed. 5 pre-existing, unrelated failures (confirmed identical to
+the failure set already present before this task: 4x `test_video00_modal_
+hybrid_semantic_parity.py`, 1x `test_hybrid_story_guard_incomplete_
+retry.py`). 3 EXPECTED, self-resolving pre-commit "no diff against HEAD"
+checks (`test_cutsell_d171_language_spine_consumer_migration.py::
+test_26_pacing_unchanged`, `test_cutsell_d172_watch_listen_besttake_v2_
+evidence.py::test_32_pacing_unchanged`, `test_cutsell_d174_watch_listen_
+besttake_guard_authority.py::test_37_38_39_boundary_pacing_render_zero_
+diff` -- all three assert `git diff --stat dialogue_pacing_transition.py`
+is empty relative to the CURRENT git HEAD, trivially true again
+immediately after this task's own commit; re-verified green post-commit,
+same self-resolving pattern as the D-214 turn's own `render_unchanged`
+checks).
+
+### 52. New failures
+**ZERO genuine new failures.**
+
+### 53. D-215 verdict
+**A. PACING V2 TRANSITION DECISION FOUNDATION OFFLINE PROVEN.**
+
+### 54. Canonical Pacing status
+`PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_PROVEN` +
+`PACING_V2_TRANSITION_DECISION_FOUNDATION_OFFLINE_PROVEN`.
+
+### 55. Exact D-216 gate (named, not implemented)
+**D-216 -- PACING V2 LIVE DIAGNOSTIC INTEGRATION.** Wire `decide_
+transition` to real adjacent Boundary-finalized clips as a diagnostics-
+only pass (mirroring D-208's own exact precedent for Ordering), and prove
+the current live `HARD_CUT`/`TIGHT_CUT` output remains completely
+unchanged. Still NO live J/L/overlap authority. **Not implemented by this
+entry.**
+
+### 56. Live Pacing authority status
+Unchanged: `PHASE_1_EXECUTABLE_MODES == (HARD_CUT, TIGHT_CUT)`, confirmed
+(test 39). Zero live wiring anywhere (test 38, AST-based).
+
+### 57. Renderer status
+Unchanged from D-214 -- `render.py`/`render_plan.py` not touched by this
+task.
+
+### 58. Unseen-RAW status
+None dispatched, none needed for this task's own conclusion.
+
+### 59. App-roadmap status
+Boundary closed -> Pacing V2 forensic closed (D-213) -> renderer/timeline
+contract offline-proven (D-214) -> transition decision foundation offline-
+proven (D-215) -> next: D-216 live diagnostic integration (offline
+authority, diagnostics-only) -> one Video00 real-media qualification ->
+unseen-RAW generalization / Cut.ai parity -> production hardening ->
+TestFlight -> App Store.
+
+### 60. Confirmation
+NO RAW dispatched. NO provider called. NO live J/L/overlap authority
+introduced (Phase 1 modes unchanged, zero live wiring). NO Boundary/
+Ordering/BestTake/Renderer file touched. D-116, D-142, D-177, D-187,
+D-206 through D-214 are all preserved, unmodified, unrewritten by this
+entry.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-216 (Pacing
+V2 Live Diagnostic Integration) is Product Owner coordination territory,
+per this entry's own "Then STOP" instruction.
+
+---
