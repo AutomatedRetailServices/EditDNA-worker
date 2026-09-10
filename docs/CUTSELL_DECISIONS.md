@@ -36640,3 +36640,323 @@ local_group_formation.py` (new).
 **HUMAN ACTION REQUIRED:** YES (condition A -- whether to authorize
 D-198 -- the one real-media RAW above -- remains a Product Owner
 decision; D-198 is NOT implemented or launched by this entry).
+
+# D-198: P1 LOCAL GROUP FORMATION -- VIDEO00 REAL-MEDIA
+QUALIFICATION (POST D-197)
+
+Post D-197, Product Owner authorization: exactly ONE canonical Video00
+RAW with `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1` and
+no other overlay, to verify D-197's structural local-group formation
+repairs D-196's real `LOCAL_GROUPING_TOO_BROAD` finding on the SAME
+canonical source, while checking for the opposite failure mode
+(over-fragmentation) the directive explicitly warned could result from
+removing chronology-only joining.
+
+## 1. Pre-RAW observability repair (authorized exception)
+
+D-198's own required relation-by-relation join/split audit could not be
+computed from data already serialized: `local_groups[].relation_
+support` only ever recorded relations that JOINED moments -- the
+boundary relation that caused each SPLIT (NEW_AUDIENCE_BEAT/DISTINCT_
+PROPOSITION/COMPLEMENTARY/UNCERTAIN/missing) was discarded before
+serialization. The Product Owner authorized a second narrow,
+observability-only exception: a new `relation_to_predecessor` field on
+each serialized P1 moment row -- the exact already-computed dominant
+D-157 relation D-197's own grouper (`build_editorial_local_groups`)
+consumed for that moment's predecessor edge, index-aligned pass-through
+of the same `relation_by_position` map already built by
+`build_editorial_moments_for_source`, never re-derived or re-ranked.
+`EditorialMoment` (D-194) untouched -- the new field lives entirely on
+`EditorialMomentUnderstanding` (D-195/D-197's own integration layer):
+`moment_relation_to_predecessor`, threaded into `editorial_moment_
+understanding_diagnostics`'s per-moment rows via a small wrapper
+(`_moment_diagnostics_with_relation`). Null for the source's first
+moment or a genuinely missing/unavailable relation; a real `UNCERTAIN`
+value (non-`UNKNOWN` confidence) serializes as `"UNCERTAIN"`, never
+silently collapsed to null.
+
+Offline-proven before dispatch (20 new tests, `tests/test_cutsell_
+d198_relation_observability.py`): RETRY/CORRECTION/CONTINUATION
+serialize verbatim; every split relation (NEW_AUDIENCE_BEAT/DISTINCT_
+PROPOSITION/COMPLEMENTARY/genuine UNCERTAIN) observable across group
+boundaries; null semantics correct for the first moment and a
+genuinely-missing relation; single-source-of-truth match against the
+grouper's own real input; consistency audit (relation + group
+membership) proven for both join and split cases; default-off parity
+and flag-on winner/family immutability re-verified. Committed as
+`e68c1e5` before workflow plumbing / dispatch.
+
+## 2. Workflow plumbing (docs-only, no cutsell_worker touch)
+
+New dedicated compact-diagnostics step, "D-198 P1 local group formation
+real-media qualification" (same read-only, pure-projection pattern as
+every prior D-11x/D-18x/D-19x step), positioned after the existing
+D-196 step. Reuses the same `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_
+DIAGNOSTICS_ENABLED` flag (from D-196) -- no new workflow input needed.
+Computes, all reporting-only, never fed back into `cutsell_worker`:
+per-group BOUNDED_LOCAL/PLAUSIBLE_LOCAL/TOO_BROAD/AMBIGUOUS quality; a
+whole-source-collapse detector based on moment-count share (NOT gated
+on the duration threshold -- offline synthetic testing caught that
+D-196's own real 353.14s failure would have fallen UNDER the 600s
+TOO_BROAD span cutoff, so a duration-only check would have silently
+missed the exact failure D-198 exists to catch; fixed before dispatch);
+a consistency audit (relation + group membership must explain every
+join/split); relation-by-relation join/split counts; an over-
+fragmentation classification (STRUCTURALLY_JUSTIFIED_FRAGMENTATION /
+EVIDENCE_LIMITED_FRAGMENTATION / OVER_FRAGMENTED / NOT_APPLICABLE)
+driven by the consistency audit, never an invented numeric ratio;
+whole-run grouping assessment; sequence-membership contract;
+false-positive + thin-CONTINUATION-support PREASSEMBLED_FINAL audit;
+clean-delivery reachability analysis; region-crossing QA check; D-196
+vs D-198 comparison; and the real-media grouping result verdict.
+Offline-validated against three synthetic fixtures (bounded/multi-
+cluster, whole-source collapse, all-missing-relation) -- the collapse
+fixture caught the threshold bug above. Committed as `731192c` before
+dispatch.
+
+## 3. RAW executed
+
+Video00 RAW run `34428966254` (job `102720158614`) on `feature/
+runpod-pod-on-demand @ 731192c`, source `Editdna longform validation/
+VIDEO-2026-07-30-09-18-03.mp4`, `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_
+DIAGNOSTICS_ENABLED=1`, all other overlays OFF/default (exactly the
+single input passed to `workflow_dispatch`). Overall job conclusion:
+`failure` -- from the SAME two pre-existing baseline gates ("Verify
+frozen Selection lock", "Verify Human Gold regression QA") already
+observed failing identically on D-190/D-192/D-196's own runs, unrelated
+to P1; every other step, including "D-198 P1 local group formation
+real-media qualification" itself, concluded `success`; Modal teardown
+confirmed. Exactly one RAW dispatched, as authorized.
+
+## 4. D-196 -> D-198 comparison (the headline result)
+
+| | D-196 | D-198 |
+|---|---|---|
+| moment count | 36 | 37 |
+| local groups | (none computed -- whole-source default) | 23 |
+| sequences | 1 | 9 |
+| max group/sequence moment count | 36 | 4 |
+| max group/sequence source span | 353.14s | 33.14s |
+| classification | LOCAL_GROUPING_TOO_BROAD | (no group TOO_BROAD; whole-source collapse: NOT detected) |
+
+The D-196 whole-source collapse is GONE. 23 local groups replace the
+single 353s sequence: 14 singletons, 9 multi-moment groups (sizes
+2-4), every one classified `BOUNDED_LOCAL` (max real span 33.14s --
+well under even the tightest 120s reporting threshold). The
+gynecologist-region moments (~82-124s) now form three small,
+genuinely-local groups (3+1+3 moments) instead of being fused with the
+topically unrelated pimples-region moments (~192-223s, now their own
+separate 2+1-moment groups) -- the exact cross-region fusion D-196
+found is structurally repaired. (The 36-vs-37 moment-count difference
+is ordinary run-to-run Watch+Listen evaluation variance, not
+attributable to D-197/D-198 -- P1 grouping never changes which moments
+get constructed.)
+
+## 5. Grouping quality / over-fragmentation audit
+
+`too_broad_group_count: 0`. `whole_source_collapse_detected: False`
+(the moment-share-based detector, independent of the duration
+threshold per Section 2's own fix). `ambiguous_group_count: 0`.
+`inconsistency_count: 0` -- EVERY one of the 36 real moment-to-
+predecessor edges was checked against its actual group membership and
+matched the expected contract exactly (RETRY/CORRECTION/CONTINUATION
+-> same group; everything else -> different group) with zero
+exceptions -- the grouper behaved exactly as designed on real media,
+not merely on synthetic fixtures.
+
+Relation-by-relation (real counts): `RETRY: 10` (all 10 joined),
+`CONTINUATION: 4` (all 4 joined), `CORRECTION: 0`, `NEW_AUDIENCE_BEAT:
+22` (all 22 split correctly -- `new_audience_beat_control.all_split_
+correctly: true`), `DISTINCT_PROPOSITION: 0`, `COMPLEMENTARY: 0`,
+`UNCERTAIN: 0`, `MISSING: 0`. 100% of the 36 edges resolved to a real,
+known relation this run (better than D-196's own 35/36 -- again
+ordinary run variance, not a P1 change).
+
+`over_fragmentation_classification: STRUCTURALLY_JUSTIFIED_
+FRAGMENTATION` -- of the 22 boundaries, ALL 22 are genuine editorial
+split evidence (`NEW_AUDIENCE_BEAT`); ZERO are missing/uncertain-
+evidence boundaries (`missing_or_uncertain_count: 0`). The 14
+singletons exist because the live evidence genuinely says they are
+separate beats, never because the evidence layer had nothing to offer
+-- exactly the directive's own distinguishing question, answered
+`STRUCTURALLY_JUSTIFIED_FRAGMENTATION`, not `OVER_FRAGMENTED` and not
+`EVIDENCE_LIMITED_FRAGMENTATION`.
+
+`whole_run_grouping_assessment: BOUNDED_USEFUL`.
+
+## 6. Sequence-level results
+
+9 real `EditorialSequenceHypothesis` objects: 8 `BLOOPER_SERIES`, 1
+`RETRY_SERIES`. Zero `PREASSEMBLED_FINAL_SEQUENCE`, zero `CLEAN_
+DELIVERY_SEQUENCE`, zero `MIXED`, zero `UNCERTAIN` this run.
+`sequence_membership_contract.cross_group_sequence_count: 0` -- every
+sequence's moments come from exactly one local group, with zero
+exceptions, on real data.
+
+## 7. False-positive / thin-support audits
+
+`false_positive_final_sequence_count: 0`. `preassembled_support_too_
+thin_count: 0` (vacuously -- no `PREASSEMBLED_FINAL_SEQUENCE` occurred
+at all this run, so the CONTINUATION-only thin-support firewall had
+nothing to flag). Both audits ran against real data with zero findings.
+
+## 8. Clean-delivery-sequence reachability
+
+`clean_delivery_sequence_count: 0` -- confirms D-197's own offline
+finding on real media. Cause: **(B) relation-driven auto-grouping
+structurally prevents this shape** -- every real JOIN relation this run
+(RETRY: 10, CONTINUATION: 4) either forces a non-clean moment role
+(RETRY) or is forward-progression-compatible (CONTINUATION), so any
+auto-grouped all-clean chain would always classify PREASSEMBLED_FINAL_
+SEQUENCE, never the weaker CLEAN_DELIVERY_SEQUENCE claim -- consistent
+with D-197 Section 7's own structural analysis, now confirmed on real
+data rather than only offline fixtures.
+
+## 9. Moment-role distribution (real)
+
+`POST_TAKE_RESET: 25`, `CONTINUATION: 6`, `ABANDONED_ATTEMPT: 3`,
+`CLEAN_AUDIENCE_DELIVERY: 1`, `NEW_AUDIENCE_BEAT: 1`, `RETRY: 1`.
+Consistent in shape with D-196's own real distribution (POST_TAKE_
+RESET-dominant), confirming P1's moment classification itself is
+unaffected by the D-197/D-198 grouping changes (as designed --
+grouping never touches moment construction or role).
+
+## 10. Region-crossing QA check
+
+`region_source_mapping.cross_region_group_count: 0` -- zero local
+groups span both the gynecologist and pimples candidate regions
+(gynecologist_candidate_count: 5, pimples_candidate_count: 3, QA-only
+region matching, never a runtime input). This directly disproves the
+D-196 cross-region fusion on the SAME real RAW.
+
+## 11. Language-Spine gap (re-measured, not repaired)
+
+`p1_missing_language_count: 1` (100% fallback `LanguageAttempt`
+reliance, unchanged). `p1_missing_relation_count: 1` (only the source's
+first moment, which by definition has no predecessor -- 36/37 moments
+received real D-157 relation evidence, actually slightly better
+coverage than D-196's own 35/36). `p1_editorial_moment_status:
+AVAILABLE` (all 37 moments resolved cleanly this run -- no unresolved
+source-mapping gaps). Per the directive's own instruction, this gap is
+carried forward, NOT repaired: real `LanguageAttempt`/`PropositionCandidate`
+coverage remains 0% in the live path.
+
+Impact assessment: **(E) not materially limiting on this run** for
+grouping and sequence classification -- the grouper operates entirely
+on the D-157 relation vocabulary (never on Language-Spine evidence),
+and that vocabulary achieved 100% real (non-fallback) coverage this
+run with zero inconsistencies. It DOES remain a live constraint on
+`preassembled_support_too_thin`-style confidence work generally (per
+D-197's own analysis), but zero `PREASSEMBLED_FINAL_SEQUENCE` occurred
+this run to exercise that path, so it is not exercised as a limiting
+factor on THIS RAW's own real evidence.
+
+## 12. P1 capability status
+
+**PARTIAL** -- not promoted to AVAILABLE merely because grouping is now
+bounded and consistent. The Language-Spine 0%-real-coverage gap
+(Section 11) remains open regardless of grouping quality, per the
+directive's own explicit instruction not to conflate the two.
+
+## 13. Downstream immutability
+
+Confirmed structurally: this run's `workflow_dispatch` passed exactly
+one input (`editorial_moment_sequence_diagnostics_enabled: "1"`) --
+every other overlay, including the D-191/D-192 bounded-finalist-
+authority flag, defaulted to OFF, so no authority path capable of
+changing a winner was even active this run. This is independently
+reinforced by the extensively re-verified offline immutability suite
+(D-195's `test_54`/`test_55`/`test_55b`, D-197's `test_38`/`test_39`,
+D-198's own `test_01`/`test_02_03` -- all re-run green this task) that
+proves, on a real `build_flow_b_draft` call, that toggling only this
+flag never changes `selected`/family/D-191 output. **Limitation,
+honestly disclosed**: unlike D-196, this turn's own job-log fetch
+tooling hit a hard size ceiling on this particular run's log stream
+before reaching back far enough to independently re-fetch the D-192
+compact-diagnostics step's own JSON block for this specific RAW
+(the fetch window only reached back into the tail of the D-198 step's
+own large JSON output); the artifact-zip and full-log-zip download URLs
+both point to hosts blocked by this session's egress policy. Immutability
+is therefore established here by flag configuration + offline-test
+proof, not by an additional direct real-artifact D-192 cross-reference
+on this specific run (as D-196 achieved) -- reported honestly rather
+than claimed as independently re-confirmed.
+
+## 14. P1-vs-P2 / no-commercial-content firewalls
+
+Confirmed unchanged: no P2 code exists or ran; no commercial/sales-
+funnel content or authority touched. `earlier_source_redundancy_status`
+remains `NOT_EVALUATED` for every sequence (D-194's own field, never
+computed here).
+
+## 15. Parity metrics
+
+Not independently re-extracted this turn (same log/artifact-fetch
+limitation as Section 13) -- the workflow's own "Video00 quality
+ladder" step completed successfully this run, but its specific
+Selection/Boundary/overall-physical Level-1 and F1-vs-Cut.ai/Human-Gold
+values were not pulled into this report. P1 has zero authority, so no
+movement in these metrics is expected or claimed regardless.
+
+## 16. Real-media grouping result
+
+**LOCAL_GROUPING_REAL_MEDIA_PROVEN.**
+
+## 17. P1 target-shape results observed
+
+`RETRY_SERIES_OBSERVED: true`, `BLOOPER_SERIES_OBSERVED: true`,
+`CLEAN_DELIVERY_SEQUENCE_OBSERVED: false`, `PREASSEMBLED_FINAL_
+SEQUENCE_OBSERVED: false`, `MIXED_SEQUENCE_OBSERVED: false`, `NO_
+MULTI_MOMENT_SEQUENCE_OBSERVED: false`.
+
+## 18. D-198 VERDICT
+
+**A. P1 LOCAL GROUPING REAL-MEDIA PROVEN.** D-196's whole-source
+collapse is gone (23 bounded local groups replace the single 353s
+sequence); every real relation-linked group is bounded and editorially
+plausible (max 33.14s span, max 4 moments); zero material over-
+fragmentation due to a grouper bug (`inconsistency_count: 0`, and the
+14 singletons are all `STRUCTURALLY_JUSTIFIED_FRAGMENTATION`, driven by
+real `NEW_AUDIENCE_BEAT` evidence, not evidence gaps); zero false
+`PREASSEMBLED_FINAL_SEQUENCE` positives; no downstream mutation
+(flag-configuration-guaranteed, offline-test-reinforced, with the
+Section 13 disclosure on what could not be independently re-confirmed
+this specific run).
+
+## 19. Canonical P1 status
+
+**PHASE_A_OFFLINE_PROVEN + CANONICAL_EVIDENCE_LIVE_DIAGNOSTIC_
+INTEGRATION_OFFLINE_PROVEN + LOCAL_GROUP_FORMATION_OFFLINE_PROVEN +
+LOCAL_GROUP_FORMATION_REAL_MEDIA_PROVEN.** Still NOT an authority. The
+Language-Spine 0%-real-coverage gap remains open (Section 11/12) --
+`REAL_MEDIA_PARTIALLY_QUALIFIED` no longer describes the GROUPING
+capability specifically (that is now real-media proven), but still
+honestly describes P1's overall qualification while Language-Spine
+evidence stays at 0%.
+
+## 20. Exact next gate
+
+Per the directive's own decision tree: since grouping itself now works
+correctly on real media AND the 0% live LanguageAttempt/Proposition
+coverage remains the clearly-next limiting factor for anything beyond
+grouping (Section 11's own analysis), the next gate is **D-199 LIVE
+LANGUAGE-SPINE EVIDENCE INTEGRATION INTO P1** -- wiring real
+`LanguageAttempt`/`PropositionCandidate`/`RelationEvidence` objects into
+the P1 live path, still diagnostic-only, no authority. NOT authorized
+or implemented by this entry.
+
+## 21. Confirmations
+
+Exactly one RAW dispatched (`34428966254`). No second RAW. No post-
+result patch to `cutsell_worker` after the RAW (both code changes this
+task made -- the pre-RAW relation-observability exception and the
+workflow plumbing -- were committed and offline-proven BEFORE
+dispatch). No P1 authority granted. No P2 implemented. No BestTake/
+Family/Boundary/Pacing/Renderer change (flag-configuration-guaranteed,
+per Section 13). No overlap/Pacing change -- dialogue overlap, J-cut,
+L-cut, micro-overlap, and Pacing V2 remain downstream and untouched.
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- whether to authorize
+D-199 live Language-Spine evidence integration, or an alternative P1
+scope, remains a Product Owner decision; this entry implements
+neither).
