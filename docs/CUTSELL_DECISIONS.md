@@ -38298,3 +38298,288 @@ Ordering/Boundary/Pacing change. `watch_listen_understanding.py`/
 **HUMAN ACTION REQUIRED:** YES (condition A -- authorizing D-200.3's
 bounded implementation gate, Section 22, is the next Product Owner
 decision; this entry designs it but does not start it).
+
+
+# D-200.3: DIMENSION-AWARE P1 RELATION INTEGRATION -- BOUNDED
+IMPLEMENTATION (POST D-200.2, OFFLINE, NO RAW)
+
+Post D-200.2 design, implements the bounded gate that design identified:
+a structured, dimension-aware relation adapter over EXISTING D-157/D-169
+evidence, and a D-197 grouping-consumer switch to use it -- offline only,
+no RAW, no provider, no P1 authority, no P2.
+
+## 1. New module
+
+`cutsell_worker/structured_editorial_relation.py` (new, ~330 lines). Owns
+the `StructuredEditorialRelationEvidence` type, the three dimension
+vocabularies, the D-157/D-169 decomposition adapter
+(`build_structured_editorial_relation`), and the D-197 grouping-consumer
+translation (`grouping_effective_relation`). Zero imports from
+`take_grouping.py`, `deterministic_best_take_authority.py`,
+`attempt_relationship_authority.py`, `boundary_engine_pass.py`,
+`dialogue_pacing_transition.py`, any renderer, or `canonical_edit_plan.py`
+(module-leaf test, confirmed).
+
+## 2. Files changed
+
+- `cutsell_worker/structured_editorial_relation.py` -- new.
+- `cutsell_worker/editorial_moment_sequence_integration.py` -- modified:
+  `build_editorial_moments_for_source` now ALSO computes (always, pure,
+  cheap) a `StructuredEditorialRelationEvidence` per predecessor edge and
+  the D-197 grouping-effective translation, exposed via the existing
+  `provenance_out` optional out-parameter (SAME pattern D-199 used for its
+  own two maps) -- return arity unchanged (still the 4-tuple every
+  existing caller unpacks). `build_editorial_moment_understanding_for_
+  source` now feeds `build_editorial_local_groups` the structured
+  translation INSTEAD OF the flat-fused relation ONLY when
+  `live_language_spine is not None` (the same condition that already
+  gates every other D-199 canonical-vs-fallback override); otherwise
+  grouping input is byte-identical to pre-D-200.3. `EditorialMoment
+  Understanding` gained four new index-aligned diagnostic tuple fields
+  (`moment_structured_relation`, `moment_grouping_effective_relation`,
+  `moment_grouping_action`, `moment_grouping_reason`); diagnostics/run-
+  summary functions extended additively.
+- `tests/test_cutsell_d200_3_structured_editorial_relation.py` -- new, 55
+  tests.
+- No other file touched. `watch_listen_understanding.py`,
+  `language_proposition_relation.py`, `language_spine.py`,
+  `language_utterance_attempt.py`, `pipeline.py`, `flow_b.py`,
+  `editorial_moment_sequence.py` -- ZERO diff (confirmed: `pipeline.py`'s
+  own diagnostics flattening already spreads whatever keys
+  `editorial_moment_understanding_diagnostics`/`editorial_moment_
+  understanding_run_summary` return, so the new fields surface with no
+  pipeline.py change at all).
+
+## 3. Structured relation type
+
+```python
+@dataclass(frozen=True)
+class StructuredEditorialRelationEvidence:
+    left_source_span_id: str | None
+    right_source_span_id: str
+    attempt_relation: str
+    attempt_relation_status: str
+    proposition_relation: str
+    proposition_relation_status: str
+    editorial_beat_relation: str
+    editorial_beat_relation_status: str
+    attempt_relation_provenance: Tuple[str, ...]
+    proposition_relation_provenance: Tuple[str, ...]
+    editorial_beat_relation_provenance: Tuple[str, ...]
+    conflict_flags: Tuple[str, ...]
+    provenance: Tuple[str, ...]
+```
+
+No numeric master confidence, no transcript field (confirmed by test).
+
+## 4. Vocabularies (exact D-200.2 spelling)
+
+- `attempt_relation`: `RETRY | CORRECTION | CONTINUATION | NEW_ATTEMPT |
+  NO_ATTEMPT_RELATION | UNKNOWN`. `NEW_ATTEMPT`/`NO_ATTEMPT_RELATION`
+  declared, never produced (no evidence source distinguishes them from
+  absence today -- honest gap, not implemented here).
+- `proposition_relation`: `SAME_PROPOSITION | DISTINCT_PROPOSITION |
+  COMPLEMENTARY_PROPOSITION | PROPOSITION_PROGRESSION | UNKNOWN`.
+  `SAME_PROPOSITION`/`PROPOSITION_PROGRESSION` declared, never produced
+  this gate (see Section 9).
+- `editorial_beat_relation`: `SAME_EDITORIAL_BEAT | NEW_AUDIENCE_BEAT |
+  UNKNOWN`. `SAME_EDITORIAL_BEAT` declared, never produced -- no positive
+  evidence source exists (D-200.2's own finding, re-confirmed here: zero
+  `same_editorial_beat_count` on every constructed fixture is CORRECT,
+  never "fixed" by inventing evidence).
+
+## 5. Confidence/status contract
+
+Categorical only -- `CONFIDENCE_SUPPORTED`/`CONFIDENCE_WEAK`/
+`CONFIDENCE_MIXED`/`CONFIDENCE_UNKNOWN`, `language_utterance_attempt.py`'s
+own already-vetted constants, imported not redefined. No numeric score
+anywhere in the new module (grep-verified: no `float`/weight arithmetic).
+
+## 6. D-157 ownership (confirmed exactly as D-200.2 designed)
+
+D-157's `AttemptRelationHypothesis` tuple contributes votes ONLY to
+`attempt_relation` (RETRY/CORRECTION/CONTINUATION) and
+`editorial_beat_relation` (NEW_AUDIENCE_BEAT). Its own `COMPLEMENTARY`
+hypothesis (content-blind, evidence-free default per its own docstring)
+contributes NOTHING to `proposition_relation` -- structurally enforced by
+never calling the D-157 vote function for the proposition dimension at
+all (`build_structured_editorial_relation`'s own hardcoded `(None,
+CONFIDENCE_UNKNOWN)` for that side). `DISTINCT_PROPOSITION`/`UNCERTAIN`
+never appear in a D-157 hypothesis (D-157 structurally never emits
+`DISTINCT_PROPOSITION`; `UNCERTAIN` asserts no dimension).
+
+## 7. D-169 ownership
+
+D-169's `RelationEvidence.relation_candidate` contributes votes to
+whichever dimension its own label falls in (all seven labels reachable on
+this side): RETRY/CORRECTION/CONTINUATION -> attempt;
+COMPLEMENTARY/DISTINCT_PROPOSITION -> proposition; NEW_AUDIENCE_BEAT ->
+beat; UNCERTAIN -> none. `RelationEvidence.confidence` is read verbatim
+as that vote's own status -- no re-derivation of `meaning_conflict`/
+`proposition_conflict`/`language_support`/`support_status` (those already
+fed `classify_relation_candidate`'s own decision; this adapter reads only
+its OUTPUT).
+
+## 8. Cross-dimension vs. same-dimension (proven, not merely designed)
+
+`test_18`/`test_19`/`test_34`/`test_36` prove cross-dimension coexistence
+(`attempt_relation=RETRY` + `proposition_relation=DISTINCT_PROPOSITION`
+-> zero conflict flags, both values retained). `test_20`/`test_37` prove a
+genuine same-dimension disagreement (D-157 says `attempt_relation=RETRY`,
+D-169 says `attempt_relation=CORRECTION`) collapses ONLY that dimension to
+`UNKNOWN`/`CONFIDENCE_MIXED` with an `ATTEMPT_SAME_DIMENSION_CONFLICT`
+flag. `test_22` proves the UNKNOWN FIREWALL: an attempt-dimension conflict
+never erases an independently-resolved proposition-dimension value.
+
+## 9. D-200 17-conflict replay result (measured this time, not estimated)
+
+`test_51` is the direct behavioral proof of the exact D-200 failure mode:
+D-157=RETRY, D-169=DISTINCT_PROPOSITION for the SAME edge. The OLD flat
+`fuse_relation_evidence` sees two different flat strings ->
+`CONFLICT_ABSTAINED` -> `RELATION_UNCERTAIN` -> a P1 grouping boundary
+(exactly D-200's own `splits_by_relation.UNCERTAIN:17` mechanism). The NEW
+structured path recognizes these as two DIFFERENT DIMENSIONS (attempt vs.
+proposition), not a real conflict, and correctly JOINS on the real
+`attempt_relation=RETRY` evidence via `GROUPING_REASON_ATTEMPT_JOIN`. This
+is the D-200.2 design's central claim (Section 21's ESTIMATE), now PROVEN
+at the unit/integration level -- still pending the separate real-media
+requalification gate (D-200.4, not run here, no RAW authorized).
+
+## 10. Grouping consumer (D-197)
+
+`build_editorial_local_groups` itself is UNCHANGED (confirmed by
+`test_55`: its own `_JOIN_RELATIONS` membership check, never widened,
+never told about the new type). Only WHICH map feeds its
+`relation_candidates_by_position` parameter changed, and only when
+`live_language_spine is not None`:
+- positive join: `attempt_relation ∈ {RETRY, CORRECTION, CONTINUATION}` ->
+  that exact value passed through (`GROUPING_REASON_ATTEMPT_JOIN`).
+- explicit split: `editorial_beat_relation == NEW_AUDIENCE_BEAT` (status
+  SUPPORTED or WEAK) wins even over a suggested attempt join
+  (`GROUPING_REASON_EXPLICIT_BEAT_BOUNDARY`, proven by `test_30`/`test_39`,
+  Case F).
+- `proposition_relation` NEVER read by `grouping_effective_relation` at
+  all (`test_31`/`test_32`) -- `DISTINCT_PROPOSITION`/`COMPLEMENTARY_
+  PROPOSITION` are `REMOVE_AS_AUTOMATIC_GROUP_BOUNDARY` exactly as D-200.2
+  Sections 14-15 specified.
+- no positive evidence in any dimension -> split,
+  `GROUPING_REASON_NO_POSITIVE_JOIN_EVIDENCE` -- the reason string never
+  says "distinct proposition" (`test_33`, the IMPORTANT DISTINCTION
+  requirement).
+- no predecessor -> split, `GROUPING_REASON_NO_PREDECESSOR`.
+
+No numeric gap threshold, no chronology, no source-order signal anywhere
+in `grouping_effective_relation` (grep-verified: no `float`/time-window
+arithmetic in the function body).
+
+## 11. Moment classification (D-194) immutability
+
+`relation_to_predecessor` (fed to `classify_editorial_moment`) is
+UNCHANGED in every case -- it always remains the flat-fused value from
+`fuse_relation_evidence`, never the grouping-effective one, regardless of
+whether the live-spine flag is on (`test_49` proves this explicitly with
+a same-dimension conflict case: `moment_relation_to_predecessor` still
+reads `"UNCERTAIN"`, the flat abstention value, even though the
+STRUCTURED attempt dimension independently also collapses to `UNKNOWN`
+for a different, dimension-aware reason). D-194's own moment-role/
+sequence-kind classification is therefore byte-identical to pre-D-200.3
+in every case -- no new code path was added to `editorial_moment_
+sequence.py` (zero diff, confirmed).
+
+## 12. CLEAN_DELIVERY_SEQUENCE / PREASSEMBLED_FINAL_SEQUENCE
+
+Untouched, as directed. `build_editorial_sequences_for_moments` still
+receives the flat-fused `relation_by_position` map, unchanged in both
+paths -- D-200.2's own mechanical proof (an all-clean chain can only reach
+`CONTINUATION`, hence only `PREASSEMBLED_FINAL_SEQUENCE`, never
+`CLEAN_DELIVERY_SEQUENCE`) still holds exactly as documented; this gate
+does not touch it (`SAME_EDITORIAL_BEAT`'s missing positive evidence,
+Section 4 above, is the reason, and remains a named, non-blocking
+limitation).
+
+## 13. Offline qualification
+
+- `python -m compileall cutsell_worker tests` -- clean.
+- New file: `tests/test_cutsell_d200_3_structured_editorial_relation.py`
+  -- 55/55 passed.
+- Targeted regression battery (D-123, D-128, D-150, D-166, D-168, D-169,
+  D-171, D-183, D-184, D-187, D-188, D-189, D-191, D-194, D-195, D-197,
+  D-198, D-199, D-200 wiring fix): 928/928 passed.
+- Full offline suite (`pytest tests/`, excluding the one pre-existing,
+  unrelated collection error in `test_semantic_stitch.py` --
+  `score_take()` missing-argument bug at module import time, last touched
+  by an unrelated 2024 commit `8077aa4`, unmodified by any D-200.x work):
+  4735 passed, 5 failed, 13 subtests passed. The 5 failures are the EXACT
+  SAME 5 pre-existing failures recorded before this task began (`test_
+  hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_retry_is_
+  covered_when_prior_delivery_preserves_numbers_and_negation` plus four in
+  `test_video00_modal_hybrid_semantic_parity.py`, all D-044 workflow-jq/
+  masking assertions unrelated to Language Spine/P1) -- zero new failures,
+  pass count exactly +55 (the new test file), confirming no regression.
+
+## 14. Immutability confirmations
+
+No `retry_family_id`/`selected_clip_id`/`final_winner` field anywhere on
+`EditorialMoment` or the new type (`test_54`). No Family/BestTake/D-191/
+Ordering/Boundary/Pacing/Renderer module imported by the new module
+(`test_43`). No provider/network/ASR call (module docstring's own
+structural claim, consistent with every prior D-19x module in this
+family). `watch_listen_understanding.py`/`language_proposition_
+relation.py`/`language_spine.py`/`language_utterance_attempt.py`: zero
+diff (git status confirms only `structured_editorial_relation.py` (new),
+`editorial_moment_sequence_integration.py`, and the new test file
+changed).
+
+## 15. D-200.3 VERDICT
+
+**A. DIMENSION-AWARE P1 RELATION INTEGRATION OFFLINE PROVEN.** The
+structured type, the D-157/D-169 adapter, the D-197 grouping-consumer
+switch, and the exact D-200 replay case (`test_51`) all pass offline.
+Default-off/live-spine-off paths are byte-identical to pre-D-200.3
+(proven, not merely asserted, via `test_48`, the 928-test targeted
+battery, and the full-suite delta). Real-media requalification (D-200.4)
+remains a SEPARATE gate -- not run here, no RAW authorized.
+
+## 16. Known non-blocking limitation (carried forward, unchanged)
+
+`SAME_EDITORIAL_BEAT` has no positive evidence source; `CLEAN_DELIVERY_
+SEQUENCE`'s reachability gap (Section 12) is therefore still open --
+named, not fixed, consistent with D-200.2's own scope boundary for this
+gate.
+
+## 17. Exact D-200.4 gate (next, NOT launched here)
+
+Per D-200.2/D-200.3: exactly ONE Video00 real-media RAW with both
+`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1` and
+`CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`, no P1 authority, to
+prove the D-200 17 flat conflicts decompose correctly in real media (not
+just synthetic fixtures): canonical Language coverage stays high, cross-
+dimension differences no longer become global UNCERTAIN, real same-
+dimension conflicts still abstain, local grouping stays bounded, false
+`PREASSEMBLED_FINAL_SEQUENCE` count stays 0, downstream selection/family/
+BestTake/render output stays byte-identical. Do NOT launch automatically.
+
+## 18. P2 readiness
+
+NOT READY. D-200.4's real-media requalification is the next and, per
+D-200.2, last intended P1 relation-integration gate before this line of
+work is considered closed; P2 Whole-Video Editorial Reasoning remains a
+separate, larger, not-yet-authorized objective.
+
+## 19. App-roadmap status
+
+Unaffected. iOS/Overlap/Pacing V2/Ordering/Boundary/Renderer/Commercial
+Moment/Sales Funnel tracks untouched, per this task's own strict scope.
+
+## 20. Confirmations
+
+Offline only. No RAW dispatched. No provider call. No weights/thresholds
+introduced. No P1 authority granted (P1 remains diagnostics-only, D-193's
+own boundary unchanged). No P2 implementation. No Family/BestTake/D-191/
+Ordering/Boundary/Pacing/Renderer change. `watch_listen_understanding.py`/
+`language_proposition_relation.py`/`language_spine.py`/`language_
+utterance_attempt.py` -- zero diff, confirmed by `git status` and by
+`test_43`/`test_44`/`test_45`'s structural checks.
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- authorizing D-200.4's one
+real-media RAW is the next Product Owner decision).

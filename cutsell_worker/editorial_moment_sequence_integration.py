@@ -104,6 +104,29 @@ from .language_spine_live_integration import (
     proposition_candidate_ids_by_attempt_id_for,
     relation_evidence_by_proposition_pair,
 )
+from .structured_editorial_relation import (
+    ATTEMPT_CONTINUATION,
+    ATTEMPT_CORRECTION,
+    ATTEMPT_RETRY,
+    ATTEMPT_UNKNOWN,
+    BEAT_NEW_AUDIENCE,
+    BEAT_SAME,
+    BEAT_UNKNOWN,
+    GROUPING_ACTION_JOIN,
+    GROUPING_ACTION_SPLIT,
+    GROUPING_REASON_EXPLICIT_BEAT_BOUNDARY,
+    GROUPING_REASON_NO_POSITIVE_JOIN_EVIDENCE,
+    GROUPING_REASON_NO_PREDECESSOR,
+    PROPOSITION_COMPLEMENTARY,
+    PROPOSITION_DISTINCT,
+    PROPOSITION_PROGRESSION,
+    PROPOSITION_SAME,
+    PROPOSITION_UNKNOWN,
+    StructuredEditorialRelationEvidence,
+    build_structured_editorial_relation,
+    grouping_effective_relation as _grouping_effective_relation,
+    structured_editorial_relation_diagnostics,
+)
 from .language_utterance_attempt import (
     ATTEMPT_ABANDONED,
     ATTEMPT_CLEAN,
@@ -320,6 +343,14 @@ class EditorialMomentUnderstanding:
     # docs/CUTSELL_DECISIONS.md D-199.
     moment_language_evidence_source: Tuple[str | None, ...] = ()
     moment_relation_evidence_source: Tuple[str, ...] = ()
+    # D-200.3: index-aligned dimension-aware structured relation evidence
+    # (``None`` for a source's first moment) plus the D-197-grouping-only
+    # translation actually consumed for that edge -- diagnostic only, no
+    # downstream authority reads this. See docs/CUTSELL_DECISIONS.md D-200.3.
+    moment_structured_relation: Tuple[StructuredEditorialRelationEvidence | None, ...] = ()
+    moment_grouping_effective_relation: Tuple[str | None, ...] = ()
+    moment_grouping_action: Tuple[str, ...] = ()
+    moment_grouping_reason: Tuple[str, ...] = ()
 
 
 def _understanding_span_for_take(
@@ -387,6 +418,22 @@ def build_editorial_moments_for_source(
     relation_by_position: dict[int, str] = {}
     relation_evidence_source_by_position: dict[int, str] = {}
     attempt_source_by_position: dict[int, str] = {}
+    # D-200.3 (docs/CUTSELL_DECISIONS.md D-200.3): dimension-aware relation
+    # evidence, ALWAYS computed (pure, no I/O) alongside the pre-existing
+    # flat fusion above -- never REPLACING `relation_to_predecessor`'s own
+    # value fed to `classify_editorial_moment` below (D-194's moment-role
+    # classification stays byte-identical, per this task's own "Do NOT
+    # modify D-194 classification" instruction). `grouping_relation_by_
+    # position` carries the SEPARATE, D-197-grouping-only translation
+    # (`structured_editorial_relation.grouping_effective_relation`) that
+    # the caller (`build_editorial_moment_understanding_for_source`) may
+    # choose to feed into `build_editorial_local_groups` INSTEAD OF
+    # `relation_by_position`, when the live Language-Spine diagnostics
+    # flag is on (see that function's own docstring for the exact gate).
+    structured_relation_by_position: dict[int, StructuredEditorialRelationEvidence | None] = {}
+    grouping_relation_by_position: dict[int, str] = {}
+    grouping_action_by_position: dict[int, str] = {}
+    grouping_reason_by_position: dict[int, str] = {}
     unresolved_count = 0
     fallback_language_attempt_count = 0
     position = 0
@@ -419,6 +466,7 @@ def build_editorial_moments_for_source(
         # so this is automatically None whenever either side fell back --
         # no extra branching needed for that case).
         canonical_relation = None
+        canonical_relation_evidence_obj = None
         if previous_attempt is not None:
             pred_props = proposition_candidate_ids_by_attempt_id.get(previous_attempt.attempt_id, ())
             cur_props = proposition_candidate_ids_by_attempt_id.get(attempt.attempt_id, ())
@@ -426,12 +474,35 @@ def build_editorial_moments_for_source(
                 evidence = relation_evidence_by_pair.get((pred_props[0], cur_props[0]))
                 if evidence is not None:
                     canonical_relation = evidence.relation_candidate
+                    canonical_relation_evidence_obj = evidence
 
         if previous_relation_lookup_span is not None:
             relation_to_predecessor, relation_evidence_source = fuse_relation_evidence(d157_relation, canonical_relation)
         else:
             relation_to_predecessor, relation_evidence_source = None, RELATION_SOURCE_MISSING
         relation_evidence_source_by_position[position] = relation_evidence_source
+
+        # D-200.3: dimension-aware structured evidence for this predecessor
+        # edge -- pure, no re-derivation of any D-157/D-169-internal
+        # computation (reads only `span.attempt_relation_hypotheses`, the
+        # SAME tuple `_dominant_relation` above already read, and the SAME
+        # `canonical_relation_evidence_obj` looked up above). `None` for
+        # the source's first moment (no predecessor) -- never fabricated.
+        if previous_relation_lookup_span is not None:
+            structured_relation = build_structured_editorial_relation(
+                left_source_span_id=previous_relation_lookup_span.span_id,
+                right_source_span_id=span.span_id,
+                d157_hypotheses=span.attempt_relation_hypotheses,
+                canonical_relation_evidence=canonical_relation_evidence_obj,
+            )
+        else:
+            structured_relation = None
+        structured_relation_by_position[position] = structured_relation
+        grouping_value, grouping_action, grouping_reason = _grouping_effective_relation(structured_relation)
+        grouping_action_by_position[position] = grouping_action
+        grouping_reason_by_position[position] = grouping_reason
+        if grouping_value is not None:
+            grouping_relation_by_position[position] = grouping_value
 
         visual_reset_present = span.exit_usability in (USABILITY_UNUSABLE, USABILITY_QUESTIONABLE)
 
@@ -456,6 +527,15 @@ def build_editorial_moments_for_source(
     if provenance_out is not None:
         provenance_out["relation_evidence_source_by_position"] = relation_evidence_source_by_position
         provenance_out["attempt_source_by_position"] = attempt_source_by_position
+        # D-200.3: dimension-aware evidence + the D-197-grouping-only
+        # translation, exposed the SAME optional-out-parameter way as the
+        # two D-199 maps above -- zero extra cost for any caller that
+        # doesn't pass `provenance_out` (unchanged for every pre-D-200.3
+        # caller/test that unpacks the 4-tuple return directly).
+        provenance_out["structured_relation_by_position"] = structured_relation_by_position
+        provenance_out["grouping_relation_by_position"] = grouping_relation_by_position
+        provenance_out["grouping_action_by_position"] = grouping_action_by_position
+        provenance_out["grouping_reason_by_position"] = grouping_reason_by_position
 
     return (
         tuple(moments), unresolved_count, fallback_language_attempt_count, relation_by_position,
@@ -848,6 +928,32 @@ def build_editorial_moment_understanding_for_source(
     )
     attempt_source_by_position = provenance_out.get("attempt_source_by_position", {})
     relation_evidence_source_by_position = provenance_out.get("relation_evidence_source_by_position", {})
+    structured_relation_by_position = provenance_out.get("structured_relation_by_position", {})
+    grouping_relation_by_position = provenance_out.get("grouping_relation_by_position", {})
+    grouping_action_by_position = provenance_out.get("grouping_action_by_position", {})
+    grouping_reason_by_position = provenance_out.get("grouping_reason_by_position", {})
+
+    # D-200.3 (docs/CUTSELL_DECISIONS.md D-200.3): the live D-199 path
+    # (both the P1 diagnostics flag AND the live Language-Spine diagnostics
+    # flag on -- the SAME condition `live_language_spine is not None`
+    # already gates every other D-199 canonical-vs-fallback override above)
+    # feeds D-197's grouper the NEW dimension-aware `grouping_relation_by_
+    # position` map instead of the flat-fused `relation_by_position` map --
+    # this changes WHICH relation value reaches `build_editorial_local_
+    # groups`'s own UNCHANGED join/split rule set, never that rule set
+    # itself (same posture D-199's own docstring already established for
+    # the flat-fusion case). `relation_by_position` (flat-fused) keeps
+    # feeding `classify_editorial_moment`'s own `relation_to_predecessor`
+    # argument (moment-role classification, D-194, byte-identical) and
+    # `build_editorial_sequences_for_moments` (sequence classification,
+    # D-194, byte-identical) UNCHANGED in both cases -- only P1's own
+    # LOCAL GROUPING input differs. When `live_language_spine` is `None`
+    # (the D-198 legacy default, or the live-spine flag off), grouping
+    # uses `relation_by_position` exactly as before D-200.3 -- BYTE-
+    # IDENTICAL to pre-D-200.3 behavior.
+    grouping_relation_source = (
+        grouping_relation_by_position if live_language_spine is not None else relation_by_position
+    )
 
     if not moments:
         capability_status = CAPABILITY_NOT_EVALUABLE
@@ -864,7 +970,7 @@ def build_editorial_moment_understanding_for_source(
     # ``local_groups`` keeps that override verbatim (unchanged contract).
     if local_groups is None:
         computed_local_groups = build_editorial_local_groups(
-            moments, relation_candidates_by_position=relation_by_position,
+            moments, relation_candidates_by_position=grouping_relation_source,
         )
         effective_local_groups: list[list[int]] = [
             list(g.moment_indices) for g in computed_local_groups if len(g.moment_indices) >= 2
@@ -895,6 +1001,21 @@ def build_editorial_moment_understanding_for_source(
     moment_relation_evidence_source = tuple(
         relation_evidence_source_by_position.get(i, RELATION_SOURCE_MISSING) for i in range(len(moments))
     )
+    # D-200.3: index-aligned pass-through of the four new per-position
+    # dicts build_editorial_moments_for_source now returns -- same pure-
+    # serialization pattern as D-198/D-199 above, no re-derivation.
+    moment_structured_relation = tuple(
+        structured_relation_by_position.get(i) for i in range(len(moments))
+    )
+    moment_grouping_effective_relation = tuple(
+        grouping_relation_by_position.get(i) for i in range(len(moments))
+    )
+    moment_grouping_action = tuple(
+        grouping_action_by_position.get(i, GROUPING_ACTION_SPLIT) for i in range(len(moments))
+    )
+    moment_grouping_reason = tuple(
+        grouping_reason_by_position.get(i, GROUPING_REASON_NO_PREDECESSOR) for i in range(len(moments))
+    )
 
     if fallback_count and "LANGUAGE_ATTEMPT_NOT_SUPPLIED" not in missing_evidence:
         missing_evidence.append("LANGUAGE_ATTEMPT_NOT_SUPPLIED")
@@ -920,6 +1041,10 @@ def build_editorial_moment_understanding_for_source(
         moment_relation_to_predecessor=moment_relation_to_predecessor,
         moment_language_evidence_source=moment_language_evidence_source,
         moment_relation_evidence_source=moment_relation_evidence_source,
+        moment_structured_relation=moment_structured_relation,
+        moment_grouping_effective_relation=moment_grouping_effective_relation,
+        moment_grouping_action=moment_grouping_action,
+        moment_grouping_reason=moment_grouping_reason,
     )
 
 
@@ -965,6 +1090,10 @@ def _moment_diagnostics_with_relation(
     relation_to_predecessor: str | None,
     language_evidence_source: str | None = None,
     relation_evidence_source: str | None = None,
+    structured_relation: StructuredEditorialRelationEvidence | None = None,
+    grouping_effective_relation_value: str | None = None,
+    grouping_action: str | None = None,
+    grouping_reason: str | None = None,
 ) -> dict:
     """D-198: `editorial_moment_diagnostics` (D-194, unchanged) plus ONE
     diagnostic-only key, `relation_to_predecessor` -- the exact
@@ -977,12 +1106,27 @@ def _moment_diagnostics_with_relation(
     never supplied per-moment provenance) and `relation_evidence_source`
     (the ``fuse_relation_evidence`` provenance tag -- MISSING/D157_ONLY/
     CANONICAL_ONLY/AGREEMENT/CONFLICT_ABSTAINED) -- no full text, no new
-    computation, pure pass-through."""
+    computation, pure pass-through.
+
+    D-200.3: `structured_relation` (the dimension-aware evidence for this
+    edge, projected via `structured_editorial_relation_diagnostics` --
+    ``None`` for the source's first moment) plus `grouping_effective_
+    relation`/`grouping_action`/`grouping_reason` -- the exact value/JOIN
+    or SPLIT/reason `build_editorial_local_groups` actually consumed for
+    THIS run (which may be the flat-fused value when the live Language-
+    Spine flag is off -- see `build_editorial_moment_understanding_for_
+    source`'s own gate). `relation_to_predecessor` above is UNCHANGED --
+    it remains the value fed to D-194's own moment-role classification,
+    never the grouping-effective one."""
     return {
         **editorial_moment_diagnostics(moment),
         "relation_to_predecessor": relation_to_predecessor,
         "language_evidence_source": language_evidence_source,
         "relation_evidence_source": relation_evidence_source,
+        "structured_relation": structured_editorial_relation_diagnostics(structured_relation),
+        "grouping_effective_relation": grouping_effective_relation_value,
+        "grouping_action": grouping_action,
+        "grouping_reason": grouping_reason,
     }
 
 
@@ -990,12 +1134,20 @@ def editorial_moment_understanding_diagnostics(understanding: EditorialMomentUnd
     relations = understanding.moment_relation_to_predecessor
     language_sources = understanding.moment_language_evidence_source
     relation_sources = understanding.moment_relation_evidence_source
+    structured_relations = understanding.moment_structured_relation
+    grouping_relations = understanding.moment_grouping_effective_relation
+    grouping_actions = understanding.moment_grouping_action
+    grouping_reasons = understanding.moment_grouping_reason
     moment_rows = [
         _moment_diagnostics_with_relation(
             m,
             relations[i] if i < len(relations) else None,
             language_sources[i] if i < len(language_sources) else None,
             relation_sources[i] if i < len(relation_sources) else None,
+            structured_relations[i] if i < len(structured_relations) else None,
+            grouping_relations[i] if i < len(grouping_relations) else None,
+            grouping_actions[i] if i < len(grouping_actions) else None,
+            grouping_reasons[i] if i < len(grouping_reasons) else None,
         )
         for i, m in enumerate(understanding.moments)
     ]
@@ -1063,6 +1215,66 @@ def editorial_moment_understanding_run_summary(
             1 for g in multi_moment_groups if g.confidence == CONFIDENCE_SUPPORTED
         ),
         "unsequenced_moment_count": unsequenced_moment_count,
+        **_structured_relation_run_summary_counts(understandings),
+    }
+
+
+def _structured_relation_run_summary_counts(
+    understandings: Tuple[EditorialMomentUnderstanding, ...],
+) -> dict:
+    """D-200.3 (docs/CUTSELL_DECISIONS.md D-200.3): bounded, counts-only
+    aggregate over every source's already-built `moment_structured_
+    relation`/`moment_grouping_action` tuples -- no re-derivation, no
+    transcript. `proposition_same_count`/`proposition_progression_count`/
+    `same_editorial_beat_count` may legitimately be `0` for every real run
+    today -- see `structured_editorial_relation.py`'s own "no new evidence
+    source" section; this is never "fixed" by inventing evidence here
+    (this task's own "NO SAME_EDITORIAL_BEAT FICTION" instruction)."""
+    edges: list[StructuredEditorialRelationEvidence] = [
+        r for u in understandings for r in u.moment_structured_relation if r is not None
+    ]
+    actions: list[str] = [
+        a for u in understandings for a in u.moment_grouping_action
+    ]
+    reasons: list[str] = [
+        r for u in understandings for r in u.moment_grouping_reason
+    ]
+
+    def _cross_dimension_compatible(edge: StructuredEditorialRelationEvidence) -> bool:
+        # At least two dimensions carry a genuinely resolved (non-UNKNOWN)
+        # value AND no same-dimension conflict flag was raised for this
+        # edge -- i.e. this edge is an example of "different supported
+        # truths in different dimensions", never a global conflict
+        # (D-200.2's own core claim, validated per-edge here).
+        if edge.conflict_flags:
+            return False
+        resolved = sum((
+            edge.attempt_relation != ATTEMPT_UNKNOWN,
+            edge.proposition_relation != PROPOSITION_UNKNOWN,
+            edge.editorial_beat_relation != BEAT_UNKNOWN,
+        ))
+        return resolved >= 2
+
+    return {
+        "structured_relation_edge_count": len(edges),
+        "attempt_retry_count": sum(1 for e in edges if e.attempt_relation == ATTEMPT_RETRY),
+        "attempt_correction_count": sum(1 for e in edges if e.attempt_relation == ATTEMPT_CORRECTION),
+        "attempt_continuation_count": sum(1 for e in edges if e.attempt_relation == ATTEMPT_CONTINUATION),
+        "attempt_unknown_count": sum(1 for e in edges if e.attempt_relation == ATTEMPT_UNKNOWN),
+        "proposition_same_count": sum(1 for e in edges if e.proposition_relation == PROPOSITION_SAME),
+        "proposition_distinct_count": sum(1 for e in edges if e.proposition_relation == PROPOSITION_DISTINCT),
+        "proposition_complementary_count": sum(1 for e in edges if e.proposition_relation == PROPOSITION_COMPLEMENTARY),
+        "proposition_progression_count": sum(1 for e in edges if e.proposition_relation == PROPOSITION_PROGRESSION),
+        "proposition_unknown_count": sum(1 for e in edges if e.proposition_relation == PROPOSITION_UNKNOWN),
+        "new_audience_beat_count": sum(1 for e in edges if e.editorial_beat_relation == BEAT_NEW_AUDIENCE),
+        "same_editorial_beat_count": sum(1 for e in edges if e.editorial_beat_relation == BEAT_SAME),
+        "editorial_beat_unknown_count": sum(1 for e in edges if e.editorial_beat_relation == BEAT_UNKNOWN),
+        "cross_dimension_compatible_count": sum(1 for e in edges if _cross_dimension_compatible(e)),
+        "same_dimension_conflict_count": sum(1 for e in edges if e.conflict_flags),
+        "grouping_join_count": sum(1 for a in actions if a == GROUPING_ACTION_JOIN),
+        "grouping_split_count": sum(1 for a in actions if a == GROUPING_ACTION_SPLIT),
+        "grouping_split_new_beat_count": sum(1 for r in reasons if r == GROUPING_REASON_EXPLICIT_BEAT_BOUNDARY),
+        "grouping_split_no_positive_join_count": sum(1 for r in reasons if r == GROUPING_REASON_NO_POSITIVE_JOIN_EVIDENCE),
     }
 
 
