@@ -311,6 +311,11 @@ def test_only_p1_modules_reference_editorial_moment_id():
     # recompute" contract D-201/D-202 require. This widens the audit's own
     # allow-list; it does not touch editorial_moment_sequence.py/
     # editorial_moment_sequence_integration.py's own minting authority.
+    # D-206: ordering_realization_plan.py (Ordering Consolidation Phase A)
+    # is the same kind of authorized additional reader -- it maps a P1
+    # moment's own editorial_moment_id to the OrderingUnit that owns it
+    # (via source_span_id), by attribute access only, never minting a new
+    # id or reopening P1's own authority.
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent / "cutsell_worker"
     referencing = [
@@ -319,7 +324,7 @@ def test_only_p1_modules_reference_editorial_moment_id():
     ]
     assert set(referencing) == {
         "editorial_moment_sequence.py", "editorial_moment_sequence_integration.py",
-        "whole_video_editorial_reasoning.py",
+        "whole_video_editorial_reasoning.py", "ordering_realization_plan.py",
     }
 
 

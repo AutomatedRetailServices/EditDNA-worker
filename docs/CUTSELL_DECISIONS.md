@@ -41366,3 +41366,504 @@ decision.
 
 **Then STOP. Do NOT implement D-206. Wait for Product Owner
 coordination.**
+
+
+# D-206: ORDERING CONSOLIDATION -- PHASE A TYPED ORDERING EVIDENCE LAYER
+OVER THE EXISTING COMPOSER CONTRACT (POST D-205, OFFLINE ONLY, NO RAW)
+
+## 1. Branch / new HEAD
+
+`feature/runpod-pod-on-demand`, verified before starting: HEAD
+`be03892ac1b0d675ddd887e4cbca19ad75123c9e` (matches expected), clean tree.
+
+## 2. Files changed
+
+- `cutsell_worker/ordering_realization_plan.py` -- NEW, the one typed
+  evidence/constraint module.
+- `tests/test_cutsell_d206_ordering_realization_plan.py` -- NEW, 51 tests.
+- `tests/test_cutsell_d200_4b_editorial_moment_identity_fix.py` -- ONE
+  test's own allow-list widened (`test_only_p1_modules_reference_
+  editorial_moment_id`), exactly the same precedent D-202 already
+  established for `whole_video_editorial_reasoning.py`: this module
+  references `EditorialMoment.editorial_moment_id` by attribute access
+  only, never mints or recomputes it.
+- No other file touched. `pipeline.py`, `universal_clean_cut.py`,
+  `brain_runtime.py`, `composer.py`, `composer_provider.py`,
+  `composer_openai.py`, `causal_order_validator.py`: zero diff (confirmed
+  by `git diff --stat`).
+
+## 3. Existing composer unchanged
+
+Confirmed: zero diff to `composer.py`/`composer_provider.py`/
+`composer_openai.py`. `test_no_composer_import` proves this module never
+imports `composer_openai`/`composer_provider`/`composer` and never calls
+`OpenAIComposerProvider(`/`safe_compose_order(`/`compose_selected(`.
+
+## 4. Composer provider status
+
+Still dormant, unchanged: `universal_clean_cut.py:147` and `brain_
+runtime.py:283` still hardcode `composer_provider=None` (confirmed by
+`git diff` showing zero change to either file). No provider call was
+made anywhere in this task.
+
+## 5. Causal validator status
+
+Unchanged: zero diff to `causal_order_validator.py`. `test_no_causal_
+validator_import` proves this module never imports or calls `find_
+causal_order_breaks`. `REASON_CAUSAL_ORDER_VALIDATOR` exists in the
+vocabulary as a declared value for a future producer only -- confirmed
+never assigned by any builder in this module's own code
+(`test_causal_order_validator_reason_declared_never_emitted`).
+
+## 6. OrderingUnit type
+
+Implemented exactly as designed in D-205: `realization_id`, `source_
+asset_id`, `source_span_ids`, `proposition_candidate_ids`, `p1_local_
+group_id`, `p1_sequence_ids`, `p2_region_ids`, `composite_component_ids`,
+`source_start`/`source_end`, `source_order`, `provenance`.
+
+## 7. Atomic unit decision
+
+The REALIZATION (D-205 Section 7's own recommendation), keyed by
+`realization_id` when present, else `clip_id` -- the EXACT SAME identity
+convention `semantic_ledger._clip_realization_id` already established
+(D-050B), reused verbatim via `_realization_identity`, never redefined.
+
+## 8. Composite representation
+
+Honest, per D-205's own named gap: `OrderingUnit.composite_component_
+ids` defaults to empty (no live field carries this today, confirmed by
+direct audit of `DraftClip`/`CandidateTake` in D-205's own forensic) and
+is populated only from an OPTIONAL caller-supplied mapping
+(`composite_component_ids_by_realization`). Composite INTERNAL ORDER
+(between two or more separate composite-piece realizations) is handled
+by a separate, also-optional `composite_group_by_realization` input to
+`build_ordering_relation_evidence`, which chains members into
+`PRESERVE_INTERNAL_ORDER` relations (`REASON_COMPOSITE_INTERNAL_ORDER`)
+in their own `source_start` order -- proven by `TestCompositeInternalOrder`
+(two-piece, three-piece, and two-composites-globally-reordered-internals-
+unchanged fixtures).
+
+## 9. OrderingRelationEvidence type
+
+Implemented exactly as designed: `relation_id`, `left_realization_id`,
+`right_realization_id`, `ordering_relation`, `ordering_reason`,
+`confidence`, `conflict_flags`, `provenance`.
+
+## 10. Relation vocabulary
+
+`MUST_PRECEDE`/`MUST_FOLLOW`/`PRESERVE_INTERNAL_ORDER`/`NO_ORDER_
+CONSTRAINT`/`CONFLICTED`/`UNKNOWN` -- exactly this task's own bounded
+list, no numeric weight anywhere.
+
+## 11. OrderedRealizationPlan type
+
+Implemented with a small companion `OrderedUnitPlacement` row type (per-
+unit `ordering_position`/`ordering_reason`/`continuity_status`/
+`conflict_flags`/`provenance`, matching this task's own suggested nested
+shape) rather than flattening those fields onto the plan itself:
+`source_asset_ids`, `ordered_realization_ids`, `ordered_units`,
+`ordering_status`, `fallback_used`, `fallback_reason`, `unresolved_
+relation_ids`, `conflict_flags`, `confidence`, `provenance`. No cut
+frames, no pacing instructions, no render instructions.
+
+## 12. Ordering-status vocabulary
+
+`ORDERED`/`PARTIALLY_ORDERED`/`CONFLICTED`/`UNKNOWN` -- computed
+deterministically: `CONFLICTED` when a genuine precedence cycle or an
+explicit `CONFLICTED` relation exists; `UNKNOWN` when zero constraints
+exist at all; `PARTIALLY_ORDERED` when some but not all placements
+needed fallback; `ORDERED` when every unit's placement is constraint-
+supported.
+
+## 13. P1 local-sequence constraint
+
+Proven: consecutive moments within one already-computed `EditorialLocal
+Group`, restricted to moments whose owning realization actually survived
+to the current unit set, are chained with `PRESERVE_INTERNAL_ORDER`
+(`REASON_P1_LOCAL_SEQUENCE`) by default -- `test_local_sequence_order_
+preserved_no_relation_role` proves the group's own order is never
+inverted.
+
+## 14. Continuation constraint
+
+Proven: a `MOMENT_ROLE_CONTINUATION` right-hand moment creates `MUST_
+PRECEDE(left, right)` (`REASON_P1_CONTINUATION`) -- `test_continuation_
+creates_must_precede`.
+
+## 15. Correction constraint
+
+Proven: a `MOMENT_ROLE_CORRECTION` right-hand moment creates `MUST_
+PRECEDE(left, right)` (`REASON_P1_CORRECTION`) -- the earlier statement is
+never dropped, only ordered relative to its correction
+(`test_correction_creates_must_precede`).
+
+## 16. Retry-survival conflict
+
+Proven: `test_no_relation_when_only_one_side_survived` confirms the
+common case (only one retry alternative reached Freeze) produces zero
+relations, per the module's own "never assume it must resolve one
+itself" contract; `test_retry_duplicate_survival_marked_conflicted_
+never_resolved` proves that when a P2 `SUPPORTED_SUPERSESSION` hypothesis
+finds BOTH sides still present as units, this module emits `CONFLICTED`
+(never a silent pick) and STILL produces a total, deterministic,
+reorder-only-valid plan.
+
+## 17. Proposition-progression constraint
+
+`REASON_P2_PROPOSITION_PROGRESSION` exists in the vocabulary and is
+exercised by tests as CALLER-SUPPLIED evidence (`test_explicit_must_
+precede`) -- this module never independently asserts progression itself,
+per D-205's own named gap (`PROPOSITION_PROGRESSION` is declared but
+never produced by any live P1/P2 deriver today) and this task's own "do
+not create another proposition-order semantic engine" instruction.
+
+## 18. P2 relationship
+
+`build_ordering_relation_evidence` consumes `WholeVideoSupersession
+Hypothesis.supersession_status`/`.meaning_conflict_status`/`.earlier_
+region_ids`/`.later_region_ids` by reference only -- never recomputes a
+region, a proposition map, or a supersession verdict.
+
+## 19. Supersession-survival conflict
+
+See Section 16. `SUPPORTED_SUPERSESSION` is never treated as permission
+to drop a unit -- proven structurally (the reorder-only invariant holds
+on every fixture involving a supersession hypothesis) and explicitly
+(`test_supported_supersession_both_survive_is_conflict_not_deletion`).
+
+## 20. Partial-supersession unique-info preservation
+
+`test_partial_supersession_preserves_unique_info` confirms a `PARTIAL_
+SUPERSESSION` hypothesis's own `uncovered_earlier_proposition_candidate_
+ids` is read, never discarded, and the unit carrying that unique content
+is never removed from the plan (proven jointly with the reorder-only
+invariant tests).
+
+## 21. Unique-information firewall
+
+Structural, not a separate runtime check: no function in this module can
+remove a `realization_id` from the set it was given (there is no
+delete/drop code path anywhere in `build_ordering_units`/`build_
+ordering_relation_evidence`/`build_deterministic_ordering_plan`) --
+proven by `validate_reorder_only_invariant` passing on every fixture,
+including all conflict/cycle/supersession cases.
+
+## 22. Reorder-only invariant
+
+Implemented as `validate_reorder_only_invariant` exactly per this task's
+own wording (`set(input) == set(output)` and multiplicity exactly one on
+both sides) -- proven both directly (`TestReorderOnlyInvariant`, 5 tests
+including deliberately-broken plans failing the check) and end-to-end
+against every real builder-produced plan in the suite.
+
+## 23. Meaning firewall
+
+Proven: a supersession hypothesis with `meaning_conflict_status ==
+MEANING_CONFLICT_PRESENT` (mapped from `supersession_status ==
+CONFLICTED`) always produces a `CONFLICTED` relation (`REASON_MEANING_
+FIREWALL`), never smoothed into any other relation value
+(`test_meaning_conflict_flagged`).
+
+## 24. Chronology firewall
+
+Proven twice: (a) `test_chronology_alone_never_creates_semantic_
+certainty` -- zero relations means `ordering_status` is `UNKNOWN`, never
+`ORDERED`, even though a total list is still emitted; (b) no builder
+function in this module reads `source_start`/`source_order` as anything
+but a TIE-BREAK inside Kahn's algorithm (module docstring's own algorithm
+description, Section 25/27) -- chronology never creates a `MUST_PRECEDE`
+relation on its own.
+
+## 25. Source-order fallback
+
+`source_order`-first, `source_start`-second, `realization_id`-third --
+the exact same precedence `compose_selected` itself already uses
+(D-205's own finding), reused as the STABLE TIE-BREAK inside the
+topological placement, never as authority.
+
+## 26. Fallback certainty status
+
+`OrderedUnitPlacement.continuity_status` is `CONSTRAINT_SUPPORTED` only
+when the unit participates in a real precedence edge (as source or
+destination); otherwise `FALLBACK` (or `UNKNOWN` for a trivial single-
+unit plan) -- `fallback_used`/`fallback_reason` on the plan itself never
+claim semantic certainty a fallback placement did not earn.
+
+## 27. Partial-order handling
+
+`build_deterministic_ordering_plan` computes a genuine partial order from
+the supplied relations (Kahn's algorithm over the actual precedence
+graph) and ALWAYS materializes a deterministic TOTAL list for the
+(duck-typed) downstream consumer, per D-205 Section 29's own finding
+that the current renderer has no partial-order concept -- proven by
+`test_partial_order_some_unknown` (mixed constrained/unconstrained units
+still produce one clean total list, correctly labelled `PARTIALLY_
+ORDERED`).
+
+## 28. Total-list materialization
+
+Every `build_deterministic_ordering_plan` call returns a total,
+deterministic `ordered_realization_ids` tuple regardless of ordering_
+status (`ORDERED`, `PARTIALLY_ORDERED`, `CONFLICTED`, and `UNKNOWN` cases
+all proven to produce a full list of the same length as the input).
+
+## 29. Cycle handling
+
+Proven: `test_cycle_detected_and_conflicted` (a MUST_PRECEDE(a,b) +
+MUST_PRECEDE(b,a) contradiction) forces `ordering_status == CONFLICTED`,
+records the cyclic edges in `unresolved_relation_ids`, and still
+produces a deterministic 2-unit total list via stable fallback -- "no
+forced topological result presented as valid," exactly this task's own
+wording.
+
+## 30. Multi-source behavior
+
+`TestMultiSource` (4 tests): source identity is preserved on every unit;
+same-source unresolved pairs fall back to `UNKNOWN`; cross-source pairs
+use `source_order` (the explicit caller-assigned rank), never raw
+per-file timestamps, as the deterministic fallback, and the overall
+status still correctly reports `UNKNOWN` rather than manufactured
+certainty.
+
+## 31. No fabricated global timeline
+
+Confirmed structurally: no function in this module ever compares
+`source_start` values across two different `source_asset_id`s as if they
+shared one clock -- the ONLY cross-source comparison anywhere in the
+sort/graph logic is on `source_order` (an explicit, caller-supplied
+cross-source rank, mirroring `compose_selected`'s own convention).
+
+## 32. Deterministic ids
+
+`OrderingUnit.realization_id` is the pre-existing stable identity
+(Section 7). `OrderingRelationEvidence.relation_id` is minted from
+`(left, right, relation, reason)` via sha256 -- proven direction-
+sensitive and repeat-stable (`test_relation_id_deterministic_and_
+direction_sensitive`). No randomly-generated id anywhere in this module
+(`test_no_random_uuid_in_source`).
+
+## 33. Input-order independence
+
+Proven at both layers: `build_ordering_units` on a reversed input list
+produces the identical tuple (`test_two_units_source_order`/the
+determinism suite), and `build_deterministic_ordering_plan` on units
+built from a reversed realization list produces an identical plan
+(`test_input_order_independence`).
+
+## 34. Composite internal-order integrity
+
+See Section 8. Proven for 2-piece, 3-piece, and multi-composite-global-
+reorder cases (`TestCompositeInternalOrder`, 3 tests) -- a composite's
+own internal order survives even when the composites themselves are
+reordered relative to each other.
+
+## 35. Local-sequence integrity
+
+See Section 13. Proven that a P1 local group's own moment order, when
+translated into surviving units, is never inverted absent a stronger,
+explicitly-supplied constraint.
+
+## 36. No add/drop/duplicate
+
+Proven exhaustively by `TestReorderOnlyInvariant` (5 tests) plus
+end-to-end on every other fixture in the suite via the same invariant
+check -- see Section 21/22.
+
+## 37. Diagnostics/provenance
+
+`ordering_unit_diagnostics`/`ordering_relation_diagnostics`/`ordered_
+realization_plan_diagnostics`/`ordered_realization_plan_run_summary` --
+bounded, JSON-safe, no transcript field anywhere (`test_unit_
+diagnostics_bounded` confirms), same tail-safe style as every P1/P2
+diagnostics function in this codebase. Every type's own `provenance`
+tuple is populated and never empty.
+
+## 38. Future composer adapter contract
+
+Documented, not built (this task's own explicit scope): a future,
+separately-authorized D-207 could adapt `OrderingUnit`s into the existing
+`ComposerProvider.order()` input shape (`clips` with `id`/`natural_
+index`/`source_order`/`start`/`end`/`text`/`role`/`visual` fields, per
+`composer_openai.py`'s own real prompt payload, read but not touched this
+task) and validate any proposed reorder against this module's own
+`validate_reorder_only_invariant` plus the constraint graph this module
+already builds -- named as the exact next-gate shape, not implemented
+here.
+
+## 39. Existing composer consolidation result
+
+Confirmed real and complete: `composer.py`/`composer_provider.py`/
+`composer_openai.py` remain byte-for-byte unchanged (Section 3), still
+occupy their existing pre-Freeze position, and still work exactly as
+before. This module adds ONLY the typed evidence/constraint layer D-205
+found missing -- it does not reimplement, wrap, call, or duplicate any
+part of the existing engine.
+
+## 40. No story-engine duplication
+
+Structurally proven: `test_no_provider_client_or_llm_prompt` confirms
+zero occurrence of `openai`/`gemini`/`responses.create`/`OpenAI(`/
+`hook`/`cta_score`/`narrative_quality` anywhere in this module's actual
+code. No story scoring, no hook/problem/benefit/proof/CTA ranking logic
+exists here -- those remain exclusively `composer_openai.py`'s own
+territory, untouched.
+
+## 41. No provider
+
+Zero provider import or call anywhere in this module (Section 3/40).
+
+## 42. No QA input
+
+`test_no_qa_reference` confirms zero occurrence of `cut_ai`/`human_gold`/
+`quality_ladder`/`benchmark_label`.
+
+## 43-45. No Family / BestTake / D-191 dependency
+
+`test_no_family_besttake_boundary_pacing_renderer_reference` confirms
+zero reference to `take_group_id`/`_semantic_best_take`/`bounded_
+finalist_authority`/`bounded_finalist_arbiter`/`take_grouping`/
+`composite_resolver`/`realization_resolver` anywhere in this module's
+code. This module reads only frozen realizations already handed to it by
+a caller -- it never re-derives Family/BestTake membership itself.
+
+## 46-48. No Boundary / Pacing / Renderer mutation
+
+Same test confirms zero reference to `boundary_engine_pass`/
+`BoundaryEngine`/`dialogue_pacing_transition`/`render_plan`/
+`RenderSegment`. No cut-frame field, no pacing-transition field, no
+render-plan field exists on any type in this module (Section 11).
+
+## 49. No commercial/funnel fields
+
+`test_no_commercial_or_funnel_fields` confirms zero occurrence of
+`commercial`/`sales_funnel`/`funnel`/`cta_score`/`hook_strength`.
+`test_no_delete_winner_or_selected_clip_field`/`test_no_master_score_
+field` confirm no dataclass field named `delete`/`winner`/`selected_
+clip`/`final_winner`/`action`/`score`/`master_score`/`quality_score`
+anywhere across all four types.
+
+## 50. New tests
+
+51 tests, all passing (`TestOrderingUnitConstruction` 6, `Test
+DeterministicPlan` 8, `TestReorderOnlyInvariant` 5, `TestP1Constraints`
+4, `TestCompositeInternalOrder` 3, `TestP2SupersessionHandling` 5,
+`TestMultiSource` 4, `TestDiagnosticsAndIds` 4, `TestStructuralAudits`
+10, plus 1 compile/import sanity, plus 1 additional determinism test
+folded into `TestDeterministicPlan`).
+
+## 51. Composer regressions
+
+`composer`/`composer_provider`/`composer_openai`-keyword sweep: 32/32
+passed, zero change to any of those three files.
+
+## 52. Causal-validator regressions
+
+Included in the same 32/32 sweep above (`-k "composer or causal_
+order"`) -- zero change to `causal_order_validator.py`.
+
+## 53. P1/P2 regressions
+
+Targeted battery (D-123/128/150/166/167/168/169/171/174/180/183/184/
+187/188/189/191/193/194/195/197/198/199/D-200-wiring/D-201/D-202/D-203/
+D-204/D-205/D-206): **1239/1239 passed** (up from 1238 pre-fix once the
+one D-200.4B allow-list widening landed).
+
+## 54. Language regressions
+
+Included in the same targeted battery (D-166/D-168/D-169/D-171): all
+passing.
+
+## 55. BestTake regressions
+
+BestTake-keyword sweep: **472/472 passed**.
+
+## 56-58. Boundary / Pacing / Render regressions
+
+Boundary/Pacing/Render-keyword sweep: **446/446 passed** (13 subtests).
+
+## 59. Full offline suite
+
+**4909 passed, 5 failed** -- the SAME 5 pre-existing, unrelated failures
+recorded before this task began (`test_hybrid_story_guard_incomplete_
+retry.py` x1, `test_video00_modal_hybrid_semantic_parity.py` x4, both
+files untouched by this task; `test_cutsell_d169_language_proposition_
+relation.py::test_30_old_serialized_ids_unaffected` passed cleanly this
+time since `pipeline.py`/`contracts.py`/`canonical_identity.py` were
+never touched this task).
+
+## 60. New failures
+
+Zero. One pre-existing failure (D-200.4B's own allow-list assertion) was
+FIXED as part of this task's own authorized scope (widening an allow-
+list to include this task's own new, legitimate consumer of
+`editorial_moment_id`) -- not a regression, an expected consequence of
+this task's own authorized new reference.
+
+## 61. D-206 VERDICT
+
+**A. ORDERING CONSOLIDATION PHASE-A OFFLINE FOUNDATION PROVEN.** Every
+required contract is met: the reorder-only invariant holds exhaustively;
+P1 local-sequence/continuation/correction/composite-internal-order
+constraints are all proven; P2 supersession-survival and meaning-
+conflict cases are correctly reported as `CONFLICTED` rather than
+resolved or dropped; the three firewalls (unique-information, meaning,
+chronology) all hold; cycles are detected and handled without ever
+presenting a forced result as valid; multi-source behavior never
+fabricates a global timeline; the existing composer/causal-validator
+stack is confirmed completely unchanged and still dormant/unused; no
+second story-composer engine was built.
+
+## 62. Canonical Ordering status
+
+`TYPED_CONSTRAINT_FOUNDATION_OFFLINE_PROVEN`. P1 status unchanged
+(`P1_READY_FOR_P2`). P2 status unchanged (`P2_READY_FOR_ORDERING`).
+
+## 63. Exact D-207 gate
+
+D-207 -- Ordering Phase B: Existing Composer Adapter / Diagnostic
+Proposal Validation, OFFLINE FIRST. Should adapt frozen `OrderingUnit`s
+to the existing composer's real input shape (Section 38), accept the
+deterministic composer path (`compose_selected`) and optionally test the
+dormant `OpenAIComposerProvider` path via MOCKS ONLY (never a real
+provider call), validate any proposed reorder against this module's own
+constraints (`validate_reorder_only_invariant` + the precedence graph),
+and fall back safely to `OrderedRealizationPlan`'s own deterministic
+baseline when a proposal is invalid. Still no RAW. Still no live
+provider. Still no runtime authority. Requires separate Product Owner
+authorization.
+
+## 64-65. Boundary / Pacing-Overlap status (restated, unaffected)
+
+Boundary: remaining qualification work unaffected. Pacing/Overlap:
+unaffected. Neither module was modified.
+
+## 66. App-roadmap status
+
+P1 closed enough -> P2 closed enough -> Ordering consolidation Phase A
+offline-proven (this document) -> D-207 (if authorized, existing-composer
+adapter/diagnostic proposal validation, offline first) -> Ordering live
+diagnostic qualification -> remaining Boundary qualification -> Pacing
+V2 / dialogue overlap / J-cut/L-cut/micro-overlap -> Renderer/export ->
+unseen RAW generalization / Cut.ai parity -> app hardening -> TestFlight/
+App Store. Commercial Moment/Sales Funnel remain later.
+
+## 67. Decision entry
+
+This document.
+
+## 68. Confirmation
+
+No pipeline wiring (`pipeline.py`/`universal_clean_cut.py`/`brain_
+runtime.py`: zero diff). No RAW. No provider call (no OpenAI/Gemini, no
+`OpenAIComposerProvider` activation). No live authority: `ordering_
+realization_plan.py` is imported by its own test file only. No Family/
+BestTake/Boundary/Pacing/Renderer change. No Commercial Moment/Sales
+Funnel scoring.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-207
+(existing-composer adapter / diagnostic proposal validation, offline
+first) is the next Product Owner decision.
+
+**Then STOP. Do NOT implement D-207. Wait for Product Owner
+coordination.**
