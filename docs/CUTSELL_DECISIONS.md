@@ -43466,3 +43466,173 @@ D-115, D-116, D-177, D-178A, D-178A.1, D-178B, D-179, and the D-097.E
 entry.
 
 ---
+
+## D-211: Boundary Qualification Closure -- Opportunistic Target-Shape Policy (post D-210, docs only, no implementation)
+
+**Status: NO CONTRADICTION FOUND. D-210's forensic and gap classification
+(G -- real-media qualification only) are confirmed by this re-inspection.
+VERDICT A adopted verbatim: BOUNDARY SUFFICIENTLY QUALIFIED FOR PACING --
+D-177 TARGET-SHAPE REAL-MEDIA OBSERVATION DEFERRED OPPORTUNISTICALLY.**
+
+### 1. Scope discipline
+DOCS/FORENSIC CLOSURE ONLY. No `cutsell_worker/`, `tests/`, or
+`.github/workflows/` file touched. No RAW dispatched, no provider called, no
+Boundary/Pacing/Renderer/Family/BestTake/Ordering behavior changed. Verified
+at start: branch `feature/runpod-pod-on-demand`, HEAD `4fe6c73`, clean tree
+-- matched the directive's expected state exactly.
+
+### 2. Re-inspection performed (existing evidence only)
+- `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`: Sections 11
+  (Overlap/Dialogue-Pacing Transition doctrine, D-129), 13.11 (Boundary
+  role, restates D-107 CASE A/B/C, unchanged), 13.12 (Dialogue/Pacing role,
+  restates D-129 Section 11, unchanged placement), 13.14 (RAW->Cut.ai
+  Level-1 contract). Confirms the canonical ordering
+  `Selection/BestTake -> Freeze -> Boundary -> Dialogue/Pacing Transition ->
+  Renderer` verbatim, and that Pacing "cannot reopen Proposition Identity,
+  Attempt Relationships, Family Formation, or BestTake -- it operates
+  strictly on already-frozen, already-boundary-safe membership."
+- `docs/CUTSELL_DECISIONS.md` D-176 through D-210: re-confirmed D-177's
+  real-media verdict on run `34363547729` ("B. SAFETY REAL-MEDIA PROVEN --
+  TARGET SHAPE NOT EXERCISED", `total_visual_trim_seconds: 0.0`, both real
+  straddling events correctly floor-blocked as no-ops) and D-180's
+  BestTake/Selection Condition-4b ownership (`_case_b_fast_path_conflict`,
+  materiality corroboration, zero Boundary role).
+- `cutsell_worker/boundary_engine_pass.py::_partial_edge_trim_summary`
+  (lines 562-608, re-read in full): confirms existing diagnostics ALREADY
+  record, per clip: whether a straddling event was evaluated
+  (`partial_edge_trim_evaluated`), whether a trim was applied
+  (`partial_edge_trim_applied` / per-side variants), the exact reason
+  (`partial_edge_trim_reason`, including the delivery-floor-block reason
+  string), and the exact physical boundary before AND after
+  (`boundary_before_start/end`, `boundary_after_start/end`).
+- `cutsell_worker/dialogue_pacing_transition.py` (module constants and
+  docstring, re-read): confirms `HARD_CUT`/`TIGHT_CUT` are
+  `SUPPORTED_NOW`/`PHASE_1_EXECUTABLE_MODES` today (D-142, already live);
+  `J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP` are `REQUIRES_RENDERER_EXTENSION`
+  and are never selected as the executed `mode` in Phase 1 -- matches
+  D-098's own Section 3 status table verbatim.
+
+**No contradiction to D-210 was found anywhere in this re-inspection.**
+
+### 3. D-116 status
+CLOSED, unchanged. 19/19 tests, hard delivery-span floor, outermost-in
+multi-event chaining, no confidence gating needed (geometric floor
+sufficient). No new evidence this task; not re-litigated.
+
+### 4. D-177 status (three-part, per directive)
+- **MECHANISM:** `OFFLINE_PROVEN` (34/34 tests, both ENTRY- and
+  EXIT-straddle shapes, ambiguous both-edge-straddle fail-open, confidence-
+  vs-geometry separation all independently proven).
+- **REAL_MEDIA_SAFETY:** `PROVEN` (D-178B, run `34363547729`: both real
+  eligible events correctly declined as no-op, zero trims applied, zero
+  regression, zero unrelated system affected).
+- **REAL_MEDIA_TARGET_SHAPE:** `NOT_YET_OBSERVED` (no real Video00 dispatch
+  to date has contained a straddling event with genuine debris beyond the
+  measured delivery floor).
+- **BLOCKING:** `NO`.
+- **NEXT OBSERVATION:** `OPPORTUNISTIC_ON_FUTURE_AUTHORIZED_RAW` -- read
+  `diagnostics["boundary_partial_edge_trim"]` (already emitted, no new
+  plumbing) on whatever RAW is next authorized for an unrelated reason.
+
+### 5. D-180 ownership correction (preserved verbatim from D-210)
+D-180 is `pipeline.py::_case_b_fast_path_conflict`'s Condition 4b --
+BestTake/Selection-side materiality corroboration between two candidates
+(D-097's `d097_would_be_counted` classification), never a Boundary
+authority. Not reintroduced as Boundary ownership here or anywhere.
+
+### 6. Current Boundary diagnostics sufficiency for future opportunistic
+observation
+**SUFFICIENT. NO CODE REQUIRED.** Re-inspection of
+`_partial_edge_trim_summary` confirms every item the directive asked to
+audit is already observable from existing, already-emitted diagnostics on
+any future RAW, with zero new plumbing:
+- target straddling event present -> `partial_edge_trim_evaluated: True`
+- trim applied -> `partial_edge_trim_applied` / per-side booleans
+- delivery-floor clamp -> `partial_edge_trim_reason` (contains
+  `visual_trim_blocked_by_delivery_floor` when clamped/declined)
+- before/after physical boundary -> `boundary_before_start/end`,
+  `boundary_after_start/end` (exact source seconds, both states)
+- abstention -> the same reason field also carries
+  `visual_trim_not_at_edge` / `visual_delivery_overlap_no_trim` for the
+  other abstention shapes
+- word-cut result -> not a separate diagnostic field, and none is needed:
+  the hard word-floor is enforced structurally at computation time (D-115's
+  delivery span, itself derived from real word timestamps) and
+  independently fail-closed-verified afterward by
+  `selection_boundary_contract.py::enforce_selection_contract`, which
+  already aborts the pass if the ordered spoken token stream was altered.
+  A word cut, if it ever occurred, would already be caught by an existing
+  mechanism before reaching any diagnostic; no new observability adds
+  safety here.
+
+No future observability addition is named or required.
+
+### 7. Boundary canonical status
+`BOUNDARY_SUFFICIENT_FOR_PACING`, with the known non-blocking qualification
+note `D177_TARGET_SHAPE_REAL_MEDIA_OBSERVATION_PENDING_OPPORTUNISTICALLY`.
+Explicitly **NOT** `FULL_REAL_MEDIA_EXHAUSTIVE_PROOF` -- this status is a
+sufficiency-for-the-next-stage determination, not a claim that every
+Boundary code path has been exercised on real data.
+
+### 8. Ordering -> Boundary handoff (formalized, restates D-098 13.11-13.12,
+D-209/D-210, unchanged)
+Ordering determines unit order among already-selected, already-Frozen
+realizations (zero live authority over membership; D-209 confirmed zero
+relations were even needed on real Video00, a valid outcome). Boundary
+receives that order and determines source in/out for each unit --
+Boundary never reorders, never changes membership, only WHERE the already-
+ordered, already-selected material begins and ends physically.
+
+### 9. Boundary -> Pacing handoff (formalized, restates D-098 13.12/D-129
+Section 11.4, unchanged)
+Pacing receives ordered, boundary-finalized, source-mapped segments. Pacing
+cannot reopen Proposition Identity, Attempt Relationships, Family
+Formation, BestTake, or Boundary's own edge decisions -- it operates
+strictly downstream, deciding only join TREATMENT (`HARD_CUT`/`TIGHT_CUT`
+today; `J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP` contract-only pending renderer
+extension) between already-fixed source in/out points.
+
+### 10. D-211 verdict
+**A. BOUNDARY SUFFICIENTLY QUALIFIED FOR PACING -- D-177 TARGET-SHAPE
+REAL-MEDIA OBSERVATION DEFERRED OPPORTUNISTICALLY.** No forensic
+contradiction was found; D-210's conclusions stand unmodified.
+
+### 11. Next gate: D-212 -- PACING V2 ARCHITECTURE / FORENSIC (named, not
+authorized)
+Scope for a future, separately-authorized D-212 task: audit existing
+`pacing.py`, `dialogue_pacing_transition.py` (D-142's already-live Phase 1:
+`HARD_CUT`/`TIGHT_CUT` `SUPPORTED_NOW`; `J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP`
+`REQUIRES_RENDERER_EXTENSION`), the D-097.E physical ownership contract, and
+current gap/transition logic and dialogue/audio overlap mechanics; design
+(not implement) the remaining Pacing V2 scope: inter-segment rhythm,
+silence/gap treatment, dialogue continuity, audio transitions, J-cut,
+L-cut, micro-overlap. **Not implemented by this entry.**
+
+### 12. No Boundary expansion
+No additional Boundary gate created for multiple events, composites,
+P1/P2, Prosodic, or ordinary motion -- D-210's forensic found no structural
+blocker in any of these, and no new evidence surfaced by this task changes
+that.
+
+### 13. App roadmap status (unchanged, restated for continuity)
+P1 CLOSED ENOUGH. P2 CLOSED ENOUGH. Ordering CLOSED ENOUGH (D-209,
+`ORDERING_READY_FOR_BOUNDARY`). Boundary `BOUNDARY_SUFFICIENT_FOR_PACING`
+(this entry). Next: Pacing V2 -> dialogue overlap / J-cut / L-cut /
+micro-overlap -> Renderer/export qualification -> unseen RAW
+generalization / Cut.ai parity -> product hardening -> TestFlight -> App
+Store. Commercial Moment / Sales Funnel remain later / out of current
+scope.
+
+### 14. Confirmation
+NO cutsell_worker/tests/workflow file touched. NO RAW dispatched. NO
+provider called. NO Boundary/Pacing/Renderer behavior change. D-116, D-177,
+D-178A, D-178A.1, D-178B, D-179, D-180, D-210, and the D-097.E
+`PHYSICAL_OWNERSHIP_CONTRACT` are preserved, unmodified, unrewritten by
+this entry.
+
+**HUMAN ACTION REQUIRED:** NO for this closure itself (no contradiction, no
+new decision needed). YES (condition A) for authorizing the named-but-not-
+implemented D-212 Pacing V2 architecture/forensic task, which is Product
+Owner coordination territory per this entry's own "Then STOP" instruction.
+
+---
