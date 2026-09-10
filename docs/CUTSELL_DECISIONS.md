@@ -37518,3 +37518,319 @@ vs-canonical relation disagreement and its effect on P1 grouping shape,
 is a Product Owner-scoped decision on how much of a blocker this
 represents before any further Language-Spine or P2 investment; this
 entry does not resolve it).
+
+# D-200.1: P1 RELATION EVIDENCE DISAGREEMENT FORENSIC (POST D-200,
+ROOT-CAUSE ONLY, NO IMPLEMENTATION)
+
+Post D-200, Product Owner authorization: a read-only forensic into why the
+D-157 Watch+Listen relation classifier and the D-169 canonical Language
+relation classifier disagreed on 17 of 19 real edges (RAW `34460889768`),
+and whether that disagreement is a true contradiction or a comparison of
+non-comparable objects/dimensions. No implementation, no RAW, no provider,
+no threshold/weight change.
+
+## 1. D-157 relation ownership (`watch_listen_understanding.py::_relation_for_pair`)
+
+Answers: "does this predecessor/current `CandidateTake`/`UnderstandingSpan`
+pair look, sound, and time out like a behavioral RETRY / CORRECTION /
+CONTINUATION / COMPLEMENTARY / NEW_AUDIENCE_BEAT?" Inputs: `_restart_evidence`
+(lexical, token-based, reused from `attempt_reconstruction.py`), VISUAL/
+behavioral labels (`BEHAVIOR_ABANDONED_ATTEMPT`, `BEHAVIOR_POST_TAKE_RESET`,
+`BEHAVIOR_CLEAN_ATTEMPT`, `BEHAVIOR_AUDIENCE_DELIVERY` -- from the
+perception/visual-signal layer, not text), `complete_idea`/terminal
+punctuation (text heuristic, shared with take_segmentation), a measured
+pause, and the source-timing gap. **`RELATION_DISTINCT_PROPOSITION` is
+declared in this module's vocabulary but is never actually produced by any
+code path in `_relation_for_pair` -- a structurally unreachable/dead
+label.** Critically, D-157's RETRY/CORRECTION paths never check whether
+the two sides' actual claim CONTENT is the same or different -- restart +
+behavioral-brokenness is sufficient regardless of topic.
+
+## 2. D-169 relation ownership (`language_proposition_relation.py::classify_relation_candidate`)
+
+Answers: "do these two `PropositionCandidate`s (adjacent, same source)
+describe the SAME editorial claim, and if not, how do they relate?"
+Inputs: `_language_support` (claim-signature content-overlap comparison via
+`signatures_describe_same_proposition`/`claim_signatures_conflict`),
+`right_attempt.restart_evidence`/`.correction_evidence` (from D-168's own
+two-pass utterance-completion state machine -- text-only, no visual
+input), `left.meaning_completion` (utterance-level, text-derived),
+`editorial_slot_evidence`, and the SAME `_DEFAULT_MAX_CONTINUATION_GAP_SEC`
+gap threshold D-157 uses for its own `NEW_AUDIENCE_BEAT` gate (explicitly
+commented as a deliberate mirror in the code). RETRY specifically
+**requires** `restart AND same_proposition AND not meaning_conflict` --
+same_proposition (claim-content match) is a hard gate D-157 does not have.
+
+## 3. Side-by-side ownership table
+
+| dimension | D-157 (Watch+Listen) | D-169 (Language Spine) |
+|---|---|---|
+| question answered | "does this look/sound like a behavioral retry?" | "is this the same claim, and how do the claims relate?" |
+| objects related | `CandidateTake`/`UnderstandingSpan` predecessor pairs | `LanguageAttempt`/`PropositionCandidate` predecessor pairs |
+| restart signal | `_restart_evidence` (lexical) | same `_restart_evidence`, via `LanguageAttempt.restart_evidence` |
+| "broken" signal | VISUAL/behavioral labels (abandoned/reset) | text-only utterance completion state machine |
+| claim-content check | **NONE** | claim-signature overlap (`same_proposition`), negation/number conflict |
+| DISTINCT_PROPOSITION reachable? | **NO (dead label)** | YES (real code path) |
+| gap threshold | `_DEFAULT_MAX_CONTINUATION_GAP_SEC` | same constant, explicitly mirrored |
+
+## 4. Granularity audit (real data, RAW `34460889768`)
+
+36 P1 moments map onto only 20 canonical `LanguageAttempt`s (confirmed
+from the persisted `moments[].attempt_ids` array): **9 of the 20 canonical
+attempts are bridged onto 2-5 different P1 moments each** (25 of the 36
+moments share an attempt with at least one neighbor; the other 11 are
+1:1). This confirms the two segmentations are NOT inherently 1:1, as the
+directive anticipated.
+
+**However, for all 17 conflicting edges specifically, the predecessor and
+current P1 moment map to two DIFFERENT canonical attempts/propositions
+(zero attempt-id or proposition-id overlap on either side), and a real
+D-169 `RelationEvidence` was found for that exact adjacent proposition
+pair** (`canonical_relation_coverage_count` for these edges is nonzero by
+construction -- `build_relation_evidence` only computes evidence for
+immediately-adjacent canonical proposition pairs, so a hit proves the
+canonical segmentation crossed into the next attempt at exactly the same
+point the P1 edge did). **Max-overlap bridge result for all 17: ALIGNMENT_VALID.**
+Ambiguous mappings: 0. Wrong-pair mappings: 0. The granularity mismatch
+(Section 4's aggregate finding) is real but does NOT explain these 17
+specific conflicts -- root cause B (bridge misalignment) is **ruled out**
+for all 17.
+
+## 5. Multi-hypothesis audit -- INSUFFICIENT_OBSERVABILITY
+
+D-157 can produce multiple `AttemptRelationHypothesis` rows per edge (the
+`_relation_for_pair` function frequently appends more than one entry, e.g.
+both a weak RETRY and nothing else, or a CONTINUATION and a NEW_AUDIENCE_BEAT
+candidate depending on gate order). P1 reduces this to one value via
+`_dominant_relation`. **No currently-persisted D-200 diagnostic serializes
+the raw per-edge hypothesis list (relation/confidence/provenance/basis)**
+-- `watch_listen_understanding_diagnostics` only emits aggregate counts
+(`relation_count`, uncertain-hypothesis count), never a per-span row.
+**Root cause C (multi-hypothesis collapse) can be neither confirmed nor
+ruled out from this RAW's artifact.** This is a genuine, disclosed
+observability gap, not a code defect -- adding per-edge hypothesis
+serialization would itself be a `cutsell_worker` change outside this
+forensic's strict scope.
+
+## 6. Relation dimension audit
+
+The flat 7-label vocabulary (`RETRY`/`CORRECTION`/`CONTINUATION`/
+`COMPLEMENTARY`/`NEW_AUDIENCE_BEAT`/`DISTINCT_PROPOSITION`/`UNCERTAIN`) is
+shared by both classifiers by name, but Section 3 shows it is used to
+answer at least two different questions:
+
+- **ATTEMPT/REALIZATION relation** (is this a re-take of the SAME
+  delivery attempt?): `RETRY`, `CORRECTION`, `CONTINUATION` -- D-157's
+  natural home, and D-169 answers a compatible but stricter version of
+  this question (same_proposition-gated).
+- **PROPOSITION/CONTENT relation** (is this the same underlying claim?):
+  `DISTINCT_PROPOSITION`, and secondarily `COMPLEMENTARY` -- D-169's
+  natural home; D-157 cannot express `DISTINCT_PROPOSITION` at all.
+- **EDITORIAL-BEAT relation** (is this a fresh audience-facing beat?):
+  `NEW_AUDIENCE_BEAT` -- both classifiers implement a near-identical gate
+  for this one label (same gap constant, same completion-based structure),
+  making this the ONE label where literal equality is most likely to be
+  semantically meaningful.
+
+**This is a real, code-confirmed dimensional conflation, directly
+consistent with the not-yet-implemented D-111 "Behavior + Proposition
+Abstraction Doctrine" (`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`
+Section 10), which already documents "same product/topic/opener !=
+same proposition" as exactly this kind of unresolved ATTEMPT-vs-PROPOSITION
+distinction.** D-200.1 did not need to invent this finding -- it
+independently reproduces what D-111 already anticipated as documentation-only,
+now backed by real conflict data.
+
+## 7. Compatibility audit (structural, not per-edge -- see Section 5's
+observability gap for why per-edge label pairs cannot be listed)
+
+| label pair | classification | basis |
+|---|---|---|
+| DISTINCT_PROPOSITION (D-169) vs any D-157 label | **GRANULARITY_MISMATCH / DIFFERENT_DIMENSION** | D-157 structurally cannot express DISTINCT_PROPOSITION (dead label); any D-169 DISTINCT_PROPOSITION verdict is guaranteed to "conflict" with whatever D-157 substitutes |
+| RETRY (D-157, content-blind) vs DISTINCT_PROPOSITION/COMPLEMENTARY (D-169, content-checked) | **DIFFERENT_DIMENSION, POTENTIALLY_COMPATIBLE** | D-157 may correctly detect a behavioral restart while D-169 correctly detects the restart was NOT about the same claim -- both can be right about their own question |
+| CORRECTION (D-157, behavioral-brokenness-gated) vs CORRECTION (D-169, utterance-state-machine-gated) | **POTENTIALLY_COMPATIBLE / GRANULARITY_MISMATCH** | same label, different upstream evidence (visual vs text state machine) -- plausible agreement, not guaranteed |
+| NEW_AUDIENCE_BEAT vs NEW_AUDIENCE_BEAT | **TRUE_CONTRADICTION when unequal** | this is the one label where both sides implement near-identical logic -- a real disagreement here is the closest this system gets to a genuine contradiction |
+| CONTINUATION vs DISTINCT_PROPOSITION | **DIFFERENT_DIMENSION** | D-157's CONTINUATION is purely about incompleteness+timing; D-169's DISTINCT_PROPOSITION is purely about claim content -- not mutually exclusive judgments |
+
+No general compatibility RULE is proposed beyond what these pairs' own
+semantics/code support (per this task's own explicit instruction).
+
+## 8. Edge-by-edge table (all 17 conflicts, RAW `34460889768`)
+
+| edge | prev span (s) | cur span (s) | prev attempt | cur attempt | mapping quality | fused relation | moment role | grouping effect |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 13.78-23.28 | 25.6-46.42 | latt_30f0783932cfb2ec7935 | latt_7e800f3d5db6f9ced37e | ALIGNMENT_VALID | UNCERTAIN | CORRECTION | SPLIT |
+| 4 | 25.6-46.42 | 48.97-59.29 | latt_7e800f3d5db6f9ced37e | latt_dacc794fe8f35bcd8acc | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 5 | 48.97-59.29 | 62.12-74.42 | latt_dacc794fe8f35bcd8acc | latt_6c3019f906a191b5c2c7 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 6 | 62.12-74.42 | 82.82-104.32 | latt_6c3019f906a191b5c2c7 | latt_3048f27434c7d0812aab | ALIGNMENT_VALID | UNCERTAIN | CORRECTION | SPLIT |
+| 9 | 82.82-104.32 | 104.32-107.48 | latt_3048f27434c7d0812aab | latt_ee5d4359a09cfd45a95b | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 10 | 104.32-107.48 | 108.74-112.42 | latt_ee5d4359a09cfd45a95b | latt_b98d7ca94a3cc83b50a6 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 11 | 108.74-112.42 | 115.12-124.63 | latt_b98d7ca94a3cc83b50a6 | latt_6626b42903438afbfb23 | ALIGNMENT_VALID | UNCERTAIN | CORRECTION | SPLIT |
+| 13 | 115.12-124.63 | 128.14-134.22 | latt_6626b42903438afbfb23 | latt_2ff549c0e0fd3144fd28 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 14 | 128.14-134.22 | 135.44-158.14 | latt_2ff549c0e0fd3144fd28 | latt_dfa62c2c3c2205f1dea5 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 17 | 135.44-158.14 | 166.56-211.02 | latt_dfa62c2c3c2205f1dea5 | latt_988ed451534dd8edecf7 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 22 | 166.56-211.02 | 213.34-222.98 | latt_988ed451534dd8edecf7 | latt_5ce0b49b3b12d3332aea | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 23 | 213.34-222.98 | 226.74-233.18 | latt_5ce0b49b3b12d3332aea | latt_426b35239e618c895fa5 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 24 | 226.74-233.18 | 236.23-251.61 | latt_426b35239e618c895fa5 | latt_6a585b74c318d9681710 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 26 | 236.23-251.61 | 251.87-264.21 | latt_6a585b74c318d9681710 | latt_7f3d78d7b283b9416e4f | ALIGNMENT_VALID | UNCERTAIN | CORRECTION | SPLIT |
+| 28 | 251.87-264.21 | 264.43-283.67 | latt_7f3d78d7b283b9416e4f | latt_785243d572c4ee1240b9 | ALIGNMENT_VALID | UNCERTAIN | CLEAN_AUDIENCE_DELIVERY | SPLIT |
+| 30 | 264.43-283.67 | 295.52-313.5 | latt_785243d572c4ee1240b9 | latt_3d788834472379671ec9 | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+| 31 | 295.52-313.5 | 319.38-346.52 | latt_3d788834472379671ec9 | latt_df006520e0b97f9551be | ALIGNMENT_VALID | UNCERTAIN | POST_TAKE_RESET | SPLIT |
+
+Note: the specific D-157-alone and D-169-alone label VALUES behind each
+`UNCERTAIN`/`CONFLICT_ABSTAINED` row are not individually recoverable from
+persisted diagnostics (Section 5) -- only that they disagreed. Moment-role
+distribution across the 17: `POST_TAKE_RESET` 12, `CORRECTION` 4,
+`CLEAN_AUDIENCE_DELIVERY` 1 -- consistent with these being predominantly
+short/low-information linguistic segments, where either classifier's
+individual uncertainty is plausible on its own terms.
+
+## 9. Root-cause taxonomy (counts across all 17 conflicts)
+
+- A. SEGMENTATION_GRANULARITY_MISMATCH: 0 primary (real in aggregate,
+  Section 4, but not the direct cause of these 17 specific edges)
+- B. MAX_OVERLAP_BRIDGE_MISALIGNMENT: 0 (ruled out for all 17)
+- C. MULTI_HYPOTHESIS_COLLAPSE_LOSS: unknown for all 17 (Section 5,
+  INSUFFICIENT_OBSERVABILITY)
+- **D. NON_EXCLUSIVE_RELATION_LABELS: 17 (primary, all edges)** --
+  Section 6/7's dimensional conflation is structural and applies uniformly
+- E. TRUE_D157_VS_LANGUAGE_CONTRADICTION: cannot be isolated from D per
+  edge without Section 5's missing data; plausible secondary for a subset
+- F. CANONICAL_LANGUAGE_RELATION_CLASSIFIER_GAP: 0 (D-169's logic is
+  internally coherent for its own stated question)
+- **G. D157_RELATION_CLASSIFIER_GAP: 17 (secondary, all edges)** -- D-157's
+  RETRY/CORRECTION paths never check claim-content equivalence, and its
+  DISTINCT_PROPOSITION label is unreachable by construction
+- **H. CURRENT_FUSION_EQUALITY_TOO_STRICT: 17 (secondary, all edges)** --
+  `fuse_relation_evidence` uses bare `==`, with no accommodation for
+  Section 6/7's dimensional structure
+- I. INSUFFICIENT_OBSERVABILITY: applies to the multi-hypothesis question
+  (C) and to per-edge label-pair reconstruction, for all 17
+
+## 10. Fusion forensic
+
+`fuse_relation_evidence(d157_relation, canonical_relation)` treats
+`d157_relation == canonical_relation` as the ONLY definition of agreement.
+**Is exact string equality a semantically valid definition of agreement?
+Answer: NO**, with evidence: the two classifiers answer different
+questions for at least 2 of the 7 labels in the shared vocabulary
+(`DISTINCT_PROPOSITION` is unreachable on one side; `RETRY`/`CORRECTION`
+are content-blind on one side and content-gated on the other) -- flat
+equality can therefore produce a `CONFLICT_ABSTAINED` verdict even when
+both classifiers are internally correct about their own, different
+question. It is closer to valid for `NEW_AUDIENCE_BEAT` and `CONTINUATION`
+(near-identical underlying logic), which is why the fusion contract's
+"never weigh sources, never invent a compatibility rule beyond code"
+posture from D-199 was the right call for THIS forensic to preserve, not
+loosen unilaterally.
+
+## 11. Grouping ownership question
+
+D-197's own question is "should these two moments be in the same LOCAL
+RECORDING SEQUENCE?" -- this is fundamentally an **ATTEMPT/REALIZATION**
+question (are these two deliveries of the same recording attempt or
+retake series?), per Section 6. `RETRY`/`CORRECTION`/`CONTINUATION` are
+therefore the directly relevant evidence dimension for local grouping.
+`DISTINCT_PROPOSITION` (a pure content-difference signal) does not, by
+itself, answer whether two moments belong to the same local recording
+sequence -- a creator can deliver two DIFFERENT propositions within one
+continuous recording attempt, or the SAME proposition across two entirely
+separate recording sessions. **Recommendation (forensic only, not
+implemented): future grouping should consume an ATTEMPT/REALIZATION-
+dimension relation signal specifically, not a flat relation value that
+mixes in proposition-content and editorial-beat judgments.**
+
+## 12. CLEAN_DELIVERY_SEQUENCE / PREASSEMBLED_FINAL_SEQUENCE impact
+
+`clean_delivery_reachability_analysis` (this run, unchanged from D-197's
+own structural finding): every real JOIN relation either forces a
+non-clean moment role (RETRY/CORRECTION) or is CONTINUATION -- so any
+auto-grouped all-clean chain always classifies as `PREASSEMBLED_FINAL_SEQUENCE`,
+never the weaker `CLEAN_DELIVERY_SEQUENCE` claim. This reachability gap is
+**not caused** by the relation conflict (it is a pre-existing D-197
+structural finding); the conflict's only effect here is that MORE splits
+(Section 8) further shrink the already-small chance of any multi-moment
+clean chain forming at all. `false_positive_final_sequence_count: 0`,
+`preassembled_support_too_thin_count: 0` -- the conflict introduced no
+false-positive risk toward `PREASSEMBLED_FINAL_SEQUENCE`; if anything, the
+extra caution is defensively safe, not risky.
+
+## 13. D-198 (23 groups/9 sequences) -> D-200 (25 groups/9 sequences) explanation
+
+This run's own D-198 audit (unchanged code) computed, for the 35 total
+predecessor edges on the 36 P1 moments: `splits_by_relation.UNCERTAIN: 17`,
+`joins_by_relation.UNCERTAIN: 0` -- **all 17 conflict edges caused a split
+and none caused a join; zero UNCERTAIN edges ever join by D-197's own
+unchanged rules.** The remaining 18 edges split/joined per real,
+non-conflicted relation evidence (`genuine_split_evidence_count: 7`
+NEW_AUDIENCE_BEAT/CONTINUATION splits, `retry_correction_continuation_
+successfully_grouped: 8` RETRY/CONTINUATION joins). The exact 17 conflict
+edges responsible for the additional fragmentation are listed in Section 8
+-- no speculation, this is the audit's own arithmetic (17 forced splits is
+the entire explanation for the shift from `LOCAL_GROUPING_REAL_MEDIA_PROVEN`
+to `LOCAL_GROUPING_BOUNDED_BUT_OVER_FRAGMENTED`).
+
+## 14. P1 blocker decision
+
+**Is this blocker small enough to close before P2? Answer: NO, not as a
+single minimal patch -- but YES the underlying issue is well-bounded and
+closeable with one architecture-design step**, per Section 9's taxonomy
+(D+G+H, all structural/design-level, not classifier bugs). This is
+evidence-driven: Section 4 rules out the two "easy" explanations (bridge
+misalignment, granularity accident) for these 17 edges specifically,
+leaving a real ontology gap (Section 6/7) that a one-line equality-relax
+or a confidence-threshold tweak cannot honestly resolve without violating
+this task's own "do not invent compatibility rules beyond code" and "do
+not weigh sources" constraints.
+
+## 15. D-200.1 VERDICT
+
+**D. MULTIPLE MATERIAL ROOT CAUSES -- P1 RELATION INTEGRATION REQUIRES ONE
+MORE DESIGN STEP.** Root causes D (non-exclusive relation labels), G
+(D-157's content-blind RETRY/dead DISTINCT_PROPOSITION label), and H
+(fusion's bare equality check) are all real, code-confirmed, and
+structural -- none is a simple bug fix, and Section 5's observability gap
+(C) means even a well-intentioned quick patch could not be evidence-based.
+This is not verdict E (evidence insufficient) -- the PROBLEM TYPE is
+clearly characterized; only the exhaustive per-edge label-pair enumeration
+is unavailable, which does not block choosing between design directions in
+Section 16.
+
+## 16. Exact next gate (design only, no RAW, no implementation)
+
+One architecture-design gate, not a code change: define (offline document,
+no code) a dimension-aware relation representation -- e.g. separate
+`attempt_relation` / `proposition_relation` / `editorial_beat_relation`
+fields, consistent with D-111's already-documented BEHAVIOR/PROPOSITION/
+ATTEMPT-RELATIONSHIP abstractions (`docs/CUTSELL_CANONICAL_ENGINE_
+ARCHITECTURE_D098.md` Section 10) -- and decide which dimension(s) D-197
+grouping should consume (Section 11's recommendation: ATTEMPT/REALIZATION
+only). This design step should also specify what additional observability
+(Section 5's gap) would be needed to validate the design before any code
+change. **NOT authorized or started by this entry.**
+
+## 17. P2 readiness after repair
+
+Once the above design step is complete and (if it changes anything)
+offline-implemented and requalified, P1's local structure is expected to
+return to bounded, non-fragmented behavior -- at which point P2 Whole-Video
+Editorial Reasoning becomes the next major capability per the standing
+roadmap. This forensic does not itself authorize or schedule that work.
+
+## 18. App-roadmap status
+
+Unchanged: P2 -> Ordering -> remaining Boundary qualification -> Pacing V2/
+overlap/J-cut/L-cut -> Renderer/export qualification -> unseen RAW
+generalization -> app/product hardening -> TestFlight/App Store. D-200.1
+is a root-cause step within the current P1 milestone, not a roadmap change.
+
+## 19. Confirmations
+
+Read-only forensic. No `cutsell_worker` change. No tests changed. No
+workflow change. No RAW dispatched. No provider call. No weights or
+thresholds touched. No P1 authority granted. No P2 implementation. No
+Family/BestTake/Boundary/Pacing change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- the Section 16 design step
+is a product-owner-scoped architecture decision, not something this
+forensic authorizes itself to start).
