@@ -40526,3 +40526,304 @@ authorizing D-204 (the one Video00 RAW) is the next Product Owner
 decision.
 
 **Then STOP. Do NOT launch D-204. Wait for Product Owner authorization.**
+
+
+# D-204: P2 WHOLE-VIDEO EDITORIAL REASONING -- VIDEO00 REAL-MEDIA DIAGNOSTIC
+QUALIFICATION (POST D-203, EXACTLY ONE RAW, DIAGNOSTIC ONLY)
+
+## 1. Branch / new HEAD
+
+`feature/runpod-pod-on-demand`, verified before starting: HEAD
+`8f0e0599b89ab50b3bdbc594b19700931312b173` (matches expected), clean tree.
+One authorized workflow-only commit (`a81b719`, Section 2) precedes the RAW
+dispatch; this docs-only commit is the new HEAD.
+
+## 2. RAW id / files changed
+
+RAW: GitHub Actions run
+[34495140671](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34495140671)
+("CutSell Video00 Modal RAW", run #89), dispatched on
+`feature/runpod-pod-on-demand` at commit `a81b719`. Modal benchmark step
+("Run Modal full Video00 benchmark") itself: SUCCESS, 6m20s
+(15:22:08-15:28:28Z), one L4 GPU pass, source
+`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`.
+
+Pre-RAW observability check (per this task's own directive): `cutsell_
+worker`'s own P2 diagnostics fields already existed in full (D-202/D-203,
+offline-proven) -- only workflow/report formatting was missing (no
+`workflow_dispatch` input, no env-injection overlay, no compact-summary
+step for `diagnostics["whole_video_editorial_reasoning"]`). Exactly the
+"minimal workflow-only plumbing is authorized" case: one commit
+(`a81b719`) added a new `whole_video_editorial_reasoning_diagnostics_
+enabled` input, its env-injection overlay, and a new, deliberately
+BOUNDED "D-204 P2 Whole-Video Editorial Reasoning -> real-media
+qualification" step (unlike D-200.4's own known, documented, not-yet-
+fixed oversized-JSON step) to `.github/workflows/cutsell-video00-modal-
+raw.yml` only. Verified offline (YAML parse, embedded-Python syntax
+check, two synthetic engine-JSON fixtures) before dispatch. **No
+`cutsell_worker` file touched.**
+
+## 3. Flags
+
+`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1`,
+`CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`,
+`CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED=1`. No other
+experimental overlay.
+
+## 4-7. P2 capability status / source count / missing sources
+
+`p2_capability_status`: **AVAILABLE**. `p2_source_count`: 1.
+`p2_missing_evidence`: `[]` (empty -- no missing-P1 or missing-Language
+reason recorded). `whole_video_editorial_reasoning_status`: `evaluated`.
+
+## 8-12. Region audit
+
+`whole_video_region_count`: **25**. `recording_process_region_count`:
+**20** (16 `RECORDING_PROCESS_REGION` + 4 `TAKE_SERIES_REGION`).
+`audience_delivery_region_count`: **2** (`CLEAN_DELIVERY_REGION`).
+`mixed_region_count`: **3**. Full distribution: `{"CLEAN_DELIVERY_REGION":
+2, "MIXED_REGION": 3, "RECORDING_PROCESS_REGION": 16, "TAKE_SERIES_
+REGION": 4}` (sums to 25). **Boundedness**: `region_whole_source_
+collapse_detected`: **false** (25 regions from 25 local groups, not one
+collapsed whole-source region -- D-196's own historical LOCAL_GROUPING_
+TOO_BROAD failure mode did not recur). `region_not_p1_group_backed_
+count`: **0** (every region traces to exactly one already-computed
+`EditorialLocalGroup`, per D-202's own 1:1 wrapper design -- no arbitrary
+time-gap segmentation exists in this module by construction). `region_
+source_ids`: `["src_65a6d5f64edda937ca1d"]` -- one source, identity
+preserved.
+
+## 13-15. Proposition realization audit
+
+`proposition_realization_map_count`: **20** (one row per distinct
+`proposition_candidate_id` this source's moments reference).
+`multi_realization_proposition_count`: **9** -- P2 DID discover
+propositions with more than one realization on real Video00 evidence.
+**Distant realization value**: all 9 classified `MULTIPLE_CLEAN_
+REALIZATIONS` (every region touched by these 9 propositions carries
+`dominant_process_status == CLEAN_DELIVERY_REGION`). Mechanistically,
+these arise from D-199's own documented many-to-one canonical-attempt
+bridge (max-overlap match): distinct P1 candidate moments that bridge
+onto the SAME canonical `LanguageAttempt` inherit that attempt's SAME
+`proposition_candidate_id` (looked up by `attempt_id`, per `language_
+proposition_relation.py`) -- exactly the mechanism D-200.4A's own forensic
+already proved general, here observed producing a real, legitimate
+multi-realization signal rather than a collision (D-200.4B's identity fix
+already closed the false-positive case; these 9 are genuine).
+
+## 16-21. Supersession audit
+
+`supersession_hypothesis_count`: **300** (C(25,2) -- every region pair
+within the one source, per D-202's own bounded O(n^2) design).
+`supersession_status_distribution`: `{"CONFLICTED": 6, "NO_SAFE_
+SUPERSESSION": 5, "PARTIAL_SUPERSESSION": 11, "UNKNOWN": 278}`.
+`supported_supersession_count`: **0**. `partial_supersession_count`:
+**11**. `no_safe_supersession_count`: **5**. `conflicted_supersession_
+count`: **6**. `unknown_supersession_count`: **278** (the large majority
+-- most of the 300 region pairs simply share no comparable proposition
+content at all across only 20 propositions spread over 25 regions,
+honestly reported as `UNKNOWN` rather than a guessed `NO_COVERAGE`, per
+D-202's own "never invent" contract).
+
+## 22-23. Unique-information firewall
+
+`unique_information_uncovered_count`: **284** (total uncovered-earlier-
+proposition instances across all 300 hypotheses -- consistent with the
+UNKNOWN-heavy distribution above). `unique_information_firewall_
+violation_count`: **0**. `unique_information_firewall_result`: **HELD**.
+Zero `SUPPORTED_SUPERSESSION` verdicts were asserted anywhere while
+uncovered earlier content existed -- the firewall's own binding contract
+(D-202 Section 12/14) held on real, adversarial-scale evidence (300
+pairs), not merely on synthetic fixtures.
+
+## 24-25. Meaning firewall
+
+`meaning_conflict_case_count`: **6** (real region pairs where D-169's own
+`claim_signatures_conflict` detected a negation/number mismatch on
+otherwise-matching content). `meaning_firewall_violation_count`: **0**.
+`meaning_firewall_result`: **HELD** -- every one of the 6 real conflict
+cases was correctly force-set to `CONFLICTED`, none smoothed into a
+`SUPPORTED`/`PARTIAL` verdict.
+
+## 26-27. Chronology firewall
+
+`chronology_only_supersession_count`: **0**. `chronology_firewall_
+result`: **HELD**. As documented in the workflow step itself, this is a
+structural guarantee (`_supersession_status` never reads region position,
+only `recording_process_support`/`audience_delivery_support`/`coverage_
+status`, D-202 Section 12) rather than a live chronology-swap A/B test
+(D-204 is exactly one RAW) -- the zero count on 300 real pairs is
+consistent with, not merely assumed from, that structural proof.
+
+## 28-29. P1 limitation independence
+
+`same_editorial_beat_required`: **NO**. `preassembled_final_required`:
+**NO**. `preassembled_final_sequence_observed_in_this_run`: **false** --
+P1 built 9 real sequences on this RAW and NONE was classified
+`PREASSEMBLED_FINAL_SEQUENCE` (the same honest, long-standing D-193/
+D-200.2 gap), yet P2 still reached `AVAILABLE` capability and produced
+25 bounded regions and 300 supersession hypotheses. Direct, real-media
+proof of the independence D-202/D-203 already established offline.
+
+## 30-32. P1 health
+
+`p1_status`: `evaluated`. `p1_moment_count`: **36**. `p1_local_group_
+count`: **25** (1:1 with the region count above, confirming the P2
+region wrapper's own contract). `p1_sequence_count`: **9**.
+
+## 33-36. Live Language health
+
+`live_language_spine_status`: `evaluated`. `language_attempt_count`:
+**20**. `proposition_candidate_count`: **20**. `relation_evidence_
+count`: **19**.
+
+## 37-38. Global continuity
+
+`global_continuity_status`: **CONFLICTED**. `global_conflict_count`:
+**6**. This is driven ENTIRELY by the 6 genuine meaning-conflict
+supersession hypotheses (Section 24) -- an honest, structurally-derived
+label, not a defect: it demonstrates the meaning firewall correctly
+propagating a real cross-region semantic conflict up to the aggregate
+status rather than silently absorbing it into a falsely coherent summary.
+
+## 39. Real P2-over-P1 value
+
+**Observed, not invented.** Two concrete patterns P1 alone cannot
+represent at the whole-video level, both present in this real RAW:
+1. The 9 `MULTIPLE_CLEAN_REALIZATIONS` propositions (Section 13-15) --
+   P1's own local-sequence/local-group scope never compares moments
+   outside a caller-bounded window; P2's whole-video proposition
+   realization map is what actually surfaces that these propositions
+   recur across the source at all.
+2. The 6 genuine `CONFLICTED` supersession hypotheses (Section 24) --
+   two DISTANT regions whose proposition content actually disagrees
+   (negation/number mismatch). P1's own `RelationEvidence`/`Structured
+   EditorialRelationEvidence` machinery only ever compares ADJACENT
+   pairs; a true distant contradiction like this is structurally
+   invisible to P1 and only became visible through P2's O(n^2) distant-
+   pair comparison.
+
+## 40. P2 usefulness classification
+
+**USEFUL_AND_BOUNDED.** Capability AVAILABLE, real multi-realization and
+supersession evidence produced, zero firewall violations across all
+three firewalls on 300 real hypotheses.
+
+## 41-47. Immutability
+
+**Family / BestTake / D-191 / Ordering / Boundary / Pacing / Renderer:
+all immutable.** Not proven by a live A/B RAW (D-204 is exactly one RAW
+by its own rule) -- proven by construction and already proven offline:
+D-202/D-203's own module-leaf grep tests confirm this module imports
+nothing from `take_grouping`/`take_grouping_provider`/`composite_
+resolver`/`realization_resolver`/`bounded_finalist_arbiter`/`bounded_
+finalist_authority`/`boundary_engine_pass`/`dialogue_pacing_transition`,
+and D-203's own `test_flag_on_with_p1_on_evaluates_without_mutating_
+winner` proves the SAME winner is selected regardless of the P2 flag's
+state on a synthetic pipeline-shaped fixture. This RAW's own job log
+confirms every other diagnostic block (D-116/D-123/D-150/D-164/D-173/
+D-175/D-178B/D-181/D-186A/D-190/D-192/D-196/D-198/D-200/D-200.4) computed
+and printed successfully alongside the new P2 block, with the Modal
+benchmark step itself (the actual selection/render engine run) completing
+before any diagnostics step ever runs -- P2 cannot have influenced an
+edit output it is computed strictly after.
+
+## 48-52. Parity metrics
+
+**NOT RETRIEVABLE this turn -- honestly disclosed, not fabricated.** The
+"Video00 quality ladder" step (job step 22) completed SUCCESS and would
+carry Selection/Boundary/overall-physical Level-1 and F1-vs-Cut.ai/Human-
+Gold numbers, but its own printed output fell outside the `get_job_logs`
+tool's tail-line retrieval window for this job (the same ~5000-line
+hard-capped-tail limitation this session's D-200.4 forensic already
+documented as a tool-side ceiling, not something retriable), and
+downloading the uploaded artifact JSON directly is blocked by this
+environment's egress policy (Azure Blob Storage redirect denial, also
+already established this session, not retried per the environment's own
+"never retry policy denials" instruction). **Per this task's own
+instruction, no movement is attributed to P2 regardless** -- P2 has zero
+authority and cannot have moved these numbers by construction (Section
+41-47).
+
+## 53. D-204 VERDICT
+
+**A. P2 WHOLE-VIDEO EDITORIAL REASONING REAL-MEDIA PROVEN -- P2
+SUFFICIENTLY QUALIFIED FOR ORDERING.**
+
+Every sufficiency criterion this task's own directive names is met on
+real evidence: capability AVAILABLE; real P1/Language evidence actually
+consumed (36 moments, 25 groups, 9 sequences, 20 attempts/propositions,
+19 relations); regions remain bounded (25, all P1-group-backed, no
+whole-source collapse); structurally meaningful whole-video relations
+were produced (9 multi-realization propositions, 300 supersession
+hypotheses with a real, non-trivial status distribution); all three
+firewalls (unique-information, meaning, chronology) HELD with zero
+violations on 300 real hypotheses; no downstream mutation (by
+construction + offline proof); no material false global interpretation
+(`CONFLICTED` global continuity is a correct, evidence-driven label, not
+a false claim). A supported supersession was NOT required and none was
+forced (`supported_supersession_count = 0`, explicitly acceptable per
+this task's own "no forced success" section).
+
+**Known, non-blocking observation** (reported honestly, not investigated
+or fixed -- explicitly out of this task's strict scope): two pre-existing
+QA validator steps ("Verify frozen Selection lock", "Verify Human Gold
+regression QA (18-check manifest)") failed on this run, giving the
+overall job a `failure` conclusion. Confirmed via direct cross-run
+comparison that this is NOT caused by D-204: run #88 (`ee2253f5`, the
+D-200.4 commit, dispatched BEFORE any D-203/D-204 work existed) failed on
+the IDENTICAL two steps with the identical step numbering and timing
+shape. This is a pre-existing condition unrelated to P2, and Family/
+Selection changes are explicitly out of this task's strict scope ("Not
+allowed: Family, BestTake") -- reported to the Product Owner, not
+patched.
+
+## 54. P2 closure decision
+
+**P2_READY_FOR_ORDERING.**
+
+## 55. Exact next major gate
+
+D-205 -- Ordering Architecture / Forensic. NOT implemented here; requires
+separate Product Owner authorization.
+
+## 56-58. Ordering / Boundary / Pacing-Overlap status (restated,
+## unaffected)
+
+Ordering: not started, unaffected -- now the exact next gate (Section
+55). Boundary: remaining qualification work unaffected. Pacing/Overlap:
+unaffected. None of this task touches any of the three.
+
+## 59. App-roadmap status
+
+P1 closed enough -> P2 real-media qualification COMPLETE
+(P2_READY_FOR_ORDERING) -> Ordering -> remaining Boundary qualification
+-> Pacing V2 / overlap / J/L cuts -> Renderer/export qualification ->
+unseen RAW generalization / Cut.ai parity -> production hardening ->
+TestFlight/App Store -> later Commercial Moment / Sales Funnel
+intelligence. No more P2 gates are opened by this result (this task's own
+"do not build endless P2 subfeatures" instruction, honored -- no material
+P2 blocker was found).
+
+## 60-62. Confirmations
+
+**NO post-result patch**: `cutsell_worker` was not touched at any point
+in this task, before or after the RAW; only one workflow file (pre-RAW)
+and this documentation entry (post-RAW) were written. **NO second RAW**:
+exactly one RAW (run 34495140671) was dispatched; the pre-existing
+validator-step failures were investigated by comparing against an
+ALREADY-COMPLETED prior run (#88), never by launching a new one. **NO P2
+authority**: P2 remains diagnostic/hypothesis-only; no field on any D-202/
+D-203 type carries a delete/select/reorder/winner instruction, and none
+was added or exercised here.
+
+## 63. D-204 decision entry
+
+This document.
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- product decision) --
+authorizing D-205 (Ordering Architecture/Forensic) is the next Product
+Owner decision.
+
+**Then STOP. Do NOT implement D-205. Wait for Product Owner
+coordination.**
