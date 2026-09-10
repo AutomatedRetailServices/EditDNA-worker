@@ -260,7 +260,7 @@ def decide_transition(
     # --- Relationship-hint hard gates (upstream evidence, never computed here) ---
     if relationship_hint == RELATIONSHIP_RETRY:
         return _fallback_plan(
-            baseline, decision_status=DECISION_CONFLICTED,
+            baseline, transition_index=transition_index, decision_status=DECISION_CONFLICTED,
             fallback_reason=CONFLICT_RETRY_RELATIONSHIP, conflict_flags=(CONFLICT_RETRY_RELATIONSHIP,),
             speech_overlap_status=SPEECH_OVERLAP_NONE, double_speech_status=DOUBLE_SPEECH_UNKNOWN,
             meaning_safety_status=SAFETY_UNKNOWN, word_safety_status=SAFETY_UNKNOWN,
@@ -271,7 +271,7 @@ def decide_transition(
         reason = CONFLICT_OVERLAP_DISABLED if not dialogue_overlap_enabled else CONFLICT_NO_CANDIDATE_OFFERED
         gap_decision = _keep_pause_or_tighten(left, baseline, lw)
         return _fallback_plan(
-            baseline, decision_status=DECISION_SUPPORTED,
+            baseline, transition_index=transition_index, decision_status=DECISION_SUPPORTED,
             fallback_reason=(reason if not dialogue_overlap_enabled else None),
             conflict_flags=((reason,) if not dialogue_overlap_enabled else ()),
             speech_overlap_status=SPEECH_OVERLAP_NONE, double_speech_status=DOUBLE_SPEECH_SAFE_NO_OVERLAP,
@@ -282,7 +282,7 @@ def decide_transition(
     if relationship_hint == RELATIONSHIP_CORRECTION:
         gap_decision = _keep_pause_or_tighten(left, baseline, lw)
         return _fallback_plan(
-            baseline, decision_status=DECISION_SAFE_FALLBACK,
+            baseline, transition_index=transition_index, decision_status=DECISION_SAFE_FALLBACK,
             fallback_reason=CONFLICT_CORRECTION_RELATIONSHIP, conflict_flags=(CONFLICT_CORRECTION_RELATIONSHIP,),
             speech_overlap_status=SPEECH_OVERLAP_NONE, double_speech_status=DOUBLE_SPEECH_NO_OVERLAP_REQUIRED,
             meaning_safety_status=SAFETY_SAFE, word_safety_status=SAFETY_SAFE,
@@ -438,13 +438,24 @@ def _keep_pause_or_tighten(left: DraftClip, baseline: DialogueTransitionPlan, le
 
 
 def _fallback_plan(
-    baseline: DialogueTransitionPlan, *, decision_status: str, fallback_reason: Optional[str],
-    conflict_flags: Tuple[str, ...], speech_overlap_status: str, double_speech_status: str,
-    meaning_safety_status: str, word_safety_status: str, gap_decision: str,
+    baseline: DialogueTransitionPlan, *, transition_index: int, decision_status: str,
+    fallback_reason: Optional[str], conflict_flags: Tuple[str, ...], speech_overlap_status: str,
+    double_speech_status: str, meaning_safety_status: str, word_safety_status: str, gap_decision: str,
 ) -> DialogueTransitionPlan:
+    """D-218F -- `baseline` comes from `plan_dialogue_pacing_transitions((left,
+    right), ...)`, a fresh 2-clip mini-sequence whose own internal
+    enumeration always assigns it `transition_index=0` regardless of the
+    real position in the full timeline (D-218R's own root-caused finding).
+    Every early-gate fallback path MUST reapply the caller's real
+    `transition_index` here, exactly like the main decision path already
+    does at its own `replace(baseline, transition_index=transition_index,
+    ...)` call -- otherwise every plan built via this fallback silently
+    reverts to index 0, corrupting `sequence_consistency_diagnostics`'s own
+    per-pair identity labels."""
     provenance = tuple(sorted(set(baseline.provenance) | {"pacing_transition_decision_v1"}))
     return replace(
         baseline,
+        transition_index=transition_index,
         fallback_reason=fallback_reason,
         provenance=provenance,
         pacing_gap_decision=gap_decision,

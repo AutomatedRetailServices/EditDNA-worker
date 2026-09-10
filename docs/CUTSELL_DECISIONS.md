@@ -45961,3 +45961,254 @@ directive did not authorize touching `cutsell_worker`). No further
 action is taken on either. Then STOP.
 
 ---
+
+## D-218F: Pacing V2 Fallback Transition-Index Identity Integrity Fix (post D-218R)
+
+**Status: VERDICT A -- PACING V2 FALLBACK TRANSITION IDENTITY INTEGRITY
+FIX OFFLINE PROVEN. The `_fallback_plan` transition-index bug D-218R
+root-caused (never fixed there, out of that task's scope) is now fixed
+at its exact source with zero decision drift. D-218R's own verdict is
+UNCHANGED: REAL_MEDIA_SAFE_USEFUL_WITH_NON_BLOCKING_EVIDENCE_LIMITATION.**
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, commit `<TO BE FILLED AT COMMIT>` (this
+task's own tiny offline bugfix commit, on top of D-218R's `b4f6e4a`). No
+RAW dispatched.
+
+### 2. Files changed
+`cutsell_worker/pacing_transition_decision.py` (the fix itself, 17
+insertions / 6 deletions), `tests/test_cutsell_d218f_pacing_v2_fallback_
+transition_identity_fix.py` (new, 32 tests), this decision doc entry.
+Nothing else.
+
+### 3. Root cause (as established in D-218R, re-confirmed here)
+`decide_transition`'s `baseline` comes from `plan_dialogue_pacing_
+transitions((left, right), ...)` -- a fresh 2-clip mini-sequence whose
+own internal `enumerate()` always assigns that lone pair
+`transition_index=0`, regardless of its real position in the full
+timeline. The module's own MAIN decision path already reapplied the
+caller's real `transition_index` at its own `replace(baseline,
+transition_index=transition_index, ...)` call, but its `_fallback_plan`
+helper -- used by three early gates: the RETRY relationship gate, the
+CORRECTION relationship gate, and the overlap-disabled/no-candidate-
+offered gate -- never did, silently reverting every plan built via those
+three gates back to index 0.
+
+### 4. Correction (minor, this task's own finding during re-audit)
+D-218R's own decision entry (item 8) and this task's directive both
+describe the real RAW's affected transitions as taking the
+`CONFLICT_NO_CANDIDATE_OFFERED` path. Re-checking the live call site
+(`universal_clean_cut.py`) during this fix shows `dialogue_overlap_
+enabled` defaults to `False` and was never set by any flag D-218R's RAW
+enabled -- so the real 26 transitions actually took the sibling branch of
+the SAME gate, `CONFLICT_OVERLAP_DISABLED`. This does not change the
+root cause, the bug, or the fix: both branches share the exact same
+`_fallback_plan` call site and the exact same bug. Recorded here for
+accuracy; D-218R's own aggregate findings (firewalls, mode counts,
+`sequence_consistency` mislabeling) are unaffected.
+
+### 5. Previous transition-index behavior
+Any plan returned via `_fallback_plan` (RETRY gate, CORRECTION gate,
+overlap-disabled/no-candidate gate) carried `transition_index=0`
+unconditionally, no matter which real adjacent pair it represented.
+
+### 6. Corrected transition-index behavior
+`_fallback_plan` now requires (`transition_index` is a required keyword
+argument with no default -- a caller cannot silently omit it) and
+reapplies the caller's real `transition_index` via the same `dataclasses.
+replace` convention already used everywhere else in this module. All
+three call sites (RETRY, CORRECTION, overlap-disabled/no-candidate) now
+pass `transition_index=transition_index` through explicitly. For
+adjacent-pair index N, `decide_transition(..., transition_index=N, ...)`
+now returns `transition_index == N` on every result path (SUPPORTED,
+SAFE_FALLBACK, CONFLICTED, UNKNOWN), proven directly (test matrix items
+1-13).
+
+### 7. Fallback construction change
+`_fallback_plan`'s signature gained one required keyword-only parameter,
+`transition_index: int`, and its `replace(baseline, ...)` call gained
+`transition_index=transition_index` as its first field. No other
+parameter, branch, or field changed.
+
+### 8. All fallback call-site audit
+Three call sites of `_fallback_plan` exist in the module (confirmed via
+`grep -n "_fallback_plan("` -- unchanged count before/after this fix,
+proving no call site was missed or added): the RETRY relationship gate
+(line ~262), the overlap-disabled/no-candidate-offered gate (line ~273),
+and the CORRECTION relationship gate (line ~284). All three now pass
+`transition_index=transition_index`. Every OTHER return path in the
+module (word-timing-missing/UNKNOWN, meaning-block/SAFE_FALLBACK,
+prosodic-restart/SAFE_FALLBACK, and the fully-SUPPORTED/ELIGIBLE path)
+already returns via the module's own single main `replace(baseline,
+transition_index=transition_index, ...)` call and was already correct
+pre-fix -- confirmed unchanged by tests 6, 9, 10 (completeness/no-
+regression controls) and 11-13 (supported J/L/micro-overlap paths).
+
+### 9. Multi-index repro before/after
+Before the fix (verified by inspection and by removing the fix locally
+during development): four adjacent pairs at real indices 0, 1, 2, 3,
+each forced through the CONFLICT_OVERLAP_DISABLED fallback gate, all
+returned `transition_index == 0` -- a genuine identity collision purely
+from fallback construction (`len({...}) == 1`). After the fix (test 20):
+the same four pairs return `transition_index` values `[0, 1, 2, 3]`
+respectively (`len({...}) == 4`).
+
+### 10. Supported-path index result
+Non-fallback SUPPORTED advanced-mode paths (J_CUT, L_CUT,
+MICRO_AUDIO_OVERLAP) were never affected by this bug (they already used
+the module's own main `replace` call) and remain correct post-fix
+(tests 11-13): each retains its own real caller-supplied
+`transition_index`.
+
+### 11. Sequence-consistency identity result
+Built two fallback plans at real positions 5 and 6 sharing identical
+`(mode, gap_removed_duration)` "evidence" but genuinely different
+`pacing_gap_decision` (`KEEP_PAUSE` vs `TIGHTEN`, driven by D-038's own
+claim-criticality classifier on each one's own trailing words) -- the
+EXACT shape `sequence_consistency_diagnostics` is designed to flag. Post-
+fix, the flagged pair correctly names `left_index: 5, right_index: 6`
+(test 20b) -- structurally impossible to reproduce as `(0, 0)` regardless
+of the plans' real positions, closing the exact defect D-218R observed
+on real data (all 9 flagged real pairs mislabeled `(0, 0)`).
+
+### 12. Selected-mode immutability
+Test 15: for identical inputs, `plan.mode` is byte-identical whether
+`transition_index` is supplied or left at its default. No mode-selection
+logic was touched.
+
+### 13. Gap-decision immutability
+Test 16: `pacing_gap_decision` (and its underlying `fallback_reason`)
+unchanged for identical inputs across the identity-only fix.
+
+### 14. Safety-status immutability
+Test 17: `meaning_safety_status`, `word_safety_status`, and
+`double_speech_status` all unchanged for identical inputs.
+
+### 15. Fallback-reason immutability
+Covered by tests 14 and 16: `decision_status` and `fallback_reason` are
+byte-identical pre/post the identity-only change.
+
+### 16. Timing-field immutability
+Test 18: `overlap_duration` (the only candidate-timing-derived output
+field on the plan) is unchanged for identical J-cut inputs with and
+without an explicit `transition_index`.
+
+### 17. Conflict-field immutability
+Test 19: `conflict_flags` unchanged for identical inputs.
+
+### 18. Deterministic result
+Test 21: two identical calls with the same real `transition_index`
+produce an identical `DialogueTransitionPlan` (`plan1 == plan2`).
+
+### 19. No RAW required
+Per this task's own explicit scope, no RAW was dispatched. The fix is an
+identity/diagnostic-labeling correction only, proven deterministically
+offline against synthetic fixtures covering every affected call site and
+every real-media shape D-218R actually observed (`CONFLICT_OVERLAP_
+DISABLED`, multi-transition sequences, and the exact same-evidence/
+different-decision `sequence_consistency` shape).
+
+### 20. D-218R evidence status
+Unchanged. D-218R's own real-media findings (capability AVAILABLE, 26
+transitions, 23 HARD_CUT/3 TIGHT_CUT/11 KEEP_PAUSE, 0 J/L/micro-overlap,
+0 firewall violations, 0 advanced execution) stand exactly as reported --
+this fix corrects only the `sequence_consistency` diagnostic's own
+per-pair IDENTITY labels, never any mode, safety, or gap decision.
+
+### 21. Evidence-coverage limitation status
+Unchanged and NOT reopened here, per this task's own explicit "NO
+EVIDENCE-COVERAGE REOPEN" instruction: D-218R's zero/limited
+relationship-hint, Prosodic, and candidate-timing coverage on the one
+real Video00 run remains a separate, non-blocking, future-authority
+question.
+
+### 22. D-215 regression
+`tests/test_cutsell_d215_pacing_transition_decision_foundation.py`: all
+46 tests still pass, unchanged, after this fix -- proving zero decision
+drift on the module's own original foundation suite.
+
+### 23. D-216 regression
+`tests/test_cutsell_d216_pacing_v2_live_diagnostic_integration.py`: all
+58 tests still pass, unchanged.
+
+### 24. D-217 regression
+`tests/test_cutsell_d217_pacing_v2_real_evidence_source_wiring.py`: all
+48 tests still pass, unchanged.
+
+### 25. D-218R workflow regression
+`tests/test_cutsell_d218r_pacing_v2_real_media_observability_repair.py`:
+all 15 tests still pass, unchanged -- this fix touched no workflow file.
+
+### 26. Full offline suite
+`python3 -m pytest tests/` (5 Pacing V2 suites, D-215 through D-218F,
+combined): 199 passed. Full repository suite (`--ignore=tests/
+test_semantic_stitch.py` for its own pre-existing, unrelated module-level
+collection error): passed with only the same 5 pre-existing, unrelated
+`D-044`/hybrid-semantic-parity failures already confirmed present before
+D-217/D-218/D-218R/D-218F (byte-identical failing test names).
+
+### 27. New failures
+Zero. This fix introduces no new test failures anywhere in the suite.
+
+### 28. D-218F verdict
+**A. PACING V2 FALLBACK TRANSITION IDENTITY INTEGRITY FIX OFFLINE
+PROVEN.**
+
+### 29. Canonical Pacing status
+Adds `PACING_V2_FALLBACK_TRANSITION_IDENTITY_INTEGRITY_OFFLINE_PROVEN` to
+the existing chain: `PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_
+PROVEN` + `PACING_V2_TRANSITION_DECISION_FOUNDATION_OFFLINE_PROVEN` +
+`PACING_V2_LIVE_DIAGNOSTIC_INTEGRATION_OFFLINE_PROVEN` + `PACING_V2_
+REAL_EVIDENCE_SOURCE_WIRING_OFFLINE_PROVEN` + `PACING_V2_REAL_MEDIA_
+DIAGNOSTIC_QUALIFICATION_PROVEN` + this entry's own new status.
+D-218R's verdict is NOT changed -- it remains
+`REAL_MEDIA_SAFE_USEFUL_WITH_NON_BLOCKING_EVIDENCE_LIMITATION`.
+
+### 30. Exact D-219 gate
+**D-219 -- Pacing V2 Advanced Transition Authority Architecture / Safety
+Forensic** (unchanged from D-218R item 15). Per this task's own explicit
+instruction, D-219 is named, NOT implemented, NOT designed in detail here.
+It will decide whether and under what exact conditions J_CUT/L_CUT/
+MICRO_AUDIO_OVERLAP may receive bounded live authority, forensic/docs
+only, and must separately consider whether Video00's limited evidence
+coverage (item 21) permits authority now or requires a narrower evidence-
+qualified gate first.
+
+### 31. Live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the only live-executed modes.
+This fix is confined to `pacing_transition_decision.py`'s own diagnostics
+-only decision layer (never imported by `universal_clean_cut.py` or
+`pipeline.py` directly, per D-215's own original structural proof,
+reconfirmed unchanged by this task's own test 28).
+
+### 32. Renderer status
+Unchanged. `render.py`/`render_plan.py` not touched, not imported by the
+fixed module (test 27).
+
+### 33. App-roadmap status
+Unchanged from D-218R. Pacing: D-213 forensic -> D-214 renderer contract
+-> D-215 decision foundation -> D-216 live diagnostics -> D-217 evidence
+wiring -> D-218 real-media qualification (observability-blocked) ->
+D-218R real-media qualification (observability fixed, audit completed,
+real bug found) -> D-218F (this entry, the found bug fixed). D-219
+(advanced live authority decision) remains the next, not-yet-reached
+gate.
+
+### 34. Confirmation
+NO RAW dispatched. NO provider/network call. NO new Pacing decision
+logic (no new mode, no new eligibility rule, no new safety check). NO new
+timing policy or duration threshold (test 23). NO live J/L/micro-overlap
+authority (unchanged, structurally impossible per item 31). NO
+Boundary/Ordering/Family/BestTake/Renderer file touched (tests 25-27).
+This is exactly, and only, the one authorized behavioral correction:
+`_fallback_plan()` preserves the exact `transition_index` of the
+transition being evaluated.
+
+**HUMAN ACTION REQUIRED:** NO for this fix itself (a bounded, fully-
+offline-proven, zero-drift bugfix within this task's own explicit
+authorization). YES (unchanged from D-218R, condition A/G) for D-219's
+own eventual authorization, which this entry does not request or begin.
+
+Then STOP. Do NOT implement D-219. Wait for Product Owner coordination.
+
+---
