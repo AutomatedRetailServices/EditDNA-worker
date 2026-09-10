@@ -44876,3 +44876,260 @@ V2 Live Diagnostic Integration) is Product Owner coordination territory,
 per this entry's own "Then STOP" instruction.
 
 ---
+## D-216: Pacing V2 Live Diagnostic Integration -- OFFLINE-FIRST (post D-215)
+
+**Status: VERDICT A -- PACING V2 LIVE DIAGNOSTIC INTEGRATION WIRED,
+DEFAULT-OFF, DIAGNOSTICS-ONLY, PROVEN. No live J_CUT/L_CUT/MICRO_AUDIO_
+OVERLAP authority. No RAW, no provider, no pipeline-stage reorder, no
+Boundary/Ordering/Family/BestTake/Renderer file touched.**
+
+### 1. Scope discipline
+Verified at start: branch `feature/runpod-pod-on-demand`, HEAD `8996237`,
+clean tree. Files changed: new `cutsell_worker/pacing_v2_live_diagnostics_
+integration.py`, `cutsell_worker/universal_clean_cut.py` (additive import +
+one flag-gated block, 24 lines), new `tests/test_cutsell_d216_pacing_v2_
+live_diagnostic_integration.py` (59 tests), `docs/CUTSELL_DECISIONS.md`. No
+RAW, no provider, no Boundary/Ordering/Renderer/Family/BestTake file
+touched.
+
+### 2. Precedent mirrored
+Mirrors D-208's exact `ordering_live_diagnostics_integration.py` shape for
+the Pacing track: default-OFF env flag, zero live authority, pure adapter
+over already-computed real objects, no new evidence construction of its
+own.
+
+### 3. Feature flag
+`CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED` (default OFF -- any of
+`1`/`true`/`yes`/`on`, case-insensitive, turns it on; unset or any other
+value stays OFF). `pacing_v2_diagnostics_enabled(env=None)` reads
+`os.environ` by default, or an injected mapping for tests.
+
+### 4. Exact live pipeline seam
+`universal_clean_cut.py::process_universal_clean_cut_sources`, strictly
+AFTER D-142's own live `apply_dialogue_pacing_transition_pass` call
+(`pacing_stage = "dialogue_pacing_transition_phase1_planned"`), inside the
+same `else` branch that only runs when Freeze was NOT blocked. The flag
+check (`if pacing_v2_diagnostics_enabled():`) gates the entire block; when
+OFF, `build_pacing_v2_live_diagnostics` is never called -- zero compute.
+When ON, the block computes `pacing_v2_diag` over `result.draft.selected`
+(the SAME real, already-Boundary-finalized, already-Phase-1-planned
+sequence D-142 just processed) and attaches it as one new, additive
+`diagnostics["pacing_v2"]` key via `replace(result, draft=replace(...))` --
+never reassigning `draft.selected`, never touching any other diagnostics
+key.
+
+### 5. Public entry point
+`build_pacing_v2_live_diagnostics(selected, *, dialogue_overlap_enabled,
+boundary_diagnostics=None, live_transition_modes=(), prosody_by_clip_id=
+None, relationship_hint_by_pair=None, candidate_timing_by_pair=None) ->
+dict`. Iterates every REAL adjacent pair in `selected` (never re-ordered,
+never all-pairs) and calls D-215's own `decide_transition` once per pair,
+by reference, on the real `DraftClip` objects -- no ASR rerun, no P1/P2
+rerun, no new word/timing construction (test 7 proves the exact object
+identity reaches `decide_transition` unchanged).
+
+### 6. Honest live evidence-availability finding (unchanged from the
+module's own forensic, restated for the decision log)
+At today's live seam: (1) NO in-memory `ProsodicDeliveryEvidence` is
+mapped to a final Boundary-finalized `DraftClip` -- D-187/D-188's own
+Prosodic evidence is computed earlier, per-candidate, during BestTake
+arbitration, and never carried through; (2) no per-adjacent-pair
+relationship hint (`continuation`/`correction`/`retry`) is currently
+extracted from P1/P2 diagnostics for the FINAL selected sequence, though
+those diagnostics dicts do persist in `draft.diagnostics` (an honest,
+bounded finding for a future gate, never attempted here per this task's
+own "do not rerun P1/P2" instruction); (3) no existing bounded candidate
+lead/tail/overlap timing source exists at this seam at all. The live call
+site therefore honestly passes `None` for all three optional evidence
+kwargs today. Every real diagnostic decision produced by the live wiring
+today resolves to `HARD_CUT`/`TIGHT_CUT`/`KEEP_PAUSE`/`UNKNOWN` -- NEVER
+`J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP` -- because `decide_transition` never
+recommends an advanced mode without a caller-supplied candidate, and none
+is offered live. This is the CORRECT, by-design behavior (this task's own
+"do not force J/L/micro-overlap just to demonstrate the mode"
+instruction), not a gap; the module's own test suite proves all five
+modes ARE correctly computed and shaped when a caller (a future gate, or
+this test suite's own fixtures) supplies the optional evidence.
+
+### 7. Capability-status ladder
+`AVAILABLE` (decisions computed for every pair, always true once >= 2
+selected clips -- D-215 always produces a safe decision even with zero
+optional evidence), `PARTIAL` (optional Prosody/candidate-timing evidence
+present for SOME pairs but not others -- not observed at today's live
+seam, supported for a future gate), `NOT_EVALUABLE` (fewer than 2 selected
+clips -- `missing_evidence = (FEWER_THAN_TWO_SELECTED_CLIPS,)`),
+`DISABLED` (reserved constant, the flag-off case never even reaches this
+module so it is never actually returned by it -- the caller's own
+diagnostics dict simply omits the `"pacing_v2"` key when OFF).
+
+### 8. Live-vs-V2 comparison classification
+Per-transition `live_vs_v2_comparison`: `AGREEMENT` (V2's mode matches
+D-142's own already-executed live mode), `V2_MORE_CONSERVATIVE` (V2 chose
+a mode no more aggressive than the live one but different), `V2_WOULD_
+USE_ADVANCED_MODE` (V2 would pick J/L/MICRO_AUDIO_OVERLAP where live chose
+HARD/TIGHT -- diagnostics-only, never executed), `INCOMPARABLE` (no live
+mode was supplied for that index, or V2's own `decision_status` is
+`UNKNOWN`/`CONFLICTED`). Honestly noted: given item 6's evidence gap,
+`AGREEMENT` structurally dominates every real live result today (V2
+degrades to the same baseline HARD_CUT/TIGHT_CUT D-142 already computed,
+since `decide_transition` reuses D-142's own live planner for that
+baseline) -- this is by design, not a defect.
+
+### 9. Firewalls proven zero-violation
+Meaning-critical words, blocked word-safety windows, and genuine
+competing double-speech all correctly fall back `decide_transition` to
+`HARD_CUT`/`TIGHT_CUT` before an advanced mode is ever selected -- so
+`firewall_violation` (an advanced mode selected alongside a BLOCKED/
+CONFLICTED safety status) is structurally impossible and tests 28/29/30
+each confirm `firewall_violation_count == 0` for their own
+firewall-triggering fixture. Relationship-hint gates (`correction` ->
+`SAFE_FALLBACK`, `retry` -> `CONFLICTED`+`HARD_CUT`, `continuation` -> no
+restriction) verified against D-215's own contract (tests 31-33).
+
+### 10. Immutability proof
+`draft.selected` clip ids, `.start`/`.end` (Boundary edges), and D-142's
+own `diagnostics["dialogue_pacing_transition"]` block are BYTE-IDENTICAL
+whether the flag is OFF or ON (tests 23-27, 40, 41 -- a real pipeline-
+level fixture via the D-097.C precedent pattern: `process_local_sources`
+faked to return a controlled two-clip draft, the real post-Freeze
+Boundary + D-142 + D-216 stages run unmodified). The only diagnostics-dict
+difference between OFF and ON is the added `"pacing_v2"` key itself (test
+40's own key-set diff assertion).
+
+### 11. D-214 renderer firewall
+This module never imports `render_plan`/`render`, never constructs or
+touches a `RenderSegment`, and never populates D-214's own independent-
+audio-window fields (`audio_start`/`audio_end`) -- structurally proven
+(tests 22, 26, and the `TestStructuralAudits` class's source-scan checks
+against the module's own code body, docstring excluded).
+
+### 12. Structural audits (source-scanned, docstring excluded)
+No P1/P2 rerun (`build_editorial_moment_understanding_for_sources`/
+`build_whole_video_editorial_understanding` never imported), no ASR
+(`from .asr`/`from .language_spine import` never imported), no provider/
+network (`requests.`/`urllib`/`http.client`/`OPENAI_API_KEY`/`genai.`/
+`GenerativeModel` never present; `analyze_prosodic_delivery` never
+called), no Family/BestTake/Boundary/Ordering mutation (`take_group_id =`,
+`_semantic_best_take`, `bounded_finalist_authority`, `boundary_engine_
+pass.apply`, `BoundaryEngine(`, `ordering_realization_plan`,
+`composite_resolver`, `realization_resolver` all absent), no `.selected =`
+mutation, no QA/commercial/sales-funnel field names, no master score.
+D-142's own live planner and D-215's own `decide_transition` are both
+reused verbatim (never redefined) -- confirmed by presence-of-call /
+absence-of-definition checks. The live wiring's own call site in
+`universal_clean_cut.py` is confirmed textually inside the flag-gated
+`if` block, with the import and the additive-dict-merge line both present
+verbatim.
+
+### 13. Diagnostics shape
+Bounded, no transcript dump: each transition row carries clip/source ids,
+`selected_mode`, the 5 D-215 status fields, candidate lead/tail/overlap,
+`decision_status`, `fallback_reason`, `prosodic_status`, `candidate_
+timing_status`, `relationship_hint`, `conflict_flags`, `provenance`,
+`live_mode`, `live_vs_v2_comparison`, `firewall_violation` -- no raw
+`.text`/`.words` field anywhere in a row, no `"transcript"` key at any
+level (tests 35/36). Batch-level: `run_summary` (mode/gap/decision/
+firewall counts, no master score), `sequence_consistency` (same-evidence-
+different-outcome flags only, D-215's own diagnostic, never rewrites a
+plan), plus prosodic/candidate-timing/comparison coverage counts.
+
+### 14. Determinism / order stability
+Two calls on the identical input produce an identical dict (test 38,
+`==` on the whole return value). Pairs are formed strictly in the given
+sequence order, never re-sorted or exhaustively cross-paired (tests 6, 39).
+
+### 15. Test matrix
+`tests/test_cutsell_d216_pacing_v2_live_diagnostic_integration.py`, 59
+tests, covering the directive's own 46-item matrix (flag default/on/off,
+zero compute when off, one/multiple/ordered adjacent pairs, words/
+Prosodic/relationship-hint reuse and absence, no P1/P2/ASR/provider
+rerun, all 6 mode diagnostics [HARD/TIGHT/KEEP_PAUSE/J/L/MICRO], advanced
+mode never executed live, D-142/Boundary-edges/selected-ids/RenderSegment/
+renderer-command unchanged, meaning/word/double-speech firewalls at zero
+violations, correction/retry/continuation relationship handling,
+multi-source, bounded diagnostics, run summary, determinism, input-order
+stability, default-off parity, flag-on immutability, no QA/commercial/
+master-score references, compileall) plus extra capability-status-ladder
+and comparison-classification coverage. Two real test-authoring bugs
+caught and fixed during this task's own verification pass (see item 16),
+following the same pattern as D-214/D-215.
+
+### 16. Bugs found and fixed during verification
+(a) `RELATIONSHIP_CORRECTION`/`retry` tests initially asserted the
+correction-relationship gate's `SAFE_FALLBACK` status without ever
+offering a candidate lead/tail -- `decide_transition`'s own overlap-
+disabled/no-candidate check runs BEFORE the correction-relationship
+check, so those tests were silently exercising the wrong branch (always
+`DECISION_SUPPORTED`); fixed by adding a real `candidate_timing_by_pair`
+entry so the fixture genuinely reaches the correction gate. (b) The
+"RenderSegment/render_plan never referenced" structural checks
+initially scanned the WHOLE module source including its own docstring
+(which legitimately explains, in prose, that `RenderSegment`/`render_
+plan` are never touched) -- fixed to scan only the code body (`CODE_ONLY`,
+same docstring-stripping helper D-208's own test file uses), matching the
+already-correct pattern the module's own docstring-vs-code distinction
+requires. Neither bug was in the shipped module -- both were test-
+authoring mistakes in the NEW test file, caught before commit.
+
+### 17. Offline qualification
+`python -m compileall -q cutsell_worker tests` -- clean. New D-216 suite:
+59/59 passed. Combined with D-215 (46) + D-214 (44): 149/149 passed. D-142
+(26) + Boundary (D-116/D-177/D-097.C/D-212 = 98 combined with D-142's own
+count folded in) + Ordering (D-206/D-207/D-208) + Prosodic (D-187/D-188)
++ D-066: 395/395 passed together. Full offline suite
+(`python -m pytest tests/ -q --ignore=tests/test_semantic_stitch.py`) run
+once; same pre-existing unrelated failure set as every prior turn this
+window (Modal-hybrid-parity/hybrid-story-guard), zero new genuine
+failures -- see item 18 for the exact count.
+
+### 18. New failures
+**ZERO genuine new failures.**
+
+### 19. D-216 verdict
+**A. PACING V2 LIVE DIAGNOSTIC INTEGRATION WIRED, DEFAULT-OFF,
+DIAGNOSTICS-ONLY, PROVEN.**
+
+### 20. Canonical Pacing status
+`PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_PROVEN` +
+`PACING_V2_TRANSITION_DECISION_FOUNDATION_OFFLINE_PROVEN` +
+`PACING_V2_LIVE_DIAGNOSTIC_INTEGRATION_DEFAULT_OFF_PROVEN`.
+
+### 21. Live Pacing authority status
+Unchanged: `PHASE_1_EXECUTABLE_MODES == (HARD_CUT, TIGHT_CUT)`. D-216
+introduces zero live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority -- every
+advanced-mode result this module ever produces is diagnostics-only,
+attached under `diagnostics["pacing_v2"]`, never read back by the
+renderer or by D-142's own live mode selection.
+
+### 22. Renderer status
+Unchanged from D-214 -- `render.py`/`render_plan.py` not touched by this
+task.
+
+### 23. Unseen-RAW status
+None dispatched, none needed for this task's own conclusion.
+
+### 24. App-roadmap status
+Boundary closed -> Pacing V2 forensic closed (D-213) -> renderer/timeline
+contract offline-proven (D-214) -> transition decision foundation offline-
+proven (D-215) -> live diagnostic integration wired default-off (D-216)
+-> next: D-217 (real evidence-source wiring -- Prosodic-to-final-clip
+mapping, per-pair relationship-hint extraction from P1/P2, or a bounded
+candidate lead/tail proposer -- each a Product Owner scope decision, none
+implied automatically by this entry) -> one Video00 real-media
+qualification -> unseen-RAW generalization / Cut.ai parity -> production
+hardening -> TestFlight -> App Store.
+
+### 25. Confirmation
+NO RAW dispatched. NO provider called. NO live J/L/overlap authority
+introduced. NO pipeline-stage reorder, no Boundary reopen, no Ordering
+change, no renderer redesign, no Family/BestTake change, no Commercial
+Moment, no Sales Funnel field. NO Boundary/Ordering/Renderer/Family/
+BestTake file touched. D-116, D-142, D-177, D-187, D-206 through D-215
+are all preserved, unmodified, unrewritten by this entry.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-217 (real
+evidence-source wiring for Pacing V2, or any other next objective) is
+Product Owner coordination territory, per this entry's own "Then STOP"
+instruction.
+
+---

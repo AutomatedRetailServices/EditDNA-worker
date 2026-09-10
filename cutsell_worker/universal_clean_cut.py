@@ -73,6 +73,10 @@ from .realization_resolver import (
 from .resolver_mode import RESOLVER_MODE_AUTHORITATIVE, resolve_resolver_mode
 from .boundary_engine_pass import apply_post_freeze_boundary_pass
 from .dialogue_pacing_transition import apply_dialogue_pacing_transition_pass
+from .pacing_v2_live_diagnostics_integration import (
+    build_pacing_v2_live_diagnostics,
+    pacing_v2_diagnostics_enabled,
+)
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -752,6 +756,31 @@ def process_universal_clean_cut_sources(
                 result, dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
             )
             pacing_stage = "dialogue_pacing_transition_phase1_planned"
+
+            # D-216: Pacing V2 live diagnostic integration -- default OFF,
+            # DIAGNOSTICS ONLY. When enabled, computes D-215's own decision
+            # foundation over the SAME real, already-Boundary-finalized,
+            # already-Phase-1-planned `result.draft.selected` sequence, at
+            # this exact seam, strictly after D-142's own live pass -- never
+            # before it, never re-ordering it. `draft.selected`/`result`'s
+            # live fields are never reassigned by this block; only a new,
+            # additive `diagnostics["pacing_v2"]` key is ever attached. No
+            # live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority: D-142's own
+            # `pacing_stage` above already reflects the only mode ever
+            # actually executed.
+            if pacing_v2_diagnostics_enabled():
+                pacing_v2_diag = build_pacing_v2_live_diagnostics(
+                    result.draft.selected,
+                    dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+                    boundary_diagnostics=result.draft.diagnostics,
+                    live_transition_modes=tuple(
+                        row.get("mode")
+                        for row in (result.draft.diagnostics.get("dialogue_pacing_transition") or {}).get("transitions", ())
+                    ),
+                )
+                result = replace(result, draft=replace(
+                    result.draft, diagnostics={**result.draft.diagnostics, "pacing_v2": pacing_v2_diag},
+                ))
     else:
         selection_stage = "not_applicable_missing_draft_contract"
         polish_stage = "not_applicable_missing_draft_contract"
