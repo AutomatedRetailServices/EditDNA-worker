@@ -46836,3 +46836,429 @@ STOP. Do NOT implement D-220. Wait for Product Owner coordination," no
 further action is taken.
 
 ---
+
+## D-220: Pacing V2 Advanced Transition Timing Policy Foundation (post D-219)
+
+**Status: VERDICT B -- TIMING POLICY PARTIALLY PROVEN, ONE QUALITY
+HEURISTIC REQUIRES REAL-MEDIA TUNING. A deterministic, offline-only
+J_CUT/L_CUT timing-amount policy is built and proven: given an already
+mechanically-safe available window (from D-217, unmodified), it chooses
+a bounded amount using real word-timing geometry, never the raw full
+window, never an invented millisecond constant, never live-wired.
+AVAILABLE SAFE WINDOW != CHOSEN TRANSITION AMOUNT is proven directly (a
+50-second available window still chooses only the real anchor word's own
+1.5-second duration in this task's own fixtures). The POLICY STRUCTURE
+(bound by real safe geometry AND a real anchor word) is sound; the
+SPECIFIC anchor-word CHOICE is honestly labeled `QUALITY_HEURISTIC_
+NOT_YET_REAL_MEDIA_TUNED` -- it has never been validated against real
+perceptual/Watch+Listen evidence. MICRO_AUDIO_OVERLAP remains
+diagnostics-only/deferred, unchanged, no timing policy built for it.**
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, this task's own commit on top of D-219's
+`36d9d4b`. No RAW dispatched.
+
+### 2. Files changed
+`cutsell_worker/pacing_v2_timing_policy.py` (NEW, ~300 lines), `tests/
+test_cutsell_d220_pacing_v2_advanced_transition_timing_policy.py` (NEW,
+64 tests), this decision doc entry. No existing `cutsell_worker/*.py`
+file modified -- `pacing_transition_decision.py`, `pacing_v2_evidence_
+adapter.py`, `pacing_v2_live_diagnostics_integration.py`, `dialogue_
+pacing_transition.py`, `render_plan.py`, `render.py` are all read-only
+inputs to this task, none touched.
+
+### 3. Timing policy module/type
+`cutsell_worker/pacing_v2_timing_policy.py`. Core type:
+`AdvancedTransitionTimingDecision` (frozen dataclass) -- `schema_
+version`, `transition_index`, `mode`, `max_safe_window`, `chosen_
+duration`, `timing_basis`, `timing_status`, `fallback_reason`, `source_
+geometry` (a sorted tuple of (key, value) pairs, never a mutable dict,
+mirroring this track's own tuple-field discipline), `prosodic_support`,
+`provenance`. No master score, no cross-pair aggregate field on the type
+itself (proven by AST-level identifier scan, test 39). Two entry points:
+`decide_jcut_timing(left, right, *, max_safe_lead, ...)` and `decide_
+lcut_timing(left, right, *, max_safe_tail, ...)`. One batch summary:
+`timing_policy_run_summary(decisions)` -- counts only.
+
+### 4. Timing input contract
+`max_safe_lead`/`max_safe_tail` are CALLER-SUPPLIED (never recomputed by
+this module -- exactly D-215's own "a caller offers a candidate; this
+function only ever judges/refines it" convention), expected to come from
+D-217's own unmodified `available_silent_head_sec`/`available_silent_
+tail_sec` or an equivalent caller-derived value. `left`/`right` are
+already Boundary-finalized `DraftClip`s, read-only. Optional: `relationship_
+hint` (reused D-215 vocabulary, `RELATIONSHIP_RETRY`/`RELATIONSHIP_
+CORRECTION`/`RELATIONSHIP_CONTINUATION`, imported not redefined), `right_
+prosody`/`left_prosody` (D-187's own `ProsodicDeliveryEvidence`, optional).
+
+### 5. J policy
+`chosen_lead = min(max_safe_lead, left's own FINAL spoken word's own
+measured duration)`, refined by Prosodic/relationship evidence (item 13).
+Anchor reasoning: the departing (LEFT) line's own last word sets the
+pace for how much silent lead-in from the incoming (RIGHT) clip follows
+it -- a real, measured quantity, never invented. Proven: window-0 ->
+`INSUFFICIENT_WINDOW`; window below `left`'s own last-word duration ->
+bounded by the WINDOW; window far exceeding it -> bounded by the ANCHOR
+(the core D-219 finding, closed here) -- tests 01-08, quality-shape test A.
+
+### 6. L policy
+Symmetric: `chosen_tail = min(max_safe_tail, right's own FIRST spoken
+word's own measured duration)`. Anchor reasoning: the incoming (RIGHT)
+line's own first word sets the pace for how much trailing silence from
+the outgoing (LEFT) clip survives under it. Tests 09-16.
+
+### 7. Micro policy status
+**Not built, per this task's own explicit instruction.** No `decide_
+micro_timing`/`decide_micro_overlap_timing` function exists anywhere in
+the module (test 29, quality-shape test F) -- confirmed by direct AST
+function-name enumeration, not merely absence of a docstring mention.
+`MICRO_AUDIO_OVERLAP` is never imported or referenced as an executable
+identifier in this module (quality-shape test F). Status remains exactly
+`DEFERRED`/`DIAGNOSTIC_ONLY`, unchanged from D-219 item 34.
+
+### 8. Max-safe vs chosen contract
+`0 <= chosen_duration <= max_safe_window` is enforced THREE ways, never
+trusted to arithmetic alone: (a) the formula itself is a `min(...)`; (b)
+an explicit `chosen = min(chosen, max_safe_window)` re-assertion
+immediately before the final decision is built; (c) direct property
+tests across seven window sizes for both J and L (tests 17-18,
+parametrized). A negative `max_safe_window` is defensively rejected
+(`INSUFFICIENT_WINDOW`, `negative_window_rejected`) rather than ever
+producing a negative or nonsensical chosen value (test 19, covering both
+modes across six window values including `None`/negative/zero/tiny).
+
+### 9. Chosen-duration invariants
+For J: `0 < chosen_lead <= max_safe_lead` whenever `timing_status ==
+SUPPORTED`; otherwise `chosen_duration is None` (never `0.0`, never a
+forced nonzero placeholder). Identical shape for L. Proven by tests
+17-19 and the SUPPORTED-path tests (03-05, 07-08, 11-13, 15-16).
+
+### 10. Zero-duration behavior
+`chosen_duration = None` represents "do not execute the advanced mode"
+uniformly across every non-`SUPPORTED` status (`UNKNOWN`, `CONFLICTED`,
+`INSUFFICIENT_WINDOW`, `INSUFFICIENT_EVIDENCE`, `SAFE_FALLBACK`) -- test
+23 confirms this is a well-formed, VALID outcome (never a crash, never a
+forced nonzero substitute), matching this task's own explicit "ZERO IS
+VALID... do not force nonzero duration" instruction.
+
+### 11. Word-geometry role
+PRIMARY and, in every fixture this task exercised, SUFFICIENT basis
+(`TIMING_BASIS_WORD_GEOMETRY`): the anchor word's own measured `end -
+start` duration, using only each clip's OWN `.words` (never a
+cross-source raw-timestamp comparison, item 21-22). No ASR rerun --
+existing word timings only.
+
+### 12. Pause-geometry role
+Named in the closed vocabulary (`TIMING_BASIS_PAUSE_GEOMETRY`) per this
+task's own required vocabulary, but NEVER produced by this version's
+actual logic -- this module deliberately does not treat "silent media
+available" as itself a timing signal (per this task's own "distinguish
+silent media available from desired exposed lead/tail... a long silent
+head/tail should not automatically become a long transition" -- exactly
+what item 5/6's anchor-word bound already prevents without needing a
+separate pause-geometry basis).
+
+### 13. Prosodic role
+REFINES, never OVERRIDES. Prosodic evidence absent -> the structural
+(word-geometry-only) cap is used unchanged (`TIMING_BASIS_WORD_
+GEOMETRY`) -- tests 08/16, quality-shape test E. Prosodic evidence
+PRESENT and showing `vocal_continuity_state == CONTINUOUS` -> confirms
+the full structural cap (`TIMING_BASIS_WORD_PLUS_PROSODIC`, `prosodic_
+support=True`) -- tests 07/15. Prosodic evidence PRESENT but NOT
+confirming clean continuity -> conservatively halves the structural cap
+(`prosodic_support=False`) UNLESS `relationship_hint == CONTINUATION`,
+which corroborates the join is a natural continuation and offsets that
+shrink back to the full structural cap (recorded in `provenance` as
+`continuation_relationship_support`) -- this is the one place `RELATIONSHIP_
+CONTINUATION` (item 14) has a coded effect in this module. Prosodic can
+never increase `chosen_duration` beyond `max_safe_window`/the anchor cap
+(the `min()` re-assertion, item 8, applies identically regardless of
+Prosodic).
+
+### 14. Prosodic optionality
+Confirmed structurally optional at every call site (`right_prosody`/
+`left_prosody` default `None`) and behaviorally optional (quality-shape
+test E: absence produces the EXACT SAME deterministic word-geometry-only
+answer as the "no signal either way" case, never a different, arbitrary
+number for absence -- this was this task's own explicit required proof).
+
+### 15. Relationship-hint role
+`RETRY`/`CORRECTION` -> defensive re-veto, never re-decided (item 22,
+`TIMING_STATUS_CONFLICTED`, `fallback_reason` names the exact
+relationship) -- D-215's own upstream decision is trusted, not
+re-derived; this module's own veto exists only to fail cleanly if a
+caller mistakenly invokes it on such a pair, per this task's own "D-220
+should not reopen those decisions" instruction. `CONTINUATION` -> may
+offset a Prosodic-uncertain shrink back to the full structural cap
+(item 13); never a REQUIRED input, never blocks by itself. `UNKNOWN`/
+absent relationship hint -> evidentially neutral, identical to `D-219`
+item 8's own established behavior at the eligibility layer -- this
+module never treats missing relationship evidence as unsafe.
+
+### 16. Bounded-default finding
+**YES, a bounded default is necessary** (D-217's own "no fraction, no
+cap" full-window behavior was already shown, by D-219, to be
+insufficient for LIVE execution) -- **and this task's own answer is the
+anchor-word-duration cap itself** (items 5/6), not a separate numeric
+fraction. No existing canonical video-editing timing doctrine citation
+exists in this codebase (confirmed by this task's own re-read of D-098's
+canonical architecture doc, Section 11.6: "no threshold or algorithm is
+authorized by naming these inputs [speech end/start timing, word
+timestamps, breath/pause, ...] here"), so per this task's own explicit
+instruction, this policy is honestly marked **`QUALITY_HEURISTIC_NOT_
+YET_REAL_MEDIA_TUNED`** -- the STRUCTURE (bounded by real safe geometry
+AND a real anchor word, never an arbitrary duration) is well-grounded;
+the SPECIFIC CHOICE of anchor word (left's last word for J, right's
+first word for L) is the part requiring real-media/perceptual tuning,
+never presented as learned truth. `TIMING_BASIS_BOUNDED_DEFAULT` is
+named in the closed vocabulary for completeness but never produced --
+this task judged a SEPARATE numeric-fraction fallback unnecessary: when
+the anchor word itself cannot be measured, the policy fails closed
+(`INSUFFICIENT_EVIDENCE`, item 20) rather than inventing a second
+number on top of the first heuristic.
+
+### 17. Quality heuristic status
+`QUALITY_HEURISTIC_NOT_YET_REAL_MEDIA_TUNED` (item 16). This is the ONE
+gap keeping this task's own verdict at B rather than A -- the mechanism
+is deterministic, bounded, and safe by construction, but its SPECIFIC
+choice of anchor word has never been checked against a real human
+Watch+Listen judgment of whether the resulting transition actually feels
+natural (this project's own D-095 quality ladder's own final gate).
+
+### 18. Large-window behavior
+Proven NOT to translate into full-window execution (tests 04-05/12-13,
+quality-shape test A): a 12.4-second, even a 50-second, available window
+still yields exactly the real anchor word's own 1.5-second duration in
+this task's own fixture geometry -- `chosen_duration < max_safe_window`
+whenever the window materially exceeds the anchor.
+
+### 19. Tiny-window behavior
+A window at or below the renderer's own numeric safety floor (`RENDER_
+EPSILON_SEC`, item 25) is proactively classified `INSUFFICIENT_WINDOW`
+(`chosen_duration=None`) rather than proposing a value D-214's own
+`_validate_independent_audio_window` would reject anyway (tests 02/06/10/14).
+A window ABOVE that floor but below the anchor word's own duration is
+still `SUPPORTED`, bounded correctly to the window itself (tests 03/11)
+-- "tiny but valid" is not artificially forced to zero; only "at or below
+the renderer's own numeric floor" is.
+
+### 20. Insufficient-evidence behavior
+When `max_safe_window` is a valid, usable, positive number but the
+anchor word's own duration cannot be measured (the anchor clip has no
+word timing at all) -> `TIMING_STATUS_INSUFFICIENT_EVIDENCE`, `chosen_
+duration=None`, `fallback_reason="anchor_word_timing_missing"` (test 20)
+-- fails closed, no numeric substitute invented. In practice this should
+be RARE: D-215's own eligibility gate already requires safe word timing
+on both anchor clips before a pair ever reaches `J_CUT`/`L_CUT`
+eligibility at all, so this is primarily a defensive/edge-case path, not
+an expected real-media outcome.
+
+### 21. Same-source behavior
+Identical, proven directly (test 25): a same-source-asset pair produces
+the exact same `chosen_duration`/`timing_status` as an equivalent
+multi-source pair (test 26) for identical geometry -- the policy reads
+only edit-timeline-relative quantities (`max_safe_window`, each clip's
+OWN word timings), never a source-asset identity comparison.
+
+### 22. Multi-source behavior
+Confirmed identical to same-source (item 21). No cross-source raw
+timestamp comparison exists anywhere in the module (test 26b, by
+construction: every computation reads exactly one clip's own `.words`
+or the caller-supplied window, never `left`'s timestamps compared
+against `right`'s timestamps directly).
+
+### 23. Renderer J mapping
+`chosen_duration` (from `decide_jcut_timing`) maps directly onto D-214's
+own existing contract with zero renderer change: the RIGHT `RenderSegment`'s
+`audio_start = right.start - chosen_duration` (a leading independent
+audio window). Proven end-to-end against the REAL `RenderSegment` type
+(test 27): `has_independent_audio_window` becomes `True`, `effective_
+audio_start` lands exactly at the expected pre-roll point, strictly
+before the segment's own video `start` -- using D-214's own unmodified
+class, no renderer redesign.
+
+### 24. Renderer L mapping
+Symmetric (test 28): the LEFT `RenderSegment`'s `audio_end = left.end +
+chosen_duration` (a trailing independent audio window), proven against
+the real `RenderSegment` type identically.
+
+### 25. HARD/TIGHT fallback
+Every non-`SUPPORTED` timing status (`UNKNOWN`, `CONFLICTED`,
+`INSUFFICIENT_WINDOW`, `INSUFFICIENT_EVIDENCE`, `SAFE_FALLBACK`) leaves
+`chosen_duration=None` -- per this task's own explicit instruction, a
+future authority gate consuming this module's output must, on any such
+result, retain the CURRENT live `HARD_CUT`/`TIGHT_CUT` behavior for that
+join, unchanged. This module itself never touches, calls, or is
+imported by `universal_clean_cut.py`/`pipeline.py` (test 40; item 31),
+so today's live behavior is, as required, byte-identical regardless of
+this module's existence.
+
+### 26. Deterministic result
+Proven directly (test 24: two identical calls produce an identical
+`AdvancedTransitionTimingDecision`, including via Python's own dataclass
+equality) and again via quality-shape test C (two STRUCTURALLY identical
+but separately-constructed fixture pairs produce identical `chosen_
+duration`/`timing_status`/`timing_basis`). No randomness, no model call,
+no learned predictor anywhere in the module (confirmed by the "no
+provider/no ASR" structural audits, items 34-35 below).
+
+### 27. No mode-selection duplication
+Confirmed structurally and behaviorally (test 32): `decide_jcut_timing`
+always returns `mode == J_CUT`, `decide_lcut_timing` always returns
+`mode == L_CUT`, on every path including every non-`SUPPORTED` one --
+this module NEVER decides which mode is correct (D-215's own exclusive
+authority, restated, never reopened) and never silently reassigns mode
+based on timing outcome.
+
+### 28. No meaning-engine duplication
+Confirmed structurally (test 33): no import of, or reference to,
+`semantic_claims`/`classify_claim`/D-038's own `CRITICAL` vocabulary
+anywhere in the module -- meaning safety remains exclusively D-215's own
+already-proven authority, consumed (via upstream eligibility) never
+re-derived here.
+
+### 29. No ASR/provider
+Confirmed structurally (tests 34-35): no `requests`/`urllib`/`openai`/
+`genai`/`google.generativeai`/`whisper`/ASR-shaped import or reference
+anywhere in the module. Deterministic only, per this task's own explicit
+"No ML / provider... Deterministic only" instruction.
+
+### 30. No Boundary/Ordering mutation
+Confirmed both behaviorally and structurally (test 30-31): `left.start`/
+`left.end`/`right.start`/`right.end` are captured before and re-asserted
+unchanged after every call in this task's own test file; no `boundary_
+engine`/`human_boundary_polish`/`editorial_moment_sequence`/`ordering_
+diagnostics` reference exists anywhere in the module. This module reads
+already-ordered, already-boundary-finalized clips only.
+
+### 31. No live pipeline
+Confirmed structurally (test 40): `pacing_v2_timing_policy` is never
+referenced in `universal_clean_cut.py` or `pipeline.py`. No feature flag
+was added by this task (per this task's own explicit "Do not add flag
+now" instruction) -- the module exists, is fully tested, and is
+completely unreachable from any live code path today.
+
+### 32. Fixture results
+All 40 of this task's own required fixture-matrix items are covered
+(items 1-40 of the directive's own "OFFLINE FIXTURE MATRIX" section map
+onto this file's tests 01-40 one-for-one, plus the 6 explicitly-named
+quality-shape tests A-F and a numeric-epsilon-parity test) -- 64 tests
+total, all passing.
+
+### 33. Summary
+`timing_policy_run_summary` proven (dedicated summary test): reports
+`transition_count`, `j_policy_count`, `l_policy_count`, `supported_
+timing_count`, `fallback_timing_count`, `insufficient_window_count`,
+`insufficient_evidence_count`, `prosodic_supported_count`, `geometry_
+only_count`, `zero_duration_count` -- no master score, no cross-pair
+optimizer (confirmed by AST-level identifier scan across the whole
+module, test 39).
+
+### 34. Regressions
+D-142 (`test_cutsell_d142_dialogue_pacing_transition_phase1.py`), D-214
+(`test_cutsell_d214_pacing_v2_renderer_timeline_contract.py`, 44
+tests), D-215 (46 tests), D-216 (58 tests), D-217 (48 tests), D-218F
+(32 tests), D-218R (15 tests), plus Ordering (D-206/D-207/D-208) and
+Boundary (D-177/D-212, `human_boundary_polish_v5`, `render_boundary_
+tightening`) regression files: run together with this task's own new
+D-220 file, **547 passed, 0 failed.**
+
+### 35. Full offline suite
+`python3 -m pytest tests/` (`--ignore=tests/test_semantic_stitch.py`
+for its own pre-existing, unrelated module-level collection error, per
+D-218R/D-218F precedent): passed with only the same 5 pre-existing,
+unrelated `D-044`/hybrid-semantic-parity failures already confirmed
+present before this entire Pacing V2 track began (byte-identical failing
+test names, reconfirmed this task).
+
+### 36. New failures
+Zero.
+
+### 37. D-220 verdict
+**B. TIMING POLICY PARTIALLY PROVEN -- ONE QUALITY HEURISTIC REQUIRES
+REAL-MEDIA TUNING.**
+
+### 38. Canonical Pacing status
+Adds `PACING_V2_JL_TIMING_POLICY_OFFLINE_PROVEN` (the deterministic,
+bounded, offline-proven POLICY MECHANISM -- never a claim that the
+SPECIFIC anchor-word heuristic is tuned or production-ready) to the
+existing chain: `PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_PROVEN` +
+`PACING_V2_TRANSITION_DECISION_FOUNDATION_OFFLINE_PROVEN` + `PACING_V2_
+LIVE_DIAGNOSTIC_INTEGRATION_OFFLINE_PROVEN` + `PACING_V2_REAL_EVIDENCE_
+SOURCE_WIRING_OFFLINE_PROVEN` + `PACING_V2_FALLBACK_TRANSITION_IDENTITY_
+INTEGRITY_OFFLINE_PROVEN` (all D-218F and earlier, unchanged) + this
+entry's own new status. Live authority remains unchanged until a
+separately-authorized future gate.
+
+### 39. Exact D-221 gate (per this task's own "IF B" branch)
+**ONE bounded real-media timing-quality tuning gate, NOT broad
+authority.** Exact name: **D-221 -- Pacing V2 J/L Timing-Amount Quality
+Tuning (real-media diagnostic, still offline/no-execution).** Scope for
+that future, separately-authorized turn: wire `decide_jcut_timing`/
+`decide_lcut_timing` into the SAME diagnostics-only seam D-216/D-217
+already use (never live execution), dispatch it against real Video00
+media (or a wider real-media set once available) to observe what
+`chosen_duration` values the current anchor-word heuristic actually
+produces on real speech, and have a human Watch+Listen pass (this
+project's own D-095 quality-ladder discipline) judge whether those
+SPECIFIC amounts feel natural -- closing item 16/17's own labeled gap
+with real evidence rather than further offline reasoning alone. This is
+NOT implemented, designed in executable detail, or begun by this entry.
+
+### 40. Live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed modes.
+This entire module is unreachable from any live code path (item 31).
+
+### 41. Micro status
+Unchanged from D-219: `DEFERRED`/`DIAGNOSTIC_ONLY`. No timing policy
+built for it in this task (item 7), per this task's own explicit
+instruction not to.
+
+### 42. Renderer status
+Unchanged. `render.py`/`render_plan.py` not touched by this task (item
+2) -- their own D-214 contract is READ and mapped onto (items 23-24),
+never modified or extended.
+
+### 43. Unseen-RAW status
+No RAW dispatched or required by this task. D-218R's Video00 run remains
+the only real-media Pacing V2 evidence to date. D-221 (item 39) is the
+first future gate that would observe this module's own real-media
+output, still without live execution.
+
+### 44. App-roadmap status
+P1/P2/Ordering/Boundary CLOSED ENOUGH (unchanged). Pacing V2: renderer
+execution proven (D-214) -> decision foundation proven (D-215) -> live
+diagnostics proven (D-216) -> evidence wiring proven (D-217) -> real-
+media safety/usefulness proven (D-218R) -> fallback identity fixed
+(D-218F) -> authority architecture forensic complete (D-219) -> **J/L
+timing-amount policy mechanism offline-proven, one quality heuristic
+flagged for real-media tuning (D-220, this entry)** -> next: D-221 J/L
+timing-amount real-media quality tuning (diagnostics only, still no
+execution, NOT implemented here) -> (future, separately authorized)
+bounded advanced transition authority implementation, default OFF ->
+Renderer/export qualification on real media -> unseen-RAW generalization
+/ Human Gold parity -> product hardening -> TestFlight -> App Store.
+
+### 45. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`.
+
+### 46. Confirmation
+NO RAW dispatched. NO provider/network/ASR call (items 29/34-35). NO
+live authority (item 31/40) -- `RenderSegment.audio_start`/`audio_end`
+are never populated by any live caller; this task's own tests construct
+`RenderSegment` instances directly, offline, purely to prove the mapping
+CONTRACT (items 23-24), never to execute anything. NO pipeline wiring
+(item 31). NO renderer redesign (`render.py`/`render_plan.py` untouched,
+item 2/42). NO Boundary reopen, NO Ordering change (item 30). NO Family/
+BestTake change. NO micro-overlap authority (item 7/41). NO new
+editorial threshold beyond the one honestly-labeled `QUALITY_HEURISTIC_
+NOT_YET_REAL_MEDIA_TUNED` structural policy itself (item 16-17) -- no
+separate invented millisecond constant exists anywhere in the module.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+explicit "STOP. Do NOT implement D-221. Wait for Product Owner
+coordination," the decision needed is whether/when to authorize D-221
+(item 39) as a new, separately-scoped, still-offline/diagnostics-only
+turn. No further action is taken.
+
+---
