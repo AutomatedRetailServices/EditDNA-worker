@@ -417,34 +417,53 @@ def test_26_blooper_series():
 
 
 def test_27_clean_delivery_sequence():
+    # D-197: the auto-grouper never joins two clean moments on chronological
+    # adjacency alone (see test_29 below) -- CLEAN_DELIVERY_SEQUENCE remains
+    # reachable at the classify_editorial_sequence/build_editorial_sequences_
+    # for_moments level (D-194, unchanged by D-197) whenever a caller has
+    # independent grouping evidence, proven here via an explicit local_groups
+    # override -- the same real per-moment objects the live adapter builds.
     takes = [_take("c1", 0, 0.0, 1.0), _take("c2", 1, 1.0, 2.0)]
-    wlu = _wlu(
-        _span("c1", 0.0, 1.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
-        _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
+    understanding_spans_by_id = {
+        "c1": _span("c1", 0.0, 1.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
+        "c2": _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
+    }
+    moments, *_ = build_editorial_moments_for_source(
+        source_asset_id="src1", takes_for_source=takes, understanding_spans_by_id=understanding_spans_by_id,
     )
-    u = build_editorial_moment_understanding_for_source(source_asset_id="src1", takes_for_source=takes, watch_listen_understanding=wlu)
-    assert u.sequence_hypotheses[0].sequence_kind == SEQUENCE_KIND_CLEAN_DELIVERY_SEQUENCE
+    sequences = build_editorial_sequences_for_moments(moments, local_groups=[[0, 1]])
+    assert sequences[0].sequence_kind == SEQUENCE_KIND_CLEAN_DELIVERY_SEQUENCE
 
 
 def test_28_preassembled_final_sequence():
-    # RELATION_COMPLEMENTARY (unlike RELATION_RETRY/RELATION_NEW_AUDIENCE_BEAT)
+    # RELATION_CONTINUATION (unlike RELATION_RETRY/RELATION_NEW_AUDIENCE_BEAT)
     # never overrides a clean attempt's moment_role away from
-    # CLEAN_AUDIENCE_DELIVERY in D-194's own classifier, while still
-    # counting as forward-progression-compatible evidence at the
-    # sequence level -- exactly the real-pipeline shape this fixture
-    # needs to prove PREASSEMBLED_FINAL_SEQUENCE end to end.
+    # CLEAN_AUDIENCE_DELIVERY in D-194's own classifier, is a genuine
+    # forward-progression-compatible relation, AND is one of D-197's own
+    # three real JOIN relations -- so the auto-grouper actually forms this
+    # group (unlike RELATION_COMPLEMENTARY, which D-197 treats as an
+    # explicit non-join per its own audit) -- exactly the real-pipeline
+    # shape this fixture needs to prove PREASSEMBLED_FINAL_SEQUENCE end to
+    # end through the live adapter path, auto-grouper included.
     takes = [_take("c1", 0, 0.0, 1.0), _take("c2", 1, 1.0, 2.0), _take("c3", 2, 2.0, 3.0)]
     wlu = _wlu(
         _span("c1", 0.0, 1.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
-        _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT], relation=RELATION_COMPLEMENTARY),
-        _span("c3", 2.0, 3.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT], relation=RELATION_COMPLEMENTARY),
+        _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT], relation=RELATION_CONTINUATION),
+        _span("c3", 2.0, 3.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT], relation=RELATION_CONTINUATION),
     )
     u = build_editorial_moment_understanding_for_source(source_asset_id="src1", takes_for_source=takes, watch_listen_understanding=wlu)
     assert all(m.moment_role == MOMENT_ROLE_CLEAN_AUDIENCE_DELIVERY for m in u.moments)
+    assert len(u.sequence_hypotheses) == 1
     assert u.sequence_hypotheses[0].sequence_kind == SEQUENCE_KIND_PREASSEMBLED_FINAL_SEQUENCE
 
 
-def test_29_clean_adjacent_takes_not_automatically_final():
+def test_29_clean_adjacent_takes_not_automatically_grouped_or_final():
+    # D-197's own "CLEAN MOMENTS WITHOUT RELATION" firewall: three clean
+    # moments, chronologically adjacent, with ZERO relation evidence
+    # between any pair, must NOT be auto-grouped into a sequence at all --
+    # chronological adjacency alone is never sufficient (this is stronger,
+    # and strictly supersedes, the older "not automatically FINAL" check:
+    # with no grouping at all, there is no sequence to even misclassify).
     takes = [_take("c1", 0, 0.0, 1.0), _take("c2", 1, 1.0, 2.0), _take("c3", 2, 2.0, 3.0)]
     wlu = _wlu(
         _span("c1", 0.0, 1.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
@@ -452,7 +471,10 @@ def test_29_clean_adjacent_takes_not_automatically_final():
         _span("c3", 2.0, 3.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
     )
     u = build_editorial_moment_understanding_for_source(source_asset_id="src1", takes_for_source=takes, watch_listen_understanding=wlu)
-    assert u.sequence_hypotheses[0].sequence_kind != SEQUENCE_KIND_PREASSEMBLED_FINAL_SEQUENCE
+    assert u.sequence_hypotheses == ()
+    assert u.moment_count == 3
+    assert len(u.local_groups) == 3
+    assert all(len(g.moment_ids) == 1 for g in u.local_groups)
 
 
 def test_30_chronology_reversal_same_classification():
@@ -460,7 +482,7 @@ def test_30_chronology_reversal_same_classification():
         takes = [_take("c1", 0, offset, offset + 1.0), _take("c2", 1, offset + 1.0, offset + 2.0)]
         wlu = _wlu(
             _span("c1", offset, offset + 1.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
-            _span("c2", offset + 1.0, offset + 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
+            _span("c2", offset + 1.0, offset + 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT], relation=RELATION_CONTINUATION),
         )
         return build_editorial_moment_understanding_for_source(
             source_asset_id="src1", takes_for_source=takes, watch_listen_understanding=wlu,
@@ -475,7 +497,7 @@ def test_31_jump_cut_unavailable():
     takes = [_take("c1", 0, 0.0, 1.0), _take("c2", 1, 1.0, 2.0)]
     wlu = _wlu(
         _span("c1", 0.0, 1.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
-        _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
+        _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT], relation=RELATION_CONTINUATION),
     )
     u = build_editorial_moment_understanding_for_source(source_asset_id="src1", takes_for_source=takes, watch_listen_understanding=wlu)
     from cutsell_worker.editorial_moment_sequence import CONTINUITY_NOT_AVAILABLE
@@ -486,7 +508,7 @@ def test_32_sequence_conflict_propagates():
     takes = [_take("c1", 0, 0.0, 1.0), _take("c2", 1, 1.0, 2.0)]
     wlu = _wlu(
         _span("c1", 0.0, 1.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
-        _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT]),
+        _span("c2", 1.0, 2.0, behavior_labels=[BEHAVIOR_CLEAN_ATTEMPT], relation=RELATION_CONTINUATION),
     )
     u = build_editorial_moment_understanding_for_source(
         source_asset_id="src1", takes_for_source=takes, watch_listen_understanding=wlu,

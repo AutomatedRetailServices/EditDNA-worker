@@ -2438,6 +2438,14 @@ def build_flow_b_draft(
             "sequences": [
                 row for source_diag in editorial_moment_source_diagnostics for row in source_diag["sequences"]
             ],
+            # D-197: real structural local groups (docs/CUTSELL_DECISIONS.md
+            # D-197) -- the same observability-only flattening pattern as
+            # "moments"/"sequences" above, so a RAW's compact log step can
+            # read local-group formation directly without reconstructing
+            # per-source structure.
+            "local_groups": [
+                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["local_groups"]
+            ],
         }
     else:
         editorial_moment_sequence_summary = {"status": "disabled"}

@@ -75,6 +75,7 @@ established.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import os
 from typing import Iterable, Mapping, Sequence, Tuple
 
@@ -288,6 +289,7 @@ class EditorialMomentUnderstanding:
     confidence: str
     conflict_flags: Tuple[str, ...]
     provenance: Tuple[str, ...]
+    local_groups: Tuple["EditorialLocalGroup", ...] = ()
 
 
 def _understanding_span_for_take(
@@ -369,20 +371,244 @@ def build_editorial_moments_for_source(
     return tuple(moments), unresolved_count, fallback_language_attempt_count, relation_by_position
 
 
+# ---------------------------------------------------------------------------
+# D-197: P1 LOCAL SEQUENCE GROUP FORMATION.
+#
+# D-196's real-media diagnostic RAW (docs/CUTSELL_DECISIONS.md D-196) proved
+# ``build_editorial_sequences_for_moments``'s own whole-source default
+# (below) is genuinely reached by the live pipeline and produces exactly
+# the failure mode the D-196 directive named in advance:
+# LOCAL_GROUPING_TOO_BROAD (one 353s sequence spanning topically unrelated
+# real regions). This section replaces that whole-source default, for the
+# live-pipeline entry point only (``build_editorial_moment_understanding_
+# for_source`` below), with a deterministic, STRUCTURAL grouper.
+#
+# Forensic audit of which ALREADY-COMPUTED relation values mean what (per
+# ``watch_listen_understanding._relation_for_pair``'s own real derivation,
+# read directly rather than assumed):
+#
+#   RELATION_RETRY        -- lexical restart + prior-attempt abandonment/
+#                             reset/pause evidence: this moment IS a retry
+#                             of its predecessor. Same local recording
+#                             structure. JOIN.
+#   RELATION_CORRECTION   -- lexical restart immediately after an
+#                             apparently-complete prior statement, no
+#                             abandonment/reset evidence: this moment
+#                             corrects its predecessor. Same local
+#                             recording structure. JOIN.
+#   RELATION_CONTINUATION -- no restart; prior span incomplete/non-
+#                             terminal; tight gap; no measured pause: this
+#                             moment continues its predecessor's own
+#                             utterance. Same local recording structure.
+#                             JOIN.
+#   RELATION_COMPLEMENTARY-- "no semantic corroboration available to
+#                             confirm non-duplicative content" (the
+#                             deriver's own docstring) -- explicitly
+#                             HEDGED, never-confirmed evidence. Per this
+#                             task's own "ambiguous relation must not
+#                             bridge... prefer bounded abstention" rule:
+#                             BOUNDARY (never a join).
+#   RELATION_NEW_AUDIENCE_BEAT -- prior span cleanly completed, no
+#                             restart, fresh delivery start after a real
+#                             gap: an explicit new-beat marker. Per this
+#                             task's own "EXPLICIT BOUNDARY RELATIONS"
+#                             section: BOUNDARY.
+#   RELATION_DISTINCT_PROPOSITION -- never emitted by any live deriver in
+#                             this codebase today (confirmed: absent from
+#                             ``_relation_for_pair``'s own body) -- but by
+#                             name it asserts the two propositions are
+#                             distinct, which is structurally a boundary,
+#                             not a join. BOUNDARY.
+#   RELATION_UNCERTAIN / no # "insufficient evidence to support any bounded
+#   relation at all         relation hypothesis" (the deriver's own
+#                             docstring) or no predecessor relation
+#                             resolved at all: the genuinely ambiguous/
+#                             absent case. Per this task's own "NO
+#                             RELATION CASE" firewall: BOUNDARY (never
+#                             fabricate a join from chronological
+#                             adjacency alone).
+#
+# This yields exactly the three JOIN relations the directive's own
+# "EXPLICIT POSITIVE RELATIONS" section names as audit candidates.
+# ---------------------------------------------------------------------------
+_JOIN_RELATIONS: frozenset[str] = frozenset({RELATION_RETRY, RELATION_CORRECTION, RELATION_CONTINUATION})
+
+GROUP_REASON_SOLE_MOMENT_IN_SOURCE = "SOLE_MOMENT_IN_SOURCE"
+GROUP_REASON_ISOLATED_NO_RELATION_EVIDENCE = "ISOLATED_NO_RELATION_EVIDENCE"
+GROUP_REASON_RELATION_LINKED_CHAIN = "RELATION_LINKED_CHAIN"
+ALLOWED_GROUPING_REASONS: frozenset[str] = frozenset({
+    GROUP_REASON_SOLE_MOMENT_IN_SOURCE, GROUP_REASON_ISOLATED_NO_RELATION_EVIDENCE,
+    GROUP_REASON_RELATION_LINKED_CHAIN,
+})
+
+
+def _local_group_id(source_asset_id: str, moment_ids: Sequence[str]) -> str:
+    """Deterministic, MEMBERSHIP-anchored id -- same shape as D-194's own
+    ``_editorial_sequence_id`` (sorted member id set, never order- or
+    timestamp-anchored, never a clip/family/dict-order dependency) under a
+    distinct ``elgrp_`` prefix."""
+    raw = "|".join((source_asset_id, "|".join(sorted(str(v) for v in moment_ids if v)))).encode("utf-8")
+    return "elgrp_" + hashlib.sha256(raw).hexdigest()[:20]
+
+
+@dataclass(frozen=True)
+class EditorialLocalGroup:
+    """D-197: one bounded, deterministic LOCAL group of ``EditorialMoment``
+    indices from the SAME per-source ordered moment list -- structural
+    evidence only, never a semantic/authority decision. Grouping decides
+    ONLY which moments are locally considered together; it never decides
+    ``sequence_kind``, winner, deletion, family, or global (cross-source)
+    redundancy -- see ``build_editorial_local_groups``'s own docstring."""
+    source_asset_id: str
+    group_id: str
+    moment_indices: Tuple[int, ...]
+    moment_ids: Tuple[str, ...]
+    source_start: float
+    source_end: float
+    grouping_reason: str
+    relation_support: Tuple[str, ...]
+    confidence: str
+    conflict_flags: Tuple[str, ...]
+    provenance: Tuple[str, ...]
+
+
+def _group_confidence(group_moments: Sequence[EditorialMoment]) -> str:
+    """Categorical only, never averaged -- mirrors ``_aggregate_confidence``
+    below's own contract at the group level."""
+    if any(m.conflict_flags for m in group_moments):
+        return CONFIDENCE_MIXED
+    confidences = {m.confidence for m in group_moments}
+    if confidences == {CONFIDENCE_SUPPORTED}:
+        return CONFIDENCE_SUPPORTED
+    if CONFIDENCE_MIXED in confidences:
+        return CONFIDENCE_MIXED
+    return CONFIDENCE_WEAK
+
+
+def _emit_local_group(
+    groups: list[EditorialLocalGroup],
+    moments: Tuple[EditorialMoment, ...],
+    indices: Sequence[int],
+    relations: Sequence[str],
+) -> None:
+    group_moments = [moments[i] for i in indices]
+    moment_ids = tuple(m.editorial_moment_id for m in group_moments)
+    source_asset_id = group_moments[0].source_asset_id
+    if len(indices) == 1:
+        reason = (
+            GROUP_REASON_SOLE_MOMENT_IN_SOURCE if len(moments) == 1
+            else GROUP_REASON_ISOLATED_NO_RELATION_EVIDENCE
+        )
+        confidence = CONFIDENCE_UNKNOWN
+    else:
+        reason = GROUP_REASON_RELATION_LINKED_CHAIN
+        confidence = _group_confidence(group_moments)
+    conflict_flags = tuple(sorted({f for m in group_moments for f in m.conflict_flags}))
+    provenance = ["EDITORIAL_MOMENT_CLASSIFICATION"]
+    if relations:
+        provenance.append("RELATION_EVIDENCE")
+    groups.append(EditorialLocalGroup(
+        source_asset_id=source_asset_id,
+        group_id=_local_group_id(source_asset_id, moment_ids),
+        moment_indices=tuple(indices),
+        moment_ids=moment_ids,
+        source_start=min(m.source_start for m in group_moments),
+        source_end=max(m.source_end for m in group_moments),
+        grouping_reason=reason,
+        relation_support=tuple(sorted(set(relations))),
+        confidence=confidence,
+        conflict_flags=conflict_flags,
+        provenance=tuple(provenance),
+    ))
+
+
+def build_editorial_local_groups(
+    moments: Tuple[EditorialMoment, ...],
+    *,
+    relation_candidates_by_position: Mapping[int, str] | None = None,
+) -> Tuple[EditorialLocalGroup, ...]:
+    """D-197's one canonical local-group builder. Pure; no I/O, no
+    provider/media/network call, no global (cross-source) search, no
+    Family Formation, no numeric adjacency threshold anywhere.
+
+    Chains CONSECUTIVE moments (already caller-ordered, one source) into
+    one local group exactly when the ALREADY-COMPUTED dominant D-157
+    relation from a moment to its immediate predecessor
+    (``relation_candidates_by_position`` -- the exact map ``build_
+    editorial_moments_for_source`` already returns, never recomputed
+    here) is one of RETRY/CORRECTION/CONTINUATION (see this section's own
+    module-level audit comment above). Every other relation value, or a
+    missing/unresolved one, is a BOUNDARY -- chronological adjacency
+    alone never joins two moments.
+
+    Each position's relation refers only to its own immediate
+    predecessor (D-157's own per-pair design), so this is already an
+    ordered linear chain, never a general graph -- no transitive-closure
+    search is performed or needed (this task's own "connected component /
+    chain design" audit conclusion).
+
+    A standalone moment (no join to predecessor or successor) is returned
+    as its own ``EditorialLocalGroup`` of size 1 -- singletons are valid
+    P1 output, never forced into a fabricated 2-moment group."""
+    relation_candidates_by_position = relation_candidates_by_position or {}
+    if not moments:
+        return ()
+
+    groups: list[EditorialLocalGroup] = []
+    current_indices: list[int] = [0]
+    current_relations: list[str] = []
+    for i in range(1, len(moments)):
+        relation = relation_candidates_by_position.get(i)
+        if relation in _JOIN_RELATIONS:
+            current_indices.append(i)
+            current_relations.append(relation)
+        else:
+            _emit_local_group(groups, moments, current_indices, current_relations)
+            current_indices = [i]
+            current_relations = []
+    _emit_local_group(groups, moments, current_indices, current_relations)
+    return tuple(groups)
+
+
+def editorial_local_group_diagnostics(group: EditorialLocalGroup) -> dict:
+    """Bounded, JSON-safe projection -- same verbatim-field-only contract
+    as ``editorial_moment_diagnostics``/``editorial_sequence_diagnostics``.
+    ``moment_ids`` are stable-id references only, never the underlying
+    ``EditorialMoment`` objects; no transcript."""
+    return {
+        "group_id": group.group_id,
+        "source_asset_id": group.source_asset_id,
+        "source_start": group.source_start,
+        "source_end": group.source_end,
+        "moment_ids": list(group.moment_ids),
+        "moment_count": len(group.moment_ids),
+        "grouping_reason": group.grouping_reason,
+        "relation_support": list(group.relation_support),
+        "confidence": group.confidence,
+        "conflict": list(group.conflict_flags),
+        "provenance": list(group.provenance),
+    }
+
+
 def build_editorial_sequences_for_moments(
     moments: Tuple[EditorialMoment, ...],
     *,
     relation_candidates_by_position: Mapping[int, str] | None = None,
     local_groups: Sequence[Sequence[int]] | None = None,
 ) -> Tuple[EditorialSequenceHypothesis, ...]:
-    """Forms bounded LOCAL sequences only. Per this task's own "audit
-    whether canonical source ordering already exists / do not invent a
-    tuned within-X-seconds rule" instruction: with no ``local_groups``
+    """Forms bounded LOCAL sequences only. With no ``local_groups``
     supplied, this treats the WHOLE per-source moment list (already
     bounded to one source_asset_id by the caller) as ONE local window --
-    no numeric adjacency threshold is invented. A caller MAY instead
-    supply explicit ``local_groups`` (index tuples into ``moments``) for a
-    finer partition; this module still performs no search of its own."""
+    the ORIGINAL D-195 default, preserved here unchanged for callers that
+    still rely on it directly. The live pipeline no longer relies on this
+    default: ``build_editorial_moment_understanding_for_source`` below
+    always supplies REAL, structurally-computed groups (D-197's own
+    ``build_editorial_local_groups``) instead of leaving this ``None`` --
+    see D-196/D-197 (``docs/CUTSELL_DECISIONS.md``) for why the
+    whole-source default was never safe as a live default. A caller MAY
+    still supply explicit ``local_groups`` (index tuples into ``moments``)
+    for a finer partition; this module still performs no search of its
+    own."""
     relation_candidates_by_position = relation_candidates_by_position or {}
     if local_groups is None:
         groups: Tuple[Tuple[int, ...], ...] = (tuple(range(len(moments))),) if len(moments) >= 2 else ()
@@ -506,8 +732,25 @@ def build_editorial_moment_understanding_for_source(
     else:
         capability_status = CAPABILITY_AVAILABLE
 
+    # D-197: when the caller leaves ``local_groups`` unset (the live
+    # pipeline's own default -- see ``build_editorial_moment_understanding_
+    # for_sources`` below), compute REAL structural local groups instead of
+    # ever falling through to ``build_editorial_sequences_for_moments``'s
+    # own whole-source default. A caller that explicitly supplies
+    # ``local_groups`` keeps that override verbatim (unchanged contract).
+    if local_groups is None:
+        computed_local_groups = build_editorial_local_groups(
+            moments, relation_candidates_by_position=relation_by_position,
+        )
+        effective_local_groups: list[list[int]] = [
+            list(g.moment_indices) for g in computed_local_groups if len(g.moment_indices) >= 2
+        ]
+    else:
+        computed_local_groups = ()
+        effective_local_groups = list(local_groups)
+
     sequences = build_editorial_sequences_for_moments(
-        moments, relation_candidates_by_position=relation_by_position, local_groups=local_groups,
+        moments, relation_candidates_by_position=relation_by_position, local_groups=effective_local_groups,
     )
 
     if fallback_count and "LANGUAGE_ATTEMPT_NOT_SUPPLIED" not in missing_evidence:
@@ -530,6 +773,7 @@ def build_editorial_moment_understanding_for_source(
             f for s in sequences for f in s.conflict_flags
         ))),
         provenance=("WATCH_LISTEN_UNDERSTANDING",) + (("RAW_UNDERSTANDING_MAP",) if raw_understanding_map is not None else ()),
+        local_groups=computed_local_groups,
     )
 
 
@@ -572,6 +816,9 @@ def editorial_moment_understanding_diagnostics(understanding: EditorialMomentUnd
         "conflict": list(understanding.conflict_flags),
         "moments": [editorial_moment_diagnostics(m) for m in understanding.moments],
         "sequences": [editorial_sequence_diagnostics(s) for s in understanding.sequence_hypotheses],
+        # D-197: real structural local groups (empty when the caller
+        # bypassed the auto-grouper with its own explicit local_groups).
+        "local_groups": [editorial_local_group_diagnostics(g) for g in understanding.local_groups],
     }
 
 
@@ -594,6 +841,12 @@ def editorial_moment_understanding_run_summary(
     else:
         p1_status = CAPABILITY_PARTIAL
 
+    all_local_groups = tuple(g for u in understandings for g in u.local_groups)
+    singleton_groups = tuple(g for g in all_local_groups if len(g.moment_ids) == 1)
+    multi_moment_groups = tuple(g for g in all_local_groups if len(g.moment_ids) >= 2)
+    sequenced_moment_ids = {mid for s in all_sequences for mid in s.moment_ids}
+    unsequenced_moment_count = sum(1 for m in all_moments if m.editorial_moment_id not in sequenced_moment_ids)
+
     return {
         **base,
         "schema_version": SCHEMA_VERSION,
@@ -604,4 +857,17 @@ def editorial_moment_understanding_run_summary(
         ),
         "p1_missing_behavior_count": sum(1 for m in all_moments if not m.provenance or "BEHAVIOR_HYPOTHESIS" not in m.provenance),
         "p1_missing_relation_count": sum(1 for m in all_moments if "RELATION_EVIDENCE" not in m.provenance),
+        # D-197: local-group formation diagnostics. ``sequence_count`` is
+        # the same value already reported as ``editorial_sequence_count``
+        # (from the base D-194 summary) -- both names kept for readability
+        # of this specific field group, never a second source of truth.
+        "local_group_count": len(all_local_groups),
+        "singleton_group_count": len(singleton_groups),
+        "multi_moment_group_count": len(multi_moment_groups),
+        "max_group_moment_count": max((len(g.moment_ids) for g in all_local_groups), default=0),
+        "sequence_count": len(all_sequences),
+        "sequence_from_supported_group_count": sum(
+            1 for g in multi_moment_groups if g.confidence == CONFIDENCE_SUPPORTED
+        ),
+        "unsequenced_moment_count": unsequenced_moment_count,
     }

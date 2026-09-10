@@ -36327,3 +36327,316 @@ Pacing change. No provider/model policy change.
 **HUMAN ACTION REQUIRED:** YES (condition A -- whether to authorize
 D-197 local-grouping repair, and any P1-authority scope, remains a
 Product Owner decision; this entry implements neither).
+
+# D-197: P1 LOCAL SEQUENCE GROUP FORMATION -- REPAIRING
+D-196'S LOCAL_GROUPING_TOO_BROAD ROOT CAUSE (OFFLINE ONLY)
+
+Post D-196, Product Owner authorization: repair D-196's proven root cause
+(`build_editorial_sequences_for_moments` defaulting to ONE whole-source
+local window when no `local_groups` are supplied) with a deterministic,
+STRUCTURAL grouper -- no numeric adjacency threshold, no Video00 literals,
+no RAW, no provider, no P1 authority, no P2, no BestTake/Family/Boundary/
+Pacing change.
+
+## 1. Forensic grouping audit (before coding, per the directive's own
+"FIRST -- FORENSIC GROUPING AUDIT" requirement)
+
+Read `watch_listen_understanding.py::_relation_for_pair`'s own real
+derivation logic directly (never assumed) to classify every relation
+value D-157 can emit as JOIN (same local recording structure), BOUNDARY
+(a genuine editorial break), or N/A (never emitted by any live deriver):
+
+- `RELATION_RETRY` -- lexical restart + prior-attempt abandonment/reset/
+  pause evidence: this moment IS a retry of its predecessor. **JOIN.**
+- `RELATION_CORRECTION` -- lexical restart immediately after an
+  apparently-complete prior statement, no abandonment/reset evidence:
+  this moment corrects its predecessor. **JOIN.**
+- `RELATION_CONTINUATION` -- no restart; prior span incomplete/non-
+  terminal; tight gap; no measured pause: this moment continues its
+  predecessor's own utterance. **JOIN.**
+- `RELATION_COMPLEMENTARY` -- the deriver's own docstring: "no semantic
+  corroboration available to confirm non-duplicative content" --
+  explicitly hedged, never-confirmed evidence. **BOUNDARY** (the
+  directive's own "ambiguous relation must not bridge... prefer bounded
+  abstention" rule).
+- `RELATION_NEW_AUDIENCE_BEAT` -- prior span cleanly completed, no
+  restart, fresh delivery start after a real gap: an explicit new-beat
+  marker. **BOUNDARY** (the directive's own "EXPLICIT BOUNDARY
+  RELATIONS" instruction, used verbatim).
+- `RELATION_DISTINCT_PROPOSITION` -- confirmed absent from
+  `_relation_for_pair`'s own body (never emitted by any live deriver
+  today) -- but by name asserts the two propositions are distinct, which
+  is structurally a boundary. **BOUNDARY** (never live-triggered today).
+- `RELATION_UNCERTAIN` / no resolved relation at all -- "insufficient
+  evidence to support any bounded relation hypothesis" (the deriver's
+  own docstring), or the source's first moment (no predecessor).
+  **BOUNDARY** (the directive's own "NO RELATION CASE" firewall:
+  chronological adjacency alone never joins two moments).
+
+This yields exactly the three JOIN relations the directive's own
+"EXPLICIT POSITIVE RELATIONS" section named as audit candidates (RETRY/
+CORRECTION/CONTINUATION) -- confirmed from the real code, not assumed.
+
+## 2. Dependency firewall (confirmed, not merely asserted)
+
+The grouper (`build_editorial_local_groups`, new) reads only:
+`EditorialMoment` objects (D-194, unchanged) and the ALREADY-COMPUTED
+`relation_candidates_by_position` map `build_editorial_moments_for_
+source` (D-195, unchanged) already returns. It imports and references
+nothing from `take_grouping.py`, `deterministic_best_take_authority.py`,
+`bounded_finalist_authority.py`, `bounded_finalist_arbiter.py`,
+`boundary_engine_pass.py`, `dialogue_pacing_transition.py`,
+`canonical_edit_plan.py`, or `render_plan`/`RenderSegment` -- confirmed
+via source-scoped string scans (`take_group_id`/`retry_family_id`/
+`selected_clip_id`/`winner_after`/etc. absent from the new section).
+
+## 3. Chain design (confirmed, not assumed)
+
+Each `AttemptRelationHypothesis` relates a span ONLY to its own immediate
+predecessor (D-157's own per-pair design, confirmed by re-reading
+`AttemptRelationHypothesis`'s own docstring) -- grouping is therefore
+already an ordered LINEAR CHAIN, never a general graph. No transitive-
+closure/connected-component search is implemented or needed: a single
+forward scan chains consecutive moments while the dominant relation at
+each position is a JOIN relation, and starts a new group the moment it
+is not (`build_editorial_local_groups`, `cutsell_worker/
+editorial_moment_sequence_integration.py`).
+
+## 4. Implementation
+
+- `EditorialLocalGroup` (new frozen dataclass): `source_asset_id`,
+  `group_id` (deterministic, membership-anchored, `elgrp_` prefix,
+  mirrors D-194's own `_editorial_sequence_id` hashing shape -- never
+  clip/family/dict-order dependent), `moment_indices`, `moment_ids`,
+  `source_start`/`source_end`, `grouping_reason` (`SOLE_MOMENT_IN_
+  SOURCE` / `ISOLATED_NO_RELATION_EVIDENCE` / `RELATION_LINKED_CHAIN` --
+  a bounded 3-value vocabulary, no invented state zoo), `relation_
+  support` (the distinct JOIN relation types found inside the group),
+  `confidence` (categorical only -- `SUPPORTED`/`WEAK`/`MIXED`/`UNKNOWN`,
+  never averaged; a singleton is always `UNKNOWN` -- no relation evidence
+  pertains to it), `conflict_flags` (surfaced from member moments'
+  own conflicts), `provenance`.
+- `build_editorial_local_groups(moments, *, relation_candidates_by_
+  position=None)` -- the one canonical grouper. A standalone moment (no
+  join to predecessor or successor) is returned as its own size-1 group
+  -- singletons are valid P1 output, never forced into a fabricated
+  2-moment group (the directive's own "SINGLETONS" instruction).
+- `editorial_local_group_diagnostics(group)` -- bounded, JSON-safe
+  projection, same verbatim-field-only contract as D-194's own
+  `editorial_moment_diagnostics`/`editorial_sequence_diagnostics`; no
+  transcript.
+- `build_editorial_moment_understanding_for_source` (D-195, modified):
+  when its own `local_groups` parameter is left `None` (the live
+  pipeline's own default), it now computes REAL structural groups via
+  `build_editorial_local_groups` and passes only the 2+-moment groups
+  into `build_editorial_sequences_for_moments` -- NEVER falling through
+  to that function's own whole-source default. A caller that explicitly
+  supplies `local_groups` keeps that override verbatim (the parameter's
+  pre-existing contract, unchanged, for any future separately-authorized
+  caller). `build_editorial_sequences_for_moments` itself (D-195) is
+  UNCHANGED -- its own whole-source default is preserved for direct
+  callers, documented as no longer relied on by the live pipeline.
+  `EditorialMomentUnderstanding` gained one new field, `local_groups`
+  (default `()`, backward compatible).
+- `editorial_moment_understanding_diagnostics`/`editorial_moment_
+  understanding_run_summary` (D-195, extended): a new `"local_groups"`
+  bounded array, and `local_group_count`, `singleton_group_count`,
+  `multi_moment_group_count`, `max_group_moment_count` (descriptive
+  only, never a classification threshold), `sequence_count` (mirrors the
+  existing `editorial_sequence_count`), `sequence_from_supported_group_
+  count`, `unsequenced_moment_count`.
+- `cutsell_worker/pipeline.py` (small, surgical): the existing D-195/
+  D-196 diagnostic block now also flattens `"local_groups"` into
+  `draft.diagnostics["editorial_moment_sequence"]`, the same pattern as
+  the existing `"moments"`/`"sequences"` arrays. D-194's own classifiers
+  (`classify_editorial_moment`/`classify_editorial_sequence`) are
+  UNCHANGED -- no genuine bug was found in them, so per the directive's
+  own instruction they were not touched.
+
+## 5. No numeric adjacency threshold (confirmed, source-scanned)
+
+The new section contains no `MAX_GAP_SECONDS`/`LOCAL_WINDOW_SECONDS`/
+bare gap-in-seconds constant, and no executable statement in it reads a
+gap length, duration, or timestamp to decide a join -- grouping is
+decided purely from the categorical relation vocabulary in Section 1
+(source-scanned test, `tests/test_cutsell_d197_editorial_local_group_
+formation.py::test_20_no_magic_time_constants_in_source` and
+`test_34_no_gap_length_read_by_grouper`).
+
+## 6. D-196 abstract replay proven
+
+A generic, abstract 33-moment fixture (five relation-linked clusters of
+~6-7 moments each, separated by explicit `NEW_AUDIENCE_BEAT` boundaries
+-- no Video00 literal spans/text/region names) that the OLD whole-source
+default would have collapsed into ONE ~33-moment sequence now produces
+5 bounded local groups, none spanning more than 7 moments
+(`test_18_d196_abstract_replay_no_whole_source_collapse`). This is the
+offline proof that D-196's real `LOCAL_GROUPING_TOO_BROAD` finding (one
+353s sequence spanning the unrelated gynecologist/pimples regions) is
+structurally fixed for the shape it actually failed on.
+
+## 7. Sequence-kind reachability (all four kinds remain real, proven end
+to end)
+
+- `RETRY_SERIES`/`BLOOPER_SERIES` -- unaffected: both already form via a
+  real `RETRY` relation, which is a JOIN relation, so the live auto-
+  grouper reaches them exactly as before D-197
+  (`test_29_retry_series_remains_reachable`,
+  `test_30_blooper_series_remains_reachable`, and D-195's own unmodified
+  `test_25`/`test_26`).
+- `PREASSEMBLED_FINAL_SEQUENCE` -- reachable end to end through the live
+  auto-grouper via a `CONTINUATION`-joined all-clean group (D-195's
+  `test_28`, updated from `RELATION_COMPLEMENTARY` to `RELATION_
+  CONTINUATION` -- `COMPLEMENTARY` is explicitly a BOUNDARY relation
+  under D-197's own audit, so it no longer forms a group at all; a real
+  live `CONTINUATION` relation between two clean, complete moments does
+  not override their `CLEAN_AUDIENCE_DELIVERY` role in D-194's own
+  classifier and IS forward-progression-compatible, so the same real
+  shape is preserved).
+- `CLEAN_DELIVERY_SEQUENCE` -- **not reachable through the live auto-
+  grouper on chronological adjacency alone** (a structural consequence,
+  not an oversight: every JOIN relation in Section 1 either forces a
+  non-clean moment role (`RETRY`/`CORRECTION`) or is forward-progression-
+  compatible (`CONTINUATION`), so any auto-grouped 2+ all-clean chain is
+  always classified `PREASSEMBLED_FINAL_SEQUENCE`, never the weaker
+  claim). The kind itself is NOT removed from the vocabulary or from
+  D-194's own classifier (unchanged) -- it remains reachable whenever a
+  caller supplies explicit grouping evidence independent of relation-to-
+  predecessor (proven via an explicit `local_groups` override,
+  D-195's updated `test_27`). This is an honest, structural finding, not
+  a gap papered over with a fabricated relation.
+- `MIXED`/`UNCERTAIN`/`RECORDING_PROCESS_SEQUENCE` -- unaffected, still
+  reachable via the roles that already trigger them.
+
+## 8. Firewalls proven
+
+- **No relation case**: two/three chronologically-adjacent clean moments
+  with zero relation evidence are never auto-grouped (D-195's updated
+  `test_29`, D-197's `test_06`) -- this directly repairs D-196's own
+  failure mode.
+- **Ambiguous/conflicting relation does not bridge**: `UNCERTAIN` and
+  `COMPLEMENTARY` never bridge an otherwise-unrelated pair, even inside
+  a longer chain (`test_07`, `test_08`).
+- **Explicit boundary relation**: `NEW_AUDIENCE_BEAT` (and, though never
+  live-emitted today, `DISTINCT_PROPOSITION`) always terminates the
+  current group (`test_05`).
+- **False-positive final sequence**: unaffected, still `0` in every
+  fixture -- no group is ever forced into `PREASSEMBLED_FINAL_SEQUENCE`
+  by the grouper itself (grouping decides membership only, never
+  `sequence_kind`).
+- **Source-order/id independence**: group ids and membership are
+  deterministic and independent of clip id, family id, dict order, and
+  input list order (`test_09`-`test_13`, `test_22`-`test_24`).
+- **No transcript, categorical confidence only, conflict retained,
+  provenance populated**: `test_25`-`test_28`.
+- **Default-off parity / flag-on immutability**: unchanged --
+  `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=0` still yields
+  byte-identical `{"status": "disabled"}`; flag-on still changes ONLY
+  the P1 diagnostics block, winner/family/D-191/Boundary/Pacing/Renderer
+  output is unchanged (`test_38`/`test_39`, D-195's own `test_54`/
+  `test_55`/`test_55b`, re-run green).
+
+## 9. Test matrix
+
+New file `tests/test_cutsell_d197_editorial_local_group_formation.py`
+(54 tests): join/boundary relation semantics for every relation value,
+singletons, 2-/5-moment chains, multiple unrelated clusters, the D-196
+abstract replay, no-whole-source-fallback via the live builder, no
+magic-time-constant source scan, exact timing, determinism (ids/
+membership/sequence), no transcript, categorical confidence, conflict
+retention, provenance, all four reachable sequence kinds, clean-
+unrelated-takes-never-final, no-gap-read/no-proposition-invention source
+scans, fallback-LanguageAttempt-still-supported, the shared D-195
+forbidden-authority-string re-scan, pipeline-level default-off/flag-on
+tests, run-summary local-group keys, explicit-override bypass, and the
+no-ASR/visual/prosodic-import re-check.
+
+`tests/test_cutsell_d195_editorial_moment_sequence_integration.py`
+updated: `test_27` (now proves `CLEAN_DELIVERY_SEQUENCE` reachability
+via an explicit `local_groups` override, per Section 7's honest finding
+above), `test_28` (relation switched `COMPLEMENTARY` -> `CONTINUATION`
+so the live auto-grouper actually forms the group), `test_29` (rewritten
+to assert the auto-grouper produces NO sequence at all for zero-relation
+clean moments -- strictly stronger than the old "not automatically
+final" check), `test_30`/`test_31`/`test_32` (given a real `CONTINUATION`
+join relation so a sequence still forms for the property each was
+actually testing -- chronology-offset invariance, `continuity_status`,
+conflict propagation -- none of which depend on the specific relation
+used).
+
+## 10. Offline qualification
+
+`python3 -m compileall cutsell_worker tests` clean. New D-197 suite: 54
+passed. D-195 (updated) + D-194 (unchanged): 167 passed. Targeted D-123/
+D-128/D-142/D-150/D-158/D-161/D-163/D-166/D-167/D-168/D-169/D-171/D-172/
+D-174/D-177/D-183/D-184/D-187/D-188/D-189/D-191 suites: 960 passed, 1
+expected transient D-169 git-diff tripwire (resolves after commit --
+same pattern as every prior D-19x task). Boundary/Pacing/render suites:
+275 passed. Full offline suite (`pytest tests/ --ignore=tests/
+test_semantic_stitch.py`): **4590 passed, 6 failed** -- the SAME 6
+pre-existing failures D-195's own entry already documented on its
+starting `HEAD` (the D-169 tripwire, 1 in `test_hybrid_story_guard_
+incomplete_retry.py`, 4 in `test_video00_modal_hybrid_semantic_
+parity.py`) -- independently reconfirmed unrelated to this task (this
+task never touches `active_path_identity.py`,
+`test_hybrid_story_guard_incomplete_retry.py`, or the Modal-workflow
+hybrid-overlay code the other 4 target); `test_semantic_stitch.py`'s
+own pre-existing collection error, unrelated. **No new failures.**
+
+## 11. New failures
+
+**NONE.**
+
+## 12. D-197 VERDICT
+
+**A. P1 LOCAL SEQUENCE GROUP FORMATION OFFLINE PROVEN.** The whole-
+source default D-196 proved unsafe is replaced, for the live pipeline
+only, with a deterministic structural grouper using exactly the three
+real relation values (`RETRY`/`CORRECTION`/`CONTINUATION`) confirmed by
+direct forensic audit to indicate shared local recording structure. No
+numeric adjacency threshold, no Video00 literal, no new classifier. All
+four D-194 sequence kinds remain reachable (three through the live
+auto-grouper unchanged or repaired; `CLEAN_DELIVERY_SEQUENCE` through
+an honest, structurally-explained explicit-override path). Zero winner/
+family/authority/Boundary/Pacing/Renderer mutation.
+
+## 13. Remaining Language-Spine gap (carried forward, NOT solved here)
+
+`REAL_LANGUAGE_ATTEMPT_LIVE_COVERAGE = 0%` and `PROPOSITION_CANDIDATE_
+LIVE_COVERAGE = 0%` remain exactly as D-195/D-196 found them -- this
+task did not live-wire D-166/168/169 collections, per its own explicit
+"NO LANGUAGE-SPINE REPAIR YET" scope boundary.
+
+## 14. Canonical P1 status
+
+**PHASE_A_OFFLINE_PROVEN + CANONICAL_EVIDENCE_LIVE_DIAGNOSTIC_
+INTEGRATION_OFFLINE_PROVEN + REAL_MEDIA_PARTIALLY_QUALIFIED +
+LOCAL_GROUP_FORMATION_OFFLINE_PROVEN.** Real-media qualification is NOT
+upgraded by this entry (that requires a RAW, not authorized here) --
+still `REAL_MEDIA_PARTIALLY_QUALIFIED` pending D-198.
+
+## 15. Exact next gate
+
+D-198 -- ONE Video00 RAW with the existing P1 diagnostics flag ON,
+verifying D-196's real 353s single sequence becomes genuinely bounded
+real local groups on the actual canonical source. NOT authorized or
+dispatched by this entry. After D-198, the remaining 0%/0% Language-
+Spine coverage gap is a separate Product Owner scope decision (D-199 or
+equivalent) about whether it materially blocks P1 further.
+
+## 16. Confirmations
+
+OFFLINE ONLY -- no RAW, no provider call, no network call. No P1
+authority granted (still zero authority flag). No P2 implemented. No
+BestTake/Family/Boundary/Pacing/Renderer change (all confirmed unchanged
+via the D-195 immutability tests, re-run green). No overlap/Pacing
+change. Four files changed: `cutsell_worker/editorial_moment_sequence_
+integration.py` (extended, D-194's own `editorial_moment_sequence.py`
+untouched), `cutsell_worker/pipeline.py` (small, surgical), `tests/
+test_cutsell_d195_editorial_moment_sequence_integration.py` (six
+fixtures updated per Section 9), `tests/test_cutsell_d197_editorial_
+local_group_formation.py` (new).
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- whether to authorize
+D-198 -- the one real-media RAW above -- remains a Product Owner
+decision; D-198 is NOT implemented or launched by this entry).
