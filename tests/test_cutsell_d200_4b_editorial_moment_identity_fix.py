@@ -304,13 +304,23 @@ def test_23_29_no_authority_consumer_of_editorial_moment_id():
 
 
 def test_only_p1_modules_reference_editorial_moment_id():
+    # D-202: whole_video_editorial_reasoning.py (P2 Phase A) is now an
+    # authorized additional reader -- it references EditorialMoment.
+    # editorial_moment_id BY ATTRIBUTE ACCESS ONLY (never re-derives or
+    # re-mints it), exactly the "reference existing ids, do not copy or
+    # recompute" contract D-201/D-202 require. This widens the audit's own
+    # allow-list; it does not touch editorial_moment_sequence.py/
+    # editorial_moment_sequence_integration.py's own minting authority.
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent / "cutsell_worker"
     referencing = [
         p.name for p in root.glob("*.py")
         if "editorial_moment_id" in p.read_text()
     ]
-    assert set(referencing) == {"editorial_moment_sequence.py", "editorial_moment_sequence_integration.py"}
+    assert set(referencing) == {
+        "editorial_moment_sequence.py", "editorial_moment_sequence_integration.py",
+        "whole_video_editorial_reasoning.py",
+    }
 
 
 # ===========================================================================

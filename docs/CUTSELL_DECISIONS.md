@@ -39877,3 +39877,347 @@ change. No Commercial Moment/Sales Funnel scoring introduced.
 offline Phase-A implementation is the next Product Owner decision.
 
 **Then STOP. Do NOT implement D-202. Wait for Product Owner authorization.**
+
+
+# D-202: P2 WHOLE-VIDEO EDITORIAL REASONING -- PHASE A TYPED FOUNDATION +
+DETERMINISTIC WHOLE-VIDEO HYPOTHESES (POST D-201, OFFLINE ONLY)
+
+## 1. Branch / new HEAD
+
+`feature/runpod-pod-on-demand`. Verified before starting: HEAD
+`3eb76edd5980191dfc614854c1aa71b0837fd27d` (matches expected), clean tree.
+New HEAD after this commit: see the commit this entry ships with.
+
+## 2. Files changed
+
+- `cutsell_worker/whole_video_editorial_reasoning.py` -- NEW, the one P2
+  Phase A module.
+- `tests/test_cutsell_d202_whole_video_editorial_reasoning.py` -- NEW, 62
+  tests.
+- `tests/test_cutsell_d200_4b_editorial_moment_identity_fix.py` -- ONE-LINE
+  widening of `test_only_p1_modules_reference_editorial_moment_id`'s own
+  allow-list to include the new module as an authorized ADDITIONAL reader
+  of `EditorialMoment.editorial_moment_id` BY ATTRIBUTE ACCESS ONLY (never
+  re-derives or re-mints it) -- exactly the "reference existing ids, never
+  copy/recompute" contract D-201/D-202 require. `editorial_moment_
+  sequence.py`/`editorial_moment_sequence_integration.py` themselves:
+  ZERO diff.
+- No other file touched. `pipeline.py`, `flow_b.py`, `take_grouping.py`,
+  `take_grouping_provider.py`, `composite_resolver.py`,
+  `realization_resolver.py`, `bounded_finalist_arbiter.py`, `bounded_
+  finalist_authority.py`, `boundary_engine_pass.py`, `dialogue_pacing_
+  transition.py`, `semantic_ledger.py`, `whole_video_openai.py`, `whole_
+  video_analysis.py`: zero diff (confirmed by module-leaf grep tests,
+  Section 15 below).
+
+## 3. WholeVideoEditorialRegion type
+
+Frozen dataclass: `source_asset_id`, `region_id` (`wver_` prefix,
+membership-anchored sha256 hash, same shape as D-194/D-197's own id
+minting), `moment_ids`, `local_group_ids`, `sequence_ids`, `source_start`/
+`source_end` (physical, observation-only), `dominant_process_status`
+(`RECORDING_PROCESS_REGION`/`TAKE_SERIES_REGION`/`CLEAN_DELIVERY_REGION`/
+`MIXED_REGION`/`UNKNOWN`), `audience_delivery_status` (reuses D-194's own
+four-value vocabulary), `proposition_candidate_ids`, `confidence`,
+`conflict_flags`, `provenance`. A thin, referencing wrapper over exactly
+one already-computed `EditorialLocalGroup` -- never a re-derivation, never
+a numeric time-gap segmentation.
+
+## 4. WholeVideoPropositionRealizationMap type
+
+Frozen dataclass, one row per `proposition_candidate_id` (D-169's own
+identity, never `semantic_idea_id`/`retry_family_id`/`take_group_id`):
+`source_asset_id`, `proposition_candidate_id`, `moment_ids`, `local_
+group_ids`, `sequence_ids`, `region_ids`, `realization_count`,
+`relationship_status` (`SINGLE_REALIZATION`/`MULTIPLE_LOCAL_REALIZATIONS`/
+`MULTIPLE_DISTANT_REALIZATIONS`/`UNKNOWN`), `confidence`, `conflict_
+flags`, `provenance`. Also delivered: `CrossSourcePropositionLink` (source
+identity kept explicit on both sides, never merged) for the multi-source
+correspondence the directive's own "multi-source support" section asks
+for, built by `build_cross_source_proposition_links`.
+
+## 5. WholeVideoSupersessionHypothesis type
+
+Frozen dataclass: `source_asset_id`, `supersession_id` (`wvsup_` prefix,
+membership-anchored), `earlier_region_ids`/`later_region_ids` (one
+canonical ordering per pair, from `source_start`, never from caller input
+order), `covered_proposition_candidate_ids`/`uncovered_earlier_
+proposition_candidate_ids`, `coverage_status` (`FULL_COVERAGE`/`PARTIAL_
+COVERAGE`/`NO_COVERAGE`/`UNKNOWN`), `recording_process_support`/`audience_
+delivery_support` (`SUPPORTED`/`WEAK`/`UNKNOWN`), `meaning_conflict_
+status` (`NO_CONFLICT`/`CONFLICTED`/`UNKNOWN`), `supersession_status`
+(`SUPPORTED_SUPERSESSION`/`PARTIAL_SUPERSESSION`/`NO_SAFE_SUPERSESSION`/
+`CONFLICTED`/`UNKNOWN`), `confidence`, `conflict_flags`, `provenance`. No
+delete action, no `selected_clip_id`-shaped field anywhere.
+
+## 6. WholeVideoEditorialUnderstanding type
+
+Frozen aggregate: `source_asset_ids`, `regions`, `proposition_
+realization_maps`, `cross_source_proposition_links`, `supersession_
+hypotheses`, `global_continuity_status` (`COHERENT`/`PARTIAL`/
+`CONFLICTED`/`UNKNOWN`), `unresolved_conflicts`, `capability_status`
+(`AVAILABLE`/`PARTIAL`/`NOT_EVALUABLE`), `confidence`, `provenance`. No
+edit plan, no winners, no ordering plan (verified by a dedicated
+field-name audit test, Section 15).
+
+## 7. Region construction
+
+`build_whole_video_editorial_regions` -- pure, one region per
+already-computed `EditorialLocalGroup` (D-197), deterministic
+`(source_start, region_id)` output order regardless of input list order.
+`dominant_process_status` aggregates already-classified `EditorialMoment.
+moment_role` values with a small precedence rule (process+clean mixed ->
+`MIXED_REGION`; process-only, narrowed to RETRY/CORRECTION only ->
+`TAKE_SERIES_REGION`; process-only otherwise -> `RECORDING_PROCESS_
+REGION`; clean-only -> `CLEAN_DELIVERY_REGION`; else `UNKNOWN`) -- no new
+detector, same composition style D-194's own sequence-kind classifier
+uses. `audience_delivery_status` replays D-194's own `_aggregate_
+audience_delivery` rule verbatim at the region level.
+
+## 8. Proposition map construction
+
+`build_whole_video_proposition_realization_maps` -- pure, groups already-
+classified `EditorialMoment.proposition_candidate_ids` references by id,
+classifying `SINGLE`/`MULTIPLE_LOCAL` (all realizations in one region)/
+`MULTIPLE_DISTANT` (realizations span >1 region) purely from region
+membership, never from `take_group_id`/`retry_family_id`.
+
+## 9. Distant realization mapping
+
+The ONLY comparison used anywhere in this module between two propositions
+is D-169's own `signatures_describe_same_proposition`/`claim_signatures_
+conflict` (`language_proposition_relation.py`, unchanged, zero
+modification) -- applied here across arbitrary DISTANT region pairs
+instead of only D-169's own adjacent-pair scope. No second semantic
+engine, no Family membership used as proposition truth, no QA label
+consulted. Confirmed via module-leaf audit: this module imports nothing
+from `take_grouping.py`/`take_grouping_provider.py`/`composite_
+resolver.py`/`realization_resolver.py`/`bounded_finalist_arbiter.py`/
+`bounded_finalist_authority.py`/`boundary_engine_pass.py`/`dialogue_
+pacing_transition.py`/`semantic_ledger.py`/`deterministic_best_take_
+authority.py`.
+
+## 10. Recording-process-region / audience-delivery-region / mixed-region
+## results (proven by tests)
+
+`test_recording_process_region`/`test_take_series_region`/`test_clean_
+delivery_region`/`test_mixed_region`/`test_unknown_region_from_uncertain_
+moments` -- all five region-role classification cases proven from
+already-classified `EditorialMoment.moment_role` composition alone, no
+provider, no numeric threshold.
+
+## 11. Redundancy / partial-redundancy / full-supersession / no-safe-
+## supersession / conflict results (proven by tests)
+
+- `test_full_redundancy_supported_supersession` -- full proposition
+  coverage + `RECORDING_PROCESS_REGION` earlier + `CLEAN_DELIVERY_REGION`
+  later -> `SUPPORTED_SUPERSESSION`.
+- `test_multiple_propositions_partial_when_one_missing` -- 3 earlier
+  propositions, 2 covered, 1 missing -> `PARTIAL_COVERAGE` ->
+  `PARTIAL_SUPERSESSION`, the missing one explicitly named in
+  `uncovered_earlier_proposition_candidate_ids`.
+- `test_clean_takes_no_supersession_evidence` -- full content overlap
+  between two `CLEAN_DELIVERY_REGION`s with ZERO process-side evidence ->
+  `NO_SAFE_SUPERSESSION` (never a fabricated supersession claim from
+  content overlap alone).
+- `test_d201_contract_C_contradictory_realization_negation_conflict` /
+  `test_number_contradiction_never_averaged` -- `meaning_conflict_status
+  == CONFLICTED` force-sets `supersession_status == CONFLICTED`
+  unconditionally, confidence never `SUPPORTED`.
+
+## 12. Firewalls (each independently proven)
+
+- **Unique-information firewall** (`test_d201_contract_B_...`): earlier
+  {A, B} / later {A} only -> B stays in `uncovered_earlier_proposition_
+  candidate_ids`, `supersession_status` never reaches `SUPPORTED_
+  SUPERSESSION`.
+- **Negation firewall** (`test_d201_contract_C_...`): same content,
+  negation flips -> `CONFLICTED`.
+- **Number firewall** (`test_number_contradiction_never_averaged`): same
+  content, differing numbers -> `CONFLICTED`, never "close enough".
+- **Factual-term / distinct-proposition firewall** (`test_d201_contract_D_
+  ...`): genuinely unrelated propositions (no shared content at all) ->
+  honestly `UNKNOWN` (never a guessed `NO_COVERAGE`), `supersession_status
+  == UNKNOWN`.
+- **Chronology firewall**, two independent proofs: `test_d201_contract_E_
+  chronology_reversal_does_not_change_semantic_truth` (feeding the SAME
+  two regions in reversed list order to the builder produces byte-
+  identical output -- position in the input list is never read) and
+  `test_chronology_firewall_role_not_position` (the region with process
+  evidence is made chronologically LATER and the clean-delivery region
+  chronologically EARLIER -- being later never by itself earns `SUPPORTED_
+  SUPERSESSION`; the verdict follows each region's OWN role, never its
+  position). `test_chronology_only_later_block_no_free_pass` additionally
+  proves that two regions with zero proposition evidence at all -- pure
+  "later block" with nothing else -- never produce even a hypothesis, let
+  alone a positive one.
+
+## 13. PREASSEMBLED_FINAL_SEQUENCE / SAME_EDITORIAL_BEAT independence
+
+`TestP1LimitationIndependence` -- confirms (via code-only-source string
+absence, docstring excluded) that neither `PREASSEMBLED_FINAL_SEQUENCE`
+nor `BEAT_SAME`/`SAME_EDITORIAL_BEAT` is ever referenced by this module's
+actual logic, and `test_functions_without_sequences_still_work` proves
+region construction succeeds with zero `EditorialSequenceHypothesis`
+objects supplied at all.
+
+## 14. P1 input reuse / proposition-identity relationship / RelationEvidence
+## relationship
+
+Confirmed by direct construction: every builder consumes `EditorialMoment`/
+`EditorialLocalGroup`/`EditorialSequenceHypothesis` (D-194/D-197) and
+`PropositionCandidate`/`ClaimSignature` (D-169) BY REFERENCE (their own
+already-minted ids), never recomputing or re-deriving them.
+`test_proposition_id_field_never_named_retry_family` confirms the map row
+type carries no `retry_family_id`/`take_group_id` field. D-169's
+`RelationEvidence` itself (the adjacent-pair object) is not directly
+consumed -- this module instead reuses its two underlying comparison
+PRIMITIVES (`signatures_describe_same_proposition`/`claim_signatures_
+conflict`) directly, extended to distant pairs, per D-201 Section 23's own
+recommendation.
+
+## 15. Structural no-authority / no-second-ontology / no-pipeline-wiring
+## audits (`TestStructuralAudits` + `TestSupersessionHypotheses`'s own
+## structural tests)
+
+- `test_pipeline_does_not_import_this_module` / `test_flow_b_does_not_
+  import_this_module` -- confirmed by direct source-text search.
+- `test_no_delete_selected_clip_or_action_field_on_any_type` -- no
+  `delete`/`winner`/`selected_clip_id`/`final_winner`/`action` substring
+  in any of the four types' own field names.
+- `test_no_family_besttake_ordering_boundary_pacing_import` -- confirmed
+  zero import from any of 9 named authority modules.
+- `test_no_commercial_or_sales_funnel_fields` -- no `hook_strength`/
+  `conversion_score`/`virality`/`sales_funnel`/`commercial_moment`
+  anywhere in field names or module source.
+- `test_no_provider_no_llm_call_anywhere` -- no `openai`/`gemini`/`whole_
+  video_openai`/`responses.create` in the module's actual code (docstring
+  excluded, since the docstring necessarily discusses, in prose, the very
+  calls it promises never to make).
+- `test_no_qa_reference_fields_or_imports` -- no `cut_ai`/`human_gold`/
+  `quality_ladder`/`benchmark_label` reference anywhere.
+- `test_no_feature_flag_env_var` -- no `os.environ`/`getenv` anywhere (no
+  default-off flag needed: nothing calls this module yet).
+- `test_no_hardcoded_video00_phrase_or_timestamp` -- no Video00-specific
+  phrase/RAW-run-id literal anywhere.
+- `test_module_functions_are_pure_no_global_state` -- no module-level
+  mutable cache, no `global` statement.
+
+## 16. Deterministic-base feasibility / graph-vs-typed-hypothesis result
+
+Confirmed empirically, not merely asserted: every fixture in the test
+suite runs with ZERO provider input and produces a fully deterministic
+result (`TestDeterminism`). No graph library, no node/edge traversal
+structure -- `WholeVideoPropositionRealizationMap` (a flat map) plus a
+flat tuple of `WholeVideoSupersessionHypothesis` rows (O(n^2) over
+regions, trivially bounded at real Video00 scale per D-201 Section 36)
+fully cover Phase A's needs.
+
+## 17. No QA-reference contract / generic fixture plan / D-201 contract
+## replay
+
+Zero Cut.ai/Human Gold/quality-ladder/benchmark input anywhere (Section
+15). The 35-scenario generic fixture design from D-201 Section 38 is
+covered across the 62 tests in `test_cutsell_d202_whole_video_editorial_
+reasoning.py`'s 9 test classes (region construction, proposition mapping,
+cross-source correspondence, supersession coverage/role/meaning/
+chronology, aggregate/diagnostics, determinism, P1-limitation
+independence, structural audits) rather than 1:1 named methods -- every
+concept in that list (region-role classification, correctly-not-redundant,
+fully/partially redundant, negation/number/factual conflict, chronology-
+independence controls, P1-dependency/non-recomputation controls) has at
+least one direct test. The D-201 contract replay (A: multiple retries +
+later clean; B: unique-information firewall; C: negation conflict; D:
+distinct propositions; E: chronology reversal) is implemented as five
+dedicated `test_d201_contract_*` tests, all passing.
+
+## 18. Video00 relevance (unchanged from D-201, no new RAW run)
+
+No Video00-specific evidence gathered or asserted in this task (offline
+only, no RAW). D-201's own classification stands: DIRECTLY_RELEVANT none
+proven; POSSIBLY_RELEVANT the stomach-family arbiter-inconsistency
+escalation (D-097.11 escalation A); NOT_P2 every other D-097.x fix.
+
+## 19. Cut.ai parity value
+
+Unchanged from D-201 Section 40 -- this module is the concrete
+implementation of that value: `WholeVideoSupersessionHypothesis` can now
+actually represent "region_late is `SUPPORTED_PARTIAL`/`SUPPORTED_
+SUPERSESSION` with regions_early_1..3", with the unique-information
+firewall guaranteeing no unique earlier content is silently claimed
+redundant.
+
+## 20. D-202 VERDICT
+
+**A. P2 PHASE-A WHOLE-VIDEO EDITORIAL FOUNDATION OFFLINE PROVEN.**
+
+## 21. D-202 decision entry
+
+This document.
+
+## 22. Canonical P2 status
+
+`PHASE_A_OFFLINE_PROVEN`. No pipeline-integration claim is made or implied
+-- `pipeline.py`/`flow_b.py` remain byte-unaware of this module's
+existence (Section 15).
+
+## 23. Exact D-203 gate
+
+D-203 -- P2 Phase B, CANONICAL-EVIDENCE LIVE DIAGNOSTIC INTEGRATION: wire
+real P1 + Language objects into P2 diagnostics inside the pipeline WITHOUT
+changing edit output (same one-way, default-off, diagnostics-only pattern
+D-183/D-184/D-191/D-195 already established). Still no authority, no RAW
+initially, no provider requirement. NOT implemented here; requires
+separate Product Owner authorization.
+
+## 24. Ordering / Boundary / Pacing-Overlap status (restated, unaffected)
+
+Ordering: not started, unaffected. Boundary: remaining qualification work
+unaffected. Pacing/Overlap (dialogue-overlap/J-cut/L-cut/micro-overlap):
+unaffected. None of this task touches any of the three.
+
+## 25. App-roadmap status
+
+P1 sufficiently closed -> P2 Phase A offline-proven -> P2 Phase B (D-203,
+live diagnostic wiring) -> one real-media P2 qualification -> Ordering ->
+remaining Boundary qualification -> Pacing V2 -> Renderer/export
+qualification -> unseen RAW generalization/Cut.ai parity -> production/app
+hardening -> TestFlight/App Store. Do not keep expanding P2 Phase A after
+its required contracts are proven (this task's own instruction, honored:
+the module ships with exactly the 4 authorized types + builders +
+diagnostics + tests, nothing more).
+
+## 26. Offline qualification (Section 27-32 of the deliverable, consolidated)
+
+- `python -m compileall cutsell_worker tests` -- clean.
+- New file: 62/62 passed.
+- Targeted regression battery (D-123, D-128, D-150, D-166, D-167, D-168,
+  D-169, D-171, D-174, D-180, D-183, D-184, D-187, D-188, D-189, D-191,
+  D-193, D-194, D-195, D-197, D-198, D-199, D-200 wiring/D-200.3/D-200.4/
+  D-200.4A/D-200.4B, D-201, D-202): **1153/1153 passed** (one test in
+  `test_cutsell_d200_4b_editorial_moment_identity_fix.py` had its own
+  allow-list widened, per Section 2 above -- the fix itself, not a masked
+  failure).
+- BestTake-keyword regression sweep: **470/470 passed**.
+- Boundary/Pacing/Render-keyword regression sweep: **444/444 passed** (13
+  subtests).
+- Full offline suite (excluding the one pre-existing, unrelated
+  `test_semantic_stitch.py` collection error, unmodified by this task):
+  **4823 passed, 5 failed, 13 subtests passed** -- the EXACT SAME 5
+  pre-existing failures recorded before this task began (`test_hybrid_
+  story_guard_incomplete_retry.py` x1, `test_video00_modal_hybrid_
+  semantic_parity.py` x4 -- both files untouched by this task), pass
+  count exactly +62 (this task's own new file). Zero new failures.
+
+## 27. Confirmations
+
+Offline only. No pipeline wiring (`pipeline.py`/`flow_b.py` confirmed
+unaware). No RAW. No provider call. No weights/thresholds. No P1
+authority change. No P2 authority granted (`P2 HYPOTHESES DO NOT ALTER
+THE EDIT` -- structurally proven, Section 15). No Family/BestTake/D-191/
+Ordering/Boundary/Pacing/Renderer change. No Commercial Moment/Sales
+Funnel scoring introduced.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-203's Phase
+B live diagnostic wiring is the next Product Owner decision. Do NOT
+implement D-203. Wait for Product Owner authorization.
