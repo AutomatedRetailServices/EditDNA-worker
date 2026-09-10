@@ -41867,3 +41867,494 @@ first) is the next Product Owner decision.
 
 **Then STOP. Do NOT implement D-207. Wait for Product Owner
 coordination.**
+
+
+# D-207: ORDERING PHASE B -- EXISTING COMPOSER ADAPTER + PROPOSAL
+VALIDATION (POST D-206, OFFLINE / MOCKED ONLY, NO RAW)
+
+## 1. Branch / new HEAD
+
+`feature/runpod-pod-on-demand`, verified before starting: HEAD
+`6181682` (matches expected), clean tree.
+
+## 2. Files changed
+
+- `cutsell_worker/ordering_composer_adapter.py` -- NEW, the one adapter/
+  validator module.
+- `tests/test_cutsell_d207_ordering_composer_adapter.py` -- NEW, 55 tests.
+- No allow-list widening required this time (this module reads no P1
+  `editorial_moment_id`).
+
+## 3. Adapter module
+
+`cutsell_worker/ordering_composer_adapter.py`. One entry point,
+`validate_composer_ordering_proposal(*, units, realizations, relations,
+baseline_plan, provider=None, labels=(), strategy=EditStrategy.MIXED,
+context_text="")`, plus a read-only compatibility probe,
+`run_existing_compose_selected_compat(units, realizations)`.
+
+## 4. Existing composer unchanged
+
+`cutsell_worker/composer.py` (`compose_selected`) -- zero diff, imported
+only, called only from the new compatibility probe (never from the
+acceptance path).
+
+## 5. OpenAI composer status
+
+`composer_openai.py`'s `OpenAIComposerProvider` -- zero diff, **never
+imported** by the new module (structural test confirms no `from
+.composer_openai import` / `OpenAIComposerProvider(`). Still confirmed
+DORMANT on every live path (`universal_clean_cut.py:147` and
+`brain_runtime.py:283` both still hardcode `composer_provider=None`,
+unchanged by this task). Every test uses a local `MockComposerProvider`
+dataclass implementing the `ComposerProvider` Protocol -- no network,
+no API key, no real request.
+
+## 6. Causal validator status
+
+`causal_order_validator.py` -- zero diff, **never imported** (structural
+test confirms no `from .causal_order_validator import` /
+`find_causal_order_breaks(`). Documented as a future seam only
+(`CAUSAL_VALIDATOR_NOT_INTEGRATED = "NOT_INTEGRATED_INPUT_SHAPE_
+MISMATCH"`, appears in every diagnostic result) -- its real input shape
+(`CanonicalEditPlan`) does not align with this module's flat
+`OrderingUnit`/proposal shape, and no adapter to bridge that gap is
+built this task, exactly per this task's own "if premature, document
+future seam only" instruction.
+
+## 7. Identity adapter contract
+
+The existing composer speaks `clip_id` only (`ComposerProvider.order`,
+`composer_provider.safe_compose_order`'s `_repair_order`). D-206's
+`OrderingUnit` is keyed by `realization_id` (falls back to `clip_id`
+when unset -- the `semantic_ledger._clip_realization_id` convention).
+`_build_identity_map(units, realizations)` is the one place that
+resolves the two domains: it looks up, for every `OrderingUnit`, the
+REAL underlying take object the caller supplies (the same objects
+passed to `ordering_realization_plan.build_ordering_units`), and builds
+an explicit `realization_id <-> clip_id` map. An `OrderingUnit` whose
+underlying take is missing, or two distinct units resolving to the same
+`clip_id`, is reported as an identity gap (`REJECTED_IDENTITY` /
+`AMBIGUOUS_CLIP_ID_MAPPING`) -- never silently guessed. `composer.py`/
+`composer_provider.py` needed zero changes; this is pure adapter-side
+translation, exactly as instructed.
+
+## 8. OrderingUnit round trip
+
+Proven losslessly: `test_realization_id_round_trip_losslessly` builds
+two units with `clip_id != realization_id` (`clip_a`/`real_a`,
+`clip_b`/`real_b`), feeds the composer a clip-id-domain reorder
+(`("clip_b", "clip_a")`), and asserts the accepted result comes back in
+the `realization_id` domain (`("real_b", "real_a")`) -- the composer
+never sees, and the caller never receives, the wrong identity domain.
+
+## 9. Composite round trip
+
+`test_composite_atomic_round_trip_through_adapter`: a two-piece
+composite (`PRESERVE_INTERNAL_ORDER(a, b)`, `REASON_COMPOSITE_INTERNAL_
+ORDER`) is moved as a whole after an unrelated unit by a mock proposal
+(`("c", "a", "b")`) and correctly ACCEPTED (the composite's own internal
+order, a before b, survives; only its position relative to `c` moved).
+`test_composite_internal_order_violation_rejected` proves the inverse:
+a proposal that scrambles the composite's internal order
+(`("c", "b", "a")`) is REJECTED_CONSTRAINT with `composite_order_valid
+== False`.
+
+## 10. Proposal result type
+
+`OrderingComposerProposalResult` -- frozen dataclass: `proposal_status`,
+`composer_path`, `proposed_realization_ids`, `accepted_realization_ids`,
+`identity_valid`, `membership_valid`, `composite_order_valid`,
+`violated_relation_ids`, `constraint_violation_count`, `validation_
+flags`, `causal_validator_status`, `fallback_used`, `fallback_reason`,
+`underlying_ordering_status`, `baseline_realization_ids`, `provenance`.
+No edit-action field anywhere (structural test confirms no `delete`/
+`render`/`cut_frame`/`select_clip` in any field name).
+
+## 11. Proposal-status vocabulary
+
+`ACCEPTED`, `REJECTED_CONSTRAINT`, `REJECTED_REORDER_ONLY`,
+`REJECTED_IDENTITY`, `REJECTED_CONFLICT`, `FALLBACK_BASELINE` (reserved
+for a future producer; not emitted by this task's own builder --
+`REJECTED_*`/`NOT_EVALUABLE` cover every path this task exercises),
+`NOT_EVALUABLE` (baseline already `CONFLICTED` -- composer never even
+consulted).
+
+## 12. Membership validation
+
+`test_dropped_item_rejected`, `test_added_item_rejected`, `test_
+duplicate_item_rejected`, `test_unknown_id_rejected` (all
+`REJECTED_REORDER_ONLY`). Detected via `composer_provider.safe_compose_
+order`'s own already-proven `_repair_order` signal
+(`"provider_output_repaired"` in `ComposerProviderResult.reason`) --
+this module is STRICTER than the existing composer: where `composer_
+provider.py` silently repairs a dropped/added/duplicated/unknown-id
+proposal and returns the repaired list, this module treats the repair
+marker ITSELF as a membership violation and falls back to D-206's own
+baseline, never accepting the lower layer's repaired list as if it were
+clean. The four cases collapse to one shared, already-proven detection
+signal rather than four independently reimplemented checks (the raw
+pre-repair proposal is not exposed by `safe_compose_order`, so a finer
+split is not reliably derivable and is not attempted).
+
+## 13. Reorder-only validation
+
+`test_valid_same_order_proposal`, `test_valid_reorder_no_constraint`,
+`test_input_order_independence` (ACCEPTED, membership preserved).
+Independent membership check re-verified after the identity/repair
+gate (`set(proposed) == set(input) and len(proposed) == len(input) ==
+len(set(input))`), never trusting the lower layer alone.
+
+## 14. Local-sequence validation
+
+`test_local_sequence_inversion_rejected`: two `CLEAN_AUDIENCE_DELIVERY`
+moments in one local group produce `PRESERVE_INTERNAL_ORDER(a, b)`; a
+proposal inverting them (`("b", "a")`) is `REJECTED_CONSTRAINT`.
+
+## 15. Continuation validation
+
+`test_continuation_inversion_rejected`: `MUST_PRECEDE(a, b)` from a
+`MOMENT_ROLE_CONTINUATION` moment; an inverted proposal is rejected.
+
+## 16. Correction validation
+
+`test_correction_inversion_rejected`: `MUST_PRECEDE(a, b)` from a
+`MOMENT_ROLE_CORRECTION` moment; an inverted proposal is rejected.
+`test_explicit_must_precede_respected` / `test_must_follow_respected`
+prove both directions of the raw relation vocabulary are honored (a
+respecting proposal is ACCEPTED, an inverting one is REJECTED_
+CONSTRAINT).
+
+## 17. Composite-order validation
+
+Covered under item 9 above; isolated into its own diagnostic boolean
+(`composite_order_valid`) computed by intersecting the set of violated
+relation ids against relations whose `ordering_reason ==
+REASON_COMPOSITE_INTERNAL_ORDER`, so a caller can distinguish a
+composite-specific violation from an unrelated one in the same
+rejected proposal.
+
+## 18. P2/meaning validation
+
+`test_meaning_conflict_baseline_fallback`: a `SUPERSESSION_CONFLICTED`
+hypothesis with `MEANING_CONFLICT_PRESENT` produces a `CONFLICTED`
+relation (`REASON_MEANING_FIREWALL`), which forces the baseline plan's
+own `ordering_status` to `CONFLICTED` -- the composer is never even
+consulted (`NOT_EVALUABLE`, `fallback_reason == "baseline_conflicted"`).
+No P2/meaning logic is recomputed here; this module only reads the
+`ordering_relation`/`ordering_status` fields D-206's own builders
+already computed.
+
+## 19. Unique-info validation
+
+D-206's `WholeVideoSupersessionHypothesis.uncovered_earlier_
+proposition_candidate_ids` is preserved on the hypothesis object itself
+and never consulted for a delete decision by this module (this module
+has no delete authority, identical to D-206) -- the baseline-conflict
+gate above is the only mechanism by which a unique-information-carrying
+hypothesis's `CONFLICTED` relation reaches this module, and it always
+routes to `NOT_EVALUABLE`/baseline fallback, never a composer-authored
+resolution.
+
+## 20. Supersession-survival validation
+
+`test_supersession_survival_conflict_baseline_fallback`: a
+`SUPERSESSION_SUPPORTED` hypothesis (both sides legitimately frozen,
+D-206's own "no delete authority" finding) produces a `CONFLICTED`
+relation (`REASON_P2_GLOBAL_CONTINUITY`); same baseline-conflict gate,
+same `NOT_EVALUABLE` outcome, same "no unit dropped" guarantee (`set
+(accepted_realization_ids) == {"a", "b"}`).
+
+## 21. Cycle/conflict behavior
+
+`test_cycle_input_not_resolved_by_composer`: a genuine precedence cycle
+(`a MUST_PRECEDE b` and `b MUST_PRECEDE a`) makes D-206's baseline plan
+itself `CONFLICTED`; the composer is given a chance to "confidently"
+propose an order (`MockComposerProvider(("a", "b"))`) but this module
+never even invokes it -- `NOT_EVALUABLE`, `composer_path ==
+NOT_EVALUATED_BASELINE_CONFLICTED`, `accepted_realization_ids ==` the
+exact baseline. The composer is never allowed to "resolve" a semantic
+conflict by construction, not merely by post-hoc rejection.
+
+## 22. Partial-order behavior
+
+`test_partially_ordered_valid_proposal_accepted` (a `PARTIALLY_ORDERED`
+baseline with one `MUST_PRECEDE` constraint accepts a valid reorder of
+the unconstrained unit) and `test_partially_ordered_invalid_proposal_
+rejected` (the same baseline rejects a proposal inverting the one real
+constraint) -- both prove the composer may propose a TOTAL order over a
+partial baseline, but acceptance is still gated by every known
+constraint, never treated as free-form once partial.
+
+## 23. Unknown-order behavior
+
+`test_unknown_baseline_valid_proposal_accepted_uncertainty_preserved`:
+an `UNKNOWN` baseline (no relations at all) accepts any reorder with no
+constraint to violate, and `underlying_ordering_status` on the ACCEPTED
+result still reads `UNKNOWN` -- acceptance never upgrades the
+diagnostic to a stronger status than the evidence actually supports.
+
+## 24. Accepted-proposal semantics
+
+`test_accepted_proposal_semantics_never_editorial_truth`: an ACCEPTED
+result carries no `editorial_truth`/`certified`/`human_gold`/`cut_ai`
+field -- "ACCEPTED" is documented (module docstring) and tested to mean
+"satisfies D-206's own typed constraints", never "editorial truth
+certified".
+
+## 25. Baseline fallback
+
+Every rejection/decline path (`_fallback_result`) returns `baseline_
+plan.ordered_realization_ids` VERBATIM -- never recomputed through a
+different algorithm. `test_exact_baseline_fallback_never_recomputed`
+and `test_baseline_plan_object_unchanged` / `test_units_and_relations_
+unchanged` confirm both the returned value and the caller's own input
+objects are untouched (pure function).
+
+## 26. One-proposal/no-retry contract
+
+`test_one_proposal_only_provider_called_once` and `test_no_retry_loop_
+on_rejection` (a `CountingProvider`/`CountingBadProvider` instrumented
+with a call counter) prove the supplied `ComposerProvider` is invoked
+AT MOST ONCE per `validate_composer_ordering_proposal` call, including
+on a proposal this module goes on to reject -- no "ask composer to try
+again" loop exists.
+
+## 27. Multi-source behavior
+
+`test_multi_source_cross_source_reorder_accepted_without_typed_
+violation`: a cross-source reorder (`srcA`/`srcB`) with no typed
+constraint present is ACCEPTED -- this module infers no cross-source
+chronology of its own; acceptance is purely "no known constraint
+violated".
+
+## 28. Chronology behavior
+
+`test_source_chronology_changed_but_constraints_preserved`: an
+unconstrained unit (`c`) is freely moved by the composer while a real
+`MUST_PRECEDE(a, b)` continuation constraint from a DIFFERENT pair
+still holds in the proposal -- ACCEPTED, proving chronology is a
+tie-break the composer may override, never an enforced constraint by
+itself.
+
+## 29. Causal validator integration result
+
+Not integrated (see item 6) -- `CAUSAL_VALIDATOR_NOT_INTEGRATED` on
+every result, `causal_validator_failure_count` fixed at `0` in every
+run summary (never omitted, so a reader never has to guess whether it
+silently PASSed).
+
+## 30. Diagnostics
+
+`ordering_composer_proposal_diagnostics(result)` -- bounded dict:
+`schema_version`, `composer_path`, `proposal_status`, `proposed_
+realization_ids`, `accepted_realization_ids`, `identity_valid`,
+`membership_valid`, `composite_order_valid`, `constraint_violation_
+count`, `violated_relation_ids`, `causal_validator_status`, `fallback_
+used`, `fallback_reason`, `underlying_ordering_status`, `baseline_
+realization_ids`, `validation_flags`, `provenance`. No transcript field.
+
+## 31. Summary
+
+`ordering_composer_run_summary(results)` -- `schema_version`,
+`proposal_count`, `accepted_count`, `rejected_identity_count`,
+`rejected_membership_count`, `rejected_constraint_count`, `rejected_
+conflict_count` (folds in `NOT_EVALUABLE`), `fallback_count`,
+`constraint_violation_count`, `causal_validator_failure_count` (always
+`0`). No master score field.
+
+## 32. Deterministic result
+
+`test_repeated_invocation_deterministic`: two calls with equal-value
+mock providers over the same units/relations/baseline produce an
+EQUAL `OrderingComposerProposalResult` (frozen-dataclass equality).
+
+## 33. Input-order independence
+
+`test_input_order_independence`: reversing the input realizations list
+(while `OrderingUnit`s themselves are already input-order-independent
+per D-206) yields the same accepted result.
+
+## 34. No story-engine duplication
+
+No hook/problem/benefit/proof/CTA ranking, no narrative-quality score,
+no LLM prompt, no new provider client of any kind is defined in this
+module -- structural tests confirm no `instruction =`/`responses.
+create`/`hook_strength`/`cta_score` in the module source. The existing
+composer's own contract (`ComposerProvider.order`, `safe_compose_
+order`) is used exactly as it already exists.
+
+## 35. No provider/network
+
+Structural tests confirm no `requests.`/`urllib`/`http.client`/
+`OPENAI_API_KEY`/`responses.create` anywhere in the module. Every test
+uses a local mock/fake `ComposerProvider` implementation.
+
+## 36. No pipeline
+
+`pipeline.py`/`universal_clean_cut.py`/`brain_runtime.py` -- confirmed
+zero diff, and structural test confirms none of them reference
+`ordering_composer_adapter` at all.
+
+## 37. No runtime authority
+
+`validate_composer_ordering_proposal` and `run_existing_compose_
+selected_compat` are pure functions; neither is called from any live
+pipeline path (item 36) -- imported only by this task's own test file.
+
+## 38-43. No Family/BestTake/D-191/Boundary/Pacing/Renderer
+
+Structural test bans `take_group_id`, `_semantic_best_take`, `bounded_
+finalist_authority`, `bounded_finalist_arbiter`, `boundary_engine_
+pass`, `BoundaryEngine`, `dialogue_pacing_transition`, `render_plan`,
+`RenderSegment`, `take_grouping`, `composite_resolver`, `realization_
+resolver` from the module source -- none present.
+
+## 44. No QA input
+
+Structural test bans `cut_ai`/`cutai`/`human_gold`/`quality_ladder`/
+`benchmark_label` (case-insensitive) from the module source -- none
+present.
+
+## 45. No commercial/funnel fields
+
+Structural test bans `commercial`/`sales_funnel`/`funnel`/`cta_score`/
+`hook_strength`/`narrative_quality` (case-insensitive) from the module
+source -- none present. `EditStrategy` is imported as an existing
+contract TYPE only (a default parameter value, `EditStrategy.MIXED`),
+never a new commercial-scoring field.
+
+## 46. New tests
+
+55 new tests in `tests/test_cutsell_d207_ordering_composer_adapter.py`,
+covering: adapter construction/identity round trip (5), valid
+proposals/determinism (6), membership rejection (5), P1 constraint
+validation (6), baseline-conflict gate (3), partial/unknown baseline
+(4), composite/multi-source (3), fallback immutability/no-retry (5),
+identity-gap handling (1), existing-composer compatibility (2),
+diagnostics/summary (2), structural audits (12), compileall (1).
+
+## 47. D-206 regression
+
+`tests/test_cutsell_d206_ordering_realization_plan.py`: 51/51 passed,
+unaffected (zero diff to `ordering_realization_plan.py`).
+
+## 48. Composer regressions
+
+`tests/test_cutsell_clean_worker_composer_provider.py` +
+`tests/test_cutsell_causal_order_validator.py` +
+`tests/test_cutsell_d207_ordering_composer_adapter.py`: 122/122 passed
+together with D-206's own suite.
+
+## 49. Causal-validator regressions
+
+`tests/test_cutsell_causal_order_validator.py`: included in item 48,
+unaffected (zero diff, never imported by the new module).
+
+## 50. P1/P2 regressions
+
+Included in the targeted D-1xx/D-2xx battery (item 51) -- unaffected.
+
+## 51. Language regressions
+
+`test_cutsell_d166_*`/`d168_*`/`d169_*`-prefixed suites included in the
+targeted D-1xx/D-2xx battery below -- unaffected (zero diff to any
+Language-Spine module).
+
+## 52. BestTake regressions
+
+`tests/*besttake*`/`*best_take*`: 339/339 passed.
+
+## 53. Boundary regressions
+
+Included in item 54 below.
+
+## 54. Pacing regressions
+
+Included in item 54 below.
+
+## 55. Render regressions
+
+`tests/*boundary*`/`*pacing*`/`*render*` together: 275/275 passed.
+
+## 56. Full offline suite
+
+`python -m pytest tests/ -q --continue-on-collection-errors`: 4964
+passed, 5 failed, 1 collection error, 13 subtests passed. The 5
+failures (`test_hybrid_story_guard_incomplete_retry.py::test_
+incomplete_failed_retry_is_covered_when_prior_delivery_preserves_
+numbers_and_negation`, and four in `test_video00_modal_hybrid_semantic_
+parity.py`) and the 1 collection error (`test_semantic_stitch.py`, a
+`TypeError` in a module-level `print` statement, last modified in
+commit `8077aa4` on 2026-08-28, weeks before D-205/D-206/D-207) are the
+SAME pre-existing, unrelated failures/error already present on the
+D-206 head (`6181682`) before this task touched anything -- confirmed
+by `git log` showing none of the five failing files, nor
+`test_semantic_stitch.py`, in this task's diff. Zero new failures.
+
+## 57. New failures
+
+Zero. `compileall -q cutsell_worker tests` also passed clean.
+
+## 58. D-207 VERDICT
+
+**A. EXISTING COMPOSER ADAPTER + ORDERING PROPOSAL VALIDATION OFFLINE
+PROVEN.**
+
+## 59. Canonical Ordering status
+
+`TYPED_CONSTRAINT_FOUNDATION_OFFLINE_PROVEN` (D-206) +
+`COMPOSER_PROPOSAL_VALIDATION_OFFLINE_PROVEN` (this document). P1/P2
+statuses unchanged.
+
+## 60. Exact D-208 gate
+
+D-208 -- ORDERING LIVE DIAGNOSTIC INTEGRATION, NO LIVE PROVIDER
+INITIALLY. Preferred first live phase (per this task's own instruction):
+the EXISTING deterministic composer path (`compose_selected`) plus
+D-206/D-207 diagnostics, with NO edit authority -- i.e. running today's
+already-live chronological composer alongside a read-only D-206/D-207
+diagnostic overlay in the real pipeline, never activating `OpenAI
+ComposerProvider` merely because this document succeeded, and never
+implemented automatically -- requires separate Product Owner
+authorization.
+
+## 61. Boundary status
+
+Unaffected; remaining qualification work unchanged.
+
+## 62. Pacing/Overlap status
+
+Unaffected; Pacing V2/dialogue-overlap/J-cut/L-cut/micro-overlap tracks
+unchanged. Neither module was modified or referenced.
+
+## 63. App-roadmap status
+
+P1 closed enough -> P2 closed enough -> Ordering typed foundation DONE
+(D-206) -> Composer adapter/proposal validation DONE, offline (this
+document) -> D-208 (if authorized, live diagnostic integration, no live
+provider) -> remaining Boundary qualification -> Pacing V2 / dialogue
+overlap / J-cut/L-cut/micro-overlap -> Renderer/export -> unseen RAW
+generalization / Cut.ai parity -> app hardening -> TestFlight/App
+Store. Commercial Moment/Sales Funnel remain later.
+
+## 64. Decision entry
+
+This document.
+
+## 65. Confirmation
+
+No pipeline wiring (`pipeline.py`/`universal_clean_cut.py`/`brain_
+runtime.py`: zero diff). No live provider call (`OpenAIComposerProvider`
+never imported/instantiated; every test uses a mock/fake `Composer
+Provider`; no network, no API key). No RAW. No runtime authority:
+`ordering_composer_adapter.py` is imported by its own test file only.
+No Family/BestTake/D-191/Boundary/Pacing/Renderer change. No Commercial
+Moment/Sales Funnel scoring.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-208
+(Ordering live diagnostic integration, no live provider initially) is
+the next Product Owner decision.
+
+**Then STOP. Do NOT implement D-208. Wait for Product Owner
+coordination.**
