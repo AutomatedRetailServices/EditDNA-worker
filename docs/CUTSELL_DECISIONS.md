@@ -39274,3 +39274,606 @@ module-leaf grep tests, Section 8).
 
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-201's
 Phase 0 architecture/forensic gate is the next Product Owner decision.
+
+
+# D-201: P2 WHOLE-VIDEO EDITORIAL REASONING -- PHASE 0 ARCHITECTURE / FORENSIC
+(POST P1 CLOSURE / D-200.4B, DOCS ONLY, NO IMPLEMENTATION)
+
+## 1. Branch / HEAD
+
+`feature/runpod-pod-on-demand`, verified HEAD `a10dd9fcb0fc3985ed63e2259b88a296245a1c8a`
+(matches expected), clean tree, before this doc-only commit.
+
+## 2. Files changed
+
+`docs/CUTSELL_DECISIONS.md` only (this entry). No `cutsell_worker` change, no
+test change, no workflow change.
+
+## 3. What was audited, and at what depth
+
+Full read this task: `whole_video_openai.py` (226 lines), `whole_video_analysis.py`
+(173 lines), `semantic_ledger.py` (1098 lines), `composite_resolver.py`
+(257 lines). Targeted (entrypoint/docstring/signature/wiring-site) audit:
+`take_grouping.py`, `language_proposition_relation.py`,
+`watch_listen_understanding.py`, `bounded_finalist_arbiter.py`,
+`bounded_finalist_authority.py`, `pipeline.py` (call-site order only, incl.
+`build_flow_b_draft`'s `apply_composite_resolution` at line 1478 vs.
+`editorial_moment_sequence_diagnostics_enabled()` at line 2437). Carried from
+this session's own prior deep work (D-193-D-200.4B): `editorial_moment_sequence.py`,
+`editorial_moment_sequence_integration.py`, `structured_editorial_relation.py`,
+`language_spine_live_integration.py`, `raw_understanding_map.py`. Not read at
+line depth this task: `take_grouping_provider.py` (2364 lines),
+`realization_resolver.py` (3840 lines) beyond targeted grep for D-049 Case A/B
+and D-191 authority references already documented in this session's D-097.x
+work -- named explicitly rather than silently assumed equivalent to a full
+read.
+
+## 4. P2 ownership
+
+Whole-video editorial UNDERSTANDING: which distant moments/sequences realize
+the same or related propositions; which regions read as recording-process vs.
+audience-facing delivery; whether later material plausibly makes earlier
+material redundant/superseded; whether the video's candidate global sequence
+covers its intended propositions without losing unique information; and
+explicit abstention when evidence is incomplete or contradictory. Output is
+hypotheses only.
+
+## 5. P2 non-ownership
+
+No edit mutation. No deletion. No second Family/grouping engine. No second
+BestTake/delivery-scoring engine (no Prosodic re-scoring, no D-184/D-191
+replacement). No Ordering (does not reorder the frozen edit). No Boundary
+(no physical cut frames). No Pacing/Overlap (no J-cut/L-cut/micro-overlap/
+dialogue-overlap construction). No Commercial Moment/Sales Funnel scoring.
+No consumption of Cut.ai keep/delete, Human Gold, quality-ladder, or
+benchmark labels as runtime input (QA stays evaluation-only).
+**P2 HYPOTHESES DO NOT ALTER THE EDIT.**
+
+## 6. Actual dependency position (verified against the real repo)
+
+The directive's conceptual stack (RAW -> Perception -> Watch+Listen ->
+Language Spine -> P1 -> P2 -> Family/Realization -> BestTake -> Freeze ->
+Ordering -> Boundary -> Pacing -> Renderer) does **NOT** match today's
+mechanical pipeline order. Verified in `pipeline.py`'s `build_flow_b_draft`:
+`apply_composite_resolution` (Family/CompositeResolver, line 1478) runs, and
+Freeze/Resolver machinery downstream of it runs, BEFORE
+`editorial_moment_sequence_diagnostics_enabled()` (P1's own diagnostics call
+site, line 2437) is ever reached. P1 today is a **read-only diagnostics
+side-channel computed AFTER Family/BestTake/Freeze-adjacent decisions have
+already been made**, over whatever draft/candidate state exists at that point
+-- not a pre-Family conceptual stage in the live mechanical order, even
+though it is architecturally described (correctly, for reasoning purposes)
+as upstream. **Minimum future integration seam** (documented, not built): for
+P1/P2 evidence to ever inform Family/Realization construction, the
+diagnostics call would need to move earlier in `build_flow_b_draft` -- before
+`apply_composite_resolution` -- or run as a separate pre-pass over raw
+candidates. Nothing is moved here.
+
+## 7. P2 input contract
+
+Primarily P1 outputs: `EditorialMoment`, `EditorialLocalGroup`,
+`EditorialSequenceHypothesis`, `StructuredEditorialRelationEvidence`.
+Canonical: `PropositionCandidate`, `LanguageAttempt`, `RelationEvidence`
+(D-169, `language_proposition_relation.py`). Plus source timing/order.
+Optional evidence: Watch+Listen behavior/performance
+(`watch_listen_understanding.py`), whole-video provider events
+(`whole_video_analysis.py`'s `TemporalEvent`/`confirmed_recording_behavior_events`).
+P2 must not recompute any of these layers -- it reads their already-built
+objects by id.
+
+## 8. P1 input sufficiency
+
+**Sufficient for Phase A.** D-200.4B closed the one blocking dependency
+(stable, collision-free `emom_` ids) P2 needs for cross-moment references.
+D-169's `ClaimSignature`/`PropositionCandidate` objects and their existing
+deterministic comparison functions (`signatures_describe_same_proposition`,
+`claim_signatures_conflict`) already give P2 everything it needs to compare
+DISTANT (not just adjacent) pairs without inventing new primitives.
+
+## 9. SAME_EDITORIAL_BEAT dependency result
+
+**Evidence-driven answer: NO, P2 does not require it.** P1's
+`SAME_EDITORIAL_BEAT` gap is a LOCAL-adjacency concept (audience-turn
+detection between neighboring moments); P2's redundancy/supersession
+reasoning operates on proposition-set overlap between arbitrary distant
+regions, which is answerable today purely from D-169's proposition/claim
+signatures and P1's `complete_idea`/`meaning_completion` completeness
+signals -- none of which depend on `SAME_EDITORIAL_BEAT`. P2 must not
+speculatively fix this P1 gap and must not silently invent
+`SAME_EDITORIAL_BEAT` evidence to substitute for it (per the directive's own
+instruction); it simply has no load-bearing need for it.
+
+## 10. Global proposition realization map design
+
+`WholeVideoPropositionRealizationMap` (per-video, one row per
+`proposition_candidate_id`): `source_asset_id`, `proposition_candidate_id`,
+`moment_ids` (P1 `emom_` ids realizing this proposition), `local_group_ids`,
+`sequence_ids`, `source_spans` (physical, observation-only),
+`realization_count`, `relationship_status` (closed vocabulary: e.g.
+`SINGLE_REALIZATION` / `MULTIPLE_LOCAL_REALIZATIONS` /
+`MULTIPLE_DISTANT_REALIZATIONS` / `UNKNOWN`), `confidence` (categorical, see
+Section 19), `provenance`. Audited against `semantic_ledger.py` first (see
+Section 30): the Ledger's `SemanticIdeaRecord`/`RealizationRecord` already
+represent "one idea -> multiple realizations," but ONLY for ideas the LOCAL
+grouping stage already merged -- it cannot discover a NEW distant grouping by
+proposition content the way this map must. This map is therefore additive,
+not a duplicate: it indexes by `proposition_candidate_id` (a D-169 object the
+Ledger never keys on) across the WHOLE video, not by `semantic_idea_id`
+(a post-grouping identity the Ledger already owns).
+
+## 11. Distant redundancy design
+
+`EARLIER_SOURCE_MATERIAL_REDUNDANT_WITH_LATER_REALIZATION` is a HYPOTHESIS
+label (never an automatic conclusion), requiring the later realization to
+ACTUALLY COVER the earlier proposition/content sufficiently (proposition-set
+containment via D-169 signatures + a completeness signal on the later side).
+Chronology (later-in-time) alone can never establish it -- it is at most
+one non-authoritative supporting fact once the structural evidence already
+agrees, never a standalone trigger.
+
+## 12. Supersession design
+
+`WholeVideoSupersessionHypothesis`: `left_region_id` (earlier/source-process
+side), `right_region_id` (later/candidate-delivery side),
+`proposition_overlap` (shared `ClaimSignature`/`PropositionCandidate` ids),
+`supersession_status` (`SUPPORTED_FULL` / `SUPPORTED_PARTIAL` /
+`NOT_SUPPORTED` / `CONFLICTED` / `UNKNOWN` -- never a numeric score),
+`required_evidence` (which of the required-conjunction items below actually
+held), `conflict_flags`, `provenance`. Meaning: "a later source-real sequence
+plausibly supersedes earlier recording-process attempts because it covers
+their required propositions in a coherent audience-facing sequence" --
+NEVER "delete earlier clips now." No P2 authority exists to act on this.
+
+## 13. Required conjunction for supersession (audited minimum; none of these
+## alone is sufficient, and no thresholds are implemented here)
+
+1. Earlier material contains repeated/alternative realizations (multiple
+   `emom_` ids / local groups for the same proposition on the earlier side).
+2. Later sequence carries audience-facing delivery evidence (not
+   recording-process labeled).
+3. Proposition coverage overlaps materially (non-empty
+   `proposition_overlap`).
+4. The later sequence covers ALL earlier proposition content the hypothesis
+   claims is redundant -- partial coverage caps the status at
+   `SUPPORTED_PARTIAL`, never `SUPPORTED_FULL`.
+5. No proposition exists ONLY in the earlier material (Section 14 firewall).
+6. No meaning conflict between the two sides (Section 15 firewall).
+7. No contradictory numbers/negation/factual claim (D-066 `negation_role` +
+   D-169 `claim_signatures_conflict` both checked; either one force-sets
+   `CONFLICTED` regardless of the rest).
+8. Sequence coherence on the later side is sufficient (reuse existing
+   `complete_idea`/`meaning_completion`, never a new coherence metric).
+9. Recording-process evidence (existing `whole_video_analysis.py`
+   `TemporalEvent` kinds / P1 moment roles) supports the earlier-region
+   interpretation -- absence of such evidence keeps the hypothesis at
+   `UNKNOWN`, never defaults it to supported.
+10. Chronology is supporting evidence only, consulted last, and never
+    sufficient alone (Section 16 firewall) -- removing it would not change
+    any status computed from items 1-9.
+
+## 14. Unique-information firewall
+
+If earlier material contains a proposition absent from the later sequence
+(example: earlier region = {A, B}, later assembled sequence = {A} only), P2
+must NOT mark the earlier material globally redundant. B is unique;
+`supersession_status` is capped at `NOT_SUPPORTED` or `SUPPORTED_PARTIAL`
+(never `SUPPORTED_FULL`), and the map from Section 10 keeps B's
+`relationship_status` distinct from A's. This is item 5 of Section 13's
+conjunction, restated as its own non-negotiable rule because the directive
+marks it critical.
+
+## 15. Meaning firewall
+
+No whole-video coherence hypothesis may override negation, numbers,
+diagnosis/factual terms, proposition conflict, or meaning completeness. P2 is
+strictly downstream of Language Spine meaning structure (D-066/D-169): a
+`conflict_flags` hit force-sets `CONFLICTED` before any overlap/coherence
+reasoning runs, unconditionally, as a short-circuit rather than a tie-break.
+
+## 16. Chronology firewall
+
+Later != better. Later != final. Last block != assembled edit. Chronology
+may support a hypothesis only when the structural evidence (Section 13
+items 1-9) already agrees independently of position; it can never be the
+deciding fact on its own, and swapping the order of two otherwise-identical
+regions in a fixture must never change the computed `supersession_status`
+(see fixture categories 6/12/24 in Section 25).
+
+## 17. Recording-process vs. audience-delivery design
+
+`WholeVideoEditorialRegion.dominant_editorial_process_status` (small closed
+vocabulary reusing P1's own `region_role`-style naming:
+`RECORDING_PROCESS_REGION` / `TAKE_SERIES_REGION` / `CLEAN_DELIVERY_REGION` /
+`MIXED_REGION` / `UNKNOWN`) is derived from existing P1 moment roles +
+`whole_video_analysis.py`'s recording-process-failure `TemporalEvent` kinds
+(`false_start`/`wrong_take`/`retry_setup`/etc., already confirmed present
+and per-source) aggregated over the region's member moments -- no new
+detector, no new provider prompt. `PREASSEMBLED_SEQUENCE_REGION` is
+deliberately NOT included as a region-role value in Phase A: current Video00
+never proved that real shape (per D-200.2/D-200.3's own honest gap), and the
+directive itself says P2 must not require a `PREASSEMBLED_FINAL_SEQUENCE`
+label to function. P2 instead reasons over CLEAN_DELIVERY regions +
+proposition progression directly.
+
+## 18. Global continuity design
+
+A `global_continuity_hypothesis` (part of `WholeVideoEditorialUnderstanding`,
+not a separate named type) states, per proposition in the realization map
+(Section 10), whether the CANDIDATE global sequence (today: whatever the live
+pipeline already assembled, read-only) covers it -- `COVERED` /
+`MISSING` / `UNCERTAIN` -- computed the same conservative way StoryValidator's
+existing `missing_idea_coverage` already works, but scoped to P2's own
+proposition-level map rather than duplicating StoryValidator's own authority.
+This is diagnostic (does the current edit look globally complete from P2's
+distant-region view), never a repair instruction.
+
+## 19. Global conflict/abstention contract
+
+Categorical only: `SUPPORTED` / `WEAK` / `MIXED` / `UNKNOWN` for confidence;
+`UNKNOWN` / `PARTIAL_REDUNDANCY` / `NO_SAFE_SUPERSESSION` / `CONFLICTED` are
+all valid, first-class outputs -- never forced into a single global
+interpretation, never a master score (no "video quality = .83" style
+number anywhere in this design).
+
+## 20. Proposed whole-video types (audited against current P1 objects, not
+## blindly adopted from the directive's own suggested field lists)
+
+- **`WholeVideoEditorialRegion`**: `region_id` (minted, D-200.4B-style stable
+  hash of its own inputs), `source_asset_id`, `moment_ids`, `local_group_ids`,
+  `sequence_ids` (references into existing P1 objects -- never copies),
+  `source_start`/`source_end` (physical, observation-only),
+  `dominant_editorial_process_status` (Section 17), `proposition_candidate_ids`,
+  `audience_delivery_status`, `recording_process_status`, `redundancy_status`
+  (`NOT_EVALUATED` default, matching P1's own deliberate
+  `earlier_source_redundancy_status = NOT_EVALUATED` posture until a
+  `WholeVideoSupersessionHypothesis` actually evaluates it), `confidence`,
+  `conflicts`, `provenance`. Audited against P1 local groups: this type is a
+  thin cross-referencing WRAPPER over existing `EditorialLocalGroup`/
+  `EditorialSequenceHypothesis` ids, not a re-derivation of their membership
+  -- avoiding the duplication the directive explicitly warns against.
+- **`WholeVideoPropositionRealizationMap`**: Section 10.
+- **`WholeVideoSupersessionHypothesis`**: Section 12 (subsumes distant
+  redundancy, Section 11, as one `supersession_status` value rather than two
+  separate hypothesis types -- redundancy is supersession's
+  `SUPPORTED_FULL`/`SUPPORTED_PARTIAL` outcome, not a distinct concept
+  needing its own type).
+- **`WholeVideoEditorialUnderstanding`** (aggregate root): `source_asset_id(s)`,
+  `editorial_regions` (references), `proposition_realization_map`,
+  `supersession_hypotheses`, `global_continuity_hypotheses`,
+  `unresolved_conflicts`, `capability_status`, `provenance`. No edit plan, no
+  final winner list, no render plan -- same diagnostics-only shape convention
+  as `WatchListenUnderstanding`/`EditorialMomentUnderstanding` (an already-
+  proven pattern in this codebase, not a new architectural style).
+
+## 21. Confidence contract
+
+See Section 19 -- categorical (`SUPPORTED`/`WEAK`/`MIXED`/`UNKNOWN`), no
+numeric master score anywhere in P2's output.
+
+## 22. Proposition identity relationship
+
+P2 references `PropositionCandidate`/`ClaimSignature` ids from
+`language_proposition_relation.py` (D-169) verbatim -- it never mints a
+competing proposition identity, and the realization map (Section 10) is
+keyed directly on `proposition_candidate_id`.
+
+## 23. RelationEvidence relationship
+
+P2 reuses D-169's `RelationEvidence`/`classify_relation_candidate`/
+`signatures_describe_same_proposition`/`claim_signatures_conflict` as its
+comparison primitives, extended in SCOPE (all pairs, not just
+`_relation_for_pair`'s adjacent pairs) but never in KIND -- no new semantic
+comparison logic is proposed; P2's job is applying the existing deterministic
+comparison across distance, not inventing a new one.
+
+## 24. Family relationship
+
+No second Family engine (Section 5). `take_grouping.group_takes` remains the
+sole grouping authority; confirmed local/pairwise by its own function
+surface (`retry_similarity`, `same_opening_restart`,
+`incomplete_attempt_completed_by_retry`, `multimodal_corroborated_retry` --
+every one compares a candidate to its immediate neighbor). P2 may, in a
+SEPARATELY authorized future integration, supply supersession/redundancy
+evidence for Family logic to consult -- not proposed or implemented here.
+
+## 25. Realization relationship
+
+`realization_resolver.py`/`take_grouping_provider.py` (targeted audit, not
+full read this task) own `take_group_id`/`retry_family_id`/BestTake
+winner/`selected_clip_id` (D-191) as real, live authorities today -- exactly
+what P2 must never backward-depend on (confirmed as REAL dependencies, not
+hypothetical, so the firewall is load-bearing). P2 does not need a new
+"whole-video realization" concept: it references existing `RealizationRecord`/
+P1 moment ids by id, never re-derives or replaces them.
+
+## 26. Composite relationship
+
+`composite_resolver.py`'s 19+1-step chain (read in full) is entirely
+take-level, local restoration/rescue/composite marking within one
+session/source's own takes -- confirmed via full read this task. P2 does not
+duplicate or extend this chain; a `WholeVideoSupersessionHypothesis` is
+evidence a FUTURE, separately-authorized authority could feed into a
+composite decision, never a composite decision itself.
+
+## 27. BestTake relationship
+
+No scoring, no ranking, no Prosodic re-scoring, no D-184/D-191 replacement
+(Section 5). `bounded_finalist_arbiter.py` (D-184, OFFLINE/DIAGNOSTIC) and
+`bounded_finalist_authority.py` (D-191, "the FIRST gate where the bounded
+[arbiter's verdict becomes] authority") were audited this task (entrypoint/
+docstring level): both operate on a bounded FINALIST set within one family --
+local, not distant -- confirming neither already does what P2 is being
+designed to do, and confirming D-191 is a real, live authority P2 must not
+read backward from.
+
+## 28. Freeze relationship
+
+P2 produces no artifact Freeze consumes; Freeze remains the sole gate
+deciding when Selection is locked. Unaffected, untouched.
+
+## 29. Ordering relationship
+
+P2 may produce evidence about source narrative continuity/proposition
+progression/sequence coherence that a LATER, separately-authorized Ordering
+stage could consume; P2 itself never reorders the frozen edit (Section 5).
+**Ordering status**: unaffected, not started, unchanged by this forensic.
+
+## 30. Boundary relationship
+
+P2 never chooses physical cut frames; Boundary remains fully separate
+(Section 5). **Boundary status**: unaffected, remaining Boundary
+qualification work unchanged by this forensic.
+
+## 31. Pacing/Overlap relationship
+
+P2 never creates J-cut/L-cut/micro-overlap/dialogue-overlap; it may later
+provide sequence semantics Pacing could consume, downstream and
+separately authorized (Section 5). **Pacing/Overlap status**: unaffected,
+Pacing V2/dialogue-overlap/J-cut/L-cut/micro-overlap tracks unchanged.
+
+## 32. `whole_video_openai.py` current role
+
+Per-source-only narrative/style/intent classifier
+(`summary`/`dominant_style`/`creator_intent`/`main_topic`/
+`product_or_subject`/`story_logic`/`edit_mode`/`sales_intent`) plus a
+recording-process-failure `TemporalEvent` vocabulary local to each source.
+Explicitly non-authoritative ("This stage does not itself delete or
+reorder"). Zero `redundant`/`supersede`/`duplicate`/`final sequence`
+vocabulary; never compares two sources or two regions of one source to each
+other. This IS perception evidence, not an understanding hypothesis and
+certainly not authority -- it narrates, it does not relate.
+
+## 33. `whole_video_analysis.py` current role
+
+The typed contract layer: `TemporalEvent`, `SourceVideoContext`,
+`WholeVideoContext` (with `.compact_text()`/`.dominant_edit_mode`),
+`WholeVideoProvider` Protocol, `safe_whole_video_analyze` (fail-open
+wrapper, never raises), and `confirmed_recording_behavior_events` (the
+narrow D-099/D-100 bridge exposing exactly `wrong_take`/`retry_setup` to
+`take_grouping.py` as LOCAL corroboration). Deterministic parts: the
+dataclasses, the fail-open wrapper, the confirmed-kinds filter, the
+compaction/majority-vote helpers. Provider-dependent parts: every actual
+`TemporalEvent`/narrative-field VALUE, which only exists if an LLM call
+produced it. Nothing here already approximates recording-process-vs-
+audience-delivery REGIONS, supersession, global redundancy, or narrative
+continuity across regions -- it stops at per-source narration.
+
+## 34. Provider role
+
+Perception evidence only, never truth, never authority -- confirmed by
+`whole_video_openai.py`'s own explicit non-authoritative framing and
+`safe_whole_video_analyze`'s fail-open contract (an absent/failed provider
+degrades to an empty, disabled context, never a crash and never a forced
+answer). P2 must not simply wrap LLM output and call it truth.
+
+## 35. Deterministic-base feasibility
+
+**YES** (Section 8's basis). Every required Phase-A input is already a
+deterministic, offline, provider-free value: P1's stable `emom_` ids
+(D-200.4B), D-169's `PropositionCandidate`/`ClaimSignature` objects and their
+existing comparison functions, and `complete_idea`/`meaning_completion`
+completeness signals already recorded on realizations/candidates. Extending
+pairwise comparison from ADJACENT-only (today's `_relation_for_pair` scope)
+to ALL region pairs is an O(n^2)-bounded loop over already-proven
+deterministic primitives, not a new capability and not an LLM call. A bounded
+multimodal/Gemini fallback arbiter (D-111) remains appropriate ONLY for
+genuine medium-confidence conflict, strictly later, never as Phase A's
+primary mechanism -- so Phase A should NOT make a provider mandatory.
+
+## 36. Graph-vs-typed-hypothesis decision
+
+**Bounded typed hypotheses, not a general graph framework.** Real Video00
+numbers (D-200.4, ~37 editorial moments per RAW) keep an O(n^2) flat pass
+over region pairs trivially bounded; a `WholeVideoPropositionRealizationMap`
+(one row per proposition) plus a flat tuple of
+`WholeVideoSupersessionHypothesis` rows (one per evaluated region pair) fully
+represents what Phase A needs without any node/edge graph abstraction,
+traversal algorithm, or cycle-handling machinery. If a future phase's real
+scale or query pattern (e.g. "shortest coverage chain across regions")
+genuinely needs graph traversal, that would be a separately-justified,
+separately-authorized extension -- not built here, and its node/edge types
+are not defined here because no forensic evidence yet justifies them.
+
+## 37. No-QA-reference contract
+
+Confirmed by design: none of the proposed types (Sections 10, 12, 20) read
+Cut.ai keep/delete labels, Human Gold, quality-ladder output, or any
+benchmark label as an input. All inputs are P1/D-169/live-pipeline objects
+only. QA (`benchmarks/video00_quality_ladder.py`, Human Gold references)
+remains evaluation-only, consulted only by a human or a QA workflow after
+the fact, never fed into P2's own reasoning.
+
+## 38. Generic fixture plan (design only, not implemented; 35 scenarios,
+## grouped to match the directive's own numbered list)
+
+1. Early retry A / later clean A. 2. Multiple retries A1/A2/A3 / later
+audience delivery A4. 3. Earlier A+B / later A only (unique-info firewall,
+Section 14). 4. Earlier A / later A+B (later adds, earlier stays
+non-redundant). 5. Earlier A / later contradictory A (meaning firewall,
+Section 15 -- `CONFLICTED`). 6. Earlier negative claim / later positive claim
+(negation firewall). 7. Earlier number 2 / later number 3 (quantity
+firewall). 8. Repeated proposition in distant regions (core redundancy
+case). 9. Distinct propositions in the same final-looking sequence (no false
+merge). 10. Recording-process cluster followed by clean delivery (region-role
+classification). 11. Clean takes with no evidence of supersession
+(`NO_SAFE_SUPERSESSION`). 12. Chronology-only later block (chronology
+firewall, Section 16 -- must NOT support alone). 13. Later incomplete
+sequence (`meaning_completion` gate fails supersession). 14. Later sequence
+missing a unique proposition (firewall, restated distinctly from #3's
+region-level version at the map level). 15. Later sequence with full
+proposition coverage (`SUPPORTED_FULL` positive control). 16. Multiple
+sources. 17. Same proposition across sources. 18. Contradictory realizations
+across sources. 19. P1 local groups as direct inputs (no recompute
+regression). 20. No `PREASSEMBLED_FINAL_SEQUENCE` label present (P2 must
+still function, Section 17). 21. Provider absent (`safe_whole_video_analyze`
+disabled context -- P2 unaffected, deterministic base suffices). 22. Provider
+conflicts with deterministic evidence (deterministic wins; provider is never
+truth, Section 34). 23. Deterministic repeat (same input twice, byte-
+identical output). 24. Input-order independence (region list order never
+changes verdicts -- chronology firewall control). 25. Source identity
+preserved through the region/map/hypothesis chain. 26. Proposition identity
+preserved (ids never re-minted). 27. No Family mutation (regression:
+grouping output identical before/after P2 runs alongside it). 28. No
+BestTake mutation. 29. No Ordering mutation. 30. No Boundary mutation.
+31. No Pacing mutation. 32. No Renderer mutation. 33. No commercial/sales
+fields anywhere in output. 34. No QA-reference field accepted as input
+(Section 37, negative test). 35. No automatic deletion path exists in any
+type or function signature (authority-absence proof, mirroring D-200.4B's
+own module-leaf audit style, Section 8 of that entry).
+
+## 39. Video00 relevance
+
+- **DIRECTLY_RELEVANT**: none. Every documented Video00 Level-1 gap
+  (D-097.1 through D-097.11) was root-caused as LOCAL -- dead-air
+  measurement, attempt fusion, guard-chain floors, pair-ranking order,
+  renderer joins -- never a distant-region duplicate/supersession failure.
+  Stated as NOT ASSERTED, not inferred, per this program's never-fabricate
+  discipline (D-200.4's own precedent).
+- **POSSIBLY_RELEVANT**: the stomach-family arbiter-inconsistency escalation
+  (D-097.11 escalation A: three runs, three verdicts). If that ambiguity
+  ultimately traces to two DISTANT deliveries of the same idea rather than a
+  local adjacent-pair judgment, P2's global view might stabilize it --
+  an unproven hypothesis, not a diagnosis. Do not claim P2 fixes this yet.
+- **NOT_P2**: every other D-097.x fix (dead air, renderer joins, QC probes,
+  guard floors, pair-order authority, D-097.11's join-instant work) --
+  local/physical/pipeline-mechanical by definition.
+
+## 40. Cut.ai parity value
+
+The scenario: a RAW contains early source takes/false starts/bloopers/
+retries/clean attempts (already handled today by LOCAL Family/BestTake), and
+LATER a creator-assembled sequence that already presents the intended
+message coherently. A Cut.ai-like editor appears to infer "earlier source
+material = recording process / redundant source takes" and "later coherent
+sequence = likely intended assembled delivery." Today nothing compares the
+early best-take-selected regions to that late whole-sequence region -- P1 is
+local-only (Section 6/24) and the whole-video provider narrates per-source
+style/intent but never compares regions (Sections 32-33). P2 closes exactly
+this gap by producing a `WholeVideoSupersessionHypothesis` such as
+"region_late is `SUPPORTED_PARTIAL` with regions_early_1..3" as evidence for
+a future authority to weigh. **Understanding vs. selection authority,
+explicitly distinguished**: P2 only produces that this relationship is
+PLAUSIBLE, with what evidence and what gaps (Section 14's firewall keeping
+any unique earlier content visible); it does not decide, and does not
+implement, "therefore prefer the later sequence" -- that would be a separate,
+later-authorized authority gate.
+
+## 41. Smallest D-202 implementation (recommended)
+
+Typed foundation (`WholeVideoEditorialRegion`,
+`WholeVideoPropositionRealizationMap`, `WholeVideoSupersessionHypothesis`,
+`WholeVideoEditorialUnderstanding`) + deterministic construction purely from
+existing P1/D-169 objects (no provider) + diagnostics function (mirroring
+`editorial_moment_sequence_diagnostics()`'s own style) + the 35 fixture
+scenarios in Section 38 as generic offline tests. NO provider requirement.
+NO pipeline wiring (not even the diagnostics-only wiring pattern P1 uses
+today, per Section 6's own finding that even that seam needs a deliberate,
+separately-authorized decision about where in `build_flow_b_draft` it would
+sit). NO authority.
+
+## 42. Modules D-202 should own
+
+One new module (name to be chosen at D-202 time, e.g.
+`whole_video_editorial_reasoning.py`), reading `editorial_moment_sequence*.py`,
+`structured_editorial_relation.py`, and `language_proposition_relation.py`
+objects by id only, plus its own new test file.
+
+## 43. Modules D-202 must not modify
+
+`editorial_moment_sequence.py`, `editorial_moment_sequence_integration.py`,
+`structured_editorial_relation.py`, `language_spine_live_integration.py`,
+`language_proposition_relation.py`, `watch_listen_understanding.py`,
+`raw_understanding_map.py`, `take_grouping.py`, `take_grouping_provider.py`,
+`composite_resolver.py`, `realization_resolver.py`,
+`bounded_finalist_arbiter.py`, `bounded_finalist_authority.py`,
+`semantic_ledger.py`, `whole_video_openai.py`, `whole_video_analysis.py`,
+`pipeline.py` (including its diagnostics call-site position -- the Section 6
+seam is documented, not moved).
+
+## 44. P2 authority status
+
+**NONE.** P2 hypotheses do not alter the edit. No field on any proposed type
+is a delete/select/reorder instruction.
+
+## 45. P2 readiness
+
+READY: P1 outputs are sufficient inputs (Section 8); existing global
+semantics (whole-video provider, Semantic Ledger, Family/Composite/
+Resolver/bounded-finalist layers) do not duplicate the proposed layer
+(Sections 24-27, 32-34); minimum types are identified without over-
+specification (Section 20); deterministic Phase A is feasible (Section 35);
+ownership boundaries are clear (Sections 42-43).
+
+## 46. D-201 VERDICT
+
+**A. P2 ARCHITECTURE READY -- SMALL OFFLINE PHASE-A IDENTIFIED.** Verdict C
+is ruled out by direct, per-layer evidence (Sections 24-27, 32-34): no
+existing whole-video-provider, Semantic-Ledger, Family, Realization,
+Composite, bounded-finalist, Watch+Listen, or Proposition-Relation
+capability performs distant cross-region comparison. Verdict B does not
+apply: D-200.4B already closed the one dependency (stable moment identity)
+P2 needed. Verdict D does not apply: every required input already exists,
+deterministically, offline.
+
+## 47. D-201 decision entry
+
+This document.
+
+## 48. Canonical P2 status
+
+`P2_PHASE_0_ARCHITECTURE_FORENSIC_COMPLETE` + `VERDICT_A_READY_FOR_D202`.
+No P2 code exists yet; no P2 authority exists; no pipeline wiring exists.
+
+## 49. Exact D-202 gate
+
+D-202 -- P2 Whole-Video Editorial Reasoning, Phase A: typed foundation +
+deterministic offline construction from existing P1/D-169 evidence +
+diagnostics + the Section 38 fixture suite. NO provider. NO pipeline
+integration. NO authority. Requires separate Product Owner authorization.
+
+## 50. Ordering / Boundary / Pacing status (restated, unaffected)
+
+Ordering: not started, unaffected. Boundary: remaining qualification work
+unaffected. Pacing/Overlap (dialogue-overlap/J-cut/L-cut/micro-overlap):
+unaffected. None of this forensic touches any of the three.
+
+## 51. App-roadmap status
+
+P1 sufficiently closed -> P2 Whole-Video Editorial Reasoning -> Ordering ->
+remaining Boundary qualification -> Pacing V2 (dialogue overlap/J-cut/L-cut/
+micro-overlap) -> Renderer/export qualification -> unseen RAW
+generalization/Cut.ai parity -> production/app hardening -> TestFlight/App
+Store. Do not expand P1 again unless a future P2 forensic finds a truly
+blocking P1 deficiency (none found here).
+
+## 52. Confirmation
+
+Docs only. No `cutsell_worker` change. No test added. No workflow change. No
+RAW. No provider call. No weights/thresholds. No P1 authority change. No P2
+implementation. No Family/BestTake/D-191/Ordering/Boundary/Pacing/Renderer
+change. No Commercial Moment/Sales Funnel scoring introduced.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-202's bounded
+offline Phase-A implementation is the next Product Owner decision.
+
+**Then STOP. Do NOT implement D-202. Wait for Product Owner authorization.**
