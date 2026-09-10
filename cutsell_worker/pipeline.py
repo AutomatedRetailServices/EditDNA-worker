@@ -129,6 +129,21 @@ from .language_spine_live_integration import (
     live_language_spine_diagnostics_enabled,
     live_language_spine_run_summary,
 )
+# D-203 (docs/CUTSELL_DECISIONS.md D-203): P2 Whole-Video Editorial
+# Reasoning, Phase B -- DIAGNOSTICS ONLY, default OFF, no authority, no
+# provider, no RAW. Consumes ONLY the already-computed `editorial_moment_
+# understandings`/`live_language_spine_by_source` objects the P1/D-199
+# blocks below already build -- never recomputes ASR/Language Spine/
+# Watch+Listen/visual/Prosodic/any provider itself. A post-Family
+# diagnostic side-channel alongside P1/D-199, never before Family/
+# BestTake/Freeze (see that module's own "mechanical pipeline position"
+# docstring section).
+from .whole_video_editorial_reasoning_integration import (
+    build_whole_video_editorial_reasoning,
+    whole_video_editorial_reasoning_diagnostics,
+    whole_video_editorial_reasoning_diagnostics_enabled,
+    whole_video_editorial_reasoning_run_summary,
+)
 from .raw_understanding_map import RawUnderstandingMap
 # D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist Arbiter --
 # OFFLINE / DIAGNOSTIC ONLY. A SEPARATE, independently-rollbackable flag
@@ -2533,6 +2548,37 @@ def build_flow_b_draft(
     else:
         editorial_moment_sequence_summary = {"status": "disabled"}
         editorial_moment_live_language_spine_summary = {"status": "disabled"}
+        # D-203: P2's own live construction needs these two -- when the P1
+        # flag is off neither is ever computed above, so they default to
+        # empty here (never undefined) for the P2 block below to safely
+        # reference regardless of the P1 flag's own state.
+        editorial_moment_understandings = ()
+        live_language_spine_by_source = {}
+
+    # D-203 (docs/CUTSELL_DECISIONS.md D-203): P2 Whole-Video Editorial
+    # Reasoning compact summary -- {"status": "disabled"} when the
+    # (separate, default-OFF) `CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_
+    # DIAGNOSTICS_ENABLED` flag is off (zero P2 compute in that case, not
+    # merely zero extra output). When ON, this is a THIRD diagnostic
+    # side-channel alongside D-195/D-199 above -- reads ONLY the
+    # already-built `editorial_moment_understandings`/`live_language_
+    # spine_by_source` objects those blocks produce (or their empty
+    # defaults when the P1/D-199 flags are themselves off), never
+    # recomputing anything. Diagnostics only: no authority, never read by
+    # Family/BestTake/D-191/Boundary/Pacing/Renderer.
+    if whole_video_editorial_reasoning_diagnostics_enabled():
+        whole_video_editorial_reasoning_result = build_whole_video_editorial_reasoning(
+            editorial_moment_understandings=editorial_moment_understandings,
+            live_language_spine_by_source=live_language_spine_by_source,
+            p1_diagnostics_enabled=editorial_moment_sequence_diagnostics_enabled(),
+            live_language_spine_diagnostics_enabled=live_language_spine_diagnostics_enabled(),
+        )
+        whole_video_editorial_reasoning_summary = {
+            **whole_video_editorial_reasoning_diagnostics(whole_video_editorial_reasoning_result),
+            **whole_video_editorial_reasoning_run_summary(whole_video_editorial_reasoning_result),
+        }
+    else:
+        whole_video_editorial_reasoning_summary = {"status": "disabled"}
 
     whole_video_diag = {
         "status": whole_video_context.status.__dict__ if whole_video_context is not None else None,
@@ -2729,6 +2775,15 @@ def build_flow_b_draft(
             # ENABLED` flag is off. Diagnostics only: no authority, never
             # read by Family/BestTake/D-191/Boundary/Pacing/Renderer.
             "live_language_spine": editorial_moment_live_language_spine_summary,
+            # D-203 (docs/CUTSELL_DECISIONS.md D-203): P2 Whole-Video
+            # Editorial Reasoning compact summary -- SEPARATE top-level
+            # key, never merged into "editorial_moment_sequence"/"live_
+            # language_spine" above. {"status": "disabled"} when this
+            # module's own `CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_
+            # DIAGNOSTICS_ENABLED` flag is off. Diagnostics only: no
+            # authority, never read by Family/BestTake/D-191/Boundary/
+            # Pacing/Renderer.
+            "whole_video_editorial_reasoning": whole_video_editorial_reasoning_summary,
             "composer_status": composition.status.__dict__,
             "composer_reason": composition.reason,
             "composer_order": list(composition.ordered_clip_ids),

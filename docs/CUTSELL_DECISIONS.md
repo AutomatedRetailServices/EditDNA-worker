@@ -40221,3 +40221,308 @@ Funnel scoring introduced.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-203's Phase
 B live diagnostic wiring is the next Product Owner decision. Do NOT
 implement D-203. Wait for Product Owner authorization.
+
+
+# D-203: P2 WHOLE-VIDEO EDITORIAL REASONING -- PHASE B CANONICAL-EVIDENCE
+LIVE DIAGNOSTIC INTEGRATION (POST D-202, OFFLINE ONLY, NO RAW/PROVIDER)
+
+## 1. Branch / new HEAD
+
+`feature/runpod-pod-on-demand`. Verified before starting: HEAD
+`f2211f6a77d2b10ad2f83b029bc2ffc84851f74f` (matches expected), clean tree.
+New HEAD: see the commit this entry ships with.
+
+## 2. Files changed
+
+- `cutsell_worker/whole_video_editorial_reasoning_integration.py` -- NEW,
+  the one Phase-B adapter module.
+- `cutsell_worker/pipeline.py` -- ONE new import block + ONE new diagnostic
+  block (guarded by the new flag, default OFF) + ONE new diagnostics dict
+  key (`whole_video_editorial_reasoning`), added strictly alongside the
+  existing D-195/D-199 diagnostic blocks, at the same post-Family location.
+  No other line touched; Family/BestTake/D-191/Freeze/Boundary/Pacing/
+  Renderer call sites: zero diff.
+- `tests/test_cutsell_d203_whole_video_editorial_reasoning_integration.py`
+  -- NEW, 35 tests.
+- `tests/test_cutsell_d202_whole_video_editorial_reasoning.py` -- ONE test
+  renamed/widened (`test_pipeline_does_not_import_this_module` ->
+  `test_pipeline_does_not_import_this_module_directly`) to reflect D-203's
+  own authorized seam: `pipeline.py` now imports the Phase-B INTEGRATION
+  module, never `whole_video_editorial_reasoning.py`'s own Phase-A
+  builders directly. `whole_video_editorial_reasoning.py` itself: zero
+  diff.
+- `cutsell_worker/whole_video_editorial_reasoning.py`, `editorial_moment_
+  sequence.py`, `editorial_moment_sequence_integration.py`, `structured_
+  editorial_relation.py`, `language_spine_live_integration.py`,
+  `language_proposition_relation.py`, `raw_understanding_map.py`,
+  `watch_listen_understanding.py`, `flow_b.py`: zero diff.
+
+## 3. Integration module
+
+`whole_video_editorial_reasoning_integration.py`. Responsibilities exactly
+as scoped: collect per-source P1 understanding + canonical proposition/
+relation evidence, adapt references into D-202's builders, build
+`WholeVideoEditorialUnderstanding`, serialize bounded diagnostics/run
+summary. Zero P2 reasoning logic of its own -- confirmed by module-leaf
+grep (`test_no_second_proposition_or_p1_builder`): it never calls
+`classify_editorial_moment`/`classify_editorial_sequence`/`build_
+proposition_candidates`/`build_relation_evidence`.
+
+## 4. Feature flag
+
+`CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED`, default
+OFF. When OFF, `pipeline.py` never calls
+`build_whole_video_editorial_reasoning` at all (zero P2 compute, not
+merely zero output) -- confirmed by `test_default_off_byte_equivalent`.
+No authority flag exists anywhere (`test_no_authority_flag_exists`).
+
+## 5. Pipeline seam
+
+Confirmed by direct read of `pipeline.py`'s `build_flow_b_draft`: the new
+P2 diagnostic block sits immediately AFTER the existing D-195 (P1)/D-199
+(live Language Spine) diagnostic block, reading `editorial_moment_
+understandings`/`live_language_spine_by_source` -- the SAME two objects
+those blocks already produce (or their explicit empty defaults, added to
+the P1 `else:` branch, when the P1 flag itself is off). This is a THIRD
+diagnostic side-channel at the exact same post-Family location D-201
+proved `apply_composite_resolution` already precedes -- nothing in the
+mechanical pipeline order was moved (D-201's own finding restated and
+honored, module docstring's "Mechanical pipeline position" section).
+
+## 6. P1 input reuse / 7. Language input reuse / 8. Proposition input
+## reuse / 9. Relation input reuse
+
+All four confirmed by direct construction, never recomputation:
+`EditorialMomentUnderstanding.moments`/`.local_groups`/`.sequence_
+hypotheses` (D-195/D-197) are read by attribute access only;
+`LiveLanguageSpineEvidence.proposition_candidates`/`.relation_evidence`
+(D-199) likewise. `test_no_asr_language_spine_watch_listen_visual_
+prosodic_rerun` confirms zero import from any builder module for these
+layers.
+
+## 10-12. Region / proposition-map / supersession construction
+
+All three call D-202's own existing builders (`build_whole_video_
+editorial_regions`/`build_whole_video_proposition_realization_maps`/
+`build_whole_video_supersession_hypotheses`) verbatim, unmodified
+(`whole_video_editorial_reasoning.py`: zero diff, confirmed above). No
+new heuristic added at the integration layer.
+
+## 13. Unique-information result
+
+Preserved end-to-end: `test_fixture_B_unique_information` proves a live-
+shaped fixture (early region with two propositions, later region covering
+only one) surfaces the uncovered one in `uncovered_earlier_proposition_
+candidate_ids` and never reaches `SUPPORTED_SUPERSESSION`.
+
+## 14. Meaning-conflict result
+
+`test_fixture_C_meaning_conflict` proves a negation-conflicting proposition
+pair forces `CONFLICTED` through the full integration path, unsmoothed.
+
+## 15. Chronology firewall
+
+`test_fixture_D_chronology_only` proves two clean regions positioned later
+in time with no process/coverage support never reach a supported
+supersession verdict through the live adapter -- the firewall proven at
+the builder level (D-202) survives the integration layer unmodified
+(no logic re-implemented here that could reintroduce a chronology
+shortcut).
+
+## 16. PREASSEMBLED independence / 17. SAME_EDITORIAL_BEAT independence
+
+`test_fixture_E_no_preassembled_label_still_builds` proves the live
+adapter builds valid regions/understanding with zero
+`PREASSEMBLED_FINAL_SEQUENCE` sequences supplied. Neither
+`PREASSEMBLED_FINAL_SEQUENCE` nor `SAME_EDITORIAL_BEAT`/`BEAT_SAME` is
+referenced anywhere in the integration module's own logic (confirmed by
+code-only-source string absence, mirroring D-202's own such tests).
+
+## 18. Multi-source result / 19. Source identity
+
+`test_multi_source_isolation`/`test_fixture_F_multi_source` prove two
+independent `source_asset_id`s produce isolated regions with no identity
+merge; supersession hypotheses never cross sources (Phase A/B scope,
+restated).
+
+## 20. Capability status
+
+`AVAILABLE` only when both the P1 flag is on with real per-source moment/
+group evidence AND the live Language Spine flag is on with real
+proposition candidates for every source touched
+(`test_both_flags_on_full_evidence_is_available`). `PARTIAL` when P1
+evidence exists but Language Spine evidence is absent or partial, or any
+per-source gap exists (`test_p1_on_language_off_is_partial`, `test_
+missing_language_source_counted_per_source`). `NOT_EVALUABLE` when the P1
+flag itself is off, or zero P1 evidence was supplied at all (`test_p1_
+flag_off_is_not_evaluable`, `test_p1_on_zero_evidence_is_not_evaluable`).
+
+## 21. Missing-input behavior
+
+Explicit, never hidden: `MISSING_P1_DIAGNOSTICS_DISABLED`/`MISSING_NO_P1_
+EVIDENCE`/`MISSING_LIVE_LANGUAGE_SPINE_DISABLED` are named, reported
+missing-evidence reasons -- this module never silently auto-enables the
+P1 or Language-Spine flags to compensate (`test_no_hidden_flag_coupling`
+confirms no `os.environ[...]=`/`setenv` call anywhere in the module).
+
+## 22. Diagnostics / 23. Run summary / 24. Provenance
+
+`whole_video_editorial_reasoning_diagnostics`/`whole_video_editorial_
+reasoning_run_summary` produce exactly the bounded shape this task's own
+directive specifies (top-level status/counts, `regions[]`/`proposition_
+realization_maps[]`/`supersession_hypotheses[]` rows verbatim off D-202's
+own diagnostic functions, `p2_source_count`/`p2_missing_p1_source_count`/
+`p2_missing_language_source_count` in the run summary) -- proven by
+`TestDiagnosticsAndRunSummary`. `provenance` tuples pass through
+unmodified from the underlying D-202 objects.
+
+## 25-29. No ASR / Language-Spine / Watch+Listen / visual / Prosodic rerun
+
+Confirmed by `test_no_asr_language_spine_watch_listen_visual_prosodic_
+rerun` (zero import of any of the five builder modules) and by
+construction: the integration function's only inputs are the two
+already-built objects the caller passes in.
+
+## 30. No provider
+
+`test_no_provider_call` confirms no `openai`/`gemini`/`whole_video_
+openai`/`responses.create` in the module's actual code (docstring
+excluded).
+
+## 31. No QA references
+
+`test_no_qa_reference` confirms no `cut_ai`/`human_gold`/`quality_ladder`/
+`benchmark_label` reference anywhere.
+
+## 32-38. No Family / BestTake / D-191 / Ordering / Boundary / Pacing /
+## Renderer mutation
+
+`test_no_family_besttake_ordering_boundary_pacing_renderer_mutation`
+confirms zero reference to `take_group_id`/`family_complete_context`/
+`selected_clip_id`/`_semantic_best_take`/`bounded_finalist_authority`/
+`bounded_finalist_arbiter`/`winner_after`/`boundary_engine_pass`/
+`BoundaryEngine`/`dialogue_pacing_transition`/`render_plan`/
+`RenderSegment`/`canonical_edit_plan`/`composite_resolver`/`realization_
+resolver`/`take_grouping` anywhere in this module's code.
+`test_pipeline_p2_block_is_diagnostics_only` confirms the pipeline.py diff
+region contains none of those mutation patterns either.
+
+## 39. No P2 authority
+
+`WholeVideoEditorialReasoningResult` carries no delete/winner/selected_
+clip_id/final_winner/action field (`test_no_p2_authority_field_or_
+action`). **P2 HYPOTHESES DO NOT ALTER THE EDIT.**
+
+## 40. Default-off parity
+
+`test_default_off_byte_equivalent` (pipeline-level): with the flag off,
+the same synthetic weak/strong retry-shaped fixture selects the same
+winner and `draft.diagnostics["whole_video_editorial_reasoning"] ==
+{"status": "disabled"}` -- byte-identical to pre-D-203.
+
+## 41. Flag-on immutability
+
+`test_flag_on_p1_off_reports_not_evaluable_no_mutation` and `test_flag_
+on_with_p1_on_evaluates_without_mutating_winner` prove the SAME winner is
+selected regardless of the P2 flag's state, with only the diagnostics
+block differing.
+
+## 42. Runtime
+
+`test_pure_integration_runtime_lightweight`: 30-moment synthetic source
+processed in well under the sanity ceiling (no invented performance
+threshold, matching this task's own instruction).
+
+## 43-49. Regression battery
+
+- D-202 regression: 62/62 (one test renamed/widened per Section 2, zero
+  behavior change to the file under test).
+- Targeted P1/Language/BestTake battery (D-123, D-128, D-150, D-166,
+  D-167, D-168, D-169, D-171, D-174, D-180, D-183, D-184, D-187, D-188,
+  D-189, D-191, D-193, D-194, D-195, D-197, D-198, D-199, D-200 wiring,
+  D-201, D-202, D-203): **1187/1187 passed**.
+- BestTake-keyword regression sweep: **471/471 passed**.
+- Boundary/Pacing/Render-keyword regression sweep: **445/445 passed** (13
+  subtests).
+- Full offline suite (excluding the one pre-existing, unrelated `test_
+  semantic_stitch.py` collection error): **4857 passed, 6 failed** at the
+  pre-commit check -- 5 of those are the SAME pre-existing, unrelated
+  failures recorded before this task began (`test_hybrid_story_guard_
+  incomplete_retry.py` x1, `test_video00_modal_hybrid_semantic_parity.py`
+  x4, both files untouched by this task); the 6th
+  (`test_cutsell_d169_language_proposition_relation.py::test_30_old_
+  serialized_ids_unaffected`) is a pre-commit-only artifact of that
+  test's own `git diff HEAD -- pipeline.py` check finding this task's
+  still-uncommitted working-tree diff -- resolved once this commit lands
+  (re-verified below).
+
+## 50. Targeted tests
+
+62 (D-202) + 35 (D-203, new) = 97 tests exercising this task's own scope,
+all passing.
+
+## 52. New failures
+
+Zero. Every failure observed traces to a pre-existing, unrelated cause
+(Section 43-49) or the pre-commit git-diff artifact (self-resolving on
+commit).
+
+## 53. D-203 VERDICT
+
+**A. P2 CANONICAL-EVIDENCE LIVE DIAGNOSTIC INTEGRATION OFFLINE PROVEN.**
+
+## 54. D-203 decision entry
+
+This document.
+
+## 55. Canonical P2 status
+
+`PHASE_A_OFFLINE_PROVEN` + `CANONICAL_EVIDENCE_LIVE_DIAGNOSTIC_
+INTEGRATION_OFFLINE_PROVEN`. No real-media claim is made -- this is
+offline-only proof that the wiring is correct and safe; D-204 (one
+Video00 RAW) is the separate, not-yet-authorized gate for real-media
+evidence.
+
+## 56. Exact D-204 RAW gate
+
+D-204 -- exactly ONE Video00 RAW with `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_
+DIAGNOSTICS_ENABLED=1`, `CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_
+ENABLED=1`, `CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_
+ENABLED=1`. No P2 authority. Purpose: observe real whole-video regions/
+multi-realization propositions/recording-process-vs-audience-delivery
+regions/distant redundancy/supersession hypotheses/unique-information
+blocks/meaning conflicts. Success does NOT require supported supersession
+to actually exist in Video00 -- honest `NO_SAFE_SUPERSESSION`/`UNKNOWN`
+is an acceptable, valid result. NOT launched here; requires separate
+Product Owner authorization.
+
+## 57-59. Ordering / Boundary / Pacing-Overlap status (restated,
+## unaffected)
+
+Ordering: not started, unaffected. Boundary: remaining qualification work
+unaffected. Pacing/Overlap: unaffected. None of this task touches any of
+the three.
+
+## 60. App-roadmap status
+
+P1 sufficiently closed -> P2 Phase A offline-proven -> P2 Phase B live-
+diagnostic-integration offline-proven -> D-204 (one real-media
+qualification RAW) -> Ordering -> remaining Boundary qualification ->
+Pacing V2 -> overlap/J/L cuts -> Renderer/export -> unseen RAW
+generalization -> app hardening -> TestFlight/App Store. Do not build
+endless P2 subfeatures (this task's own instruction, honored: exactly one
+new integration module + flag + wiring + tests, nothing more).
+
+## 61. Confirmation
+
+No RAW. No Video00. No Modal. No RunPod. No provider call (no OpenAI/
+Gemini/whole-video provider). No P2 authority (still NONE after D-203; no
+authority gate is authorized here). No Family/BestTake/D-191/Ordering/
+Boundary/Pacing/Renderer change. No Commercial Moment/Sales Funnel
+scoring.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/C -- paid compute) --
+authorizing D-204 (the one Video00 RAW) is the next Product Owner
+decision.
+
+**Then STOP. Do NOT launch D-204. Wait for Product Owner authorization.**

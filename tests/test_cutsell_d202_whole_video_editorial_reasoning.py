@@ -750,9 +750,18 @@ class TestP1LimitationIndependence:
 # audits (deliverable items 36-48, 68).
 # ---------------------------------------------------------------------------
 class TestStructuralAudits:
-    def test_pipeline_does_not_import_this_module(self):
+    def test_pipeline_does_not_import_this_module_directly(self):
+        # D-203 (docs/CUTSELL_DECISIONS.md D-203) authorizes pipeline.py to
+        # import the SEPARATE Phase-B integration adapter
+        # (whole_video_editorial_reasoning_integration.py) -- that module,
+        # never this one, is pipeline.py's authorized seam into P2. This
+        # module's own Phase-A builders/types are never imported by
+        # pipeline.py directly (no P2 reasoning logic lives in pipeline.py
+        # itself), preserving D-202's own "no pipeline wiring" scope for
+        # THIS module specifically.
         pipeline_source = (REPO_ROOT / "cutsell_worker" / "pipeline.py").read_text()
-        assert "whole_video_editorial_reasoning" not in pipeline_source
+        assert "from .whole_video_editorial_reasoning import" not in pipeline_source
+        assert "from .whole_video_editorial_reasoning_integration import" in pipeline_source
 
     def test_flow_b_does_not_import_this_module(self):
         flow_b_source = (REPO_ROOT / "cutsell_worker" / "flow_b.py").read_text()
