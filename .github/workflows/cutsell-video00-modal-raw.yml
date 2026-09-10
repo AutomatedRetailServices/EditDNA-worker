@@ -5487,6 +5487,122 @@ jobs:
           print(json.dumps({k: v for k, v in summary.items() if k != "transitions"}, indent=2, sort_keys=True, default=str))
           PY
 
+      - name: D-221 Pacing V2 J/L timing -> Video00 real-media candidate extraction
+        # D-221 (docs/CUTSELL_DECISIONS.md D-221): determines REAL_JL_
+        # CANDIDATE_COUNT -- pairs where D-215's own decision layer
+        # (unmodified) actually selected `J_CUT`/`L_CUT`, never a
+        # recomputation. Reads the D-218R step's own already-written,
+        # small output file (never re-parses the huge engine JSON) and
+        # filters its `transitions[]` rows down to genuine J/L
+        # candidates -- a PURE PROJECTION, no transition/timing/safety
+        # logic recomputed. Per-row `candidate_audio_lead`/`candidate_
+        # audio_tail` ARE the D-220 `max_safe_lead`/`max_safe_tail`
+        # inputs (already serialized, D-216/D-217, unmodified); the
+        # per-word ANCHOR duration D-220's own `chosen_duration` formula
+        # needs (left's last word / right's first word) is HONESTLY
+        # marked unavailable below -- no existing serialization anywhere
+        # in this codebase carries per-word timestamps for selected
+        # clips (`universal_clean_cut_validation.py`'s own `"selected"`
+        # projection carries only `clip_id`/`start`/`end`/`text`/`take_
+        # group_id`), and adding that field would be a `cutsell_worker`
+        # change this task does not authorize. This step recomputes
+        # NOTHING -- if REAL_JL_CANDIDATE_COUNT is 0, the missing anchor
+        # field is moot; if it is nonzero, this gap is reported
+        # honestly, never fabricated.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          src_path = "artifact/d218_pacing_v2_real_media_qualification.json"
+          out_path = "artifact/d221_pacing_v2_jl_timing_candidates.json"
+
+          if not os.path.exists(src_path) or os.path.getsize(src_path) == 0:
+              print("ERROR: D-218R's own output artifact is missing -- cannot extract D-221 candidates.", file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d221_pacing_v2_jl_timing_candidates.v1",
+                             "source_status": "d218r_artifact_missing"}, f, indent=2)
+              sys.exit(1)
+
+          with open(src_path) as f:
+              try:
+                  d218r = json.load(f)
+              except Exception as e:
+                  print(f"ERROR: failed to parse {src_path}: {e}", file=sys.stderr)
+                  with open(out_path, "w") as f2:
+                      json.dump({"schema_version": "cutsell.video00.d221_pacing_v2_jl_timing_candidates.v1",
+                                 "source_status": "d218r_artifact_unparseable"}, f2, indent=2)
+                  sys.exit(1)
+
+          if d218r.get("pacing_v2_block_status") != "PRESENT":
+              print("ERROR: D-218R's own artifact reports pacing_v2_block_status != PRESENT -- cannot extract candidates.", file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d221_pacing_v2_jl_timing_candidates.v1",
+                             "source_status": "pacing_v2_block_not_present"}, f, indent=2)
+              sys.exit(1)
+
+          rows = d218r.get("transitions") or []
+          candidates = []
+          for idx, row in enumerate(rows):
+              mode = row.get("selected_mode")
+              if mode not in ("J_CUT", "L_CUT"):
+                  continue
+              candidates.append({
+                  "transition_index": idx,
+                  "left_clip_id": row.get("left_clip_id"),
+                  "right_clip_id": row.get("right_clip_id"),
+                  "left_source_asset_id": row.get("left_source_asset_id"),
+                  "right_source_asset_id": row.get("right_source_asset_id"),
+                  "selected_mode": mode,
+                  "candidate_audio_lead": row.get("candidate_audio_lead"),
+                  "candidate_audio_tail": row.get("candidate_audio_tail"),
+                  "candidate_overlap": row.get("candidate_overlap"),
+                  "decision_status": row.get("decision_status"),
+                  "fallback_reason": row.get("fallback_reason"),
+                  "relationship_hint": row.get("relationship_hint"),
+                  "prosodic_status": row.get("prosodic_status"),
+                  "double_speech_status": row.get("double_speech_status"),
+                  "word_safety_status": row.get("word_safety_status"),
+                  "meaning_safety_status": row.get("meaning_safety_status"),
+                  "live_mode": row.get("live_mode"),
+                  "firewall_violation": row.get("firewall_violation"),
+                  "conflict_flags": row.get("conflict_flags"),
+                  # D-220's own chosen_duration = min(max_safe_window,
+                  # anchor_word_duration) cannot be computed here --
+                  # anchor word timestamps for `left`/`right` are not
+                  # serialized anywhere in this codebase's result.json
+                  # today. Honest gap, never fabricated.
+                  "anchor_word_duration": None,
+                  "anchor_word_duration_status": "NOT_RETRIEVABLE_WORD_TIMESTAMPS_NOT_SERIALIZED",
+                  "d220_chosen_duration": None,
+                  "d220_chosen_duration_status": "NOT_COMPUTABLE_WITHOUT_ANCHOR_WORD_DATA",
+              })
+
+          summary = {
+              "schema_version": "cutsell.video00.d221_pacing_v2_jl_timing_candidates.v1",
+              "source_status": "d218r_artifact_present",
+              "transition_count": d218r.get("transition_count"),
+              "real_jl_candidate_count": len(candidates),
+              "j_candidate_count": sum(1 for c in candidates if c["selected_mode"] == "J_CUT"),
+              "l_candidate_count": sum(1 for c in candidates if c["selected_mode"] == "L_CUT"),
+              "candidates": candidates,
+              "anchor_word_duration_observability": "NOT_RETRIEVABLE_THIS_RUN -- universal_clean_cut_validation.py's own 'selected' projection carries only clip_id/start/end/text/take_group_id, never per-word timestamps; adding that field is a cutsell_worker change out of this task's own scope.",
+          }
+
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True, default=str)
+
+          size = os.path.getsize(out_path)
+          print("--- D-221 Pacing V2 J/L Timing -> Real-Media Candidate Extraction (pure projection of D-218R's own already-written transitions[] -- recomputes NO transition/timing/safety decision) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -5519,6 +5635,7 @@ jobs:
             artifact/d204_whole_video_editorial_reasoning_real_media_qualification.json
             artifact/d209_ordering_real_media_qualification.json
             artifact/d218_pacing_v2_real_media_qualification.json
+            artifact/d221_pacing_v2_jl_timing_candidates.json
           retention-days: 14
           if-no-files-found: warn
 
