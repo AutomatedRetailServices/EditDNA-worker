@@ -685,24 +685,42 @@ def classify_editorial_sequence(
 # No transcript dump.
 # ---------------------------------------------------------------------------
 def editorial_moment_diagnostics(moment: EditorialMoment) -> dict:
+    """Bounded, JSON-safe projection of an already-built ``EditorialMoment``
+    -- every field here is read verbatim off the frozen dataclass (D-196's
+    own observability-only serialization requirement: no new computation,
+    no transcript, no child-object dump). ``attempt_ids``/``proposition_
+    candidate_ids`` are stable-id references only, never the underlying
+    objects."""
     return {
         "editorial_moment_id": moment.editorial_moment_id,
+        "source_asset_id": moment.source_asset_id,
+        "source_start": moment.source_start,
+        "source_end": moment.source_end,
+        "attempt_ids": list(moment.attempt_ids),
+        "proposition_candidate_ids": list(moment.proposition_candidate_ids),
         "moment_role": moment.moment_role,
         "audience_delivery_status": moment.audience_delivery_status,
         "recording_process_status": moment.recording_process_status,
         "completion_status": moment.completion_status,
         "confidence": moment.confidence,
         "conflict": list(moment.conflict_flags),
-        "source_start": moment.source_start,
-        "source_end": moment.source_end,
+        "provenance": list(moment.provenance),
     }
 
 
 def editorial_sequence_diagnostics(sequence: EditorialSequenceHypothesis) -> dict:
+    """Bounded, JSON-safe projection of an already-built
+    ``EditorialSequenceHypothesis`` -- same verbatim-field-only contract as
+    ``editorial_moment_diagnostics`` above. ``moment_ids`` are stable-id
+    references only, never the underlying ``EditorialMoment`` objects."""
     return {
         "sequence_id": sequence.sequence_id,
-        "sequence_kind": sequence.sequence_kind,
+        "source_asset_id": sequence.source_asset_id,
+        "source_start": sequence.source_start,
+        "source_end": sequence.source_end,
+        "moment_ids": list(sequence.moment_ids),
         "moment_count": len(sequence.moment_ids),
+        "sequence_kind": sequence.sequence_kind,
         "sequence_completeness": sequence.sequence_completeness,
         "audience_delivery_status": sequence.audience_delivery_status,
         "recording_process_status": sequence.recording_process_status,
@@ -712,8 +730,7 @@ def editorial_sequence_diagnostics(sequence: EditorialSequenceHypothesis) -> dic
         "earlier_source_redundancy_status": sequence.earlier_source_redundancy_status,
         "confidence": sequence.confidence,
         "conflict": list(sequence.conflict_flags),
-        "source_start": sequence.source_start,
-        "source_end": sequence.source_end,
+        "provenance": list(sequence.provenance),
     }
 
 

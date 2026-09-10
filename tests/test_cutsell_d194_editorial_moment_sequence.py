@@ -634,16 +634,32 @@ def test_d193_contract_d_final_like_with_retry_relation_not_supported():
 # Diagnostics / run summary shape.
 # ---------------------------------------------------------------------------
 def test_diagnostics_moment_shape():
+    # D-196's own required per-moment trace field list.
     d = editorial_moment_diagnostics(_clean_moment(0))
-    for key in ("editorial_moment_id", "moment_role", "audience_delivery_status", "recording_process_status", "completion_status", "confidence", "conflict", "source_start", "source_end"):
+    for key in (
+        "editorial_moment_id", "source_asset_id", "source_start", "source_end",
+        "attempt_ids", "proposition_candidate_ids", "moment_role", "audience_delivery_status",
+        "recording_process_status", "completion_status", "confidence", "conflict", "provenance",
+    ):
         assert key in d
+    assert isinstance(d["attempt_ids"], list)
+    assert isinstance(d["proposition_candidate_ids"], list)
+    assert isinstance(d["provenance"], list)
 
 
 def test_diagnostics_sequence_shape():
+    # D-196's own required per-sequence trace field list.
     seq = classify_editorial_sequence([_clean_moment(0), _clean_moment(1, start=2.0, end=3.0)])
     d = editorial_sequence_diagnostics(seq)
-    for key in ("sequence_id", "sequence_kind", "moment_count", "sequence_completeness", "proposition_progression_status", "internal_redundancy_status", "continuity_status", "confidence", "conflict", "source_start", "source_end"):
+    for key in (
+        "sequence_id", "source_asset_id", "source_start", "source_end", "moment_ids", "moment_count",
+        "sequence_kind", "sequence_completeness", "proposition_progression_status",
+        "internal_redundancy_status", "continuity_status", "earlier_source_redundancy_status",
+        "confidence", "conflict", "provenance",
+    ):
         assert key in d
+    assert isinstance(d["moment_ids"], list)
+    assert isinstance(d["provenance"], list)
 
 
 def test_run_summary_counts():

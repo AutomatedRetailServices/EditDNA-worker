@@ -648,6 +648,67 @@ def test_55_flag_on_winner_immutability(monkeypatch):
     assert off_result.draft.diagnostics["editorial_moment_sequence"] == {"status": "disabled"}
 
 
+def test_55b_flag_on_serializes_real_moment_and_sequence_rows(monkeypatch):
+    """D-196 pre-RAW proof: with real WatchListenUnderstanding evidence
+    threaded through build_flow_b_draft (the SAME parameter contract
+    flow_b.py already uses live), the flag-on diagnostics block emits at
+    least one real moment row and one real sequence row with every
+    D-196-required field -- not merely the aggregate counts -- while the
+    winner/families remain exactly as before."""
+    from cutsell_worker.pipeline import build_flow_b_draft
+
+    request, takes, labels, expected_winner = _pipeline_fixture()
+    wlu = WatchListenUnderstanding(source_asset_id="src", understanding_spans=(
+        UnderstandingSpan(
+            span_id="weak", source_asset_id="src", source_start=1.0, source_end=3.0,
+            behavior_state_hypotheses=(_behavior(BEHAVIOR_CLEAN_ATTEMPT),), behavior_confidence=WL_CONFIDENCE_SUPPORTED,
+            attempt_boundary_hypotheses=(), attempt_relation_hypotheses=(), relation_confidence=WL_CONFIDENCE_UNKNOWN,
+            meaning_completion_hypothesis=WL_MEANING_COMPLETE, performance_usability_hypothesis=USABILITY_USABLE,
+            entry_usability=USABILITY_USABLE, delivery_usability=USABILITY_USABLE, exit_usability=USABILITY_USABLE,
+            conflict_flags=(), evidence_provenance={},
+        ),
+        UnderstandingSpan(
+            span_id="strong", source_asset_id="src", source_start=4.0, source_end=6.0,
+            behavior_state_hypotheses=(_behavior(BEHAVIOR_CLEAN_ATTEMPT),), behavior_confidence=WL_CONFIDENCE_SUPPORTED,
+            attempt_boundary_hypotheses=(),
+            attempt_relation_hypotheses=(AttemptRelationHypothesis(RELATION_RETRY, WL_CONFIDENCE_SUPPORTED, "x", "weak", ()),),
+            relation_confidence=WL_CONFIDENCE_SUPPORTED, meaning_completion_hypothesis=WL_MEANING_COMPLETE,
+            performance_usability_hypothesis=USABILITY_USABLE, entry_usability=USABILITY_USABLE,
+            delivery_usability=USABILITY_USABLE, exit_usability=USABILITY_USABLE,
+            conflict_flags=(), evidence_provenance={},
+        ),
+    ))
+    monkeypatch.setenv("CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED", "1")
+    result = build_flow_b_draft(request, takes, labels, watch_listen_understandings=(wlu,))
+
+    assert [c.clip_id for c in result.draft.selected] == [expected_winner]
+    p1 = result.draft.diagnostics["editorial_moment_sequence"]
+    assert p1["status"] == "evaluated"
+    assert len(p1["moments"]) >= 1
+    assert len(p1["sequences"]) >= 1
+    moment_required = {
+        "editorial_moment_id", "source_asset_id", "source_start", "source_end", "attempt_ids",
+        "proposition_candidate_ids", "moment_role", "audience_delivery_status",
+        "recording_process_status", "completion_status", "confidence", "conflict", "provenance",
+    }
+    sequence_required = {
+        "sequence_id", "source_asset_id", "source_start", "source_end", "moment_ids", "moment_count",
+        "sequence_kind", "sequence_completeness", "proposition_progression_status",
+        "internal_redundancy_status", "continuity_status", "earlier_source_redundancy_status",
+        "confidence", "conflict", "provenance",
+    }
+    for row in p1["moments"]:
+        assert moment_required.issubset(row.keys())
+        assert "text" not in row and "transcript" not in row
+    for row in p1["sequences"]:
+        assert sequence_required.issubset(row.keys())
+    # Determinism: repeated calls with identical inputs serialize identically.
+    result2 = build_flow_b_draft(request, takes, labels, watch_listen_understandings=(wlu,))
+    p1_2 = result2.draft.diagnostics["editorial_moment_sequence"]
+    assert p1["moments"] == p1_2["moments"]
+    assert p1["sequences"] == p1_2["sequences"]
+
+
 # ---------------------------------------------------------------------------
 # 56-60: runtime / capability / missing-evidence / local-only / no-global-search.
 # ---------------------------------------------------------------------------

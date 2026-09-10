@@ -115,6 +115,7 @@ from .watch_listen_understanding import WatchListenUnderstanding
 from .editorial_moment_sequence_integration import (
     build_editorial_moment_understanding_for_sources,
     editorial_moment_sequence_diagnostics_enabled,
+    editorial_moment_understanding_diagnostics,
     editorial_moment_understanding_run_summary,
 )
 # D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist Arbiter --
@@ -2415,9 +2416,28 @@ def build_flow_b_draft(
             takes=take_tuple,
             watch_listen_understandings=tuple(watch_listen_understandings),
         )
+        # D-196 (docs/CUTSELL_DECISIONS.md D-196): OBSERVABILITY-ONLY
+        # serialization of the already-built per-source moment/sequence
+        # objects -- pure re-projection via D-194's own bounded diagnostic
+        # functions (editorial_moment_understanding_diagnostics), no new
+        # computation, no authority, no transcript. Flattened across
+        # sources into two top-level arrays so a RAW's compact log step
+        # can read them directly without reconstructing per-source
+        # structure. Without this, the aggregate counts alone gave the
+        # one authorized D-196 RAW nothing to trace per-moment/per-
+        # sequence evidence against.
+        editorial_moment_source_diagnostics = [
+            editorial_moment_understanding_diagnostics(u) for u in editorial_moment_understandings
+        ]
         editorial_moment_sequence_summary = {
             "status": "evaluated",
             **editorial_moment_understanding_run_summary(editorial_moment_understandings),
+            "moments": [
+                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["moments"]
+            ],
+            "sequences": [
+                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["sequences"]
+            ],
         }
     else:
         editorial_moment_sequence_summary = {"status": "disabled"}
