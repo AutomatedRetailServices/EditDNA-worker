@@ -273,6 +273,25 @@ on:
         required: false
         default: ""
         type: string
+      whole_video_editorial_reasoning_diagnostics_enabled:
+        # D-204 (docs/CUTSELL_DECISIONS.md D-203/D-204): "1" overlays
+        # CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED=1
+        # (cutsell_worker/whole_video_editorial_reasoning_integration.py's
+        # Phase B live diagnostic integration, D-202/D-203, wired into
+        # pipeline.py). Consumes ONLY the already-computed P1/live-
+        # Language-Spine evidence the two flags above produce -- to reach
+        # CAPABILITY_AVAILABLE both editorial_moment_sequence_diagnostics_
+        # enabled=1 AND live_language_spine_diagnostics_enabled=1 must ALSO
+        # be set (never auto-linked; reported honestly as PARTIAL/NOT_
+        # EVALUABLE otherwise, see that module's own docstring). DIAGNOSTICS
+        # ONLY: P2 has NO selection/Family/BestTake/D-191/Ordering/Boundary/
+        # Pacing/Renderer authority -- it never mutates selected_clip_id/
+        # ranked/membership/render plan. Empty (default) = code default
+        # OFF, byte-identical to every run before D-203/D-204.
+        description: "Optional: '1' enables CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED (D-203/D-204, diagnostic-only, no authority; requires editorial_moment_sequence_diagnostics_enabled=1 AND live_language_spine_diagnostics_enabled=1 too to reach AVAILABLE). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -546,6 +565,18 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-200 Live Language-Spine Diagnostics for this run: CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-204: optional D-203 P2 Whole-Video Editorial Reasoning
+          # diagnostic overlay, applied only when the dispatch input is
+          # exactly "1"; code default (OFF) otherwise. SEPARATE from the
+          # two flags above -- never auto-linked -- see cutsell_worker/
+          # whole_video_editorial_reasoning_integration.py's own module
+          # docstring and docs/CUTSELL_DECISIONS.md D-202/D-203/D-204 for
+          # the full no-authority contract.
+          if [ "${{ github.event.inputs.whole_video_editorial_reasoning_diagnostics_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-204 P2 Whole-Video Editorial Reasoning Diagnostics for this run: CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -4780,6 +4811,207 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: D-204 P2 Whole-Video Editorial Reasoning -> real-media qualification
+        # D-204 (docs/CUTSELL_DECISIONS.md D-204): real-media qualification
+        # of D-203's live P2 diagnostic integration on the SAME canonical
+        # Video00 RAW. Reads the SAME `artifact/video00-modal.json` the
+        # D-196/D-198/D-200 steps above read, and PURE-PROJECTS the
+        # already-serialized `diagnostics["whole_video_editorial_
+        # reasoning"]` block (D-203's own `whole_video_editorial_
+        # reasoning_integration.py` diagnostics/run-summary functions) --
+        # recomputes NO region, NO proposition map, NO supersession
+        # hypothesis, NO claim-signature comparison. Every classification
+        # below (multi-realization "value" category, firewall violation
+        # counts) is a REPORTING-ONLY audit over already-serialized fields,
+        # computed here exactly like D-198/D-200's own `real_media_
+        # grouping_result`-style classifications -- never fed back into
+        # cutsell_worker. Deliberately BOUNDED (unlike D-200.4's own known,
+        # documented, not-yet-fixed oversized-JSON design flaw): this step
+        # embeds only the already-bounded region/proposition-map/
+        # supersession row lists the engine itself already serialized,
+        # never a second copy of the whole upstream artifact.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          summary = {"schema_version": "cutsell.video00.d204_whole_video_editorial_reasoning_real_media_qualification.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          diag = engine.get("diagnostics") if isinstance(engine, dict) else None
+          p2_block = diag.get("whole_video_editorial_reasoning") if isinstance(diag, dict) else None
+          p2_status = (p2_block or {}).get("status") if isinstance(p2_block, dict) else "block_missing"
+          summary["whole_video_editorial_reasoning_status"] = p2_status
+          summary["p2_capability_status"] = (p2_block or {}).get("capability_status", "MISSING_FROM_SERIALIZATION")
+          summary["p2_missing_evidence"] = (p2_block or {}).get("missing_evidence", [])
+          summary["p2_source_count"] = (p2_block or {}).get("source_count", 0)
+
+          # --- P1/Language health (same source blocks D-198/D-200 already
+          # read, cross-referenced here only, never recomputed). ---
+          p1_block = diag.get("editorial_moment_sequence") if isinstance(diag, dict) else None
+          live_block = diag.get("live_language_spine") if isinstance(diag, dict) else None
+          summary["p1_status"] = (p1_block or {}).get("status", "block_missing")
+          summary["p1_moment_count"] = len((p1_block or {}).get("moments", []))
+          summary["p1_local_group_count"] = len((p1_block or {}).get("local_groups", []))
+          summary["p1_sequence_count"] = len((p1_block or {}).get("sequences", []))
+          summary["live_language_spine_status"] = (live_block or {}).get("status", "block_missing")
+          summary["language_attempt_count"] = (live_block or {}).get("language_attempt_count", "MISSING_FROM_SERIALIZATION")
+          summary["proposition_candidate_count"] = (live_block or {}).get("proposition_candidate_count", "MISSING_FROM_SERIALIZATION")
+          summary["relation_evidence_count"] = (live_block or {}).get("relation_evidence_count", "MISSING_FROM_SERIALIZATION")
+
+          regions = (p2_block or {}).get("regions", [])
+          maps_ = (p2_block or {}).get("proposition_realization_maps", [])
+          hyps = (p2_block or {}).get("supersession_hypotheses", [])
+          summary["whole_video_region_count"] = len(regions)
+          summary["regions"] = regions
+
+          process_counts = {}
+          for r in regions:
+              status = r.get("dominant_process_status", "MISSING")
+              process_counts[status] = process_counts.get(status, 0) + 1
+          summary["recording_process_region_count"] = process_counts.get("RECORDING_PROCESS_REGION", 0) + process_counts.get("TAKE_SERIES_REGION", 0)
+          summary["audience_delivery_region_count"] = process_counts.get("CLEAN_DELIVERY_REGION", 0)
+          summary["mixed_region_count"] = process_counts.get("MIXED_REGION", 0)
+          summary["region_process_status_distribution"] = process_counts
+
+          # --- Region boundedness audit: no whole-source collapse, source
+          # identity preserved, every region is P1-group-backed. ---
+          source_ids = sorted({r.get("source_asset_id") for r in regions if r.get("source_asset_id")})
+          summary["region_source_ids"] = source_ids
+          summary["region_whole_source_collapse_detected"] = len(regions) == 1 and len(p1_block.get("local_groups", []) if isinstance(p1_block, dict) else []) > 1
+          summary["region_not_p1_group_backed_count"] = sum(1 for r in regions if not r.get("local_group_ids"))
+
+          summary["proposition_realization_map_count"] = len(maps_)
+          multi = [m for m in maps_ if (m.get("realization_count") or 0) > 1]
+          summary["multi_realization_proposition_count"] = len(multi)
+
+          region_status_by_id = {r.get("region_id"): r.get("dominant_process_status") for r in regions}
+
+          def classify_multi_realization(row):
+              statuses = {region_status_by_id.get(rid) for rid in (row.get("region_ids") or [])}
+              statuses.discard(None)
+              if statuses <= {"CLEAN_DELIVERY_REGION"}:
+                  return "MULTIPLE_CLEAN_REALIZATIONS"
+              if "TAKE_SERIES_REGION" in statuses and "CLEAN_DELIVERY_REGION" in statuses:
+                  return "RETRY_TO_LATER_REALIZATION"
+              if "RECORDING_PROCESS_REGION" in statuses and "CLEAN_DELIVERY_REGION" in statuses:
+                  return "RECORDING_PROCESS_TO_CLEAN_DELIVERY"
+              if row.get("relationship_status") == "MULTIPLE_DISTANT_REALIZATIONS":
+                  return "CROSS_REGION_REPETITION"
+              return "AMBIGUOUS"
+
+          summary["multi_realization_propositions"] = [
+              {**m, "distant_realization_value": classify_multi_realization(m)} for m in multi
+          ]
+          value_counts = {}
+          for m in summary["multi_realization_propositions"]:
+              v = m["distant_realization_value"]
+              value_counts[v] = value_counts.get(v, 0) + 1
+          summary["distant_realization_value_distribution"] = value_counts
+
+          summary["supersession_hypothesis_count"] = len(hyps)
+          status_counts = {}
+          for h in hyps:
+              s = h.get("supersession_status", "MISSING")
+              status_counts[s] = status_counts.get(s, 0) + 1
+          summary["supported_supersession_count"] = status_counts.get("SUPPORTED_SUPERSESSION", 0)
+          summary["partial_supersession_count"] = status_counts.get("PARTIAL_SUPERSESSION", 0)
+          summary["no_safe_supersession_count"] = status_counts.get("NO_SAFE_SUPERSESSION", 0)
+          summary["conflicted_supersession_count"] = status_counts.get("CONFLICTED", 0)
+          summary["unknown_supersession_count"] = status_counts.get("UNKNOWN", 0)
+          summary["supersession_status_distribution"] = status_counts
+          summary["supported_or_partial_hypotheses"] = [
+              h for h in hyps if h.get("supersession_status") in ("SUPPORTED_SUPERSESSION", "PARTIAL_SUPERSESSION")
+          ]
+
+          # --- Unique-information firewall audit. ---
+          uncovered_total = sum(len(h.get("uncovered_earlier_proposition_candidate_ids") or []) for h in hyps)
+          summary["unique_information_uncovered_count"] = uncovered_total
+          unique_info_violations = [
+              h.get("supersession_id") for h in hyps
+              if (h.get("uncovered_earlier_proposition_candidate_ids") or [])
+              and h.get("supersession_status") == "SUPPORTED_SUPERSESSION"
+          ]
+          summary["unique_information_firewall_violation_count"] = len(unique_info_violations)
+          summary["unique_information_firewall_violations"] = unique_info_violations
+          summary["unique_information_firewall_result"] = "HELD" if not unique_info_violations else "VIOLATED"
+
+          # --- Meaning firewall audit. ---
+          meaning_conflict_cases = [h for h in hyps if h.get("meaning_conflict_status") == "CONFLICTED"]
+          summary["meaning_conflict_case_count"] = len(meaning_conflict_cases)
+          meaning_violations = [
+              h.get("supersession_id") for h in meaning_conflict_cases
+              if h.get("supersession_status") != "CONFLICTED"
+          ]
+          summary["meaning_firewall_violation_count"] = len(meaning_violations)
+          summary["meaning_firewall_violations"] = meaning_violations
+          summary["meaning_firewall_result"] = "HELD" if not meaning_violations else "VIOLATED"
+
+          # --- Chronology firewall audit. Structurally guaranteed by
+          # construction (whole_video_editorial_reasoning.py's own
+          # _supersession_status never reads position, only recording_
+          # process_support/audience_delivery_support/coverage_status --
+          # see docs/CUTSELL_DECISIONS.md D-202 Section 12) rather than a
+          # live A/B chronology-swap test (D-204 is exactly ONE RAW). ---
+          chronology_only = [
+              h.get("supersession_id") for h in hyps
+              if h.get("supersession_status") in ("SUPPORTED_SUPERSESSION", "PARTIAL_SUPERSESSION")
+              and h.get("recording_process_support") == "UNKNOWN"
+              and h.get("coverage_status") != "PARTIAL_COVERAGE"
+          ]
+          summary["chronology_only_supersession_count"] = len(chronology_only)
+          summary["chronology_firewall_result"] = "HELD" if not chronology_only else "VIOLATED"
+
+          # --- P1 limitation independence (D-193/D-200.2/D-201's own known,
+          # honest gap -- P2 never requires either). ---
+          summary["same_editorial_beat_required"] = "NO"
+          summary["preassembled_final_required"] = "NO"
+          sequences = (p1_block or {}).get("sequences", []) if isinstance(p1_block, dict) else []
+          summary["preassembled_final_sequence_observed_in_this_run"] = any(
+              s.get("sequence_kind") == "PREASSEMBLED_FINAL_SEQUENCE" for s in sequences
+          )
+
+          # --- Global continuity. ---
+          summary["global_continuity_status"] = (p2_block or {}).get("global_continuity_status", "MISSING_FROM_SERIALIZATION")
+          summary["global_conflict_count"] = len((p2_block or {}).get("unresolved_conflicts", []))
+
+          # --- Usefulness classification (reporting-only, from the counts
+          # above -- never a QA reference label). ---
+          if summary["p2_capability_status"] == "AVAILABLE" and (summary["multi_realization_proposition_count"] > 0 or summary["supersession_hypothesis_count"] > 0):
+              usefulness = "USEFUL_AND_BOUNDED" if not unique_info_violations and not meaning_violations and not chronology_only else "MATERIALLY_WRONG"
+          elif summary["p2_capability_status"] in ("AVAILABLE", "PARTIAL"):
+              usefulness = "SAFE_BUT_NOT_YET_USEFUL"
+          else:
+              usefulness = "SAFE_BUT_NOT_YET_USEFUL"
+          summary["p2_usefulness_classification"] = usefulness
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/d204_whole_video_editorial_reasoning_real_media_qualification.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True, default=str)
+
+          size = os.path.getsize(out_path)
+          print("--- D-204 P2 Whole-Video Editorial Reasoning -> Real-Media Qualification (pure re-projection of already-computed diagnostics['whole_video_editorial_reasoning'] -- recomputes NO region, NO proposition map, NO supersession hypothesis, NO claim-signature comparison; multi-realization value/firewall classifications below are reporting-only, never fed back into cutsell_worker) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps({k: v for k, v in summary.items() if k not in ("regions", "multi_realization_propositions", "supported_or_partial_hypotheses")}, indent=2, sort_keys=True, default=str))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -4809,6 +5041,7 @@ jobs:
             artifact/d198_local_group_formation_qualification_summary.json
             artifact/d200_live_language_spine_p1_qualification_summary.json
             artifact/d200_4_dimension_aware_relation_real_media_requalification.json
+            artifact/d204_whole_video_editorial_reasoning_real_media_qualification.json
           retention-days: 14
           if-no-files-found: warn
 
