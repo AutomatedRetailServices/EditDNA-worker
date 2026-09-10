@@ -290,6 +290,14 @@ class EditorialMomentUnderstanding:
     conflict_flags: Tuple[str, ...]
     provenance: Tuple[str, ...]
     local_groups: Tuple["EditorialLocalGroup", ...] = ()
+    # D-198: the exact ALREADY-COMPUTED dominant D-157 relation used by
+    # D-197's own grouper for moments[i]'s predecessor edge (or ``None``
+    # for the source's first moment, or when no relation was resolved) --
+    # index-aligned with ``moments``. Diagnostic only: no downstream
+    # authority reads this; it is the SAME value (never re-derived, never
+    # re-ranked) build_editorial_local_groups already consumed to decide
+    # membership. See docs/CUTSELL_DECISIONS.md D-198.
+    moment_relation_to_predecessor: Tuple[str | None, ...] = ()
 
 
 def _understanding_span_for_take(
@@ -753,6 +761,15 @@ def build_editorial_moment_understanding_for_source(
         moments, relation_candidates_by_position=relation_by_position, local_groups=effective_local_groups,
     )
 
+    # D-198: index-aligned pass-through of the SAME relation_by_position map
+    # build_editorial_local_groups already consumed above -- no re-derivation,
+    # no re-ranking. ``None`` for the source's first moment or any position
+    # with no resolved dominant relation (the exact same semantics D-197's
+    # own grouper already treats as a boundary).
+    moment_relation_to_predecessor = tuple(
+        relation_by_position.get(i) for i in range(len(moments))
+    )
+
     if fallback_count and "LANGUAGE_ATTEMPT_NOT_SUPPLIED" not in missing_evidence:
         missing_evidence.append("LANGUAGE_ATTEMPT_NOT_SUPPLIED")
     if unresolved_count:
@@ -774,6 +791,7 @@ def build_editorial_moment_understanding_for_source(
         ))),
         provenance=("WATCH_LISTEN_UNDERSTANDING",) + (("RAW_UNDERSTANDING_MAP",) if raw_understanding_map is not None else ()),
         local_groups=computed_local_groups,
+        moment_relation_to_predecessor=moment_relation_to_predecessor,
     )
 
 
@@ -805,7 +823,25 @@ def build_editorial_moment_understanding_for_sources(
 # ---------------------------------------------------------------------------
 # Diagnostics / run summary.
 # ---------------------------------------------------------------------------
+def _moment_diagnostics_with_relation(
+    moment: EditorialMoment, relation_to_predecessor: str | None,
+) -> dict:
+    """D-198: `editorial_moment_diagnostics` (D-194, unchanged) plus ONE
+    diagnostic-only key, `relation_to_predecessor` -- the exact
+    already-computed value D-197's own grouper consumed for this moment's
+    predecessor edge, never re-derived here. See docs/CUTSELL_DECISIONS.md
+    D-198 ("SINGLE SOURCE OF TRUTH")."""
+    return {**editorial_moment_diagnostics(moment), "relation_to_predecessor": relation_to_predecessor}
+
+
 def editorial_moment_understanding_diagnostics(understanding: EditorialMomentUnderstanding) -> dict:
+    relations = understanding.moment_relation_to_predecessor
+    moment_rows = [
+        _moment_diagnostics_with_relation(
+            m, relations[i] if i < len(relations) else None,
+        )
+        for i, m in enumerate(understanding.moments)
+    ]
     return {
         "source_asset_id": understanding.source_asset_id,
         "moment_count": understanding.moment_count,
@@ -814,7 +850,7 @@ def editorial_moment_understanding_diagnostics(understanding: EditorialMomentUnd
         "missing_evidence": list(understanding.missing_evidence),
         "confidence": understanding.confidence,
         "conflict": list(understanding.conflict_flags),
-        "moments": [editorial_moment_diagnostics(m) for m in understanding.moments],
+        "moments": moment_rows,
         "sequences": [editorial_sequence_diagnostics(s) for s in understanding.sequence_hypotheses],
         # D-197: real structural local groups (empty when the caller
         # bypassed the auto-grouper with its own explicit local_groups).
