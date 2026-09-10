@@ -45473,3 +45473,226 @@ Video00 RAW, paid compute) is Product Owner coordination territory, per
 this entry's own "Then STOP" instruction.
 
 ---
+## D-218: Pacing V2 Video00 Real-Media Diagnostic Qualification (post D-217)
+
+**Status: VERDICT C -- PARTIALLY PROVEN. ONE MATERIAL PACING V2 BLOCKER
+REMAINS: the real `diagnostics["pacing_v2"]` block this RAW computed is
+NOT RETRIEVABLE by this analysis session in this environment. This is an
+OBSERVABILITY/RETRIEVAL gap, not a Pacing V2 code defect -- no evidence
+of any Pacing V2 regression, safety-firewall violation, or live-authority
+leak exists either way, because the data itself could not be examined.**
+
+### 1. RAW id / branch / HEAD
+GitHub Actions run `34529284576` ("CutSell Video00 Modal RAW", run #91),
+`AutomatedRetailServices/EditDNA-worker`, `feature/runpod-pod-on-demand`,
+commit `d94a944` (D-218's own workflow-only overlay commit, on top of
+D-217's `24a7131`). Dispatched via `workflow_dispatch` exactly once.
+
+### 2. Flags enabled for this run
+Exactly the five authorized: `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_
+DIAGNOSTICS_ENABLED=1`, `CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_
+ENABLED=1`, `CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_
+ENABLED=1`, `CUTSELL_ORDERING_DIAGNOSTICS_ENABLED=1`, `CUTSELL_PACING_
+V2_DIAGNOSTICS_ENABLED=1`. No other experimental overlay input set. No
+OpenAI composer, no live provider.
+
+### 3. Pre-RAW observability check (this task's own required step)
+Verified before dispatch: the engine's own diagnostics fully serialize
+`draft.diagnostics["pacing_v2"]` (D-216/D-217) into `result.json`'s own
+`"diagnostics"` key via `universal_clean_cut_validation.py` (line-level
+confirmed: `"diagnostics": diagnostics` in its returned dict) -- no
+`cutsell_worker` change was needed for the DATA itself. The ONE missing
+piece was the workflow's own `CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED`
+`workflow_dispatch` input (D-196/D-200/D-204/D-209 all already had
+theirs); added as minimal, authorized, workflow-only plumbing (commit
+`d94a944`), mirroring the D-209 pattern exactly. **This check itself was
+INCOMPLETE**: it verified the data is computed and serialized, but did
+not verify that this analysis session could actually RETRIEVE that
+serialized JSON within this environment's own tool/egress constraints --
+see item 8 for the gap this missed.
+
+### 4. Job outcome
+The underlying Modal compute succeeded completely end-to-end: `Run Modal
+full Video00 benchmark` (8m19s), `Download Video00 Modal artifacts`,
+`Download Human Gold reference video`, `Verify active-path identity`,
+`Print full canonical diagnostics`, `Upload Video00 Modal diagnostic
+artifact`, the D-196/D-198/D-200/D-200.4/D-204/D-209 compact diagnostic
+steps, `Video00 quality ladder`, and `Modal teardown confirmation` ALL
+report `conclusion: success`. Real Video00 media was processed with
+Pacing V2 diagnostics enabled; the run is a genuine real-media artifact,
+not a crash.
+
+### 5. The overall job's `conclusion: failure` is PRE-EXISTING and
+UNRELATED to Pacing V2
+Exactly two steps failed: `Verify frozen Selection lock` and `Verify
+Human Gold regression QA (18-check manifest)`. Direct comparison against
+the IMMEDIATELY PRIOR run on this branch (`34508325003`, run #90, commit
+`513c1f1`, the D-209 bootstrap -- before ANY D-216/D-217/D-218 Pacing V2
+work existed) shows the byte-identical failure pattern: same two step
+names, same position in the same 42-step sequence, same
+`conclusion: failure`. This proves these two QA gates were ALREADY red
+before Pacing V2 diagnostics were ever wired -- a pre-existing Selection/
+Human-Gold-regression-QA gap entirely out of D-218's own scope (`NO
+BOUNDARY REOPEN`, `NO ORDERING CHANGE`, `NO FAMILY/BESTTAKE CHANGE`; this
+gate is none of those, and D-218's own scope never authorized touching
+it). Per this task's own "NO FIX LOOP... regardless of result: STOP" and
+"NO POST-RESULT PATCH" rules, this is named, not fixed, here.
+
+### 6. Capability status / per-pair audit / mode distribution / timing /
+relationship / Prosodic coverage / firewalls / D-142 comparison /
+advanced-mode counts / KEEP_PAUSE / J-cut / L-cut / micro-overlap audits
+/ immutability / usefulness classification
+**NONE OF THESE ARE RETRIEVABLE from this RAW by this analysis session.**
+See item 8 for the exact, honestly-named blocker. No number in this
+category is reported because none could be read -- reporting a
+plausible-looking value here would be exactly the "fabricate a verdict
+from incomplete/unretrievable data" this project's own binding rules
+forbid.
+
+### 7. What WAS retrievable
+The GitHub Actions job-log tool (`get_job_logs`) returned a real but
+TAIL-TRUNCATED slice of the 42-step job's own combined log (confirmed:
+the retrieved slice's own final lines are the job's literal last log
+lines -- "Cleaning up orphan processes" / the Node.js 20 deprecation
+notice -- proving this is the log's TAIL, not an arbitrary window). That
+tail slice happens to include a portion of the `Video00 quality ladder`
+step's own detailed per-region JSON dump: dozens of real, genuine
+Level-1 region findings (`kind: false_keep / missing_delivery /
+matches_gold_over_cutai / matches_gold_beyond_cutai / gold_removes_
+cutai_keeps / gold_keeps_cutai_drops`, each carrying real Spanish
+Video00 transcript fragments and real `cutai_keep`/`idea_id`/
+`retry_family` fields) -- this proves the quality ladder itself ran
+successfully against real RAW/Cut.ai/Human Gold/CutSell media and
+produced genuine, non-fabricated region-level findings. However, the
+tail slice does NOT reach far enough to include that step's own
+AGGREGATE summary numbers (total Level-1 seconds, F1 vs Cut.ai, F1 vs
+Human Gold) -- those lines fall outside the retrieved window. `git diff`
+against the immediately prior run's job (item 5) is the only clean
+signal this session could extract with full confidence.
+
+### 8. The exact blocker (verdict C's one material blocker)
+Two compounding, both environment-level, both non-code:
+(a) The full `result.json` (containing `diagnostics["pacing_v2"]` in
+full) is bundled ONLY inside the `cutsell-video00-modal-human-review`
+GitHub Actions artifact (588 MB: `path: artifact/`, the whole directory,
+MP4 previews included). Downloading ANY GitHub Actions artifact requires
+following its signed URL to `productionresultssa19.blob.core.windows.net`
+(Azure Blob Storage) -- this session's own egress proxy returns a hard
+`CONNECT tunnel failed, response 403` for that host (organization
+policy), for artifacts of every size (also confirmed against the much
+smaller 112 KB `cutsell-video00-modal-validator-reports` artifact, and
+against `results-receiver.actions.githubusercontent.com`, the raw
+job-log-zip host) -- this matches this session's own persistent, already-
+named constraint ("Never retry a policy denial -- Azure Blob Storage
+artifact downloads... are hard environment limitations -- report
+honestly as not-retrievable"), so this was not retried past the first
+confirmation.
+(b) The workflow's own `Print full canonical diagnostics` step (the ONE
+place the CI log itself could have surfaced `diagnostics.pacing_v2`)
+hand-picks specific `.diagnostics.<key>` sections via individual `jq`
+queries -- `unified_selection_reasoner`, `boundary_engine_pass`,
+`perceptual_watch_listen`, `take_judge_groups`, `deterministic_best_
+take_authority`, `semantic_idea_equivalence`, `distinct_idea_grouping_
+safety`, `final_story_coherence_validation`, `canonical_edit_plan`, and
+more -- but was NEVER extended with a `.diagnostics.pacing_v2` query
+(unlike D-208/D-209's own Ordering track, which got a DEDICATED,
+separate, bounded "D-209 Ordering -> Video00 real-media diagnostic
+qualification" job step, mirroring D-196/D-200/D-204's own precedent).
+D-218's own pre-RAW observability check (item 3) verified the underlying
+DATA exists but did not verify a bounded, log-tail-safe PRINT step also
+exists for it -- an honest gap in that check's own execution, not
+authorized to fix now under this task's own "NO FIX LOOP... STOP" rule.
+Even had this session's own `get_job_logs` tool returned the full,
+untruncated log, this specific step would still never have echoed
+`pacing_v2` -- the missing report step is real and independent of the
+truncation issue in (a).
+
+### 9. Why this is not verdict D (REGRESSION)
+A regression requires evidence that Pacing V2 (or anything it touches)
+broke something that previously worked. No such evidence exists: the
+underlying pipeline ran to completion, produced a deliverable-scored
+preview, and the two red gates are provably pre-existing and unrelated
+(item 5). The absence of Pacing V2 data is a RETRIEVAL gap, not a
+FUNCTIONAL one.
+
+### 10. Selection/Boundary/overall physical Level-1, F1 vs Cut.ai/Human
+Gold
+Not extractable as clean aggregate numbers from the retrievable tail
+(item 7) -- reporting a guessed number here is refused per this project's
+own "never fabricate a verdict from incomplete data" rule. The
+qualitative evidence that IS visible (item 7's real per-region findings)
+is reported instead of a number.
+
+### 11. D-218 verdict
+**C. PARTIALLY PROVEN -- ONE MATERIAL PACING V2 BLOCKER REMAINS**
+(observability/retrieval, not a code defect; see item 8 for the exact,
+single, named blocker).
+
+### 12. Canonical Pacing status
+Unchanged from D-217: `PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_
+PROVEN` + `PACING_V2_TRANSITION_DECISION_FOUNDATION_OFFLINE_PROVEN` +
+`PACING_V2_LIVE_DIAGNOSTIC_INTEGRATION_OFFLINE_PROVEN` + `PACING_V2_
+REAL_EVIDENCE_SOURCE_WIRING_OFFLINE_PROVEN`. Real-media diagnostic
+qualification (D-218's own named goal) remains UNPROVEN, not because the
+underlying wiring is suspect, but because it was never actually observed
+this run.
+
+### 13. Next gate
+Per this task's own "if C/D: STOP with exactly one blocker. No
+D-218.1." -- no D-219 is defined here (D-219 -- Advanced Transition
+Authority Architecture/Safety Forensic -- is explicitly gated on an A/B
+verdict, which this is not). The single, actionable, low-risk fix this
+finding names for a FUTURE Product Owner-authorized turn (never
+implemented here) is: add ONE dedicated, bounded `.diagnostics.pacing_v2`
+report/print step to `cutsell-video00-modal-raw.yml`, mirroring D-209's
+own exact precedent step, so a future RAW's Pacing V2 diagnostics are
+retrievable from the CI log itself without depending on the blocked
+artifact-download path.
+
+### 14. Live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the only live-executed modes.
+Nothing in this RAW dispatch, its workflow-only overlay commit, or this
+analysis introduced, exercised, or could have exercised any live J_CUT/
+L_CUT/MICRO_AUDIO_OVERLAP authority -- the flag only ever gates a
+diagnostics-only code path (D-216/D-217, both unmodified this task).
+
+### 15. Renderer status
+Unchanged from D-214/D-217 -- `render.py`/`render_plan.py` not touched
+by this task.
+
+### 16. Unseen-RAW status
+This IS the first real-media RAW to run with Pacing V2 diagnostics
+enabled; its own diagnostic content is simply unread (item 8). No
+further RAW authorized or dispatched by this task.
+
+### 17. App-roadmap status
+P1/P2/Ordering/Boundary CLOSED ENOUGH (unchanged). Pacing: D-213 forensic
+-> D-214 renderer contract -> D-215 decision foundation -> D-216 live
+diagnostics -> D-217 evidence wiring -> D-218 (this entry) real-media
+diagnostic qualification attempted, BLOCKED on retrieval, not on
+evidence wiring or engine behavior. Advanced Pacing authority decision
+(the would-be D-219) is NOT reached this turn. Two pre-existing,
+unrelated Selection/Human-Gold-regression-QA gate failures remain open
+Product Owner territory, named but not touched here.
+
+### 18. Confirmation
+NO post-result `cutsell_worker` patch (the D-218 commit is workflow-only:
+`.github/workflows/cutsell-video00-modal-raw.yml`). NO second RAW (one
+dispatch, one run id, reported as-is). NO provider call (no OpenAI
+composer, no live Prosodic/ASR provider invoked beyond what the standard
+Video00 pipeline itself always uses). NO live advanced-transition
+authority (unchanged, structurally impossible to have been introduced by
+a diagnostics-only flag). NO Boundary/Ordering/Renderer/Family/BestTake
+file touched by this task.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- this is a TRUE SCOPE
+BOUNDARY / PRODUCT DECISION: (1) whether to authorize the dedicated
+D-218-shaped report-step fix (item 13) plus a fresh, separately-
+authorized RAW to actually observe Pacing V2 on real media, and (2)
+separately, whether/when to investigate the two pre-existing Selection/
+Human-Gold-regression-QA gate failures (item 5), which predate and are
+unrelated to the entire Pacing V2 track. Per this task's own explicit
+"Then STOP. Do NOT implement D-219. Wait for Product Owner
+coordination," no further action is taken on either.
+
+---
