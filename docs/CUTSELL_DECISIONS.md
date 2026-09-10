@@ -47552,3 +47552,272 @@ whether/when to authorize the future Audio Join Treatment Architecture/
 Forensic gate (item 24). No further action is taken.
 
 ---
+
+## D-221: Pacing V2 J/L Timing-Amount Real-Media Quality Tuning (post D-220C)
+
+**Status: VERDICT C -- INSUFFICIENT REAL J/L EXAMPLES TO JUDGE TIMING
+QUALITY. The confirmatory Video00 RAW reproduces D-218R's own real-media
+scarcity finding exactly: 26 real transitions evaluated, `real_jl_
+candidate_count: 0` (`j_candidate_count: 0`, `l_candidate_count: 0`) --
+every one of the 26 real adjacent pairs was decided `HARD_CUT`/`TIGHT_
+CUT` by D-215's own unmodified decision layer, never `J_CUT`/`L_CUT`.
+Per this task's own explicit "do not fabricate a quality conclusion"
+instruction, NO quality label (`NATURAL`/`TOO_SHORT`/`TOO_LONG`) is
+assigned to anything -- there is nothing real to label. No second RAW
+was requested or dispatched.**
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, commit `76d25e4` (this task's own
+workflow-only observability commit, on top of D-220C's `6890fa9`). No
+further commit changes HEAD before this decision entry.
+
+### 2. RAW id
+GitHub Actions run `34541696239` ("CutSell Video00 Modal RAW", run #93),
+`AutomatedRetailServices/EditDNA-worker`, `feature/runpod-pod-on-demand`,
+commit `76d25e4`. Dispatched via `workflow_dispatch` exactly once.
+
+### 3. Flags
+Exactly the five authorized (same as D-218/D-218R, no additional D-220
+diagnostic flag exists in the workflow -- confirmed by inspection before
+dispatch): `editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`, `whole_video_editorial_
+reasoning_diagnostics_enabled=1`, `ordering_diagnostics_enabled=1`,
+`pacing_v2_diagnostics_enabled=1`. No other experimental overlay input
+set. No OpenAI composer, no live provider.
+
+### 4. Real J/L candidate count
+**0.** (`real_jl_candidate_count: 0`, from `artifact/d221_pacing_v2_jl_
+timing_candidates.json`, retrieved via job log -- the small artifact
+itself is not downloadable in this environment, same established Azure
+Blob Storage egress block as D-218/D-218R; the step's own printed output
+was retrievable this run because of its late step position, 42 of 44).
+
+### 5. J candidate count
+0.
+
+### 6. L candidate count
+0.
+
+### 7. Per-candidate timing table
+Empty (`candidates: []`) -- there are no real J/L candidates on this
+run to tabulate. Reporting an empty table here is the honest result,
+not an omission.
+
+### 8. Max-safe windows
+Not applicable -- no candidate reached the point of having a reportable
+`max_safe_window` value in the filtered candidate set (all 26 real
+pairs were decided `HARD_CUT`/`TIGHT_CUT`, meaning either no positive
+candidate window existed or one existed but downstream firewalls did
+not select an advanced mode; distinguishing those two sub-cases would
+require the full un-filtered `transitions[]` array's own `candidate_
+audio_lead`/`candidate_audio_tail` values, which D-218R's own prior
+retrieval already established are uniformly at or near zero for this
+exact video, per D-218R's own `candidate_j_lead_available_count: 0`/
+`candidate_l_tail_available_count: 0` finding, unchanged and reconfirmed
+by this run's own byte-identical `transition_count: 26`).
+
+### 9. Anchor durations
+Not computable this run in any case -- confirmed as a genuine, honest,
+pre-existing observability gap (item 2's own workflow addition
+explicitly marks every candidate row, were any to exist, `anchor_word_
+duration_status: NOT_RETRIEVABLE_WORD_TIMESTAMPS_NOT_SERIALIZED`,
+because no existing serialization anywhere in this codebase carries
+per-word timestamps for selected clips). Moot this run since `real_jl_
+candidate_count == 0`.
+
+### 10. Chosen durations
+Not computable (item 9). Moot this run.
+
+### 11. Chosen/max ratios
+Not computable (items 8-10). Moot this run.
+
+### 12. J anchor assessment
+**NOT EVALUABLE THIS RUN.** Zero real J-cut candidates exist to assess
+the "left's final word duration" anchor choice against. D-220's own
+anchor-word heuristic is neither confirmed nor contradicted by this
+run -- it remains exactly `QUALITY_HEURISTIC_NOT_YET_REAL_MEDIA_TUNED`,
+unchanged, per this task's own explicit "do not change it during the
+run" instruction (which was never at risk of being violated, since no
+code was touched).
+
+### 13. L anchor assessment
+**NOT EVALUABLE THIS RUN.** Symmetric to item 12 -- zero real L-cut
+candidates exist.
+
+### 14. Prosodic effect
+**NOT EVALUABLE THIS RUN.** No candidate exists on which Prosodic
+refinement could have acted, so no directional assessment (shorter/
+unchanged/other) is possible. Per this task's own "where absent: do not
+penalize" instruction, this absence of evaluable evidence is reported
+neutrally, not as a finding against Prosodic's own design.
+
+### 15. NATURAL count
+0 (of 0 candidates).
+
+### 16. TOO_SHORT count
+0 (of 0 candidates).
+
+### 17. TOO_LONG count
+0 (of 0 candidates).
+
+### 18. NO_MEANINGFUL_DIFFERENCE count
+0 (of 0 candidates).
+
+### 19. NOT_EVALUABLE count
+0 -- there were no candidates to even mark `NOT_EVALUABLE`; the entire
+candidate set is empty, which is itself the finding (item 4), not an
+aggregate of per-candidate `NOT_EVALUABLE` labels.
+
+### 20. Baseline-vs-candidate judgment
+**Not performed.** With zero real J/L candidates, there is no join to
+build a pair-local A/B (baseline `HARD_CUT`/`TIGHT_CUT` vs. D-220's own
+chosen J/L timing) around. No comparison clip of any kind was rendered
+-- doing so would have required either fabricating a synthetic join not
+actually present in this real media (out of this task's own "real-media
+diagnostic" scope) or waiting on real evidence that this run confirms
+does not exist.
+
+### 21. Full-max comparison if available
+Not available -- same reason as item 20.
+
+### 22. Safety status
+**Unchanged, not reopened, per this task's own explicit "do not reopen
+unless real evidence contradicts them" instruction.** Word safety,
+meaning safety, double-speech safety, and renderer mechanical capability
+all remain exactly as D-215/D-214 already offline-proved them (D-215's
+46 tests, D-214's 44 tests, unchanged since D-218F). This run's own
+`firewall_violation_count` (visible in the D-218R artifact this step
+reads from) was 0, consistent with every prior real-media run in this
+track -- no contradicting evidence was found, so nothing is reopened.
+
+### 23. Future Audio Join Treatment candidate count
+**`NOT_DETERMINABLE_FROM_RETRIEVABLE_DATA`.** Per D-220C's own Section
+16.3 finding (restated, not reopened, here): no existing diagnostic
+field anywhere in this codebase's serialized output carries room-tone/
+ambience-continuity evidence at all -- the per-pair `transitions[]` row
+schema (D-216/D-217, unmodified) has no such field to inspect. This is
+not a "zero candidates found" result; it is an honest "the evidence
+needed to even look for such candidates does not exist yet" result,
+consistent with D-220C's own Section 16.13 naming this exact gap for
+the future Audio Join Treatment Architecture/Forensic gate.
+
+### 24. Room-tone/ambience observations
+None retrievable -- same reason as item 23. No fabricated observation is
+offered in its place.
+
+### 25. Micro status
+Unchanged: `MICRO_AUDIO_OVERLAP` remains `DEFERRED`/`DIAGNOSTIC_ONLY`.
+Not tuned, not evaluated, not touched by this task, per its own explicit
+"Do not tune MICRO_AUDIO_OVERLAP" instruction.
+
+### 26. D-220 heuristic verdict
+**C. INSUFFICIENT REAL J/L EXAMPLES TO JUDGE TIMING QUALITY.**
+
+### 27. Additional Video00 RAW required: NO
+Per this task's own explicit "IMPORTANT IF C ... do not create repeated
+RAW gates around Video00" instruction. This finding (zero real J/L
+candidates on this exact Video00 media, at this exact commit) is now
+confirmed TWICE independently (D-218R's own prior run, and this run) --
+a third attempt on the same source video would not be expected to
+produce different real-media evidence, since the candidate-derivation
+logic (`pacing_v2_evidence_adapter.candidate_timing_for_pair`) and the
+Boundary tightening it measures against are both unchanged and CLOSED
+across this entire span (D-213 through D-220C).
+
+### 28. Exact next gate
+Per this task's own explicit "Choose one: CONTROLLED J/L PERCEPTUAL
+FIXTURE QUALIFICATION or DEFER NATURAL QUALITY VALIDATION TO UNSEEN
+RAW. Do not request repeated Video00 runs" -- this entry recommends and
+names:
+
+**D-222 -- Pacing V2 J/L Timing Controlled Perceptual Fixture
+Qualification (offline, synthetic fixtures, human Watch+Listen
+judgment, NO RAW).**
+
+Rationale for choosing the controlled-fixture path over deferring to
+unseen-RAW generalization: (a) it is actionable immediately, with zero
+further paid compute, unlike waiting on an unseen RAW that may not
+exist yet or may not be scheduled for this purpose; (b) the scarcity
+observed here is plausibly STRUCTURAL, not incidental -- D-218R's own
+item 5 finding (restated, not re-derived, here) is that Boundary's own
+existing word-tight trimming (D-097.C/D-116/D-177) may leave little or
+no measurable silent margin at any real join, meaning an unseen RAW
+shot and boundary-processed similarly could just as easily reproduce
+`real_jl_candidate_count: 0` again, at the cost of a real, separately-
+authorized RAW spent for a coin-flip outcome; (c) a controlled
+perceptual fixture set can DIRECTLY exercise the exact question D-221
+was created to answer (does D-220's own anchor-word-duration heuristic
+produce a `NATURAL`/`TOO_SHORT`/`TOO_LONG` result) across a deliberately
+varied matrix of available-window sizes and anchor-word durations,
+something real media cannot currently be relied upon to provide.
+Deferring to unseen-RAW generalization remains available as a SEPARATE,
+later confirmatory step (once Milestone-1's own Generalization Gate,
+D-098 Section 15.16, is reached for unrelated reasons) but is not
+recommended as the PRIMARY path to closing this specific quality
+question. **Not implemented, not designed in executable detail, not
+begun by this entry.**
+
+### 29. J/L live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed modes.
+This task granted NO authority (per its own explicit "D-221 itself
+grants: NO AUTHORITY" instruction) -- moot to restate further given
+zero candidates existed to exercise any authority over regardless.
+
+### 30. Audio Join Treatment status
+Unchanged from D-220C: `SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/
+`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE` remain `ARCHITECTURALLY_
+DEFINED`/`NOT_IMPLEMENTED`/`NO_AUTHORITY`. `CLICK_FADE` remains
+existing/live/unchanged. Not started inside this task (item 23's own
+finding reinforces, rather than begins, the future Audio Join Treatment
+Architecture/Forensic gate D-220C already named).
+
+### 31. Renderer status
+Unchanged. `render.py`/`render_plan.py` not touched by this task. No
+comparison clip was rendered (item 20) -- the renderer's own D-214
+mechanical proof is neither exercised nor extended by this task.
+
+### 32. Unseen-RAW status
+D-218R's and this task's own RAW remain the only two real-media Pacing
+V2 evidence points to date, both on the same Video00 source video, both
+showing `real_jl_candidate_count`/equivalent `= 0`. No unseen RAW was
+dispatched or is recommended as the primary next step (item 28).
+
+### 33. App-roadmap status
+P1/P2/Ordering/Boundary CLOSED ENOUGH (unchanged). Pacing V2: renderer
+execution proven (D-214) -> decision foundation proven (D-215) -> live
+diagnostics/evidence proven (D-216/D-217) -> real-media safety/
+usefulness proven (D-218R) -> fallback identity fixed (D-218F) ->
+advanced-authority architecture forensic (D-219) -> J/L timing policy
+mechanism offline-proven (D-220) -> canonical join/audio-treatment model
+(D-220C) -> **J/L timing-amount real-media quality tuning: INSUFFICIENT
+REAL EXAMPLES on Video00, twice-confirmed (D-221, this entry)** -> next:
+D-222 controlled perceptual fixture qualification (offline, NOT
+implemented here) -> bounded J/L authority (future, separately named,
+still gated on D-222's own outcome) -> Audio Join Treatment architecture/
+forensic -> `SHORT_CROSSFADE`/`AMBIENCE_*` execution + decision-layer
+implementation -> micro-overlap final authority -> Renderer/export
+qualification -> unseen-RAW generalization/Human Gold parity -> product
+hardening -> TestFlight -> App Store.
+
+### 34. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`.
+
+### 35. Confirmation
+NO live authority granted or implemented. NO provider/network call. NO
+second RAW (one dispatch, one run id, `34541696239`, reported as-is; the
+prior D-218R run, `34532737477`, is cited as corroborating evidence,
+never re-run). NO `cutsell_worker/*.py` file touched (workflow-only
+change, `76d25e4`, validated locally against three synthetic fixtures
+before dispatch). NO timing-policy modification (`pacing_v2_timing_
+policy.py` untouched, unreopened). NO micro-overlap authority or tuning.
+NO `SHORT_CROSSFADE`/`AMBIENCE_*` implementation. NO Boundary/Ordering/
+Family/BestTake change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+explicit "Then STOP. Do NOT implement next gate. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-222
+(Pacing V2 J/L Timing Controlled Perceptual Fixture Qualification,
+offline, no RAW) as the next, separately-scoped engineering turn. No
+further action is taken.
+
+---
