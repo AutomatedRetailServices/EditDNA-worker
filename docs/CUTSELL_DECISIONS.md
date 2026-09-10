@@ -43829,3 +43829,406 @@ V2 Architecture/Forensic) itself is Product Owner coordination territory,
 per this entry's own "Then STOP" instruction.
 
 ---
+
+## D-213: Pacing V2 -- Architecture / Forensic (post D-212, docs only, no implementation)
+
+**Status: FORENSIC COMPLETE. VERDICT B -- PACING V2 PARTIALLY READY: ONE
+RENDERER/TIMELINE CONTRACT GAP MUST BE CLOSED FIRST. No `cutsell_worker/*.py`,
+`tests/`, or workflow file touched. No RAW, no provider, no Pacing/
+Renderer/Boundary/Ordering/Family/BestTake change.**
+
+### 1. Scope discipline
+DOCS/FORENSIC ONLY per directive. Verified at start: branch
+`feature/runpod-pod-on-demand`, HEAD `afd4028`, clean tree. This entry is
+the only change.
+
+### 2. Current Pacing entry point and mechanical position
+There is no `pacing.py` -- the entire live Pacing authority is
+`cutsell_worker/dialogue_pacing_transition.py` (D-142, 401 lines, read in
+full). Live call site: `universal_clean_cut.py:751`,
+`apply_dialogue_pacing_transition_pass(result, dialogue_overlap_enabled=
+getattr(request, "dialogue_overlap_enabled", False))`, in the exact chain
+`enforce_complete_idea_boundaries -> freeze_selection_contract ->
+apply_post_freeze_boundary_pass -> polish_human_boundaries_v5 ->
+enforce_selection_contract -> apply_dialogue_pacing_transition_pass`
+(confirmed unchanged from D-210's own trace). Pacing therefore sees
+`draft.selected` AFTER every Boundary authority, including
+`polish_human_boundaries_v5`'s own possible interior splits -- the fully
+final, Boundary-approved clip sequence.
+
+### 3. Current atomic pacing unit
+**Answer: the `DraftClip`, exactly as it exists in `draft.selected` at the
+moment Pacing runs** -- neither a coarser "ordered realization component"
+(pre-Boundary) nor the renderer's own final `RenderSegment` (built later,
+and possibly coalesced -- see Section 18). `plan_dialogue_pacing_
+transitions(selected: Sequence[DraftClip], ...)` iterates this sequence
+pairwise by index, in the SAME order `render_plan.build_render_plan` later
+iterates -- no re-ordering, no re-grouping, confirmed by direct read.
+
+### 4. Phase-1 supported modes (D-142, confirmed live)
+Vocabulary: `HARD_CUT`, `TIGHT_CUT`, `J_CUT`, `L_CUT`, `MICRO_AUDIO_OVERLAP`
+(`TRANSITION_MODES`). `PHASE_1_EXECUTABLE_MODES = (HARD_CUT, TIGHT_CUT)` --
+the only two modes ever actually assigned as `mode` today.
+`RENDERER_SUPPORT_MATRIX`: `HARD_CUT`/`TIGHT_CUT` = `SUPPORTED_NOW`;
+`J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP` = `REQUIRES_RENDERER_EXTENSION`.
+D-211's summary of this status is confirmed exact, unchanged.
+
+### 5. HARD_CUT contract (derived from `render.py::_concat_render_command`,
+read in full)
+Every segment's video is `trim=duration=exact` and audio is
+`apad=whole_dur=exact` + `atrim=duration=exact` to the SAME `exact`
+duration (`rendered_segment_duration_sec`, frame-rounded), then fed as
+`[v_i][a_i]` pairs into ONE `concat=n=...:v=1:a=1[vout][aout]` filter.
+**Audio and video switch at the exact same instant, always, today** -- no
+per-segment audio/video divergence exists. A 12 ms `afade` in/out is
+applied to each segment's OWN audio edges before padding (click-avoidance
+only -- see Section 17). Source-level silence is preserved only where
+Boundary/`tighten_trailing_silence` did not already remove it; the join
+itself inserts zero silence (`concat` abuts `[v_i][a_i]` directly to
+`[v_{i+1}][a_{i+1}]`). Selected whenever `gap_removed = 0.0` (no Boundary
+trim recorded at either edge of the pair).
+
+### 6. TIGHT_CUT contract (confirmed, precise difference from HARD_CUT)
+**TIGHT_CUT is a LABEL, never a second physical operation.**
+`_applied_edge_trim` reads `boundary_engine_pass`'s OWN already-applied
+`audio_edge_rows`/`visual_edge_rows` (D-097/D-116) for the left clip's EXIT
+edge and the right clip's ENTRY edge; if their summed trim > 0, the join is
+labelled TIGHT_CUT with `gap_removed_duration` equal to that sum. This
+module never re-measures silence, never invents a threshold, and can never
+disagree with Boundary. **This is source trimming Pacing merely
+attributes, never a timeline-placement decision of its own** -- the
+directive's own "do not conflate source trim with pacing gap" instruction
+is already satisfied by construction, not by convention.
+
+### 7. Current gap model
+There is no literal `gap_before`/`gap_after`/`transition_gap` field or any
+inserted-silence representation anywhere in the render path (confirmed:
+`concat` abuts segments directly). The only "gap" concept that exists is
+`DialogueTransitionPlan.gap_removed_duration` -- a retrospective SUM of
+Boundary's own two edge trims, attributive only. **No forward-looking,
+Pacing-owned intentional-pause representation exists today** (see Section
+33, `KEEP_PAUSE`/`TIGHTEN`/`OVERLAP`/`UNKNOWN` vocabulary, not yet built).
+
+### 8. Current word-timing input
+`DraftClip.words` (the exact same D-115/D-116/D-177-canonical, already-
+aligned ASR word list) is directly available to Pacing via the `selected`
+sequence it already receives -- `left.words[-1].end` / `right.words[0].
+start` give speech end/start at each side of a pair with zero new
+plumbing and zero ASR rerun. Pacing does not currently read `.words` at
+all (only `.clip_id`/`.start`/`.end`), but the source is already in hand.
+
+### 9. Current Prosodic input
+**ZERO.** `prosodic_audio_v2.py` (D-187, read in full) is an explicitly
+freestanding EVIDENCE library -- "NOT wired into `pipeline.py`'s live
+per-family loop, NOT wired into `watch_listen_understanding.py`, and NOT
+consumed by `bounded_finalist_arbiter.py`" at Phase A; D-188 later wired it
+ONLY into `bounded_finalist_arbiter.py` for BestTake-adjacent diagnostic
+fusion (still no winner authority) -- a completely different consumer,
+never Pacing. `dialogue_pacing_transition.py` imports nothing from either
+module. The evidence PRIMITIVE (`ProsodicDeliveryEvidence`, built over an
+arbitrary `source_start`/`source_end` span -- `vocal_continuity_state`,
+`hesitation_state`, `restart_or_interruption_state`, `pause_structure_
+state`) is general enough to be invoked over a NARROW transition-local
+window (e.g. the last/first ~0.5-1.0 s of a clip near its edge) without
+any change to the module itself -- this is a wiring gap (a new call site),
+not a primitive gap.
+
+### 10. Current Boundary handoff (re-confirmed, unchanged from D-098
+13.11-13.12 / D-211)
+Pacing receives ordered, Boundary-finalized, source-mapped `DraftClip`s and
+never reopens `.start`/`.end` semantics (confirmed: `plan_dialogue_pacing_
+transitions` never calls `replace()` on a clip, never returns a mutated
+`selected` -- `apply_dialogue_pacing_transition_pass`'s own docstring:
+"`draft.selected` is NEVER reassigned here"). It may only describe the
+TEMPORAL RELATIONSHIP between two already-fixed clips.
+
+### 11. J-cut / L-cut / micro-overlap support status
+**All three: `REQUIRES_RENDERER_EXTENSION`, confirmed by direct code
+read, not merely asserted.** `_concat_render_command` gives every
+segment's audio and video the identical trimmed duration with no
+`adelay`/`amix`/`acrossfade` anywhere in that filter graph. A repo-wide
+search confirms `amix`/`adelay` exist ONLY in `media_overlay_render.py`
+(background-music/photo-overlay audio layering, a structurally different,
+later filter-graph stage -- never applicable to the per-segment concat
+join without a genuine restructuring). No partial or hidden support
+exists anywhere else in the codebase.
+
+### 12. Dialogue-overlap taxonomy (as requested, mapped to current code)
+1. no overlap = `HARD_CUT`/`TIGHT_CUT` (today's only two executable modes).
+2. non-speech ambience overlap = not modeled at all today (would live in
+   `media_overlay_render.py`'s domain, not dialogue Pacing).
+3. J-cut = `J_CUT`, vocabulary-only, `REQUIRES_RENDERER_EXTENSION`.
+4. L-cut = `L_CUT`, vocabulary-only, `REQUIRES_RENDERER_EXTENSION`.
+5. micro dialogue overlap = `MICRO_AUDIO_OVERLAP`, vocabulary-only,
+   `REQUIRES_RENDERER_EXTENSION`.
+6. unsafe double-speech overlap = has NO vocabulary entry yet -- this is a
+   real, named gap for V2 (a `mode` must never resolve to this; it is a
+   safety OUTCOME classification, not a `mode`).
+
+### 13. 12 ms join-fade classification (directive's own A/B/C)
+**Neither A ("true overlap") nor cleanly B ("crossfade only") -- most
+accurately C, "unrelated to dialogue overlap," with the precise mechanism
+named honestly rather than force-fit:** `_audio_join_fade_filters` applies
+an `afade=t=in`/`afade=t=out` to EACH segment's OWN audio stream
+independently, before that segment's own `apad`/`atrim`, entirely inside
+that segment's own filter chain -- it never touches a neighboring
+segment's samples, never mixes two streams (`acrossfade` requires two
+input streams; none is used here). It is pure click-avoidance at a fixed,
+non-editorial 12 ms duration (D-094.3 F14) and changes no spoken timing
+(confirmed: `duration_sec` passed to the fade helper is the segment's own
+pre-existing tightened duration, unchanged by the fade itself). It must
+never be classified or reused as dialogue overlap.
+
+### 14. Contiguous-coalesce classification
+`render_plan.py::_coalesce_contiguous_segments`/`_can_coalesce` (re-
+confirmed from D-210): merges two ALREADY-SELECTED, ALREADY-ADJACENT
+(<=0.05 s gap) `RenderSegment`s from the SAME source/asset with identical
+playback settings into one, purely to avoid a redundant re-encode boundary
+at a frame the creator never stopped at. **Renderer optimization only** --
+it never touches semantic segment identity (operates on `RenderSegment`,
+built downstream of `DraftClip`, after Pacing has already run) and never
+influences transition eligibility upstream. **One honest cross-cutting
+finding:** because this coalesce runs AFTER Pacing already planned a
+transition for that same same-source-touching pair, a pair Pacing labelled
+`HARD_CUT`/`TIGHT_CUT` can be silently merged away by the renderer into one
+continuous segment with no cut at all. This is never physically wrong (a
+merge is strictly safer/more continuous than any cut mode), but it makes
+that specific `DialogueTransitionPlan` diagnostic row describe a join that
+never actually renders as a cut -- a diagnostic-accuracy nuance, not a
+correctness defect, worth closing during V2's own diagnostic-integration
+gate (read `render_plan`'s own coalesce decision when annotating Pacing
+diagnostics), never a reason to delay V2's typed foundation.
+
+### 15. Current renderer timeline model / independent audio-video timeline
+support
+**Does not exist.** `RenderSegment` (`render_plan.py`) carries exactly one
+`start`/`end` pair per segment, consumed identically for both the video
+and audio filter chains in `_concat_render_command`. There is no
+`video_start`/`video_end` vs `audio_start`/`audio_end` distinction
+anywhere in the schema or the filter graph. **This is the exact
+renderer-extension seam** the directive asked to identify.
+
+### 16. Exact renderer-extension gap (the ONE gap this forensic identifies)
+To realize `J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP`, `RenderSegment` (or a new
+sibling type built from it) needs an audio window independent of its video
+window, and `_concat_render_command`'s filter graph needs a join-local
+mechanism (per-pair, not per-segment) to let one segment's audio extend
+into or precede its neighbor's video window -- most naturally an
+`adelay`/`amix`-based join treatment SCOPED TO ADJACENT PAIRS ONLY (never a
+global mix), reusing ffmpeg techniques already present in this codebase
+for a different purpose (`media_overlay_render.py`'s overlay mixing) but
+requiring a genuinely new join-stage filter-graph construction, not a
+copy-paste. This is a bounded, well-understood, OFFLINE-provable extension
+-- not an open-ended renderer rewrite.
+
+### 17. Renderer ownership (confirmed, restated per directive)
+Pacing chooses transition semantics (`mode`, timing offsets); the renderer
+executes them. Today's renderer invents nothing (it has no J/L/overlap
+logic of its own -- it simply cannot execute those modes yet, which is why
+Phase 1 never selects them). The correct V2 contract, once the renderer
+extension lands: Pacing emits a `DialogueTransitionPlan`; the renderer
+consumes it as data, never re-deriving `mode` itself.
+
+### 18. Meaning / word-cut / double-speech firewalls (design position, not
+implemented)
+**Meaning firewall:** any candidate overlap that would make a negation,
+number, correction, or other critical factual clause inaudible or
+ambiguous must fall back to `HARD_CUT`/`TIGHT_CUT` -- reusing D-038/D-040's
+existing `semantic_claims.py`/`claim_coverage_best_take.py` criticality
+classification as the evidence source (no new critical-claim detector).
+**Word-cut firewall:** identical invariant to Boundary's own (D-115/D-116/
+D-177): an overlap's boundary may never fall inside a word -- `DraftClip.
+words` is the same hard floor Pacing would test against, exactly as
+Boundary already does. **Double-speech firewall:** proposed categorical
+vocabulary (no numeric score, per directive): `SAFE_OVERLAP`,
+`SAFE_J_CUT`, `SAFE_L_CUT`, `NO_OVERLAP_REQUIRED`, `CONFLICTED`,
+`UNKNOWN` -- mirrors the existing `SAFETY_SAFE`/`SAFETY_FALLBACK`
+two-state vocabulary in `dialogue_pacing_transition.py` today, expanded
+only as far as the new modes require, never inventing a numeric
+confidence threshold (matches this module's own existing "reuse, don't
+invent" discipline, e.g. `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC` reuse in
+D-177).
+
+### 19. Pause ownership (audited, four-way split confirmed clean)
+- source-internal pause -> Boundary's `split_selected_interior_
+  performance_gaps` (interior dead air, `boundary_engine_pass.py`) --
+  never Pacing's, confirmed unchanged.
+- Boundary-trimmed dead air -> already removed before Pacing ever sees the
+  clip; Pacing only ATTRIBUTES it (`gap_removed_duration`), never decides
+  it.
+- inter-segment timeline gap -> does not exist today (Section 7) --
+  Pacing's to own once/if introduced.
+- intentional pacing pause -> does not exist today -- Pacing's to own in
+  V2 (`KEEP_PAUSE` below).
+
+### 20. Silence/gap model -- exact missing representation for V2
+Confirmed: the engine currently simply concatenates clips
+(`concat=n=...:v=1:a=1`) with no timeline gap primitive at all. V2 needs,
+at minimum, a `KEEP_PAUSE`/`TIGHTEN`/`OVERLAP`/`UNKNOWN` classification per
+transition (directive's own "no make-it-fast heuristic" requirement) --
+this is a NEW field on `DialogueTransitionPlan`, not a renderer change by
+itself (a kept pause is already representable: simply do not trim it,
+which is already what happens when Boundary declines a trim).
+
+### 21. Composite relationship
+`boundary_engine_pass.py` has no composite-specific logic (D-210, Section
+7, reconfirmed unchanged): a composite is fully resolved into concrete,
+individually-addressed `DraftClip`s before Freeze. Pacing, running after
+Boundary, therefore already treats a composite's internal joins and any
+between-realization join through the exact SAME mechanism -- one pairwise
+loop over `draft.selected`, no separate code path. **No composite-specific
+Pacing logic is needed**; this mirrors D-210's own composite-independence
+finding for Boundary.
+
+### 22. Pairwise vs. global pacing
+**Recommendation: pairwise adjacent transitions, exactly as D-142 already
+implements, plus bounded sequence-level consistency ONLY where evidence
+requires it** (e.g. not oscillating rapidly between `TIGHTEN` and
+`KEEP_PAUSE` on back-to-back joins for no evidentiary reason) -- never a
+global pacing optimizer. Nothing in this forensic found evidence that a
+full-sequence rhythm optimizer is needed; the directive's own stated
+"strong preference" is confirmed correct and unchallenged by anything
+found here.
+
+### 23. Proposed V2 transition type (adjusted from directive's draft to
+match repo convention)
+Extend `DialogueTransitionPlan` (already 90% of the way there) rather than
+inventing a parallel type:
+
+```
+left_clip_id, right_clip_id, transition_index          # existing
+mode: HARD_CUT | TIGHT_CUT | J_CUT | L_CUT | MICRO_AUDIO_OVERLAP  # existing vocabulary
+video_switch_time                                       # existing (visual_cut_time)
+audio_left_end_offset, audio_right_start_offset         # NEW -- only meaningful once J/L/overlap execute
+gap_duration                                             # existing concept, needs a forward (not just attributive) reading
+pacing_gap_decision: KEEP_PAUSE | TIGHTEN | OVERLAP | UNKNOWN   # NEW
+speech_overlap_status: SAFE_OVERLAP | SAFE_J_CUT | SAFE_L_CUT | NO_OVERLAP_REQUIRED | CONFLICTED | UNKNOWN  # NEW
+meaning_safety_status                                    # NEW -- reuses D-038/D-040 criticality, no new detector
+dialogue_overlap_enabled, safety_status, fallback_reason, provenance  # existing
+```
+
+### 24/25/26. J-cut / L-cut / micro-overlap eligibility (design position,
+no thresholds invented)
+**J-cut eligible** only when: the renderer can represent independent
+audio/video timing (Section 16's gap, once closed); the right clip's own
+audio is available before its own visual in-point without crossing a word
+in either clip; no meaning-firewall conflict; no double-speech conflict.
+**L-cut eligible** only when: the left clip's audio tail remains a
+complete, meaningful unit (word-floor respected); the right clip's visual
+can appear early with no speech conflict. **Micro-overlap eligible** only
+when: both adjacent deliveries are individually complete (D-115 delivery
+span fully intact on both sides); the overlap window sits only on a safe
+phonetic/ambience edge (never mid-word, never crossing a meaning-firewall
+span); no double-speech intelligibility loss. All three explicitly defer
+their exact numeric window to future, separately-authorized evidence --
+none invented here, per directive.
+
+### 27. Abstention / fallback contract
+Already exists and is directly reusable: `SAFETY_FALLBACK` +
+`fallback_reason` (`overlap_disabled` / `renderer_extension_required`).
+V2 adds exactly one more fallback reason once the renderer extension
+lands but the SAFETY evidence itself is `CONFLICTED`/`UNKNOWN` --
+falling back to `HARD_CUT`/`TIGHT_CUT` exactly as today, never inventing a
+new terminal state.
+
+### 28. Generic fixture plan (24-30, from directive's 1-30 list, condensed
+to the ones needing new coverage; 1/2/13/14/15/17-30's discipline items
+are largely already covered by D-142's own tests plus D-212's own
+precedent)
+Not implemented here (forensic only). The 30-item list in the directive
+maps cleanly onto: (a) executable-today fixtures (hard cut / tight cut /
+pause retained / silence tightened) -- ALREADY covered by D-142's own
+existing test suite, to be located and cited (not re-verified line-by-line
+in this docs-only task) rather than re-authored; (b) not-yet-executable
+fixtures (J-cut/L-cut/micro-overlap eligibility, unsafe variants,
+negation/number/correction protection, distant/same-source, composite,
+multi-source, no-renderer-support fallback) -- these become D-214's own
+targeted test matrix once the renderer/timeline contract is designed, not
+before (building them now would test against a type shape not yet fixed).
+
+### 29. Video00 relevance (existing evidence only, no RAW)
+D-209's own real-media qualification already recorded, for the same live
+`selected` sequence Pacing consumes, that 25 realizations survived to
+Freeze with zero Ordering relations needed -- an "already clean" selection.
+D-142's own docstring and D-178B's real Boundary run both confirm
+`gap_removed_duration > 0` (TIGHT_CUT) DOES occur on real Video00 dispatch
+data whenever Boundary records a real edge trim; `HARD_CUT` is the
+observed default otherwise. No existing evidence in this codebase's
+records shows a captured, transition-local prosodic read or a J/L-cut
+eligibility evaluation on real Video00 data, because neither mechanism is
+wired yet -- consistent with Section 9's "zero current input" finding.
+No new RAW is authorized or needed to reach this conclusion.
+
+### 30. Cut.ai-style parity value (explained, not overclaimed)
+Correct clip selection and order with awkward dead gaps between joins
+still reads as an amateur edit; natural tight cuts, a safely-led audio
+handle, a safely-trailed audio tail, or a safe micro-overlap read as a
+professionally paced edit. This forensic does not claim Cut.ai's own
+internal implementation uses these exact techniques -- only that the
+PERCEIVED-professionalism gap Pacing V2 targets is a real, named,
+distinct axis from semantic correctness, independent of Selection/
+Boundary quality.
+
+### 31. Smallest phased implementation (adjusted from the directive's
+draft numbering; directive explicitly permits this)
+The directive's own proposed D-214 ("typed transition foundation, offline
+only") is effectively ALREADY DONE -- `DialogueTransitionPlan` (D-142)
+already carries nearly the exact shape requested (Section 23), so a
+separate "typed foundation" gate would be redundant bureaucracy the
+directive itself asks to avoid. The one real, structural, still-missing
+piece is the renderer/timeline contract (Section 16). Recommended
+sequence, mirroring the Ordering track's own successful precedent
+(D-206->D-209):
+
+- **D-214** -- Pacing V2 renderer/timeline contract extension, OFFLINE
+  ONLY: extend `RenderSegment` (or a new sibling) with an independent
+  audio window and extend `_concat_render_command`'s filter graph to
+  realize `J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP` for an adjacent pair, plus
+  the new `DialogueTransitionPlan` fields (Section 23) and the
+  eligibility/safety vocabulary (Sections 12/18/24-27), proven entirely
+  with synthetic fixtures (matching D-212's own precedent) -- no live
+  wiring yet.
+- **D-215** -- live diagnostic integration: wire the extended planner into
+  `apply_dialogue_pacing_transition_pass` as a diagnostics-only pass
+  (mirrors D-208's exact precedent) -- still never selects an overlap mode
+  live by default, exactly as Phase 1 does today, until explicitly
+  authorized.
+- **D-216** -- one Video00 real-media qualification RAW (mirrors D-209's
+  exact precedent).
+
+### 32. Renderer sequencing recommendation
+The renderer/timeline contract extension (D-214 above) must land BEFORE
+any live Pacing V2 mode selection, because Phase 1's own honest fallback
+discipline (never execute an unsupported mode) would otherwise force every
+V2-typed decision straight back to `HARD_CUT`/`TIGHT_CUT` anyway --
+building the typed decision layer first, without the renderer able to act
+on it, would produce diagnostics-only value with no path to an actual
+rendered improvement, the same trap the directive's own "goal: minimum
+gates, not bureaucracy" warns against.
+
+### 33. Pacing authority status (current, live)
+Phase 1 (D-142) IS live in production (called unconditionally from
+`universal_clean_cut.py` whenever `draft.selected` is non-empty), but its
+authority is diagnostics-only -- it never mutates `draft.selected`, never
+selects an overlap mode, and always falls back safely. Future V2 authority
+must remain bounded to transition/timeline placement between two already-
+fixed clips, never upstream selection or Boundary -- confirmed as the
+correct, already-enforced boundary (Section 10).
+
+### 34. Verdict
+**B. PACING V2 PARTIALLY READY -- ONE RENDERER/TIMELINE CONTRACT GAP MUST
+BE CLOSED FIRST** (Section 16: independent audio/video timing per segment
+does not exist in `RenderSegment`/`_concat_render_command` today).
+
+### 35. Confirmation
+NO cutsell_worker/tests/workflow file touched. NO RAW dispatched. NO
+provider called. NO Pacing/Renderer/Boundary/Ordering/Family/BestTake
+change. D-116, D-142, D-177, D-187, D-210, D-211, D-212, and every
+Boundary/Ordering closure named in this task's own preservation list are
+unmodified.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-214 (the
+renderer/timeline contract extension, offline only) is Product Owner
+coordination territory, per this entry's own "Then STOP" instruction.
+
+---
