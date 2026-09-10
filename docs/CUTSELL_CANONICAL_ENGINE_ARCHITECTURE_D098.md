@@ -2673,3 +2673,332 @@ Proposition Identity, Attempt Relationships, BestTake, Boundary, and
 Pacing are all restated, never modified, by this section. See
 `docs/CUTSELL_DECISIONS.md` D-178A for the decision-log entry recording
 this section's doctrine.
+
+---
+
+## 16. Pacing V2 Canonical Three-Layer Join Strategy Model (D-220C)
+
+**Status: additive doctrine, documentation only. No engine behavior
+change, no RAW, no provider call, no BestTake/Family/Boundary/Ordering/
+Renderer authority change, no feature flag, no `cutsell_worker/*.py`
+file, no `tests/*.py` file touched to write this section.** No layer is
+renumbered, no Section 3 status changes, no accepted D-096 through
+D-220 authority contract is altered. This section EXTENDS Section 11
+(D-129's own Overlap/Dialogue-Pacing Transition doctrine, unchanged) and
+Section 13.12 (unchanged) with the complete canonical shape Pacing V2
+must reason in — it restates, never replaces, D-213 through D-220's own
+accepted implementation.
+
+### 16.1 Why this section exists
+
+Section 11's own original doctrine (D-129) already named the target
+transition vocabulary (`HARD_CUT`, `TIGHT_CUT`, `J_CUT`, `L_CUT`,
+`MICRO_AUDIO_OVERLAP`) but described Pacing as choosing ONE mode per
+join. D-213 through D-220's own accepted implementation proved that
+mode-selection (D-215), evidence wiring (D-216/D-217), real-media
+qualification (D-218R), identity integrity (D-218F), and a J/L timing-
+amount policy (D-220) are each real, separate concerns — and D-220's own
+forensic (via D-219) surfaced a further real distinction the original
+Section 11 doctrine did not yet separate: the AUDIO TREATMENT applied at
+a join (a fade, a brief crossfade, a carried ambience bed) is a
+DIFFERENT decision from the PRIMARY TRANSITION MODE, with its own
+evidence, its own safety bar, and its own future timing question. This
+section canonicalizes that separation, and makes the video-adaptive
+principle Section 11.2 already implied ("no one transition is
+universal") explicit and binding.
+
+### 16.2 Canonical pipeline shape (restates and extends Section 11.4,
+does not renumber Layer 7)
+
+For every adjacent, already-ordered, already-Boundary-finalized pair:
+
+```
+MEDIA / SPEECH / WORD / PROSODIC / RELATION EVIDENCE
+        v
+JOIN UNDERSTANDING          (Layer 7's own execution boundary, new
+        v                    conceptual sub-stage -- restates Section
+                             11.4's placement, does not renumber it)
+TRANSITION DECISION          (D-215, unchanged authority)
+        v
+TIMING POLICY                 (D-220 for J/L; a future, separate
+        v                      audio-treatment timing policy for
+                               anything Layer 16.6 below names)
+AUDIO JOIN TREATMENT          (NEW canonical secondary axis, Section
+        v                      16.6 -- NOT_IMPLEMENTED, NO_AUTHORITY)
+RENDERER EXECUTION            (D-214, unchanged authority)
+```
+
+The Renderer EXECUTES whatever window/mix/fade instruction the plan
+above it describes; it never chooses semantics, never infers that "this
+join needs an ambience bridge" on its own (restates Section 4/13.11-
+13.12/15.17's "BOUNDARY/PACING EXECUTE" — actually a DECIDE/EXECUTE split
+within Pacing's own territory: Join Understanding and Transition
+Decision and Audio Join Treatment DECIDE; the Renderer alone EXECUTES).
+
+### 16.3 Layer 1 — Join Understanding (new canonical conceptual object,
+not yet a `cutsell_worker/*.py` type)
+
+Answers **"what is happening at this join?"** — evidence/state only,
+never a decision. A future `JoinUnderstanding` object (or repo-
+equivalent abstraction, name not fixed by this section) would carry
+dimensions including: `speech_left`/`speech_right` occupancy,
+`non_speech_left`/`non_speech_right` occupancy, silence/head/tail
+geometry (already computed today by D-217's `available_silent_head_
+sec`/`available_silent_tail_sec`, reused not duplicated), room-tone/
+ambience continuity or discontinuity (NOT yet measured by any existing
+module — named here as a future evidence dimension, not implemented),
+same-source/cross-source identity, the existing `CONTINUATION`/
+`CORRECTION`/`RETRY`/`UNKNOWN` relationship vocabulary (D-215, reused
+verbatim), meaning-critical content near the edge (D-038's `classify_
+claim`, reused verbatim), word-timing availability, Prosodic edge
+evidence (D-187, reused verbatim), restart/hesitation evidence, and
+audio-level discontinuity IF deterministically measurable later (no
+provider requirement is created by naming this). **No threshold is
+defined here** (restates Section 6's binding anti-loop contract:
+naming an evidence dimension authorizes no algorithm or threshold).
+
+**Join Understanding is NOT authority.** It never itself chooses `J`,
+`L`, a crossfade, or an ambience carry — it only produces the evidence/
+state Layer 2 and Layer 3 below consume. This mirrors, at the Pacing
+sub-stage level, the same PERCEIVE-vs-DECIDE separation Section 13.3.2/
+15.17 already establishes for the whole engine ("PERCEPTION PROPOSES
+EVIDENCE... STRUCTURED EDITORIAL AUTHORITIES DECIDE").
+
+### 16.4 Layer 2 — Transition Decision (restates D-215's own existing
+authority, unchanged, extends Section 11.2's vocabulary with `KEEP_
+PAUSE` as an explicit first-class primary mode)
+
+Answers **"how should the two clips relate temporally?"** Canonical
+primary transition-mode vocabulary (six values, the first five already
+implemented — `KEEP_PAUSE` is D-215's own existing `pacing_gap_
+decision` outcome, elevated here to sit alongside the other five as an
+equally first-class OUTCOME OF THIS SAME LAYER, not a separate concern):
+
+- **`KEEP_PAUSE`** — a meaningful pause is retained. **Binding
+  restatement:** Pacing must never be designed as "always remove every
+  gap" — a real, intentional silence is a valid, sometimes CORRECT,
+  editorial outcome, exactly as D-215's own `_keep_pause_or_tighten`
+  already treats a trailing `CRITICAL`-claim pause (D-038 reused).
+- **`HARD_CUT`** — the safe fallback. Correct whenever evidence is
+  missing, meaning is sensitive, an advanced mode is unsafe, OR a direct
+  cut is simply the appropriate choice on its own editorial merits (not
+  merely a fallback of last resort).
+- **`TIGHT_CUT`** — a compact non-overlap join. **Binding restatement:**
+  no second Boundary trim happens here — Boundary (Layer 7, D-107
+  Section 9/D-177) owns semantic source edges exclusively; Pacing's own
+  `TIGHT_CUT` classification is an ATTRIBUTION of Boundary's own already-
+  applied trim (D-215's own `baseline.mode`/`gap_removed_duration`
+  reuse), never a second trimming authority.
+- **`J_CUT`** — next audio leads next video (one-sided audio/video
+  divergence; `RenderSegment.audio_start < start` on the RIGHT segment,
+  D-214).
+- **`L_CUT`** — previous audio trails after the visual switch (one-sided
+  divergence; `RenderSegment.audio_end > end` on the LEFT segment,
+  D-214).
+- **`MICRO_AUDIO_OVERLAP`** — two audio streams overlap briefly. Highest
+  safety bar of the six (D-215's own `DOUBLE_SPEECH_SAFE_MICRO_OVERLAP`
+  requirement, unchanged). **Binding restatement (unchanged from D-219
+  item 34/D-220 item 41):** remains diagnostics-only/deferred; naming it
+  here does NOT imply broad authority, and this section grants none.
+
+### 16.5 Layer 3 — Audio Join Treatment (NEW canonical secondary axis)
+
+**Binding principle: Audio Join Treatment is INDEPENDENT from the
+primary Transition Decision (Layer 2).** A join's TEMPORAL relationship
+(does video B start before/after/exactly-when audio B starts?) and its
+AUDIO TREATMENT (is there a fade, a brief crossfade, a carried ambience
+bed?) are two different questions with two different evidence
+requirements and two different safety bars — conflating them was
+Section 11's own original gap, closed here.
+
+Canonical secondary audio-treatment vocabulary (exact future type names
+may differ; semantic ownership is canonical as of this section):
+
+- **`NONE`** — no additional audio treatment beyond whatever the
+  Transition Decision itself already implies.
+- **`CLICK_FADE`** — **Status: EXISTING, already implemented, already
+  live, unchanged by this section.** This is `render.py`'s own existing
+  `_AUDIO_JOIN_FADE_SEC = 0.012` (12 ms) `afade=t=in`/`afade=t=out` pair,
+  applied to every segment's OWN audio edges as a purely TECHNICAL
+  click-prevention measure (segments below `_AUDIO_JOIN_FADE_MIN_
+  SEGMENT_SEC` are left untouched). **Binding distinction (this
+  section's own required clarification):** `CLICK_FADE` != an editorial
+  crossfade, != an ambience bridge, != dialogue overlap. It carries NO
+  editorial intent, decides nothing about the join's relationship, and
+  is not part of the D-215/D-220 decision space at all — it is a
+  Renderer-owned technical detail that happens on every segment
+  regardless of Pacing's own transition mode.
+- **`SHORT_CROSSFADE`** — **Status: `ARCHITECTURALLY_DEFINED`,
+  `NOT_IMPLEMENTED`, `NO_AUTHORITY`.** A bounded audio transition
+  smoothing an abrupt join where two clips have audible discontinuity
+  but required speech must not overlap. NOT automatically dialogue
+  overlap — a future implementation MUST distinguish speech from non-
+  speech (Section 16.7) before this treatment may receive any authority.
+- **`AMBIENCE_CARRY_LEFT`** — **Status: `ARCHITECTURALLY_DEFINED`,
+  `NOT_IMPLEMENTED`, `NO_AUTHORITY`.** Carries safe non-speech/room-tone
+  material from the OUTGOING (left) clip across the join. No lexical
+  speech extension unless a separately-authorized transition mode
+  (`L_CUT`) explicitly permits it.
+- **`AMBIENCE_CARRY_RIGHT`** — **Status: `ARCHITECTURALLY_DEFINED`,
+  `NOT_IMPLEMENTED`, `NO_AUTHORITY`.** Introduces safe room-tone/non-
+  speech material from the INCOMING (right) clip before the visual/audio
+  join, as appropriate. No required-word masking.
+- **`AMBIENCE_BRIDGE`** — **Status: `ARCHITECTURALLY_DEFINED`,
+  `NOT_IMPLEMENTED`, `NO_AUTHORITY`.** Uses non-speech ambience to smooth
+  a perceptible room-tone/background discontinuity across the join.
+  Remains distinct from `J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP` — those
+  are TEMPORAL relationships (Layer 2); this is an AUDIO TEXTURE
+  treatment (Layer 3), and the two may or may not co-occur (Section
+  16.6).
+
+### 16.6 Orthogonality contract (binding, requires a future compatibility
+matrix — not defined exhaustively here)
+
+Primary Transition Decision (Layer 2) and Audio Join Treatment (Layer 3)
+are SEPARATE AXES. Illustrative, non-exhaustive combinations a future
+decision layer may need to reason about: `TIGHT_CUT` + `SHORT_
+CROSSFADE`; `J_CUT` + `NONE`; `J_CUT` + `AMBIENCE_CARRY_LEFT`; `KEEP_
+PAUSE` + `NONE`; `HARD_CUT` + `CLICK_FADE` (already today's own live,
+universal shape, since `CLICK_FADE` applies regardless of mode). **This
+section does NOT claim every combination is valid** — a future decision
+layer must define the full compatibility matrix (which Layer-2/Layer-3
+pairs are safe, which are meaningless, which require additional
+evidence) before any Layer-3 treatment beyond `CLICK_FADE`/`NONE`
+receives authority. The architecture must SUPPORT orthogonality (two
+independent fields on a future plan object, never one conflated
+enumeration); it does not itself resolve every compatibility question.
+
+### 16.7 Speech-vs-non-speech requirement (binding precondition for any
+future Layer-3 authority beyond `CLICK_FADE`/`NONE`)
+
+Before `SHORT_CROSSFADE`, `AMBIENCE_CARRY_LEFT`, `AMBIENCE_CARRY_RIGHT`,
+or `AMBIENCE_BRIDGE` may receive ANY authority, the engine must be able
+to distinguish, with sufficient confidence, REQUIRED LEXICAL SPEECH from
+SAFE NON-SPEECH/room-tone/ambience material at the relevant join. **This
+section does NOT implement that classifier** — naming the requirement
+authorizes no algorithm, per Section 6.
+
+### 16.8 Firewalls (restate, do not weaken, D-215's own existing
+contracts — apply identically to every future Layer-3 treatment)
+
+- **Word safety (restates Section 15.17's "MEANING PRESERVATION IS P0"
+  and D-215's own `word_safety_status` contract):** no treatment may
+  mask, truncate, double, or blur required lexical content.
+- **Meaning safety (restates D-038's own vocabulary):** negation,
+  numbers, factual qualifiers, diagnostic terms, correction statements,
+  and dependent clauses remain protected; no smoothness objective ever
+  overrides meaning.
+- **Double-speech safety:** `MICRO_AUDIO_OVERLAP` keeps the highest bar
+  (D-215, unchanged). `SHORT_CROSSFADE` must never become accidental
+  double-speech. Any `AMBIENCE_*` treatment must use only non-required-
+  speech material unless explicitly paired with a separately-authorized
+  speech-overlap mode.
+
+### 16.9 Timing-policy relationship (binding, does not reopen D-220)
+
+D-220 remains responsible ONLY for J/L timing AMOUNT (`chosen_lead`/
+`chosen_tail`, `pacing_v2_timing_policy.py`, unchanged by this section).
+Crossfade/ambience timing is explicitly NOT folded into D-220
+retroactively — a future, SEPARATE audio-treatment timing policy is
+named (Section 16.11) for that question, never assumed to already exist.
+D-220's own anchor-word heuristic remains exactly `QUALITY_HEURISTIC_
+NOT_YET_REAL_MEDIA_TUNED`, with no reinterpretation by this section;
+D-221 (named, not implemented, by D-220) still owns real-media timing-
+quality tuning for J/L specifically, and per this section's own required
+clarification, D-221 tunes J/L ONLY — it does not close the full Audio
+Join Treatment roadmap this section opens.
+
+### 16.10 Video-adaptive strategy doctrine (binding, sharpens Section
+11.2's existing "no one transition is universal" principle)
+
+CutSell does NOT apply one fixed transition/treatment preset to every
+join across every user video. For each join, the ACTUAL evidence
+available in that specific customer's media (word boundaries, speech
+occupancy, silence, non-speech audio, room tone, ambience continuity or
+discontinuity, source identity, relationship hints, meaning criticality,
+Prosodic edge state, available safe audio window) determines the
+appropriate strategy. The motor's own job is to choose the SAFEST/most
+NATURAL strategy for THAT join, never a one-size-fits-all rule.
+
+### 16.11 No-Cut.ai-preset doctrine (binding, restates Section 15.10's
+own "we do not know Cut.ai's internal implementation" honesty)
+
+No future capability may be named or built as an imitation target such
+as `CUTAI_STYLE_TRANSITION = X` or equivalent. CutSell's own internal
+transition/treatment methods are, and remain, unknown-and-irrelevant to
+imitate. The goal is a PROFESSIONAL, NATURAL perceived result, judged
+against this project's own D-095 quality ladder (RAW -> Cut.ai parity ->
+Human Gold parity -> technical QC -> perceptual Watch+Listen), never
+benchmarked against a guessed competitor mechanism.
+
+### 16.12 Renderer ownership (restates Section 4/13.11-13.12/15.17's
+"BOUNDARY/PACING EXECUTE" statement, sharpened for Layer 3)
+
+The Renderer (D-214, `render_plan.py`/`render.py`) may EXECUTE audio
+windows, mixing, fades, and (in a future implementation) ambience
+layers — but ONLY when explicitly described by a Pacing plan handed to
+it. The Renderer never DECIDES that "this join needs an ambience
+bridge" on its own initiative; that decision belongs exclusively to the
+Transition Decision/Audio Join Treatment layers above it (D-215 and this
+section's own future Layer 3, respectively).
+
+### 16.13 Future audio-treatment gate (named, NOT authorized to begin by
+this section)
+
+**PACING V2 AUDIO JOIN TREATMENT ARCHITECTURE / FORENSIC** — a future,
+separately-authorized, offline-only forensic (mirroring D-219's own
+approach for J/L) that must audit: speech/non-speech evidence
+availability (Section 16.7), room-tone representation (does any existing
+module measure it at all today — likely NOT, per Section 16.3's own
+honest "NOT yet measured by any existing module" finding), amplitude/
+background continuity, the existing `CLICK_FADE` implementation's own
+exact scope (Section 16.5), Renderer filtergraph capability for a
+crossfade/ambience layer (a NEW D-214-shaped mechanical proof, not yet
+done), the Layer-2/Layer-3 treatment compatibility matrix (Section
+16.6), a treatment timing policy (Section 16.9), and the full word/
+meaning/double-speech safety firewalls (Section 16.8) applied to each
+treatment. **Not implemented, not designed in executable detail, not
+begun by this section.**
+
+### 16.14 Recommended future sequence (a recommendation, not an
+authorization — restates Section 6's binding anti-loop contract)
+
+1. Finish D-221 (J/L timing-amount real-media quality tuning, offline/
+   diagnostics-only, already named by D-220).
+2. Bounded J/L live authority (a future, separately-named gate).
+3. Audio Join Treatment architecture/forensic (Section 16.13).
+4. `SHORT_CROSSFADE`/`AMBIENCE_*` execution + decision-layer
+   implementation (only after step 3's own forensic closes its own
+   named gaps).
+5. `MICRO_AUDIO_OVERLAP` authority last, and under a stricter bar than
+   J/L (unchanged from D-219/D-220).
+6. Renderer/export qualification on real media.
+
+This section does not find evidence today favoring a SMALLER
+consolidation of these steps — J/L timing tuning (step 1) and the Audio
+Join Treatment forensic (step 3) exercise different modules
+(`pacing_v2_timing_policy.py` vs. a not-yet-built room-tone/ambience
+evidence layer) and different renderer capabilities (existing D-214
+independent-audio-windows vs. a not-yet-proven crossfade/ambience-layer
+mechanism), so keeping them sequential, bounded, separately-authorized
+gates remains the recommended shape, consistent with every prior gate in
+this Pacing V2 track (D-213 through D-220).
+
+### 16.15 Confirmation: documentation only
+
+No `cutsell_worker/*.py` file, no `tests/*.py` file, no `.github/
+workflows/*.yml` file, no feature flag, and no authority contract was
+touched, added, or changed to write this section. No RAW was dispatched.
+No provider/network call was made. D-213 through D-220's own accepted
+implementation and verdicts are unchanged — D-220's own verdict (B:
+TIMING POLICY PARTIALLY PROVEN, ONE QUALITY HEURISTIC REQUIRES REAL-
+MEDIA TUNING) is restated, never altered, by this section.
+
+---
+
+No change to Section 2's 20 layers, Section 3's status table, Sections
+4-15, or any accepted D-096 through D-220 authority contract. Family
+Formation, Proposition Identity, Attempt Relationships, BestTake,
+Boundary, Ordering, and Pacing are all restated, never modified, by this
+section. See `docs/CUTSELL_DECISIONS.md` D-220C for the decision-log
+entry recording this section's doctrine.
