@@ -38813,3 +38813,292 @@ Sales-Funnel change. Docs-only entry.
 **HUMAN ACTION REQUIRED:** YES -- condition A (retrieve the small
 artifact directly, or authorize the Section 8 remedy + one future
 confirmatory RAW) is required before a D-200.4 verdict can be issued.
+
+
+# D-200.4A: P1 EDITORIAL MOMENT IDENTITY / CROSS-GROUP FORENSIC
+(POST D-200.4, FORENSIC ONLY, NO IMPLEMENTATION)
+
+Post D-200.4 (Product Owner independently retrieved the complete real
+artifact from run `34476657955` out-of-band; its confirmed-positive
+numbers are treated as trusted input here, not re-verified -- this
+session still has no artifact-download path, see D-200.4's own Section
+3). Investigates the reported `cross_group_sequence_count = 2` and a
+directly-observed symptom (repeated `editorial_moment_id` values across
+different `local_group_id` rows in the same RAW's `d198_local_group_
+formation_qualification_summary.json`) before accepting P1 closure.
+
+## 1. Root cause -- PROVEN, not inferred, via code inspection + a local,
+## uncommitted, offline reproduction (generalizes to every RAW; no
+## Video00-specific content)
+
+`_editorial_moment_id` (`editorial_moment_sequence.py`, `classify_
+editorial_moment`'s own id mint) hashes ONLY:
+
+    (source_asset_id, source_start, source_end, moment_role, attempt_ids)
+
+It does **NOT** include `source_span_id` (the real, already-unique
+`take.clip_id`/`UnderstandingSpan.span_id` P1 candidate identity) even
+though `classify_editorial_moment` already receives `source_span_id` as
+a parameter and stores it verbatim on `EditorialMoment.source_span_id` --
+it is simply never fed into the hash.
+
+`build_editorial_moments_for_source` builds ONE `EditorialMoment` PER
+ELIGIBLE TAKE (`for take in ordered: ...`), consistent with D-195's own
+"complete unfiltered candidate pool" doctrine (no take is ever
+pre-filtered/deduplicated before P1 classifies it). D-199's own bridge
+(`language_attempts_by_span_id_for_source`) resolves EACH `Understanding
+Span` to its OWN independently-best-overlapping canonical `LanguageAttempt`
+-- nothing in that function (or anywhere else) prevents TWO DIFFERENT
+spans from independently picking the SAME canonical attempt as their best
+overlap. When that happens, both resulting `EditorialMoment`s share the
+SAME `source_start`/`source_end`/`attempt_id` (all inherited from the one
+shared canonical attempt) and, if their local structural role also
+matches, the SAME `moment_role` -- so `_editorial_moment_id` mints the
+IDENTICAL id for both, even though they came from two genuinely different
+P1 candidate takes with two different `source_span_id` values.
+
+**Verified via a minimal, local, uncommitted repro** (two `CandidateTake`s
+with different `clip_id`s, both overlapping one shared canonical
+`LanguageAttempt`, run through the real, unmodified `build_editorial_
+moment_understanding_for_source`):
+
+```
+editorial_moment_ids:        ['emom_2197...', 'emom_2197...']  (IDENTICAL)
+source_span_ids (clip_id):   ['clipA', 'clipB']                (DIFFERENT)
+```
+
+Both moments also landed in local groups sharing the SAME `elgrp_...` id
+(`_local_group_id` is itself minted from `sorted(moment_ids)`, so two
+singleton groups whose sole member is the same duplicated id collide
+too) -- a second-order symptom of the same root cause, not a separate
+bug.
+
+A second local, uncommitted check confirmed the smallest fix restores
+uniqueness: hashing `source_span_id` alongside the existing inputs
+produces two DISTINCT ids for the two takes above, with no other change
+to the id's shape or the rest of the codebase.
+
+## 2. Structural invariant -- PROVEN: sequences never cross local groups
+
+`build_editorial_local_groups` (D-197) is a single forward pass over
+`range(1, len(moments))` that either appends the current index to the
+CURRENTLY OPEN group or flushes it and starts a NEW single-element list
+at the next index -- every index from `0` to `len(moments)-1` is placed
+into EXACTLY ONE emitted group (a true partition of the position space;
+proven by direct reading of `editorial_moment_sequence_integration.py`
+lines 728-741, no code path revisits or merges a flushed group).
+
+`build_editorial_sequences_for_moments` (D-195) then iterates
+`effective_local_groups` ONE ENTRY AT A TIME: `for group in groups:
+group_moments = [moments[i] for i in sorted(group)]` -- `group` here is
+always exactly one already-computed local group's own index list; the
+function contains no code path that unions, concatenates, or otherwise
+combines indices from two different groups into one sequence (lines
+789-802). **This structurally guarantees: every `EditorialSequenceHypothesis`
+originates from exactly one `EditorialLocalGroup`, by construction, in
+every RAW, unconditionally** -- not merely "usually true."
+
+## 3. Therefore: `cross_group_sequence_count` is a DIAGNOSTIC ARTIFACT,
+## not a real engine bug
+
+The workflow's own audit script (both the pre-existing D-198 step and
+this task's own new D-200.4 step reuse the identical pattern) rebuilds
+group membership via `moment_to_group = {mid: group_id for g in
+local_groups for mid in g.moment_ids}` -- a plain Python dict, so a
+duplicated `mid` key silently keeps only the LAST group's id written to
+it. When a sequence's own moment_ids include a duplicated id whose OTHER
+occurrence belongs to a different real local group, `moment_to_group.get
+(mid)` can resolve to that OTHER group's id instead of the sequence's own
+true originating group -- producing a `{group_id}` set of size >1 for
+that sequence in the diagnostic's OWN reconstruction, even though the
+real engine object (Section 2) was built from exactly one group. The
+diagnostic script's `moment_to_group` mechanism is the ONLY place this
+audit can go wrong; it is workflow-reporting code, not `cutsell_worker`.
+
+## 4. Quantified real-media evidence (from the Product-Owner-relayed
+## D-200.4 real numbers, not independently re-verified, but consistent
+## with and directly explained by Section 1's mechanism)
+
+Live Language Spine constructed exactly **20** canonical `LanguageAttempt`s
+this run, with **100% canonical attempt coverage** at P1 (every P1 moment
+used a real canonical attempt, never the D-157 fallback). `structured_
+relation_edge_count = 36` implies `moment_count = 37` (edges = moments -
+1 for one source). **By the pigeonhole principle alone: 37 moments built
+from only 20 unique canonical attempts means AT LEAST 17 of the 37
+moments necessarily share a canonical attempt (and therefore share
+`source_start`/`source_end`/`attempt_id`) with at least one other
+moment** -- independent of any per-row data this session cannot access,
+this is arithmetically forced by the two counts the Product Owner already
+confirmed. This is fully consistent with, and provides a strong
+quantitative floor for, the duplicate-`editorial_moment_id` symptom
+directly observed in `d198_local_group_formation_qualification_summary.
+json` (e.g. `emom_aa3c02e0358ee4d2b05a` reported associated with more
+than one `local_group_id`).
+
+`attempt_unknown_count = 21` of 36 structured edges is plausibly, though
+not provably from available evidence, related: when a canonical attempt
+is reused across adjacent P1 positions, the "previous attempt" identity
+used to resolve `attempt_relation` for a given edge can be inconsistent
+depending on which duplicate sits at which list position -- this is
+named as a PLAUSIBLE CONTRIBUTING FACTOR, not asserted as proven; it does
+not require reopening the relation dimensions themselves (D-200.3's own
+decomposition logic is unaffected by which attempt object it is handed).
+
+Exact per-moment/per-row duplicate counts, IDs, and their local_group_id
+assignments beyond the two data points above are **not enumerable** from
+the summary-level counts available to this forensic; a full duplicate-ID
+census requires the artifact's own full `moments[]`/`local_groups[]`
+arrays, which this session does not have independent access to (see
+D-200.4 Section 3's still-standing retrieval limitation for this
+session).
+
+## 5. EditorialMoment's intended identity (per-code, resolved without
+## redefining D-193/D-194's own doctrine)
+
+D-193/D-194's own language ("WHAT ROLE DOES THIS SOURCE-REAL MOMENT
+PLAY") anchors moments to REAL source timing (never a fabricated/
+synthetic window) -- it does not, on inspection, assert "one identity
+per unique physical span" as opposed to "one identity per candidate
+occurrence". The ACTUAL, unchanged operational construction
+(`build_editorial_moments_for_source`'s own `for take in ordered:` loop,
+D-195's own "complete unfiltered candidate pool" doctrine, explicit
+"never manufactured, never pre-filtered" language already in that
+module's docstring) is, and always has been, **one `EditorialMoment` per
+ELIGIBLE CANDIDATE TAKE** (identity option **C: one candidate
+occurrence**), not "one per unique physical span" (option A). The `_
+editorial_moment_id` docstring's own comparison to `canonical_identity.
+mint_source_span_id` describes the HASHING STYLE it borrows (content+
+timing anchored, deterministic), not a claim that the id is meant to
+collapse distinct candidates sharing a span into one identity. Read this
+way, the current minting function is simply UNDER-SPECIFIED relative to
+its own already-established operational contract -- it omits the one
+input (`source_span_id`) that already correctly distinguishes different
+candidates today, everywhere else in this same object (`EditorialMoment.
+source_span_id` itself, `take.clip_id` throughout the rest of the
+codebase). This is a narrow, low-risk finding, not a deep identity-
+philosophy fork requiring Product Owner arbitration.
+
+## 6. Language-attempt overlap / candidate-pool duplication contribution
+
+Confirmed by Section 1's own reproduction: D-199's max-overlap bridge
+(`language_attempts_by_span_id_for_source`) is a genuinely MANY-TO-ONE
+mapping by construction (each span picks its own best-overlapping
+attempt independently; nothing enforces a 1:1 constraint across spans).
+D-195's own "complete unfiltered candidate pool" doctrine is the reason
+multiple `CandidateTake`s can exist for what is, physically, one real
+utterance (e.g. a full take and an overlapping sub-clip candidate) --
+this is BY DESIGN for P1 (P1 must independently classify every candidate
+the pipeline ever produced, never pre-select) and should NOT be
+"fixed" by deduplicating the candidate pool itself (that would violate
+D-195's own completeness principle and could hide a real, distinct
+candidate BestTake/Family still needs to reason about later). The
+correct seam for the fix is the IDENTITY layer (Section 7), not the
+candidate-pool layer.
+
+## 7. Smallest possible repair (named, NOT implemented)
+
+Add `source_span_id` to `_editorial_moment_id`'s hash input tuple
+(`classify_editorial_moment` already receives and threads this value; no
+new parameter, no new data flow, no new evidence source). This:
+
+- restores one distinct id per candidate occurrence (matching the
+  already-established, unchanged operational contract, Section 5);
+- requires zero change to `build_editorial_local_groups`/`build_
+  editorial_sequences_for_moments` (Section 2's own structural invariant
+  already holds regardless of id uniqueness -- fixing the id makes the
+  DIAGNOSTIC audit trustworthy again, it does not change what the real
+  engine already correctly does);
+- requires zero change to D-157/D-169/D-166/D-168/D-199 (all upstream,
+  untouched, evidence producers, exactly as every prior D-200.x task in
+  this line has preserved);
+- is deterministic, additive-only, and would change `editorial_moment_
+  id` VALUES for any moment sharing a canonical attempt with another
+  moment -- since NOTHING today reads this id to make a Family/BestTake/
+  D-191/Ordering/Boundary/Pacing/Renderer decision (P1 remains zero-
+  authority, D-193's own boundary, unchanged), this value change is safe
+  for every current consumer (all of them diagnostics-only) and is
+  exactly the kind of change this program's own "P1 has no authority"
+  invariant exists to make safe.
+
+Do NOT deduplicate candidate takes/spans as an alternative (Section 6)
+-- it is the architecturally wrong seam for this fix.
+
+## 8. Cross-group sequence audit (the two reported cases)
+
+The exact per-sequence child-index/child-moment-id table for the two
+reported `cross_group_sequence_count` cases is not enumerable from the
+summary-level counts available to this forensic (same retrieval
+limitation as D-200.4 Section 3 -- the full `sequences[]`/`local_groups[]`
+arrays were not independently retrieved this session). Both are
+classified, on the strength of Sections 1-3's proof, as:
+
+**FALSE_POSITIVE_FROM_DUPLICATE_MOMENT_ID** -- not `REAL_CROSS_GROUP_
+SEQUENCE` (Section 2 proves that outcome is structurally impossible in
+the current code) and not genuinely `AMBIGUOUS` (Section 3 names the
+exact, sole diagnostic mechanism that produces this reading).
+
+## 9. P2 readiness impact (asked and answered separately, per this
+## task's own instruction)
+
+- **For TODAY's P1** (diagnostics-only, zero authority, D-193's own
+  boundary unchanged): **NON_BLOCKING_DIAGNOSTIC_ISSUE.** No active
+  Family/BestTake/Ordering/Boundary/Pacing/Renderer decision reads
+  `editorial_moment_id` today; the duplicate-id symptom affects only this
+  workflow's own audit script's cross-group reading, not any real
+  editorial outcome.
+- **For P2** (named requirement: stable references for local editorial
+  moments, sequences, distant proposition redundancy, global reasoning):
+  **BLOCKING_IDENTITY_INTEGRITY_ISSUE.** A whole-video reasoning layer
+  that needs to tell "the same candidate occurrence, referenced twice"
+  apart from "two genuinely different candidates that happen to collide
+  in derived-id space" cannot safely build on the current id as-is.
+
+## 10. Relation architecture status (restated, not reopened)
+
+D-200.3's dimension-aware decomposition and D-200.4's real-media
+requalification are UNAFFECTED by this finding and are NOT reopened.
+Duplicate `EditorialMoment` identity is orthogonal to, and does not
+invalidate, D-200.3's attempt/proposition/editorial-beat dimensions or
+D-200.4's cross-dimension-compatible/same-dimension-conflict results --
+those operate on `RelationEvidence`/`AttemptRelationHypothesis` objects
+keyed by span/proposition ids, not by `editorial_moment_id`.
+
+## 11. D-200.4A VERDICT
+
+**B. CROSS-GROUP COUNT IS DIAGNOSTIC FALSE POSITIVE -- EDITORIAL MOMENT
+IDENTITY REQUIRES ONE SMALL OFFLINE FIX BEFORE P2.**
+
+The cross-group reading is conclusively a diagnostic artifact (Sections
+1-3, proven by code + local reproduction, not inferred). The underlying
+duplicate-identity root cause is real, general (every RAW, not Video00-
+specific), low-risk to fix (Section 7), and does not require reopening
+relation architecture, Language Spine, grouping rules, or any authority
+boundary -- but it DOES need fixing before P2 can safely treat
+`editorial_moment_id` as a stable reference (Section 9).
+
+## 12. Next gate
+
+Per this task's own "if B/C: define exactly ONE smallest offline fix...
+do not automatically demand another Video00 RAW unless the fix affects
+actual P1 sequence/group BEHAVIOR" instruction: Section 7's fix changes
+only `editorial_moment_id` VALUES (an identity-layer, diagnostics-only
+change) -- it does not alter which moments join which group or which
+relation joins/splits anything (Section 2's own invariant is unaffected
+either way). Once Section 7 is implemented and offline-proven
+(deterministic id uniqueness test + full existing D-194/D-195/D-197/
+D-198/D-199/D-200.3 regression suite green), **P1 may be considered
+sufficiently closed for P2 without a further paid RAW**, per this
+task's own explicit allowance. D-201 (P2 Whole-Video Editorial
+Reasoning, Phase 0) remains the next major gate after that offline fix +
+proof, not authorized here.
+
+## 13. Confirmations
+
+Forensic only. No `cutsell_worker` change. No test added or modified. No
+workflow change. No RAW. No provider call. No relation-dimension
+redesign. No Language Spine reopen. No grouping retune. No P1 authority
+granted. No P2 implementation. Docs only.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing Section 7's
+bounded offline identity fix (and the offline-only proof loop named in
+Section 12) is the next Product Owner decision.
