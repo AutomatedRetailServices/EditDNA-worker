@@ -37273,3 +37273,248 @@ construction-unavailable both preserve D-198 behavior exactly (Section
 **HUMAN ACTION REQUIRED:** YES (condition C -- paid compute: D-200's ONE
 Video00 RAW requires Product Owner authorization before dispatch; this
 entry implements and offline-qualifies D-199 only and does not launch it).
+
+# D-200: LIVE LANGUAGE-SPINE -> P1 VIDEO00 REAL-MEDIA
+QUALIFICATION (POST D-199)
+
+Post D-199, Product Owner authorization: exactly ONE canonical Video00 RAW
+with `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1` and
+`CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`, no other overlay, no
+P1 authority, to prove whether D-199's live Language-Spine construction
+actually works on real media and whether P1 actually consumes it.
+
+## 1. Pre-RAW observability check -- a real wiring blocker found and fixed
+
+Before dispatch, tracing the live call path found `flow_b.py` already
+computed `raw_understanding_maps` (real `RawUnderstandingMap` objects with
+real ASR `word_timings`, used unchanged for `watch_listen_understandings`)
+but never passed it into `build_flow_b_draft(...)` -- D-199's own new
+parameter was never wired to its data source in the production path.
+Dispatching as-is would have guaranteed `NOT_EVALUABLE`/0% coverage for a
+wiring reason, not a real-media finding. Product Owner authorized the
+minimal one-line integration fix: `raw_understanding_maps=raw_
+understanding_maps` passed through unchanged (no new computation, no
+second construction, no ASR call). 6 new offline tests
+(`test_cutsell_d200_wiring_fix.py`) proved both flags off is unaffected,
+P1-on/live-spine-off reproduces D-198 behavior exactly, both flags on lets
+the live Language Spine receive real word timings, exactly one ASR pass
+regardless of flag state, and downstream selection is immutable across
+flag states. Committed (`cece66c`) and pushed before dispatch.
+
+## 2. RAW identity
+
+- RAW id: `34460889768` (GitHub Actions run), head `cece66c0408b6414d6d13bee107d6c29aa11d641`
+- Source: `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4` (the
+  same canonical Video00 source D-196/D-198 used)
+- Flags: `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1`,
+  `CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`, no other overlay
+- Job status: overall workflow conclusion `failure`, but this is the SAME
+  known pattern seen on prior real-media RAWs in this workflow (e.g. run
+  `34428966254`): the failure is entirely in two content-drift-sensitive
+  validators, "Verify frozen Selection lock" and "Verify Human Gold
+  regression QA (18-check manifest)", both comparing against a frozen
+  reference snapshot -- every diagnostic/qualification step this entry
+  reports from (`Print full canonical diagnostics`, `Verify active-path
+  identity`, `Verify Video00 architecture`, D-196/D-198/D-200 compact
+  diagnostics, `Upload validator reports`, `Modal teardown confirmation`)
+  succeeded. Neither lock-check failure is attributable to D-199/D-200:
+  P1 has zero authority and never touches selection (offline-proven,
+  Section 1 above), and the "Verify active-path identity" step -- which
+  exists specifically to catch CODE EXISTS != VIDEO USED IT -- passed,
+  confirming the code that ran is this commit's code.
+
+## 3. Construction result -- REAL, ON REAL MEDIA
+
+Live Language Spine actually constructed from the real source's ASR word
+timings, ONE construction for the ONE real source
+(`source_construction_count: 1`):
+
+- `live_language_spine_status`: **AVAILABLE**
+- `language_word_count`: 623
+- `language_phrase_count`: 58
+- `language_utterance_count`: 40
+- `language_attempt_count`: 20
+- `proposition_candidate_count`: 20
+- `relation_evidence_count`: 19
+- `language_conflict_count`: 1 (a `PropositionCandidate`-level conflict
+  flag, D-169's own bounded conflict marker -- distinct from the P1
+  relation-fusion conflicts in Section 5 below)
+- `construction_error_count`: 0 (no per-source fallback-failure triggered)
+- `live_language_spine_additional_asr_pass_count`: **0** (structurally
+  confirmed -- D-199's module imports nothing from `asr.py`)
+
+## 4. P1 consumption result -- FULL COVERAGE (D-198's 0% gap closed)
+
+- `canonical_attempt_used_by_p1_count`: 36 / `p1_moment_count`: 36 ->
+  **canonical_attempt_coverage_pct: 100.0%** (D-198 baseline: 0%)
+- `fallback_attempt_used_by_p1_count`: 0 -> **fallback_coverage_pct: 0.0%**
+  (D-198 baseline: 100%)
+- `canonical_proposition_coverage_count`: 36 ->
+  **proposition_coverage_pct: 100.0%** (D-198 baseline: 0%)
+- `missing_language_p1_count`: 0
+- `moment_language_evidence_source_distribution`: `{"CANONICAL_LANGUAGE_SPINE": 36}`
+  -- every single P1 moment on this real source used the real canonical
+  `LanguageAttempt`, zero fallback.
+
+This is the primary D-199/D-200 objective achieved cleanly: real
+canonical `LanguageAttempt`/`PropositionCandidate` objects, built once
+from real ASR evidence, materially and completely replaced the D-157
+approximation for P1's diagnostics on real media.
+
+## 5. Relation fusion result -- a real, honestly-disclosed disagreement
+
+`canonical_relation_coverage_count`: 19 (every edge where canonical
+`RelationEvidence` existed). `moment_relation_evidence_source_
+distribution`: `{"AGREEMENT": 2, "CONFLICT_ABSTAINED": 17, "D157_ONLY": 16,
+"MISSING": 1}` -- **CANONICAL_ONLY: 0** (D-157 always had some hypothesis
+once a predecessor existed).
+
+Of the 19 edges where canonical Language RelationEvidence existed
+(AGREEMENT + CONFLICT_ABSTAINED = 2 + 17 = 19, matching `relation_
+evidence_count` exactly): only 2 AGREED with D-157's relation; **17 of 19
+(89.5%) CONFLICTED** and were correctly abstained to `RELATION_UNCERTAIN`
+via `fuse_relation_evidence` -- never a silent majority vote, never one
+side silently overwriting the other (offline-proven contract, Section 4
+of D-199's own entry). `relation_conflict_examples` (10 shown, all real
+spans on `src_f1089567f84398529907`) confirms every conflict resolves to
+the same safe `UNCERTAIN` effective relation with `CONFLICT_ABSTAINED`
+provenance -- no forced preference either direction.
+
+**ESCALATION B** (recorded, not fixed -- NO FIX LOOP per this task's own
+scope): the D-157 Watch+Listen relation classifier and the D-169 canonical
+Language relation classifier disagree on nearly 9 of every 10 edges where
+both produce an opinion, on this real Spanish-heavy source. This is a
+genuine cross-authority disagreement signal, not a code defect in either
+classifier and not attributable to D-199/D-200 (which only fuse, never
+reclassify) -- it is new information this qualification RAW's own design
+exists to surface. Root-causing which classifier (or both) is
+miscalibrated on this source is Product Owner-scoped follow-up work, not
+authorized or attempted in this entry.
+
+## 6. D-197/D-198 grouping comparison -- BOUNDED but OVER_FRAGMENTED
+
+| field | D-198 baseline | D-200 (this run) |
+|---|---|---|
+| moment_count | 37 | 36 |
+| local_group_count | 23 | 25 |
+| singleton_group_count | 14 | 16 |
+| multi_moment_group_count | 9 | 9 |
+| max_group_moment_count | 4 | 3 |
+| sequence_count | 9 | 9 |
+| false_preassembled_final_count | 0 | 0 |
+| real_media_grouping_result | LOCAL_GROUPING_REAL_MEDIA_PROVEN | **LOCAL_GROUPING_BOUNDED_BUT_OVER_FRAGMENTED** |
+
+D-197's own unchanged join/split rule set was not modified (verified:
+`build_editorial_local_groups` untouched, full 71-test D-197 suite passes
+unmodified). The shape difference has a direct structural-evidence
+explanation, not an arbitrary regression: the 17 `CONFLICT_ABSTAINED`
+edges (Section 5) resolve to `RELATION_UNCERTAIN`, which D-197's grouper
+has always treated as a non-joining boundary -- richer canonical evidence
+that DISAGREES with D-157 therefore causes MORE splits than D-157 alone
+would have produced, trading a possible over-join for safety. The
+1-moment count difference (37 -> 36) is not attributable to D-199/D-200
+code (neither module touches take/candidate/moment eligibility) and is
+consistent with previously-documented run-to-run stochastic variance in
+upstream attempt-reconstruction/hybrid-LLM stages across this RAW series
+(D-097.x).
+
+**No regression against the required invariants**: zero whole-source
+collapse, zero cross-source groups, zero cross-region merges
+(`cross_region_group_count: 0`), zero false `PREASSEMBLED_FINAL_SEQUENCE`
+(`preassembled_support_too_thin_count: 0`), `CLEAN_DELIVERY_SEQUENCE`
+still **STILL_NOT_OBSERVED** (0, matching D-197's own known reachability
+finding, not newly caused). `RETRY_SERIES_OBSERVED: true`,
+`BLOOPER_SERIES_OBSERVED: true` (5 blooper series) -- same target shapes
+as D-198.
+
+## 7. Moment role distribution (this run)
+
+`CLEAN_AUDIENCE_DELIVERY: 3`, `CORRECTION: 9`, `NEW_AUDIENCE_BEAT: 2`,
+`POST_TAKE_RESET: 22`. `region_source_mapping`: `gynecologist_candidate_count:
+5`, `pimples_candidate_count: 3`, `cross_region_group_count: 0` -- topic
+regions remain cleanly separated, consistent with D-196/D-198.
+
+## 8. Downstream immutability
+
+`Verify active-path identity` (the CODE EXISTS != VIDEO USED IT check)
+and `Verify Video00 architecture` both **passed** on this run. Combined
+with the offline-proven contract (D-199/D-200 test suites: both flags off
+is byte-identical; flag-on changes only Language/P1 diagnostics; selected
+clip IDs identical across flag states), Family Formation, BestTake,
+D-191, Ordering, Boundary, Pacing, and Renderer are confirmed unaffected.
+`earlier_source_redundancy_status` remains `NOT_EVALUATED` -- no P2 code
+ran.
+
+## 9. Bilingual / Spanish real-media note
+
+The canonical Language Spine constructed successfully end-to-end on this
+real Spanish-heavy source (623 real words, 58 phrases, 40 utterances, 20
+attempts, 20 propositions, 19 relations) and was fully consumed by P1
+(100% coverage). This is real, positive Spanish real-media evidence for
+construction and consumption. It is explicitly **not** claimed as
+English/Spanish real-media parity -- that requires the separate future
+qualification (one English RAW, one Spanish RAW, plus a code-switching
+fixture/RAW) named in D-199, not run here.
+
+**BILINGUAL REAL-MEDIA PARITY: NOT_YET_QUALIFIED.**
+
+## 10. D-200 VERDICT
+
+**C. LIVE LANGUAGE-SPINE CONSTRUCTS BUT DEGRADES P1 STRUCTURAL
+UNDERSTANDING.** Construction and P1 consumption are unambiguous
+successes (100% real coverage, zero fallback, zero construction errors,
+zero additional ASR passes, zero authority violation, zero false-final).
+But the canonical relation evidence disagrees with D-157 on 17 of 19
+edges where both exist (Section 5), and the safe, unchanged
+conflict-abstention/D-197-grouping contract converts that disagreement
+into measurable over-fragmentation this run's own D-198 auditor flags
+(`LOCAL_GROUPING_BOUNDED_BUT_OVER_FRAGMENTED`, not `REAL_MEDIA_PROVEN`).
+This is not a crash, not a false-final, not a whole-source collapse, and
+not an authority violation -- but per this task's own explicit "do not
+call any difference automatically an improvement" instruction, a real,
+disclosed degradation in P1's structural usefulness cannot be called
+`A. REAL_MEDIA_PROVEN`.
+
+## 11. Canonical P1 status
+
+**LIVE_LANGUAGE_SPINE_CONSTRUCTION_REAL_MEDIA_PROVEN +
+LIVE_LANGUAGE_SPINE_P1_CONSUMPTION_REAL_MEDIA_PROVEN +
+LOCAL_GROUP_FORMATION_REAL_MEDIA_REGRESSED_TO_OVER_FRAGMENTED
+(escalation B, Section 5, open).** Still NOT an authority. D-198's own
+`LOCAL_GROUPING_REAL_MEDIA_PROVEN` status for this exact source is
+superseded by this run's `LOCAL_GROUPING_BOUNDED_BUT_OVER_FRAGMENTED`
+finding until escalation B is resolved.
+
+## 12. P2 / Overlap / Pacing status
+
+P2: still NOT AUTHORIZED, nothing implemented. Overlap/Pacing (D-129):
+untouched, downstream.
+
+## 13. Canonical roadmap decision
+
+Per the directive's own decision tree, verdict C requires isolating the
+regression before any next-gate proposal -- **D-201 (P2 Whole-Video
+Editorial Reasoning) is NOT proposed as the next gate.** The smallest
+next investigation is a forensic root-cause of escalation B (Section 5):
+why the D-169 canonical Language relation classifier and the D-157
+Watch+Listen relation classifier disagree on 17 of 19 real edges on this
+source -- offline forensic analysis of the already-fetched conflict
+examples (Section 5), no RAW required. NOT authorized or started by this
+entry.
+
+## 14. Confirmations
+
+Exactly ONE RAW dispatched (`34460889768`). No second RAW. No
+post-result `cutsell_worker` patch (all code changes -- the pre-RAW
+wiring fix -- were committed and offline-proven BEFORE dispatch,
+per Section 1). No threshold tuning, no phrase dictionaries. No P1
+authority granted. No P2 implemented. D-197 grouping rules unchanged
+(verified: full 71-test suite green, unmodified). No Family/BestTake/
+D-191/Ordering/Boundary/Pacing/Renderer change (Section 8). No overlap/
+Pacing change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- escalation B, the D-157-
+vs-canonical relation disagreement and its effect on P1 grouping shape,
+is a Product Owner-scoped decision on how much of a blocker this
+represents before any further Language-Spine or P2 investment; this
+entry does not resolve it).
