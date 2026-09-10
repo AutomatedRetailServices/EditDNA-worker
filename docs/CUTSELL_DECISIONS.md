@@ -36086,3 +36086,244 @@ list correction, item 1).
 D-196 -- the one real-media RAW above -- remains a Product Owner
 decision; D-196 is NOT implemented or launched automatically by this
 entry).
+
+# D-196: P1 EDITORIAL MOMENT & SEQUENCE UNDERSTANDING -- VIDEO00 --
+REAL-MEDIA DIAGNOSTIC QUALIFICATION (POST D-195)
+
+Post D-195, Product Owner authorization: exactly ONE canonical Video00
+RAW with `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1` and
+NO P1 authority flag, to observe real P1 moment/sequence construction
+against real `WatchListenUnderstanding` evidence for the first time.
+P1 diagnostics only -- zero P1 authority, zero P2, one RAW, no
+post-result patch, no provider/model policy change, no BestTake/
+Family/Boundary/Pacing change.
+
+## 1. Pre-RAW observability repair (authorized exception)
+
+D-195's live wiring only serialized the AGGREGATE P1 run summary into
+`draft.diagnostics["editorial_moment_sequence"]`, not per-moment/
+per-sequence rows, which cannot satisfy D-196's real-media reporting
+requirement. The Product Owner explicitly authorized a narrow,
+observability-only serialization exception (no change to moment/
+sequence construction, classification, grouping, confidence, conflict
+flags, or any downstream authority):
+
+- `editorial_moment_diagnostics`/`editorial_sequence_diagnostics`
+  (D-194, already-existing pure projection functions) extended with
+  already-computed dataclass fields only: moments gained
+  `source_asset_id`, `attempt_ids`, `proposition_candidate_ids`,
+  `provenance`; sequences gained `source_asset_id`, `moment_ids`,
+  `provenance`. No new computation, no transcript, no child-object
+  dump -- IDs only.
+- `cutsell_worker/pipeline.py`'s existing D-195 diagnostic block now
+  also emits flattened `moments`/`sequences` arrays (built from the
+  same already-computed `EditorialMomentUnderstanding` objects via the
+  existing `editorial_moment_understanding_diagnostics` helper) beside
+  the unchanged aggregate. Flag OFF: unchanged `{"status": "disabled"}`.
+- Offline-proven before dispatch: flag-off/on winner/family/authority/
+  Boundary/Pacing/render parity; real fixture serializes >=1 moment row
+  and >=1 sequence row with the full required field sets; no
+  transcript; deterministic (byte-identical across two calls);
+  missing-P1 fails open; `compileall` clean; targeted D-194/D-195
+  regressions pass with two pre-existing test bugs fixed (`test_05`
+  needed a real `LanguageAttempt` on BOTH spans, not one;
+  `test_28_preassembled_final_sequence` needed `RELATION_COMPLEMENTARY`
+  instead of `RELATION_NEW_AUDIENCE_BEAT`, which D-194's own classifier
+  correctly reroutes to `MOMENT_ROLE_NEW_AUDIENCE_BEAT`).
+- Committed as `4be82db` before RAW dispatch (workflow plumbing: new
+  `editorial_moment_sequence_diagnostics_enabled` input, env overlay,
+  mask-exclusion entry, new "D-196 P1 editorial moment sequence compact
+  diagnostics" step, artifact-upload path).
+
+## 2. RAW executed
+
+Video00 RAW `34421871319` (job `102698853546`) on
+`feature/runpod-pod-on-demand` @ `4be82db`, source
+`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`,
+`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1`, all other
+overlays OFF/default. Exactly one RAW dispatched, as authorized.
+
+## 3. P1 run summary (real)
+
+`p1_editorial_moment_status: "evaluated"`. One source
+(`src_4b9af08a438a47eb6be0`). 36 real `EditorialMoment` objects, 1 real
+`EditorialSequenceHypothesis`, spanning 8.37s-361.51s of the ~362s
+source (essentially the full RAW). `p1_missing_language_count: 1`
+(the source relied 100% on the D-168 Language-Spine fallback adapter --
+zero real `LanguageAttempt`/`PropositionCandidate` coverage anywhere in
+this source). `p1_missing_relation_count: 1` (only the first moment,
+which by definition has no predecessor, lacked a real D-157 relation
+hypothesis -- 35/36 moments DID receive real relation evidence).
+`p1_missing_behavior_count: 0`.
+
+## 4. Moment-role distribution (real)
+
+`POST_TAKE_RESET: 26`, `CONTINUATION: 6`, `ABANDONED_ATTEMPT: 2`,
+`CLEAN_AUDIENCE_DELIVERY: 1`, `NEW_AUDIENCE_BEAT: 1`. Zero
+`PRE_TAKE_SETUP`/`FALSE_START`/`RETRY`/`CORRECTION`/`BREAKING_
+CHARACTER`/`UNCERTAIN` this run. `VISUAL_CORROBORATION`: 0/36.
+`PROSODIC_CORROBORATION`: 0/36 -- expected and honest, since only the
+P1 flag was set (D-187/D-190 Prosodic diagnostics were correctly not
+enabled this run, per scope).
+
+## 5. Conflict handling (real)
+
+2 real `CONTINUATION_STATE_VS_RESET_OR_BREAK_BEHAVIOR_EVIDENCE`
+conflicts. Both correctly retained their structural role and
+downgraded confidence to `MIXED` rather than silently resolving --
+D-194's conflict-flag firewall held on real evidence.
+
+## 6. Controls
+
+- Clean-audience-delivery: exactly 1 moment, structure-only/
+  first-position basis, no prosody/visual involvement -- plausible but
+  thin evidence.
+- Retry-series / blooper-series: none constructed this run (no `RETRY`/
+  `FALSE_START` moments emitted at all).
+- Correction/continuation: 0 `CORRECTION`, 6 `CONTINUATION` -- real,
+  non-zero, structurally distinct from `POST_TAKE_RESET`.
+- Clean-delivery-sequence: not the sequence kind assigned (see below).
+- Abandoned-attempt: 2 real moments, both distinct from
+  `POST_TAKE_RESET`.
+
+## 7. Preassembled-final-sequence audit
+
+The single real sequence was NOT classified
+`PREASSEMBLED_FINAL_SEQUENCE` (mixed role composition -- the 8-point
+D-194 conjunction correctly did not fire on genuinely mixed real
+evidence). `false_positive_final_sequence_count: 0` (required and
+met -- zero `PREASSEMBLED_FINAL_SEQUENCE` rows exist at all, so none
+could be a false positive).
+
+## 8. Chronology / quality-vs-structure firewalls
+
+No chronology-firewall violation observed (all moment/sequence spans
+non-decreasing in source time; `whole_video_p1_map` is monotonic
+8.37s->361.51s). No quality-vs-structure firewall violation observed
+(role assignment tracked structural provenance, not delivery-quality
+scoring, throughout).
+
+## 9. Source Order / Grouping Audit -- FINDING
+
+**LOCAL_GROUPING_TOO_BROAD.** The one real sequence spans 353.14s of
+the ~362s source -- from inside the `gynecologist` region (~82-112s)
+through the topically unrelated `pimples` region (~192-223s) and
+beyond, i.e. essentially the entire RAW collapsed into a single
+sequence hypothesis. This is exactly the directive's own named failure
+mode ("If P1 creates one sequence spanning unrelated distant regions of
+Video00: DO NOT call this successful P1 understanding... report
+LOCAL_GROUPING_TOO_BROAD"). Root cause (already known from D-195):
+`build_editorial_sequences_for_moments` defaults to ONE whole-source
+local window whenever no `local_groups` are supplied by the caller, and
+the live pipeline path does not currently supply real local groups.
+This is an integration/grouping gap for a NEXT phase -- it is NOT
+patched by this entry, per the directive's explicit "do not patch it
+after the RAW" instruction.
+
+## 10. Cross-reference corroboration
+
+The D-192 compact-diagnostics step on the same RAW confirmed 8 real
+BestTake families, `applied_families: []`,
+`bounded_finalist_authority_run_summary: {"status": "disabled"}` --
+zero winner/authority mutation. The Pimples family's real finalist pair
+(`clip_2bab2e89a4d2505cc07a` winner /
+`clip_65f9107c53bb03fe9566`) matches D-190/D-192's own prior
+established finding, and both clips appear as real P1 moments
+(classified `POST_TAKE_RESET`) -- P1 operates over the same real
+candidate-identity space as the rest of the pipeline.
+
+## 11. Language Spine / Relation evidence reality
+
+100% fallback-adapter reliance for Language-Spine evidence on this
+source (0 real `LanguageAttempt`/`PropositionCandidate` objects
+constructed source-wide, consistent with D-195's own forensic finding
+that these collections are not yet built in the live pipeline path).
+97% (35/36) real D-157 relation-evidence coverage -- a genuine, strong
+corroboration signal for the relation side even though the language
+side is 100% approximation.
+
+## 12. P1 capability honesty
+
+P1 capability remains **PARTIAL**, not upgraded to `AVAILABLE`, purely
+because moments were emitted this run -- per the directive's explicit
+instruction not to upgrade capability status on emission alone. The
+Language-Spine fallback and the grouping default both remain honestly
+reported gaps.
+
+## 13. P1-vs-P2 firewall / no-commercial-content confirmation
+
+No P2 code exists or ran. No commercial/sales-funnel content or
+authority was touched, read, or influenced by P1 this run.
+
+## 14. Immutability confirmation
+
+Winner (`applied_families: []`), Family Formation, D-191/D-192 bounded
+finalist authority (`status: "disabled"`), Boundary, Pacing, and
+Renderer were all unchanged and independently confirmed unaffected via
+direct cross-reference against the same RAW's own D-192 diagnostics
+step output. Zero downstream mutation confirmed.
+
+## 15. Whole-video P1 map
+
+36 chronological moment rows (source_start/source_end/moment_role/
+confidence only, no transcript) spanning 8.37s-361.51s, cross-checked
+against the `GYNECOLOGIST_SPAN`/pimples region markers already used by
+D-190/D-192's own region-source-mapping helpers.
+
+## 16. Video00 target-shape result
+
+Closest to **(C) a mixed recording-process/continuation shape with
+sparse clean-delivery anchors**, not a clean retry-series, not a
+blooper-series, and not a genuinely-supported preassembled-final
+sequence. Consistent with the honest `POST_TAKE_RESET`-dominant role
+distribution above.
+
+## 17. Cut.ai-parity relevance
+
+None claimed. P1 has zero authority this run; no F1/selection change is
+possible or occurred. Parity metrics (Selection/Boundary/overall
+physical Level-1) are unchanged from D-192's own last-established
+values on this RAW -- P1 did not and could not move them.
+
+## 18. D-196 VERDICT
+
+**C. PARTIALLY PROVEN -- LIVE EVIDENCE / GROUPING GAPS.** Real
+`EditorialMoment`/`EditorialSequenceHypothesis` objects are genuinely
+constructed from live Video00 evidence (real relation coverage 97%,
+real conflict handling, real role distribution, zero false positives),
+but two material limitations block calling this a clean pass: (a)
+`LOCAL_GROUPING_TOO_BROAD` -- the sole sequence spans nearly the whole
+RAW across topically unrelated regions, a genuine integration/grouping
+gap; (b) 100% Language-Spine fallback-adapter reliance -- zero real
+`LanguageAttempt`/`PropositionCandidate` evidence anywhere in this
+source. Both qualify under Verdict C's own criteria ("moments are
+constructed; but missing Language/Relation evidence or overly broad
+grouping materially limits interpretation").
+
+## 19. Canonical P1 status
+
+**PHASE_A_OFFLINE_PROVEN + PHASE_B_LIVE_DIAGNOSTIC_INTEGRATION_
+OFFLINE_PROVEN + REAL_MEDIA_PARTIALLY_QUALIFIED (grouping + Language-
+Spine gaps open).** Still NOT an authority. Still NOT provider-backed
+beyond the evidence it already borrows from D-157/D-168.
+
+## 20. Exact next gate
+
+Local-grouping repair (supplying real `local_groups` to
+`build_editorial_sequences_for_moments` instead of the whole-source
+default) is the next proven root cause, and remains a Product Owner
+scope decision (D-197 or equivalent) -- NOT authorized or implemented
+by this entry.
+
+## 21. Confirmations
+
+Exactly one RAW dispatched (`34421871319`). No second RAW. No
+post-result patch to `cutsell_worker` after the RAW (the only code
+change this task made was the pre-RAW observability exception in
+Section 1, committed and offline-proven BEFORE dispatch). No P1
+authority granted. No P2 implemented. No BestTake/Family/Boundary/
+Pacing change. No provider/model policy change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- whether to authorize
+D-197 local-grouping repair, and any P1-authority scope, remains a
+Product Owner decision; this entry implements neither).
