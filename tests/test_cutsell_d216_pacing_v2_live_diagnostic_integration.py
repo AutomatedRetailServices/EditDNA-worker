@@ -639,9 +639,14 @@ class TestStructuralAudits:
         assert "decide_transition(" in MODULE_SOURCE  # it IS called
 
     def test_wiring_call_is_flag_gated(self):
+        # D-217 replaced the direct D-216 call with `build_pacing_v2_live_
+        # diagnostics_with_real_evidence` (pacing_v2_evidence_adapter.py),
+        # which itself calls this module's own unmodified function
+        # underneath -- both names share this prefix, so the check accepts
+        # either, still requiring the call inside the flag-gated block.
         source = (REPO_ROOT / "cutsell_worker" / "universal_clean_cut.py").read_text()
         idx = source.index("if pacing_v2_diagnostics_enabled():")
-        call_idx = source.index("build_pacing_v2_live_diagnostics(", idx)
+        call_idx = source.index("build_pacing_v2_live_diagnostics", idx)
         assert call_idx > idx  # the real call site is textually inside the flag-gated block
         # And the flag check precedes the call with nothing but the block's
         # own body between them (no other top-level `if` reopens scope).

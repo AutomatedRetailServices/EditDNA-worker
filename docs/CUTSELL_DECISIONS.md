@@ -45133,3 +45133,343 @@ Product Owner coordination territory, per this entry's own "Then STOP"
 instruction.
 
 ---
+## D-217: Pacing V2 Real Evidence-Source Wiring -- OFFLINE / DIAGNOSTIC ONLY (post D-216)
+
+**Status: VERDICT A -- PACING V2 REAL EVIDENCE-SOURCE WIRING OFFLINE
+PROVEN. READY FOR REAL-MEDIA DIAGNOSTIC QUALIFICATION. No live J_CUT/
+L_CUT/MICRO_AUDIO_OVERLAP authority. No RAW, no provider, no new timing
+constant, no Boundary/Ordering/Renderer/Family/BestTake file touched.**
+
+### 1. Scope discipline
+Verified at start: branch `feature/runpod-pod-on-demand`, HEAD `fb868e6`,
+clean tree. Files changed: new `cutsell_worker/pacing_v2_evidence_
+adapter.py`, `cutsell_worker/universal_clean_cut.py` (one call-site swap,
+additive), new `tests/test_cutsell_d217_pacing_v2_real_evidence_source_
+wiring.py` (48 tests), one D-216 test assertion updated (see item 16),
+`docs/CUTSELL_DECISIONS.md`. No Boundary/Ordering/Renderer/Family/
+BestTake file touched. `pacing_v2_live_diagnostics_integration.py`
+(D-216) and `pacing_transition_decision.py` (D-215) are BOTH byte-
+unmodified by this task.
+
+### 2. Relationship evidence source
+`draft.diagnostics["editorial_moment_sequence"]["moments"]` -- the
+ALREADY-SERIALIZED, flattened, per-source-ordered list D-198/D-199
+already attach when the SEPARATE `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_
+DIAGNOSTICS_ENABLED` flag is on for that run (this task never turns that
+flag on itself). The underlying `EditorialMomentUnderstanding` Python
+objects `pipeline.py::build_flow_b_draft` builds are LOCAL to that call
+and do not survive to this later, post-Boundary Pacing seam -- only their
+JSON-safe diagnostics projection does, so that projection (never a live
+object) is the one input this task reads. `relation_to_predecessor`
+(D-198's own "SINGLE SOURCE OF TRUTH", D-197's grouper's own already-
+resolved value) is reused verbatim, never re-derived.
+
+### 3. Relationship pair-mapping contract
+A selected `DraftClip` maps to AT MOST ONE moment row via `clip.
+attempt_id in row["attempt_ids"]` (never by time proximity). A pair's
+hint is reused ONLY when: both clips resolve to EXACTLY ONE row (0 or
+>1 matches is UNRESOLVED, distinguished as `CLIP_NOT_IDENTIFIED`/
+`AMBIGUOUS_IDENTITY_MATCH`, never guessed), both share the pair's own
+`source_asset_id` (`CROSS_SOURCE_PAIR` otherwise), and `right`'s row is
+literally the NEXT row after `left`'s row in P1's own per-source local-
+sequence order (`NOT_ADJACENT_IN_P1_LOCAL_SEQUENCE` otherwise -- a
+moment removed upstream between them is honestly reported, never
+silently bridged). Only `RETRY`/`CORRECTION`/`CONTINUATION` map to a
+`pacing_transition_decision` hint (`NO_RELATION_RESOLVED` otherwise);
+`COMPLEMENTARY`/`NEW_AUDIENCE_BEAT`/`DISTINCT_PROPOSITION`/`UNCERTAIN`/
+`None` all resolve to no restriction, matching D-215's own "no relation
+asserted" default for a plain `None` hint.
+
+### 4. Relationship coverage
+Real, but bounded by two upstream facts, both honestly reported rather
+than worked around: (a) the SEPARATE P1 diagnostics flag must be on for
+the run; (b) `attempt_id` must be populated on the selected `DraftClip`
+(carried through from `CandidateTake` per D-076 -- populated on the live
+construction path, but not guaranteed on every historical/test
+construction site). Zero coverage is a correct, reported `NO_
+UNDERSTANDING_SUPPLIED`/`CLIP_NOT_IDENTIFIED` outcome, never an error.
+
+### 5. Prosodic evidence source
+`draft.diagnostics["take_judge_groups"][*]["prosodic_pipeline_candidate_
+evidence"]` -- the ALREADY-COMPUTED, per-candidate D-187 diagnostics dict
+D-189/D-190 already attach to each finalist-arbitration family row, when
+the SEPARATE `CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED` flag
+(and the bounded finalist arbiter itself) are on AND that family was
+D-184-eligible (2-3 candidates, a decisive terminal state). This task
+never calls `analyze_prosodic_delivery` and never decodes audio.
+
+### 6. Prosodic mapping contract
+Direct `clip_id` lookup across every `take_judge_groups` row's own
+`prosodic_pipeline_candidate_evidence` dict. `_ProsodicEdgeEvidence`
+(new, tiny, `__slots__`-only) exposes ONLY the two fields D-215's own
+`_prosody_supports_overlap` reads via `getattr` (`restart_or_
+interruption_state`, `vocal_continuity_state`), copied verbatim from the
+already-computed `prosodic_delivery_diagnostics()` dict's own
+`prosodic_restart_state`/`prosodic_continuity_state` keys -- never a
+BestTake score, never a winner rank, never an emotion inference.
+
+### 7. Prosodic coverage
+HONESTLY PARTIAL by construction, exactly as D-216 predicted and this
+task's own directive anticipated: only a candidate whose family
+underwent finalist arbitration, AND whose `clip_id` survived into the
+final selected sequence (the winner, typically), ever has an entry.
+Every other selected clip's status is `UNAVAILABLE`, reported per-clip
+(`left_prosodic_status`/`right_prosodic_status`) and per-pair
+(`prosodic_mapping_status`: `BOTH_AVAILABLE`/`PARTIAL`/`UNAVAILABLE`),
+never invented. This coverage gap does NOT block this task's own verdict
+(see item 25's "success question") because word/timing evidence and the
+relationship hint both work independently of it.
+
+### 8. Right-audio-lead derivation
+`available_silent_head_sec(clip)` = `max(0, min(word.start for word in
+clip.words) - clip.start)` -- the room, ALREADY INSIDE the clip's own
+selected span, between the visual cut point and its earliest real spoken
+word. `None` (never `0.0`) when the clip has no word timing at all.
+
+### 9. Left-audio-tail derivation
+`available_silent_tail_sec(clip)` = `max(0, clip.end - max(word.end for
+word in clip.words))` -- symmetric geometry, same firewall.
+
+### 10. Micro-overlap derivation
+`min(available_silent_head_sec(right), available_silent_tail_sec(left))`
+ONLY when both are real positive numbers; `None` otherwise (either side
+unknown, or either side offers zero room). No new geometry model -- this
+is the same window `pacing_transition_decision.py`'s own `_double_
+speech_window` already treats as the safe overlap shape.
+
+### 11. Timing-source contract
+`candidate_timing_for_pair(left, right)` is the ONE new derivation
+function; `TIMING_SOURCE_WORD_GEOMETRY = "WORD_TIMING_GEOMETRY_WITHIN_
+SELECTED_CLIP_BOUNDS"` names it in every diagnostics row. Status ladder:
+`AVAILABLE` (at least one side offers real positive room), `NO_SAFE_
+WINDOW` (both sides checked, both offer exactly zero), `UNKNOWN_MISSING_
+WORD_TIMING` (no word timing on either relevant side at all) -- the
+WORD-TIMING FIREWALL this task requires: missing timing is UNKNOWN,
+never asserted safe.
+
+### 12. No-magic-duration result
+Confirmed by structural test (`test_no_magic_duration_constants`): no
+`J_CUT_MS`/`L_CUT_MS`/`OVERLAP_MS`/`IDEAL_GAP_MS` or any other named
+duration constant exists in the new module's own code. The ENTIRE
+derived available window (never a fraction, never a fixed cap) is always
+offered as the candidate; `pacing_transition_decision.decide_transition`
+(D-215, unmodified) remains the one authority that re-validates and
+decides whether to actually use it.
+
+### 13. Source-availability firewall
+Structural, not a runtime check: both derived bounds are, by
+construction, `<= (clip.end - clip.start)` -- they read only `clip.
+words`/`clip.start`/`clip.end`, values already inside the clip's own
+already-Boundary-approved span. No source re-probe, no audio decode, no
+extraction outside source bounds is possible from this derivation.
+
+### 14. Word firewall
+Enforced by construction (item 8/9's own definition: room is measured
+strictly outside the nearest real word on the relevant side) AND
+independently re-validated downstream by D-215's own unmodified `_word_
+safety`/`_word_window_overlap`. A genuine double-speech BLOCK is
+therefore structurally impossible from THIS module's own derived
+candidate (proven, not merely asserted, by `overlap_sec = min(lead,
+tail)` always landing inside both sides' own measured-safe windows) --
+documented explicitly in the module's own docstring as a "safe by
+construction" property, and exercised by `test_blocked_overlap_fixture_
+real_double_speech`, which shows the correct behavior for the adjacent,
+distinct case: BOTH sides offering zero room collapses to `NO_SAFE_
+WINDOW` -> `HARD_CUT`, zero firewall violations either way.
+
+### 15. Meaning firewall
+NOT re-implemented here -- `decide_transition` already reuses
+`semantic_claims.classify_claim` (D-038) verbatim on whatever window it
+is offered (structurally confirmed: `classify_claim`/`CRITICAL =` never
+appear in this module). Duplicating that check here would be the "new
+transition classifier" this task's own "NO DUPLICATE SEMANTIC ENGINE"
+rule forbids.
+
+### 16. Missing-word behavior
+`available_silent_head_sec`/`available_silent_tail_sec` both return
+`None` (never `0.0`) for a clip with `words=()` -- `candidate_timing_
+for_pair` reports `UNKNOWN_MISSING_WORD_TIMING` in that case, and the
+`(lead, tail)` pair handed to `decide_transition` becomes `(None, None)`
+-- the SAME "no candidate offered" fallback path D-215/D-216 already
+proved safe. One pre-existing D-216 test assertion (`test_wiring_call_
+is_flag_gated`) needed updating for the new call-site function name
+(`build_pacing_v2_live_diagnostics_with_real_evidence` replaces the
+direct `build_pacing_v2_live_diagnostics` call textually, though the
+underlying function is still called, unmodified, one level down) --
+D-216's own 59 tests all still pass unchanged otherwise.
+
+### 17. Missing-Prosodic behavior
+`prosodic_evidence_for_clip` returns `{"evidence": None, "status":
+UNAVAILABLE}` for any clip_id absent from every `take_judge_groups`
+row's own candidate-evidence dict -- `left_prosody`/`right_prosody`
+simply stay `None` at the `decide_transition` call, matching its own
+pre-existing "Prosodic is always optional" contract (D-187/D-188).
+
+### 18. Missing-relation behavior
+Every one of `NO_UNDERSTANDING_SUPPLIED`/`CLIP_NOT_IDENTIFIED`/
+`AMBIGUOUS_IDENTITY_MATCH`/`NOT_ADJACENT_IN_P1_LOCAL_SEQUENCE`/`NO_
+RELATION_RESOLVED`/`CROSS_SOURCE_PAIR` resolves `relationship_hint` to
+`None` -- the same "no relation asserted" default D-215 already treats
+as no restriction, never a fabricated CONTINUATION/CORRECTION/RETRY.
+
+### 19. Same-source behavior
+Proven (`test_16_same_source_behavior`, `test_correction/retry_fixture_
+end_to_end`): a real RETRY/CORRECTION relation on a same-source adjacent
+pair is reused and correctly forces `decide_transition`'s own hard gate
+(`CONFLICTED`+`HARD_CUT` for RETRY, `SAFE_FALLBACK` for CORRECTION).
+
+### 20. Multi-source behavior
+Proven (`test_17_multi_source_behavior_cross_source_pair_is_unknown`): a
+cross-source pair NEVER reuses a relation even if one exists on either
+side's own source-local sequence -- `CROSS_SOURCE_PAIR`, hint `None`.
+
+### 21. Source identity
+`left_source_asset_id`/`right_source_asset_id`/`left_clip_id`/`right_
+clip_id` are preserved verbatim in every diagnostics row (D-216's own
+existing fields, untouched) and confirmed distinct for a genuine
+multi-source pair (test 18).
+
+### 22. Candidate timing diagnostics
+Every transition row (when the flag is on) carries `available_left_
+silent_tail`, `available_right_silent_head`, `candidate_audio_lead`,
+`candidate_audio_tail`, `candidate_micro_overlap`, `candidate_timing_
+status`, `candidate_timing_source` -- bounded, no transcript, no
+waveform.
+
+### 23. Relationship diagnostics
+Every row also carries `relationship_hint`, `relationship_source`
+(`P1_LOCAL_SEQUENCE_MOMENT_RELATION`/`NONE`), `relationship_mapping_
+status` (the six-value ladder from item 3).
+
+### 24. Prosodic diagnostics
+Every row also carries `left_prosodic_status`/`right_prosodic_status`
+(`AVAILABLE`/`UNAVAILABLE`) and `prosodic_mapping_status` (`BOTH_
+AVAILABLE`/`PARTIAL`/`UNAVAILABLE`).
+
+### 25. Run summary
+Extends D-216's own `run_summary` dict (additive keys, nothing removed)
+with: `relationship_hint_available_count`/`_unknown_count`, `prosodic_
+left_available_count`/`_right_available_count`/`_pair_available_count`/
+`_pair_partial_count`/`_pair_unavailable_count`, `candidate_j_lead_
+available_count`/`_l_tail_available_count`/`_micro_overlap_available_
+count`/`_timing_unavailable_count`, `advanced_mode_eligible_count`,
+`j_cut_eligible_count`/`l_cut_eligible_count`/`micro_overlap_eligible_
+count`. No master score.
+
+### 26-29. Fixtures
+J-eligibility, L-eligibility, micro-overlap-eligibility, and blocked-
+overlap fixtures all pass end-to-end through the real adapter + real
+(unmodified) `decide_transition`: right-leading-silence-only ->
+`J_CUT`; left-trailing-silence-only -> `L_CUT`; both sides safe ->
+`MICRO_AUDIO_OVERLAP`; both sides offer zero room -> `HARD_CUT`, zero
+firewall violations.
+
+### 30. Correction/retry/continuation fixtures
+All three pass end-to-end (items 19-20 above); CONTINUATION (and every
+non-hard-gate relation, including `None`) never restricts an otherwise-
+safe advanced-mode result.
+
+### 31. Deterministic result
+`test_21_deterministic_result`: two identical calls produce an
+identical dict, including every new evidence field.
+
+### 32-33. Boundary/Ordering immutability
+`test_19_no_boundary_mutation` proves `left.start/.end`/`right.start/
+.end` are byte-identical before and after a full evidence-derivation +
+decision call. `test_20_no_ordering_authority_referenced` confirms this
+module never imports any Ordering module/function
+(`ordering_realization_plan`/`ordering_composer_adapter`/`compose_
+selected`/`safe_compose_order`).
+
+### 34. D-142/RenderSegment/renderer immutability
+`test_25_d142_live_unchanged_structurally` confirms `plan_dialogue_
+pacing_transitions`/`apply_dialogue_pacing_transition_pass` are never
+redefined here (only D-142's own unmodified function, reused
+transitively via `decide_transition`, D-215's own established pattern).
+`test_24_renderer_live_unchanged_structurally` confirms `RenderSegment`/
+`render_plan`/`render` are never imported. Pipeline-level:
+`test_flag_on_immutability_selected_and_edges_unchanged` and `test_
+flag_on_d142_diagnostics_unchanged_vs_off` prove it end-to-end through
+the real `universal_clean_cut.py` seam (D-097.C precedent pattern).
+
+### 35. Advanced-mode execution firewall
+`test_23_advanced_recommendation_is_diagnostic_only`: an advanced-mode
+`selected_mode` in the D-217 diagnostics row never becomes the LIVE
+mode -- `live_mode` stays an observability-only field, D-142's own
+`pacing_stage` (set earlier, untouched) remains the sole record of what
+actually executed (`HARD_CUT`/`TIGHT_CUT` only).
+
+### 36. No ASR/provider/recompute
+Structural (`test_no_new_word_or_asr_recompute`, `test_no_provider_
+call`): no `asr`/`language_spine` import, no `analyze_prosodic_
+delivery` call, no `requests`/`urllib`/`http.client`/`OPENAI_API_KEY`/
+`genai`/`GenerativeModel` reference anywhere in the new module.
+
+### 37. Regression results
+D-217 (48) + D-216 (59) + D-215 (46) + D-214 (44) + D-142 (26) +
+Boundary (D-116/D-177/D-097.C/D-212) + Ordering (D-206/D-207/D-208) +
+Prosodic (D-187/D-188) + D-066: **592/592 passed.** P1/Language
+regressions (D-166/D-168/D-169/D-171/D-194/D-195/D-199/D-200.4B):
+**455/455 passed.** `compileall` clean. Full offline suite
+(`python -m pytest tests/ -q --ignore=tests/test_semantic_stitch.py`)
+run once; same pre-existing unrelated failure set as every prior turn
+this window (Modal-hybrid-parity/hybrid-story-guard), zero new genuine
+failures.
+
+### 38. New failures
+**ZERO genuine new failures.**
+
+### 39. D-217 verdict
+**A. PACING V2 REAL EVIDENCE-SOURCE WIRING OFFLINE PROVEN -- READY FOR
+REAL-MEDIA DIAGNOSTIC QUALIFICATION.**
+
+### 40. Canonical Pacing status
+`PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_PROVEN` +
+`PACING_V2_TRANSITION_DECISION_FOUNDATION_OFFLINE_PROVEN` +
+`PACING_V2_LIVE_DIAGNOSTIC_INTEGRATION_OFFLINE_PROVEN` + `PACING_V2_
+REAL_EVIDENCE_SOURCE_WIRING_OFFLINE_PROVEN`.
+
+### 41. Exact D-218 gate (named, not implemented)
+**D-218 -- PACING V2 VIDEO00 REAL-MEDIA DIAGNOSTIC QUALIFICATION.**
+Exactly ONE Video00 RAW, enabling P1/Language/P2/Ordering diagnostics as
+needed plus `CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED=1`. Still NO live
+J/L/micro-overlap authority. Purpose: observe whether real Video00
+transitions produce HARD/TIGHT, KEEP_PAUSE, J/L/micro-overlap
+eligibility, or safe abstention -- no forced advanced-mode result. **Not
+implemented by this entry.**
+
+### 42. Live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the only live-executed modes,
+even after this task. Zero live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP
+authority introduced.
+
+### 43. Renderer status
+Unchanged from D-214 -- `render.py`/`render_plan.py` not touched by this
+task.
+
+### 44. App-roadmap status
+Boundary closed -> Pacing V2 forensic closed (D-213) -> renderer/timeline
+contract offline-proven (D-214) -> transition decision foundation
+offline-proven (D-215) -> live diagnostic integration wired default-off
+(D-216) -> real evidence-source wiring offline-proven (D-217) -> next:
+D-218 Video00 real-media diagnostic qualification (Product Owner
+authorization required; exactly ONE RAW) -> unseen-RAW generalization /
+Cut.ai parity -> production hardening -> TestFlight -> App Store.
+
+### 45. Confirmation
+NO RAW dispatched. NO provider called. NO live J/L/overlap authority
+introduced. NO new timing/duration constant. NO pipeline-stage reorder,
+no Boundary reopen, no Ordering change, no renderer redesign, no
+Family/BestTake change, no Commercial Moment, no Sales Funnel field. NO
+Boundary/Ordering/Renderer/Family/BestTake file touched. `pacing_v2_
+live_diagnostics_integration.py` (D-216) and `pacing_transition_
+decision.py` (D-215) are BOTH byte-unmodified. D-116, D-142, D-166,
+D-168, D-169, D-171, D-177, D-187, D-194, D-195, D-198, D-199,
+D-200.4B, D-206 through D-216 are all preserved, unmodified, unrewritten
+by this entry.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/C) -- authorizing D-218 (one
+Video00 RAW, paid compute) is Product Owner coordination territory, per
+this entry's own "Then STOP" instruction.
+
+---

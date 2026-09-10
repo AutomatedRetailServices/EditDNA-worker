@@ -73,10 +73,8 @@ from .realization_resolver import (
 from .resolver_mode import RESOLVER_MODE_AUTHORITATIVE, resolve_resolver_mode
 from .boundary_engine_pass import apply_post_freeze_boundary_pass
 from .dialogue_pacing_transition import apply_dialogue_pacing_transition_pass
-from .pacing_v2_live_diagnostics_integration import (
-    build_pacing_v2_live_diagnostics,
-    pacing_v2_diagnostics_enabled,
-)
+from .pacing_v2_live_diagnostics_integration import pacing_v2_diagnostics_enabled
+from .pacing_v2_evidence_adapter import build_pacing_v2_live_diagnostics_with_real_evidence
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -768,8 +766,21 @@ def process_universal_clean_cut_sources(
             # live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority: D-142's own
             # `pacing_stage` above already reflects the only mode ever
             # actually executed.
+            #
+            # D-217: real evidence-source wiring, additive to D-216, same
+            # flag. `build_pacing_v2_live_diagnostics_with_real_evidence`
+            # (pacing_v2_evidence_adapter.py) derives relationship-hint/
+            # Prosodic/candidate-timing evidence from what is ALREADY on
+            # `result.draft.diagnostics` (the SAME dict already threaded
+            # through as `boundary_diagnostics` -- "editorial_moment_
+            # sequence"/"take_judge_groups" keys, both no-op/absent unless
+            # their OWN separate flags were already on for this run, never
+            # turned on by this call) then calls D-216's own unmodified
+            # `build_pacing_v2_live_diagnostics` underneath -- still the
+            # one decision engine (D-215's `decide_transition`), still
+            # never executed live.
             if pacing_v2_diagnostics_enabled():
-                pacing_v2_diag = build_pacing_v2_live_diagnostics(
+                pacing_v2_diag = build_pacing_v2_live_diagnostics_with_real_evidence(
                     result.draft.selected,
                     dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
                     boundary_diagnostics=result.draft.diagnostics,
@@ -777,6 +788,8 @@ def process_universal_clean_cut_sources(
                         row.get("mode")
                         for row in (result.draft.diagnostics.get("dialogue_pacing_transition") or {}).get("transitions", ())
                     ),
+                    editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
+                    take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
                 )
                 result = replace(result, draft=replace(
                     result.draft, diagnostics={**result.draft.diagnostics, "pacing_v2": pacing_v2_diag},
