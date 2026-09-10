@@ -42833,3 +42833,375 @@ provider, still no Ordering authority) is the next Product Owner
 decision.
 
 **Then STOP. Do NOT launch D-209. Wait for Product Owner coordination.**
+
+
+# D-209: ORDERING VIDEO00 REAL-MEDIA DIAGNOSTIC QUALIFICATION (POST D-208,
+EXACTLY ONE RAW, DIAGNOSTIC ONLY, NO ORDERING AUTHORITY)
+
+## 1. Branch / HEAD
+
+`feature/runpod-pod-on-demand`. Verified before starting: HEAD `a004324`
+(matches expected), clean tree. Workflow-only bootstrap commit
+`513c1f1` (Section 3-4 below) preceded the one authorized RAW.
+
+## 2. RAW id
+
+GitHub Actions run `34508325003` ("CutSell Video00 Modal RAW", run
+#90), dispatched on `feature/runpod-pod-on-demand` head `513c1f1`.
+Source: `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`.
+Exactly ONE RAW dispatched -- no rerun, no second confirmation RAW.
+
+## 3. Pre-RAW observability check
+
+Existing engine diagnostics (D-208) already fully serialize everything
+Ordering needs (`diagnostics["ordering"]`, itself the merge of D-208's
+`ordering_live_diagnostics`/`ordering_live_diagnostics_run_summary`).
+Only workflow-level input/overlay/report plumbing was missing -- exactly
+the "minimal workflow-only plumbing is authorized" case. **Zero
+cutsell_worker files touched.**
+
+## 4. Flags
+
+`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1`,
+`CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`,
+`CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED=1`,
+`CUTSELL_ORDERING_DIAGNOSTICS_ENABLED=1`. No other experimental
+overlay. No `OpenAIComposerProvider` activation.
+
+## 5. Ordering capability status
+
+`AVAILABLE`. `p1_status: "evaluated"`, `p2_status: "evaluated"`,
+`p2_capability_status: "AVAILABLE"` -- both prerequisite layers
+genuinely ran and produced usable evidence; Ordering's own capability
+ladder correctly promoted to `AVAILABLE` rather than `PARTIAL`.
+
+## 6. Unit count / 7. input selected/frozen count / 8. output baseline
+count
+
+`ordering_unit_count = input_unit_count = output_unit_count = 25`.
+
+## 9. Dropped / added / duplicate count
+
+`dropped_count = 0`, `added_count = 0`, `duplicate_unit_id_count = 0`,
+`duplicate_baseline_id_count = 0`.
+
+## 10-11. Identity integrity / membership invariant
+
+`membership_invariant_result: "HELD"` -- the 25 selected realizations'
+`realization_id`s exactly equal the baseline plan's 25 `ordered_
+realization_ids`, no duplicates either side. Realization identity and
+source identity both preserved (`source_asset_ids: ["src_2a0fbb0cdf042
+020893f"]`, one source, matching Video00's own single-file nature).
+
+## 12-17. Relation counts
+
+`ordering_relation_count = 0`. `must_precede_count = 0`, `must_follow_
+count = 0`, `preserve_internal_order_count = 0`, `no_order_constraint_
+count = 0`, `conflicted_relation_count = 0`, `unknown_relation_count =
+0`. `relation_type_distribution = {}`, `relation_reason_distribution =
+{}`. Honestly: among the 25 realizations that actually SURVIVED to the
+frozen selection, none share a P1 local group with another surviving
+member, none carry a continuation/correction moment role among
+survivors, and no P2 supersession hypothesis has both sides among
+survivors -- exactly the outcome D-206's own docstring predicted ("most
+P1 candidates never survive to Freeze"). Zero relations is not a bug;
+it is an honest report of an editorially "clean" 25-clip real Video00
+selection with no surviving retry/continuation/correction/supersession
+pairs.
+
+## 18-19. P1 sequence constraint / violations
+
+`p1_sequence_constraint_count = 0`, `p1_sequence_violation_count = 0`.
+
+## 20-21. Continuation constraint / violations
+
+`continuation_constraint_count = 0`, `continuation_violation_count =
+0`.
+
+## 22-23. Correction constraint / violations
+
+`correction_constraint_count = 0`, `correction_violation_count = 0`.
+No deletion was ever inferred from a correction relation (none existed
+this run; the mechanism itself is unchanged and offline-proven, D-208
+Fixture C).
+
+## 24. Retry-survival conflict count
+
+`retry_survival_conflict_count = 0`. No unresolved retry alternatives
+reached the frozen selection this run -- BestTake/CompositeResolver
+already resolved every retry family upstream, exactly as designed;
+Ordering never had a winner to (not) pick.
+
+## 25-27. Composite unit count / constraints / violations
+
+`composite_unit_count = 0`, `composite_internal_order_constraint_count
+= 0`, `composite_violation_count = 0`. No composite realization
+survived to this selection.
+
+## 28-29. P2 constraint count / classifications
+
+`p2_constraint_count = 0`, `p2_constraint_classifications = {}`. P2
+ran successfully (`AVAILABLE`) but produced no relation that reached
+Ordering's own surviving-unit scope this run -- consistent with D-204's
+own real-media finding that most P2 supersession hypotheses involve at
+least one side that was NOT selected.
+
+## 30-31. Unique-information unit count / losses
+
+`unique_information_unit_count = 0` (no surviving unit's `proposition_
+candidate_ids` was populated this run -- honestly reported, not
+guessed), `unique_information_loss_count = 0` (structurally guaranteed
+by the HELD membership invariant above: Ordering has no delete
+authority, so a loss is impossible while membership holds).
+
+## 32-33. Meaning-conflict cases / resolution violations
+
+`meaning_conflict_ordering_case_count = 0`, `meaning_conflict_
+resolution_violation_count = 0`. No P2 meaning conflict reached
+Ordering this run; the firewall (never "solve" a contradiction by
+rearranging) is unchanged and offline-proven (D-208 Fixture H).
+
+## 34. Baseline ordered ids
+
+25 `real_<20-hex>`-shaped realization ids (D-050B/D-206 identity
+convention), listed in full in `artifact/d209_ordering_real_media_
+qualification.json`'s `ordered_realization_ids` field (captured
+verbatim in this run's job log).
+
+## 35. Ordering status
+
+`UNKNOWN` -- correct and honest: zero real editorial relations exist,
+so D-206's own builder reports `UNKNOWN` (not `ORDERED`), never
+upgrading fallback placement to semantic certainty.
+
+## 36-37. Fallback used / reason
+
+`fallback_used: true`, `fallback_reason: "no_positive_editorial_
+relation"`.
+
+## 38-39. Unresolved relation count / cycle count
+
+`unresolved_relation_count = 0`, `cycle_count = 0` -- no cycle, no
+unresolved conflict this run (consistent with zero relations existing
+at all).
+
+## 40. Source-order fallback count
+
+`source_order_fallback_count = 25` -- every one of the 25 units was
+placed by stable source-chronology tie-break alone (D-206's own
+`(source_order, source_start, realization_id)` convention), never by a
+proven editorial relation.
+
+## 41. Chronology-only semantic-order count
+
+`chronology_only_semantic_order_count = 0` -- the chronology firewall
+HELD: despite 25/25 fallback placements, `ordering_status` never reads
+`ORDERED` (it reads `UNKNOWN`), so no fallback placement is ever
+misreported as semantically proven.
+
+## 42. Multi-source result
+
+`multi_source_result: "NOT_EXERCISED"` -- Video00 is a single source
+file (`source_asset_ids` has exactly one entry); the cross-source-
+timeline firewall (never compare source-local timestamps across files
+as one global timeline) is unchanged and offline-proven (D-206/D-208
+Fixture I) but genuinely not exercised by this real RAW.
+
+## 43-50. Composer compatibility path
+
+`composer_proposal_available: true`. `composer_path: "MOCK_PROVIDER"`
+-- this is D-207's own generic vocabulary value for "a supplied,
+non-None `ComposerProvider` was used"; it is emitted regardless of
+whether the supplied provider is a true test mock or D-208's
+deterministic, provider-free `compose_selected` compatibility wrapper,
+because D-207's own `composer_path` vocabulary has no third value for
+that distinction. This is a naming/labeling nuance in the diagnostic
+field, not a functional issue: `openai_composer_instantiated: "NO"` and
+`network_call_count: 0` (Section 51-52) independently and unambiguously
+confirm no real provider ran. `proposed_realization_ids` == `accepted_
+order` == `ordered_realization_ids` (all 25, identical order) --
+`proposal_status: "ACCEPTED"`. `proposal_membership_valid: true`,
+`proposal_identity_valid: true`, `proposal_constraint_violation_count:
+0`, `proposal_violated_relation_ids: []`. `proposal_fallback_used:
+false` (the composer proposal itself was accepted outright; D-207's
+OWN internal fallback path was not needed since the deterministic
+compat wrapper's chronological order exactly matched an unconstrained
+baseline). `baseline_fallback_exact_match: true`.
+
+## 51. Causal validator status
+
+`NOT_INTEGRATED_INPUT_SHAPE_MISMATCH` -- unchanged from D-207's own
+finding; not forced.
+
+## 52-53. OpenAI composer instantiated / provider call count
+
+`openai_composer_instantiated: "NO"`, `provider_call_count: 0`,
+`network_call_count: 0` -- structural facts already proven by D-206/
+D-207/D-208's own offline test suites (never `OpenAIComposerProvider`
+imported/instantiated anywhere reachable from this code path),
+restated here as this run's own confirmation rather than re-derived
+from the artifact (an artifact cannot prove a negative about network
+activity; the guarantee comes from the code path itself).
+
+## 54. P1/P2 health
+
+`p1_status: "evaluated"`, `p2_status: "evaluated"`, `p2_capability_
+status: "AVAILABLE"` -- both upstream diagnostic layers ran cleanly on
+this real Video00 RAW, exactly as D-196/D-204's own prior real-media
+qualifications already established independently.
+
+## 55-56. Real Ordering-over-upstream value / usefulness classification
+
+`real_ordering_value_present: false`, `ordering_usefulness_
+classification: "SAFE_BUT_NOT_YET_USEFUL"`. Honest and, per this task's
+own explicit instruction ("Do NOT require reorder... a safe result may
+be 'current selected order already satisfies all known constraints' --
+that is valid... Actual semantic reorder is NOT mandatory"), a fully
+VALID outcome, not a defect: on this specific 25-clip, already-cleanly-
+resolved Video00 selection, there was no real editorial ordering
+question left for Ordering to answer -- P1/BestTake/CompositeResolver
+had already resolved every retry/continuation/correction/composite
+case before the frozen selection formed. Ordering correctly and safely
+reported that absence rather than fabricating a relation to "look
+useful."
+
+## 57-64. Downstream immutability
+
+**Structural** (proven offline, D-206/D-207/D-208's own 121 combined
+tests, unaffected by this RAW): Family, BestTake, D-191, selected-clip
+identity, the existing composer's live output, Boundary, Pacing, and
+Renderer inputs are read-only inputs to `ordering_live_diagnostics_
+integration.py` and are never reassigned by it (structural bans on
+`take_group_id =`, `_semantic_best_take`, `boundary_engine_pass`,
+`BoundaryEngine`, `dialogue_pacing_transition`, `RenderSegment`,
+`selected_clip_id =`, `.selected = ` etc. in that module's own source,
+D-208 Section 41-47). **This run**: the job's own step sequence ran the
+Family/BestTake/composer/Boundary-adjacent diagnostic print steps
+(`D-186A`/`D-190`/`D-192`/`D-116`/`D-123`/`D-150`/`D-164`/`D-170`/
+`D-173`/`D-175`/`D-178B`/`D-181`) to `success` in their usual order and
+position, unchanged from every prior non-Ordering RAW on this branch --
+no step was skipped, reordered, or altered by the Ordering flag's
+presence. The exact byte-for-byte `selected`/`composer_status`
+diagnostic sub-blocks for this specific run were not independently
+re-fetched (job-log tail-cap, Section 66) -- reported honestly as not
+re-verified this turn rather than assumed, though the structural
+guarantee above is independent of this run's own log retrievability.
+
+## 65-69. Parity metrics
+
+**NOT RETRIEVABLE this turn.** The Selection/Boundary/overall-physical
+Level-1 and F1-vs-Cut.ai/Human-Gold metrics are computed by the
+"Video00 quality ladder" step, which completed `success` in this run
+(job step #22) and would have printed/persisted them, but this
+session's `get_job_logs` tool has a hard effective cap (the full job
+log for this run is already only ~5000 lines and appears server-side-
+truncated to the JOB'S FINAL STEPS ONLY -- "Print full canonical
+diagnostics" onward; two independent fetches at `tail_lines=5000` and
+`tail_lines=50000` returned byte-identical truncated content), and the
+artifact ZIP download (`cutsell-video00-modal-validator-reports.zip`,
+which would contain `video00-modal-quality-ladder.json`) is blocked by
+this session's own Azure Blob Storage egress policy -- both are the
+SAME environment limitations this session's D-204 turn already
+established and is instructed never to retry. Per this task's own
+"Ordering has zero authority... do NOT attribute changes to Ordering"
+instruction, this gap has no bearing on the D-209 verdict either way --
+Ordering's own diagnostic block (Sections 5-56 above) was fully
+retrieved and analyzed directly from the job log's own printed output.
+
+## 70. D-209 VERDICT
+
+**A. ORDERING REAL-MEDIA DIAGNOSTIC QUALIFICATION PROVEN -- ORDERING
+SUFFICIENTLY QUALIFIED FOR BOUNDARY.**
+
+Every "Ordering sufficiency for now" criterion from this task's own
+directive is met on real Video00 evidence: capability `AVAILABLE`;
+selected-realization membership preserved exactly (`HELD`); unit
+identities stable (no duplicates); the honest LACK of real constraints
+is represented rather than fabricated; local-sequence/composite
+integrity holds (trivially, zero cases, zero violations); retry
+conflicts are not resolved by Ordering (zero cases reached it, the
+mechanism itself is offline-proven); meaning/unique-information
+firewalls hold (zero violations); fallback uncertainty remains honest
+(`UNKNOWN`, never upgraded, chronology-only-semantic-order count 0);
+no downstream edit mutation (structural + this run's own unchanged
+step sequence); no material false ordering interpretation. The one
+named naming nuance (`composer_path` reading `"MOCK_PROVIDER"` for the
+non-mock deterministic compat wrapper, Section 43-50) is COSMETIC ONLY
+-- it does not affect safety, correctness, membership, or authority,
+and is independently disambiguated by `openai_composer_instantiated`/
+`network_call_count` on the same record -- so it does not rise to a
+verdict-B-level "limitation," per this task's own instruction that an
+actual semantic reorder, or any particular relation count, is NOT
+mandatory for qualification.
+
+## 71. Ordering closure
+
+**ORDERING_READY_FOR_BOUNDARY.**
+
+## 72. Exact next gate
+
+D-210 -- REMAINING BOUNDARY QUALIFICATION, ARCHITECTURE/FORENSIC
+AGAINST CURRENT CLOSED BOUNDARY WORK. Boundary is NOT starting from
+zero: audit and continue from existing, closed mechanisms (D-116,
+D-177, D-180, and other closed Boundary work) rather than redesigning.
+Requires separate Product Owner authorization; not implemented
+automatically.
+
+## 73. Boundary status
+
+Untouched during D-209. Existing mechanisms (D-116, D-177, D-180, and
+other closed Boundary work) preserved; remaining qualification pending,
+now that Ordering itself is closed enough to return to it.
+
+## 74. Pacing/Overlap status
+
+Untouched. Still later: Boundary -> Pacing V2 -> dialogue overlap ->
+J-cut -> L-cut -> micro-overlap -> Renderer.
+
+## 75. App-roadmap status
+
+P1 closed enough -> P2 closed enough -> Ordering: D-205 forensic DONE
+-> D-206 typed foundation DONE -> D-207 proposal validation DONE ->
+D-208 live diagnostic integration DONE -> D-209 real-media
+qualification DONE, `ORDERING_READY_FOR_BOUNDARY` (this document) ->
+remaining Boundary qualification (D-210, if authorized) -> Pacing V2 /
+overlap -> Renderer/export -> unseen RAW generalization / Cut.ai parity
+-> production hardening -> TestFlight/App Store. Commercial Moment/
+Sales Funnel remain later.
+
+## 76. Confirmation: NO post-result patch
+
+Confirmed. Zero `cutsell_worker` files were touched after the RAW
+completed (or before it, beyond the D-206/D-207/D-208 work already
+committed prior to this task and the D-209 workflow-only bootstrap,
+Section 3-4). This document is analysis/documentation only.
+
+## 77. Confirmation: NO second RAW
+
+Confirmed. Exactly one RAW (`34508325003`) was dispatched this task;
+no rerun, no confirmation RAW.
+
+## 78. Confirmation: NO live provider
+
+Confirmed. `OpenAIComposerProvider` was never imported/instantiated;
+`openai_composer_instantiated: "NO"`, `provider_call_count: 0`,
+`network_call_count: 0` on this run's own artifact.
+
+## 79. Confirmation: NO Ordering authority
+
+Confirmed. Ordering diagnostics were read-only this run: the actual
+rendered/delivered edit was produced by the existing, unmodified
+Selection/BestTake/Freeze/Boundary/Pacing/Renderer pipeline exactly as
+before D-206-D-209 existed; `diagnostics["ordering"]` is a side-channel
+never consumed by any authority.
+
+## 80. Decision entry
+
+This document.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- authorizing D-210
+(remaining Boundary qualification, architecture/forensic against
+existing closed Boundary work) is the next Product Owner decision.
+
+**Then STOP. Do NOT implement D-210. No D-209.1. No engine patch. No
+second RAW. Wait for Product Owner coordination.**
