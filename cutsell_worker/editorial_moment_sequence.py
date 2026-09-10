@@ -296,17 +296,35 @@ _RETRY_FAMILY_ROLES: frozenset[str] = frozenset({
 
 
 def _editorial_moment_id(
-    source_asset_id: str, source_start: float, source_end: float, moment_role: str, attempt_ids: Sequence[str],
+    source_asset_id: str, source_start: float, source_end: float, source_span_id: str | None,
+    moment_role: str, attempt_ids: Sequence[str],
 ) -> str:
     """Deterministic, content+timing-anchored id -- mirrors ``canonical_
     identity.mint_source_span_id``'s exact hashing shape under a distinct
     ``emom_`` prefix, minted here rather than registered in
     ``canonical_identity.py`` because nothing yet reads this id to make an
     editorial decision (D-050A's own "no consumer yet" precedent, reused by
-    every Language Spine module to date)."""
+    every Language Spine module to date).
+
+    D-200.4B (see the decision log's D-200.4A/D-200.4B entries): includes
+    ``source_span_id`` -- the caller's already-stable P1 candidate/
+    source-span identity (``EditorialMoment.source_span_id`` itself,
+    threaded here verbatim, never re-derived) -- alongside the original
+    content+timing+role+attempt inputs. D-200.4A's forensic proved
+    ``build_editorial_moments_for_source`` mints ONE ``EditorialMoment``
+    PER ELIGIBLE CANDIDATE OCCURRENCE (D-195's own "complete unfiltered
+    candidate pool" doctrine, unchanged) -- the identity contract this id
+    must satisfy is therefore "one id per candidate occurrence", not "one
+    id per canonical LanguageAttempt". Omitting ``source_span_id`` let two
+    genuinely different candidates that both bridge (D-199's own
+    max-overlap match, a real many-to-one mapping by construction) onto
+    the SAME canonical attempt collide onto one id whenever their timing/
+    role also matched -- this one additional, already-available input
+    closes that gap without changing what the id anchors to in every
+    other respect."""
     raw = "|".join((
         source_asset_id, f"{float(source_start):.3f}", f"{float(source_end):.3f}",
-        moment_role, ",".join(sorted(str(v) for v in attempt_ids if v)),
+        str(source_span_id or ""), moment_role, ",".join(sorted(str(v) for v in attempt_ids if v)),
     )).encode("utf-8")
     return "emom_" + hashlib.sha256(raw).hexdigest()[:20]
 
@@ -457,7 +475,7 @@ def classify_editorial_moment(
     confidence = CONFIDENCE_MIXED if conflict_flags else base_confidence
 
     editorial_moment_id = _editorial_moment_id(
-        attempt.source_asset_id, attempt.source_start, attempt.source_end, role, (attempt.attempt_id,),
+        attempt.source_asset_id, attempt.source_start, attempt.source_end, source_span_id, role, (attempt.attempt_id,),
     )
 
     return EditorialMoment(

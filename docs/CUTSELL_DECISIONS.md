@@ -39102,3 +39102,175 @@ granted. No P2 implementation. Docs only.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing Section 7's
 bounded offline identity fix (and the offline-only proof loop named in
 Section 12) is the next Product Owner decision.
+
+
+# D-200.4B: P1 EDITORIAL MOMENT IDENTITY INTEGRITY FIX
+(POST D-200.4A, OFFLINE ONLY, NO RAW)
+
+Post D-200.4A, Product Owner authorization: implement exactly ONE fix --
+include `source_span_id` in `EditorialMoment`'s id minting -- to close
+the identity-collision root cause D-200.4A proved via code inspection
+and a local reproduction.
+
+## 1. Files changed
+
+- `cutsell_worker/editorial_moment_sequence.py` -- `_editorial_moment_id`
+  gained one new parameter, `source_span_id: str | None`, hashed
+  alongside the existing `(source_asset_id, source_start, source_end,
+  moment_role, attempt_ids)` inputs; `classify_editorial_moment`'s one
+  call site now passes its own already-received `source_span_id`
+  argument through unchanged (no new parameter added there -- the value
+  was already in scope).
+- `tests/test_cutsell_d200_4b_editorial_moment_identity_fix.py` -- new,
+  26 tests.
+- No other file touched. `editorial_moment_sequence_integration.py`,
+  `watch_listen_understanding.py`, `language_proposition_relation.py`,
+  `language_spine.py`, `language_utterance_attempt.py`, `pipeline.py`,
+  `flow_b.py` -- zero diff.
+
+## 2. Previous / new id contract
+
+- Previous: `hash(source_asset_id, source_start, source_end,
+  moment_role, sorted(attempt_ids))`.
+- New: `hash(source_asset_id, source_start, source_end, source_span_id
+  or "", moment_role, sorted(attempt_ids))`. Same `emom_` prefix, same
+  hashing style (sha256, first 20 hex chars), same object schema
+  (`EditorialMoment.source_span_id` already existed as a field; nothing
+  added or removed from the dataclass).
+
+## 3. `source_span_id` inclusion -- verified both directions
+
+`test_02`/`test_07`/`test_09`: the SAME candidate occurrence (same
+`source_span_id` + same other inputs) still mints a deterministic,
+repeatable id across calls and across `None`. `test_03`/`test_04`/
+`test_05`/`test_06`: a DIFFERENT `source_span_id` always mints a
+DIFFERENT id, including when `source_asset_id`, timing, `moment_role`,
+and the canonical attempt (hence `attempt_ids`) are ALL identical --
+directly closing the exact collision shape D-200.4A proved.
+
+## 4. Collision repro, before/after
+
+`test_10` builds the same generic two-candidate collision fixture
+D-200.4A's own forensic reproduction used (two `CandidateTake`s with
+different `source_span_id`s, both bridging via D-199's max-overlap match
+onto one shared canonical `LanguageAttempt`) through the REAL, unchanged
+`build_editorial_moment_understanding_for_source`. Before this fix (see
+D-200.4A's own recorded repro output), both moments minted the identical
+`editorial_moment_id`; after this fix, `ids[0] != ids[1]` while
+`spans == ["spanA", "spanB"]` stays distinct as it always was.
+
+## 5. No candidate deduplication (D-200.4A Section 6, honored)
+
+`test_11`: both candidate occurrences still produce their own
+`EditorialMoment` (`moment_count == 2`) -- the fix is identity
+uniqueness, never candidate-pool elimination.
+
+## 6. No behavior change -- verified directly
+
+`test_12`-`test_17`: `moment_role`, `confidence`, `conflict_flags`,
+`proposition_candidate_ids`, and `attempt_ids` are all unaffected by the
+id change in the same collision fixture; D-200.3's own structured
+relation evidence (`moment_structured_relation`) is present and
+well-formed for the second moment, unreopened.
+
+## 7. Group/sequence integrity
+
+`test_18`: across ALL local groups combined, moment ids are now unique
+(`len(all_ids) == len(set(all_ids))`) -- the D-200.4A collision symptom
+(one id appearing under >1 `local_group_id`) is structurally gone.
+`test_19`/`test_20`: every sequence's own `moment_ids` remain a subset of
+exactly one local group's own `moment_ids` (the one-group-per-sequence
+invariant D-200.4A already proved structurally via code reading is
+independently reconfirmed here with unique ids in play). `test_21`
+reproduces the EXACT workflow-diagnostic mechanism named in D-200.4A
+(`moment_to_group = {mid: gid for g in local_groups for mid in g.
+moment_ids}`) and proves it can no longer silently overwrite a real
+group's ownership of a shared id -- zero collisions. `test_22`: group
+count/shape for the same fixture is unaffected by the identity fix (two
+singleton groups, same as any two isolated candidates would always form
+under D-197's unchanged join/split rules).
+
+## 8. Authority/no-provider/no-hardcode audits
+
+`test_23_29`: `take_grouping.py`, `deterministic_best_take_authority.py`,
+`attempt_relationship_authority.py`, `bounded_finalist_authority.py`,
+`boundary_engine_pass.py`, `dialogue_pacing_transition.py`,
+`canonical_edit_plan.py`, `realization_resolver.py`,
+`composite_resolver.py` -- none reference `editorial_moment_id`.
+`test_only_p1_modules_reference_editorial_moment_id`: confirms exactly
+`editorial_moment_sequence.py`/`editorial_moment_sequence_integration.py`
+are the only `cutsell_worker` files that ever do. `test_30_36`: the
+mint function contains no provider/network/ASR/weight/threshold/
+Video00-literal/region-name string. `test_37`: no unrelated identity
+namespace (`mint_attempt_id`/`mint_semantic_idea_id`/`mint_
+retry_family_id`) is touched.
+
+## 9. Offline qualification
+
+- `python -m compileall cutsell_worker tests` -- clean.
+- New file: 26/26 passed.
+- Targeted regression battery (D-123, D-128, D-150, D-166, D-168, D-169,
+  D-171, D-183, D-184, D-187, D-188, D-189, D-191, D-194, D-195, D-197,
+  D-198, D-199, D-200 wiring, D-200.3, D-200.4B): **954/954 passed**.
+- BestTake-keyword regression sweep: **383/383 passed**.
+- Boundary/Pacing/Render-keyword regression sweep: **442/442 passed**.
+- Full offline suite (excluding the one pre-existing, unrelated
+  `test_semantic_stitch.py` collection error, unmodified by any D-200.x
+  work): **4761 passed, 5 failed, 13 subtests passed** -- the EXACT SAME
+  5 pre-existing failures recorded before this task began, pass count
+  exactly +26 (this task's own new file). Zero new failures.
+
+## 10. D-200.4B VERDICT
+
+**A. EDITORIAL MOMENT IDENTITY INTEGRITY OFFLINE PROVEN -- P1 READY FOR
+P2.**
+
+## 11. P1 closure decision
+
+**P1_READY_FOR_P2.**
+
+## 12. Canonical P1 status
+
+`PHASE_A_OFFLINE_PROVEN` + `CANONICAL_EVIDENCE_LIVE_DIAGNOSTIC_
+INTEGRATION_OFFLINE_PROVEN` + `LOCAL_GROUP_FORMATION_REAL_MEDIA_PROVEN`
++ `LIVE_LANGUAGE_SPINE_P1_REAL_MEDIA_PROVEN` + `DIMENSION_AWARE_
+RELATION_REAL_MEDIA_PROVEN` + `EDITORIAL_MOMENT_IDENTITY_INTEGRITY_
+OFFLINE_PROVEN`.
+
+## 13. Known non-blocking limitation (carried forward, unchanged, not
+## reopened)
+
+`SAME_EDITORIAL_BEAT` positive evidence remains absent (no detector
+exists; never inferred from absence). `CLEAN_DELIVERY_SEQUENCE`
+auto-group reachability remains limited for the same reason (D-200.2/
+D-200.3's own named, honest gap).
+
+## 14. Exact next major gate
+
+D-201 -- P2 Whole-Video Editorial Reasoning, Phase 0 Architecture /
+Forensic. NOT implemented here; requires separate Product Owner
+authorization.
+
+## 15. P2 readiness
+
+Ready to begin the Phase 0 architecture/forensic gate (D-201) once
+authorized. No open-ended P1 roadmap remains.
+
+## 16. App-roadmap status
+
+Unaffected. Overlap/Pacing V2/J-cut/L-cut/micro-overlap/Ordering/
+Boundary-remaining/Renderer/production-hardening/TestFlight tracks
+untouched, per this task's own strict scope.
+
+## 17. Confirmations
+
+Offline only. No RAW dispatched (D-200.4A's own "additional RAW
+required: NO" conclusion honored). No provider call. No weights or
+thresholds. No relation-dimension redesign. No Language Spine change.
+No grouping-rule change (D-197's own `_JOIN_RELATIONS` membership test
+untouched). No P1 authority granted. No P2 implementation. No Family/
+BestTake/D-191/Ordering/Boundary/Pacing/Renderer change (verified via
+module-leaf grep tests, Section 8).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-201's
+Phase 0 architecture/forensic gate is the next Product Owner decision.
