@@ -5339,6 +5339,144 @@ jobs:
           print(json.dumps({k: v for k, v in summary.items() if k not in ("units", "relations")}, indent=2, sort_keys=True, default=str))
           PY
 
+      - name: D-218R Pacing V2 -> Video00 real-media diagnostic qualification
+        # D-218R (docs/CUTSELL_DECISIONS.md D-218/D-218R): D-218's own
+        # finding was OBSERVABILITY ONLY -- the engine already serializes
+        # `diagnostics["pacing_v2"]` in full (D-216/D-217), but no workflow
+        # step ever extracted it into a small, always-retrievable artifact,
+        # so it was buried inside the multi-hundred-MB `cutsell-video00-
+        # modal-human-review` artifact this session's own egress policy
+        # cannot download. This step is the fix: read the SAME `artifact/
+        # video00-modal.json` the D-196/D-200/D-204/D-209 steps above read,
+        # and PURE-PROJECT the already-serialized `diagnostics["pacing_v2"]`
+        # block verbatim into a small, bounded file -- recomputes NO
+        # transition, NO relationship hint, NO Prosodic mapping, NO
+        # candidate timing window; every field below is copied, never
+        # re-derived. Unlike D-209's own graceful "MISSING_FROM_
+        # SERIALIZATION" fallback, this step FAILS LOUDLY (non-zero exit)
+        # when the block is absent -- D-218's own finding was exactly a
+        # silent, undetected absence, so a recurrence must be impossible to
+        # miss, never quietly re-emitted as an empty artifact.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          out_path = "artifact/d218_pacing_v2_real_media_qualification.json"
+
+          if not isinstance(engine, dict):
+              print("ERROR: artifact/video00-modal.json missing or unparseable -- cannot qualify Pacing V2.", file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d218_pacing_v2_real_media_qualification.v1",
+                             "source_status": "engine_json_missing_or_unparseable"}, f, indent=2)
+              sys.exit(1)
+
+          diag = engine.get("diagnostics") if isinstance(engine.get("diagnostics"), dict) else {}
+          block = diag.get("pacing_v2")
+
+          if not isinstance(block, dict):
+              print("=" * 78, file=sys.stderr)
+              print("ERROR: diagnostics['pacing_v2'] IS MISSING FROM THE SERIALIZED RESULT.", file=sys.stderr)
+              print("This is exactly the D-218 finding recurring -- either CUTSELL_PACING_V2_", file=sys.stderr)
+              print("DIAGNOSTICS_ENABLED was not set for this run, or Freeze was blocked before", file=sys.stderr)
+              print("the Pacing seam was ever reached, or a real regression. FAILING LOUDLY", file=sys.stderr)
+              print("instead of emitting an empty artifact, per this task's own requirement.", file=sys.stderr)
+              print("=" * 78, file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d218_pacing_v2_real_media_qualification.v1",
+                             "source_status": "engine_json_present", "pacing_v2_block_status": "MISSING_FROM_SERIALIZATION"},
+                            f, indent=2)
+              sys.exit(1)
+
+          # --- Pure re-projection: every field below is copied verbatim
+          # from the already-computed D-216/D-217 block -- no transition,
+          # relationship hint, Prosodic mapping, or candidate timing window
+          # is recomputed here. ---
+          summary = {"schema_version": "cutsell.video00.d218_pacing_v2_real_media_qualification.v1"}
+          summary["source_status"] = "engine_json_present"
+          summary["pacing_v2_block_status"] = "PRESENT"
+          summary["capability_status"] = block.get("capability_status")
+          summary["missing_evidence"] = block.get("missing_evidence", [])
+          summary["transition_count"] = block.get("transition_count")
+          summary["transitions"] = block.get("transitions", [])
+          summary["run_summary"] = block.get("run_summary", {})
+          summary["sequence_consistency"] = block.get("sequence_consistency", {})
+          summary["firewall_violation_count"] = block.get("firewall_violation_count")
+
+          selected = engine.get("selected") or []
+          summary["selected_clip_count"] = len(selected)
+          summary["transition_count_matches_selected_minus_one"] = (
+              summary["transition_count"] == max(0, len(selected) - 1)
+          )
+
+          # --- D-142 live comparison (already computed per-transition as
+          # `live_mode`/`live_vs_v2_comparison`; aggregated here for the
+          # compact top-level view only -- no re-derivation). ---
+          rows = summary["transitions"]
+          summary["current_d142_live_modes"] = [r.get("live_mode") for r in rows]
+          summary["selected_d215_modes"] = [r.get("selected_mode") for r in rows]
+
+          # --- Advanced-mode recommendation vs execution -- the ONE
+          # structural fact this task requires be visible on every run:
+          # D-216/D-217 never write back into `draft.selected`/D-142's own
+          # live mode/RenderSegment, so "executed" is always 0 by
+          # construction (already offline-proven, D-216 items 22/26,
+          # D-217 items 35/36/40) -- restated here, never re-derived from
+          # this one artifact, which cannot prove a negative about the
+          # renderer either way. ---
+          summary["advanced_recommendation_count"] = (block.get("run_summary") or {}).get("advanced_mode_eligible_count", 0)
+          summary["advanced_execution_count"] = 0
+          summary["live_independent_audio_window_count"] = 0
+
+          # --- Usefulness classification (reporting-only, same vocabulary
+          # D-218's own directive named; never a QA reference label, never
+          # fed back into cutsell_worker). ---
+          fw_violations = summary["firewall_violation_count"] or 0
+          run_summary = summary["run_summary"] or {}
+          relationship_available = run_summary.get("relationship_hint_available_count", 0)
+          prosodic_available = run_summary.get("prosodic_pair_available_count", 0) + run_summary.get("prosodic_pair_partial_count", 0)
+          timing_available = (
+              run_summary.get("candidate_j_lead_available_count", 0)
+              + run_summary.get("candidate_l_tail_available_count", 0)
+              + run_summary.get("candidate_micro_overlap_available_count", 0)
+          )
+          advanced_eligible = run_summary.get("advanced_mode_eligible_count", 0)
+          if fw_violations > 0:
+              usefulness = "MATERIALLY_WRONG"
+          elif summary["capability_status"] not in ("AVAILABLE", "PARTIAL"):
+              usefulness = "SAFE_BUT_NOT_YET_USEFUL"
+          elif advanced_eligible > 0 or relationship_available > 0 or prosodic_available > 0 or timing_available > 0:
+              usefulness = "USEFUL_AND_BOUNDED" if advanced_eligible > 0 else "USEFUL_BUT_LIMITED"
+          else:
+              usefulness = "SAFE_BUT_NOT_YET_USEFUL"
+          summary["pacing_v2_usefulness_classification"] = usefulness
+
+          os.makedirs("artifact", exist_ok=True)
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True, default=str)
+
+          size = os.path.getsize(out_path)
+          print("--- D-218R Pacing V2 -> Real-Media Qualification (pure re-projection of already-computed diagnostics['pacing_v2'] -- recomputes NO transition/relationship/Prosodic/timing; advanced_execution_count/live_independent_audio_window_count are structural facts already offline-proven by D-216/D-217, never re-derived from this one artifact) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps({k: v for k, v in summary.items() if k != "transitions"}, indent=2, sort_keys=True, default=str))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -5370,6 +5508,7 @@ jobs:
             artifact/d200_4_dimension_aware_relation_real_media_requalification.json
             artifact/d204_whole_video_editorial_reasoning_real_media_qualification.json
             artifact/d209_ordering_real_media_qualification.json
+            artifact/d218_pacing_v2_real_media_qualification.json
           retention-days: 14
           if-no-files-found: warn
 
