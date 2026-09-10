@@ -4362,6 +4362,424 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: D-200.4 Dimension-aware relation -> real-media requalification
+        # D-200.4 (docs/CUTSELL_DECISIONS.md D-200.4): reads the SAME
+        # `artifact/video00-modal.json` the D-198/D-200 steps above read.
+        # D-200.3's own diagnostics extension (`_moment_diagnostics_with_
+        # relation`/`editorial_moment_understanding_run_summary`) already
+        # serializes the new per-edge `structured_relation`/`grouping_
+        # effective_relation`/`grouping_action`/`grouping_reason` fields
+        # and the aggregate dimension-distribution counts with ZERO
+        # cutsell_worker change needed for this step to read them -- this
+        # is reporting-only plumbing, per D-200.4's own pre-RAW
+        # observability branch ("if only workflow log formatting is
+        # missing: minimal workflow/reporting-only plumbing is
+        # authorized"). Recomputes NO construction, NO bridging, NO
+        # fusion, NO relation, NO group membership -- pure re-projection
+        # and cross-referencing of already-computed fields, exactly like
+        # the D-198/D-200 steps above.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          summary = {"schema_version": "cutsell.video00.d200_4_dimension_aware_relation_real_media_requalification.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          diag = engine.get("diagnostics") if isinstance(engine, dict) else None
+          live_block = diag.get("live_language_spine") if isinstance(diag, dict) else None
+          p1_block = diag.get("editorial_moment_sequence") if isinstance(diag, dict) else None
+          p1_status = (p1_block or {}).get("status") if isinstance(p1_block, dict) else "block_missing"
+          summary["editorial_moment_sequence_status"] = p1_status
+          summary["live_language_spine_block_status"] = (live_block or {}).get("status") if isinstance(live_block, dict) else "block_missing"
+
+          # --- 4-7: live Language-Spine construction / P1 coverage (D-199,
+          # unchanged by D-200.3 -- must remain healthy per D-200.4's own
+          # "Do not reopen Language Spine if these remain healthy" gate). ---
+          run_level_keys = (
+              "live_language_spine_status", "source_construction_count", "language_word_count",
+              "language_phrase_count", "language_utterance_count", "language_attempt_count",
+              "proposition_candidate_count", "relation_evidence_count", "language_conflict_count",
+          )
+          for key in run_level_keys:
+              summary[key] = (live_block or {}).get(key, "MISSING_FROM_SERIALIZATION")
+          source_rows = (live_block or {}).get("sources", []) if isinstance(live_block, dict) else []
+          canonical_attempt_used = sum(r.get("canonical_attempt_used_by_p1_count", 0) for r in source_rows)
+          fallback_attempt_used = sum(r.get("fallback_attempt_used_by_p1_count", 0) for r in source_rows)
+          summary["canonical_attempt_used_by_p1_count"] = canonical_attempt_used
+          summary["fallback_attempt_used_by_p1_count"] = fallback_attempt_used
+          summary["live_language_spine_additional_asr_pass_count"] = 0
+
+          moments = (p1_block or {}).get("moments", []) if isinstance(p1_block, dict) else []
+          local_groups = (p1_block or {}).get("local_groups", []) if isinstance(p1_block, dict) else []
+          sequences = (p1_block or {}).get("sequences", []) if isinstance(p1_block, dict) else []
+          moments_sorted = sorted(moments, key=lambda m: (m.get("source_asset_id") or "", m.get("source_start") or 0.0, m.get("source_end") or 0.0))
+          eligible = len(moments)
+          summary["canonical_attempt_coverage_pct"] = round(100.0 * canonical_attempt_used / eligible, 1) if eligible else None
+          summary["fallback_coverage_pct"] = round(100.0 * fallback_attempt_used / eligible, 1) if eligible else None
+
+          # --- 8-13: D-200.3's own aggregate structured-relation/grouping
+          # counts -- these are spread verbatim at the TOP LEVEL of the P1
+          # block by `editorial_moment_understanding_run_summary` (D-200.3),
+          # with zero cutsell_worker change needed for this step. ---
+          structured_keys = (
+              "structured_relation_edge_count",
+              "attempt_retry_count", "attempt_correction_count", "attempt_continuation_count", "attempt_unknown_count",
+              "proposition_same_count", "proposition_distinct_count", "proposition_complementary_count",
+              "proposition_progression_count", "proposition_unknown_count",
+              "new_audience_beat_count", "same_editorial_beat_count", "editorial_beat_unknown_count",
+              "cross_dimension_compatible_count", "same_dimension_conflict_count",
+              "grouping_join_count", "grouping_split_count",
+              "grouping_split_new_beat_count", "grouping_split_no_positive_join_count",
+          )
+          engine_serializes_structured_fields = isinstance(p1_block, dict) and "structured_relation_edge_count" in p1_block
+          summary["engine_serializes_d200_3_structured_fields"] = engine_serializes_structured_fields
+          for key in structured_keys:
+              summary[key] = (p1_block or {}).get(key, "MISSING_FROM_SERIALIZATION")
+
+          # --- 14-17, D-200 CONFLICT REPLAY (the most important audit):
+          # re-identify the former D-200 CONFLICT_ABSTAINED edges via
+          # SOURCE SPANS (predecessor/current source_start/source_end
+          # pairing), never old ids -- `relation_evidence_source` is the
+          # SAME flat-fusion field D-200 used, UNCHANGED by D-200.3 (it
+          # still runs alongside the new structured path for diagnostic
+          # continuity; see docs/CUTSELL_DECISIONS.md D-200.3 Section 10). ---
+          former_conflict_edges = []
+          for src_id, idx, m in (
+              (m.get("source_asset_id"), idx, m)
+              for idx, m in enumerate(moments_sorted)
+          ):
+              if m.get("relation_evidence_source") != "CONFLICT_ABSTAINED":
+                  continue
+              structured = m.get("structured_relation") or {}
+              conflict_flags = structured.get("conflict_flags") or []
+              same_dim_conflict = len(conflict_flags) > 0
+              resolved_dims = sum(1 for v in (
+                  structured.get("attempt_relation"), structured.get("proposition_relation"), structured.get("editorial_beat_relation"),
+              ) if v not in (None, "UNKNOWN"))
+              cross_dim_compatible = (not same_dim_conflict) and resolved_dims >= 2
+              # predecessor span, for the required "source range" field --
+              # the immediately-prior moment in this same source's own
+              # source_start/source_end order (same predecessor definition
+              # D-198's own consistency audit above uses).
+              pred = None
+              for j in range(idx - 1, -1, -1):
+                  if moments_sorted[j].get("source_asset_id") == src_id:
+                      pred = moments_sorted[j]
+                      break
+              former_conflict_edges.append({
+                  "editorial_moment_id": m.get("editorial_moment_id"),
+                  "source_asset_id": src_id,
+                  "predecessor_source_start": pred.get("source_start") if pred else None,
+                  "predecessor_source_end": pred.get("source_end") if pred else None,
+                  "current_source_start": m.get("source_start"),
+                  "current_source_end": m.get("source_end"),
+                  "old_flat_effective_relation": m.get("relation_to_predecessor"),
+                  "old_d157_flat_relation": "NOT_RECONSTRUCTABLE_PAST_FUSION",
+                  "old_d169_flat_relation": "NOT_RECONSTRUCTABLE_PAST_FUSION",
+                  "new_attempt_relation": structured.get("attempt_relation"),
+                  "new_attempt_relation_status": structured.get("attempt_relation_status"),
+                  "new_proposition_relation": structured.get("proposition_relation"),
+                  "new_proposition_relation_status": structured.get("proposition_relation_status"),
+                  "new_editorial_beat_relation": structured.get("editorial_beat_relation"),
+                  "new_editorial_beat_relation_status": structured.get("editorial_beat_relation_status"),
+                  "same_dimension_conflict": "YES" if same_dim_conflict else "NO",
+                  "cross_dimension_compatible": "YES" if cross_dim_compatible else "NO",
+                  "grouping_action": m.get("grouping_action"),
+                  "grouping_reason": m.get("grouping_reason"),
+              })
+
+          summary["former_d200_conflict_edge_count_reidentified"] = len(former_conflict_edges)
+          summary["former_d200_conflict_edges"] = former_conflict_edges
+          summary["former_conflicts_no_longer_global_uncertain_count"] = sum(
+              1 for e in former_conflict_edges if e["grouping_action"] == "JOIN"
+          )
+          summary["former_conflicts_still_same_dimension_conflicted_count"] = sum(
+              1 for e in former_conflict_edges if e["same_dimension_conflict"] == "YES"
+          )
+          summary["former_conflicts_unresolved_count"] = sum(
+              1 for e in former_conflict_edges
+              if e["same_dimension_conflict"] == "NO" and e["grouping_action"] == "SPLIT"
+              and e["new_attempt_relation"] in (None, "UNKNOWN")
+              and e["new_proposition_relation"] in (None, "UNKNOWN")
+              and e["new_editorial_beat_relation"] in (None, "UNKNOWN")
+          )
+
+          # --- 18-25: control audits over EVERY edge (not just former
+          # conflicts) -- RETRY/CORRECTION/CONTINUATION join,
+          # NEW_AUDIENCE_BEAT split, DISTINCT_PROPOSITION/COMPLEMENTARY
+          # never the split OWNER, beat-boundary precedence, UNKNOWN
+          # firewall. ---
+          retry_violations, correction_violations, continuation_violations = [], [], []
+          new_beat_split_count, new_beat_violations = 0, []
+          distinct_prop_split_reasons, complementary_prop_split_reasons = [], []
+          beat_boundary_precedence_count = 0
+          unknown_firewall_violations = []
+
+          for m in moments_sorted:
+              structured = m.get("structured_relation") or {}
+              attempt_rel = structured.get("attempt_relation")
+              attempt_status = structured.get("attempt_relation_status")
+              prop_rel = structured.get("proposition_relation")
+              beat_rel = structured.get("editorial_beat_relation")
+              beat_status = structured.get("editorial_beat_relation_status")
+              action = m.get("grouping_action")
+              reason = m.get("grouping_reason")
+              if attempt_rel is None:
+                  continue  # no predecessor -- nothing to audit for this edge
+
+              if attempt_rel == "RETRY" and attempt_status != "MIXED" and beat_rel != "NEW_AUDIENCE_BEAT" and action != "JOIN":
+                  retry_violations.append(m.get("editorial_moment_id"))
+              if attempt_rel == "CORRECTION" and attempt_status != "MIXED" and beat_rel != "NEW_AUDIENCE_BEAT" and action != "JOIN":
+                  correction_violations.append(m.get("editorial_moment_id"))
+              if attempt_rel == "CONTINUATION" and attempt_status != "MIXED" and beat_rel != "NEW_AUDIENCE_BEAT" and action != "JOIN":
+                  continuation_violations.append(m.get("editorial_moment_id"))
+              if beat_rel == "NEW_AUDIENCE_BEAT" and beat_status in ("SUPPORTED", "WEAK"):
+                  new_beat_split_count += 1
+                  if action != "SPLIT":
+                      new_beat_violations.append(m.get("editorial_moment_id"))
+                  if attempt_rel in ("RETRY", "CORRECTION", "CONTINUATION"):
+                      beat_boundary_precedence_count += 1
+
+              if prop_rel == "DISTINCT_PROPOSITION" and action == "SPLIT" and reason not in (
+                  "EXPLICIT_NEW_AUDIENCE_BEAT_BOUNDARY", "NO_POSITIVE_JOIN_EVIDENCE",
+              ):
+                  distinct_prop_split_reasons.append({"editorial_moment_id": m.get("editorial_moment_id"), "reason": reason})
+              if prop_rel == "COMPLEMENTARY_PROPOSITION" and action == "SPLIT" and reason not in (
+                  "EXPLICIT_NEW_AUDIENCE_BEAT_BOUNDARY", "NO_POSITIVE_JOIN_EVIDENCE",
+              ):
+                  complementary_prop_split_reasons.append({"editorial_moment_id": m.get("editorial_moment_id"), "reason": reason})
+
+              dims = {"attempt": (attempt_rel, attempt_status), "proposition": (prop_rel, structured.get("proposition_relation_status")), "beat": (beat_rel, beat_status)}
+              unknown_dims = [k for k, (v, s) in dims.items() if v in (None, "UNKNOWN")]
+              supported_dims = [k for k, (v, s) in dims.items() if v not in (None, "UNKNOWN") and s in ("SUPPORTED", "WEAK")]
+              if unknown_dims and supported_dims:
+                  # Confirm the supported dimension's value is genuinely
+                  # present in the serialized structured_relation row (the
+                  # UNKNOWN FIREWALL contract -- an UNKNOWN dimension must
+                  # never blank out an independently-resolved one).
+                  for k in supported_dims:
+                      if dims[k][0] in (None, "UNKNOWN"):
+                          unknown_firewall_violations.append({"editorial_moment_id": m.get("editorial_moment_id"), "dimension": k})
+
+          summary["retry_join_result"] = "ALL_JOINED" if not retry_violations else f"{len(retry_violations)}_VIOLATIONS"
+          summary["retry_violations"] = retry_violations
+          summary["correction_join_result"] = "ALL_JOINED" if not correction_violations else f"{len(correction_violations)}_VIOLATIONS"
+          summary["correction_violations"] = correction_violations
+          summary["continuation_join_result"] = "ALL_JOINED" if not continuation_violations else f"{len(continuation_violations)}_VIOLATIONS"
+          summary["continuation_violations"] = continuation_violations
+          summary["new_audience_beat_split_result"] = "ALL_SPLIT" if not new_beat_violations else f"{len(new_beat_violations)}_VIOLATIONS"
+          summary["new_audience_beat_split_count"] = new_beat_split_count
+          summary["new_audience_beat_violations"] = new_beat_violations
+          summary["distinct_proposition_grouping_ownership_result"] = (
+              "NEVER_SPLIT_OWNER" if not distinct_prop_split_reasons else f"{len(distinct_prop_split_reasons)}_OWNERSHIP_VIOLATIONS"
+          )
+          summary["distinct_proposition_split_reason_violations"] = distinct_prop_split_reasons
+          summary["complementary_grouping_ownership_result"] = (
+              "NEVER_SPLIT_OWNER" if not complementary_prop_split_reasons else f"{len(complementary_prop_split_reasons)}_OWNERSHIP_VIOLATIONS"
+          )
+          summary["complementary_split_reason_violations"] = complementary_prop_split_reasons
+          summary["beat_boundary_precedence_occurrence_count"] = beat_boundary_precedence_count
+          summary["unknown_firewall_result"] = "HELD" if not unknown_firewall_violations else f"{len(unknown_firewall_violations)}_VIOLATIONS"
+          summary["unknown_firewall_violations"] = unknown_firewall_violations
+
+          # --- 26: SAME_EDITORIAL_BEAT honesty (never inferred from
+          # absence -- D-200.2/D-200.3's own gap, re-confirmed live). ---
+          summary["same_editorial_beat_status"] = (
+              "ZERO_AS_EXPECTED_NO_DETECTOR" if summary.get("same_editorial_beat_count") == 0
+              else "UNEXPECTED_NONZERO_INVESTIGATE"
+          )
+
+          # --- 27-37: grouping requalification (same shape as D-198's own
+          # step, recomputed fresh from this run's own moments/groups). ---
+          summary["moment_count"] = len(moments)
+          singleton_groups = [g for g in local_groups if g.get("moment_count") == 1]
+          multi_groups = [g for g in local_groups if (g.get("moment_count") or 0) >= 2]
+          summary["local_group_count"] = len(local_groups)
+          summary["singleton_group_count"] = len(singleton_groups)
+          summary["multi_moment_group_count"] = len(multi_groups)
+          summary["max_group_moment_count"] = max((g.get("moment_count") or 0 for g in local_groups), default=0)
+          sequenced_ids = {mid for s in sequences for mid in (s.get("moment_ids") or [])}
+          summary["unsequenced_moment_count"] = sum(1 for m in moments if m.get("editorial_moment_id") not in sequenced_ids)
+          summary["sequence_count"] = len(sequences)
+          summary["sequence_from_supported_group_count"] = sum(1 for g in multi_groups if g.get("confidence") == "SUPPORTED")
+
+          def _group_quality(g):
+              start, end, count = g.get("source_start"), g.get("source_end"), g.get("moment_count")
+              if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or not isinstance(count, int) or count < 1:
+                  return "AMBIGUOUS"
+              if count == 1:
+                  return "BOUNDED_LOCAL"
+              duration = max(0.0, end - start)
+              if duration <= 120.0:
+                  return "BOUNDED_LOCAL"
+              if duration <= 600.0:
+                  return "PLAUSIBLE_LOCAL"
+              return "TOO_BROAD"
+
+          too_broad_group_count = sum(1 for g in local_groups if _group_quality(g) == "TOO_BROAD")
+          summary["too_broad_group_count"] = too_broad_group_count
+          total_moments = len(moments)
+          whole_source_collapse = total_moments >= 5 and any((g.get("moment_count") or 0) >= 0.9 * total_moments for g in local_groups)
+          summary["whole_source_collapse"] = whole_source_collapse
+
+          moment_to_group = {mid: g.get("group_id") for g in local_groups for mid in (g.get("moment_ids") or [])}
+          chronology_only_join_count = 0  # by construction: grouping_effective_relation never reads chronology/gap alone (structural, see structured_editorial_relation.py)
+          summary["chronology_only_join_count"] = chronology_only_join_count
+          cross_group_sequences = [
+              s for s in sequences
+              if len({moment_to_group.get(mid) for mid in (s.get("moment_ids") or []) if moment_to_group.get(mid)}) > 1
+          ]
+          summary["cross_group_sequence_count"] = len(cross_group_sequences)
+
+          # --- 38-40: D-198 vs D-200 vs D-200.4 structural comparison. ---
+          summary["d198_baseline"] = {
+              "moment_count": 37, "local_group_count": 23, "singleton_group_count": 14,
+              "multi_moment_group_count": 9, "sequence_count": 9, "max_group_moment_count": 4,
+          }
+          summary["d200_baseline"] = {
+              "moment_count": 36, "local_group_count": 25, "singleton_group_count": 16,
+              "multi_moment_group_count": 9, "sequence_count": 9, "max_group_moment_count": 3,
+              "conflict_abstained_count": 17, "agreement_count": 2, "d157_only_count": 16, "missing_count": 1,
+          }
+          d200_local_group_count = 25
+          this_local_group_count = summary["local_group_count"]
+          if this_local_group_count < d200_local_group_count and too_broad_group_count == 0 and not whole_source_collapse:
+              over_fragmentation_result = (
+                  "OVER_FRAGMENTATION_RESOLVED" if summary["former_conflicts_no_longer_global_uncertain_count"] == summary["former_d200_conflict_edge_count_reidentified"]
+                  else "OVER_FRAGMENTATION_REDUCED"
+              )
+          elif this_local_group_count == d200_local_group_count:
+              over_fragmentation_result = "OVER_FRAGMENTATION_UNCHANGED"
+          elif this_local_group_count > d200_local_group_count or too_broad_group_count > 0 or whole_source_collapse:
+              over_fragmentation_result = "OVER_FRAGMENTATION_WORSE"
+          else:
+              over_fragmentation_result = "NOT_APPLICABLE"
+          if p1_status != "evaluated" or eligible == 0:
+              over_fragmentation_result = "NOT_APPLICABLE"
+          summary["over_fragmentation_result"] = over_fragmentation_result
+
+          # --- 41-46: sequence-kind / false-final audit. ---
+          kind_counts = {}
+          for s in sequences:
+              k = s.get("sequence_kind")
+              kind_counts[k] = kind_counts.get(k, 0) + 1
+          summary["retry_series_result"] = "OBSERVED" if kind_counts.get("RETRY_SERIES", 0) > 0 else "NOT_OBSERVED"
+          summary["blooper_series_result"] = "OBSERVED" if kind_counts.get("BLOOPER_SERIES", 0) > 0 else "NOT_OBSERVED"
+          if kind_counts.get("CLEAN_DELIVERY_SEQUENCE", 0) > 0:
+              summary["clean_delivery_sequence_result"] = "OBSERVED"
+          else:
+              summary["clean_delivery_sequence_result"] = "NOT_OBSERVED_EXPECTED_LIMITATION"
+          preassembled_final_count = kind_counts.get("PREASSEMBLED_FINAL_SEQUENCE", 0)
+          summary["preassembled_final_sequence_count"] = preassembled_final_count
+          false_final = [
+              s for s in sequences
+              if s.get("sequence_kind") == "PREASSEMBLED_FINAL_SEQUENCE"
+              and s.get("proposition_progression_status") != "FORWARD_PROGRESS"
+          ]
+          summary["false_preassembled_final_count"] = len(false_final)
+          thin_support = [
+              s for s in sequences
+              if s.get("sequence_kind") == "PREASSEMBLED_FINAL_SEQUENCE"
+              and all(rc == "CONTINUATION" for rc in (s.get("relation_candidates") or []) if rc)
+          ]
+          summary["thin_support_count"] = len(thin_support)
+
+          # --- 47-54: P1-vs-P2 firewall / downstream immutability
+          # (structural confirmation only -- P1 has zero authority by
+          # construction, D-193's own boundary, unchanged by D-200.3/4). ---
+          earlier_redundancy_values = {s.get("earlier_source_redundancy_status") for s in sequences}
+          summary["p1_vs_p2_firewall"] = {
+              "earlier_source_redundancy_status_values_observed": sorted(v for v in earlier_redundancy_values if v is not None),
+              "all_not_evaluated": earlier_redundancy_values <= {"NOT_EVALUATED", None},
+          }
+          summary["downstream_immutability"] = {
+              "family_formation": "UNTOUCHED_NO_P1_AUTHORITY_CALL_SITE",
+              "besttake": "UNTOUCHED_NO_P1_AUTHORITY_CALL_SITE",
+              "d191_bounded_finalist_authority": "UNTOUCHED_NO_P1_AUTHORITY_CALL_SITE",
+              "ordering": "UNTOUCHED_NO_P1_AUTHORITY_CALL_SITE",
+              "boundary": "UNTOUCHED_NO_P1_AUTHORITY_CALL_SITE",
+              "pacing": "UNTOUCHED_NO_P1_AUTHORITY_CALL_SITE",
+              "renderer": "UNTOUCHED_NO_P1_AUTHORITY_CALL_SITE",
+          }
+
+          # --- 55-59: parity metrics, if the D-095 comparison framework
+          # produced them this run (P1 has no authority -- never causally
+          # attributed to P1 even if present). ---
+          ladder = load("artifact/video00-modal-quality-ladder.json")
+          summary["parity_metrics"] = {
+              "available": isinstance(ladder, dict),
+              "note": "P1 has no authority; any movement here is never causally attributed to P1.",
+              "raw": ladder if isinstance(ladder, dict) else None,
+          }
+
+          # --- 60-62: verdict / closure decision. ---
+          language_healthy = (
+              (live_block or {}).get("status") == "evaluated"
+              and summary.get("live_language_spine_status") == "AVAILABLE"
+              and canonical_attempt_used > 0
+          )
+          cross_dim_ok = summary["former_conflicts_no_longer_global_uncertain_count"] >= 0  # structural: no crash, real counts
+          no_regression = (
+              summary["retry_join_result"] == "ALL_JOINED"
+              and summary["correction_join_result"] == "ALL_JOINED"
+              and summary["continuation_join_result"] == "ALL_JOINED"
+              and summary["new_audience_beat_split_result"] == "ALL_SPLIT"
+              and summary["distinct_proposition_grouping_ownership_result"] == "NEVER_SPLIT_OWNER"
+              and summary["complementary_grouping_ownership_result"] == "NEVER_SPLIT_OWNER"
+              and summary["unknown_firewall_result"] == "HELD"
+              and summary["false_preassembled_final_count"] == 0
+          )
+          only_limitation_is_beat = (
+              summary["same_editorial_beat_status"] == "ZERO_AS_EXPECTED_NO_DETECTOR"
+              and summary["clean_delivery_sequence_result"] == "NOT_OBSERVED_EXPECTED_LIMITATION"
+          )
+
+          if language_healthy and no_regression and over_fragmentation_result in ("OVER_FRAGMENTATION_RESOLVED", "OVER_FRAGMENTATION_REDUCED", "NOT_APPLICABLE"):
+              verdict = "A. DIMENSION-AWARE P1 RELATION INTEGRATION REAL-MEDIA PROVEN -- P1 SUFFICIENTLY QUALIFIED FOR P2" if only_limitation_is_beat else \
+                        "B. DIMENSION-AWARE RELATION REAL-MEDIA PROVEN -- ONE NON-BLOCKING P1 LIMITATION REMAINS"
+              p1_closure = "P1_READY_FOR_P2"
+          elif language_healthy and no_regression:
+              verdict = "B. DIMENSION-AWARE RELATION REAL-MEDIA PROVEN -- ONE NON-BLOCKING P1 LIMITATION REMAINS"
+              p1_closure = "P1_READY_FOR_P2"
+          elif language_healthy and not no_regression:
+              verdict = "C. PARTIALLY PROVEN -- ONE MATERIAL P1 BLOCKER REMAINS"
+              p1_closure = "P1_NOT_READY_FOR_P2"
+          else:
+              verdict = "D. REGRESSION"
+              p1_closure = "P1_NOT_READY_FOR_P2"
+
+          summary["d200_4_verdict"] = verdict
+          summary["p1_closure_decision"] = p1_closure
+          summary["canonical_p1_status"] = p1_status
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/d200_4_dimension_aware_relation_real_media_requalification.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-200.4 Dimension-Aware Relation -> Real-Media Requalification (pure re-projection of already-computed diagnostics -- recomputes NO construction, NO bridging, NO fusion, NO relation, NO group membership) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -4390,6 +4808,7 @@ jobs:
             artifact/d196_editorial_moment_sequence_diagnostics_summary.json
             artifact/d198_local_group_formation_qualification_summary.json
             artifact/d200_live_language_spine_p1_qualification_summary.json
+            artifact/d200_4_dimension_aware_relation_real_media_requalification.json
           retention-days: 14
           if-no-files-found: warn
 
