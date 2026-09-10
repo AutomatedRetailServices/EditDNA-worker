@@ -37834,3 +37834,467 @@ Family/BestTake/Boundary/Pacing change.
 **HUMAN ACTION REQUIRED:** YES (condition A -- the Section 16 design step
 is a product-owner-scoped architecture decision, not something this
 forensic authorizes itself to start).
+
+# D-200.2: DIMENSION-AWARE P1 RELATION ARCHITECTURE (POST D-200.1,
+DESIGN ONLY, NO IMPLEMENTATION)
+
+Post D-200.1, Product Owner authorization: design (not implement) a
+dimension-aware relation model that stops forcing the ATTEMPT/REALIZATION,
+PROPOSITION/CONTENT, and EDITORIAL-BEAT editorial questions into one flat,
+mutually-exclusive seven-label field. Docs only.
+
+## 1. Existing-label decomposition (factual, code-verified)
+
+| label | dimension(s) it actually describes | producing module | evidence | can coexist with another dimension's value? | keep as provenance? | disappears from future fused type? |
+|---|---|---|---|---|---|---|
+| RETRY | ATTEMPT (content-blind on D-157's side) | both (D-157 `_relation_for_pair`, D-169 `classify_relation_candidate`) | D-157: lexical restart + behavioral brokenness/pause, NO content check. D-169: restart + `same_proposition` (claim-signature match) REQUIRED. | YES -- a RETRY (same delivery attempt) can occur within any proposition/beat state | YES, per-side, as `attempt_relation` evidence with distinct provenance tags for D-157 vs D-169 (they compute it differently) | YES (folds into `attempt_relation`) |
+| CORRECTION | ATTEMPT | both | D-157: restart + apparently-complete prior + no brokenness evidence (behavioral gate). D-169: `right_attempt.correction_evidence` (text state-machine gate, or fused CONFLICT+restart/correction) | YES | YES | YES (folds into `attempt_relation`) |
+| CONTINUATION | ATTEMPT | both | D-157: no restart, incomplete/non-terminal prior, tight gap, no pause. D-169: `left.meaning_completion == INCOMPLETE`, no restart, no meaning conflict | YES | YES | YES (folds into `attempt_relation`) |
+| COMPLEMENTARY | PROPOSITION | D-169 real path (`left.editorial_slot_evidence == right.editorial_slot_evidence` when NOT same_proposition); D-157 declares it but only via a weak, evidence-free "no semantic corroboration available" fallback | D-169: shared editorial slot. D-157: absence of restart + both complete + moderate gap (a pure default, not a positive signal) | YES -- complementary CONTENT says nothing about whether it's the same recording attempt or the same local beat | YES, but D-157's version should be down-weighted as a true default, not a positive finding | YES (folds into `proposition_relation`) |
+| NEW_AUDIENCE_BEAT | EDITORIAL-BEAT (both sides implement near-identical logic -- the one label most likely to be a genuine same-dimension comparison) | both | Same gap constant, same "both complete, no restart, real gap" structural gate on both sides (D-169 explicitly comments it mirrors D-157) | YES -- can co-occur with any proposition state | YES | YES (folds into `editorial_beat_relation`) |
+| DISTINCT_PROPOSITION | PROPOSITION | **D-169 only** -- declared in D-157's vocabulary but structurally unreachable (dead label, confirmed: no code path in `_relation_for_pair` ever produces it) | D-169: `meaning_conflict AND same_proposition AND not restart`, OR `not same_proposition` with no complementary/beat gate matched | YES -- a distinct proposition can occur inside one continuous recording take | YES (D-169-only provenance) | YES (folds into `proposition_relation`) |
+| UNCERTAIN | cross-cutting (each side's own "insufficient evidence" fallback) | both | D-157: no entries matched any gate. D-169: conflicting evidence sources, or either side's `meaning_completion == UNCERTAIN` | N/A -- this is an absence-of-evidence marker, not a dimension | YES, per-dimension (see Section 8) | Replaced by per-dimension `UNKNOWN`, never a single global value |
+
+## 2. Final relation dimensions (three, matching the starting hypothesis --
+audited and confirmed, not blindly accepted)
+
+1. **`attempt_relation`** -- "how does this spoken realization relate to
+   the preceding realization?" Values: `RETRY`, `CORRECTION`,
+   `CONTINUATION`, `NEW_ATTEMPT`, `NO_ATTEMPT_RELATION`, `UNKNOWN`.
+   (`NEW_ATTEMPT`/`NO_ATTEMPT_RELATION` are new, minimal additions: today
+   neither classifier has a clean way to say "this IS a fresh, unrelated
+   delivery attempt, positively" vs. "no attempt-relation evidence
+   exists at all" -- both currently collapse into `UNCERTAIN`. This
+   distinction matters for Section 9's grouping contract.)
+2. **`proposition_relation`** -- "how does the informational claim
+   relate?" Values: `SAME_PROPOSITION`, `DISTINCT_PROPOSITION`,
+   `COMPLEMENTARY_PROPOSITION`, `PROPOSITION_PROGRESSION`, `UNKNOWN`.
+   (`SAME_PROPOSITION` is a new explicit positive value -- today's
+   `RETRY`/`CORRECTION` conflate "same delivery attempt" with "same
+   proposition" on D-169's side; separating them lets a future consumer
+   ask about proposition identity without also asking about attempt
+   identity. `PROPOSITION_PROGRESSION` names D-169's own `PROGRESSION_
+   FORWARD_PROGRESS` concept from `editorial_moment_sequence.py`,
+   promoted to a first-class proposition-dimension value instead of a
+   derived sequence-level side effect.)
+3. **`editorial_beat_relation`** -- "does this moment continue the same
+   local audience-facing editorial beat, or begin another?" Values:
+   `SAME_EDITORIAL_BEAT`, `NEW_AUDIENCE_BEAT`, `UNKNOWN`.
+   **Audit finding, stated honestly per this task's own instruction: NO
+   current evidence source (D-157 or D-169) positively asserts
+   `SAME_EDITORIAL_BEAT`. Only the negative/split value (`NEW_AUDIENCE_
+   BEAT`) has real evidence on either side.** `SAME_EDITORIAL_BEAT`
+   exists in the vocabulary for a FUTURE evidence source (not built,
+   not authorized here) -- until then it must default to `UNKNOWN`,
+   never be inferred as a positive join signal from mere absence of
+   `NEW_AUDIENCE_BEAT`. This is the one "evidence dimension still
+   undefined" the D-200.2 verdict names explicitly (Section 20).
+
+No fourth dimension is proposed -- CLAUDE.md's own D-111 doctrine already
+scopes this to ATTEMPT/PROPOSITION-family abstractions, and this task's
+own "do not create a giant ontology" instruction is honored by keeping the
+third (`editorial_beat_relation`) minimal and explicitly not overloaded
+with anything COMPLEMENTARY/DISTINCT_PROPOSITION already covers.
+
+## 3. Structured future type
+
+```
+StructuredEditorialRelationEvidence:
+    left_source_span_id: str
+    right_source_span_id: str
+
+    attempt_relation: str                  # RETRY/CORRECTION/CONTINUATION/
+                                            # NEW_ATTEMPT/NO_ATTEMPT_RELATION/UNKNOWN
+    attempt_relation_status: str           # SUPPORTED/WEAK/MIXED/UNKNOWN
+    attempt_relation_sources: Tuple[str, ...]   # e.g. ("D157",) / ("D169",) / ("D157","D169")
+
+    proposition_relation: str              # SAME_PROPOSITION/DISTINCT_PROPOSITION/
+                                            # COMPLEMENTARY_PROPOSITION/PROPOSITION_PROGRESSION/UNKNOWN
+    proposition_relation_status: str
+    proposition_relation_sources: Tuple[str, ...]
+
+    editorial_beat_relation: str           # SAME_EDITORIAL_BEAT/NEW_AUDIENCE_BEAT/UNKNOWN
+    editorial_beat_relation_status: str
+    editorial_beat_relation_sources: Tuple[str, ...]
+
+    evidence_conflicts: Tuple[str, ...]    # e.g. ("ATTEMPT_RELATION_MIXED",) --
+                                            # only when the SAME dimension disagrees
+    provenance: Tuple[str, ...]            # e.g. ("D157_RELATION_FUSION", "D169_RELATION_FUSION")
+```
+
+No numeric master confidence (per instruction). No transcript. Each
+dimension carries its own categorical status and its own source list --
+this IS the mechanism that answers Section 10's UNKNOWN-isolation
+requirement without any new machinery.
+
+## 4. Confidence/status contract
+
+Categorical only, reusing the existing canonical vocabulary
+(`SUPPORTED`/`MIXED`/`WEAK`/`UNKNOWN` -- same constants
+`language_proposition_relation.py` already uses). Conflict is per
+dimension: if D-157 and D-169 both produce a value for `attempt_relation`
+and they differ, `attempt_relation_status = MIXED` and `attempt_relation`
+itself becomes the existing project-wide `RELATION_UNCERTAIN`-equivalent
+for that ONE dimension only -- it never forces `proposition_relation` or
+`editorial_beat_relation` to `MIXED`/`UNKNOWN` (Section 1's "UNKNOWN in
+one dimension must not erase supported evidence in another" requirement,
+satisfied by construction: each dimension's status field is independent).
+
+## 5. D-157 ownership
+
+Primary: **`attempt_relation`** (lexical restart, behavioral brokenness/
+pause, timing gap -- exactly what `_relation_for_pair` already computes).
+Secondary, evidence-permitting: **`editorial_beat_relation`**'s existing
+`NEW_AUDIENCE_BEAT` NEGATIVE value only (D-157's own gate for it: both
+complete, no restart, real gap, fresh-delivery visual signal) --
+unchanged from today. **D-157 owns zero `proposition_relation` evidence**
+(confirmed: no claim-content comparison exists anywhere in
+`_relation_for_pair`) -- it must never be made proposition authority, per
+this task's own instruction; this is a natural consequence of auditing
+its actual inputs, not an imposed rule.
+
+## 6. D-169 ownership
+
+Primary: **`proposition_relation`** (claim-signature `same_proposition`/
+`meaning_conflict`, `editorial_slot_evidence` equality, D-169's own
+`PROGRESSION_FORWARD_PROGRESS`-style forward-content reasoning). Secondary:
+**`attempt_relation`**, via `LanguageAttempt.restart_evidence`/
+`.correction_evidence` -- genuinely linguistic evidence for the SAME
+attempt-relation question D-157 also answers, just from a different
+evidence channel (text state machine vs. visual/behavioral labels).
+D-169 owns the SAME (real, code-confirmed) share of `editorial_beat_
+relation`'s negative `NEW_AUDIENCE_BEAT` value as D-157 (explicitly
+mirrored gate, Section 1). **D-169 owns zero visual/behavioral evidence**
+-- it must never be made editorial-beat sole authority beyond that one
+mirrored, already-existing gate.
+
+## 7. Evidence-by-dimension table
+
+| dimension | D-157 evidence | D-169 evidence | positive-evidence gap? |
+|---|---|---|---|
+| attempt_relation | lexical restart + visual/behavioral brokenness + timing | lexical restart (same primitive) + text-completion state machine | none -- both sides contribute real, independent evidence |
+| proposition_relation | none | claim-signature overlap/conflict, editorial slot | D-157 side is a structural absence, not a gap to close -- proposition identity is inherently a linguistic-content question |
+| editorial_beat_relation | `NEW_AUDIENCE_BEAT` only (negative) | `NEW_AUDIENCE_BEAT` only (negative, mirrored) | **YES -- no positive `SAME_EDITORIAL_BEAT` evidence exists on either side today (Section 2)** |
+
+## 8. Cross-dimension compatibility rules
+
+Two dimensions from different sides are **never** compared against each
+other for agreement/conflict -- conflict is defined ONLY within a single
+dimension (`attempt_relation` vs `attempt_relation`,
+`proposition_relation` vs `proposition_relation`, etc.), never across.
+Example from this task's own text: `proposition_relation=DISTINCT_
+PROPOSITION` (D-169) and `editorial_beat_relation=SAME_EDITORIAL_BEAT`
+(hypothetically, if ever evidenced) is NOT a conflict -- they are
+different dimensions describing the SAME real edge simultaneously, both
+potentially true.
+
+## 9. Same-dimension conflict rules
+
+Conflict is `d157_value == d169_value` per dimension -- the SAME equality
+check D-199's `fuse_relation_evidence` already uses, just narrowed to
+compare only within one dimension at a time instead of across the flat
+7-label space. This preserves D-199's own "never weigh sources, never
+silently override" contract (Section 21) while fixing the actual defect
+(Section 20 of D-200.1): a `RETRY` (D-157, attempt dimension) is never
+again compared for equality against a `DISTINCT_PROPOSITION` (D-169,
+proposition dimension) -- the single largest source of the 17 false
+conflicts.
+
+## 10. Exact-string-equality replacement
+
+Per-dimension exact equality (Section 9) REPLACES the current flat
+7-label exact equality. This is not "equality is invalid" (D-200.1
+Section 10's verdict stands for the FLAT field) -- within one dimension
+where both sides genuinely answer the same question (Section 5-7),
+literal equality remains the right, minimal, evidence-respecting
+definition of agreement. The fix is narrowing WHAT gets compared, not
+loosening HOW it is compared.
+
+## 11. Grouping consumer dimensions (D-197)
+
+**Confirmed by code, not merely hypothesized**: `build_editorial_local_
+groups`'s `_JOIN_RELATIONS = {RETRY, CORRECTION, CONTINUATION}` already
+consumes ONLY the attempt-relation-equivalent labels for its join
+decision -- `NEW_AUDIENCE_BEAT`/`DISTINCT_PROPOSITION`/`COMPLEMENTARY`/
+`UNCERTAIN` are ALL already treated identically as "boundary" today, with
+zero differentiation among them. The starting hypothesis is **CONFIRMED**:
+D-197 should consume `attempt_relation` for JOIN, `editorial_beat_
+relation` for an explicit SPLIT signal (currently already true via
+`NEW_AUDIENCE_BEAT`, just not yet a separately-named field), and
+`proposition_relation` should **NOT** independently determine local-group
+membership -- also already true today (D-197 never special-cases
+`DISTINCT_PROPOSITION`), but the dimension-aware model makes this an
+explicit, provable contract instead of an accidental side effect of a
+flat vocabulary.
+
+## 12. Grouping positive-join contract
+
+JOIN when `attempt_relation` (SUPPORTED or WEAK status, per-dimension) is
+`RETRY`, `CORRECTION`, or `CONTINUATION` -- unchanged from today's
+`_JOIN_RELATIONS`. No new join path is added for `editorial_beat_
+relation=SAME_EDITORIAL_BEAT` because Section 2/7 show no evidence source
+exists for that positive value yet -- adding a join rule for evidence that
+doesn't exist would be exactly the "invent a rule" this task forbids.
+
+## 13. Grouping split contract
+
+SPLIT when `editorial_beat_relation=NEW_AUDIENCE_BEAT` (SUPPORTED or WEAK)
+exists, OR when `attempt_relation` is `UNKNOWN`/`NO_ATTEMPT_RELATION`/
+absent (no positive join evidence) -- unchanged in effect from today's
+default-to-boundary behavior, now made explicit and dimension-scoped
+rather than "everything that isn't in a 3-item join set."
+
+## 14. DISTINCT_PROPOSITION grouping decision
+
+**REMOVE_AS_AUTOMATIC_GROUP_BOUNDARY** (confirming, not changing, today's
+actual behavior -- D-197 never gives it special negative treatment
+today; the risk this audit closes off is a FUTURE naive redesign adding
+an explicit "if proposition_relation == DISTINCT_PROPOSITION: split" rule,
+which Section 11's ownership analysis shows would be wrong: a source
+sequence may legitimately deliver Proposition A -> B -> C inside one
+continuous, uninterrupted recording take, and `proposition_relation`
+alone cannot see whether that continuity was interrupted.
+
+## 15. COMPLEMENTARY grouping decision
+
+Same reasoning and same answer as Section 14: **PROPOSITION-dimension
+ownership, not a grouping input.** "Content is complementary" does not by
+itself answer "same local recording neighborhood" -- D-197 already does
+not consume it specially today, and the design must not introduce a rule
+that starts consuming it.
+
+## 16. UNKNOWN handling
+
+Handled structurally by Section 3's per-dimension status fields, never by
+one global relation value: `attempt_relation=UNKNOWN` with `proposition_
+relation=DISTINCT_PROPOSITION (SUPPORTED)` and `editorial_beat_relation=
+SAME_EDITORIAL_BEAT (SUPPORTED)` [hypothetically, once evidenced] would
+NOT collapse into one global `UNCERTAIN` -- a consumer that only cares
+about `attempt_relation` (D-197, per Section 11) sees `UNKNOWN` and
+treats it as a boundary (Section 13) exactly as today, while a future P2
+consumer interested in proposition/beat continuity would still see the
+`SUPPORTED` evidence on those two dimensions, undestroyed.
+
+## 17. Chronology firewall
+
+Unchanged and explicitly re-confirmed: no dimension, value, or status in
+this design is derived from source-timeline adjacency/chronology alone.
+Every value in Sections 1/5-7 traces to a real lexical, behavioral,
+claim-signature, or completion-state input -- never "these two moments
+are next to each other in time" by itself.
+
+## 18. No weighting result
+
+**NO weighting is required or introduced.** Sections 9-10's per-dimension
+equality replaces the flat equality; no dimension's evidence is scored
+against another's, no source is preferred over another, no confidence
+threshold is added. This directly satisfies the "do not weigh sources"
+constraint carried over from D-199/D-200.1.
+
+## 19. CLEAN_DELIVERY_SEQUENCE reachability finding
+
+Confirmed by code (`editorial_moment_sequence.py::_classify_sequence_
+kind`/`_progression_status_from_relations`/`_FORWARD_COMPATIBLE_
+RELATIONS`), not merely by the persisted diagnostic string: an all-clean
+grouped local chain can ONLY have been joined via `CONTINUATION` (the
+only `_JOIN_RELATIONS` member compatible with an all-`CLEAN_AUDIENCE_
+DELIVERY` role set, since `RETRY`/`CORRECTION` groups trigger the
+higher-precedence `RETRY_SERIES` classification before the `all_clean`
+check ever runs). `CONTINUATION` is a member of `_FORWARD_COMPATIBLE_
+RELATIONS`, so `_progression_status_from_relations` ALWAYS returns
+`FORWARD_PROGRESS` for such a chain, which ALWAYS classifies it
+`PREASSEMBLED_FINAL_SEQUENCE`, NEVER the weaker `CLEAN_DELIVERY_SEQUENCE`.
+**This is a mechanical inevitability of the current architecture, not a
+coincidence.** Per Section 2/7's honest disclosure: the missing capability
+is a positive `SAME_EDITORIAL_BEAT` evidence source that could join two
+clean, content-progressing (not merely incomplete-continuation) moments
+via `editorial_beat_relation` instead of `attempt_relation=CONTINUATION`
+-- **this capability does not exist today and D-200.2 does not manufacture
+it.** CLEAN_DELIVERY_SEQUENCE remains structurally unreachable even after
+D-200.3 (Section 26) unless a future, separately-authorized evidence
+source is built.
+
+## 20. PREASSEMBLED_FINAL_SEQUENCE impact
+
+Confirms this task's own suspicion: `CONTINUATION` is literally the ONLY
+mechanical route to an all-clean joined chain today (Section 19), so it
+is ALSO the only route to `PREASSEMBLED_FINAL_SEQUENCE`. The recommended
+future contract (not implemented here) should require a CONJUNCTION,
+consistent with D-095's own quality-ladder doctrine already cited in
+CLAUDE.md ("`PREASSEMBLED_FINAL_SEQUENCE` requires a CONJUNCTION of
+structural signals"): clean audience-facing moments (existing) + genuine
+content/proposition progression (a real `proposition_relation=
+PROPOSITION_PROGRESSION` value, not merely "not RETRY/CORRECTION") +
+local editorial continuity (`editorial_beat_relation` absence of `NEW_
+AUDIENCE_BEAT`) + absence of attempt/process interruption (existing role
+checks). This is a Section 26/D-200.3-adjacent follow-on, not something
+this design step implements.
+
+## 21. D-200 17-conflict replay
+
+**Honesty note, carried forward from D-200.1 Section 5/13**: the raw
+per-edge D-157-alone and D-169-alone label VALUES behind each of the 17
+conflicts are not recoverable from RAW `34460889768`'s persisted
+diagnostics -- only that they disagreed and both resolved to the fused
+`UNCERTAIN`. The counts below are therefore a **structural, code-grounded
+estimate**, not a literal per-edge re-measurement; a literal replay
+requires the diagnostics enhancement named in Section 27's offline plan.
+
+Structural reasoning: D-157 can never produce `DISTINCT_PROPOSITION`
+(Section 1, dead label) and has zero proposition-dimension evidence
+(Section 5); D-169 produced a real canonical relation for all 19 edges
+where it had an opinion, and D-200's own moment-role distribution for the
+17 conflicts (`POST_TAKE_RESET` 12, `CORRECTION` 4, `CLEAN_AUDIENCE_
+DELIVERY` 1) is consistent with short/low-information segments where a
+content-based (D-169) verdict of `DISTINCT_PROPOSITION`/`COMPLEMENTARY_
+PROPOSITION` is at least as likely as a genuine same-dimension `NEW_
+AUDIENCE_BEAT`-vs-`NEW_AUDIENCE_BEAT` disagreement. Best available
+estimate:
+
+- `same_dimension_true_conflict_count`: **LOW, plausibly 0-3 of 17**
+  (only possible if both sides independently asserted `NEW_AUDIENCE_BEAT`
+  and disagreed, or both asserted the same attempt-relation label pair
+  and disagreed -- the one case D-200.1 Section 7 called `TRUE_
+  CONTRADICTION when unequal`)
+- `cross_dimension_compatible_count`: **HIGH, plausibly 14-17 of 17**
+  (a D-157 `attempt_relation` value compared against a D-169
+  `proposition_relation` value under the OLD flat equality, which would
+  no longer be compared at all under Section 9's per-dimension model)
+- `still_unknown_count`: **17 of 17**, formally, until Section 27's
+  diagnostics enhancement is built and a real RAW is re-read
+
+**Do not treat these as measured; they are the honest best estimate this
+forensic's own available evidence supports, per Section 21's own
+disclosure requirement, not a retroactive claim that D-200.3 already
+"solves" D-200 (per this task's own "no retroactive claim" instruction).**
+
+## 22. Minimal D-200.3 implementation gate
+
+**D-200.3 -- Dimension-Aware Relation Representation / P1 Grouping
+Consumer.** Bounded scope:
+
+1. New `StructuredEditorialRelationEvidence` type (Section 3) in a new,
+   narrow adapter module (e.g. `structured_editorial_relation.py`) --
+   never inside `watch_listen_understanding.py` or
+   `language_proposition_relation.py` directly (Section 23).
+2. Two pure adapter functions: one mapping an existing D-157
+   `AttemptRelationHypothesis` (dominant, as today) into
+   `attempt_relation`/`editorial_beat_relation` fields (its only two
+   real dimensions, Section 5); one mapping an existing D-169
+   `RelationEvidence` into `attempt_relation`/`proposition_relation`/
+   `editorial_beat_relation` fields (Section 6) using its already-
+   computed `relation_candidate` plus whatever finer signal (`restart_
+   evidence`/`correction_evidence`/`same_proposition`) is already
+   exposed on the objects it was built from -- no new computation, pure
+   re-labeling of already-produced values.
+3. A per-dimension fuse function replacing `fuse_relation_evidence`'s
+   flat comparison with three independent Section-9 comparisons.
+4. `editorial_moment_sequence_integration.py`'s `build_editorial_local_
+   groups` reads ONLY `attempt_relation`/`editorial_beat_relation` from
+   the new structured type (Section 11-13) -- `_JOIN_RELATIONS`'s
+   existing three values are unchanged, just re-sourced.
+5. New diagnostics: per-dimension status/value counts, AND (closing
+   Section 21's gap) the raw per-edge D-157-only and D-169-only dimension
+   values BEFORE fusion, so a future RAW can literally re-run Section 21's
+   replay instead of estimating it.
+6. Offline tests only (Section 27) -- no RAW in D-200.3 itself; a
+   real-media requalification RAW is a SEPARATE future gate, only after
+   D-200.3 is offline-green.
+
+## 23. Modules D-200.3 should own / must not rewrite
+
+**Should own (new code)**: the new structured type + two adapters + the
+per-dimension fuse function + `build_editorial_local_groups`'s field
+sourcing (a re-pointing, not a rule change, per Section 11).
+
+**Must NOT rewrite**: `watch_listen_understanding.py::_relation_for_pair`
+(D-157) and `language_proposition_relation.py::classify_relation_
+candidate` (D-169) stay exactly as they are -- both remain the
+authoritative PRODUCERS of their own evidence; D-200.3 only re-labels
+their already-computed outputs into the three dimensions. If either
+classifier is later found to have a proven local bug (none identified in
+this forensic -- Section 1's "D-157 never checks proposition content" is
+an ownership boundary, not a bug), that is recorded and repaired
+separately, never folded into this adapter work.
+
+## 24. Offline qualification plan (for D-200.3, when authorized)
+
+- Targeted tests for the two adapters (D-157 hypothesis -> structured
+  type, D-169 RelationEvidence -> structured type) against synthetic
+  fixtures covering each of the 7 legacy labels (Section 1's
+  decomposition table, used as the exact fixture matrix).
+- Targeted tests for the per-dimension fuse function: same-dimension
+  agreement, same-dimension conflict (abstain, never pick a side, exactly
+  D-199's own contract narrowed per-dimension), cross-dimension
+  non-comparison (the Section 8 rule -- the single most important new
+  test, since its absence IS today's defect).
+- Regression: full existing D-194/D-195/D-197/D-198/D-199/D-200 suites
+  green, unmodified in their own assertions (since `_JOIN_RELATIONS`'s
+  three values and their meaning are unchanged, per Section 11).
+- A new synthetic fixture reproducing D-200's own 17-conflict SHAPE
+  (adjacent moments where D-157 asserts an attempt-dimension label and
+  D-169 asserts a proposition-dimension label) to prove the new fusion no
+  longer abstains/splits for that shape.
+- `compileall`, full offline suite once, per the standing CLAUDE.md
+  qualification contract.
+
+## 25. Real-media requalification need
+
+**YES** -- after D-200.3 is offline-green, one real-media Video00 RAW
+(same flags as D-200, no new overlay) is needed to literally re-measure
+Section 21's replay with the new per-dimension diagnostics and confirm the
+grouping-fragmentation blocker (D-200/D-200.1's actual open finding)
+closes on the real source. This is a SEPARATE future gate, not part of
+D-200.3's own offline-only scope, and NOT authorized by this entry.
+
+## 26. P1 structurally sufficient after implementation?
+
+**YES**, for the D-200/D-200.1 blocker specifically (the 17-edge
+relation-fusion over-fragmentation) -- Section 9's per-dimension fusion
+directly targets and is expected to close it, pending the real-media
+requalification in Section 25. **CLEAN_DELIVERY_SEQUENCE's structural
+unreachability (Section 19) is a separate, known, NON-BLOCKING limitation**
+for the purpose of proceeding to P2: P2 Whole-Video Editorial Reasoning
+does not require P1's LOCAL sequence-kind classifier to be able to name a
+`CLEAN_DELIVERY_SEQUENCE` specifically, only that P1's grouping/moment
+evidence remain bounded and honest (which it is, with or without that one
+sequence-kind label being reachable). No open-ended P1 roadmap: this is
+the one, single, named remaining limitation, and it is explicitly not a
+P2 blocker.
+
+## 27. P2 readiness
+
+Ready to proceed to P2 Whole-Video Editorial Reasoning once D-200.3 is
+implemented and offline-qualified (Section 24) and the real-media
+requalification (Section 25) confirms the fragmentation blocker closed on
+Video00. Neither is authorized or started by this entry.
+
+## 28. App-roadmap status
+
+Unchanged: P1 relation integration closure (D-200.3 + requalification) ->
+P2 Whole-Video Editorial Reasoning -> Ordering -> remaining Boundary
+qualification -> Pacing V2/dialogue overlap/J-cut/L-cut/micro-overlap ->
+Renderer/export qualification -> unseen RAW generalization/Cut.ai parity
+-> product hardening -> TestFlight/App Store.
+
+## 29. D-200.2 VERDICT
+
+**A. DIMENSION-AWARE RELATION ARCHITECTURE READY -- ONE BOUNDED
+IMPLEMENTATION GATE IDENTIFIED (D-200.3, Section 22)**, with one
+explicitly-named caveat that does not block the bounded gate: the
+`editorial_beat_relation` dimension's positive `SAME_EDITORIAL_BEAT`
+value has no evidence source today (Section 2/7/19) and is deliberately
+left undefined/deferred rather than manufactured -- D-200.3's own scope
+does not require it (Section 12 adds no new join rule for it).
+
+## 30. Confirmations
+
+Docs-only. No `cutsell_worker` change. No tests changed. No workflow
+change. No RAW dispatched. No provider call. No weights or thresholds.
+No P1 authority granted. No P2 implementation. No Family/BestTake/
+Ordering/Boundary/Pacing change. `watch_listen_understanding.py`/
+`language_proposition_relation.py` inspected read-only, not modified.
+
+**HUMAN ACTION REQUIRED:** YES (condition A -- authorizing D-200.3's
+bounded implementation gate, Section 22, is the next Product Owner
+decision; this entry designs it but does not start it).
