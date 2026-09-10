@@ -292,6 +292,27 @@ on:
         required: false
         default: ""
         type: string
+      ordering_diagnostics_enabled:
+        # D-209 (docs/CUTSELL_DECISIONS.md D-206/D-207/D-208/D-209): "1"
+        # overlays CUTSELL_ORDERING_DIAGNOSTICS_ENABLED=1 (cutsell_worker/
+        # ordering_live_diagnostics_integration.py's live diagnostic
+        # integration, D-208, wired into pipeline.py). Consumes ONLY the
+        # already-computed P1/P2 evidence the flags above produce -- to
+        # reach CAPABILITY_AVAILABLE both editorial_moment_sequence_
+        # diagnostics_enabled=1 AND whole_video_editorial_reasoning_
+        # diagnostics_enabled=1 must ALSO be set (never auto-linked;
+        # reported honestly as PARTIAL/NOT_EVALUABLE otherwise, see that
+        # module's own docstring). DIAGNOSTICS ONLY: Ordering has NO
+        # selection/Family/BestTake/D-191/Boundary/Pacing/Renderer
+        # authority -- it never mutates selected_clip_id/ranked/
+        # membership/render plan, and never activates OpenAIComposer
+        # Provider (D-206/D-207/D-208 all confirm it stays dormant).
+        # Empty (default) = code default OFF, byte-identical to every run
+        # before D-208/D-209.
+        description: "Optional: '1' enables CUTSELL_ORDERING_DIAGNOSTICS_ENABLED (D-208/D-209, diagnostic-only, no authority; requires editorial_moment_sequence_diagnostics_enabled=1 AND whole_video_editorial_reasoning_diagnostics_enabled=1 too to reach AVAILABLE). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -577,6 +598,18 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-204 P2 Whole-Video Editorial Reasoning Diagnostics for this run: CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-209: optional D-208 Ordering Live Diagnostic Integration
+          # overlay, applied only when the dispatch input is exactly
+          # "1"; code default (OFF) otherwise. SEPARATE from the three
+          # flags above -- never auto-linked -- see cutsell_worker/
+          # ordering_live_diagnostics_integration.py's own module
+          # docstring and docs/CUTSELL_DECISIONS.md D-206/D-207/D-208/
+          # D-209 for the full no-authority contract.
+          if [ "${{ github.event.inputs.ordering_diagnostics_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_ORDERING_DIAGNOSTICS_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-209 Ordering Live Diagnostics for this run: CUTSELL_ORDERING_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_ORDERING_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -5012,6 +5045,265 @@ jobs:
           print(json.dumps({k: v for k, v in summary.items() if k not in ("regions", "multi_realization_propositions", "supported_or_partial_hypotheses")}, indent=2, sort_keys=True, default=str))
           PY
 
+      - name: D-209 Ordering -> Video00 real-media diagnostic qualification
+        # D-209 (docs/CUTSELL_DECISIONS.md D-209): real-media qualification
+        # of D-208's live Ordering diagnostic integration on the SAME
+        # canonical Video00 RAW. Reads the SAME `artifact/video00-modal.json`
+        # the D-196/D-200/D-204 steps above read, and PURE-PROJECTS the
+        # already-serialized `diagnostics["ordering"]` block (D-208's own
+        # `ordering_live_diagnostics_integration.py` diagnostics/run-summary
+        # functions merged by pipeline.py) -- recomputes NO OrderingUnit,
+        # NO relation, NO baseline plan, NO proposal validation. Every
+        # audit below (membership invariant, P1/composite/meaning firewall
+        # violation counts, usefulness classification) is a REPORTING-ONLY
+        # check over already-serialized fields, computed here exactly like
+        # D-204's own step -- never fed back into cutsell_worker. No
+        # OpenAIComposerProvider is ever instantiated by this step or by
+        # the engine it reads (D-206/D-207/D-208 all confirm it stays
+        # dormant; the "openai composer instantiated"/"provider call
+        # count" fields below are the structural fact those three
+        # documents already proved, restated here, never re-derived from
+        # this one artifact).
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          summary = {"schema_version": "cutsell.video00.d209_ordering_real_media_qualification.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          diag = engine.get("diagnostics") if isinstance(engine, dict) else None
+          block = diag.get("ordering") if isinstance(diag, dict) else None
+          status = (block or {}).get("status") if isinstance(block, dict) else "block_missing"
+          summary["ordering_block_status"] = status
+          summary["ordering_capability_status"] = (block or {}).get("capability_status", "MISSING_FROM_SERIALIZATION")
+          summary["ordering_missing_evidence"] = (block or {}).get("missing_evidence", [])
+
+          units = (block or {}).get("units", [])
+          relations = (block or {}).get("relations", [])
+          baseline = (block or {}).get("baseline_plan") or {}
+          proposal = (block or {}).get("proposal_validation") or {}
+
+          summary["ordering_unit_count"] = len(units)
+          summary["ordering_relation_count"] = len(relations)
+          summary["units"] = units
+          summary["relations"] = relations
+
+          # --- Membership invariant: input units vs baseline output. ---
+          unit_ids = [u.get("realization_id") for u in units]
+          baseline_ids = baseline.get("ordered_realization_ids", [])
+          summary["input_unit_count"] = len(unit_ids)
+          summary["output_unit_count"] = len(baseline_ids)
+          input_set, output_set = set(unit_ids), set(baseline_ids)
+          summary["dropped_count"] = len(input_set - output_set)
+          summary["added_count"] = len(output_set - input_set)
+          summary["duplicate_unit_id_count"] = len(unit_ids) - len(input_set)
+          summary["duplicate_baseline_id_count"] = len(baseline_ids) - len(output_set)
+          summary["membership_invariant_result"] = (
+              "HELD" if input_set == output_set
+              and len(unit_ids) == len(input_set) and len(baseline_ids) == len(output_set)
+              else "VIOLATED"
+          )
+          summary["source_asset_ids"] = sorted({u.get("source_asset_id") for u in units if u.get("source_asset_id")})
+          summary["multi_source_result"] = "NOT_EXERCISED" if len(summary["source_asset_ids"]) <= 1 else "EXERCISED"
+
+          # --- Relation-type distribution + provenance breakdown. ---
+          relation_counts = {}
+          reason_counts = {}
+          for r in relations:
+              relation_counts[r.get("relation", "MISSING")] = relation_counts.get(r.get("relation", "MISSING"), 0) + 1
+              reason_counts[r.get("ordering_reason", "MISSING")] = reason_counts.get(r.get("ordering_reason", "MISSING"), 0) + 1
+          summary["relation_type_distribution"] = relation_counts
+          summary["must_precede_count"] = relation_counts.get("MUST_PRECEDE", 0)
+          summary["must_follow_count"] = relation_counts.get("MUST_FOLLOW", 0)
+          summary["preserve_internal_order_count"] = relation_counts.get("PRESERVE_INTERNAL_ORDER", 0)
+          summary["no_order_constraint_count"] = relation_counts.get("NO_ORDER_CONSTRAINT", 0)
+          summary["conflicted_relation_count"] = relation_counts.get("CONFLICTED", 0)
+          summary["unknown_relation_count"] = relation_counts.get("UNKNOWN", 0)
+          summary["relation_reason_distribution"] = reason_counts
+
+          # --- Baseline position lookup, for every order-constraint audit
+          # below (a real check against the actual final list, not a
+          # re-derivation of the ordering algorithm itself). ---
+          position = {rid: i for i, rid in enumerate(baseline_ids)}
+
+          def _violated(rel_list):
+              count = 0
+              ids = []
+              for r in rel_list:
+                  left, rite = position.get(r.get("left_unit_id")), position.get(r.get("right_unit_id"))
+                  if left is None or rite is None:
+                      continue
+                  if left >= rite:
+                      count += 1
+                      ids.append(r.get("relation_id"))
+              return count, ids
+
+          p1_seq = [r for r in relations if r.get("ordering_reason") == "P1_LOCAL_SEQUENCE"]
+          continuation = [r for r in relations if r.get("ordering_reason") == "P1_CONTINUATION"]
+          correction = [r for r in relations if r.get("ordering_reason") == "P1_CORRECTION"]
+          composite = [r for r in relations if r.get("ordering_reason") == "COMPOSITE_INTERNAL_ORDER"]
+
+          summary["p1_sequence_constraint_count"] = len(p1_seq)
+          summary["p1_sequence_violation_count"], summary["p1_sequence_violations"] = _violated(p1_seq)
+          summary["continuation_constraint_count"] = len(continuation)
+          summary["continuation_violation_count"], summary["continuation_violations"] = _violated(continuation)
+          summary["correction_constraint_count"] = len(correction)
+          summary["correction_violation_count"], summary["correction_violations"] = _violated(correction)
+          summary["composite_internal_order_constraint_count"] = len(composite)
+          summary["composite_violation_count"], summary["composite_violations"] = _violated(composite)
+          summary["composite_unit_count"] = sum(1 for u in units if u.get("composite_component_ids"))
+
+          # --- Retry-survival / supersession-survival conflict (Ordering
+          # never picks a winner; a real conflict here is EXPECTED, not a
+          # defect). ---
+          retry_survival = [r for r in relations if "SUPERSESSION_SURVIVAL_CONFLICT" in (r.get("conflict_flags") or [])]
+          summary["retry_survival_conflict_count"] = len(retry_survival)
+          summary["retry_survival_no_winner_selected"] = summary["membership_invariant_result"] == "HELD"
+
+          # --- P2 constraint classification (reporting-only, mirrors
+          # D-204's own reporting-only value classification). ---
+          p2_reasons = ("P2_PROPOSITION_PROGRESSION", "P2_GLOBAL_CONTINUITY", "MEANING_FIREWALL", "UNIQUE_INFORMATION")
+          p2_relations = [r for r in relations if r.get("ordering_reason") in p2_reasons]
+          summary["p2_constraint_count"] = len(p2_relations)
+
+          def _classify_p2(r):
+              rel, reason = r.get("relation"), r.get("ordering_reason")
+              if rel in ("MUST_PRECEDE", "MUST_FOLLOW", "PRESERVE_INTERNAL_ORDER"):
+                  return "DIRECT_ORDER_CONSTRAINT"
+              if rel == "CONFLICTED":
+                  return "CONFLICT_ONLY"
+              if reason in p2_reasons:
+                  return "CONTEXT_ONLY"
+              return "UNUSED"
+
+          p2_classification_counts = {}
+          for r in p2_relations:
+              c = _classify_p2(r)
+              p2_classification_counts[c] = p2_classification_counts.get(c, 0) + 1
+          summary["p2_constraint_classifications"] = p2_classification_counts
+
+          # --- Unique-information / meaning firewalls (Ordering has no
+          # delete authority -- a unit carrying uncovered unique content
+          # can only be "lost" if membership itself was violated, already
+          # audited above). ---
+          proposition_units = [u for u in units if u.get("proposition_candidate_ids")]
+          summary["unique_information_unit_count"] = len(proposition_units)
+          summary["unique_information_loss_count"] = (
+              0 if summary["membership_invariant_result"] == "HELD" else summary["dropped_count"]
+          )
+
+          meaning_cases = [r for r in relations if r.get("ordering_reason") == "MEANING_FIREWALL"]
+          summary["meaning_conflict_ordering_case_count"] = len(meaning_cases)
+          summary["meaning_conflict_resolution_violation_count"] = (
+              len(meaning_cases) if meaning_cases and baseline.get("ordering_status") != "CONFLICTED" else 0
+          )
+
+          # --- Chronology firewall: a FALLBACK-only placement (no real
+          # editorial relation) must never be reported at ORDERED/
+          # confidence-SUPPORTED -- read directly from the already-
+          # serialized per-unit ordered_units list, never re-derived. ---
+          ordered_units = baseline.get("ordered_units", [])
+          fallback_placements = [u for u in ordered_units if u.get("continuity_status") == "FALLBACK"]
+          summary["source_order_fallback_count"] = len(fallback_placements)
+          summary["chronology_only_semantic_order_count"] = sum(
+              1 for u in fallback_placements if baseline.get("ordering_status") == "ORDERED"
+          )
+
+          # --- Deterministic baseline, echoed verbatim. ---
+          summary["ordered_realization_ids"] = baseline_ids
+          summary["ordering_status"] = baseline.get("ordering_status", "MISSING_FROM_SERIALIZATION")
+          summary["fallback_used"] = baseline.get("fallback_used")
+          summary["fallback_reason"] = baseline.get("fallback_reason")
+          summary["unresolved_relation_ids"] = baseline.get("unresolved_relation_ids", [])
+          summary["unresolved_relation_count"] = len(summary["unresolved_relation_ids"])
+          summary["cycle_count"] = sum(1 for rid in summary["unresolved_relation_ids"] if str(rid).startswith("CYCLE:"))
+          summary["conflict_flags"] = baseline.get("conflict_flags", [])
+
+          # --- Composer compatibility path + D-207 validator reuse. ---
+          summary["composer_proposal_available"] = bool(proposal)
+          summary["composer_path"] = proposal.get("composer_path", "NOT_AVAILABLE")
+          summary["proposed_realization_ids"] = proposal.get("proposed_realization_ids", [])
+          summary["proposal_status"] = proposal.get("proposal_status", "NOT_AVAILABLE")
+          summary["proposal_membership_valid"] = proposal.get("membership_valid")
+          summary["proposal_identity_valid"] = proposal.get("identity_valid")
+          summary["proposal_constraint_violation_count"] = proposal.get("constraint_violation_count", 0)
+          summary["proposal_violated_relation_ids"] = proposal.get("violated_relation_ids", [])
+          summary["proposal_fallback_used"] = proposal.get("fallback_used")
+          summary["accepted_order"] = proposal.get("accepted_realization_ids", [])
+          summary["baseline_fallback_exact_match"] = (
+              proposal.get("fallback_used") is not True
+              or proposal.get("accepted_realization_ids", []) == baseline_ids
+          )
+          summary["causal_validator_status"] = proposal.get("causal_validator_status", (block or {}).get("causal_validator_status", "MISSING_FROM_SERIALIZATION"))
+
+          # --- Structural facts already proven by D-206/D-207/D-208's own
+          # offline test suites (never re-derived from this one artifact,
+          # which cannot prove a negative about network calls). ---
+          summary["openai_composer_instantiated"] = "NO"
+          summary["provider_call_count"] = 0
+          summary["network_call_count"] = 0
+
+          # --- P1/P2 health cross-reference (same source blocks D-196/
+          # D-204 already read, cross-referenced here only). ---
+          p1_block = diag.get("editorial_moment_sequence") if isinstance(diag, dict) else None
+          p2_block = diag.get("whole_video_editorial_reasoning") if isinstance(diag, dict) else None
+          summary["p1_status"] = (p1_block or {}).get("status", "block_missing")
+          summary["p2_status"] = (p2_block or {}).get("status", "block_missing")
+          summary["p2_capability_status"] = (p2_block or {}).get("capability_status", "MISSING_FROM_SERIALIZATION")
+
+          # --- Real-Ordering-over-upstream value + usefulness
+          # classification (reporting-only, from the counts above --
+          # never a QA reference label; a "no reorder needed, all known
+          # constraints already satisfied" result is explicitly VALID
+          # per this task's own "do not require reorder" instruction). ---
+          violations = (
+              summary["p1_sequence_violation_count"] + summary["continuation_violation_count"]
+              + summary["correction_violation_count"] + summary["composite_violation_count"]
+              + summary["meaning_conflict_resolution_violation_count"] + summary["chronology_only_semantic_order_count"]
+          )
+          real_constraints = (
+              summary["must_precede_count"] + summary["must_follow_count"] + summary["preserve_internal_order_count"]
+              + summary["conflicted_relation_count"]
+          )
+          if summary["membership_invariant_result"] != "HELD" or violations > 0:
+              usefulness = "MATERIALLY_WRONG"
+          elif summary["ordering_capability_status"] == "AVAILABLE" and real_constraints > 0:
+              usefulness = "USEFUL_AND_BOUNDED"
+          elif summary["ordering_capability_status"] in ("AVAILABLE", "PARTIAL"):
+              usefulness = "SAFE_BUT_NOT_YET_USEFUL"
+          else:
+              usefulness = "SAFE_BUT_NOT_YET_USEFUL"
+          summary["ordering_usefulness_classification"] = usefulness
+          summary["real_ordering_value_present"] = real_constraints > 0
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/d209_ordering_real_media_qualification.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True, default=str)
+
+          size = os.path.getsize(out_path)
+          print("--- D-209 Ordering -> Real-Media Qualification (pure re-projection of already-computed diagnostics['ordering'] -- recomputes NO OrderingUnit, NO relation, NO baseline plan, NO proposal validation; violation/usefulness classifications below are reporting-only, never fed back into cutsell_worker) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps({k: v for k, v in summary.items() if k not in ("units", "relations")}, indent=2, sort_keys=True, default=str))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -5042,6 +5334,7 @@ jobs:
             artifact/d200_live_language_spine_p1_qualification_summary.json
             artifact/d200_4_dimension_aware_relation_real_media_requalification.json
             artifact/d204_whole_video_editorial_reasoning_real_media_qualification.json
+            artifact/d209_ordering_real_media_qualification.json
           retention-days: 14
           if-no-files-found: warn
 
