@@ -40827,3 +40827,542 @@ Owner decision.
 
 **Then STOP. Do NOT implement D-205. Wait for Product Owner
 coordination.**
+
+
+# D-205: ORDERING -- PHASE 0 ARCHITECTURE / FORENSIC (POST D-204, DOCS ONLY,
+NO IMPLEMENTATION)
+
+## 1. Branch / new HEAD
+
+`feature/runpod-pod-on-demand`, verified before starting: HEAD
+`30e8e36b90f9a3095cafda7d4b24ecaed00dcbca` (matches expected), clean tree.
+
+## 2. Files changed
+
+`docs/CUTSELL_DECISIONS.md` only (this entry). No `cutsell_worker` change,
+no test change, no workflow change, no RAW.
+
+## 3. Actual current ordering mechanisms (repo-wide forensic)
+
+Direct code read of every module named below (not inferred):
+
+- **`composer.py` (`compose_selected`)** -- Category **B** (source-
+  chronology preservation). Pure function: takes the frozen family
+  winners + every ungrouped valid take, sorts by `(source_order, start,
+  end, clip_id)`. This is the ONLY step that ALWAYS runs; it is the live
+  default behavior on every RAW today.
+- **`composer_provider.py` (`safe_compose_order`, `ComposerProvider`) +
+  `composer_openai.py` (`OpenAIComposerProvider`)** -- Category **C**
+  (real editorial ordering), FULLY BUILT: an LLM prompt ("You are
+  CutSell's global story composer... For SALES footage, build the
+  strongest coherent product sales story... hook, product context, demo,
+  problem, feature, benefit, proof, reaction, objection, result, CTA...
+  For NATURAL footage... setup, development and payoff/conclusion")
+  reasons about proposition progression in spirit and returns a reordered
+  id list. `_repair_order` enforces a strict, already-proven invariant:
+  reorder-only, never add/drop/duplicate, any invalid/incomplete/missing
+  provider output is deterministically repaired back to natural
+  (chronological) order, and any exception fails open to natural order.
+  **Confirmed DORMANT on every live call path**, by direct read: both
+  production entry points hardcode `composer_provider=None` --
+  `universal_clean_cut.py:147` (the active Clean Cut V1 path this
+  session's whole mission targets) and `brain_runtime.py:283` (the
+  canonical `BrainRuntime` construction the older `worker_job.py` path
+  reads `brain.composer_provider` from). Only test fixtures ever
+  instantiate a real `OpenAIComposerProvider`.
+- **`causal_order_validator.py` (D-027, `find_causal_order_breaks`)** --
+  Category **A/E boundary** (a VALIDATOR/GATE, never a constructor): a
+  general (English+Spanish) connector-lexicon + same-source-chronology +
+  optional bounded `CausalOrderArbiter` escalation that detects a
+  dependent-consequence/continuation clip placed BEFORE (or missing
+  relative to) the clip it depends on, ACROSS independent ideas. Routes
+  findings to human review (`final_edit_reviewer.py`'s
+  `CAUSAL_ORDER_BREAK`) -- explicitly NEVER auto-reorders ("a cross-idea
+  reorder risks undoing an intentional Composer pacing choice"). No live
+  `CausalOrderArbiter` implementation exists yet (honest gap, same
+  pattern as `semantic_idea_equivalence.py`'s own arbiter).
+- **`final_edit_reviewer.py`'s `STORY_ORDER_BREAK`** -- Category **E**
+  (narrower validator): checks only that ONE accepted composite's OWN
+  components stay in recording order relative to each other -- explicitly
+  scoped to not fire on legitimate cross-idea Composer reordering.
+
+No other `sort(`/`sorted(`/`timeline`/`chronological` hit in the repo
+constitutes an editorial ordering decision -- the remainder are render-
+mechanical (`render_plan.py`'s segment-list iteration, `_coalesce_
+contiguous_segments`) or unrelated (Category E: variable names, log
+sorting, dict key sorting for determinism).
+
+## 4. Current mechanical pipeline position
+
+**Important, precise finding, more nuanced than the directive's own
+framing assumed.** This codebase's own internal canonical-order
+documentation (`dialogue_pacing_transition.py`'s own docstring, restating
+D-098 Section 11/D-129) states the order as:
+
+    Selection / BestTake -> Selection Freeze -> Boundary
+    (boundary_engine_pass.py) -> Dialogue/Pacing Transition -> Renderer
+
+**"Ordering" does not appear as a separately named phase in that
+internal documentation at all.** Direct read of `pipeline.py` confirms
+why: `compose_selected`/`safe_compose_order` run at lines 2353-2363,
+consuming `kept`/`groups` (the just-resolved family winners) and
+producing `composed_takes` -- which THEN feeds `safe_review_draft`
+(draft review), and only after that (StoryValidator/repair-loop/
+CanonicalEditPlan, outside this file's immediate scope) does the
+selection become what the rest of the codebase treats as "frozen."
+**The existing arrangement-of-clips-into-a-sequence step runs BEFORE
+Freeze, as part of Selection/Composition itself -- not as a distinct
+POST-Freeze stage the way this directive's own "Freeze Contract" section
+describes** ("Ordering acts after winner/realization decisions are
+frozen... Ordering may rearrange selected realizations"). A genuinely
+separate, post-Freeze stage matching that exact contract does not exist
+in the codebase today. This is the "minimum future integration seam"
+this task's own directive asks for: any real post-Freeze Ordering
+authority would be a NEW seam, inserted between the (implicit) Freeze
+point and `boundary_engine_pass.py`'s own call site -- not a relocation
+of the existing pre-Freeze composer, and not built here (this task
+performs no reordering of the pipeline).
+
+## 5-6. Canonical Ordering ownership / non-ownership
+
+**Ownership**: given the selected/valid realizations that survived
+upstream understanding and selection, what sequence they should appear
+in -- reasoning over proposition progression, narrative continuity,
+source chronology where useful, P2 global region relationships,
+supersession/redundancy evidence, local sequence integrity, and
+continuity across selected realizations. **Non-ownership** (confirmed by
+this forensic against every module read): which take wins (Family/
+BestTake/D-191's own authority, untouched); which proposition is
+semantically true (D-169/P2's own evidence, untouched); physical frame
+boundaries (`boundary_engine_pass.py`'s own authority); pacing
+transitions/J-cut/L-cut/micro-overlap (`dialogue_pacing_transition.py`'s
+own authority); renderer behavior (`render.py`/`render_plan.py`'s own
+authority).
+
+## 7. Atomic ordering unit
+
+**Recommendation: the REALIZATION** (today's `CandidateTake`/`DraftClip`
+identity that survives Freeze), NOT the raw clip, moment, or P1 sequence.
+Rationale: `compose_selected`'s own existing contract already operates at
+exactly this granularity (`CandidateTake` objects post-family-resolution);
+`draft.selected`/`render_plan.build_render_plan` both iterate this same
+unit; and D-202/D-203's own P2 evidence (`WholeVideoEditorialRegion`/
+`WholeVideoPropositionRealizationMap`) references moments/groups/sequences
+only as EVIDENCE, never as the thing being arranged. Mixing units (e.g.
+ordering P1 moments directly) would require re-deriving which
+realization each moment belongs to post-Freeze -- unnecessary, since that
+mapping already exists via `source_span_id`/`attempt_ids` references.
+
+## 8. Frozen-selection dependency
+
+Confirmed real and load-bearing: `compose_selected` already receives only
+`kept`/`groups`/`surviving_labels` -- i.e. it is CONSTITUTIONALLY unable
+to see a discarded take. A future post-Freeze Ordering stage would depend
+on `draft.selected` (or an equivalent already-frozen realization list) as
+its ONLY realization-membership input, never re-deriving membership
+itself.
+
+## 9-10. P1 / P2 relationship
+
+**P1**: Ordering should consume `EditorialLocalGroup`/
+`EditorialSequenceHypothesis` (via `sequence_id`/`moment_ids`) as a
+CONSTRAINT (Section 23) -- reference only, never recomputed. **P2**:
+Ordering should consume `WholeVideoPropositionRealizationMap`/
+`WholeVideoSupersessionHypothesis`/`global_continuity_status` as EVIDENCE
+for redundancy/supersession/conflict-aware placement (Sections 15-17) --
+P2 itself never outputs the final ordering (confirmed: D-202/D-203's own
+types carry no ordering/position field).
+
+## 11. Proposition relationship
+
+Ordering should reference `proposition_candidate_id` (D-169) directly,
+never re-derive proposition identity, and never equate it with
+`retry_family_id`/`take_group_id` (the same conflation firewall D-201/
+D-169's own module docstring already established for P2).
+
+## 12-15. Family / Realization / Composite / BestTake relationship
+
+**Family/BestTake/D-191**: read-only upstream input (which realizations
+survived); Ordering has zero write path to any of them -- confirmed:
+neither `composer.py` nor `composer_provider.py` imports `take_grouping`/
+`take_grouping_provider`/`bounded_finalist_arbiter`/`bounded_finalist_
+authority`, and `safe_compose_order`'s own `_repair_order` structurally
+CANNOT add or drop a realization (Section 3). **Composite**: audited
+`composite_resolver.py`/`realization_resolver.py` directly -- a
+`DraftClip`'s composite membership is NOT currently exposed to
+`compose_selected`/`safe_compose_order` as a distinct flag (both just see
+a flat `CandidateTake` sequence); a real composite realization's internal
+piece order is established once, upstream, by `composite_resolver.py`'s
+own `_split_groups_for_composite` (singleton groups per true composite
+piece) and never revisited by the composer today. **Recommendation**: a
+future Ordering stage should treat a composite's member pieces as ONE
+atomic unit with an immutable internal order (Section 24), which requires
+a NEW, currently-absent "is this realization part of a composite, and
+what is its internal position" reference -- named here as the one
+concrete, closeable gap (Section 45/46).
+
+## 16. Freeze relationship
+
+See Section 4. Today's composer runs BEFORE the point this codebase
+treats as frozen; a genuine post-Freeze Ordering stage does not exist.
+Not reopened or moved here.
+
+## 17-18. Source-order vs. editorial-order relationship
+
+Confirmed distinct in the existing code's own design intent:
+`compose_selected` is explicitly named ("Flexible composer preserving
+creator/source order by DEFAULT") as a FALLBACK, with `safe_compose_order`
+existing specifically to allow an EDITORIAL (non-chronological) order when
+supported. The distinction the directive asks to preserve is therefore
+already a live design principle, not something to invent.
+
+## 19. Proposition-progression contract
+
+**Gap named, not invented.** D-169's `RelationEvidence.relation_
+candidate` includes `PROPOSITION_PROGRESSION`... actually does NOT --
+checked directly: D-200.2/D-200.3's own `PROPOSITION_PROGRESSION` value
+(structured-relation dimension 2) is declared in the vocabulary but
+**NEVER PRODUCED** by any live deriver today (`structured_editorial_
+relation.py`'s own docstring: "declared for schema completeness but NEVER
+PRODUCED here today -- no existing evidence source in this codebase
+positively asserts any of the three today"). **Exact input gap**: no
+existing signal distinguishes "semantic progression" (A causally/
+narratively precedes B) from "mere source timestamp order" -- the
+OpenAI composer prompt reasons about this only in unstructured natural
+language, never as typed evidence. Ordering must NOT invent a second
+semantic engine to fill this (this task's own instruction); it should
+represent `PROPOSITION_PROGRESSION` as `UNKNOWN` wherever this gap
+applies, exactly as D-200.3 already does for P1.
+
+## 20-22. Continuation / correction / retry contracts
+
+Derived from existing types, not assumed: `MOMENT_ROLE_CONTINUATION`
+(P1) implies REQUIRED ADJACENCY -- a continuation's content is
+meaningless detached from its predecessor, so Ordering should treat a
+`CONTINUATION`-linked pair as `PRESERVE_INTERNAL_ORDER`, never
+independently placed. `ATTEMPT_CORRECTION`/`RELATION_CORRECTION` implies
+a DEPENDENCY relationship where the correcting realization's placement
+relative to what it corrects matters for meaning (a correction stated
+before the error it corrects can invert meaning) -- `MUST_FOLLOW` the
+corrected content when both survive, or is simply the sole surviving
+realization when the correction resolver already discarded the
+corrected one (the common case, per `hybrid_retry_winner_authority.py`).
+`RETRY`/`MOMENT_ROLE_RETRY` realizations are, per this session's own
+D-097.x/D-191 work, USUALLY already resolved to one winner before
+Ordering ever runs (Family/BestTake's own job) -- Ordering should only
+ever see a retry-labelled realization when Selection legitimately left
+more than one active (Section 15's "duplicate-presence diagnostic"
+case), never assume it must resolve one itself.
+
+## 23. Local-sequence integrity
+
+**Recommendation, directly informed by D-197's own proven invariant**:
+Ordering should consume a P1 `EditorialLocalGroup`'s member realizations
+as a CONSTRAINED BLOCK by default (its own internal relative order
+preserved) unless a SEPARATELY authorized future signal explicitly
+permits breaking it -- mirroring exactly the conservative default this
+whole P1/P2 program has used throughout (WHEN UNCERTAIN, KEEP). This
+answers the directive's own question directly: yes, Ordering should
+consume `sequence_id`/`moment_ids`/local-group order as a constrained
+block, never scrambled casually.
+
+## 24. Composite internal-order integrity
+
+Per Section 15: a composite realization's internal piece order is
+established upstream (`composite_resolver.py`) and should be treated as
+IMMUTABLE by Ordering -- Ordering arranges realizations relative to each
+other, never the internals of one.
+
+## 25-27. Unique-information / meaning / chronology firewalls
+
+**Directly reusable, not reinvented**: D-202/D-203 already built exactly
+this vocabulary and proved it real-media (D-204: `unique_information_
+firewall_result`/`meaning_firewall_result`/`chronology_firewall_result`,
+all HELD on 300 real hypotheses). A future Ordering stage should consume
+`uncovered_earlier_proposition_candidate_ids`/`meaning_conflict_status`
+from P2's own supersession hypotheses AS-IS, never recompute them --
+"no ordering step may drop a selected realization's unique proposition
+content merely for smoother chronology" is exactly the same non-
+negotiable this program already enforces one layer up. **Named gap**:
+the EXISTING composer (`composer_openai.py`) has NO analogous typed
+firewall today -- its prompt only says "never invent speech... include
+every input id exactly once" in natural language, with zero connection
+to P2's typed evidence. This is the single most concrete, scoped gap a
+future D-206 should close (Section 45/46), not a reason to build a
+second engine.
+
+## 28. Multi-source contract
+
+Audited: `compose_selected`'s own sort key already includes `source_
+order` as the PRIMARY sort field (not `start`/`end` alone) -- i.e. the
+existing code already refuses to compare raw timestamps across
+independent sources; `source_order` is a caller-assigned, explicit
+cross-source ranking, never inferred from wall-clock file timestamps.
+**No global/timeline model exists beyond this** -- confirmed by grep:
+no `timeline_assets.py`/`timeline_asset_storage.py` construct spans
+raw timestamps into one continuous cross-source clock (they store/
+reference render-time media assets, a different concept entirely,
+confirmed by reading their own top-of-file purpose). **Safe fallback,
+already proven**: `source_order`-first, `start`/`end`-second, exactly
+matching this task's own "no timeline fabrication" instruction.
+
+## 29. Partial-vs-total order decision
+
+**Directly answered by reading `render_plan.py`**: `build_render_plan`
+iterates `draft.selected` in LIST ORDER to build sequential
+`RenderSegment`s -- the renderer has NO partial-order/abstention concept
+at all; it requires a deterministic TOTAL order today. **Recommendation**:
+a future Ordering stage must always emit a total, deterministic list
+(exactly this task's own "Example" pattern: semantic ordering UNKNOWN ->
+stable source order used as the physical fallback -> `ordering_status`
+stays `UNKNOWN`/`PARTIAL`, never mislabeled as semantic confidence).
+
+## 30-32. Renderer / Boundary / Pacing firewalls
+
+**Renderer** (Section 29): consumes an ordered, total realization list
+only -- no cut-frame or pacing instruction. **Boundary**
+(`boundary_engine_pass.py`, read in full): confirmed its OWN documented
+ownership table is exclusively about WHERE a clip starts/ends
+(entry/exit/interior dead air), never WHICH clip comes next -- a clean,
+pre-existing separation Ordering should not blur. **Pacing**
+(`dialogue_pacing_transition.py`, read in full): confirmed its own
+canonical-order docstring places it strictly AFTER Boundary, consuming
+`draft.selected`'s ALREADY-ORDERED sequence to plan adjacent-pair joins
+(hard cut / J-cut / L-cut / overlap) -- it "never changes membership/
+order," by its own explicit module contract. Ordering must never emit a
+gap-duration/transition-type decision; that is this module's exclusive
+territory, already contractually fenced off.
+
+## 33-34. Proposed Ordering types / relation vocabulary
+
+Per this task's own "adjust based on repo conventions" instruction, and
+matching D-202's own naming/shape conventions exactly:
+
+- **`OrderingUnit`**: `realization_id`, `source_asset_id`, `source_span_
+  ids`, `proposition_candidate_ids`, `p1_local_group_id`, `p1_sequence_
+  id`, `is_composite`, `composite_member_order` (immutable, Section 24),
+  `source_start`/`source_end` (observation-only).
+- **`OrderingRelationEvidence`** (pairwise): `left_realization_id`,
+  `right_realization_id`, `ordering_relation` (`MUST_PRECEDE`/`MUST_
+  FOLLOW`/`PRESERVE_INTERNAL_ORDER`/`NO_ORDER_CONSTRAINT`/`CONFLICTED`/
+  `UNKNOWN`), `ordering_reason` (`LOCAL_SEQUENCE_ORDER`/`PROPOSITION_
+  PROGRESSION`/`SOURCE_CHRONOLOGY_SUPPORT`/`P2_GLOBAL_CONTINUITY`/
+  `COMPOSITE_INTERNAL_ORDER`/`CORRECTION_DEPENDENCY`/`CONTINUATION_
+  DEPENDENCY`/`UNIQUE_INFORMATION_PRESERVATION`), `confidence`,
+  `conflict_flags`, `provenance`.
+- **`OrderedRealizationPlan`** (aggregate, per this task's own suggested
+  shape, adopted as-is): `source_asset_ids`, `ordered_realization_ids`
+  (the total, deterministic, renderer-ready list), `ordered_units`
+  (`OrderingUnit` rows with `ordering_position` appended),
+  `global_ordering_status` (`ORDERED`/`PARTIALLY_ORDERED`/`CONFLICTED`/
+  `UNKNOWN`), `unresolved_conflicts`, `confidence`.
+
+## 35. Confidence / abstention contract
+
+Categorical only (`SUPPORTED`/`WEAK`/`MIXED`/`UNKNOWN`, reused verbatim
+from `language_utterance_attempt.py`'s already-vetted vocabulary, same as
+every P1/P2 type). `global_ordering_status` supports `ORDERED`/
+`PARTIALLY_ORDERED`/`CONFLICTED`/`UNKNOWN` per this task's own
+"Abstention" section.
+
+## 36. Deterministic fallback
+
+Stable source order (Section 28's `source_order`-first key) whenever
+semantic ordering evidence is `UNKNOWN` -- the renderer still receives a
+total order (Section 29), while `global_ordering_status` honestly reports
+`UNKNOWN`/`PARTIALLY_ORDERED`, never smuggled in as `ORDERED`.
+
+## 37. Existing-logic consolidation result
+
+**Real editorial ordering logic already exists** (Section 3: `composer_
+provider.py`/`composer_openai.py`, fully built, dormant). Per this task's
+own "no second ordering engine" instruction: a future D-206 should
+design how P1 local-sequence-integrity + P2 global/supersession/meaning
+evidence become STRUCTURED INPUT to (or a small deterministic wrapper
+around) the EXISTING `safe_compose_order`/`_repair_order` safety
+contract -- never a parallel `OrderedRealizationPlan` construction path
+that duplicates `_repair_order`'s own already-proven reorder-only/
+add-drop-duplicate-proof invariant. The genuinely NEW work is the typed
+evidence layer (Sections 33-34) and the firewalls that layer enforces
+(Section 27's named gap) -- not a second chronological-fallback engine,
+which already exists and is already correct.
+
+## 38. No-QA-reference contract
+
+Confirmed by design: none of the proposed types (Section 33-34) read
+Cut.ai/Human Gold/quality-ladder/raw-benchmark-target data. All inputs
+are P1/P2/D-169/frozen-realization objects only, mirroring D-202/D-203's
+own already-proven contract.
+
+## 39. Video00 relevance (existing D-204 evidence only, no RAW)
+
+- **DIRECTLY_RELEVANT**: the 9 real `MULTIPLE_CLEAN_REALIZATIONS`
+  multi-realization propositions (D-204) are exactly the class of case
+  Ordering must handle correctly -- if more than one of a proposition's
+  realizations ever reached Freeze (an upstream state this task does not
+  control), Ordering must never silently drop one (Section 25) and must
+  place the surviving/duplicate-flagged ones per the "Supersession
+  Effect"/"Partial Supersession" sections' own rules.
+- **POSSIBLY_RELEVANT**: the 6 real `CONFLICTED` global-continuity cases
+  (D-204) -- IF any of the conflicting realizations both survived Freeze
+  (unproven either way without a fresh RAW, which this task does not
+  run), Ordering's meaning firewall (Section 26) would be the layer
+  responsible for refusing to place them as if compatible.
+- **NOT_ORDERING**: every other D-097.x/D-204 finding (dead air, renderer
+  joins, QC probes, guard floors, pair-order authority, region/
+  proposition-map construction itself) -- local/physical/upstream-
+  selection-mechanical by definition, outside Ordering's scope.
+
+## 40. Cut.ai parity value
+
+Precise, restated from this task's own example: correct realizations can
+be selected (Family/BestTake correct) yet still APPEAR in a semantically
+wrong sequence (e.g. a proof point placed before the claim it supports,
+or a correction placed before the statement it corrects) -- Selection
+looks locally right, the final edit still reads wrong. Ordering is the
+layer that closes exactly this class of gap. **No F1 improvement is
+claimed** -- this is architecture only, no RAW was run.
+
+## 41. Generic fixture plan (design only, not implemented; 40 scenarios,
+## the directive's own numbered list, grouped by theme)
+
+1. one selected realization (trivial base case). 2-3. source order already
+correct / two realizations with explicit proposition progression.
+4. source order conflicts with proposition progression (the core
+firewall-interaction case). 5-7. continuation chain / correction chain /
+retry alternatives already resolved. 8. unresolved retry duplicate still
+present (Section 15's "no selection authority" case). 9-10. local
+sequence atomic order / composite realization internal order (Sections
+23-24). 11-13. A+B unique info followed by A / A-B-C forward progression /
+B recorded before A but proposition order requires A->B (chronology-vs-
+editorial-order firewall proof). 14-17. chronology-only evidence / no
+ordering evidence / contradictory ordering relations / partial order.
+18-20. total-order fallback / deterministic tie-break / input-order
+independence. 21-23. same source / multi-source / cross-source with no
+global timeline (Section 28's fallback proof). 24-26. P2 supersession
+evidence / P2 partial supersession / P2 meaning conflict (direct D-204-
+shaped replays). 27-30. unique information preservation / negation
+dependency / number dependency / factual correction (meaning-firewall
+proofs, D-066-style). 31-35. no Boundary mutation / no Pacing mutation /
+no renderer mutation / no Family mutation / no BestTake mutation
+(structural no-authority audits, mirroring D-202/D-203's own module-leaf
+grep-test style). 36-38. no QA references / no provider / no commercial
+fields. 39. no master score. 40. no source-specific hardcode (Video00
+literal/timestamp/phrase absence, mirroring every prior P1/P2 audit).
+
+## 42. Smallest D-206 implementation (recommended, contingent on Verdict
+## C's consolidation framing, Section 46)
+
+If separately authorized: (a) the typed foundation (`OrderingUnit`/
+`OrderingRelationEvidence`/`OrderedRealizationPlan`, Section 33-34);
+(b) deterministic construction purely from frozen realizations + existing
+P1 local-group/sequence references + existing P2 evidence (no provider);
+(c) the three firewalls (Section 25-27) enforced structurally, the same
+way D-202 enforces them; (d) a bounded diagnostics/run-summary function
+pair (same style as `whole_video_editorial_reasoning_diagnostics`); (e)
+the 40 fixture scenarios (Section 41) as generic offline tests. NO
+provider call. NO pipeline wiring (not even a diagnostics-only wiring --
+this stage's own correct pipeline seam, Section 4, does not exist yet and
+inserting one is a separately-authorized decision). NO authority.
+
+## 43. Modules D-206 should own
+
+One new module (name to be chosen at D-206 time, e.g.
+`ordering_realization_plan.py`), reading `editorial_moment_sequence*.py`,
+`whole_video_editorial_reasoning*.py`, and `language_proposition_
+relation.py` objects by id only, plus its own new test file.
+
+## 44. Modules D-206 must not modify
+
+`composer.py`, `composer_provider.py`, `composer_openai.py` (the existing
+engine, Section 37 -- consolidation is a LATER, separately-authorized
+integration step, not part of D-206's own offline foundation),
+`causal_order_validator.py`, `final_edit_reviewer.py`, every P1/P2/
+Language-Spine module (`editorial_moment_sequence*.py`, `structured_
+editorial_relation.py`, `language_spine_live_integration.py`, `language_
+proposition_relation.py`, `whole_video_editorial_reasoning*.py`),
+`take_grouping*.py`, `composite_resolver.py`, `realization_resolver.py`,
+`bounded_finalist_arbiter.py`, `bounded_finalist_authority.py`,
+`semantic_ledger.py`, `boundary_engine_pass.py`, `dialogue_pacing_
+transition.py`, `render.py`/`render_plan.py`, `pipeline.py` (including
+the pre-Freeze composer call site, Section 4 -- documented, not moved).
+
+## 45. Ordering authority status
+
+**NONE.** No field on any proposed type is a delete/select/reorder-the-
+frozen-membership/render instruction; a future `OrderedRealizationPlan`
+only ever permutes an already-fixed realization-id set, structurally
+mirroring `_repair_order`'s own already-proven invariant.
+
+## 46. Ordering readiness
+
+Real editorial-ordering-shaped infrastructure already exists (Section 3)
+and sits close to, but not exactly at, its canonically-intended position
+(Section 4). Deterministic Phase-A inputs (P1 local-sequence structure,
+P2 global/supersession/meaning evidence, D-169 proposition identity) are
+all already available and offline-proven (D-202/D-203/D-204). The one
+genuine, closeable gap is the EXISTING composer's total lack of a typed,
+P1/P2-evidence-aware firewall (Section 27) and of composite-internal-
+order awareness (Section 15/24) -- not an absence of ordering
+capability altogether.
+
+## 47. D-205 VERDICT
+
+**C. EXISTING ENGINE ALREADY CONTAINS ORDERING -- CONSOLIDATION
+REQUIRED.** Per this task's own explicit branch ("If existing engine
+contains real editorial ordering: D-205 may recommend consolidation
+rather than building a parallel engine"): `composer_provider.py`/
+`composer_openai.py` is real, already-tested editorial ordering
+infrastructure (reorder-only, add/drop/duplicate-proof, fail-open to
+chronology) -- confirmed dormant on the live path, not confirmed absent.
+D-206's own scope must therefore be framed as building the missing typed
+EVIDENCE layer (P1/P2-aware, firewall-enforcing) that could eventually
+inform or wrap the existing engine, never a second, parallel
+`OrderedRealizationPlan` construction path duplicating `_repair_order`'s
+own invariant.
+
+## 48. D-205 decision entry
+
+This document.
+
+## 49. Exact D-206 gate
+
+D-206 -- Ordering Phase A: typed foundation (`OrderingUnit`/`Ordering
+RelationEvidence`/`OrderedRealizationPlan`) + deterministic construction
+from frozen realizations + existing P1/P2 evidence + the three firewalls
++ diagnostics + the 40 fixture tests (Section 41-42), explicitly framed
+as a FUTURE CONSOLIDATION INPUT to the existing dormant composer engine,
+never a parallel engine. NO provider. NO pipeline integration
+(the correct seam does not exist yet, Section 4). NO authority. Requires
+separate Product Owner authorization.
+
+## 50-51. Boundary / Pacing-Overlap status (restated, unaffected)
+
+Boundary: remaining qualification work unaffected. Pacing/Overlap: J-cut/
+L-cut/micro-overlap/dialogue-overlap tracks unaffected. Neither module
+was modified; both were only read to confirm their own firewalls
+(Sections 30-32).
+
+## 52. App-roadmap status
+
+P1 closed enough -> P2 closed enough -> Ordering Phase 0
+architecture/forensic COMPLETE (this document) -> D-206 (if authorized,
+consolidation-framed typed foundation) -> remaining Boundary
+qualification -> Pacing V2 / overlap / J/L cuts -> Renderer/export
+qualification -> unseen RAW generalization / Cut.ai parity -> production
+hardening -> TestFlight/App Store -> later Commercial Moment / Sales
+Funnel intelligence.
+
+## 53. Confirmation
+
+Docs only. No `cutsell_worker` change. No test added. No workflow change.
+No RAW. No provider call. No Ordering authority. No P1/P2 change. No
+Family/BestTake/Boundary/Pacing/Renderer change. No Commercial Moment/
+Sales Funnel scoring.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-206's
+consolidation-framed offline typed foundation is the next Product Owner
+decision.
+
+**Then STOP. Do NOT implement D-206. Wait for Product Owner
+coordination.**
