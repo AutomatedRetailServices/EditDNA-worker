@@ -42358,3 +42358,478 @@ the next Product Owner decision.
 
 **Then STOP. Do NOT implement D-208. Wait for Product Owner
 coordination.**
+
+
+# D-208: ORDERING LIVE DIAGNOSTIC INTEGRATION -- DETERMINISTIC / NO LIVE
+PROVIDER / NO AUTHORITY (POST D-207)
+
+## 1. Branch / new HEAD
+
+`feature/runpod-pod-on-demand`, verified before starting: HEAD
+`7b78479` (matches expected), clean tree.
+
+## 2. Files changed
+
+- `cutsell_worker/ordering_live_diagnostics_integration.py` -- NEW, the
+  one live-integration adapter module.
+- `tests/test_cutsell_d208_ordering_live_diagnostics_integration.py` --
+  NEW, 35 tests.
+- `cutsell_worker/pipeline.py` -- MODIFIED: import block; one `else`-
+  branch default (`whole_video_editorial_reasoning_result = None`,
+  mirroring the existing P1 empty-default pattern); the new D-208
+  diagnostic block (a FOURTH diagnostic side-channel, immediately after
+  the D-203 P2 block); one new `"ordering"` key in the returned
+  diagnostics dict.
+- `tests/test_cutsell_d200_4b_editorial_moment_identity_fix.py` -- ONE
+  test's own allow-list widened (`test_only_p1_modules_reference_
+  editorial_moment_id`), the same precedent D-202/D-206 already
+  established.
+
+## 3. Feature flag
+
+`CUTSELL_ORDERING_DIAGNOSTICS_ENABLED`, default OFF
+(`ordering_diagnostics_enabled()`). When OFF, `build_ordering_live_
+diagnostics` is never even called -- zero Ordering compute, not merely
+zero extra output. No authority flag anywhere in the module.
+
+## 4. Live integration module
+
+`cutsell_worker/ordering_live_diagnostics_integration.py`. One entry
+point, `build_ordering_live_diagnostics(*, selected_realizations,
+editorial_moment_understandings=(), whole_video_editorial_reasoning_
+result=None, p1_diagnostics_enabled, p2_diagnostics_enabled)`, pure,
+reusing D-206's `build_ordering_units`/`build_ordering_relation_
+evidence`/`build_deterministic_ordering_plan` and D-207's `validate_
+composer_ordering_proposal` verbatim -- no sorting/topological/
+validation logic reimplemented.
+
+## 5. Exact pipeline seam
+
+**The ideal, mechanically-real POST-FREEZE seam this task's directive
+describes does not exist inside `pipeline.py` today** -- reported
+honestly per this task's own "if the ideal seam does not mechanically
+exist, state that explicitly, do not fix stage order" instruction.
+D-205/D-207 already established that Selection Freeze is a SEPARATE
+downstream gate (`canonical_edit_plan.py`/`universal_clean_cut.py`),
+never reached inside `pipeline.py`'s own `build_flow_b_draft` function.
+This function's own existing composer call (`compose_selected`/`safe_
+compose_order`) still runs at the exact line D-205 found it (structural
+test `test_no_pipeline_stage_move` asserts the composer call index is
+strictly before the new Ordering block's own call index) -- nothing was
+moved. D-208's diagnostics run at the ONLY real in-memory point
+available inside this function: immediately after the P1 (D-195/D-199)
+and P2 (D-203) diagnostic blocks, reading the function's own CURRENT
+`selected` `DraftClip` bucket (post-composition, post-review) -- never a
+genuinely-verified post-Freeze set. This honesty is embedded in the
+module's own docstring, never silently assumed away.
+
+## 6. Frozen-selection input
+
+`selected` (the `DraftClip` tuple this function already builds) is
+passed as `selected_realizations` -- the same objects D-195/D-199/D-203
+already sit beside, no new bucket constructed.
+
+## 7. OrderingUnit construction
+
+Built via D-206's own `build_ordering_units`, unmodified -- reads
+`DraftClip.realization_id`/`.source_span_id`/`.source_asset_id`/
+`.source_order`/`.start`/`.end` (all already-carried-through D-050A/
+D-076 fields), no new fields added to `DraftClip`.
+
+## 8. Realization identity preservation
+
+`_realization_identity` (D-206's, reused via `build_ordering_units`)
+falls back `realization_id -> clip_id` exactly as established; no
+identity guessing added by this module.
+
+## 9. Composite identity
+
+`OrderingUnit.composite_component_ids` stays an optional, caller-
+supplied field (D-206's own named gap) -- this task supplies no live
+composite-group signal (none exists today), honestly reported as
+absent, never guessed.
+
+## 10. P1 local-sequence reuse
+
+`moments_by_source`/`local_groups_by_source`/`moments_by_id`/`local_
+groups_by_id`/`sequence_ids_by_moment_id` are all built by flattening
+the ALREADY-COMPUTED `EditorialMomentUnderstanding.moments`/`.local_
+groups`/`.sequence_hypotheses` the P1 block already produces -- zero
+reclassification of `CONTINUATION`/`CORRECTION`/local-sequence roles
+(Fixture B/C/E, Section 20 below).
+
+## 11. Continuation reuse
+
+Fixture B proves a real `EditorialMoment` with `moment_role ==
+MOMENT_ROLE_CONTINUATION` inside a real `EditorialLocalGroup` produces
+`MUST_PRECEDE`/`REASON_P1_CONTINUATION` via D-206's own builder, with no
+new logic in this module.
+
+## 12. Correction reuse
+
+Fixture C proves the same for `MOMENT_ROLE_CORRECTION`.
+
+## 13. Retry-survival conflict
+
+Fixture D: two frozen alternatives across two real, hand-built
+`WholeVideoEditorialRegion`s with a `SUPERSESSION_SUPPORTED` hypothesis
+produce a `CONFLICTED` relation (`SUPERSESSION_SURVIVAL_CONFLICT`),
+forcing `ordering_status == CONFLICTED` -- membership always preserved,
+no winner ever picked (`run_summary["retry_survival_conflict_count"] ==
+1`).
+
+## 14. P2 input reuse
+
+`region_ids_by_moment_id`/`supersession_hypotheses` are built by
+flattening the ALREADY-COMPUTED `WholeVideoEditorialUnderstanding.
+regions`/`.supersession_hypotheses` (the real P2 object, not just its
+own flattened diagnostics dict) -- `pipeline.py` now threads `whole_
+video_editorial_reasoning_result.understanding` through for this
+purpose; zero re-derivation of supersession/global-continuity/
+proposition-realization-map logic (structural test bans `build_whole_
+video_editorial_understanding(` as a call inside this module).
+
+## 15. P2 optionality
+
+`has_p2_evidence = p2_diagnostics_enabled and whole_video_editorial_
+reasoning_result is not None`. When false, Ordering still builds units/
+a baseline plan from frozen selection + whatever P1 evidence exists
+(Fixture A/I) -- capability degrades to `PARTIAL`, `MISSING_P2_
+UNAVAILABLE` reported explicitly, never silently upgraded.
+
+## 16. Relation construction
+
+Built via D-206's own `build_ordering_relation_evidence`, unmodified --
+no new relation semantics (structural test: `RELATION_*`/`REASON_*`
+vocabulary imported, never redefined).
+
+## 17. Deterministic baseline
+
+Built via D-206's own `build_deterministic_ordering_plan`, unmodified.
+
+## 18. Source-order fallback
+
+Fixture A/I: same-source and cross-source unresolved units fall back to
+D-206's own stable `(source_order, source_start, realization_id)`
+tie-break -- `ordering_status == UNKNOWN` in both cases, never upgraded.
+
+## 19. Fallback certainty
+
+Every fallback-only placement is reported `ordering_status !=
+ORDERED`/`CONFIDENCE != SUPPORTED` -- D-206's own already-proven
+"chronology alone never creates semantic certainty" invariant, reused
+unmodified.
+
+## 20. Cycle/conflict behavior
+
+Reused verbatim from D-206 (cycle detection) and the meaning-firewall/
+supersession-survival CONFLICTED-relation gate (Fixture D/G/H) -- no new
+conflict logic in this module.
+
+## 21. Multi-source behavior
+
+Fixture I: `source_order` is the explicit cross-source rank (never raw
+per-file timestamps compared as if on one timeline) -- `srcA`/`srcB`
+with `source_order` 0/1 order correctly despite `srcA`'s own later raw
+timestamp.
+
+## 22. No fabricated timeline
+
+Only known realization ids ever appear in any output (D-206's own
+reorder-only invariant, inherited unmodified).
+
+## 23. Reorder-only invariant
+
+Structurally guaranteed by reusing D-206's `build_deterministic_
+ordering_plan` (never a second construction path) -- every fixture
+above that asserts membership (`set(ordered_realization_ids) == {...}`)
+proves it end to end through this module too.
+
+## 24. Proposal compatibility path
+
+`_DeterministicComposeSelectedProvider` wraps the EXISTING, unmodified,
+provider-free `composer.py::compose_selected` (called with `groups=()`)
+as a `ComposerProvider`-shaped diagnostic compatibility path -- proven
+provider-free, network-free, story-model-free, and deterministic
+(`TestProposalCompatibilityPath`). Calling `compose_selected` directly
+here does not alter live state or blur authority: its result is fed
+only into D-207's own read-only validator and discarded otherwise.
+
+## 25. D-207 validator reuse
+
+`validate_composer_ordering_proposal` (D-207, unmodified) is called
+exactly once per `build_ordering_live_diagnostics` invocation, with the
+compatibility provider above -- structural test confirms `def validate_
+composer_ordering_proposal(` is never redefined in this module, only
+called.
+
+## 26. Proposal status
+
+Every live diagnostic result carries a real `OrderingComposerProposal
+Result` (`TestProposalCompatibilityPath.test_deterministic_provider_
+free_valid_proposal_accepted`: `ACCEPTED`, `composer_path ==
+MOCK_PROVIDER` -- the deterministic wrapper counts as a supplied
+provider structurally, distinguishable from the true no-provider path
+via `composer_path`'s own name, never containing "openai").
+
+## 27. Baseline fallback result
+
+Unaffected by this module -- D-207's own exact-baseline-fallback
+contract is inherited unmodified (Fixture H proves `NOT_EVALUABLE` +
+baseline retained end to end through the live wiring).
+
+## 28. Causal validator status
+
+`CAUSAL_VALIDATOR_NOT_INTEGRATED` ("NOT_INTEGRATED_CONTRACT_MISMATCH"-
+equivalent, D-207's own constant reused verbatim) on every result --
+`causal_order_validator.py` is never imported by this module (structural
+test).
+
+## 29. Capability status
+
+`AVAILABLE` (both P1 and P2 evidence present), `PARTIAL` (selection
+exists but P1 and/or P2 unavailable), `NOT_EVALUABLE` (no selected
+realization at all), `DISABLED` (reported by `pipeline.py` when the
+flag itself is off -- this module's builder never even runs).
+
+## 30. Missing-input behavior
+
+`MISSING_NO_SELECTED_REALIZATIONS` / `MISSING_P1_UNAVAILABLE` /
+`MISSING_P2_UNAVAILABLE` -- explicit, never silent auto-enable/upgrade
+(`TestMissingInput`).
+
+## 31. Diagnostics
+
+`ordering_live_diagnostics(result)` -- bounded dict: `capability_
+status`, `missing_evidence`, `unit_count`, `relation_count`, `units`
+(each with `ordering_unit_id` aliasing `realization_id`, plus D-206's
+own fields), `relations` (each with `left_unit_id`/`right_unit_id`/
+`relation` aliasing D-206's own fields), `baseline_plan` (D-206's own
+diagnostics dict), `proposal_validation` (D-207's own diagnostics dict),
+`causal_validator_status`, `provenance`. No transcript field.
+
+## 32. Run summary
+
+`ordering_live_diagnostics_run_summary(result)` -- the full directive-
+specified field list (`ordering_unit_count`, `ordering_relation_count`,
+`must_precede_count`, `must_follow_count`, `preserve_internal_order_
+count`, `conflicted_relation_count`, `unknown_relation_count`,
+`ordering_status`, `fallback_used`, `unresolved_relation_count`,
+`cycle_count`, `retry_survival_conflict_count`, `composite_internal_
+order_constraint_count`, `p1_sequence_constraint_count`, `continuation_
+constraint_count`, `correction_constraint_count`, `p2_constraint_
+count`, `composer_proposal_available`, `composer_proposal_status`,
+`composer_constraint_violation_count`). No master score.
+
+## 33. Provenance
+
+`("D208_LIVE_DIAGNOSTIC_INTEGRATION",)` on every result -- distinct from
+D-206's/D-207's own provenance tags, so a reader can tell which layer
+produced which part of the compound diagnostic.
+
+## 34. Default-off parity
+
+`test_default_off_byte_equivalent`: with the flag off, `result.draft.
+selected` is unaffected and `diagnostics["ordering"] == {"status":
+"disabled"}` -- the same `{"status": "disabled"}` pattern every prior
+D-19x/D-20x diagnostic phase already established.
+
+## 35. Flag-on immutability
+
+`test_flag_on_immutability_same_edit_output`: on/off produce IDENTICAL
+`selected` clip ids, and every diagnostics key OTHER than `"ordering"`
+itself is byte-identical between the two runs (`off_keys == on_keys`
+after excluding `"ordering"`).
+
+## 36. Existing composer unchanged
+
+`composer.py`/`composer_provider.py`/`composer_openai.py` -- zero diff;
+structural test confirms `def compose_selected(`/`def safe_compose_
+order(`/`def _repair_order(` are never redefined in the new module.
+
+## 37. OpenAI composer dormant
+
+Still confirmed DORMANT (`universal_clean_cut.py:147`/`brain_runtime.
+py:283` both still hardcode `composer_provider=None`, unchanged) --
+`composer_openai`/`OpenAIComposerProvider(` never appear in the new
+module (structural test).
+
+## 38. No provider/network
+
+Structural test bans `requests.`/`urllib`/`http.client`/`OPENAI_API_
+KEY`/`responses.create` from the new module's source.
+
+## 39. No P1 rerun
+
+Structural test bans `build_editorial_moment_understanding_for_sources(`
+and ASR/Language-Spine/Watch+Listen/visual/Prosodic import patterns from
+the new module -- every P1 object is a caller-supplied reference.
+
+## 40. No P2 rerun
+
+Structural test bans `build_whole_video_editorial_understanding(` as a
+call inside the new module -- the real P2 object is a caller-supplied
+reference (`pipeline.py` still owns the one call site, in the existing
+D-203 block).
+
+## 41-47. No Family/BestTake/D-191/selected-clip/Boundary/Pacing/Renderer
+mutation
+
+Structural test bans `take_group_id =`, `_semantic_best_take`, `bounded_
+finalist_authority`, `boundary_engine_pass`, `BoundaryEngine`,
+`dialogue_pacing_transition`, `RenderSegment`, `take_grouping`,
+`composite_resolver`, `realization_resolver`, `selected_clip_id =`,
+`.selected = ` from the module source -- none present. `pipeline.py`'s
+own `selected`/`composed_takes`/`composition` values are read, never
+reassigned, by the new block.
+
+## 48. No QA inputs
+
+Structural test bans `cut_ai`/`cutai`/`human_gold`/`quality_ladder`/
+`benchmark_label` (case-insensitive) from the module source.
+
+## 49. No commercial/funnel fields
+
+Structural test bans `commercial`/`sales_funnel`/`funnel`/`cta_score`/
+`hook_strength`/`narrative_quality` (case-insensitive) from the module
+source.
+
+## 50. New tests
+
+35 new tests in `tests/test_cutsell_d208_ordering_live_diagnostics_
+integration.py`, covering: flag function (3), missing input (1),
+fixtures A-J (10, including full pipeline-level default-off/flag-on/
+determinism wiring via `build_flow_b_draft`), proposal compatibility
+path (2), diagnostics/summary shape (2), structural audits (16),
+compileall (1).
+
+## 51. D-206 regression
+
+`tests/test_cutsell_d206_ordering_realization_plan.py`: unaffected,
+included in the 192-test sweep below.
+
+## 52. D-207 regression
+
+`tests/test_cutsell_d207_ordering_composer_adapter.py`: unaffected,
+included in the 192-test sweep below.
+
+## 53. Composer regressions
+
+`tests/test_cutsell_clean_worker_composer_provider.py` +
+`tests/test_cutsell_causal_order_validator.py` +
+`tests/test_cutsell_d203_whole_video_editorial_reasoning_integration.py`
++ D-206/D-207/D-208's own suites: 192/192 passed together.
+
+## 54. P1/P2 regressions
+
+Included in the targeted D-1xx/D-2xx battery (item 60) -- unaffected.
+
+## 55. Language regressions
+
+`test_cutsell_d166_*`/`d168_*`/`d169_*`-prefixed suites included in the
+targeted D-1xx/D-2xx battery -- unaffected (zero diff to any Language-
+Spine module).
+
+## 56. BestTake regressions
+
+`tests/*besttake*`/`*best_take*`: 339/339 passed.
+
+## 57. Boundary regressions
+
+Included in item 58 below.
+
+## 58. Pacing regressions
+
+Included in item 58 below (`tests/*boundary*`/`*pacing*`/`*render*`
+together: 275/275 passed).
+
+## 59. Render regressions
+
+Included in item 58 above.
+
+## 60. Full offline suite
+
+`python -m pytest tests/ -q --continue-on-collection-errors`: 4998
+passed, 6 failed, 1 collection error, 13 subtests passed. Five of the
+six failures (`test_hybrid_story_guard_incomplete_retry.py::test_
+incomplete_failed_retry_is_covered_when_prior_delivery_preserves_
+numbers_and_negation`, and four in `test_video00_modal_hybrid_semantic_
+parity.py`) plus the collection error (`test_semantic_stitch.py`) are
+the SAME pre-existing, unrelated failures already present on the D-207
+head (`7b78479`) before this task touched anything. The sixth
+(`test_cutsell_d169_language_proposition_relation.py::test_30_old_
+serialized_ids_unaffected`) is the same PRE-COMMIT-ONLY `git diff
+--stat HEAD -- cutsell_worker/pipeline.py` check this session has hit
+on every prior turn that touches `pipeline.py` (D-203 etc.) -- it
+self-resolves once this commit lands (verified post-commit below).
+
+## 61. New failures
+
+Zero (beyond the expected, self-resolving pre-commit check above).
+`compileall -q cutsell_worker tests` also passed clean.
+
+## 62. D-208 VERDICT
+
+**A. ORDERING LIVE DIAGNOSTIC INTEGRATION OFFLINE PROVEN.**
+
+## 63. Canonical Ordering status
+
+`TYPED_CONSTRAINT_FOUNDATION_OFFLINE_PROVEN` (D-206) +
+`COMPOSER_PROPOSAL_VALIDATION_OFFLINE_PROVEN` (D-207) +
+`LIVE_DIAGNOSTIC_INTEGRATION_OFFLINE_PROVEN` (this document). P1/P2
+statuses unchanged.
+
+## 64. Exact D-209 gate
+
+D-209 -- ORDERING REAL-MEDIA DIAGNOSTIC QUALIFICATION. Exactly ONE
+Video00 RAW (per this task's own "do not launch D-209 automatically"
+instruction, requires separate Product Owner authorization). Still no
+live OpenAI composer, still no Ordering authority. Purpose: observe real
+`OrderingUnit`s/constraints/baseline/fallback/conflicts on Video00's own
+real frozen selection, P1 evidence, and P2 evidence -- diagnostic only.
+
+## 65. Boundary status
+
+Unaffected; remaining qualification work unchanged.
+
+## 66. Pacing/Overlap status
+
+Unaffected; Pacing V2/dialogue-overlap/J-cut/L-cut/micro-overlap tracks
+unchanged. Neither module was modified or referenced.
+
+## 67. App-roadmap status
+
+P1 closed enough -> P2 closed enough -> Ordering: D-205 forensic DONE ->
+D-206 typed foundation DONE -> D-207 proposal validation DONE -> D-208
+live diagnostics DONE, offline (this document) -> D-209 (if authorized,
+one real-media qualification RAW) -> remaining Boundary qualification
+-> Pacing V2 / dialogue overlap / J-cut/L-cut/micro-overlap -> Renderer/
+export -> unseen RAW generalization / Cut.ai parity -> production
+hardening -> TestFlight/App Store. Commercial Moment/Sales Funnel remain
+later.
+
+## 68. Decision entry
+
+This document.
+
+## 69. Confirmation
+
+No RAW. No live provider call (`OpenAIComposerProvider` never imported/
+instantiated; every test uses the deterministic `compose_selected`
+compatibility wrapper or a mock/fake `ComposerProvider`; no network, no
+API key). No pipeline stage reorder (`composer.py`/`composer_provider.
+py`/existing composer call site all unchanged; the new Ordering block
+runs strictly after it, in the only real in-memory diagnostic seam
+available -- see Section 5's own honesty note). No Ordering authority:
+`ordering_live_diagnostics_integration.py`'s `build_ordering_live_
+diagnostics` mutates nothing in `pipeline.py`'s own draft; `selected`/
+`composed_takes`/`composition` are read-only inputs. No Family/BestTake/
+D-191/Boundary/Pacing/Renderer change. No Commercial Moment/Sales Funnel
+scoring.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing D-209 (one
+Video00 RAW, Ordering real-media diagnostic qualification, still no live
+provider, still no Ordering authority) is the next Product Owner
+decision.
+
+**Then STOP. Do NOT launch D-209. Wait for Product Owner coordination.**

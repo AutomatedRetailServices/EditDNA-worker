@@ -316,6 +316,14 @@ def test_only_p1_modules_reference_editorial_moment_id():
     # moment's own editorial_moment_id to the OrderingUnit that owns it
     # (via source_span_id), by attribute access only, never minting a new
     # id or reopening P1's own authority.
+    # D-208: ordering_live_diagnostics_integration.py (Ordering Live
+    # Diagnostic Integration) is the same kind of authorized additional
+    # reader -- it flattens the live pipeline's already-built
+    # EditorialMomentUnderstanding.moments into a moment_id -> moment
+    # lookup (moments_by_id) so D-206's own build_ordering_relation_
+    # evidence can resolve local-sequence/continuation/correction
+    # relations, by attribute access only, never minting a new id or
+    # reopening P1's own authority.
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent / "cutsell_worker"
     referencing = [
@@ -325,6 +333,7 @@ def test_only_p1_modules_reference_editorial_moment_id():
     assert set(referencing) == {
         "editorial_moment_sequence.py", "editorial_moment_sequence_integration.py",
         "whole_video_editorial_reasoning.py", "ordering_realization_plan.py",
+        "ordering_live_diagnostics_integration.py",
     }
 
 

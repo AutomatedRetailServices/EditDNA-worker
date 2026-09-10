@@ -144,6 +144,17 @@ from .whole_video_editorial_reasoning_integration import (
     whole_video_editorial_reasoning_diagnostics_enabled,
     whole_video_editorial_reasoning_run_summary,
 )
+# D-208 (docs/CUTSELL_DECISIONS.md D-208): Ordering Live Diagnostic
+# Integration -- a DIAGNOSTIC SIDE-CHANNEL only, reading the P1/P2
+# objects the two blocks above already build. No Ordering authority, no
+# pipeline stage reorder (see that module's own "mechanical pipeline-
+# position honesty" docstring section).
+from .ordering_live_diagnostics_integration import (
+    build_ordering_live_diagnostics,
+    ordering_diagnostics_enabled,
+    ordering_live_diagnostics,
+    ordering_live_diagnostics_run_summary,
+)
 from .raw_understanding_map import RawUnderstandingMap
 # D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist Arbiter --
 # OFFLINE / DIAGNOSTIC ONLY. A SEPARATE, independently-rollbackable flag
@@ -2579,6 +2590,50 @@ def build_flow_b_draft(
         }
     else:
         whole_video_editorial_reasoning_summary = {"status": "disabled"}
+        # D-208: the live Ordering diagnostic block below needs the real
+        # WholeVideoEditorialReasoningResult object (never just its own
+        # flattened summary dict) when the P2 flag is ON -- when P2 is
+        # OFF this mirrors the same "define the empty default" pattern
+        # already used for `editorial_moment_understandings`/`live_
+        # language_spine_by_source` above, so the block below can safely
+        # reference this name regardless of this flag's own state.
+        whole_video_editorial_reasoning_result = None
+
+    # D-208 (docs/CUTSELL_DECISIONS.md D-208): Ordering Live Diagnostic
+    # Integration -- DIAGNOSTIC SIDE-CHANNEL ONLY. {"status": "disabled"}
+    # when the (separate, default-OFF) `CUTSELL_ORDERING_DIAGNOSTICS_
+    # ENABLED` flag is off (zero Ordering compute in that case, not
+    # merely zero extra output). When ON, this is a FOURTH diagnostic
+    # side-channel alongside D-195/D-199/D-203 above -- reads ONLY the
+    # already-built `selected` DraftClip tuple (this function's own
+    # CURRENT selected realizations at this point; see the integration
+    # module's own "mechanical pipeline-position honesty" docstring
+    # section -- the ideal, mechanically-real POST-FREEZE seam does not
+    # exist inside this function, Freeze is a separate downstream gate)
+    # plus the already-built `editorial_moment_understandings`/`whole_
+    # video_editorial_reasoning_result.understanding` objects the P1/P2
+    # blocks above produce (or their empty/None defaults when those
+    # flags are themselves off), never recomputing P1/P2/Language/
+    # Family/BestTake/CompositeResolver/RealizationResolver. Diagnostics
+    # only: no authority, never read by Family/BestTake/D-191/Boundary/
+    # Pacing/Renderer.
+    if ordering_diagnostics_enabled():
+        ordering_live_result = build_ordering_live_diagnostics(
+            selected_realizations=selected,
+            editorial_moment_understandings=editorial_moment_understandings,
+            whole_video_editorial_reasoning_result=(
+                whole_video_editorial_reasoning_result.understanding
+                if whole_video_editorial_reasoning_result is not None else None
+            ),
+            p1_diagnostics_enabled=editorial_moment_sequence_diagnostics_enabled(),
+            p2_diagnostics_enabled=whole_video_editorial_reasoning_diagnostics_enabled(),
+        )
+        ordering_live_diagnostics_summary = {
+            **ordering_live_diagnostics(ordering_live_result),
+            **ordering_live_diagnostics_run_summary(ordering_live_result),
+        }
+    else:
+        ordering_live_diagnostics_summary = {"status": "disabled"}
 
     whole_video_diag = {
         "status": whole_video_context.status.__dict__ if whole_video_context is not None else None,
@@ -2784,6 +2839,14 @@ def build_flow_b_draft(
             # authority, never read by Family/BestTake/D-191/Boundary/
             # Pacing/Renderer.
             "whole_video_editorial_reasoning": whole_video_editorial_reasoning_summary,
+            # D-208 (docs/CUTSELL_DECISIONS.md D-208): Ordering Live
+            # Diagnostic Integration compact summary -- SEPARATE top-level
+            # key, never merged into any P1/P2 summary above. {"status":
+            # "disabled"} when this module's own `CUTSELL_ORDERING_
+            # DIAGNOSTICS_ENABLED` flag is off. Diagnostics only: no
+            # Ordering authority, never read by Family/BestTake/D-191/
+            # Boundary/Pacing/Renderer, never a pipeline stage reorder.
+            "ordering": ordering_live_diagnostics_summary,
             "composer_status": composition.status.__dict__,
             "composer_reason": composition.reason,
             "composer_order": list(composition.ordered_clip_ids),
