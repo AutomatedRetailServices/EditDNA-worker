@@ -38583,3 +38583,233 @@ utterance_attempt.py` -- zero diff, confirmed by `git status` and by
 
 **HUMAN ACTION REQUIRED:** YES (condition A -- authorizing D-200.4's one
 real-media RAW is the next Product Owner decision).
+
+
+# D-200.4: DIMENSION-AWARE P1 RELATION VIDEO00 REAL-MEDIA
+REQUALIFICATION (POST D-200.3, PARTIAL RETRIEVAL -- HONEST DISCLOSURE)
+
+Post D-200.3, Product Owner authorization: ONE canonical Video00 RAW with
+both `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1` and
+`CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`, no P1 authority, no
+other overlay, to requalify D-200.3's dimension-aware relation
+architecture against the exact real media that produced D-200's 17
+`CONFLICT_ABSTAINED` flat-fusion conflicts.
+
+## 1. RAW identity
+
+- Run `34476657955` (`video00-modal-raw` job `102868964362`), dispatched
+  on `feature/runpod-pod-on-demand` @ `ee2253f`, workflow_dispatch inputs
+  `editorial_moment_sequence_diagnostics_enabled=1`,
+  `live_language_spine_diagnostics_enabled=1`, no other overlay.
+- Modal benchmark step (step 11) completed successfully in ~12m17s. New
+  step 38 ("D-200.4 Dimension-aware relation -> real-media
+  requalification") completed with conclusion `success` -- it did not
+  crash and wrote its output file. Overall job conclusion is `failure`,
+  caused entirely by two PRE-EXISTING, UNRELATED validator steps
+  ("Verify frozen Selection lock", "Verify Human Gold regression QA") --
+  the same legacy-selection-shaped validators that D-097.x's own
+  precedent already treats as historical/non-blocking for a Freeze-based
+  path; P1 diagnostics are unaffected by and unrelated to those failures.
+
+## 2. Pre-RAW observability (confirmed correct in advance)
+
+D-200.3's own diagnostics extension already serialized the required
+per-edge fields (`structured_relation`, `grouping_effective_relation`,
+`grouping_action`, `grouping_reason`) and the aggregate dimension counts
+with ZERO `cutsell_worker` change (Section 1's own D-200.3 report already
+proved this). The one authorized pre-RAW action was WORKFLOW-ONLY
+reporting plumbing (a new step reading the same already-serialized
+fields) -- committed and offline-validated against two synthetic
+pipeline-function fixtures before dispatch (see prior commit `ee2253f`).
+
+## 3. RETRIEVAL LIMITATION (binding disclosure -- read before any finding
+## below)
+
+This run's new step deliberately embedded the FULL quality-ladder JSON
+under `parity_metrics.raw` (a design choice made for completeness, not
+authorized to be corrected here -- see Section 8). That inflated the
+step's own printed JSON to a size that exceeds BOTH: (a) this session's
+artifact-download path (GitHub serves artifact/log-archive downloads via
+Azure Blob Storage SAS URLs; this environment's egress policy denies
+that host -- `productionresultssa5.blob.core.windows.net` and
+`results-receiver.actions.githubusercontent.com` both returned CONNECT
+403 policy denials, confirmed via the agent-proxy status endpoint, not
+retried per this environment's own instruction not to retry policy
+denials); and (b) the `get_job_logs` tool's own retrieval ceiling
+(confirmed empirically: requests for 6000 and 9000 tail lines both
+returned byte-identical output capped at exactly 5000 lines, while a
+4000-line request was honored in full -- the tool cannot return more than
+approximately the job's last ~5000 log lines regardless of the
+`tail_lines` value requested beyond that).
+
+Because `parity_metrics`'s embedded ladder dump alone consumes nearly all
+of that 5000-line window, only the ALPHABETICALLY-LATE half of the
+JSON's sorted keys (`p...` through `w...`, plus a partial tail of the
+embedded ladder's own region rows) was retrievable this session. Fields
+whose keys sort alphabetically BEFORE `parity_metrics` -- including
+`d200_4_verdict`, `p1_closure_decision` (sorts after `p` but its value
+depends on fields that don't), the `d198_baseline`/`d200_baseline`
+comparison dicts, `correction_join_result`, `continuation_join_result`,
+`new_audience_beat_split_result`, `distinct_proposition_grouping_
+ownership_result`, `complementary_grouping_ownership_result`,
+`beat_boundary_precedence_occurrence_count`, `cross_dimension_compatible_
+count`, `former_d200_conflict_edges` (the single most important audit
+table), `attempt_retry_count`/`attempt_correction_count`/`attempt_
+continuation_count`, `moment_count`, `local_group_count` (direct value),
+`live_language_spine_status` and the full language-coverage block --
+were NOT retrievable this session. This is a REPORTING/RETRIEVAL gap
+only: the underlying computation ran and succeeded (step conclusion
+`success`); the data exists in the uploaded
+`cutsell-video00-modal-validator-reports` artifact (101 KB, well within
+any normal size), simply unreachable through this session's permitted
+download paths.
+
+**No verdict is fabricated to fill this gap.** Per this whole engineering
+line's own binding doctrine ("never declare success from partial
+evidence"), Section 7 below states explicitly what is NOT determined.
+
+## 4. What WAS retrieved and independently confirmed
+
+From the reachable tail of the step's own printed JSON (`schema_version:
+cutsell.video00.d200_4_dimension_aware_relation_real_media_
+requalification.v1`, confirming this is genuinely this run's own D-200.4
+output, not a stale cache):
+
+| field | value |
+|---|---|
+| `structured_relation_edge_count` | 36 |
+| `same_dimension_conflict_count` | **2** |
+| `unknown_firewall_result` | `HELD` (0 violations) |
+| `retry_join_result` | `ALL_JOINED` (0 violations) |
+| `retry_series_result` | `OBSERVED` |
+| `too_broad_group_count` | 0 |
+| `whole_source_collapse` | `false` |
+| `preassembled_final_sequence_count` | 0 |
+| `same_editorial_beat_count` | 0 |
+| `same_editorial_beat_status` | `ZERO_AS_EXPECTED_NO_DETECTOR` |
+| `proposition_candidate_count` | 20 |
+| `proposition_distinct_count` | 1 |
+| `proposition_complementary_count` | 10 |
+| `proposition_progression_count` | 0 |
+| `proposition_same_count` | 0 |
+| `proposition_unknown_count` | 25 |
+| `relation_evidence_count` | 19 |
+| `singleton_group_count` | 15 |
+| `sequence_count` | 10 |
+| `sequence_from_supported_group_count` | 10 |
+| `thin_support_count` | 0 |
+| `unsequenced_moment_count` | 13 |
+| `source_status` | `engine_json_present` |
+| `source_construction_count` | 1 |
+
+## 5. Primary success test -- ANSWERED, directly, by retrieved evidence
+
+**`same_dimension_conflict_count` is 2, down from D-200's flat-fusion 17
+`CONFLICT_ABSTAINED` edges.** This is the single most important number
+this run produced, and it answers D-200.4's own Primary Success Test
+directly: the former D-200 conflicts do NOT remain global `UNCERTAIN` en
+masse under the structured model -- at most 2 of the original 17
+edges (bound: `former_conflicts_still_same_dimension_conflicted_count <=
+2`, since 2 is the total same-dimension-conflict count across ALL 36
+edges this run, not only the former-conflict subset) are genuine
+same-dimension disagreements; the remainder are resolvable as
+cross-dimension-compatible or single-source, exactly the central claim
+D-200.2 designed for and D-200.3 implemented offline. The EXACT former-
+conflict-edge replay table (which of the original 17 map to which
+outcome) is one of the fields lost to the retrieval gap (Section 3) and
+is NOT reconstructed here.
+
+`retry_join_result: ALL_JOINED` (zero violations) and
+`unknown_firewall_result: HELD` (zero violations) are the two most
+safety-critical control audits this task required, and both are
+CONFIRMED CLEAN on real media, retrieved directly (not derived).
+
+## 6. Derived (not directly retrieved) facts, shown with derivation
+
+- **`moment_count` = 37** -- derived from `structured_relation_edge_count
+  = 36` (one structured edge per predecessor pair; edges = moments - 1
+  for a single-source RAW). This is one MORE than D-200's own 36 (closer
+  to D-198's original 37) -- a real, if minor, topology difference this
+  run; the exact cause is not determined here (data lost to the
+  retrieval gap) and is NOT assumed to be caused by D-200.3.
+- **`local_group_count` = 25** -- derived from `singleton_group_count =
+  15` + an inferred `multi_moment_group_count = 10` (the codebase's own
+  architecture mints exactly one sequence per multi-moment local group
+  when `local_groups` is left `None`, so `sequence_count = 10` and
+  `sequence_from_supported_group_count = 10` together indicate 10
+  multi-moment groups, ALL with `SUPPORTED` confidence). This exactly
+  matches D-200's own `local_group_count = 25` -- suggesting a stable
+  grouping topology at the aggregate level despite the moment-count
+  difference above.
+- **`false_preassembled_final_count` = 0** -- `preassembled_final_
+  sequence_count` is retrieved as 0, so a false-positive rate over zero
+  occurrences is necessarily 0 by definition.
+
+## 7. NOT DETERMINED this session (explicit, per Section 3)
+
+`d200_4_verdict`, `p1_closure_decision`, `canonical_p1_status`,
+`correction_join_result`, `continuation_join_result`, `new_audience_
+beat_split_result`, `distinct_proposition_grouping_ownership_result`,
+`complementary_grouping_ownership_result`, `beat_boundary_precedence_
+occurrence_count`, `cross_dimension_compatible_count`, the exact
+`former_d200_conflict_edges` table, `attempt_retry_count`/`attempt_
+correction_count`/`attempt_continuation_count`/`attempt_unknown_count`,
+`new_audience_beat_count`, `editorial_beat_unknown_count`,
+`grouping_join_count`/`grouping_split_count`/`grouping_split_new_beat_
+count`/`grouping_split_no_positive_join_count`, `over_fragmentation_
+result`, `live_language_spine_status` and the full language-coverage
+block, `max_group_moment_count`, `blooper_series_result`, `clean_
+delivery_sequence_result`, `d198_baseline`/`d200_baseline` comparison
+dicts as computed this run, `p1_vs_p2_firewall`, `downstream_
+immutability` confirmations as computed this run, and full parity-ladder
+metrics (only a partial, non-authoritative 25-region slice of the
+embedded ladder dump was visible: 18 LEVEL_1 / 4 LEVEL_2 / 3 LEVEL_3
+rows -- NOT the ladder's own official aggregate, and explicitly not
+relied upon for any conclusion here).
+
+## 8. Root cause and recommended remedy (documentation only, not
+## implemented here per this task's own "no post-result patch" rule)
+
+The retrieval gap is caused entirely by this task's OWN pre-RAW workflow
+step embedding the full, unbounded quality-ladder JSON under
+`parity_metrics.raw` instead of a small bounded projection (as every
+other compact-diagnostics step in this workflow already does). Fixing
+this (bounding `parity_metrics` to a small summary, matching the other
+steps' own pattern) would let a FUTURE run's D-200.4 step retrieve
+cleanly within the `get_job_logs` ceiling -- but doing so now would be a
+post-result `cutsell_worker`-adjacent workflow patch after an already-
+executed, already-paid RAW, which this task's own "NO POST-RESULT PATCH"
+/ "NO SECOND RAW" rules bar. This is recorded as a NAMED FUTURE FIX, not
+performed.
+
+## 9. D-200.4 VERDICT
+
+**NOT ASSERTED.** The retrieved evidence (Sections 4-6) is STRONGLY
+POSITIVE and directly answers the Primary Success Test (Section 5), but
+this task's own mandated verdict criteria require confirmation of
+several individual control audits (`correction_join_result`,
+`continuation_join_result`, `new_audience_beat_split_result`, the two
+grouping-ownership results, the beat-boundary-precedence count) that
+were not retrievable this session (Section 3/7). Declaring a verdict
+without them would be exactly the "declare success from duration
+similarity / selection counts alone" failure mode this whole program's
+own D-095 doctrine forbids. The Product Owner has two paths to close
+this: (a) retrieve `artifact/d200_4_dimension_aware_relation_real_media_
+requalification.json` from the `cutsell-video00-modal-validator-reports`
+artifact of run `34476657955` directly (101 KB, a normal browser
+download) and supply its content, allowing this analysis to complete
+without any further RAW; or (b) authorize the Section 8 workflow-only
+fix and one future confirmatory RAW under the existing D-200.4-class
+authorization.
+
+## 10. Confirmations
+
+Exactly ONE RAW dispatched (no second RAW). No post-result
+`cutsell_worker` patch. No provider/model change. No weights or
+thresholds. No `SAME_EDITORIAL_BEAT` detector implemented. No
+Family/BestTake/Ordering/Boundary/Pacing/Renderer/Commercial-Moment/
+Sales-Funnel change. Docs-only entry.
+
+**HUMAN ACTION REQUIRED:** YES -- condition A (retrieve the small
+artifact directly, or authorize the Section 8 remedy + one future
+confirmatory RAW) is required before a D-200.4 verdict can be issued.
