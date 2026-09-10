@@ -35749,3 +35749,340 @@ nothing calls this module yet). Two new files only:
 D-195 -- P1 Phase B, live pipeline diagnostic wiring -- as the next
 bounded task, remains a Product Owner decision; D-195 is NOT
 implemented automatically by this entry).
+
+---
+
+# D-195: P1 EDITORIAL MOMENT & SEQUENCE UNDERSTANDING -- PHASE B --
+CANONICAL EVIDENCE / LIVE PIPELINE DIAGNOSTIC INTEGRATION
+
+Post D-194, Product Owner authorization: integrate D-194's typed
+classifiers with REAL already-computed pipeline evidence. Still
+diagnostic/hypothesis only -- no edit mutation, no provider call, no
+RAW, no authority.
+
+## 1. Scope executed
+
+One new module, `cutsell_worker/editorial_moment_sequence_integration.py`
+(the adapter layer), one new test file,
+`tests/test_cutsell_d195_editorial_moment_sequence_integration.py`
+(74 tests), a small, surgical `cutsell_worker/pipeline.py` diagnostic
+wiring (import + flag-gated block + one new `draft.diagnostics` key),
+and one D-194 test-file update (`pipeline.py` removed from D-194's own
+"not imported by any production module" parametrize list, replaced by
+an explicit positive check that pipeline.py imports the INTEGRATION
+module only, never D-194's own classifiers module directly).
+
+## 2. Integration module
+
+`editorial_moment_sequence_integration.py` -- exports
+`editorial_moment_sequence_diagnostics_enabled()`,
+`EditorialMomentUnderstanding`, `build_editorial_moments_for_source`,
+`build_editorial_sequences_for_moments`,
+`build_editorial_moment_understanding_for_source`,
+`build_editorial_moment_understanding_for_sources`,
+`editorial_moment_understanding_diagnostics`,
+`editorial_moment_understanding_run_summary`.
+
+## 3. `EditorialMomentUnderstanding` type
+
+Frozen dataclass: `source_asset_id`, `moments`, `sequence_hypotheses`,
+`moment_count`, `sequence_count`, `capability_status`,
+`missing_evidence`, `confidence`, `conflict_flags`, `provenance` --
+exactly D-195's own "recommended minimum" list. References D-194's own
+already-bounded `EditorialMoment`/`EditorialSequenceHypothesis` objects
+by value; copies no giant upstream object.
+
+## 4. Feature flag
+
+`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED`, default OFF
+(`editorial_moment_sequence_diagnostics_enabled()`, same `os.environ` +
+`_env_true_default_false` pattern every prior D-18x/D-19x flag uses).
+No authority flag exists or is needed -- nothing this module produces
+can mutate anything (see items 34-41).
+
+## 5. Pipeline position (forensic finding, documented per directive)
+
+`RawUnderstandingMap`/`WatchListenUnderstanding` (D-155/D-157) ARE
+constructed live, per source, in `flow_b.py` today (confirmed by direct
+read: `build_raw_understanding_maps_for_sources`/`build_watch_listen_
+understanding_for_sources` calls, `watch_listen_understandings` passed
+into `build_flow_b_draft`). `LanguageAttempt`/`PropositionCandidate`/
+`RelationEvidence` (D-168/D-169's own Phase B/C Language Spine) are
+**NOT** constructed as a general per-source collection anywhere in the
+live call path -- confirmed by grep: only `language_spine_consumer_
+migration.py` (D-171, two narrow per-call legacy-comparison sites) and
+`watch_listen_relation_discovery.py` construct them at all, neither as
+a source-wide collection. Building a full Language Spine collection
+here would be RUNNING LANGUAGE SPINE CONSTRUCTION -- explicitly
+forbidden. This module therefore takes `WatchListenUnderstanding` as
+its PRIMARY live evidence source (its `UnderstandingSpan` already
+carries `behavior_state_hypotheses` reused verbatim from D-155 and
+`attempt_relation_hypotheses` mirroring D-169's own relation
+vocabulary), and treats real `LanguageAttempt`/`PropositionCandidate`/
+`RelationEvidence` as OPTIONAL, preferred-when-supplied inputs for a
+future, separately-authorized integration step. In `pipeline.py`, the
+diagnostics block is computed BEFORE `draft = DraftTimeline(...,
+diagnostics={...})` is constructed -- the same location D-183/D-184/
+D-191's own compact summaries already live, using `take_tuple` (the
+complete, unfiltered candidate pool, never reassigned after
+realization-id minting) so a discarded/failed attempt still gets its
+own real moment.
+
+## 6. `_derive_language_attempt` fallback adapter (honestly documented)
+
+Since real `LanguageAttempt` objects are absent from the live path
+today, a small, pure, DOCUMENTED translation
+(`_derive_language_attempt`) maps D-157's already-computed
+`behavior_state_hypotheses`/`meaning_completion_hypothesis` into a
+`LanguageAttempt`-shaped value (D-194's classifier requires one as its
+first argument). This is an honest APPROXIMATION of D-168's real
+cross-span grouping algorithm (it does not merge multiple spans into
+one Attempt) -- used ONLY when no real `LanguageAttempt` is supplied
+for that span, and every such fallback use is counted and reported
+(`LANGUAGE_ATTEMPT_NOT_SUPPLIED` in `missing_evidence`,
+`p1_missing_language_count` in the run summary). It reuses D-168's own
+`_BRIEF_WORD_CEILING`/`_BRIEF_DURATION_CEILING_SEC`/`_word_count`
+verbatim (no new threshold) for the FALSE_START/ABANDONED_ATTEMPT
+split.
+
+## 7. RawUnderstanding mapping
+
+Optional `raw_understanding_map` parameter: when its own
+`track_status["raw_understanding_map_status"]` is `FAILED`, capability
+is downgraded to `NOT_EVALUABLE` regardless of `WatchListenUnderstanding`
+(defensive -- Watch+Listen is itself built FROM the Raw map). Never
+used to recompute anything -- read-only status check.
+
+## 8. WatchListen mapping
+
+Primary evidence source (item 5). `UnderstandingSpan.span_id` is
+looked up by `CandidateTake.clip_id` (the same identity contract D-155/
+D-157 already establish); a take with no matching span is SKIPPED, never
+manufactured (`unresolved_count` -> `CAPABILITY_PARTIAL`).
+
+## 9. LanguageAttempt mapping
+
+Real, caller-supplied `LanguageAttempt` (keyed by span/clip id) is
+preferred verbatim over the fallback adapter (item 6) whenever present
+-- proven end to end (`test_05_real_language_attempt_preferred_over_
+fallback`).
+
+## 10. Proposition mapping
+
+Optional `proposition_candidates` (real D-169 objects); their ids are
+folded into each moment's `proposition_candidate_ids` by matching
+`attempt_ids`. Absent by default in the live path today, honestly
+reported (`PROPOSITION_CANDIDATE_NOT_SUPPLIED`).
+
+## 11. Relation mapping
+
+`UnderstandingSpan.attempt_relation_hypotheses` (D-157, mirrors D-169's
+`RelationEvidence.relation_candidate` vocabulary verbatim) is reduced to
+one dominant relation per pair via `_dominant_relation` -- a SELECTION
+among already-computed hypotheses (confidence-then-priority ranked),
+never a new relation-detection heuristic. Feeds both the moment's
+`relation_to_predecessor` and the sequence's `relation_candidates`.
+
+## 12. Behavior mapping
+
+`UnderstandingSpan.behavior_state_hypotheses` (D-155, reused verbatim)
+passed straight through to `classify_editorial_moment`'s own
+`behavior_hypotheses=` parameter -- no duplicate behavior classifier.
+
+## 13. Visual corroboration
+
+`exit_usability in (UNUSABLE, QUESTIONABLE)` (D-157's own per-zone
+usability, itself derived from D-115's positioned performance/defect
+evidence) is passed as `visual_reset_present` -- corroboration/conflict
+only, never role-establishing (item 24 below).
+
+## 14. Prosodic corroboration
+
+Optional `prosodic_evidence_by_span_id` mapping, passed straight
+through to `classify_editorial_moment`'s own `prosodic_evidence=`
+parameter when present for that exact span id; absent by default
+(no audio decode performed here -- see item 32).
+
+## 15. Clean-audience-delivery result
+
+Proven via the real adapter path with NO prosodic/visual evidence at
+all and NO source-position dependence
+(`test_15_clean_audience_delivery_mapping`,
+`test_24_ordinary_motion_does_not_break_role`).
+
+## 16-19. Retry / blooper / clean-delivery / preassembled-final-sequence
+results
+
+All four sequence kinds proven end to end through the real adapter path
+from `WatchListenUnderstanding` spans (`test_25`-`test_28`).
+
+## 20. False-positive firewall
+
+`test_29_clean_adjacent_takes_not_automatically_final`: three real,
+adjacent, clean spans with NO relation evidence supplied classify
+`CLEAN_DELIVERY_SEQUENCE`, never `PREASSEMBLED_FINAL_SEQUENCE` --
+proven through the live adapter, not just D-194's own unit tests.
+
+## 21. Chronology firewall
+
+`test_30_chronology_reversal_same_classification`: identical structural
+evidence at `t=0` and `t=500` yields the identical `sequence_kind`.
+
+## 22. Sequence-conflict result
+
+`test_32_sequence_conflict_propagates`: a real Prosodic-fragmented
+corroboration conflict on one moment propagates to the sequence's own
+`conflict_flags`/`MIXED` confidence -- never silently absorbed.
+
+## 23. Distant-redundancy result
+
+`earlier_source_redundancy_status` is unconditionally `NOT_EVALUATED`
+on every sequence this integration produces (`test_33`) -- P2 territory,
+never computed here.
+
+## 24. Local-only grouping
+
+`build_editorial_sequences_for_moments` forms ONE local window per
+source by default (no invented numeric adjacency threshold, per the
+directive's own instruction) or accepts explicit caller-supplied
+`local_groups`; `classify_editorial_sequence`'s own single-source
+constraint is never bypassed (`test_59`).
+
+## 25. Source timing
+
+Exact, never re-derived (`test_34_exact_source_timing`).
+
+## 26. Deterministic ids / 27. Deterministic ordering
+
+Same evidence -> same moment/sequence ids regardless of input take
+order (`test_35`-`test_37`).
+
+## 28. Capability status
+
+`AVAILABLE`/`PARTIAL`/`NOT_EVALUABLE`/`DISABLED` all proven
+(`test_57_capability_status_values`); never claims `AVAILABLE` when
+`WatchListenUnderstanding` is absent or a `RawUnderstandingMap` reports
+`FAILED`.
+
+## 29. Missing-evidence result
+
+`missing_evidence` tuple honestly lists every optional canonical
+evidence type this source did NOT receive (`test_16`-`test_21`,
+`test_58`).
+
+## 30-33. No-recomputation results
+
+Structurally proven (AST-based import checks, docstring-stripped):
+this module imports nothing from `asr.py` (no ASR rerun), nothing from
+`local_performance.py` (no visual rerun), nothing from
+`prosodic_audio_v2.py` (no Prosodic decode), nothing from
+`audio_silence.py` (no silence rerun) -- `test_40`-`test_43`.
+
+## 34. No-provider result
+
+Zero network/provider surface in code (`test_39`, parametrized over
+`openai`/`requests.`/`urllib`/`subprocess`/`socket`).
+
+## 35-41. No family/BestTake/D-191/Ordering/Boundary/Pacing/Render
+mutation
+
+Structurally asserted via docstring-stripped source grep for every
+forbidden field/function/module name
+(`test_44_to_50_no_authority_mutation_strings`,
+`test_51_no_p2_whole_video_import`) -- none present.
+
+## 42. Default-off parity
+
+`test_54_default_off_byte_equivalent`: with the flag unset, a real
+`build_flow_b_draft` call's `selected` winner is unchanged and
+`draft.diagnostics["editorial_moment_sequence"] == {"status":
+"disabled"}` -- the OFF path performs zero extra work (the whole block
+is skipped by the `if`, not merely its output suppressed).
+
+## 43. Flag-on immutability
+
+`test_55_flag_on_winner_immutability`: with the flag ON, the SAME real
+pipeline call's `selected` winner is identical to the OFF run, and the
+new diagnostics key reports `"status": "evaluated"`.
+
+## 44. Diagnostics
+
+`editorial_moment_understanding_diagnostics` -- per-moment/per-sequence
+bounded rows (reusing D-194's own `editorial_moment_diagnostics`/
+`editorial_sequence_diagnostics`), plus the aggregate's own
+`capability_status`/`missing_evidence`/`confidence`/`conflict`. No
+transcript dump (`test_38`).
+
+## 45. Run summary
+
+`editorial_moment_understanding_run_summary` -- every D-194 count plus
+`p1_editorial_moment_status`, `p1_missing_language_count`,
+`p1_missing_behavior_count`, `p1_missing_relation_count`.
+
+## 46. Runtime
+
+`test_56_pipeline_runtime_lightweight`: a synthetic 20-moment source
+builds in well under a second (no target invented, generous sanity
+ceiling only) -- no provider, no media decode, no ASR.
+
+## 47-59. Regression battery
+
+`python3 -m compileall cutsell_worker tests` clean. Targeted D-123/
+D-128/D-142/D-145-D-195/pipeline/Boundary/Pacing/render suites: **1717
+passed** (0 failed, beyond the expected transient D-169 git-diff
+tripwire that resolves after commit -- same pattern as every prior
+D-19x task). Full offline suite
+(`pytest tests/ --ignore=tests/test_semantic_stitch.py`): **4535
+passed, 6 failed, 13 subtests passed** -- the 5 non-tripwire failures
+(4 in `test_video00_modal_hybrid_semantic_parity.py`, 1 in `test_hybrid_
+story_guard_incomplete_retry.py`) and the pre-existing
+`test_semantic_stitch.py` collection error were independently
+reconfirmed PRE-EXISTING on this task's own starting `HEAD` (`614732c`)
+via the same before/after isolation method D-194 used -- unrelated to
+this task, not introduced by it.
+
+## 60. New failures
+
+**NONE.**
+
+## 61. D-195 VERDICT
+
+**A. P1 CANONICAL-EVIDENCE LIVE DIAGNOSTIC INTEGRATION OFFLINE PROVEN.**
+The real adapter layer constructs genuine `EditorialMoment`/
+`EditorialSequenceHypothesis`/`EditorialMomentUnderstanding` objects
+from actually-live `WatchListenUnderstanding` evidence, with the
+fallback Language-Spine adapter and every optional canonical-evidence
+gap honestly reported rather than silently assumed. Default-off parity
+and flag-on winner immutability are both proven against a real
+`build_flow_b_draft` call, not merely unit-level mocks.
+
+## 62. Canonical P1 status
+
+**PHASE_A_OFFLINE_PROVEN + CANONICAL_EVIDENCE_LIVE_DIAGNOSTIC_
+INTEGRATION_OFFLINE_PROVEN.** NOT real-media proven (no RAW has run
+with this flag). NOT provider-backed. NOT an authority.
+
+## 63. Exact D-196 RAW gate
+
+D-196 = exactly ONE Video00 RAW with
+`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1` and NO P1
+authority flag, purpose: observe real moment roles/retry-blooper/
+clean-delivery/preassembled-final-sequence hypotheses against the
+canonical Video00 source and assess whether real target shapes exist.
+Not expected to change F1/selection at all (P1 has zero authority).
+NOT implemented or launched by this entry.
+
+## 64. Confirmations
+
+NO RAW dispatched. NO provider/network call made. NO authority granted.
+Three files changed:
+`cutsell_worker/editorial_moment_sequence_integration.py` (new),
+`cutsell_worker/pipeline.py` (small, surgical, flag-gated diagnostic
+wiring only), `tests/test_cutsell_d195_editorial_moment_sequence_
+integration.py` (new), plus one D-194 test-file update (parametrize
+list correction, item 1).
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize
+D-196 -- the one real-media RAW above -- remains a Product Owner
+decision; D-196 is NOT implemented or launched automatically by this
+entry).

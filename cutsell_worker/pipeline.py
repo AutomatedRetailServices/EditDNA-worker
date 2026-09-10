@@ -107,6 +107,16 @@ from .watch_listen_besttake_guard_authority import (
 )
 from .watch_listen_relation_discovery import watch_listen_relation_discovery_enabled
 from .watch_listen_understanding import WatchListenUnderstanding
+# D-195 (docs/CUTSELL_DECISIONS.md D-195): P1 Editorial Moment & Sequence
+# Understanding, Phase B -- DIAGNOSTICS ONLY, default OFF, no authority.
+# Consumes ONLY already-computed `WatchListenUnderstanding` evidence (built
+# above/upstream in flow_b.py); never mutates selected_clip_id/ranked/
+# family membership/D-191 authority/Boundary/Pacing/render plan.
+from .editorial_moment_sequence_integration import (
+    build_editorial_moment_understanding_for_sources,
+    editorial_moment_sequence_diagnostics_enabled,
+    editorial_moment_understanding_run_summary,
+)
 # D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist Arbiter --
 # OFFLINE / DIAGNOSTIC ONLY. A SEPARATE, independently-rollbackable flag
 # from D-163/D-172/D-174's own diagnostic-only flags. Consulted ONLY when
@@ -2384,6 +2394,34 @@ def build_flow_b_draft(
         for take in (*discarded, *review_removed, *no_usable_removed)
     )
 
+    # D-195: P1 Editorial Moment & Sequence Understanding, Phase B --
+    # DIAGNOSTICS ONLY. {"status": "disabled"} when the (separate,
+    # default-OFF) diagnostics flag is off -- in that case this block
+    # below is never even computed, so the OFF path performs zero extra
+    # work (not merely zero extra output). Uses `take_tuple` (the
+    # complete, un-filtered candidate pool this call ever saw -- see its
+    # own comment near the top of this function, never reassigned after
+    # realization-id minting) so a discarded/failed attempt still gets
+    # its own real editorial-process-role moment, matching P1's own
+    # "role exists independently of whether it wins" contract
+    # (docs/CUTSELL_DECISIONS.md D-195). Computed here, before `draft`
+    # is constructed, so it is available for `draft.diagnostics` below
+    # -- the same location D-183/D-184/D-191's own compact summaries
+    # already live.
+    if editorial_moment_sequence_diagnostics_enabled():
+        editorial_moment_source_ids = sorted({t.source_asset_id for t in take_tuple})
+        editorial_moment_understandings = build_editorial_moment_understanding_for_sources(
+            sources=editorial_moment_source_ids,
+            takes=take_tuple,
+            watch_listen_understandings=tuple(watch_listen_understandings),
+        )
+        editorial_moment_sequence_summary = {
+            "status": "evaluated",
+            **editorial_moment_understanding_run_summary(editorial_moment_understandings),
+        }
+    else:
+        editorial_moment_sequence_summary = {"status": "disabled"}
+
     whole_video_diag = {
         "status": whole_video_context.status.__dict__ if whole_video_context is not None else None,
         "dominant_edit_mode": whole_video_context.dominant_edit_mode if whole_video_context is not None else "natural",
@@ -2565,6 +2603,12 @@ def build_flow_b_draft(
                     }
                 )
             ),
+            # D-195 (docs/CUTSELL_DECISIONS.md D-195): P1 Editorial Moment
+            # & Sequence Understanding compact summary -- {"status":
+            # "disabled"} when the (separate, default-OFF) diagnostics
+            # flag is off. Diagnostics only: no authority, never read by
+            # Family/BestTake/D-191/Boundary/Pacing/Renderer.
+            "editorial_moment_sequence": editorial_moment_sequence_summary,
             "composer_status": composition.status.__dict__,
             "composer_reason": composition.reason,
             "composer_order": list(composition.ordered_clip_ids),

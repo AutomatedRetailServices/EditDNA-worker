@@ -700,11 +700,21 @@ def test_internal_redundancy_rejects_unknown_value():
 
 
 # ---------------------------------------------------------------------------
-# Module-leaf structural guarantees: this module is imported by NOTHING in
-# production, and it imports NOTHING from any authority module.
+# Module-leaf structural guarantees: this module (D-194's own pure
+# classifiers) is imported by NOTHING in production, and imports NOTHING
+# from any authority module. `pipeline.py` is deliberately EXCLUDED from
+# this list as of D-195 (docs/CUTSELL_DECISIONS.md D-195), which
+# explicitly authorizes wiring a NEW, SEPARATE integration module
+# (`editorial_moment_sequence_integration.py`) into `pipeline.py`'s own
+# diagnostics -- see `test_cutsell_d195_editorial_moment_sequence_
+# integration.py`'s own module-leaf tests for the D-195-era version of
+# this guarantee (pipeline.py may reference the INTEGRATION module;
+# D-194's own classifiers module must still never be imported directly,
+# and no authority/Family/BestTake/Boundary/Pacing/render module may
+# ever reference either one).
 # ---------------------------------------------------------------------------
 _PRODUCTION_MODULES = (
-    "pipeline.py", "flow_b.py", "bounded_finalist_arbiter.py", "bounded_finalist_authority.py",
+    "flow_b.py", "bounded_finalist_arbiter.py", "bounded_finalist_authority.py",
     "composite_resolver.py", "realization_resolver.py", "boundary_engine_pass.py",
     "dialogue_pacing_transition.py", "take_grouping.py", "take_grouping_provider.py",
     "deterministic_best_take_authority.py", "take_judge.py", "semantic_authority_observability.py",
@@ -719,6 +729,21 @@ def test_not_imported_by_any_production_module(module_name: str):
         pytest.skip(f"{module_name} not present in this checkout")
     src = path.read_text()
     assert "editorial_moment_sequence" not in src
+
+
+def test_pipeline_never_imports_d194_classifiers_directly():
+    """D-195 wires a SEPARATE integration module into pipeline.py -- this
+    module's own pure classifiers (editorial_moment_sequence.py) are never
+    imported directly by pipeline.py; the one-hop indirection through
+    editorial_moment_sequence_integration.py is deliberate (module-leaf
+    isolation)."""
+    tree = ast.parse((WORKER_DIR / "pipeline.py").read_text())
+    imported_modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module.rsplit(".", 1)[-1])
+    assert "editorial_moment_sequence" not in imported_modules
+    assert "editorial_moment_sequence_integration" in imported_modules
 
 
 def test_module_imports_nothing_from_authority_modules():
