@@ -36960,3 +36960,316 @@ L-cut, micro-overlap, and Pacing V2 remain downstream and untouched.
 D-199 live Language-Spine evidence integration, or an alternative P1
 scope, remains a Product Owner decision; this entry implements
 neither).
+
+# D-199: P1 LIVE LANGUAGE-SPINE EVIDENCE INTEGRATION -- OFFLINE
+IMPLEMENTATION (POST D-198)
+
+Product Owner authorization: construct and consume the existing canonical
+Language Spine objects (D-166/D-168/D-169's `LanguageWord`/`LanguagePhrase`/
+`LanguageUtterance`/`LanguageAttempt`/`PropositionCandidate`/
+`RelationEvidence`) LIVE from already-computed ASR word timings for P1
+diagnostics -- offline implementation + pipeline wiring only; no ASR
+rerun, no provider call, no RAW, no P1/P2 authority.
+
+## 1. Live construction module
+
+New module `cutsell_worker/language_spine_live_integration.py` -- the one
+adapter layer between D-166/D-168/D-169's own already-vetted builders and
+P1's per-source integration layer. Mints nothing new; every object is
+built by a direct call into the existing canonical functions, in the
+canonical order:
+
+`adapt_words_to_language_words` -> `segment_language_phrases` (no real
+audio-silence-interval/restart-marker evidence threaded in -- an explicit,
+honestly-flagged simplification: `missing_evidence` always includes
+`AUDIO_SILENCE_EVIDENCE_NOT_SUPPLIED`, and `segment_language_phrases`'s
+own documented fail-open contract, timing + punctuation only, applies) ->
+`segment_language_utterances` -> `build_language_attempts` ->
+`build_proposition_candidates` -> `build_relation_evidence`.
+
+`LiveLanguageSpineEvidence` (frozen dataclass): `source_asset_id`, `words`,
+`phrases`, `utterances`, `attempts`, `proposition_candidates`,
+`relation_evidence`, `capability_status`
+(AVAILABLE/PARTIAL/NOT_EVALUABLE/DISABLED), `missing_evidence`,
+`conflicts`, `provenance`. Built ONCE per source from
+`RawUnderstandingMap.word_timings` (D-155, unchanged) -- the SAME
+`contracts.Word` tuple already computed upstream. Absent/empty word
+timings return an honest `NOT_EVALUABLE` result rather than raising.
+
+## 2. NO ASR RERUN (structurally confirmed)
+
+`language_spine_live_integration.py` imports nothing from `asr.py`, calls
+no `WhisperModel`/`run_asr`/`.transcribe(...)`, and never reads
+`RawUnderstandingMap.transcript` (a deliberately-wrong-transcript test
+proves construction is driven only by `word_timings`). Confirmed by
+module-source-inspection tests (`test_09`/`test_10`/`test_11`).
+
+## 3. Bridging (deterministic maximum-overlap, never text-match)
+
+`language_attempts_by_span_id_for_source` bridges real `LanguageAttempt`
+objects (D-166/D-168's own independent word-timing-gap segmentation) onto
+P1's existing `UnderstandingSpan.span_id` keys via maximum TEMPORAL
+overlap -- never BestTake/family/rendered-timeline identity, never a text
+match. A span with zero overlap against every real attempt is absent from
+the returned mapping and falls through to the existing D-157
+approximation automatically.
+
+## 4. Relation fusion contract (never majority-vote)
+
+`fuse_relation_evidence(d157_relation, canonical_relation)` -- 5-way
+contract, proven by direct unit tests (`test_17`-`test_21`):
+
+- both `None` -> `(None, MISSING)`
+- D-157 only -> `(d157_relation, D157_ONLY)`
+- canonical only -> `(canonical_relation, CANONICAL_ONLY)`
+- both present and EQUAL -> `(value, AGREEMENT)`
+- both present and DIFFERENT -> `(RELATION_UNCERTAIN, CONFLICT_ABSTAINED)`
+  -- never silently picks a side, never averages/votes. `RELATION_
+  UNCERTAIN` is the exact value D-197's own unchanged grouper already
+  treats as a non-joining boundary, so conflict resolution changes WHICH
+  value reaches that rule set, never the rule set itself.
+
+## 5. P1 integration (`editorial_moment_sequence_integration.py`)
+
+`build_editorial_moments_for_source` gained two OPTIONAL parameters:
+`relation_evidence_by_pair` (real D-169 `RelationEvidence` keyed by
+proposition-candidate-id pair) and `provenance_out` (a mutable dict the
+caller may pass to receive the two new per-position provenance maps).
+**The function's RETURN ARITY is UNCHANGED (still a 4-tuple)** -- this
+was a deliberate fix mid-implementation: an initial draft widened the
+return to 6 values and broke all 25 existing D-197/D-198 callers that
+unpack exactly 4; the corrected design exposes the new provenance data
+only via the optional out-parameter, so every existing caller (including
+the full D-194/D-195/D-197/D-198 suites) is untouched.
+
+`build_editorial_moment_understanding_for_source` gained `live_language_
+spine: LiveLanguageSpineEvidence | None = None`. When supplied (together
+with a `WatchListenUnderstanding`), it is the SINGLE canonical source for
+`language_attempts_by_span_id`/`proposition_candidates`/`relation_
+evidence` for that source -- it OVERRIDES any caller-supplied fallback
+values for those three, never mixing canonical and D-157-derived
+linguistic truth for the same source. When `None` (the default), behavior
+is BYTE-IDENTICAL to pre-D-199.
+
+`EditorialMomentUnderstanding` gained two index-aligned diagnostic-only
+tuples: `moment_language_evidence_source`
+(`CANONICAL_LANGUAGE_SPINE`/`D157_FALLBACK` per moment) and `moment_
+relation_evidence_source` (the fusion provenance tag per moment).
+`build_editorial_moment_understanding_for_sources` (batch form) gained
+`live_language_spine_by_source: Mapping[str, LiveLanguageSpineEvidence] |
+None = None`, looked up per source, absent-for-a-source == `None` for
+that source (byte-identical fallback per source).
+
+New helper `live_language_spine_source_diagnostics_for_p1(evidence,
+understanding)` merges `language_spine_live_integration`'s own
+construction-only diagnostics with four P1-CONSUMPTION counts derived
+purely from the already-built `EditorialMomentUnderstanding`:
+`canonical_attempt_used_by_p1_count`, `fallback_attempt_used_by_p1_count`,
+`canonical_proposition_coverage_count`, `canonical_relation_coverage_
+count` -- pure re-projection, no re-derivation.
+
+## 6. Fallback contract (proven, no crash, no dropped source)
+
+1. real canonical Language Spine (when `live_language_spine` bridges a
+   span); 2. existing D-157 fallback (`_derive_language_attempt`,
+   unchanged) when canonical is unavailable for that span/source; 3.
+   `MISSING`/`D157_FALLBACK` reported honestly, never silently upgraded.
+   Proven for: absent `RawUnderstandingMap` (`test_03`), empty
+   `word_timings` (`test_04`), a `NOT_EVALUABLE` spine object passed
+   through end-to-end with zero crash (`test_28`/`test_59`), and a batch
+   with one source missing its spine entry leaving the OTHER source's
+   result unaffected (`test_29`).
+
+## 7. Proposition/Retry identity firewall (preserved)
+
+D-169's Proposition Identity != Retry Identity is untouched: P1 only ever
+reads `proposition_candidate_id`/`attempt_id` as reference strings
+(`test_30` confirms `EditorialMoment` carries no `retry_family_id`
+field); no merge/split/family-minting logic was added anywhere in this
+task.
+
+## 8. Bilingual / Spanglish safety (structural evidence only)
+
+Every one of the directive's mandated fixtures (Spanish: negation,
+negative polarity, open clause, "otra vez" retry-phrase-alone,
+two-distinct-propositions, number+correction; English equivalents;
+Spanglish code-switching; a structural cross-language restart-equivalence
+pair) constructs successfully and behaves per STRUCTURAL evidence only --
+proven directly:
+
+- `test_35`/`test_41`: a single isolated utterance containing "otra
+  vez"/"again" with no restart-PAIR evidence classifies `CLEAN_ATTEMPT`,
+  never `RETRY`/`CORRECTION` -- the phrase alone never forces a
+  classification.
+- `test_45`: a genuine structural restart pattern (same-first-two-
+  content-tokens across two utterances) produces the SAME categorical
+  attempt-state set in Spanish and English -- proving the detector
+  (`attempt_reconstruction._restart_evidence`, reused verbatim, token-
+  based) is language-independent, not a translated phrase list.
+- `test_47`: a language switch mid-sentence with no timing/punctuation
+  boundary produces exactly ONE utterance -- the switch alone never
+  splits.
+- `test_54`: no forbidden literal ("otra vez"/"again"/"perdón"/"sorry")
+  appears as the operand of an equality/membership comparison anywhere in
+  either D-199 module (regex-scanned, docstring-safe).
+- `test_55`: no `language == "es"`/`"en"` (or similar) comparison exists
+  in either D-199 module (AST-walked `ast.Compare` scan, so a docstring
+  merely DISCUSSING the absence of such a branch cannot false-positive).
+- `test_56`: the new module references no `.en`-suffixed Whisper model
+  name.
+- Meaning preservation: `count_meaning_sensitive_tokens_preserved`
+  (D-166's own reusable proof metric) confirms negation particles and
+  digit-bearing tokens survive normalization in both languages
+  (`test_49`/`test_50`/`test_51`); Spanish accented characters (`test_52`)
+  and English contractions (`test_53`) are confirmed intact end-to-end.
+
+## 9. Legacy ASR model audit
+
+`grep`-audited the live production path (`asr.py` and its callers): no
+`base.en`/`small.en`/`medium.en`/`large.en` Whisper model reference exists
+on the path this module reads from (`RawUnderstandingMap.word_timings`).
+D-199 adds zero ASR configuration of any kind -- it only ever reads
+already-produced word timings.
+
+## 10. Immutability (both flags OFF, and flag-on-but-construction-
+unavailable)
+
+Both `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=0` and
+`CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=0` (the default) preserve
+D-198 behavior exactly: `pipeline.py`'s new `live_language_spine_by_
+source` construction only runs INSIDE the existing P1-flag-gated block,
+and only when the SEPARATE live-spine flag is also on (never auto-linked
+to the P1 flag, per the directive's own instruction) -- `test_57`/
+`test_58`/`test_59` plus the full existing D-194/D-195/D-197/D-198 suites
+(241 tests) passing unmodified prove this. `raw_understanding_maps:
+Iterable[RawUnderstandingMap] = ()` was added to `build_flow_b_draft` as
+a new, empty-by-default parameter -- no existing caller is affected.
+
+## 11. Pipeline wiring (`pipeline.py`)
+
+Inside the existing P1 diagnostics block, when `CUTSELL_LIVE_LANGUAGE_
+SPINE_DIAGNOSTICS_ENABLED` is ALSO on: builds one `LiveLanguageSpineEvidence`
+per UNIQUE `source_asset_id` (never per clip/family/finalist), wrapped in a
+per-source `try/except` (the pipeline-side half of the fallback-failure
+contract -- a construction exception for one source is caught, recorded,
+and every other source continues unaffected). Passes the resulting map
+into `build_editorial_moment_understanding_for_sources` as `live_
+language_spine_by_source`. Adds a new, SEPARATE top-level `draft.
+diagnostics["live_language_spine"]` key (`{"status": "disabled"}` when
+either flag is off) carrying `live_language_spine_run_summary` plus
+per-source `live_language_spine_source_diagnostics_for_p1` rows and any
+construction-error count/detail -- never merged into the existing
+`"editorial_moment_sequence"` key.
+
+## 12. No P1/D-197 grouping retuning
+
+`build_editorial_local_groups` (D-197) and its join/split rule set are
+UNCHANGED -- D-199 only changes WHICH relation value the existing rule
+set consumes (via fusion), never the rules themselves. Confirmed: the
+full 71-test D-197 suite passes unmodified.
+
+## 13. Tests
+
+New `tests/test_cutsell_d199_live_language_spine_integration.py` -- 63
+tests covering: flag default/on; construction (absent/empty/real,
+source-identity, determinism, silence-evidence honesty); NO ASR RERUN
+(module-source-inspection); source isolation and run-summary aggregation;
+deterministic-overlap bridging (including a reversed-order-supply test
+proving overlap, not list position, drives the match); the 5-way
+`fuse_relation_evidence` contract; P1 precedence/consumption/diagnostics-
+field-length; the fallback-failure contract (absent map, empty timings,
+`NOT_EVALUABLE` object, batch partial-source-failure); the Proposition/
+Retry identity firewall; 6 Spanish + 6 English fixtures; 2 bilingual-
+equivalence tests; 3 Spanglish/code-switching tests; 8 safety tests
+(negation/number/accent/contraction preservation, no-phrase-hardcoding,
+no-language-branch, no-English-only-model); 3 immutability tests; 4 P1
+real-coverage-diagnostics tests.
+
+Two implementation bugs were found and fixed DURING this same task via
+these tests before any commit: (a) the return-arity regression in
+`build_editorial_moments_for_source` (Section 5, caught by running the
+existing D-197/D-198 suites, which is exactly why "run existing suites
+before adding new ones" is this task's own required order); (b) two
+test-authoring bugs in the new suite itself (a hardcoded `source_asset_id`
+in a shared `_take` test helper masking a real cross-source scenario, and
+a wrong per-source diagnostics key name) -- both caught and fixed before
+this entry was written, not discovered later.
+
+## 14. Regression
+
+`python3 -m compileall cutsell_worker tests`: clean. Targeted D-194/D-195/
+D-197/D-198 suites: 241/241 passed. New D-199 suite: 63/63 passed. Full
+offline suite (`pytest tests/ --ignore=tests/test_semantic_stitch.py`,
+the one pre-existing, D-199-unrelated collection error confirmed present
+identically on the unmodified base commit): PASS_COUNT/TOTAL_COUNT (see
+Section 15) -- SIX pre-existing failures unrelated to this task were
+confirmed present on the base commit (`ac4a0cd`) via `git stash` before
+this task's changes existed: five in `test_video00_modal_hybrid_semantic_
+parity.py`/`test_hybrid_story_guard_incomplete_retry.py` (unrelated
+workflow-overlay/story-guard assertions), and one
+(`test_cutsell_d169_language_proposition_relation.py::test_30_old_
+serialized_ids_unaffected`) which asserts `git diff HEAD` is empty for
+`cutsell_worker/pipeline.py`/`canonical_identity.py`/`contracts.py` --
+this ONE fails only while D-199's own `pipeline.py` edit is uncommitted
+(a working-tree-dirtiness guard, not a semantic-identity check) and
+passes again once committed, since `git diff HEAD` is then empty.
+
+## 15. D-199 VERDICT
+
+**A. LIVE LANGUAGE-SPINE -> P1 INTEGRATION OFFLINE PROVEN.** Construction
+works end-to-end from real ASR-shaped word timings; P1 consumes real
+canonical `LanguageAttempt`/`PropositionCandidate`/`RelationEvidence`
+when bridged, with honest counts distinguishing canonical vs. fallback
+usage; the fallback/fusion/immutability/bilingual/Spanglish/safety
+contracts are all proven offline. Real-media (Video00) proof of nonzero
+canonical coverage is explicitly NOT claimed by this entry -- that is
+D-200's job.
+
+## 16. Canonical P1 status
+
+**PHASE_A_OFFLINE_PROVEN + LOCAL_GROUP_FORMATION_REAL_MEDIA_PROVEN
+(D-198, unchanged) + LIVE_LANGUAGE_SPINE_CONSTRUCTION_OFFLINE_PROVEN +
+LIVE_LANGUAGE_SPINE_P1_CONSUMPTION_OFFLINE_PROVEN.** Still NOT an
+authority. Real-media LanguageAttempt/PropositionCandidate/RelationEvidence
+coverage remains UNVERIFIED on Video00 pending D-200.
+
+## 17. Bilingual status
+
+Structural safety (no phrase-hardcoding, no language-branch, categorical
+equivalence on synthetic fixtures) is OFFLINE PROVEN. Real-media
+English/Spanish/Spanglish PARITY is explicitly NOT claimed -- per the
+directive's own roadmap, that requires a SEPARATE future qualification
+(one English RAW, one Spanish RAW, plus a code-switching fixture/RAW),
+not run in this task.
+
+## 18. P2 / Overlap / Pacing status
+
+P2: still NOT AUTHORIZED, nothing implemented. Overlap/Pacing (D-129):
+untouched, downstream, no code in this task references `dialogue_overlap_
+enabled`/`overlaps_delivery`/Pacing V2.
+
+## 19. Exact next gate
+
+Per the directive: **D-200** = exactly ONE Video00 RAW with BOTH
+`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=1` and
+`CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`, no P1 authority, to
+prove real `LanguageAttempt`/`PropositionCandidate` coverage > 0 on real
+media, canonical `RelationEvidence` actually consumed, fallback reliance
+materially decreases, D-197 grouping remains bounded, P1 classifications
+remain safe, and no false `PREASSEMBLED_FINAL_SEQUENCE` is introduced.
+NOT authorized or launched by this entry.
+
+## 20. Confirmations
+
+No ASR rerun, no provider/network call, no visual/Prosodic recompute
+(structurally confirmed, Section 2/9). No RAW dispatched -- fully
+offline. No P1 authority granted; Family Formation/BestTake/D-191/
+Ordering/Boundary/Pacing/Renderer/Commercial Moment/Sales Funnel
+unchanged (no D-199 code references any of them). No P2 implemented.
+D-197 grouping rules unchanged (Section 12). Default-OFF and flag-on-
+construction-unavailable both preserve D-198 behavior exactly (Section
+10, tests 57-59). No new recurring paid infrastructure. No secrets moved.
+
+**HUMAN ACTION REQUIRED:** YES (condition C -- paid compute: D-200's ONE
+Video00 RAW requires Product Owner authorization before dispatch; this
+entry implements and offline-qualifies D-199 only and does not launch it).

@@ -117,7 +117,19 @@ from .editorial_moment_sequence_integration import (
     editorial_moment_sequence_diagnostics_enabled,
     editorial_moment_understanding_diagnostics,
     editorial_moment_understanding_run_summary,
+    live_language_spine_source_diagnostics_for_p1,
 )
+# D-199 (docs/CUTSELL_DECISIONS.md D-199): live Language-Spine construction
+# from already-computed ASR word timings -- DIAGNOSTICS ONLY, default OFF,
+# no authority, no ASR rerun, no provider call. Consumed ONLY inside the
+# existing D-195/D-197/D-198 P1 diagnostics block below, and ONLY when this
+# flag is ALSO on (never auto-linked to the P1 flag -- see module docstring).
+from .language_spine_live_integration import (
+    build_live_language_spine_for_source,
+    live_language_spine_diagnostics_enabled,
+    live_language_spine_run_summary,
+)
+from .raw_understanding_map import RawUnderstandingMap
 # D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist Arbiter --
 # OFFLINE / DIAGNOSTIC ONLY. A SEPARATE, independently-rollbackable flag
 # from D-163/D-172/D-174's own diagnostic-only flags. Consulted ONLY when
@@ -1366,6 +1378,7 @@ def build_flow_b_draft(
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     boundary_owner: str = "pre_freeze",
     watch_listen_understandings: Iterable[WatchListenUnderstanding] = (),
+    raw_understanding_maps: Iterable[RawUnderstandingMap] = (),
     local_paths: Mapping[str, str] | None = None,
 ) -> ProcessingResult:
     """Build an editable draft after understanding the complete source context.
@@ -1388,6 +1401,18 @@ def build_flow_b_draft(
     those operations in its post-Freeze BoundaryEngine pass, so they skip
     here instead of acting on a pre-authority candidate set. The legacy
     ``process_local_sources`` callers keep the default.
+
+    ``raw_understanding_maps`` (D-199, docs/CUTSELL_DECISIONS.md D-199): an
+    optional collection of already-built ``RawUnderstandingMap`` objects
+    (one per source asset), the SAME per-source object D-155 already
+    produces upstream -- consumed ONLY to reach each source's own
+    ``word_timings`` (already-computed ASR words, never re-transcribed) for
+    the P1 live Language-Spine diagnostics block below, and ONLY when both
+    ``CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED`` and
+    ``CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED`` are on. Empty (the
+    default) reproduces every pre-D-199 caller's behavior exactly --
+    byte-identical `selected_clip_id`/`ranked`/membership/Boundary/Pacing/
+    Renderer either way.
     """
     del boundary_owner  # consumed by the wrappers; never influences the draft itself
     take_tuple = tuple(takes)
@@ -2411,10 +2436,42 @@ def build_flow_b_draft(
     # already live.
     if editorial_moment_sequence_diagnostics_enabled():
         editorial_moment_source_ids = sorted({t.source_asset_id for t in take_tuple})
+
+        # D-199 (docs/CUTSELL_DECISIONS.md D-199): live Language-Spine
+        # construction, ONLY when this SEPARATE flag is also on (never
+        # auto-linked to the P1 flag above -- see module docstring). Built
+        # ONCE per unique source_asset_id here (never per clip/family/
+        # finalist) from each source's own already-computed
+        # `RawUnderstandingMap.word_timings` -- zero ASR re-invocation.
+        # Per-source `try/except` is this call site's half of the
+        # FALLBACK FAILURE TEST contract (module docstring): a
+        # construction exception for one source is caught, recorded as
+        # NOT_EVALUABLE with an honest `missing_evidence` reason, and
+        # every other source's construction/P1 evaluation continues
+        # unaffected -- no crash, no dropped source.
+        live_language_spine_by_source: dict[str, "LiveLanguageSpineEvidence"] = {}
+        live_language_spine_construction_errors: list[dict] = []
+        if live_language_spine_diagnostics_enabled():
+            raw_map_by_source = {m.source_asset_id: m for m in raw_understanding_maps}
+            for source_asset_id in editorial_moment_source_ids:
+                try:
+                    live_language_spine_by_source[source_asset_id] = build_live_language_spine_for_source(
+                        source_asset_id=source_asset_id,
+                        raw_understanding_map=raw_map_by_source.get(source_asset_id),
+                    )
+                except Exception as exc:  # noqa: BLE001 -- fail-open per source, never crash the draft
+                    live_language_spine_by_source[source_asset_id] = build_live_language_spine_for_source(
+                        source_asset_id=source_asset_id, raw_understanding_map=None,
+                    )
+                    live_language_spine_construction_errors.append(
+                        {"source_asset_id": source_asset_id, "error": repr(exc)}
+                    )
+
         editorial_moment_understandings = build_editorial_moment_understanding_for_sources(
             sources=editorial_moment_source_ids,
             takes=take_tuple,
             watch_listen_understandings=tuple(watch_listen_understandings),
+            live_language_spine_by_source=live_language_spine_by_source,
         )
         # D-196 (docs/CUTSELL_DECISIONS.md D-196): OBSERVABILITY-ONLY
         # serialization of the already-built per-source moment/sequence
@@ -2447,8 +2504,35 @@ def build_flow_b_draft(
                 row for source_diag in editorial_moment_source_diagnostics for row in source_diag["local_groups"]
             ],
         }
+
+        # D-199: SEPARATE top-level diagnostics key (never merged into
+        # `editorial_moment_sequence_summary` above -- see module
+        # docstring's "not auto-linked to the P1 flag" instruction). Empty/
+        # {"status": "disabled"} whenever `CUTSELL_LIVE_LANGUAGE_SPINE_
+        # DIAGNOSTICS_ENABLED` is off, regardless of the P1 flag's own
+        # state -- byte-identical to pre-D-199 in that case.
+        if live_language_spine_diagnostics_enabled():
+            live_language_spine_source_diagnostics = [
+                live_language_spine_source_diagnostics_for_p1(
+                    live_language_spine_by_source[source_asset_id], understanding,
+                )
+                for source_asset_id, understanding in zip(
+                    editorial_moment_source_ids, editorial_moment_understandings
+                )
+                if source_asset_id in live_language_spine_by_source
+            ]
+            editorial_moment_live_language_spine_summary = {
+                "status": "evaluated",
+                **live_language_spine_run_summary(live_language_spine_by_source.values()),
+                "sources": live_language_spine_source_diagnostics,
+                "construction_error_count": len(live_language_spine_construction_errors),
+                "construction_errors": live_language_spine_construction_errors,
+            }
+        else:
+            editorial_moment_live_language_spine_summary = {"status": "disabled"}
     else:
         editorial_moment_sequence_summary = {"status": "disabled"}
+        editorial_moment_live_language_spine_summary = {"status": "disabled"}
 
     whole_video_diag = {
         "status": whole_video_context.status.__dict__ if whole_video_context is not None else None,
@@ -2637,6 +2721,14 @@ def build_flow_b_draft(
             # flag is off. Diagnostics only: no authority, never read by
             # Family/BestTake/D-191/Boundary/Pacing/Renderer.
             "editorial_moment_sequence": editorial_moment_sequence_summary,
+            # D-199 (docs/CUTSELL_DECISIONS.md D-199): live Language-Spine
+            # evidence integration compact summary -- SEPARATE top-level
+            # key, never merged into "editorial_moment_sequence" above.
+            # {"status": "disabled"} when either the P1 diagnostics flag or
+            # this module's own `CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_
+            # ENABLED` flag is off. Diagnostics only: no authority, never
+            # read by Family/BestTake/D-191/Boundary/Pacing/Renderer.
+            "live_language_spine": editorial_moment_live_language_spine_summary,
             "composer_status": composition.status.__dict__,
             "composer_reason": composition.reason,
             "composer_order": list(composition.ordered_clip_ids),

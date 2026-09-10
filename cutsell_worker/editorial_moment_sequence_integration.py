@@ -90,6 +90,20 @@ from .editorial_moment_sequence import (
     editorial_sequence_diagnostics,
 )
 from .language_proposition_relation import PropositionCandidate, RelationEvidence
+from .language_spine_live_integration import (
+    LANGUAGE_EVIDENCE_CANONICAL,
+    LANGUAGE_EVIDENCE_D157_FALLBACK,
+    RELATION_SOURCE_AGREEMENT,
+    RELATION_SOURCE_CANONICAL_ONLY,
+    RELATION_SOURCE_CONFLICT_ABSTAINED,
+    RELATION_SOURCE_MISSING,
+    LiveLanguageSpineEvidence,
+    fuse_relation_evidence,
+    language_attempts_by_span_id_for_source,
+    live_language_spine_diagnostics,
+    proposition_candidate_ids_by_attempt_id_for,
+    relation_evidence_by_proposition_pair,
+)
 from .language_utterance_attempt import (
     ATTEMPT_ABANDONED,
     ATTEMPT_CLEAN,
@@ -298,6 +312,14 @@ class EditorialMomentUnderstanding:
     # re-ranked) build_editorial_local_groups already consumed to decide
     # membership. See docs/CUTSELL_DECISIONS.md D-198.
     moment_relation_to_predecessor: Tuple[str | None, ...] = ()
+    # D-199: index-aligned per-moment sourcing diagnostics -- which
+    # evidence source actually produced this moment's own LanguageAttempt
+    # (CANONICAL_LANGUAGE_SPINE / D157_FALLBACK) and its relation-to-
+    # predecessor value (D157_ONLY / CANONICAL_ONLY / AGREEMENT /
+    # CONFLICT_ABSTAINED / MISSING). Diagnostic only. See
+    # docs/CUTSELL_DECISIONS.md D-199.
+    moment_language_evidence_source: Tuple[str | None, ...] = ()
+    moment_relation_evidence_source: Tuple[str, ...] = ()
 
 
 def _understanding_span_for_take(
@@ -314,6 +336,8 @@ def build_editorial_moments_for_source(
     language_attempts_by_span_id: Mapping[str, LanguageAttempt] | None = None,
     proposition_candidate_ids_by_attempt_id: Mapping[str, Tuple[str, ...]] | None = None,
     prosodic_evidence_by_span_id: Mapping[str, object] | None = None,
+    relation_evidence_by_pair: Mapping[Tuple[str, str], "RelationEvidence"] | None = None,
+    provenance_out: dict | None = None,
 ) -> Tuple[Tuple[EditorialMoment, ...], int, int, dict[int, str]]:
     """Builds one ``EditorialMoment`` per eligible take, in deterministic
     ``(source_start, source_end, clip_id)`` order. A take with NO matching
@@ -321,10 +345,35 @@ def build_editorial_moments_for_source(
     task's own "do not create moments from arbitrary token windows /
     ambiguous source mapping" instruction. Returns ``(moments,
     unresolved_count, fallback_language_attempt_count, relation_by_
-    position)`` -- the last a ``{local_sequence_position: relation_
-    candidate}`` map of every ACTUALLY-RESOLVED (non-``None``) dominant
-    relation, for the caller to pass straight into ``build_editorial_
-    sequences_for_moments`` without recomputing it."""
+    position)`` -- ``relation_by_position`` is a ``{local_sequence_
+    position: relation_candidate}`` map of every ACTUALLY-RESOLVED
+    (non-``None``) FUSED dominant relation, for the caller to pass
+    straight into ``build_editorial_sequences_for_moments`` without
+    recomputing it.
+
+    D-199 (docs/CUTSELL_DECISIONS.md D-199): the RETURN ARITY of this
+    function is UNCHANGED from D-198 -- every existing caller (including
+    the full D-194/D-195/D-197/D-198 test suites, which unpack exactly 4
+    values) keeps working unmodified with both new flags OFF, per the
+    "default OFF must preserve current D-198 behavior exactly" contract.
+    The two new D-199 provenance maps (``relation_evidence_source_by_
+    position``, ``attempt_source_by_position``) are exposed ONLY via the
+    optional ``provenance_out`` mutable-dict out-parameter -- when the
+    caller passes a ``dict``, this function populates it with those two
+    keys; when omitted (``None``, the default), no extra work/allocation
+    beyond the two local dicts already needed internally, and no ambient
+    change to any existing caller.
+
+    ``relation_evidence_by_pair`` is the OPTIONAL real canonical D-169
+    ``RelationEvidence`` (keyed by proposition-candidate-id pair, see
+    ``language_spine_live_integration.relation_evidence_by_proposition_
+    pair``) -- when a canonical relation is found for a predecessor edge,
+    it is FUSED with the existing D-157 Watch+Listen relation via
+    ``language_spine_live_integration.fuse_relation_evidence`` (agreement/
+    conflict-abstention/single-source contract, never a silent majority
+    vote or override -- see that module's own docstring). This changes
+    WHICH relation value reaches D-197's own unchanged join/split rule
+    set; it does not change that rule set itself."""
     ordered = sorted(
         (t for t in takes_for_source if t.source_asset_id == source_asset_id),
         key=lambda t: (t.start, t.end, t.clip_id),
@@ -332,20 +381,24 @@ def build_editorial_moments_for_source(
     language_attempts_by_span_id = language_attempts_by_span_id or {}
     proposition_candidate_ids_by_attempt_id = proposition_candidate_ids_by_attempt_id or {}
     prosodic_evidence_by_span_id = prosodic_evidence_by_span_id or {}
+    relation_evidence_by_pair = relation_evidence_by_pair or {}
 
     moments: list[EditorialMoment] = []
     relation_by_position: dict[int, str] = {}
+    relation_evidence_source_by_position: dict[int, str] = {}
+    attempt_source_by_position: dict[int, str] = {}
     unresolved_count = 0
     fallback_language_attempt_count = 0
     position = 0
     previous_relation_lookup_span: UnderstandingSpan | None = None
+    previous_attempt: LanguageAttempt | None = None
     for take in ordered:
         span = _understanding_span_for_take(take, understanding_spans_by_id)
         if span is None or not take.clip_id or take.start is None or take.end is None or take.end < take.start:
             unresolved_count += 1
             continue
 
-        relation_to_predecessor, _relation_confidence = (
+        d157_relation, _relation_confidence = (
             _dominant_relation(span.attempt_relation_hypotheses) if previous_relation_lookup_span is not None
             else (None, CONFIDENCE_UNKNOWN)
         )
@@ -353,9 +406,32 @@ def build_editorial_moments_for_source(
         real_attempt = language_attempts_by_span_id.get(take.clip_id)
         if real_attempt is not None:
             attempt = real_attempt
+            attempt_source_by_position[position] = LANGUAGE_EVIDENCE_CANONICAL
         else:
-            attempt = _derive_language_attempt(take, span, relation_to_predecessor)
+            attempt = _derive_language_attempt(take, span, d157_relation)
             fallback_language_attempt_count += 1
+            attempt_source_by_position[position] = LANGUAGE_EVIDENCE_D157_FALLBACK
+
+        # D-199: canonical D-169 relation lookup, via each side's own real
+        # proposition_candidate_id -- only resolvable when BOTH sides used
+        # a real canonical LanguageAttempt (a fallback-derived attempt's
+        # id never appears in a real PropositionCandidate's attempt_ids,
+        # so this is automatically None whenever either side fell back --
+        # no extra branching needed for that case).
+        canonical_relation = None
+        if previous_attempt is not None:
+            pred_props = proposition_candidate_ids_by_attempt_id.get(previous_attempt.attempt_id, ())
+            cur_props = proposition_candidate_ids_by_attempt_id.get(attempt.attempt_id, ())
+            if pred_props and cur_props:
+                evidence = relation_evidence_by_pair.get((pred_props[0], cur_props[0]))
+                if evidence is not None:
+                    canonical_relation = evidence.relation_candidate
+
+        if previous_relation_lookup_span is not None:
+            relation_to_predecessor, relation_evidence_source = fuse_relation_evidence(d157_relation, canonical_relation)
+        else:
+            relation_to_predecessor, relation_evidence_source = None, RELATION_SOURCE_MISSING
+        relation_evidence_source_by_position[position] = relation_evidence_source
 
         visual_reset_present = span.exit_usability in (USABILITY_UNUSABLE, USABILITY_QUESTIONABLE)
 
@@ -374,9 +450,16 @@ def build_editorial_moments_for_source(
             relation_by_position[position] = relation_to_predecessor
         moments.append(moment)
         previous_relation_lookup_span = span
+        previous_attempt = attempt
         position += 1
 
-    return tuple(moments), unresolved_count, fallback_language_attempt_count, relation_by_position
+    if provenance_out is not None:
+        provenance_out["relation_evidence_source_by_position"] = relation_evidence_source_by_position
+        provenance_out["attempt_source_by_position"] = attempt_source_by_position
+
+    return (
+        tuple(moments), unresolved_count, fallback_language_attempt_count, relation_by_position,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -666,6 +749,7 @@ def build_editorial_moment_understanding_for_source(
     relation_evidence: Iterable[RelationEvidence] | None = None,
     prosodic_evidence_by_span_id: Mapping[str, object] | None = None,
     local_groups: Sequence[Sequence[int]] | None = None,
+    live_language_spine: LiveLanguageSpineEvidence | None = None,
 ) -> EditorialMomentUnderstanding:
     """The one canonical per-source P1 Phase B builder. Pure; no I/O, no
     provider call, no perception recomputation (see module docstring).
@@ -674,8 +758,31 @@ def build_editorial_moment_understanding_for_source(
     them -- when given, their ids are folded in as reference evidence
     (``proposition_candidate_ids_by_attempt_id``); when absent (the
     current live-pipeline default), moments simply carry no proposition
-    references, honestly reported via ``missing_evidence``."""
+    references, honestly reported via ``missing_evidence``.
+
+    D-199 (docs/CUTSELL_DECISIONS.md D-199): ``live_language_spine``, when
+    supplied, is the SINGLE canonical source for all three of
+    ``language_attempts_by_span_id``/``proposition_candidates``/
+    ``relation_evidence`` -- it OVERRIDES those three parameters (never
+    mixes canonical and caller-supplied values for the same source,
+    preventing two competing linguistic truths). Real ``LanguageAttempt``
+    objects are bridged onto this source's own ``UnderstandingSpan``s via
+    ``language_spine_live_integration.language_attempts_by_span_id_for_
+    source``'s deterministic maximum-overlap match -- a span with no
+    overlapping real attempt simply falls through to the existing D-157
+    fallback (``_derive_language_attempt``, unchanged), exactly the
+    FALLBACK CONTRACT that module's own docstring specifies. When
+    ``live_language_spine`` is ``None`` (the default -- the D-199 live-
+    language-spine flag OFF, or construction unavailable/failed for this
+    source), behavior is BYTE-IDENTICAL to pre-D-199."""
     missing_evidence: list[str] = []
+
+    if live_language_spine is not None and watch_listen_understanding is not None:
+        language_attempts_by_span_id = language_attempts_by_span_id_for_source(
+            watch_listen_understanding.understanding_spans, live_language_spine.attempts,
+        )
+        proposition_candidates = live_language_spine.proposition_candidates
+        relation_evidence = live_language_spine.relation_evidence
 
     if raw_understanding_map is not None and raw_understanding_map.track_status.get(
         "raw_understanding_map_status"
@@ -724,6 +831,11 @@ def build_editorial_moment_understanding_for_source(
     if not prosodic_evidence_by_span_id:
         missing_evidence.append("PROSODIC_EVIDENCE_NOT_SUPPLIED")
 
+    relation_evidence_by_pair = (
+        relation_evidence_by_proposition_pair(tuple(relation_evidence)) if relation_evidence is not None else {}
+    )
+
+    provenance_out: dict = {}
     moments, unresolved_count, fallback_count, relation_by_position = build_editorial_moments_for_source(
         source_asset_id=source_asset_id,
         takes_for_source=takes_tuple,
@@ -731,7 +843,11 @@ def build_editorial_moment_understanding_for_source(
         language_attempts_by_span_id=language_attempts_by_span_id,
         proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
         prosodic_evidence_by_span_id=prosodic_evidence_by_span_id,
+        relation_evidence_by_pair=relation_evidence_by_pair,
+        provenance_out=provenance_out,
     )
+    attempt_source_by_position = provenance_out.get("attempt_source_by_position", {})
+    relation_evidence_source_by_position = provenance_out.get("relation_evidence_source_by_position", {})
 
     if not moments:
         capability_status = CAPABILITY_NOT_EVALUABLE
@@ -769,6 +885,16 @@ def build_editorial_moment_understanding_for_source(
     moment_relation_to_predecessor = tuple(
         relation_by_position.get(i) for i in range(len(moments))
     )
+    # D-199: index-aligned pass-through of the two new per-position fusion/
+    # source dicts build_editorial_moments_for_source now returns -- same
+    # pure-serialization pattern as moment_relation_to_predecessor (D-198)
+    # above, no re-derivation.
+    moment_language_evidence_source = tuple(
+        attempt_source_by_position.get(i) for i in range(len(moments))
+    )
+    moment_relation_evidence_source = tuple(
+        relation_evidence_source_by_position.get(i, RELATION_SOURCE_MISSING) for i in range(len(moments))
+    )
 
     if fallback_count and "LANGUAGE_ATTEMPT_NOT_SUPPLIED" not in missing_evidence:
         missing_evidence.append("LANGUAGE_ATTEMPT_NOT_SUPPLIED")
@@ -792,6 +918,8 @@ def build_editorial_moment_understanding_for_source(
         provenance=("WATCH_LISTEN_UNDERSTANDING",) + (("RAW_UNDERSTANDING_MAP",) if raw_understanding_map is not None else ()),
         local_groups=computed_local_groups,
         moment_relation_to_predecessor=moment_relation_to_predecessor,
+        moment_language_evidence_source=moment_language_evidence_source,
+        moment_relation_evidence_source=moment_relation_evidence_source,
     )
 
 
@@ -801,13 +929,21 @@ def build_editorial_moment_understanding_for_sources(
     takes: Iterable[CandidateTake],
     watch_listen_understandings: Iterable[WatchListenUnderstanding],
     raw_understanding_maps: Iterable[RawUnderstandingMap] = (),
+    live_language_spine_by_source: Mapping[str, LiveLanguageSpineEvidence] | None = None,
     **kwargs,
 ) -> Tuple[EditorialMomentUnderstanding, ...]:
     """Batch form, one per source, in ``sources`` order -- deterministic
-    regardless of ``takes``/``watch_listen_understandings`` input order."""
+    regardless of ``takes``/``watch_listen_understandings`` input order.
+    ``live_language_spine_by_source`` (D-199): optional ``source_asset_id
+    -> LiveLanguageSpineEvidence`` map, looked up per source and passed
+    straight through as ``build_editorial_moment_understanding_for_
+    source``'s own ``live_language_spine`` parameter -- absent for a given
+    source is identical to ``None`` (byte-identical pre-D-199 behavior for
+    that source)."""
     takes = tuple(takes)
     wlu_by_source = {u.source_asset_id: u for u in watch_listen_understandings}
     raw_by_source = {m.source_asset_id: m for m in raw_understanding_maps}
+    live_language_spine_by_source = live_language_spine_by_source or {}
     out = []
     for source_asset_id in sources:
         out.append(build_editorial_moment_understanding_for_source(
@@ -815,6 +951,7 @@ def build_editorial_moment_understanding_for_sources(
             takes_for_source=takes,
             watch_listen_understanding=wlu_by_source.get(source_asset_id),
             raw_understanding_map=raw_by_source.get(source_asset_id),
+            live_language_spine=live_language_spine_by_source.get(source_asset_id),
             **kwargs,
         ))
     return tuple(out)
@@ -824,21 +961,41 @@ def build_editorial_moment_understanding_for_sources(
 # Diagnostics / run summary.
 # ---------------------------------------------------------------------------
 def _moment_diagnostics_with_relation(
-    moment: EditorialMoment, relation_to_predecessor: str | None,
+    moment: EditorialMoment,
+    relation_to_predecessor: str | None,
+    language_evidence_source: str | None = None,
+    relation_evidence_source: str | None = None,
 ) -> dict:
     """D-198: `editorial_moment_diagnostics` (D-194, unchanged) plus ONE
     diagnostic-only key, `relation_to_predecessor` -- the exact
     already-computed value D-197's own grouper consumed for this moment's
     predecessor edge, never re-derived here. See docs/CUTSELL_DECISIONS.md
-    D-198 ("SINGLE SOURCE OF TRUTH")."""
-    return {**editorial_moment_diagnostics(moment), "relation_to_predecessor": relation_to_predecessor}
+    D-198 ("SINGLE SOURCE OF TRUTH").
+
+    D-199: two more diagnostic-only keys, `language_evidence_source`
+    (CANONICAL_LANGUAGE_SPINE / D157_FALLBACK / ``None`` when the caller
+    never supplied per-moment provenance) and `relation_evidence_source`
+    (the ``fuse_relation_evidence`` provenance tag -- MISSING/D157_ONLY/
+    CANONICAL_ONLY/AGREEMENT/CONFLICT_ABSTAINED) -- no full text, no new
+    computation, pure pass-through."""
+    return {
+        **editorial_moment_diagnostics(moment),
+        "relation_to_predecessor": relation_to_predecessor,
+        "language_evidence_source": language_evidence_source,
+        "relation_evidence_source": relation_evidence_source,
+    }
 
 
 def editorial_moment_understanding_diagnostics(understanding: EditorialMomentUnderstanding) -> dict:
     relations = understanding.moment_relation_to_predecessor
+    language_sources = understanding.moment_language_evidence_source
+    relation_sources = understanding.moment_relation_evidence_source
     moment_rows = [
         _moment_diagnostics_with_relation(
-            m, relations[i] if i < len(relations) else None,
+            m,
+            relations[i] if i < len(relations) else None,
+            language_sources[i] if i < len(language_sources) else None,
+            relation_sources[i] if i < len(relation_sources) else None,
         )
         for i, m in enumerate(understanding.moments)
     ]
@@ -906,4 +1063,39 @@ def editorial_moment_understanding_run_summary(
             1 for g in multi_moment_groups if g.confidence == CONFIDENCE_SUPPORTED
         ),
         "unsequenced_moment_count": unsequenced_moment_count,
+    }
+
+
+def live_language_spine_source_diagnostics_for_p1(
+    evidence: "LiveLanguageSpineEvidence", understanding: EditorialMomentUnderstanding,
+) -> dict:
+    """D-199 (docs/CUTSELL_DECISIONS.md D-199): the mandated per-source
+    "diagnostics required per source" block -- ``live_language_spine_
+    diagnostics`` (construction-only, D-199's own module) merged with
+    FOUR P1-CONSUMPTION counts derived purely from this source's already-
+    built ``EditorialMomentUnderstanding`` (no re-derivation, no new
+    computation): how many of THIS source's moments actually used a real
+    canonical attempt/proposition/relation versus the D-157 fallback.
+    Pure re-projection, same pattern as every other D-19x diagnostics
+    function in this module."""
+    base = live_language_spine_diagnostics(evidence)
+    canonical_attempt_used_by_p1_count = sum(
+        1 for s in understanding.moment_language_evidence_source if s == LANGUAGE_EVIDENCE_CANONICAL
+    )
+    fallback_attempt_used_by_p1_count = sum(
+        1 for s in understanding.moment_language_evidence_source if s == LANGUAGE_EVIDENCE_D157_FALLBACK
+    )
+    canonical_proposition_coverage_count = sum(
+        1 for m in understanding.moments if m.proposition_candidate_ids
+    )
+    canonical_relation_coverage_count = sum(
+        1 for s in understanding.moment_relation_evidence_source
+        if s in (RELATION_SOURCE_CANONICAL_ONLY, RELATION_SOURCE_AGREEMENT, RELATION_SOURCE_CONFLICT_ABSTAINED)
+    )
+    return {
+        **base,
+        "canonical_attempt_used_by_p1_count": canonical_attempt_used_by_p1_count,
+        "fallback_attempt_used_by_p1_count": fallback_attempt_used_by_p1_count,
+        "canonical_proposition_coverage_count": canonical_proposition_coverage_count,
+        "canonical_relation_coverage_count": canonical_relation_coverage_count,
     }
