@@ -46212,3 +46212,627 @@ own eventual authorization, which this entry does not request or begin.
 Then STOP. Do NOT implement D-219. Wait for Product Owner coordination.
 
 ---
+
+## D-219: Pacing V2 Advanced Transition Authority Architecture / Safety Forensic (post D-218F)
+
+**Status: VERDICT B -- ADVANCED MODE SAFETY READY, EXACT TIMING-AMOUNT
+POLICY MUST BE DEFINED BEFORE AUTHORITY. The J_CUT/L_CUT firewall
+mechanism (word safety, meaning safety, double-speech safety,
+relationship-hint vetoes, fail-closed-on-unknown, renderer mechanical
+execution) is fully offline-proven and safe to grant live authority
+over. The ONE remaining architectural gap is that `pacing_v2_evidence_
+adapter.py`'s own candidate-timing derivation deliberately offers the
+FULL mechanically-available silent window as the candidate lead/tail --
+"no fraction, no cap, no invented duration" -- with zero policy on how
+much of that window an advanced transition should actually USE. "Safe to
+execute" and "how much to execute" are two different questions, and only
+the first is answered today. MICRO_AUDIO_OVERLAP is additionally
+deferred (diagnostics-only) on top of this same gap. This is
+architecture/forensic only -- no code, test, workflow, or RAW change.**
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, HEAD unchanged at `0c4c725` (D-218F). No
+commit is expected to change HEAD other than this docs-only entry.
+
+### 2. Files changed
+`docs/CUTSELL_DECISIONS.md` (this entry) only. No `cutsell_worker/*.py`
+file, test file, or workflow file touched.
+
+### 3. Current advanced-mode readiness
+**Mechanism: PROVEN SAFE.** **Timing-amount policy: MISSING.** **Live
+authority: NOT YET JUSTIFIED without item 30's gap closed.**
+Decision layer (D-215, `pacing_transition_decision.py`): fully offline-
+proven, 46 tests, zero live wiring. Live diagnostics integration (D-216):
+58 tests, flag-gated, zero live wiring. Real evidence-source wiring
+(D-217): 48 tests, zero recompute, zero live wiring. Real-media
+qualification (D-218R): capability AVAILABLE on real Video00, 0 firewall
+violations, 0 advanced execution (structural). Identity-integrity fix
+(D-218F): 32 tests, zero decision drift. Renderer mechanical execution
+(D-214, `render_plan.py`/`render.py`): 44 tests proving J/L/micro-overlap
+ARE physically renderable via `RenderSegment.audio_start`/`audio_end`
+independent-audio-window fields, real ffmpeg command construction and
+execution against synthetic tone sources, multi-source correctness,
+join-isolation (an overlap on one join never smears an unrelated join's
+timing), deterministic and order-preserving. Nothing in this chain has
+ever been wired into `universal_clean_cut.py`'s or `pipeline.py`'s LIVE
+execution path -- only into the diagnostics-only D-216/D-217 seam. The
+ONE missing piece, at every level of this stack, is a principled answer
+to "how much lead/tail/overlap should an executed transition actually
+use," which no module in this chain currently supplies.
+
+### 4. J-cut hard requirements
+All of the following MUST hold (all confirmed by D-215's own test
+matrix, tests 05-07/13-19/23-26):
+1. `candidate_audio_lead_sec` offered and `> 0`, derived from real word-
+   timing geometry (`available_silent_head_sec` on the RIGHT clip) --
+   never invented, never defaulted.
+2. The lead window falls entirely within `right`'s own leading silence
+   (word-safety proof on the pre-cut window: `_word_safety` against
+   `(right.start - lead, right.start)`).
+3. No required lexical content from EITHER side falls inside the actual
+   double-speech window (`double_speech_status == DOUBLE_SPEECH_SAFE_
+   J_CUT`, never `NO_OVERLAP_REQUIRED`/`CONFLICTED`).
+4. `word_safety_status == SAFE` (never `UNKNOWN`/`BLOCKED`).
+5. `meaning_safety_status == SAFE` (D-038's `classify_claim` finds no
+   `CRITICAL` claim inside the relevant window on either side).
+6. No `RETRY`/`CORRECTION` relationship hint present (hard veto, see
+   item 20-21).
+7. `decision_status == SUPPORTED` (never `SAFE_FALLBACK`/`CONFLICTED`/
+   `UNKNOWN`).
+8. Source identity unambiguous (`left`/`right` each carry their own
+   `source_asset_id`; multi-source and same-source pairs both proven
+   correct, D-215 tests 25-26; D-214 tests 18-19 additionally prove the
+   RENDERER seeks two independent windows correctly even when both
+   sides share one source file).
+9. Renderer capability proven executable for the exact requested window
+   (D-214's own `_validate_independent_audio_window`: non-negative
+   `audio_start`, `audio_end` within source duration, `audio_end >
+   audio_start` -- raises rather than silently clamping on any
+   violation, D-214 tests 20-22/24).
+10. `overlap_duration`/candidate values remain exactly the caller-
+    supplied geometry -- the decision layer never rounds up, pads, or
+    substitutes a different number (D-215 test 31: no invented duration
+    constant anywhere in the module).
+
+### 5. L-cut hard requirements
+Symmetric to J-cut (D-215 tests 08-10/13-19/23-26):
+1. `candidate_audio_tail_sec` offered and `> 0`, derived from `available_
+   silent_tail_sec` on the LEFT clip.
+2. Tail window falls entirely within `left`'s own trailing silence.
+3. No required lexical content from either side inside the actual
+   double-speech window (`DOUBLE_SPEECH_SAFE_L_CUT`).
+4. `word_safety_status == SAFE`.
+5. `meaning_safety_status == SAFE`.
+6. No `RETRY`/`CORRECTION` relationship hint.
+7. `decision_status == SUPPORTED`.
+8. Source identity unambiguous (same proof as J-cut).
+9. Renderer capability proven executable (same validation, applied to
+   `left.audio_end` instead of `right.audio_start`).
+
+### 6. Micro-overlap hard requirements
+Strictly the UNION of the J-cut and L-cut requirements PLUS both windows
+simultaneously positive (D-215 tests 11-12): `candidate_audio_lead_sec >
+0` AND `candidate_audio_tail_sec > 0`; the overlap amount used is
+`min(lead, tail)` (both `_double_speech_window`'s own geometry and
+`pacing_v2_evidence_adapter.candidate_timing_for_pair`'s own `micro_
+overlap` field agree on this exact formula); double-speech safety must
+be `SAFE_MICRO_OVERLAP` (both sides' actual overlap window must be
+lexically empty, not merely each side's OWN silence considered alone);
+meaning/word safety SAFE on both sides; no RETRY/CORRECTION; `decision_
+status == SUPPORTED`; renderer validation passes for BOTH independent
+windows on the SAME join simultaneously (D-214 test 11 proves bounded
+simultaneous audio presence is correctly realized, never an unbounded
+smear). **Recommendation: C -- diagnostics-only for now** (see item 34):
+MICRO compounds item 30's timing-amount gap (it needs a single
+reconciled amount from TWO independent per-side windows, not one), and
+D-218R's real-media run exercised ZERO micro-eligible pairs (`candidate_
+micro_overlap_available_count: 0`), so there is no real-media evidence
+this shape behaves acceptably even before the timing-amount question is
+answered.
+
+### 7. Prosodic requirement decision
+**OPTIONAL_SUPPORT, with a MANDATORY-VETO-WHEN-AVAILABLE nuance.**
+Prosodic evidence's ABSENCE never blocks eligibility (D-215 test 20:
+`left_prosody=None, right_prosody=None` still yields `J_CUT`/
+`DECISION_SUPPORTED`); this is architecturally deliberate (D-187/D-188's
+own "Prosodic must be optional" contract, restated in `pacing_
+transition_decision.py`'s own module docstring). But when Prosodic
+evidence IS supplied and shows `restart_or_interruption_state ==
+RESTART_DETECTED`, it becomes a HARD VETO regardless of otherwise-safe
+word/meaning/double-speech geometry (D-215 test 22, D-217's `prosody_
+blocks` logic) -- continuity evidence, when present, may only ADD
+confidence (recorded in `provenance`), never override a real block, and
+restart evidence, when present, may ONLY subtract eligibility, never be
+overridden by otherwise-safe geometry. D-217's own real-media finding
+(`prosodic_pair_available_count: 0/26`, expected because the diagnostic
+flag was correctly not set) means this vote will simply never fire on
+today's real evidence pipeline until Prosodic finalist-arbitration
+diagnostics are enabled live -- an orthogonal, already-named, separate
+future gate, not this one.
+
+### 8. Relationship-hint requirement decision
+**RETRY and CORRECTION are hard vetoes; CONTINUATION and UNKNOWN/absent
+are non-blocking.** Confirmed exactly by the existing code (`decide_
+transition`'s own first two gates, checked BEFORE any timing/safety
+evaluation): `RELATIONSHIP_RETRY` forces `DECISION_CONFLICTED` +
+`HARD_CUT` unconditionally (D-215 test 18) -- the strongest block,
+appropriate because a retry signals unresolved EDITORIAL ambiguity about
+which content is even correct, categorically outside Pacing's authority
+to adjudicate. `RELATIONSHIP_CORRECTION` forces `DECISION_SAFE_FALLBACK`
++ `HARD_CUT` (D-215 test 16) -- a softer, EXPECTED shape (a correction
+should not audibly overlap into what it corrects) rather than an
+anomaly. `RELATIONSHIP_CONTINUATION` does NOT block (D-215 test 17: a
+safe J-cut proceeds unchanged under `CONTINUATION`) -- today's code
+treats it as evidentially neutral, not as additional corroborating
+support; recommend leaving it exactly as-is (non-blocking, non-
+required) rather than inventing new weighting logic now, per this task's
+own scope. `UNKNOWN`/absent relationship hint is NOT auto-unsafe --
+there is no third branch in `decide_transition` for it; a pair with no
+relationship evidence at all proceeds directly to word/meaning/double-
+speech/timing evaluation exactly as if it had never been asked (this is
+precisely why D-217's real-media run, with `relationship_hint_unknown_
+count: 26/26`, still produced `capability_status: AVAILABLE` rather than
+blocking everything -- the architecture already treats missing
+relationship evidence as "proceed on deterministic geometry alone,"
+never as "assume unsafe").
+
+### 9. Word-safety requirement
+Mandatory, hard veto on `BLOCKED` or `UNKNOWN` (D-215 tests 07/13-15/19).
+Checked against the exact pre-cut candidate window on each side using
+the widest available word-timing evidence the caller supplies (defaults
+to the clip's own `.words`).
+
+### 10. Meaning-safety requirement
+Mandatory, hard veto on `BLOCKED`. Reuses D-038's `classify_claim`
+verbatim -- no new negation/number/correction detector authorized or
+needed (D-215 tests 07/10/13-15, D-217's own "no recompute" structural
+audit).
+
+### 11. Double-speech requirement
+Mandatory, hard veto on `CONFLICTED`/`NO_OVERLAP_REQUIRED` (genuine
+competing lexical content on both sides of the actual overlap window).
+The SAFE_* variant appropriate to the requested mode (`SAFE_J_CUT`/
+`SAFE_L_CUT`/`SAFE_MICRO_OVERLAP`) is itself part of the eligibility
+proof, not merely a label (D-215 tests 06/09/12).
+
+### 12. Source-availability requirement
+Mandatory. `left`/`right` each carry an unambiguous `source_asset_id`;
+proven correct for same-source (D-215 test 25), multi-source (D-215 test
+26), and at the RENDERER level for same-source pairs requiring two
+independent seeks into the same file (D-214 tests 18-19). No authority
+gate may execute a window whose source cannot be resolved to exactly one
+physical asset.
+
+### 13. Candidate-timing requirement
+Mandatory positive existence check (item 30 covers the separate, unmet,
+AMOUNT question): at least one of `candidate_audio_lead_sec`/`candidate_
+audio_tail_sec` must be a real, non-`None`, `> 0` value derived from
+`available_silent_head_sec`/`available_silent_tail_sec` (word-timing
+geometry only) -- never a default, never an invented constant (D-215
+test 31, D-217's own module docstring: "this module never invents [a
+candidate] -- a caller offers a candidate; this function only ever
+judges its safety").
+
+### 14. Renderer-capability requirement
+Mandatory pre-flight validation, proven at the D-214 mechanical layer
+independent of this decision layer: non-negative `audio_start`, `audio_
+end` not exceeding the source's own probed duration, `audio_end >
+audio_start` with a small numeric safety epsilon (`AUDIO_TIMELINE_
+EPSILON_SEC`, D-214 test 38's own "no new editorial threshold, only a
+numeric safety epsilon" distinction) -- raises rather than silently
+clamping (D-214 tests 20-22/24). A future authority gate must call this
+validation BEFORE committing to an advanced `RenderSegment`, never after
+(see item 29).
+
+### 15. Evidence precedence (hard vetoes -> required positive evidence ->
+optional corroboration -> fallback)
+Confirmed against the ACTUAL code order in `decide_transition` (not
+merely the directive's own conceptual sketch):
+1. `RELATIONSHIP_RETRY` -> block (`DECISION_CONFLICTED`).
+2. Overlap disabled or no candidate offered at all -> block (baseline
+   `SUPPORTED`, never advanced -- this is the ordinary, expected, non-
+   error shape, not a firewall failure).
+3. `RELATIONSHIP_CORRECTION` -> block (`DECISION_SAFE_FALLBACK`).
+4. Word safety on the pre-cut window (`UNKNOWN`/`BLOCKED`) -> contributes
+   to `unknown_evidence`/`blocked`.
+5. Double-speech safety on the actual overlap window (`CONFLICTED`/`NO_
+   OVERLAP_REQUIRED`) -> contributes to `blocked`.
+6. Meaning safety on whichever window genuinely has words in it ->
+   contributes to `blocked`.
+7. Prosodic restart, IF evidence is available -> contributes to
+   `blocked` (never contributes to `unknown_evidence` -- its absence is
+   simply not evaluated).
+8. If `unknown_evidence and not blocked` -> `DECISION_UNKNOWN`, baseline
+   mode (fail-closed on ambiguity, never optimistic).
+9. If `blocked` -> `DECISION_SAFE_FALLBACK`, baseline mode.
+10. Only if NONE of the above fired -> `DECISION_SUPPORTED`, the
+    REQUESTED advanced mode is selected.
+Optional corroboration (Prosodic continuity, `CONTINUATION` relationship)
+never appears in this precedence chain at all today -- it is recorded in
+`provenance` for observability but never changes `eligibility`/`decision_
+status`/`mode`. This is architecturally consistent with the directive's
+own "may strengthen but not override hard vetoes" instruction, since
+today's code goes further: it does not even use positive corroboration
+to promote a borderline case, only negative Prosodic evidence (restart)
+demotes one.
+
+### 16. Hard-veto list
+`RELATIONSHIP_RETRY`; `RELATIONSHIP_CORRECTION`; `word_safety_status ==
+BLOCKED` or `UNKNOWN`; `meaning_safety_status == BLOCKED`; `double_
+speech_status in (CONFLICTED, NO_OVERLAP_REQUIRED)`; Prosodic restart/
+interruption detected (when evidence is available); overlap disabled at
+the caller level (`dialogue_overlap_enabled=False`, the master kill
+switch); no positive candidate timing offered at all.
+
+### 17. Positive-evidence list
+Real, non-zero `candidate_audio_lead_sec`/`candidate_audio_tail_sec`
+from word-timing geometry; `word_safety_status == SAFE`; `meaning_
+safety_status == SAFE`; `double_speech_status` equal to the SAFE_*
+variant matching the requested mode; `decision_status == SUPPORTED`;
+(future, not yet checked in code) renderer pre-flight validation passing
+for the exact requested window.
+
+### 18. Optional-corroboration list
+Prosodic continuity (`vocal_continuity_state == CONTINUOUS`) -- recorded
+in `provenance`, never required, never promotes an otherwise-ineligible
+pair. `RELATIONSHIP_CONTINUATION` -- evidentially neutral today (item
+8), available as a FUTURE corroboration signal but not used as one now,
+per this task's own no-new-logic scope.
+
+### 19. Unknown/missing-evidence behavior
+Fail-closed in every case actually exercised by the code: missing word
+timing on either side -> `DECISION_UNKNOWN`, baseline `HARD_CUT`,
+`word_safety_status == UNKNOWN` (D-215 test 19). Missing relationship
+hint -> proceeds on remaining geometry, never blocks by itself (item 8).
+Missing Prosodic evidence -> proceeds on remaining geometry, never
+blocks by itself (item 7). Missing/zero candidate timing -> baseline
+`SUPPORTED` `HARD_CUT`/`TIGHT_CUT`, never advanced (the D-218R real-
+media shape, 26/26 real transitions).
+
+### 20. Retry handling
+Hard veto, `DECISION_CONFLICTED`, forced `HARD_CUT`, regardless of any
+other otherwise-safe evidence (item 8, item 15 step 1). This is
+INTENTIONALLY the single strongest block in the whole precedence chain
+-- a retry relationship means the upstream Selection/Family/BestTake
+layer has not yet resolved which content is even the intended one, and
+Pacing must never paper over that uncertainty with a smooth-sounding
+audio transition.
+
+### 21. Correction handling
+Hard veto, `DECISION_SAFE_FALLBACK` (a softer classification than
+RETRY's `CONFLICTED`, reflecting that a correction relationship is an
+EXPECTED, understood editorial shape, not an anomaly), forced `HARD_
+CUT` (item 8, item 15 step 3).
+
+### 22. Continuation handling
+Non-blocking (item 8, item 18). A safe J/L/micro candidate proceeds
+exactly as if no relationship hint had been supplied at all. No special
+promotion logic exists or is recommended to be added by this task.
+
+### 23. Boundary firewall
+Preserved absolutely, by construction and by direct test proof: `left.
+start`/`left.end`/`right.start`/`right.end` are read ONLY, never written,
+anywhere in `pacing_transition_decision.py` (D-215 test 23 explicitly
+captures and re-asserts all four values unchanged after `decide_
+transition` runs) and `pacing_v2_evidence_adapter.py` (D-217's own "never
+reopen Boundary" structural audit). Any future authority gate's OWN new
+code must preserve this identically: it may populate `RenderSegment.
+audio_start`/`audio_end` (a RENDER-layer, not a `DraftClip`-layer,
+field) but must NEVER write back into `DraftClip.start`/`.end`, and must
+never call any Boundary-owning module (`human_boundary_polish_v5.py`,
+`boundary_engine`-adjacent code) -- confirmed no such import exists
+anywhere in the Pacing V2 chain today (D-215 test 35, D-214 test 40).
+
+### 24. Ordering firewall
+Equally preserved: nothing in the Pacing V2 chain reads or writes
+`source_order`, `editorial_moment_sequence`, or any Ordering-owned
+diagnostic key as an authority (D-215 test 35's own "no boundary/
+ordering/besttake/family module imported" audit, D-218F test 25 reusing
+the identical structural check for the same file after this task's own
+fix). A future authority gate consumes ALREADY-ORDERED adjacent pairs
+(`selected[i], selected[i+1]`) and must never reorder, insert, or remove
+a clip -- it only ever decides how the join BETWEEN two fixed, already-
+positioned neighbors sounds.
+
+### 25. One-mode-per-join contract
+Already structurally enforced by the existing data model, not something
+a future authority gate needs to newly invent: `DialogueTransitionPlan.
+mode` is a single closed-vocabulary string field (D-214 test 23: "the
+transition mode is always one of the closed vocabulary" -- `HARD_CUT`,
+`TIGHT_CUT`, `J_CUT`, `L_CUT`, `MICRO_AUDIO_OVERLAP`, never more than one
+simultaneously). `MICRO_AUDIO_OVERLAP` is ALREADY the representation for
+"both sides overlap a little" -- it is its OWN single mode, not a
+runtime combination of `J_CUT` + `L_CUT` executing together. No compound
+semantics need to be invented, and none should be.
+
+### 26. Fallback contract
+If advanced-mode eligibility is not reached (any hard veto, or missing
+required positive evidence), the ONLY fallback is the baseline mode
+`decide_transition` itself already computed via D-142's own live `plan_
+dialogue_pacing_transitions` (`baseline.mode`, always `HARD_CUT` or
+`TIGHT_CUT` today) -- exactly today's live behavior, byte-identical. Per
+this task's own explicit instruction, NO retry chain (J rejected -> try
+L -> try micro) is authorized or exists in the current code: D-215 never
+outputs a ranked list of alternative safe modes for one pair, only a
+single `mode` field, so inventing a chain would require NEW decision
+logic this task does not authorize.
+
+### 27. Feature-flag recommendation (design only, not created)
+`CUTSELL_PACING_V2_ADVANCED_AUTHORITY_ENABLED`, default OFF, following
+the exact existing pattern of every prior Pacing V2 flag (`CUTSELL_
+PACING_V2_DIAGNOSTICS_ENABLED`, `dialogue_overlap_enabled` itself). OFF
+must mean current `HARD_CUT`/`TIGHT_CUT`-only behavior, byte-identical
+to today, with zero code-path divergence (mirrors D-216's own "when OFF,
+nothing in this module is ever called" contract). This flag is NAMED
+here for a future implementation turn; it is NOT added to any file by
+this entry.
+
+### 28. Renderer mapping contract (design only, not implemented)
+Confirmed directly from `render_plan.py`'s own docstring and `render.py`
+lines 636-637 (the renderer's own `right_leads`/`left_trails` checks):
+- **J_CUT** -> sets the RIGHT segment's `audio_start = right.start -
+  lead_amount` (a LEADING audio window: this segment's own audio begins
+  before its own video, i.e. plays under the tail of the LEFT clip's
+  video). The LEFT segment is untouched.
+- **L_CUT** -> sets the LEFT segment's `audio_end = left.end + tail_
+  amount` (a TRAILING audio window: this segment's own audio continues
+  after its own video ends, i.e. plays under the head of the RIGHT
+  clip's video). The RIGHT segment is untouched.
+- **MICRO_AUDIO_OVERLAP** -> sets BOTH: LEFT's `audio_end = left.end +
+  overlap_amount` AND RIGHT's `audio_start = right.start - overlap_
+  amount`, where `overlap_amount = min(lead, tail)` (identical formula
+  D-215's `_double_speech_window` and D-217's `candidate_timing_for_
+  pair` both already use). `HARD_CUT`/`TIGHT_CUT` leave both `audio_
+  start`/`audio_end` at their default `None` (audio window identical to
+  video window), exactly today's only live-produced shape.
+`lead_amount`/`tail_amount`/`overlap_amount` are exactly item 30's own
+unanswered question -- this mapping is otherwise complete and already
+proven executable end-to-end (D-214's own tests 06-11 construct these
+exact `RenderSegment` shapes from raw derived geometry and prove the
+resulting ffmpeg command produces the correct audio/video relationship).
+
+### 29. Renderer failure fallback
+D-214's own `_validate_independent_audio_window` already raises (never
+silently clamps) on an invalid window. A future authority gate's own
+contract must therefore: (a) validate the fully-constructed advanced
+`RenderSegment` BEFORE committing to it as the join's final plan
+(atomic pre-render validation, not a try/render/catch); (b) on ANY
+validation failure, substitute the baseline `HARD_CUT`/`TIGHT_CUT`
+`RenderSegment` (no `audio_start`/`audio_end` set) for that one join
+only; (c) never allow a validation failure on one join to abort or
+partially-export the rest of the timeline. This mirrors D-097.2's own
+established renderer-contract precedent (a defect in one join's
+execution must never produce a partial or corrupted export).
+
+### 30. Timing-amount finding (the identified blocker)
+`pacing_v2_evidence_adapter.candidate_timing_for_pair` sets `lead =
+right_head` and `tail = left_tail` -- literally, exactly, the FULL
+measured available-silence window on each side, by explicit design
+("identical to the available windows themselves -- no fraction, no cap,
+no invented duration," verbatim from the function's own docstring). This
+was the CORRECT decision for D-217's own diagnostics-only scope (a
+diagnostic must report the true available window, not a guessed
+aesthetic amount) but it means NO module anywhere in this codebase
+today answers the separate question a LIVE authority gate would actually
+need to answer: given 2.9 seconds of measured available silence, should
+an executed J-cut actually USE all 2.9 seconds, some fraction of it, or
+a value derived from some other principle entirely (speech cadence,
+natural breath length, a per-mode ceiling)? Executing the FULL available
+window unconditionally is not proven safe from a QUALITY standpoint
+(item 38) even though it is proven safe from a FIREWALL standpoint (a
+2.9-second J-cut lead would never violate word/meaning/double-speech
+safety, since the window is by definition silent and word-free, but it
+could easily feel unnatural, which those three firewalls were never
+designed to judge).
+
+### 31. Max-safe-vs-chosen finding
+Confirmed as its own distinct question from item 30, not a duplicate:
+`available_safe_window` (the maximum the firewalls will PERMIT) and
+`chosen_amount` (the amount that would actually produce a good-feeling
+edit) are two different numbers with no established relationship in
+today's code. D-218R's real-media run never surfaced this in practice
+(every one of its 26 real pairs measured a ZERO available window, so
+"how much of it to use" was moot on that specific video -- see item 35),
+but the gap is real and would manifest on ANY real video where Boundary
+leaves measurable silent room at a join. This is the SAME blocker as
+item 30, viewed from the execution side rather than the derivation side;
+this report treats them as one blocker for the purposes of the D-219
+verdict, not two independent ones.
+
+### 32. J authority recommendation
+**Mechanism SAFE, authority NOT YET JUSTIFIED without item 30 closed.**
+Every hard veto and every piece of required positive evidence (items
+4/9/10/11/13/16/17) is already proven, both at the decision layer (D-215)
+and the renderer layer (D-214), independently, offline. The single
+missing piece before granting LIVE authority is a principled answer to
+"how much of the available lead window to actually request" -- without
+it, any live J-cut would execute using the raw geometric maximum, which
+this forensic explicitly does NOT certify as a good aesthetic default
+(item 30/38).
+
+### 33. L authority recommendation
+Identical to J-cut, symmetric (item 5, item 28). Same blocker, same
+recommendation: mechanism safe, authority blocked on the same missing
+timing-amount policy.
+
+### 34. Micro authority recommendation
+**C. Diagnostics-only for now.** Compounds item 30's gap (needs a single
+reconciled amount from two independently-measured windows, not one) and
+has ZERO real-media evidence of its own behavior (`candidate_micro_
+overlap_available_count: 0/26` on the only real RAW run to date, D-218R
+item 4). Recommend deferring MICRO_AUDIO_OVERLAP authority until AFTER
+J/L authority (once granted, under whatever timing-amount policy D-220
+defines) has itself been proven on real media, per the directive's own
+"do not force authorization" instruction.
+
+### 35. D-218R coverage impact
+**Evidence SCARCITY on this one real video, not an unsafe evidence
+contract.** D-218R's real Video00 run measured `candidate_timing_
+unavailable_count: 0` and ALL 26 real pairs classified `NO_SAFE_WINDOW`
+(zero available silent room on either side of every real transition) --
+plausibly because Boundary's own existing tightening (D-097.C/D-116/
+D-177) already trims every selected clip precisely to its own word
+boundaries, leaving little or no measurable silent margin for Pacing to
+ever find (a real, honest, architecturally-explicable finding, still not
+root-cause-confirmed per D-218R's own item 5). This means: (a) the
+DECISION mechanism (fail closed to baseline when no candidate exists)
+behaved exactly as designed and safely on real data -- the mechanism
+itself is not implicated; (b) any FUTURE authority gate, even once
+enabled, will likely trigger RARELY on video shot and boundary-processed
+the way Video00 was, unless Boundary's own tightening policy is
+separately revisited (explicitly out of THIS task's scope, and a genuine
+Product Owner-level product question, not an engineering default); (c)
+this scarcity is therefore evidence that broad authority will have
+LIMITED real-world impact on today's pipeline, not evidence that the
+SAFETY CONTRACT itself is deficient -- these are two different findings
+and must not be conflated.
+
+### 36. Additional RAW required: NO
+D-218R's own real-media evidence, combined with this offline
+architectural/forensic analysis of the already-existing, already-tested
+decision and renderer layers, is sufficient to reach this task's
+architecture decision. No further Video00 (or any other) RAW is needed
+to decide WHETHER and UNDER WHAT CONDITIONS to grant authority -- that
+is a code-and-doctrine question the existing evidence already answers.
+A confirmatory RAW would become relevant again only once a timing-amount
+policy (D-220) and an actual authority implementation exist to observe.
+
+### 37. Production observability contract (design only, for a future gate)
+The D-216/D-217 diagnostics-only pipeline ALREADY records, per pair,
+every field a future live-authority gate needs for parity plus two new
+ones: `selected_mode` (today: the recommendation; would become "the mode
+D-215 recommended," distinct from what follows), `pacing_gap_decision`,
+`speech_overlap_status`, `meaning_safety_status`, `word_safety_status`,
+`double_speech_status`, `candidate_audio_lead`/`candidate_audio_tail`/
+`candidate_overlap` (today: the full available window; see item 30),
+`decision_status`, `fallback_reason`, `prosodic_status`, `candidate_
+timing_status`, `relationship_hint`, `conflict_flags`, `provenance`,
+`live_mode` (D-142's own baseline), `live_vs_v2_comparison`, `firewall_
+violation`. A live-authority gate's own ADDITIONAL required fields, not
+present today: `executed_mode` (distinct from `selected_mode`/
+`recommended_mode`, since today nothing is ever executed -- this field
+does not exist because nothing needs it yet), `actual_timing_used`
+(distinct from `candidate_timing`, once D-220 defines a policy that may
+choose LESS than the full candidate window), and confirmation that the
+render layer's own `RenderSegment.audio_start`/`audio_end` were actually
+set as requested (already representable, per item 28, just never
+populated by any live caller today).
+
+### 38. Safety-vs-quality conclusion
+**These are two separate, non-substitutable proofs, and only the first
+is complete.** SAFE TO EXECUTE is fully proven: the firewall chain
+(items 4-19) guarantees an executed advanced transition can never
+overlap required speech, never split a critical claim, never proceed on
+unknown/conflicted evidence, and never silently fail at the renderer
+(items 14/29). LIKELY TO IMPROVE EDIT QUALITY is NOT proven and cannot
+be, from safety evidence alone: a firewall-safe transition using the
+FULL available silent window (item 30) could be aesthetically wrong --
+too long, too abrupt, inconsistent join-to-join -- and nothing in the
+current safety proof says otherwise, because none of these three
+firewalls (word/meaning/double-speech) were designed to judge pacing
+FEEL, only pacing SAFETY. Authority should not be granted on safety
+proof alone; a quality/timing-amount proof (D-220, and eventually a
+human Watch+Listen pass per this project's own D-095 quality ladder) is
+a separate, still-needed gate.
+
+### 39. Cut.ai parity relevance
+Advanced J/L/micro-overlap transitions may perceptually resemble a
+faster, more "professionally cut" feel commonly associated with
+commercial short-form editing (including, plausibly, Cut.ai's own
+output), but per this task's own explicit instruction, CutSell's actual
+internal transition METHOD is unknown and irrelevant to imitate --
+authority should never be granted on the reasoning "this is probably
+what Cut.ai does." The correct standard, per D-129/Section 11.3's own
+binding CLARITY BEFORE SPEED invariant and this project's own D-095
+quality ladder (RAW -> Cut.ai parity -> Human Gold parity -> technical
+QC -> perceptual Watch+Listen), is a NATURAL, PROFESSIONAL result judged
+against Human Gold, never a competitor-imitation goal.
+
+### 40. Smallest D-220 gate
+**D-220 -- Pacing V2 Advanced Transition Timing Policy Foundation,
+OFFLINE ONLY.** Defines, for the first time, a principled (never an
+invented millisecond constant) rule for how much of an available safe
+window an advanced transition should actually request -- grounded in
+something derivable from existing evidence (e.g., a bounded fraction of
+the measured available window, a value informed by the clip's own
+measured speech rate/cadence via existing D-187 Prosodic evidence when
+available, or an explicit conservative ceiling reasoned from the
+firewall geometry itself) -- still with ZERO live wiring, ZERO renderer
+change beyond what D-214 already proved, and ZERO RAW. This is the
+smallest gate that unblocks item 32/33's J/L recommendation; it does NOT
+by itself authorize live execution (that would be a further, separately-
+named gate once D-220's own policy is offline-proven).
+
+### 41. D-219 verdict
+**B. ADVANCED MODE SAFETY READY -- EXACT TIMING-AMOUNT POLICY MUST BE
+DEFINED BEFORE AUTHORITY.**
+
+### 42. Pacing canonical status
+Unchanged, adds no new `_PROVEN` status (this entry is forensic/
+architecture only, not an implementation): `PACING_V2_RENDERER_
+TIMELINE_CONTRACT_OFFLINE_PROVEN` + `PACING_V2_TRANSITION_DECISION_
+FOUNDATION_OFFLINE_PROVEN` + `PACING_V2_LIVE_DIAGNOSTIC_INTEGRATION_
+OFFLINE_PROVEN` + `PACING_V2_REAL_EVIDENCE_SOURCE_WIRING_OFFLINE_
+PROVEN` + `PACING_V2_FALLBACK_TRANSITION_IDENTITY_INTEGRITY_OFFLINE_
+PROVEN` (all D-218F and earlier, unchanged) + **`PACING_V2_ADVANCED_
+AUTHORITY_ARCHITECTURE_FORENSIC_COMPLETE`** (new this entry -- the
+architecture QUESTION is answered; the architecture ITSELF, and any live
+authority, remains unbuilt). D-218R's own verdict is explicitly UNCHANGED:
+`REAL_MEDIA_SAFE_USEFUL_WITH_NON_BLOCKING_EVIDENCE_LIMITATION`.
+
+### 43. Live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed modes.
+Nothing in this forensic entry introduces, enables, designs in
+executable detail, or could have introduced any live J_CUT/L_CUT/MICRO_
+AUDIO_OVERLAP authority -- this is a documentation-only entry, no
+`cutsell_worker/*.py` file was touched.
+
+### 44. Renderer status
+Unchanged. `render.py`/`render_plan.py` not touched by this task (item
+2). D-214's own mechanical proof (items 3-6/28-29) is READ and CITED,
+never modified or extended.
+
+### 45. Unseen-RAW status
+No RAW dispatched or required by this task (item 36). D-218R's Video00
+run remains the only real-media Pacing V2 evidence to date; its own
+findings (items 4/35) are preserved verbatim, never reopened or
+recomputed.
+
+### 46. App-roadmap status
+P1/P2/Ordering/Boundary CLOSED ENOUGH (unchanged). Pacing V2: renderer
+execution proven (D-214) -> decision foundation proven (D-215) -> live
+diagnostics proven (D-216) -> evidence wiring proven (D-217) -> real-
+media safety/usefulness proven (D-218R) -> fallback identity fixed
+(D-218F) -> **authority architecture forensic complete, timing-amount
+policy identified as the next gate (D-219, this entry)** -> next: D-220
+Advanced Transition Timing Policy Foundation (offline only, NOT
+implemented here) -> (future, separately authorized) bounded advanced
+transition authority implementation, default OFF -> Renderer/export
+qualification on real media -> unseen-RAW generalization / Human Gold
+parity -> product hardening -> TestFlight -> App Store. No stage beyond
+this entry's own naming of D-220 is authorized or begun.
+
+### 47. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md` per this
+task's own "Append: D-219 ... Docs only" instruction.
+
+### 48. Confirmation
+NO `cutsell_worker/*.py` file touched. NO test file added or modified.
+NO workflow file touched. NO RAW dispatched. NO provider/network call.
+NO live J/L/MICRO_AUDIO_OVERLAP authority created, enabled, or
+implemented in executable code. NO renderer behavior change (D-214's own
+mechanism is cited, not extended). NO Boundary reopen (item 23). NO
+Ordering change (item 24). NO Family/BestTake change. NO commercial-
+moment or sales-funnel logic touched or named as in-scope. NO new
+timing constant, threshold, or duration value introduced anywhere (items
+30/31 explicitly identify the ABSENCE of such a policy as the finding,
+never propose or hardcode one here).
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- this is a TRUE SCOPE
+BOUNDARY / PRODUCT DECISION: whether to authorize D-220 (Advanced
+Transition Timing Policy Foundation, offline only) as the next,
+separately-scoped engineering turn. Per this task's own explicit "Then
+STOP. Do NOT implement D-220. Wait for Product Owner coordination," no
+further action is taken.
+
+---
