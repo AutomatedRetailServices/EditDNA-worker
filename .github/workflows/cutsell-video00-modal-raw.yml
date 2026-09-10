@@ -313,6 +313,28 @@ on:
         required: false
         default: ""
         type: string
+      pacing_v2_diagnostics_enabled:
+        # D-218 (docs/CUTSELL_DECISIONS.md D-213 through D-217): "1"
+        # overlays CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED=1 (cutsell_
+        # worker/pacing_v2_live_diagnostics_integration.py's live
+        # diagnostic integration, D-216, plus cutsell_worker/pacing_v2_
+        # evidence_adapter.py's real evidence-source wiring, D-217, both
+        # wired into universal_clean_cut.py at the one live Pacing seam).
+        # Relationship-hint coverage additionally requires editorial_
+        # moment_sequence_diagnostics_enabled=1 (never auto-linked;
+        # reported honestly as UNKNOWN otherwise -- see pacing_v2_
+        # evidence_adapter.py's own module docstring). DIAGNOSTICS ONLY:
+        # Pacing V2 has NO live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority
+        # -- the live executed mode remains exactly what D-142's own
+        # plan_dialogue_pacing_transitions (HARD_CUT/TIGHT_CUT only)
+        # already decided; it never mutates selected_clip_id/ranked/
+        # membership/Boundary/Ordering/render plan/RenderSegment audio
+        # windows. Empty (default) = code default OFF, byte-identical to
+        # every run before D-216/D-217.
+        description: "Optional: '1' enables CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED (D-216/D-217, diagnostic-only, no live advanced-transition authority; relationship-hint coverage additionally benefits from editorial_moment_sequence_diagnostics_enabled=1). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -610,6 +632,19 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-209 Ordering Live Diagnostics for this run: CUTSELL_ORDERING_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_ORDERING_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-218: optional D-216/D-217 Pacing V2 live diagnostic overlay,
+          # applied only when the dispatch input is exactly "1"; code
+          # default (OFF) otherwise. SEPARATE from the four flags above --
+          # never auto-linked -- see cutsell_worker/pacing_v2_live_
+          # diagnostics_integration.py's and cutsell_worker/pacing_v2_
+          # evidence_adapter.py's own module docstrings and docs/CUTSELL_
+          # DECISIONS.md D-216/D-217/D-218 for the full no-authority
+          # contract.
+          if [ "${{ github.event.inputs.pacing_v2_diagnostics_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-218 Pacing V2 Live Diagnostics for this run: CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
