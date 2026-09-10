@@ -485,6 +485,17 @@ def process_local_sources(
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
         boundary_owner=boundary_owner,
         watch_listen_understandings=watch_listen_understandings,
+        # D-200 (docs/CUTSELL_DECISIONS.md D-200): the SAME already-computed
+        # `raw_understanding_maps` object built above (line ~422, used
+        # unchanged for `watch_listen_understandings`) -- passed through
+        # unchanged so D-199's live Language-Spine construction can read
+        # each source's own `word_timings` when both
+        # `CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED` and
+        # `CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED` are on. No new
+        # computation, no second construction, no ASR call -- `()` default
+        # behavior (every pre-D-200 caller) is unaffected since this is the
+        # exact object already in scope, never a re-derivation.
+        raw_understanding_maps=raw_understanding_maps,
         # D-189 (docs/CUTSELL_DECISIONS.md D-189): the SAME source_asset_id
         # -> local file path mapping this function already threads through
         # to ASR/audio-silence/local-performance perception above -- passed

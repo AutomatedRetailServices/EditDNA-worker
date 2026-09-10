@@ -259,6 +259,20 @@ on:
         required: false
         default: ""
         type: string
+      live_language_spine_diagnostics_enabled:
+        # D-200 (docs/CUTSELL_DECISIONS.md D-199/D-200): "1" overlays
+        # CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1
+        # (cutsell_worker/language_spine_live_integration.py's live
+        # construction of the canonical Language Spine from already-
+        # computed ASR word timings, consumed by P1 only when the P1
+        # flag above is ALSO "1" -- never auto-linked). DIAGNOSTICS ONLY:
+        # no ASR rerun, no provider call, no Family/BestTake/D-191/
+        # Ordering/Boundary/Pacing/Renderer authority. Empty (default) =
+        # code default OFF, byte-identical to every run before D-199/D-200.
+        description: "Optional: '1' enables CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED (D-199/D-200, diagnostic-only, no authority; requires editorial_moment_sequence_diagnostics_enabled=1 too to be consumed by P1). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -521,6 +535,17 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-196 P1 Editorial Moment & Sequence Diagnostics for this run: CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-200: optional D-199 live Language-Spine diagnostic overlay,
+          # applied only when the dispatch input is exactly "1"; code
+          # default (OFF) otherwise. SEPARATE from the P1 flag above --
+          # never auto-linked -- see cutsell_worker/language_spine_live_
+          # integration.py's own module docstring and docs/CUTSELL_
+          # DECISIONS.md D-199/D-200 for the full no-authority contract.
+          if [ "${{ github.event.inputs.live_language_spine_diagnostics_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-200 Live Language-Spine Diagnostics for this run: CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -4126,6 +4151,217 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: D-200 Live Language-Spine -> P1 compact diagnostics
+        # D-200 (docs/CUTSELL_DECISIONS.md D-200): real-media qualification
+        # of D-199's live Language-Spine construction/P1 consumption on the
+        # SAME canonical Video00 RAW. Reads the SAME `artifact/video00-
+        # modal.json` the D-196/D-198 steps above read, and PURE-PROJECTS
+        # already-serialized `diagnostics["live_language_spine"]` (D-199's
+        # own module) and `diagnostics["editorial_moment_sequence"]["moments"]`
+        # (D-198's own per-moment `language_evidence_source`/`relation_
+        # evidence_source` fields) -- recomputes NO construction, NO
+        # bridging, NO fusion, NO moment role, NO relation, NO group
+        # membership. Every classification below is reporting-only, never
+        # fed back into cutsell_worker. Honestly discloses (never silently
+        # drops) any requested breakdown the CURRENT serialization cannot
+        # reconstruct (e.g. per-attempt attempt_state distribution, and the
+        # pre-fusion individual canonical/D-157 relation values behind a
+        # CONFLICT_ABSTAINED edge) rather than fabricating one.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          summary = {"schema_version": "cutsell.video00.d200_live_language_spine_p1_qualification.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          diag = engine.get("diagnostics") if isinstance(engine, dict) else None
+          live_block = diag.get("live_language_spine") if isinstance(diag, dict) else None
+          live_status = (live_block or {}).get("status") if isinstance(live_block, dict) else "block_missing"
+          summary["live_language_spine_block_status"] = live_status
+
+          p1_block = diag.get("editorial_moment_sequence") if isinstance(diag, dict) else None
+          p1_status = (p1_block or {}).get("status") if isinstance(p1_block, dict) else "block_missing"
+          summary["editorial_moment_sequence_status"] = p1_status
+
+          # --- Construction-side summary (D-199's own live_language_spine_run_summary). ---
+          run_level_keys = (
+              "live_language_spine_status", "source_construction_count", "language_word_count",
+              "language_phrase_count", "language_utterance_count", "language_attempt_count",
+              "proposition_candidate_count", "relation_evidence_count", "language_conflict_count",
+          )
+          for key in run_level_keys:
+              summary[key] = (live_block or {}).get(key, "MISSING_FROM_SERIALIZATION")
+
+          source_rows = (live_block or {}).get("sources", []) if isinstance(live_block, dict) else []
+          summary["source_count"] = len(source_rows)
+          summary["sources"] = source_rows
+          summary["construction_error_count"] = (live_block or {}).get("construction_error_count", 0)
+          summary["construction_errors"] = (live_block or {}).get("construction_errors", [])
+
+          # --- ASR reuse proof (structural -- D-199 never calls ASR; the
+          # workflow's own D-052/asr-pass step, if present, is the ground
+          # truth for the single real pass; this run adds no second one by
+          # construction, see docs/CUTSELL_DECISIONS.md D-199 Section 2). ---
+          summary["live_language_spine_additional_asr_pass_count"] = 0
+
+          # --- Aggregate P1-consumption coverage (sum across sources). ---
+          canonical_attempt_used = sum(r.get("canonical_attempt_used_by_p1_count", 0) for r in source_rows)
+          fallback_attempt_used = sum(r.get("fallback_attempt_used_by_p1_count", 0) for r in source_rows)
+          proposition_covered = sum(r.get("canonical_proposition_coverage_count", 0) for r in source_rows)
+          relation_covered = sum(r.get("canonical_relation_coverage_count", 0) for r in source_rows)
+          summary["canonical_attempt_used_by_p1_count"] = canonical_attempt_used
+          summary["fallback_attempt_used_by_p1_count"] = fallback_attempt_used
+          summary["canonical_proposition_coverage_count"] = proposition_covered
+          summary["canonical_relation_coverage_count"] = relation_covered
+
+          # --- Moment-level pass (D-198's own moment rows, plus D-199's two
+          # new per-moment fields) -- pure re-projection, no re-derivation. ---
+          moments = (p1_block or {}).get("moments", []) if isinstance(p1_block, dict) else []
+          summary["p1_moment_count"] = len(moments)
+
+          # NOTE: dict keys below are stringified (e.g. `None` -> "MISSING")
+          # -- `relation_to_predecessor` is genuinely `None` for every
+          # source's first moment (docs/CUTSELL_DECISIONS.md D-198), and
+          # `json.dump(..., sort_keys=True)` cannot sort a dict with mixed
+          # `None`/`str` keys. Reporting-only relabeling, no data loss.
+          language_evidence_counts = {}
+          relation_evidence_source_counts = {}
+          effective_relation_type_counts = {}
+          moment_role_counts = {}
+          missing_language_p1_count = 0
+          for m in moments:
+              les = m.get("language_evidence_source")
+              les_key = les if les is not None else "MISSING"
+              language_evidence_counts[les_key] = language_evidence_counts.get(les_key, 0) + 1
+              if les is None:
+                  missing_language_p1_count += 1
+              res = m.get("relation_evidence_source") or "MISSING"
+              relation_evidence_source_counts[res] = relation_evidence_source_counts.get(res, 0) + 1
+              rel = m.get("relation_to_predecessor")
+              rel_key = rel if rel is not None else "NONE_NO_PREDECESSOR"
+              effective_relation_type_counts[rel_key] = effective_relation_type_counts.get(rel_key, 0) + 1
+              role = m.get("moment_role") or "MISSING"
+              moment_role_counts[role] = moment_role_counts.get(role, 0) + 1
+
+          summary["moment_language_evidence_source_distribution"] = language_evidence_counts
+          summary["moment_relation_evidence_source_distribution"] = relation_evidence_source_counts
+          summary["moment_effective_relation_type_distribution"] = effective_relation_type_counts
+          summary["moment_role_distribution"] = moment_role_counts
+          summary["missing_language_p1_count"] = missing_language_p1_count
+
+          eligible = len(moments)
+          summary["canonical_attempt_coverage_pct"] = (
+              round(100.0 * canonical_attempt_used / eligible, 1) if eligible else None
+          )
+          summary["fallback_coverage_pct"] = (
+              round(100.0 * fallback_attempt_used / eligible, 1) if eligible else None
+          )
+          summary["proposition_coverage_pct"] = (
+              round(100.0 * proposition_covered / eligible, 1) if eligible else None
+          )
+
+          # --- CONFLICT_ABSTAINED edges (bounded list -- span + effective
+          # relation + evidence-source tag only; the pre-fusion individual
+          # canonical/D-157 values behind a conflict are NOT separately
+          # serialized past fusion -- see serialization_gaps below). ---
+          conflict_examples = [
+              {
+                  "editorial_moment_id": m.get("editorial_moment_id"),
+                  "source_asset_id": m.get("source_asset_id"),
+                  "source_start": m.get("source_start"),
+                  "source_end": m.get("source_end"),
+                  "effective_relation_to_predecessor": m.get("relation_to_predecessor"),
+              }
+              for m in moments if m.get("relation_evidence_source") == "CONFLICT_ABSTAINED"
+          ]
+          summary["relation_conflict_count"] = len(conflict_examples)
+          summary["relation_conflict_examples"] = conflict_examples[:10]
+
+          # --- Local groups / sequences (D-197/D-198, unchanged rules --
+          # pure pass-through for the D-198-vs-D-200 comparison). ---
+          local_groups = (p1_block or {}).get("local_groups", []) if isinstance(p1_block, dict) else []
+          sequences = (p1_block or {}).get("sequences", []) if isinstance(p1_block, dict) else []
+          singleton_groups = [g for g in local_groups if g.get("moment_count") == 1]
+          multi_groups = [g for g in local_groups if (g.get("moment_count") or 0) >= 2]
+          summary["local_group_count"] = len(local_groups)
+          summary["singleton_group_count"] = len(singleton_groups)
+          summary["multi_moment_group_count"] = len(multi_groups)
+          summary["max_group_moment_count"] = max((g.get("moment_count") or 0 for g in local_groups), default=0)
+          summary["sequence_count"] = len(sequences)
+          sequenced_ids = {mid for s in sequences for mid in (s.get("moment_ids") or [])}
+          summary["unsequenced_moment_count"] = sum(
+              1 for m in moments if m.get("editorial_moment_id") not in sequenced_ids
+          )
+          kind_counts = {}
+          for s in sequences:
+              k = s.get("sequence_kind")
+              kind_counts[k] = kind_counts.get(k, 0) + 1
+          summary["p1_target_shape_observed"] = {
+              "RETRY_SERIES_OBSERVED": kind_counts.get("RETRY_SERIES", 0) > 0,
+              "BLOOPER_SERIES_OBSERVED": kind_counts.get("BLOOPER_SERIES", 0) > 0,
+              "CLEAN_DELIVERY_SEQUENCE_OBSERVED": kind_counts.get("CLEAN_DELIVERY_SEQUENCE", 0) > 0,
+              "PREASSEMBLED_FINAL_SEQUENCE_OBSERVED": kind_counts.get("PREASSEMBLED_FINAL_SEQUENCE", 0) > 0,
+              "MIXED_SEQUENCE_OBSERVED": kind_counts.get("MIXED", 0) > 0,
+          }
+          false_final_count = sum(
+              1 for s in sequences
+              if s.get("sequence_kind") == "PREASSEMBLED_FINAL_SEQUENCE" and (s.get("confidence") not in ("SUPPORTED",))
+          )
+          summary["false_preassembled_final_count"] = false_final_count
+
+          # --- D-198 baseline (docs/CUTSELL_DECISIONS.md D-198, recorded
+          # numbers) for the required D-198-vs-D-200 comparison. ---
+          summary["d198_baseline"] = {
+              "moment_count": 37, "local_group_count": 23, "singleton_group_count": 14,
+              "multi_moment_group_count": 9, "sequence_count": 9, "max_group_moment_count": 4,
+              "too_broad_group_count": 0, "false_preassembled_final_count": 0,
+              "canonical_attempt_coverage_pct": 0.0, "fallback_coverage_pct": 100.0,
+              "proposition_coverage_pct": 0.0,
+          }
+
+          # --- Honest disclosure of requested breakdowns the CURRENT
+          # serialization cannot reconstruct (D-199's own diagnostics
+          # functions were not modified by this pre-RAW exception -- see
+          # docs/CUTSELL_DECISIONS.md D-200 Section on scope). ---
+          summary["serialization_gaps"] = [
+              "LanguageAttempt.attempt_state distribution (CLEAN_ATTEMPT/FALSE_START/"
+              "ABANDONED_ATTEMPT/CORRECTION/CONTINUATION/RECORDING_PROCESS/UNCERTAIN) is "
+              "not exposed by D-199's live_language_spine_diagnostics serialization -- "
+              "only aggregate language_attempt_count is available this run.",
+              "The pre-fusion individual canonical-relation and D-157-relation values "
+              "behind an AGREEMENT/CONFLICT_ABSTAINED edge are not separately serialized "
+              "past fuse_relation_evidence -- only the fused effective relation and its "
+              "provenance tag (relation_evidence_source) are available this run.",
+          ]
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/d200_live_language_spine_p1_qualification_summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-200 Live Language-Spine -> P1 compact diagnostics (a pure projection of already-computed diagnostics['live_language_spine']/diagnostics['editorial_moment_sequence'] fields -- recomputes NO construction, NO bridging, NO fusion, NO moment role, NO relation, NO group membership; all classifications below are reporting-only, never fed back into cutsell_worker) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -4153,6 +4389,7 @@ jobs:
             artifact/d192_bounded_finalist_authority_diagnostics_summary.json
             artifact/d196_editorial_moment_sequence_diagnostics_summary.json
             artifact/d198_local_group_formation_qualification_summary.json
+            artifact/d200_live_language_spine_p1_qualification_summary.json
           retention-days: 14
           if-no-files-found: warn
 
