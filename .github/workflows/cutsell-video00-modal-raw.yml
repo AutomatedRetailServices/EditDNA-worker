@@ -5432,6 +5432,16 @@ jobs:
           summary["current_d142_live_modes"] = [r.get("live_mode") for r in rows]
           summary["selected_d215_modes"] = [r.get("selected_mode") for r in rows]
 
+          # D-142 comparison AGGREGATE counts live at the TOP LEVEL of the
+          # D-216 block (sibling to run_summary, never inside it) -- copied
+          # verbatim, never re-derived from the per-row lists above.
+          summary["d142_comparison"] = {
+              "comparison_agreement_count": block.get("comparison_agreement_count"),
+              "comparison_more_conservative_count": block.get("comparison_more_conservative_count"),
+              "comparison_advanced_mode_count": block.get("comparison_advanced_mode_count"),
+              "comparison_incomparable_count": block.get("comparison_incomparable_count"),
+          }
+
           # --- Advanced-mode recommendation vs execution -- the ONE
           # structural fact this task requires be visible on every run:
           # D-216/D-217 never write back into `draft.selected`/D-142's own

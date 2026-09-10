@@ -104,6 +104,12 @@ def _representative_pacing_v2_block(n_transitions: int = 4) -> dict:
         },
         "sequence_consistency": {"inconsistent_pair_count": 0, "inconsistent_pairs": []},
         "firewall_violation_count": 0,
+        # D-142 comparison aggregates live at the TOP LEVEL of the real
+        # D-216 block (sibling to run_summary, never nested inside it).
+        "comparison_agreement_count": n_transitions,
+        "comparison_more_conservative_count": 0,
+        "comparison_advanced_mode_count": 0,
+        "comparison_incomparable_count": 0,
     }
 
 
@@ -176,6 +182,36 @@ def test_representative_block_produces_complete_artifact(tmp_path):
     assert out["pacing_v2_usefulness_classification"] in (
         "USEFUL_AND_BOUNDED", "USEFUL_BUT_LIMITED", "SAFE_BUT_NOT_YET_USEFUL", "MATERIALLY_WRONG",
     )
+    # D-142 comparison aggregates (top-level on the real block, never
+    # nested inside run_summary) must be pure-projected, not dropped.
+    assert out["d142_comparison"] == {
+        "comparison_agreement_count": 4,
+        "comparison_more_conservative_count": 0,
+        "comparison_advanced_mode_count": 0,
+        "comparison_incomparable_count": 0,
+    }
+
+
+def test_d142_comparison_survives_when_block_lacks_it(tmp_path):
+    # A block that (for any reason) never populated the comparison_*
+    # aggregates must still produce a complete artifact -- None, never a
+    # KeyError or a silently dropped key.
+    block = _representative_pacing_v2_block(n_transitions=2)
+    for key in (
+        "comparison_agreement_count", "comparison_more_conservative_count",
+        "comparison_advanced_mode_count", "comparison_incomparable_count",
+    ):
+        block.pop(key, None)
+    engine = _engine_json(block, selected_count=3)
+    proc = _run_step(tmp_path, engine)
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads((tmp_path / "artifact" / "d218_pacing_v2_real_media_qualification.json").read_text())
+    assert out["d142_comparison"] == {
+        "comparison_agreement_count": None,
+        "comparison_more_conservative_count": None,
+        "comparison_advanced_mode_count": None,
+        "comparison_incomparable_count": None,
+    }
 
 
 def test_does_not_dump_unrelated_full_result_json(tmp_path):

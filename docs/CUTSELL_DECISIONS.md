@@ -45696,3 +45696,268 @@ unrelated to the entire Pacing V2 track. Per this task's own explicit
 coordination," no further action is taken on either.
 
 ---
+
+## D-218R: Pacing V2 Real-Media Observability Repair + One Confirmatory RAW (post D-218)
+
+**Status: VERDICT B -- D-218 REAL-MEDIA SAFE/USEFUL, ONE NON-BLOCKING
+EVIDENCE LIMITATION REMAINS. The observability gap D-218 named is fixed
+and PROVEN on a real confirmatory RAW: `diagnostics["pacing_v2"]` is now
+extracted into a small, always-retrievable artifact and was successfully
+read from the CI log this time. The original D-218 audit is now COMPLETE.
+Pacing V2 is structurally safe on real Video00 media (zero firewall
+violations, zero live advanced-mode execution, capability AVAILABLE) but
+found ZERO available J/L/micro-overlap timing windows and ZERO
+relationship-hint coverage on this specific real video -- an honest,
+architecturally-explicable evidence-availability limitation, not a
+defect, and not blocking.**
+
+### 1. Observability repair (workflow/reporting-only, per D-218R's own scope)
+Added ONE new step to `cutsell-video00-modal-raw.yml`, `"D-218R Pacing V2
+-> Video00 real-media diagnostic qualification"`, positioned after the
+existing D-209 Ordering step and before "Upload validator reports" --
+mirrors D-209's own precedent exactly. It reads the same `artifact/
+video00-modal.json` those steps already read and PURE-PROJECTS the
+already-computed `diagnostics["pacing_v2"]` block (D-216/D-217, both
+unmodified) into a new small file, `artifact/d218_pacing_v2_real_media_
+qualification.json`, registered in the "Upload validator reports"
+step's small, always-retrievable artifact bundle -- never the blocked
+588 MB `cutsell-video00-modal-human-review` artifact. No transition,
+relationship hint, Prosodic mapping, or candidate timing window is
+recomputed; every field is copied verbatim from the real engine output.
+
+Unlike D-209's own graceful "MISSING_FROM_SERIALIZATION" fallback, this
+step FAILS LOUDLY (non-zero exit, a clear stderr banner naming the exact
+D-218 finding) when `diagnostics["pacing_v2"]` is absent -- D-218's own
+finding was exactly a silent, undetected absence, so a recurrence must be
+impossible to miss.
+
+### 2. Mandatory pre-RAW local validation (per D-218R's own requirement)
+Before spending the confirmatory RAW, the step's actual embedded Python
+was extracted via `yaml.safe_load` (the same block-scalar dedent GitHub
+Actions itself performs -- never a raw substring slice) and executed
+against synthetic fixtures, proving BOTH required shapes offline:
+- a representative present `pacing_v2` block produces a complete,
+  bounded artifact carrying every field D-218's own audit requires (13
+  new tests, `tests/test_cutsell_d218r_pacing_v2_real_media_observability_
+  repair.py`);
+- a missing block, and a missing/unparseable `video00-modal.json`
+  entirely, FAIL LOUDLY with a non-zero exit and a named stderr banner --
+  never a silently-emitted empty-looking artifact.
+
+### 3. Exactly one confirmatory RAW
+GitHub Actions run `34532737477` ("CutSell Video00 Modal RAW", run #92),
+`AutomatedRetailServices/EditDNA-worker`, `feature/runpod-pod-on-demand`,
+commit `e9a071a` (this task's own workflow-only commit, on top of D-218's
+`d94a944`). Dispatched via `workflow_dispatch` exactly once, the same
+five flags as D-218 (`CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_
+ENABLED=1`, `CUTSELL_LIVE_LANGUAGE_SPINE_DIAGNOSTICS_ENABLED=1`,
+`CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_DIAGNOSTICS_ENABLED=1`,
+`CUTSELL_ORDERING_DIAGNOSTICS_ENABLED=1`, `CUTSELL_PACING_V2_DIAGNOSTICS_
+ENABLED=1`), no other overlay. This run's own new D-218R step succeeded
+and its printed summary WAS retrievable via this session's log tool this
+time (its position, step 41 of 43, fell inside the tail; D-218's original
+attempt (run #91) had the equivalent problem at a step position that did
+not).
+
+### 4. Real-media Pacing V2 result (completing the original D-218 audit)
+`capability_status: AVAILABLE`. `selected_clip_count: 27`,
+`transition_count: 26` (`transition_count_matches_selected_minus_one:
+true`). Mode distribution: `hard_cut_count: 23`, `tight_cut_count: 3`,
+`keep_pause_count: 11`, `j_cut_count`/`l_cut_count`/`micro_overlap_count:
+0/0/0`. `advanced_mode_eligible_count: 0`, `advanced_recommendation_
+count: 0`, `advanced_execution_count: 0` (structural fact -- D-216/D-217
+never write back into `draft.selected`/D-142's own live mode/
+RenderSegment). `live_independent_audio_window_count: 0` (structural
+fact, same reason). `firewall_violation_count: 0` across all 26 real
+pairs. `word_safety_block_count`/`meaning_block_count`/`double_speech_
+block_count: 0/0/0` (no safety block was ever exercised because no
+candidate was ever offered -- see item 6). `pacing_v2_usefulness_
+classification: SAFE_BUT_NOT_YET_USEFUL`.
+
+### 5. Evidence-source coverage on this real video (all three D-217 sources)
+- **Relationship hint:** `relationship_hint_available_count: 0` /
+  `relationship_hint_unknown_count: 26` (100% `UNKNOWN`). Needs a
+  separate, future investigation (not this task's scope): either
+  `attempt_id` is not populated on real `DraftClip`s at this seam, or P1
+  moments genuinely do not map onto this real run's clips. Not a Pacing
+  V2 defect by itself -- the adapter correctly reports "no understanding
+  supplied" rather than inventing a relationship.
+- **Prosodic evidence:** `prosodic_pair_available_count: 0` /
+  `prosodic_pair_unavailable_count: 26` (100% `UNAVAILABLE`) -- EXPECTED,
+  not a gap: `CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED` was
+  correctly NOT set for this run, per this task's own "no other overlay"
+  instruction.
+- **Candidate timing windows:** `candidate_j_lead_available_count`/
+  `candidate_l_tail_available_count`/`candidate_micro_overlap_available_
+  count: 0/0/0`, and `candidate_timing_unavailable_count: 0` -- every one
+  of the 26 real pairs classified `NO_SAFE_WINDOW`. This is plausibly
+  architectural, not a bug: Boundary's own existing tightening (D-116/
+  D-177/D-097.C) already trims every clip precisely to its own word
+  boundaries before Pacing V2 ever sees it, leaving no measurable silent
+  margin on either side of a transition for this adapter to find. This
+  is a real, honest finding -- NOT root-cause-confirmed this task (out of
+  scope: no Pacing logic change authorized), named here for a future
+  gate.
+
+### 6. Why zero coverage did not produce zero safety proof
+With zero candidate timing offered on every pair, `decide_transition`
+took its own `CONFLICT_NO_CANDIDATE_OFFERED` fallback branch for every
+one of the 26 real transitions (`pacing_transition_decision.py`, the
+`if not dialogue_overlap_enabled or not candidate_offered:` branch) --
+`decision_status: DECISION_SUPPORTED`, `selected_mode` equal to
+D-142's own baseline live mode. This is exactly the safe, structurally-
+guaranteed behavior D-215/D-216/D-217 were built to prove: zero evidence
+never produces a fabricated advanced-mode recommendation, it produces
+the same baseline `HARD_CUT`/`TIGHT_CUT` D-142 already computed.
+
+### 7. D-142 comparison (real gap found and fixed in this task's own
+workflow-only scope)
+The D-218R extraction step as first written on this branch (this task's
+own earlier commit `e9a071a`) copied `run_summary` and per-pair
+`transitions[]` verbatim but MISSED the four `comparison_*` AGGREGATE
+counts, which live at the TOP LEVEL of the real `pacing_v2` block
+(sibling to `run_summary`, never nested inside it, per `pacing_v2_live_
+diagnostics_integration.py`'s own return shape) -- a real omission in
+this task's own bounded artifact, not a `cutsell_worker` defect, found
+during this same task's own audit-completion pass and fixed by adding a
+`d142_comparison` sub-object to the extraction step (`comparison_
+agreement_count`/`comparison_more_conservative_count`/`comparison_
+advanced_mode_count`/`comparison_incomparable_count`), validated locally
+against a synthetic fixture (both a populated and an absent-keys case,
+2 new tests) -- no second RAW spent to validate this, per this task's
+own "no second confirmatory RAW" rule; workflow/reporting-only,
+authorized under this task's own explicit scope.
+
+This run's own already-completed artifact (produced before the fix, not
+re-run) does not carry the `d142_comparison` sub-object, so this run's
+own actual comparison values are DERIVED here from already-retrieved
+data, not directly read from a `d142_comparison` field: the retrieved
+`current_d142_live_modes` and `selected_d215_modes` per-pair lists are
+IDENTICAL, element-for-element, across all 26 transitions, and item 6
+establishes `decision_status: DECISION_SUPPORTED` (never `UNKNOWN`/
+`CONFLICTED`) for every one of them -- `_classify_comparison`'s own logic
+(`pacing_v2_live_diagnostics_integration.py`) therefore places all 26 in
+`COMPARISON_AGREEMENT` and none in `V2_MORE_CONSERVATIVE`/`V2_WOULD_USE_
+ADVANCED_MODE`/`INCOMPARABLE` -- a deterministic consequence of already-
+verified code and already-retrieved data, not a guess. A future run will
+carry the field directly.
+
+### 8. `sequence_consistency` finding -- investigated, real bug found,
+NOT fixed (out of this task's scope)
+The retrieved artifact shows `sequence_consistency.inconsistent_pair_
+count: 9`, with all 9 flagged `inconsistent_pairs` entries showing
+`left_index: 0, right_index: 0` -- structurally impossible if the field
+meant what it claims (26 distinct adjacent pairs cannot all be pair
+`(0, 0)`). Root-caused by reading `pacing_transition_decision.py`: this
+is a REAL, PRE-EXISTING bug in `decide_transition`'s `_fallback_plan`
+helper, not a reporting artifact. `decide_transition` computes its
+`baseline` via `plan_dialogue_pacing_transitions((left, right), ...)[0]`
+-- a fresh 2-clip mini-sequence whose own internal enumeration always
+assigns `transition_index=0` to that lone pair. The function's own MAIN
+return path (`replace(baseline, transition_index=transition_index, ...)`
+at line ~405) correctly overwrites this with the real per-pair index
+passed in by the caller -- but its `_fallback_plan` helper (used by the
+`RETRY`-relationship gate, the `CORRECTION`-relationship gate, and
+critically the `CONFLICT_NO_CANDIDATE_OFFERED`/overlap-disabled gate)
+never re-applies `transition_index`, so every plan returned via that
+path silently keeps the baseline's bogus `transition_index=0`. Because
+item 6 established that ALL 26 real transitions this run took exactly
+that fallback path, every one of the 26 real plans shares
+`transition_index=0` -- `sequence_consistency_diagnostics` then compared
+`(mode, gap_removed_duration, pacing_gap_decision)` correctly (that part
+of the check is sound) and correctly found 9 genuinely same-evidence/
+different-decision adjacent pairs, but mislabeled all 9 as `(0, 0)`
+because the underlying data it reads was mislabeled first. This is a
+genuine `cutsell_worker` defect in `pacing_transition_decision.py`
+(`_fallback_plan` missing a `transition_index` field), discovered by
+this task's own required real-data investigation but explicitly OUT OF
+SCOPE to fix here -- this task's own directive authorizes "workflow/
+reporting change, local extraction test, exactly one confirmatory RAW,
+artifact analysis, docs" and explicitly forbids "Pacing logic" changes.
+Recorded here for the next authorized Pacing gate (D-219 or a dedicated
+fix-only turn); NOT implemented in this task.
+
+### 9. Renderer / Boundary / Ordering / Family / BestTake status
+Unchanged. No file in any of those authorities was touched by this task.
+`render.py`/`render_plan.py` not touched (D-214/D-217/D-218 precedent
+continues).
+
+### 10. Live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the only live-executed modes.
+This run's own real data reconfirms it structurally (item 4): zero
+advanced-mode eligibility, zero advanced-mode execution, on real Video00
+media, not merely offline.
+
+### 11. Immutability
+Not independently re-verified live this run (out of this task's own
+"no cutsell_worker" scope) -- structurally proven offline by D-216/D-217
+(both files unmodified since D-217, byte-identical this run) and
+reconfirmed by item 4's own `advanced_execution_count: 0`/`live_
+independent_audio_window_count: 0` structural facts, which hold
+regardless of what data this specific run produced.
+
+### 12. Why this is verdict B, not A
+A verdict A would require zero remaining evidence limitation. Item 5
+names one real, non-blocking limitation (zero coverage on all three
+optional evidence sources for this specific real video) that is not yet
+root-cause-confirmed as expected-vs-defective. It does not block safety
+or usefulness-in-principle (item 6 proves the fallback is safe by
+construction even at zero coverage), so it is NOT a verdict C/D blocker
+either -- Pacing V2 is real-media SAFE and its own foundation is PROVEN;
+only its OPTIONAL evidence coverage remains unexplored on this specific
+video.
+
+### 13. Why this is not verdict C or D
+Verdict C (D-218's own verdict) was specifically the RETRIEVAL gap --
+now fixed and proven (items 1-3). Verdict D (regression) would require
+evidence Pacing V2 broke something that previously worked; none exists
+-- the two red gates on this run's job (`Verify frozen Selection lock`,
+`Verify Human Gold regression QA (18-check manifest)`) are the same two
+pre-existing, unrelated failures already root-caused in D-218 item 5,
+reconfirmed present and unchanged on this run's job as well.
+
+### 14. Canonical Pacing status
+`PACING_V2_RENDERER_TIMELINE_CONTRACT_OFFLINE_PROVEN` + `PACING_V2_
+TRANSITION_DECISION_FOUNDATION_OFFLINE_PROVEN` + `PACING_V2_LIVE_
+DIAGNOSTIC_INTEGRATION_OFFLINE_PROVEN` + `PACING_V2_REAL_EVIDENCE_
+SOURCE_WIRING_OFFLINE_PROVEN` + **`PACING_V2_REAL_MEDIA_DIAGNOSTIC_
+QUALIFICATION_PROVEN`** (new this task -- D-218's own named goal, now
+actually observed and audited on real Video00 media).
+
+### 15. Next gate (named, NOT implemented per this task's own explicit
+instruction)
+**D-219 -- Pacing V2 Advanced Transition Authority Architecture / Safety
+Forensic.** Scope for that future, separately-authorized turn should
+include, at minimum: (a) root-causing item 5's zero-timing-window finding
+(is Boundary's own tightening structurally incompatible with ever
+offering a J/L/micro-overlap candidate, or is there a real coverage gap
+in `available_silent_head_sec`/`available_silent_tail_sec`?); (b) fixing
+item 8's `_fallback_plan` `transition_index` omission in
+`pacing_transition_decision.py` (a real, small, low-risk `cutsell_worker`
+fix, explicitly NOT made in this task); (c) investigating item 5's 100%
+`relationship_hint: UNKNOWN` finding (attempt-id population vs. P1
+moment mapping at this real seam); (d) only after (a)-(c), any decision
+about a live (non-diagnostic) advanced-transition authority. None of
+this is implemented, designed in detail, or authorized to begin by this
+entry -- naming it satisfies this task's own explicit requirement, no
+more.
+
+### 16. Confirmation
+NO cutsell_worker file touched (workflow YAML + this decision doc + the
+D-218R test file only). NO Pacing logic change (item 8's real bug is
+named, not fixed). NO renderer/Boundary/Ordering/Family/BestTake change.
+NO second confirmatory RAW (one dispatch, one run id, `34532737477`,
+reported as-is; the `d142_comparison` fix in item 7 was validated
+entirely offline against synthetic fixtures, never against a second live
+run). NO live advanced-transition authority introduced or exercised.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+explicit "If A/B: next gate: D-219 ... Do NOT implement D-219," the
+Product Owner decision needed is whether/when to authorize D-219 (item
+15) as a new, separately-scoped turn, and separately, whether to
+authorize the item-8 `_fallback_plan` fix independently of the broader
+D-219 scope (it is small, low-risk, and root-caused, but D-218R's own
+directive did not authorize touching `cutsell_worker`). No further
+action is taken on either. Then STOP.
+
+---
