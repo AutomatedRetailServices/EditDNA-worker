@@ -242,6 +242,23 @@ on:
         required: false
         default: ""
         type: string
+      editorial_moment_sequence_diagnostics_enabled:
+        # D-196: "1" overlays CUTSELL_EDITORIAL_MOMENT_SEQUENCE_
+        # DIAGNOSTICS_ENABLED=1 (D-195's own P1 Editorial Moment & Sequence
+        # Understanding live diagnostic wiring, cutsell_worker/editorial_
+        # moment_sequence.py + editorial_moment_sequence_integration.py,
+        # wired into pipeline.py). Independent of every flag above --
+        # never requires or implies any of them. DIAGNOSTICS ONLY: P1 has
+        # no selection/Family/BestTake/deletion/ordering authority; it
+        # never mutates selected_clip_id/ranked/membership/Boundary/
+        # Pacing/render plan -- see cutsell_worker/editorial_moment_
+        # sequence_integration.py's own module docstring and
+        # docs/CUTSELL_DECISIONS.md D-194/D-195/D-196. Empty (default) =
+        # code default OFF, byte-identical to every run before D-195/D-196.
+        description: "Optional: '1' enables CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED (D-196/D-195, diagnostic-only, no authority). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -492,6 +509,18 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-192 Bounded Finalist Authority for this run: CUTSELL_BOUNDED_FINALIST_ARBITER_AUTHORITY_ENABLED=$(jq -r '.CUTSELL_BOUNDED_FINALIST_ARBITER_AUTHORITY_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-196: optional D-195 P1 Editorial Moment & Sequence
+          # Understanding diagnostic overlay, applied only when the
+          # dispatch input is exactly "1"; code default (OFF) otherwise.
+          # Independent of every flag above. DIAGNOSTICS ONLY -- see
+          # cutsell_worker/editorial_moment_sequence_integration.py's own
+          # module docstring and docs/CUTSELL_DECISIONS.md D-194/D-195/
+          # D-196 for the full no-authority contract.
+          if [ "${{ github.event.inputs.editorial_moment_sequence_diagnostics_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-196 P1 Editorial Moment & Sequence Diagnostics for this run: CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -523,7 +552,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED', 'CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED', 'CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED', 'CUTSELL_BOUNDED_FINALIST_ARBITER_AUTHORITY_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED', 'CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED', 'CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED', 'CUTSELL_BOUNDED_FINALIST_ARBITER_AUTHORITY_ENABLED', 'CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -3412,6 +3441,214 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: D-196 P1 editorial moment sequence compact diagnostics
+        # D-196 (docs/CUTSELL_DECISIONS.md D-196): the FIRST real-media
+        # diagnostic qualification of D-194/D-195's P1 Editorial Moment &
+        # Sequence Understanding -- its own dedicated, late, tail-safe
+        # summary step, same D-119/.../D-192 pattern, positioned directly
+        # after D-192's own step (still before teardown) so its own small
+        # output survives any job-log-fetch truncation independently.
+        # Reads the SAME `artifact/video00-modal.json` (already on disk)
+        # and PURE-PROJECTS the `editorial_moment_sequence` block D-195/
+        # D-196's own pipeline.py wiring already attached to
+        # `draft.diagnostics` -- recomputes NO moment role, NO sequence
+        # kind, NO grouping. Region source-mapping reuses the EXACT SAME
+        # helper approach as the D-190/D-192 steps above (candidate_id/
+        # source_start/source_end/a short text hash only -- never a
+        # transcript). The BOUNDED_LOCAL/PLAUSIBLE_LOCAL/TOO_BROAD/
+        # AMBIGUOUS grouping-audit classification below is a REPORTING-
+        # ONLY categorization computed here, from already-serialized
+        # source_start/source_end/moment_count fields, purely to surface
+        # whether P1's local-sequence grouping stayed bounded on real
+        # media -- it is NEVER fed back into cutsell_worker and changes
+        # no P1 behavior. Zero `cutsell_worker` decision-logic change;
+        # this step is a read-only reporting addition.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          regression_fixture = load("benchmarks/video00_regression_qa.json")
+
+          summary = {"schema_version": "cutsell.video00.d196_editorial_moment_sequence_diagnostics.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          diag = engine.get("diagnostics") if isinstance(engine, dict) else None
+          p1_block = diag.get("editorial_moment_sequence") if isinstance(diag, dict) else None
+          summary["editorial_moment_sequence_status"] = (
+              (p1_block or {}).get("status") if isinstance(p1_block, dict) else "block_missing"
+          )
+
+          clip_meta = {}
+          if isinstance(engine, dict):
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          text_norm = " ".join(str(clip.get("text") or "").lower().split())
+                          clip_meta[clip["clip_id"]] = {
+                              "start": clip.get("start"),
+                              "end": clip.get("end"),
+                              "source_asset_id": clip.get("source_asset_id"),
+                              "text_hash": hashlib.sha256(text_norm.encode("utf-8")).hexdigest()[:12],
+                              "_norm_text": text_norm,
+                          }
+
+          moments = []
+          sequences = []
+          run_summary = {}
+          if isinstance(p1_block, dict):
+              moments = p1_block.get("moments") or []
+              sequences = p1_block.get("sequences") or []
+              run_summary = {
+                  k: v for k, v in p1_block.items() if k not in ("status", "moments", "sequences")
+              }
+
+          # Pure passthrough of D-195/D-196's own already-computed run-level
+          # summary -- no recomputation of any count here.
+          summary["run_summary"] = run_summary
+          summary["moment_count_in_artifact"] = len(moments)
+          summary["sequence_count_in_artifact"] = len(sequences)
+          summary["moments"] = sorted(moments, key=lambda m: (m.get("source_start") or 0, m.get("source_end") or 0))
+          summary["sequences"] = sorted(sequences, key=lambda s: (s.get("source_start") or 0, s.get("source_end") or 0))
+
+          # --- Grouping / source-order audit (REPORTING-ONLY, never fed
+          # back into cutsell_worker; see step comment above for the
+          # exact, honestly-invented thresholds). ---
+          def _grouping_classification(seq):
+              start, end, count = seq.get("source_start"), seq.get("source_end"), seq.get("moment_count")
+              if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or not isinstance(count, int) or count < 2:
+                  return "AMBIGUOUS", None
+              duration = max(0.0, end - start)
+              if duration <= 120.0:
+                  return "BOUNDED_LOCAL", duration
+              if duration <= 600.0:
+                  return "PLAUSIBLE_LOCAL", duration
+              return "TOO_BROAD", duration
+
+          grouping_audit = []
+          too_broad_count = 0
+          for seq in summary["sequences"]:
+              classification, duration = _grouping_classification(seq)
+              if classification == "TOO_BROAD":
+                  too_broad_count += 1
+              grouping_audit.append({
+                  "sequence_id": seq.get("sequence_id"),
+                  "moment_count": seq.get("moment_count"),
+                  "source_start": seq.get("source_start"),
+                  "source_end": seq.get("source_end"),
+                  "span_duration_sec": duration,
+                  "sequence_kind": seq.get("sequence_kind"),
+                  "classification": classification,
+              })
+          summary["grouping_audit"] = grouping_audit
+          summary["too_broad_sequence_count"] = too_broad_count
+
+          # --- False-positive audit: PREASSEMBLED_FINAL_SEQUENCE rows with
+          # proposition_progression_status != FORWARD_PROGRESS would be a
+          # genuine false positive (D-194's own conjunction requires
+          # positive progression evidence -- never emitted by construction,
+          # but audited here directly against the real artifact, not
+          # merely trusted). ---
+          false_positive_final_sequences = [
+              seq for seq in summary["sequences"]
+              if seq.get("sequence_kind") == "PREASSEMBLED_FINAL_SEQUENCE"
+              and seq.get("proposition_progression_status") != "FORWARD_PROGRESS"
+          ]
+          summary["false_positive_final_sequence_count"] = len(false_positive_final_sequences)
+          summary["false_positive_final_sequences"] = false_positive_final_sequences
+          summary["preassembled_final_sequences"] = [
+              seq for seq in summary["sequences"] if seq.get("sequence_kind") == "PREASSEMBLED_FINAL_SEQUENCE"
+          ]
+
+          # --- Compact region source-mapping (QA-only; candidate_id + span +
+          # a short text hash ONLY -- never a transcript). SAME helper
+          # functions/approach as D-123/D-181/D-186A/D-190/D-192's own steps.
+          GYNECOLOGIST_SPAN = (90.0, 109.0)  # generous window around 96.47-102.47s
+
+          def _span_overlaps(meta, lo, hi):
+              start, end = meta.get("start"), meta.get("end")
+              if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                  return False
+              return start < hi and end > lo
+
+          def _region_norm_refs(prefix):
+              out = []
+              if isinstance(regression_fixture, dict):
+                  for check in regression_fixture.get("checks") or []:
+                      if not isinstance(check, dict) or not str(check.get("id", "")).startswith(prefix):
+                          continue
+                      if check.get("kind") == "required_order":
+                          continue
+                      text = check.get("text")
+                      if text:
+                          out.append(" ".join(str(text).lower().split()))
+              return [t for t in out if t]
+
+          def _region_candidates(prefix, span=None):
+              refs = _region_norm_refs(prefix)
+              matched = set()
+              if span:
+                  lo, hi = span
+                  matched |= {cid for cid, meta in clip_meta.items() if _span_overlaps(meta, lo, hi)}
+              matched |= {
+                  cid for cid, meta in clip_meta.items()
+                  if refs and any(ref in meta.get("_norm_text", "") for ref in refs)
+              }
+              return [
+                  {
+                      "candidate_id": cid,
+                      "source_start": clip_meta[cid].get("start"),
+                      "source_end": clip_meta[cid].get("end"),
+                      "text_hash": clip_meta[cid].get("text_hash"),
+                  }
+                  for cid in sorted(matched)
+              ]
+
+          summary["region_source_mapping"] = {
+              "pimples": _region_candidates("pimples"),
+              "gynecologist": _region_candidates("gynecologist", GYNECOLOGIST_SPAN),
+          }
+
+          # --- Whole-video compact P1 map: one row per moment, structural
+          # labels only, no transcript. ---
+          summary["whole_video_p1_map"] = [
+              {
+                  "source_start": m.get("source_start"),
+                  "source_end": m.get("source_end"),
+                  "moment_role": m.get("moment_role"),
+                  "confidence": m.get("confidence"),
+              }
+              for m in summary["moments"]
+          ]
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/d196_editorial_moment_sequence_diagnostics_summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-196 P1 editorial moment sequence compact diagnostics (a pure projection of already-computed draft.diagnostics['editorial_moment_sequence'] fields -- recomputes no moment role, no sequence kind, no grouping; grouping_audit/false_positive_final_sequences are a reporting-only audit over already-serialized fields) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -3437,6 +3674,7 @@ jobs:
             artifact/d186a_terminal_besttake_arbiter_summary.json
             artifact/d190_prosodic_finalist_diagnostics_summary.json
             artifact/d192_bounded_finalist_authority_diagnostics_summary.json
+            artifact/d196_editorial_moment_sequence_diagnostics_summary.json
           retention-days: 14
           if-no-files-found: warn
 
