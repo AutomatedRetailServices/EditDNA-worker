@@ -43205,3 +43205,264 @@ existing closed Boundary work) is the next Product Owner decision.
 
 **Then STOP. Do NOT implement D-210. No D-209.1. No engine patch. No
 second RAW. Wait for Product Owner coordination.**
+
+## D-210: Remaining Boundary Qualification -- Architecture / Forensic (post D-209, docs only, no implementation)
+
+**Status: FORENSIC COMPLETE. GAP CLASSIFICATION: G (real-media qualification only)
+against the fixed A-H taxonomy. NO code, test, or workflow change of any kind
+made or authorized by this task; NO RAW dispatched by this task.**
+
+### 1. Scope discipline
+This task was DOCS/FORENSIC ONLY per its own directive. No file under
+`cutsell_worker/`, `tests/`, or `.github/workflows/` was created, edited, or
+touched. `git status --short` was clean at the start (HEAD `43d31c4`, branch
+`feature/runpod-pod-on-demand`) and remains clean except for this one docs
+append. No provider call, no Modal/RunPod dispatch, no Boundary/Pacing/
+Renderer/Family/BestTake/Ordering/Commercial-Moment/Sales-Funnel code was
+modified.
+
+### 2. Mechanical live Boundary/Pacing call chain (traced, `universal_clean_cut.py`
+lines 655-811, non-freeze-blocked path)
+`enforce_complete_idea_boundaries` (pre-Freeze idea recovery, Selection-side)
+-> `freeze_selection_contract` (the Freeze itself -- the hard semantic phase
+barrier; everything after this line is Boundary-only) -> `apply_post_freeze_boundary_pass`
+(the ONE post-Freeze BoundaryEngine pass) -> `polish_human_boundaries_v5`
+(source-evidenced multimodal micro-polish) -> `enforce_selection_contract`
+(fail-closed verification Boundary did not alter the ordered spoken token
+stream) -> `apply_dialogue_pacing_transition_pass` (Pacing planning,
+diagnostics-only, strictly after Boundary, before render). This confirms the
+directive's own assumed ordering (Selection -> Freeze -> Boundary -> Pacing ->
+Renderer) is exactly what the live code does; there is no seam where Pacing or
+Renderer runs before Boundary, and no seam where Boundary runs before Freeze.
+
+`apply_post_freeze_boundary_pass` itself (in `boundary_engine_pass.py`) is a
+fixed four-step orchestrator: `trim_locked_selection_edges` -> `split_selected_interior_performance_gaps`
+-> `tighten_selected_audio_edges` -> `tighten_selected_visual_edges` (D-116 +
+D-177). All four steps operate on the already-Frozen ordered clip list; none
+can add, remove, or reorder a clip.
+
+### 3. Core algorithms confirmed correct against their own tests
+- **D-115 (`positioned_performance_evidence.py`)** is the ONE canonical
+  delivery-span source of truth: `compute_delivery_span` derives the hard
+  floor directly from the take's own already-aligned ASR word timestamps
+  (`min(start)`/`max(end)`, no fixed padding, `available=False` when no
+  words -- never fabricated). `classify_event_zone` is the ONE canonical
+  ENTRY/DELIVERY/EXIT classifier and is computed AFTER attempt-fusion, so it
+  automatically covers fused members. Both D-116 and D-177 consume this
+  authority directly and never recompute zones themselves.
+- **D-116 (visual CASE A edge consumption)**: trims ENTRY/EXIT visual events
+  at a clip's edge, hard floor = `delivery_span.start`/`.end`, never crossed;
+  "outermost-in" chaining handles multiple events per side; a DELIVERY-zone
+  event with no straddle is never trimmed. 19 tests, all confirmed by name.
+- **D-177 (partial-edge trim for straddling events)**: reuses the existing
+  `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC = 0.08` constant (no new constant
+  introduced) as the eligibility test -- a straddling event whose
+  inside-DELIVERY portion is <= this tolerance gets its edge clamped exactly
+  to the delivery floor; an event straddling both delivery edges at once
+  fails open by design. 34 tests, all confirmed by name, including explicit
+  confidence-vs-geometry separation (`test_19_high_confidence_breaking_character_straddle_still_gated_by_overlap_not_confidence`).
+
+### 4. Resolved non-issue: "ordinary motion firewall" is geometric by design, not a gap
+The directive's own framing raised whether the absence of confidence-gating
+in the visual edge-trim path is a missing protection. Direct inspection of
+D-177's own test suite proves this is INTENTIONAL and TESTED: the geometric
+safety floor (never cross the measured delivery span, never cross a word)
+already makes the trim safe regardless of the triggering event's confidence
+score. Confidence gating would add a second, redundant, potentially
+inconsistent safety mechanism on top of an already-sufficient geometric one.
+This is closed as a correct design choice, not reopened as a new gap, and no
+new threshold is proposed (the directive explicitly forbids inventing one).
+
+### 5. Correction to the directive's own D-180 assumption
+The directive's framing described "D-180" as Boundary-related visual/
+performance materiality stabilization. Direct inspection of `pipeline.py`
+(the `_case_b_fast_path_conflict` / Condition 4b machinery, `docs/CUTSELL_DECISIONS.md`'s
+own "D-180: CASE-B FAST-PATH MATERIALITY STABILIZATION" section) proves this
+is a BestTake/Selection-side arbitration gate, not a Boundary authority: it
+corroborates a raw `delivery_event_count` asymmetry between two BestTake
+candidates against D-097's own existing `d097_would_be_counted` materiality
+classification before allowing a semantic-fast-path bypass. It shares only
+the underlying materiality CONCEPT with Boundary (both ultimately trace back
+to `local_performance.py::detect_candidate_events`'s geometric
+event-existence detector, a lower/different bar than D-097's own materiality
+floor); it has zero role in any Boundary trim decision. This is reported
+honestly rather than folded into the Boundary gap analysis the directive's
+own framing implied.
+
+### 6. Renderer firewall audit (deliverable items 31-32)
+Read `render.py::tighten_trailing_silence` in full and `render_plan.py::_coalesce_contiguous_segments`
+in full. Three renderer-side mechanical operations exist:
+- `tighten_trailing_silence`: real ffmpeg `silencedetect` on the segment's
+  own source audio; trims ONLY a silence interval that reaches the
+  segment's trailing edge (`reaches_edge` test against `edge_tolerance_sec`);
+  internal pauses and spoken audio are never touched;
+  `maximum_trim_sec=12.0` is a hard ceiling, not an editorial judgment.
+- `_audio_join_fade_filters` (12 ms afade in/out at each segment's OWN
+  existing edges): a purely physical click-removal treatment across an
+  already-decided join; changes no boundary, no timing, no selection.
+- `_coalesce_contiguous_segments` / `_can_coalesce`: merges two
+  ALREADY-SELECTED, ALREADY-ADJACENT (<=0.05 s gap) segments from the SAME
+  source/asset into one only when playback/caption settings are identical --
+  eliminates a redundant decoder/encoder boundary at a frame the creator
+  never actually stopped at; never merges across a source boundary, never
+  changes which clips were selected.
+
+**Classification: NONE of the three is hidden or undisclosed.** All three
+are named verbatim in `boundary_engine_pass.py`'s own
+`PHYSICAL_OWNERSHIP_CONTRACT` table under the "RENDERER MECHANICAL OPS" row
+(owner `render.render_preview`; evidence "trailing-silence tighten
+(recorded), 12ms join fades, contiguous coalesce"; never "any editorial
+decision"). None reinterprets semantic delivery: each operates strictly on
+an already-Frozen, already-Boundary-tightened segment's own physical/source
+properties, with hard, disclosed, non-editorial ceilings. This closes the
+Renderer firewall audit with no new finding.
+
+### 7. Composite-boundary integration (deliverable item, taxonomy F)
+`boundary_engine_pass.py` contains zero composite-specific branching -- only
+a disclosed invariant statement ("no composite, no membership change -- the
+ordered token stream ..."). This is architecturally correct, not a gap:
+`CompositeResolver` resolves any composite BEFORE Freeze into concrete,
+individually-addressed clips in the ordered selection; by the time Boundary
+runs post-Freeze, there is no abstract "composite" left to be aware of --
+every clip, whether it originated as a single-take winner or one component
+of a resolved composite, is a plain selected clip subject to the same
+edge-trim contract uniformly. Boundary is correctly composite-agnostic by
+construction. Taxonomy item F does not apply: no integration is missing
+because there is nothing left for Boundary to integrate with at its own
+stage.
+
+### 8. Zone-Usability V2 (D-167) / Prosodic relationship to Boundary
+`grep` across `cutsell_worker/*.py` for Zone-Usability V2 and prosodic
+references shows both concepts live entirely in
+`watch_listen_zone_usability_v2.py`, `watch_listen_besttake_*`,
+`prosodic_audio_v2.py`, `prosodic_finalist_comparison.py`,
+`bounded_finalist_*`, `editorial_moment_sequence*`, and `pipeline.py` --
+never in `boundary_engine_pass.py` or any other Boundary module. Boundary
+consumes only D-115 positioned performance evidence (visual/audio events)
+and word-level ASR alignment; it never consumes Zone-Usability V2 or
+Prosodic evidence, and per the ownership contract it should not (Boundary
+never re-litigates a semantic/arbitration decision, only WHERE an already-
+selected delivery's physical edges fall). This is a clean, correct
+separation, not an omission.
+
+### 9. Real-media qualification history (D-176/D-177/D-178A/D-178A.1/D-178B/D-179,
+existing evidence only, no new RAW)
+- D-176: forensic-only, no code change, identified the gynecologist-family
+  entry/exit debris target shape.
+- D-177: implemented, 34/34 offline tests passing (synthetic fixtures DO
+  exercise the true target shape end-to-end and pass).
+- D-178A/D-178A.1: canonical architecture consolidation and a status
+  correction, no new evidence of its own.
+- **D-178B (the one real-media RAW so far, run `34363547729`, default/OFF
+  overlay flags -- current canonical production path)**: D-177's own
+  real-media verdict there was **"B. SAFETY REAL-MEDIA PROVEN -- TARGET
+  SHAPE NOT EXERCISED."** Both real straddling events this run correctly
+  resolved `visual_trim_blocked_by_delivery_floor` (the clip's raw boundary
+  was already exactly at the measured delivery edge -- no real debris
+  existed beyond it, so the mechanism correctly declined a redundant
+  no-op trim rather than reporting a false positive). `total_visual_trim_seconds: 0.0`
+  that run. The gynecologist region's dominant defect that run was an
+  orthogonal, already-escalated BestTake DELIVERYSCORE_PATH tie-break
+  (Escalation A / D-097.11), explicitly NOT attributable to D-177/D-116
+  since zero visual trims were applied. D-178B's own report explicitly
+  declined to authorize a dedicated RAW to chase the target shape ("do not
+  repeatedly rerun Video00 hoping for a trigger").
+- D-179: BestTake/DeliveryScore run-to-run winner-stability forensic, no
+  code change -- orthogonal to Boundary, not re-litigated here.
+
+**This is the one concrete, still-open item this forensic surfaces**: D-177's
+partial-edge trim mechanism is fully offline-proven and real-media
+SAFETY-proven (it behaves correctly and conservatively on the real edge
+shapes it has actually encountered), but has never yet been observed
+correctly trimming a REAL straddling event that had genuine debris beyond
+the delivery floor, because no such event has yet occurred in an actual
+Video00 dispatch. This is not a code defect -- it is a data-occurrence gap.
+
+### 10. Test coverage inventory (confirmed by direct read)
+D-116: 19 tests (`test_cutsell_d116_visual_boundary_consumption.py`). D-177:
+34 tests (`test_cutsell_d177_boundary_partial_edge_trim.py`). D-097.C
+(`apply_post_freeze_boundary_pass` orchestration): 15 tests
+(`test_cutsell_d097_c_boundary_engine_pass.py`). D-180 (BestTake-side, not
+Boundary): 34 tests (`test_cutsell_d180_case_b_materiality_stabilization.py`),
+listed here only for completeness after the Section 5 correction.
+`test_cutsell_post_selection_edge_only_boundary.py` (4), `test_cutsell_human_boundary_polish_v5.py`
+(5), `test_cutsell_selection_boundary_contract.py` (4),
+`test_cutsell_final_boundary_authority_refresh.py` (1). No coverage gap was
+found in this inventory relative to the algorithms actually shipped.
+
+### 11. Gap classification against the directive's fixed A-H taxonomy
+A. post-delivery trim qualification -- NOT the gap (D-116/D-177 offline-proven,
+real-media-safe on observed shapes).
+B. pre-delivery trim qualification -- NOT the gap (same authority, symmetric
+ENTRY-side logic proven identically).
+C. partial-overlap edge qualification -- proven OFFLINE (34/34); the residual
+is real-media occurrence, folded into G below rather than double-counted here.
+D. multi-event arbitration -- NOT the gap ("outermost-in" chaining is
+implemented and tested for both D-116 and D-177 multi-event cases).
+E. delivery-span source-of-truth integration -- NOT the gap (D-115 is the
+single authority; both D-116 and D-177 consume it directly, never recompute).
+F. composite-boundary integration -- NOT the gap; not applicable by
+architecture (Section 7).
+**G. real-media qualification only -- THIS IS THE GAP.** D-177's own true
+target shape (a real straddling event with genuine debris beyond the
+delivery floor, correctly partially trimmed) has not yet occurred in any
+dispatched Video00 RAW. Every other Boundary authority audited in this
+forensic (D-115, D-116, the ownership contract, composite independence,
+the renderer firewall, Zone-Usability V2/Prosodic isolation) is
+structurally sound with no material gap.
+H. no material gap -- only one confirmatory RAW -- this is the closest
+sibling classification to G but is not selected verbatim, because a single
+new RAW cannot be relied on to manufacture the target shape on demand (it is
+a property of what a creator's take happens to contain, not something a
+dispatch can force); G is the more honest label for a gap whose resolution
+depends on data occurrence rather than a bounded, schedulable qualification
+step.
+
+### 12. Cut.ai / Human Gold parity relevance (existing evidence only, no new
+causal F1 claim)
+D-178B's own parity delta that run (Cut.ai 0.7935 vs D-175's 0.8501; Gold
+0.7467 vs D-175's 0.8252) was explicitly and correctly NOT attributed to
+D-177/D-116 (zero trims applied that run, so it is architecturally
+impossible for the delta to originate there); the movement was ordinary
+BestTake tie-break variance in the same gynecologist family plus an
+unrelated `pimples` family recurrence. No causal F1 relationship between
+the Section 11 gap (G) and current Cut.ai/Human Gold parity numbers is
+claimed here, consistent with that precedent.
+
+### 13. D-211 gate recommendation (exactly ONE, bounded)
+**Recommended: a passive, opportunistic REAL-MEDIA observation gate, not a
+new dedicated paid RAW.** D-178B's own report already established that
+repeatedly dispatching Video00 hoping to trigger D-177's target shape is not
+authorized and would violate the standing "do not run overlapping paid RAW
+benchmarks" discipline for a shape that cannot be forced on demand. The
+bounded D-211 gate is therefore: on the NEXT Video00 Modal RAW dispatched
+for any other, separately-authorized reason, read `diagnostics`' D-116/D-177
+fields (already printed/available, no new plumbing required) and check
+specifically whether any real event this time resolves to an actual applied
+partial-edge trim (`partial_edge_trim_applied_count > 0`) rather than
+`visual_trim_blocked_by_delivery_floor`. If yes: D-177 finally has TARGET-SHAPE
+real-media proof and can be closed as fully qualified. If no (as in every
+RAW observed so far): report the same honest "SAFETY PROVEN -- TARGET SHAPE
+NOT EXERCISED" status again and take no further action. This requires zero
+new code, zero new workflow input, and zero new paid compute of its own --
+it rides entirely on whatever RAW is next authorized for an unrelated
+reason, consistent with condition C (no paid compute outside authorization).
+
+### 14. Overall D-210 verdict
+Architecture forensic COMPLETE. No structural Boundary defect, no missing
+firewall, no undisclosed renderer trim, no composite-integration gap, and no
+confidence-vs-geometry safety gap were found. The single remaining item is
+data-occurrence-bound real-media qualification of an already offline-proven,
+already-safe mechanism (Section 11, taxonomy G). No code change is proposed
+or authorized by this task.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether/when to treat D-177 as
+fully qualified without ever observing its target shape live, versus
+continuing to wait opportunistically per Section 13, is a Product Owner
+product-quality-bar decision, not an engineering one.
+
+D-115, D-116, D-177, D-178A, D-178A.1, D-178B, D-179, and the D-097.E
+`PHYSICAL_OWNERSHIP_CONTRACT` are preserved, unmodified, unrewritten by this
+entry.
+
+---
