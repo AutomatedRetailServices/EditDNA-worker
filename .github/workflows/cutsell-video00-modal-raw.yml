@@ -3649,6 +3649,483 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: D-198 P1 local group formation real-media qualification
+        # D-198 (docs/CUTSELL_DECISIONS.md D-198): real-media qualification
+        # of D-197's local-group formation on the SAME canonical Video00
+        # RAW that D-196 originally found LOCAL_GROUPING_TOO_BROAD on.
+        # Reads the SAME `artifact/video00-modal.json` the D-196 step above
+        # reads, and PURE-PROJECTS/re-audits already-serialized `moments`
+        # (D-198's own `relation_to_predecessor` field included, per
+        # docs/CUTSELL_DECISIONS.md D-198's own pre-RAW observability
+        # repair), `local_groups`, and `sequences` -- recomputes NO
+        # relation, NO moment role, NO sequence kind, NO group membership.
+        # Every classification below (per-group quality, whole-run
+        # assessment, over-fragmentation cause, consistency audit) is a
+        # REPORTING-ONLY categorization derived from already-serialized
+        # fields; none of it is fed back into cutsell_worker.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          regression_fixture = load("benchmarks/video00_regression_qa.json")
+
+          summary = {"schema_version": "cutsell.video00.d198_local_group_formation_qualification.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          diag = engine.get("diagnostics") if isinstance(engine, dict) else None
+          p1_block = diag.get("editorial_moment_sequence") if isinstance(diag, dict) else None
+          p1_status = (p1_block or {}).get("status") if isinstance(p1_block, dict) else "block_missing"
+          summary["editorial_moment_sequence_status"] = p1_status
+
+          clip_meta = {}
+          if isinstance(engine, dict):
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          text_norm = " ".join(str(clip.get("text") or "").lower().split())
+                          clip_meta[clip["clip_id"]] = {
+                              "start": clip.get("start"),
+                              "end": clip.get("end"),
+                              "source_asset_id": clip.get("source_asset_id"),
+                              "text_hash": hashlib.sha256(text_norm.encode("utf-8")).hexdigest()[:12],
+                              "_norm_text": text_norm,
+                          }
+
+          moments = []
+          sequences = []
+          local_groups = []
+          run_summary = {}
+          if isinstance(p1_block, dict):
+              moments = p1_block.get("moments") or []
+              sequences = p1_block.get("sequences") or []
+              local_groups = p1_block.get("local_groups") or []
+              run_summary = {
+                  k: v for k, v in p1_block.items() if k not in ("status", "moments", "sequences", "local_groups")
+              }
+
+          summary["run_summary"] = run_summary
+          summary["moment_count_in_artifact"] = len(moments)
+          summary["sequence_count_in_artifact"] = len(sequences)
+          summary["local_group_count_in_artifact"] = len(local_groups)
+
+          moments_sorted = sorted(moments, key=lambda m: (m.get("source_start") or 0, m.get("source_end") or 0))
+          sequences_sorted = sorted(sequences, key=lambda s: (s.get("source_start") or 0, s.get("source_end") or 0))
+          groups_sorted = sorted(local_groups, key=lambda g: (g.get("source_start") or 0, g.get("source_end") or 0))
+          summary["moments"] = moments_sorted
+          summary["sequences"] = sequences_sorted
+          summary["local_groups"] = groups_sorted
+
+          # --- moment_id -> group_id / sequence_kind lookups (pure
+          # membership indexing over already-serialized ids). ---
+          moment_to_group = {}
+          for g in local_groups:
+              gid = g.get("group_id")
+              for mid in g.get("moment_ids") or []:
+                  moment_to_group[mid] = gid
+
+          moment_to_sequence_kind = {}
+          for s in sequences:
+              kind = s.get("sequence_kind")
+              for mid in s.get("moment_ids") or []:
+                  moment_to_sequence_kind[mid] = kind
+
+          # --- Per-group quality classification (same BOUNDED_LOCAL/
+          # PLAUSIBLE_LOCAL/TOO_BROAD/AMBIGUOUS vocabulary D-196's own
+          # sequence-level grouping_audit used, applied here to LOCAL
+          # GROUPS -- the real unit of D-197's own decision). A singleton
+          # (moment_count == 1) is always BOUNDED_LOCAL by definition --
+          # nothing to span. ---
+          def _group_quality(g):
+              start, end, count = g.get("source_start"), g.get("source_end"), g.get("moment_count")
+              if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or not isinstance(count, int) or count < 1:
+                  return "AMBIGUOUS", None
+              if count == 1:
+                  return "BOUNDED_LOCAL", 0.0
+              duration = max(0.0, end - start)
+              if duration <= 120.0:
+                  return "BOUNDED_LOCAL", duration
+              if duration <= 600.0:
+                  return "PLAUSIBLE_LOCAL", duration
+              return "TOO_BROAD", duration
+
+          per_group_findings = []
+          too_broad_group_count = 0
+          ambiguous_group_count = 0
+          for g in groups_sorted:
+              classification, duration = _group_quality(g)
+              if classification == "TOO_BROAD":
+                  too_broad_group_count += 1
+              if classification == "AMBIGUOUS":
+                  ambiguous_group_count += 1
+              per_group_findings.append({
+                  "group_id": g.get("group_id"),
+                  "source_asset_id": g.get("source_asset_id"),
+                  "source_start": g.get("source_start"),
+                  "source_end": g.get("source_end"),
+                  "span_duration_sec": duration,
+                  "moment_count": g.get("moment_count"),
+                  "grouping_reason": g.get("grouping_reason"),
+                  "relation_support": g.get("relation_support"),
+                  "confidence": g.get("confidence"),
+                  "conflict_flags": g.get("conflict"),
+                  "classification": classification,
+              })
+          summary["per_group_findings"] = per_group_findings
+          summary["too_broad_group_count"] = too_broad_group_count
+          summary["ambiguous_group_count"] = ambiguous_group_count
+
+          # --- Whole-source collapse check: NO local group may absorb
+          # ~all of the source's real moments -- INDEPENDENT of the
+          # duration-based per-group classification above. D-196's own
+          # real failure (353.14s) fell UNDER the 600s "TOO_BROAD" span
+          # threshold, so gating this check on that classification would
+          # have silently missed the exact failure D-198 exists to catch
+          # -- moment-count share is the structural signal that actually
+          # distinguishes "one real local group" from "the whole source
+          # collapsed into one group regardless of its span." The >=5
+          # floor avoids flagging a trivially small, genuinely single-
+          # group RAW as a "collapse". ---
+          total_moments = len(moments)
+          whole_source_collapse = total_moments >= 5 and any(
+              (f.get("moment_count") or 0) >= 0.9 * total_moments
+              for f in per_group_findings
+          )
+          summary["whole_source_collapse_detected"] = whole_source_collapse
+
+          # --- Consistency / relation-by-relation / join-split audit. One
+          # source at a time (Video00 is single-source; defensive for any
+          # future multi-source RAW). Predecessor is the immediately prior
+          # moment in that source's own source_start/source_end order --
+          # the exact order build_editorial_moments_for_source builds
+          # `local_sequence_position` in. ---
+          JOIN_RELATIONS = {"RETRY", "CORRECTION", "CONTINUATION"}
+          KNOWN_RELATIONS = {
+              "RETRY", "CORRECTION", "CONTINUATION", "NEW_AUDIENCE_BEAT",
+              "DISTINCT_PROPOSITION", "COMPLEMENTARY", "UNCERTAIN",
+          }
+
+          by_source = {}
+          for m in moments_sorted:
+              by_source.setdefault(m.get("source_asset_id"), []).append(m)
+
+          relation_counts = {k: 0 for k in KNOWN_RELATIONS}
+          relation_counts["MISSING"] = 0
+          relation_counts["OTHER"] = 0
+          joins_by_relation = {k: 0 for k in relation_counts}
+          splits_by_relation = {k: 0 for k in relation_counts}
+          inconsistencies = []
+          retry_correction_continuation_grouped = 0
+          missing_or_uncertain_count = 0
+          consistency_rows = []
+
+          for src_id, src_moments in by_source.items():
+              for idx in range(1, len(src_moments)):
+                  predecessor = src_moments[idx - 1]
+                  current = src_moments[idx]
+                  relation = current.get("relation_to_predecessor")
+                  bucket = relation if relation in KNOWN_RELATIONS else ("MISSING" if relation is None else "OTHER")
+                  relation_counts[bucket] += 1
+                  if bucket in ("MISSING", "UNCERTAIN"):
+                      missing_or_uncertain_count += 1
+
+                  pred_group = moment_to_group.get(predecessor.get("editorial_moment_id"))
+                  cur_group = moment_to_group.get(current.get("editorial_moment_id"))
+                  same_group = pred_group is not None and pred_group == cur_group
+                  if same_group:
+                      joins_by_relation[bucket] += 1
+                      if bucket in JOIN_RELATIONS:
+                          retry_correction_continuation_grouped += 1
+                  else:
+                      splits_by_relation[bucket] += 1
+
+                  expected_same_group = bucket in JOIN_RELATIONS
+                  if expected_same_group != same_group:
+                      inconsistencies.append({
+                          "source_asset_id": src_id,
+                          "predecessor_moment_id": predecessor.get("editorial_moment_id"),
+                          "current_moment_id": current.get("editorial_moment_id"),
+                          "relation_to_predecessor": relation,
+                          "predecessor_group_id": pred_group,
+                          "current_group_id": cur_group,
+                          "expected_same_group": expected_same_group,
+                          "actual_same_group": same_group,
+                      })
+                  consistency_rows.append({
+                      "source_asset_id": src_id,
+                      "predecessor_moment_id": predecessor.get("editorial_moment_id"),
+                      "predecessor_source_start": predecessor.get("source_start"),
+                      "predecessor_source_end": predecessor.get("source_end"),
+                      "current_moment_id": current.get("editorial_moment_id"),
+                      "current_source_start": current.get("source_start"),
+                      "current_source_end": current.get("source_end"),
+                      "relation_to_predecessor": relation,
+                      "same_local_group": same_group,
+                  })
+
+          summary["relation_counts"] = relation_counts
+          summary["joins_by_relation"] = joins_by_relation
+          summary["splits_by_relation"] = splits_by_relation
+          summary["consistency_rows"] = consistency_rows
+          summary["inconsistency_count"] = len(inconsistencies)
+          summary["inconsistencies"] = inconsistencies
+
+          # --- NEW_AUDIENCE_BEAT control: every real NEW_AUDIENCE_BEAT
+          # boundary must have occurred BEFORE that moment (i.e. split,
+          # never same-group) -- already covered by the consistency audit
+          # above; surfaced here explicitly per its own required section. ---
+          new_audience_beat_rows = [r for r in consistency_rows if r["relation_to_predecessor"] == "NEW_AUDIENCE_BEAT"]
+          summary["new_audience_beat_control"] = {
+              "count": len(new_audience_beat_rows),
+              "all_split_correctly": all(not r["same_local_group"] for r in new_audience_beat_rows),
+              "rows": new_audience_beat_rows,
+          }
+
+          # --- Over-fragmentation classification (structural, no invented
+          # numeric ratio). A genuine grouper defect (inconsistency_count >
+          # 0) is OVER_FRAGMENTED outright. Otherwise: whether the
+          # boundaries actually observed are dominated by genuine editorial
+          # split evidence (NEW_AUDIENCE_BEAT/DISTINCT_PROPOSITION/
+          # COMPLEMENTARY) vs. the live evidence layer simply having no/
+          # uncertain relation to offer (MISSING/UNCERTAIN). ---
+          total_edges = sum(relation_counts.values())
+          genuine_split_evidence = relation_counts["NEW_AUDIENCE_BEAT"] + relation_counts["DISTINCT_PROPOSITION"] + relation_counts["COMPLEMENTARY"]
+          total_splits = missing_or_uncertain_count + genuine_split_evidence
+          if total_edges == 0:
+              fragmentation_classification = "NOT_APPLICABLE"
+          elif inconsistencies:
+              fragmentation_classification = "OVER_FRAGMENTED"
+          elif total_splits == 0:
+              fragmentation_classification = "NOT_APPLICABLE"
+          elif missing_or_uncertain_count > genuine_split_evidence:
+              fragmentation_classification = "EVIDENCE_LIMITED_FRAGMENTATION"
+          else:
+              fragmentation_classification = "STRUCTURALLY_JUSTIFIED_FRAGMENTATION"
+          summary["over_fragmentation_classification"] = fragmentation_classification
+          summary["over_fragmentation_evidence"] = {
+              "total_edges": total_edges,
+              "genuine_split_evidence_count": genuine_split_evidence,
+              "missing_or_uncertain_count": missing_or_uncertain_count,
+              "retry_correction_continuation_successfully_grouped": retry_correction_continuation_grouped,
+              "singleton_group_count": run_summary.get("singleton_group_count"),
+              "multi_moment_group_count": run_summary.get("multi_moment_group_count"),
+          }
+
+          # --- Whole-run grouping assessment (structural, no invented
+          # numeric ratio). ---
+          if p1_status != "evaluated" or total_moments == 0:
+              whole_run_assessment = "EVIDENCE_INSUFFICIENT"
+          elif too_broad_group_count > 0 or whole_source_collapse:
+              whole_run_assessment = "TOO_BROAD"
+          elif fragmentation_classification == "OVER_FRAGMENTED":
+              whole_run_assessment = "OVER_FRAGMENTED"
+          elif ambiguous_group_count > 0 and ambiguous_group_count < len(groups_sorted):
+              whole_run_assessment = "MIXED_QUALITY"
+          elif ambiguous_group_count > 0 and ambiguous_group_count == len(groups_sorted):
+              whole_run_assessment = "EVIDENCE_INSUFFICIENT"
+          else:
+              whole_run_assessment = "BOUNDED_USEFUL"
+          summary["whole_run_grouping_assessment"] = whole_run_assessment
+
+          # --- Sequence membership contract: every sequence's moments must
+          # come from exactly ONE local group. ---
+          cross_group_sequences = []
+          for s in sequences_sorted:
+              group_ids = {moment_to_group.get(mid) for mid in (s.get("moment_ids") or [])}
+              group_ids.discard(None)
+              if len(group_ids) != 1:
+                  cross_group_sequences.append({"sequence_id": s.get("sequence_id"), "group_ids_found": sorted(group_ids)})
+          summary["sequence_membership_contract"] = {
+              "cross_group_sequence_count": len(cross_group_sequences),
+              "cross_group_sequences": cross_group_sequences,
+          }
+
+          # --- False-positive / thin-support PREASSEMBLED_FINAL_SEQUENCE
+          # audit (D-196's own false-positive check, plus D-198's new
+          # CONTINUATION-only thin-support firewall). ---
+          false_positive_final_sequences = [
+              s for s in sequences_sorted
+              if s.get("sequence_kind") == "PREASSEMBLED_FINAL_SEQUENCE"
+              and s.get("proposition_progression_status") != "FORWARD_PROGRESS"
+          ]
+          summary["false_positive_final_sequence_count"] = len(false_positive_final_sequences)
+          summary["false_positive_final_sequences"] = false_positive_final_sequences
+
+          thin_support_sequences = []
+          for s in sequences_sorted:
+              if s.get("sequence_kind") != "PREASSEMBLED_FINAL_SEQUENCE":
+                  continue
+              group_ids = {moment_to_group.get(mid) for mid in (s.get("moment_ids") or [])}
+              group_ids.discard(None)
+              owning_group = next((g for g in local_groups if g.get("group_id") in group_ids), None)
+              relation_support = set((owning_group or {}).get("relation_support") or [])
+              if relation_support == {"CONTINUATION"}:
+                  thin_support_sequences.append({"sequence_id": s.get("sequence_id"), "group_id": owning_group.get("group_id") if owning_group else None})
+          summary["preassembled_support_too_thin_count"] = len(thin_support_sequences)
+          summary["preassembled_support_too_thin_sequences"] = thin_support_sequences
+
+          # --- Clean-delivery-sequence reachability (D-197's own honest
+          # offline finding, cross-checked against the real RAW). ---
+          kind_counts = {}
+          for s in sequences:
+              kind_counts[s.get("sequence_kind")] = kind_counts.get(s.get("sequence_kind"), 0) + 1
+          clean_delivery_count = kind_counts.get("CLEAN_DELIVERY_SEQUENCE", 0)
+          summary["clean_delivery_sequence_count"] = clean_delivery_count
+          summary["clean_delivery_reachability_analysis"] = (
+              "B: relation-driven auto-grouping structurally prevents this shape on the live path "
+              "(every real JOIN relation either forces a non-clean moment role -- RETRY/CORRECTION -- "
+              "or is forward-progression-compatible -- CONTINUATION -- so any auto-grouped all-clean "
+              "chain always classifies PREASSEMBLED_FINAL_SEQUENCE, never the weaker CLEAN_DELIVERY_"
+              "SEQUENCE claim; see docs/CUTSELL_DECISIONS.md D-197 Section 7)."
+              if clean_delivery_count == 0 else
+              "UNEXPECTED: real CLEAN_DELIVERY_SEQUENCE observed on this RAW -- re-examine before "
+              "trusting the D-197 offline reachability analysis for this run."
+          )
+
+          # --- Whole-video P1 local map (moment role + local group id +
+          # sequence kind, no transcript). ---
+          summary["whole_video_p1_map"] = [
+              {
+                  "source_start": m.get("source_start"),
+                  "source_end": m.get("source_end"),
+                  "moment_role": m.get("moment_role"),
+                  "confidence": m.get("confidence"),
+                  "relation_to_predecessor": m.get("relation_to_predecessor"),
+                  "local_group_id": moment_to_group.get(m.get("editorial_moment_id")),
+                  "sequence_kind": moment_to_sequence_kind.get(m.get("editorial_moment_id")),
+              }
+              for m in moments_sorted
+          ]
+
+          # --- Compact region source-mapping (QA-only; SAME approach as
+          # D-190/D-192/D-196's own steps -- never a runtime grouping
+          # input). Applied here to LOCAL GROUP spans, to detect whether
+          # any group still crosses clearly unrelated known regions. ---
+          GYNECOLOGIST_SPAN = (90.0, 109.0)
+
+          def _span_overlaps(meta, lo, hi):
+              start, end = meta.get("start"), meta.get("end")
+              if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                  return False
+              return start < hi and end > lo
+
+          def _region_norm_refs(prefix):
+              out = []
+              if isinstance(regression_fixture, dict):
+                  for check in regression_fixture.get("checks") or []:
+                      if not isinstance(check, dict) or not str(check.get("id", "")).startswith(prefix):
+                          continue
+                      if check.get("kind") == "required_order":
+                          continue
+                      text = check.get("text")
+                      if text:
+                          out.append(" ".join(str(text).lower().split()))
+              return [t for t in out if t]
+
+          def _region_candidates(prefix, span=None):
+              refs = _region_norm_refs(prefix)
+              matched = set()
+              if span:
+                  lo, hi = span
+                  matched |= {cid for cid, meta in clip_meta.items() if _span_overlaps(meta, lo, hi)}
+              matched |= {
+                  cid for cid, meta in clip_meta.items()
+                  if refs and any(ref in meta.get("_norm_text", "") for ref in refs)
+              }
+              return matched
+
+          pimples_ids = _region_candidates("pimples")
+          gynecologist_ids = _region_candidates("gynecologist", GYNECOLOGIST_SPAN)
+          cross_region_groups = []
+          for g in groups_sorted:
+              lo, hi = g.get("source_start"), g.get("source_end")
+              if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+                  continue
+              overlaps_pimples = any(_span_overlaps(clip_meta.get(cid, {}), lo, hi) for cid in pimples_ids)
+              overlaps_gyn = any(_span_overlaps(clip_meta.get(cid, {}), lo, hi) for cid in gynecologist_ids)
+              if overlaps_pimples and overlaps_gyn:
+                  cross_region_groups.append({"group_id": g.get("group_id"), "source_start": lo, "source_end": hi})
+          summary["region_source_mapping"] = {
+              "pimples_candidate_count": len(pimples_ids),
+              "gynecologist_candidate_count": len(gynecologist_ids),
+              "cross_region_group_count": len(cross_region_groups),
+              "cross_region_groups": cross_region_groups,
+          }
+
+          # --- D-196 -> D-198 comparison (D-196's own real, already-
+          # documented numbers -- docs/CUTSELL_DECISIONS.md D-196 -- as
+          # fixed historical comparison literals, never a runtime input). ---
+          d196_baseline = {
+              "moment_count": 36, "sequence_count": 1, "max_sequence_span_sec": 353.14,
+              "classification": "LOCAL_GROUPING_TOO_BROAD",
+          }
+          max_group_span = max(
+              (max(0.0, (g.get("source_end") or 0) - (g.get("source_start") or 0)) for g in groups_sorted),
+              default=0.0,
+          )
+          summary["d196_vs_d198_comparison"] = {
+              "d196_baseline": d196_baseline,
+              "d198_moment_count": total_moments,
+              "d198_local_group_count": len(local_groups),
+              "d198_singleton_group_count": run_summary.get("singleton_group_count"),
+              "d198_multi_moment_group_count": run_summary.get("multi_moment_group_count"),
+              "d198_sequence_count": len(sequences),
+              "d198_max_group_moment_count": run_summary.get("max_group_moment_count"),
+              "d198_max_group_source_span_sec": max_group_span,
+              "d198_whole_run_grouping_assessment": whole_run_assessment,
+          }
+
+          # --- Real-media grouping result verdict. ---
+          if p1_status != "evaluated" or total_moments == 0:
+              real_media_grouping_result = "GROUPING_EVIDENCE_INSUFFICIENT"
+          elif whole_run_assessment == "TOO_BROAD":
+              real_media_grouping_result = "LOCAL_GROUPING_STILL_TOO_BROAD"
+          elif whole_run_assessment == "OVER_FRAGMENTED":
+              real_media_grouping_result = "LOCAL_GROUPING_BOUNDED_BUT_OVER_FRAGMENTED"
+          elif fragmentation_classification == "EVIDENCE_LIMITED_FRAGMENTATION":
+              real_media_grouping_result = "LOCAL_GROUPING_BOUNDED_BUT_EVIDENCE_LIMITED"
+          else:
+              real_media_grouping_result = "LOCAL_GROUPING_REAL_MEDIA_PROVEN"
+          summary["real_media_grouping_result"] = real_media_grouping_result
+
+          # --- P1 target-shape observed flags. ---
+          summary["p1_target_shape_observed"] = {
+              "RETRY_SERIES_OBSERVED": kind_counts.get("RETRY_SERIES", 0) > 0,
+              "BLOOPER_SERIES_OBSERVED": kind_counts.get("BLOOPER_SERIES", 0) > 0,
+              "CLEAN_DELIVERY_SEQUENCE_OBSERVED": kind_counts.get("CLEAN_DELIVERY_SEQUENCE", 0) > 0,
+              "PREASSEMBLED_FINAL_SEQUENCE_OBSERVED": kind_counts.get("PREASSEMBLED_FINAL_SEQUENCE", 0) > 0,
+              "MIXED_SEQUENCE_OBSERVED": kind_counts.get("MIXED", 0) > 0,
+              "NO_MULTI_MOMENT_SEQUENCE_OBSERVED": len(sequences) == 0,
+          }
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/d198_local_group_formation_qualification_summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-198 P1 local group formation real-media qualification (a pure re-audit of already-computed/already-serialized moments/local_groups/sequences fields -- recomputes NO relation, NO moment role, NO sequence kind, NO group membership; all classifications below are reporting-only, never fed back into cutsell_worker) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -3675,6 +4152,7 @@ jobs:
             artifact/d190_prosodic_finalist_diagnostics_summary.json
             artifact/d192_bounded_finalist_authority_diagnostics_summary.json
             artifact/d196_editorial_moment_sequence_diagnostics_summary.json
+            artifact/d198_local_group_formation_qualification_summary.json
           retention-days: 14
           if-no-files-found: warn
 
