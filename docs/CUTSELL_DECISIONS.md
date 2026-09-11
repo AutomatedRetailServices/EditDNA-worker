@@ -53391,3 +53391,304 @@ Product Owner territory as already recorded in D-235H/D-235I, unchanged by
 this task.
 
 ---
+
+## D-235K -- Lost Semantic Atom Materiality Qualification, ONE RAW Maximum, Diagnostic Only, No Fix (post D-235J)
+
+**Branch/HEAD verified before dispatch:** `feature/runpod-pod-on-demand` @
+`b0b0442` (D-235J), clean tree. No file touched by this task except this
+decision-log entry -- diagnostic-only gate, no engine/workflow/test change.
+
+**RAW authorized and run:** exactly ONE, per directive.
+`source_key`: `Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`.
+No substitution, no fallback sibling, no second RAW.
+
+**S3 preflight:** the workflow's own D-228 pre-dispatch S3 existence check
+(step 8, "D-228 sibling RAW S3 existence preflight") ran before any Modal
+compute and **succeeded** (13:48:30-13:48:34Z) -- same object D-235/D-235H
+already qualified as reachable.
+
+**Run:** GitHub Actions workflow run
+[34606402933](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34606402933)
+(`cutsell-video00-modal-raw.yml`, run #98), dispatched on
+`feature/runpod-pod-on-demand` @ `b0b0442`. Same diagnostic flag set as
+D-235/D-235H: `editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`,
+`whole_video_editorial_reasoning_diagnostics_enabled=1`,
+`ordering_diagnostics_enabled=1`, `pacing_v2_diagnostics_enabled=1`,
+`audio_join_treatment_diagnostics_enabled=1`. No provider overlay. The
+Modal benchmark step itself **succeeded** (13:48:35-13:50:58, ~2m23s) and
+Modal teardown was confirmed (automatic scale-to-zero, no persistent GPU
+resource created).
+
+**D-235J's own extraction step ran and SUCCEEDED for the first time on real
+media.** Step 21, "D-235J Lost Semantic Atom diagnostics -> sibling-safe
+extraction," completed with conclusion **SUCCESS** at 13:51:06Z -- this is
+the first direct, real-Modal-run proof that
+`diagnostics["lost_semantic_atom_diagnostics"]` serializes correctly on a
+real engine run and the extraction step's own fail-loud guard (non-zero
+exit on a missing block) did NOT trigger, meaning the block was genuinely
+present in the real engine JSON. D-235G's own step 20 also succeeded
+(13:51:06Z), reconfirming `selection_freeze_diagnostics` continues to
+serialize correctly. Both are proven, positive validations of D-235G's and
+D-235J's own engine-side changes, on top of their offline test suites.
+
+**Retrieval attempt for the field-level content, reported honestly --
+BOTH available channels exhausted, both blocked, neither by this task's own
+doing.**
+
+1. **Direct artifact download** (the whole point of D-235G/D-235J): the
+   small `cutsell-video00-modal-validator-reports` artifact for this run is
+   30,109 bytes -- the same order of magnitude as D-235H's own 30,377-byte
+   artifact. A fresh, valid, signed download URL was obtained and `curl`'d
+   directly; it failed identically to D-235H's own attempt: `CONNECT tunnel
+   failed, response 403` against the Azure Blob Storage host
+   (`productionresultssa17.blob.core.windows.net` this time -- a different
+   specific hostname than D-235H's `productionresultssa19...`, confirming
+   the block is a HOST-CATEGORY policy, `*.blob.core.windows.net` generally,
+   not a single pinned hostname).
+2. **Full workflow-run logs ZIP** (a channel not attempted in D-235H): GitHub's
+   `get_workflow_run_logs_url` API returned a download link on an entirely
+   DIFFERENT host, `results-receiver.actions.githubusercontent.com` (not
+   Azure Blob at all). A direct `curl` of this URL was **also** blocked
+   identically: `CONNECT tunnel failed, response 403`, with the agent
+   proxy's own diagnostic explicitly naming `results-receiver.
+   actions.githubusercontent.com:443` as denied by organization policy.
+   **This is a genuinely new, broader finding beyond D-235H's own framing**:
+   this session's egress restriction is not scoped to the Azure Blob
+   Storage host category alone -- it also blocks GitHub's own first-party
+   results-delivery host for full log downloads. The practical
+   implication: there is no artifact- or log-ZIP download path available to
+   this session at all, regardless of which of GitHub's own delivery hosts
+   serves it.
+3. **Job-log text extraction** (the D-235F/D-235H fallback): `get_job_logs`
+   was queried at multiple `tail_lines` values (50, 1500, 6000, 20000) with
+   `return_content=true`. The `tail_lines=50` request correctly returned
+   only the true final ~50 lines (13:51:09.78-13:51:10.51). Values of 1500,
+   6000, and 20000 all returned MORE content but converged on the SAME
+   hard content-size cap once `tail_lines` grew large enough: 6000 and
+   20000 both returned an byte-identical 420,780-character result anchored
+   at the identical earliest timestamp, `13:51:08.80Z` -- never earlier,
+   regardless of how much larger `tail_lines` was requested. This is the
+   same wall D-235H already characterized (a real ~380-420K character
+   content cap, not a strict `tail_lines` line-count contract), now measured
+   precisely: the reachable window's own earliest timestamp is fixed at
+   `13:51:08.80Z` no matter how many additional lines are requested beyond
+   that saturation point.
+
+**Why this wall specifically defeats D-235K.** Step 21 (D-235J extraction)
+itself ran and printed its output at `13:51:06Z`-`13:51:07Z` -- roughly 1.8-2.8
+seconds BEFORE the earliest timestamp (`13:51:08.80Z`) this session's
+`get_job_logs` tool can reach on this run. The intervening gap is consumed
+by step 18's own "Print full canonical diagnostics" step (13:51:02-13:51:06,
+several large `jq`-filtered diagnostic dumps) immediately followed by steps
+38-43's own P1/Language-Spine/P2/Ordering compact-diagnostic prints
+(13:51:08+, individually tens of KB each: D-196 at 31,704 bytes, D-198 at
+42,605 bytes, D-204 at 21,207 bytes, etc.) -- exactly the same log-density
+mechanism D-235H already identified, now confirmed to push step 21's own
+small, already-bounded output outside the retrievable window on THIS run
+too. A file that searched the fully-saved 420,780-character log for
+`lost_semantic_atom_diagnostics` (the actual diagnostics key) found zero
+occurrences; the one match for the bare filename string
+`lost-semantic-atom-diagnostics.json` at character offset 412255 was only
+the "Upload validator reports" step's own `path:` file-list echo (a
+different, later, unrelated print), not step 21's own body content.
+
+**What is therefore proven with certainty (from the GitHub Actions Jobs
+API's own step-conclusion field -- ground truth, immune to the log-density
+problem above) vs. what remains unretrievable:**
+
+**Proven (step conclusions, 100% reliable):**
+- Step 20 (D-235G extraction): **SUCCESS** -- `selection_freeze_
+  diagnostics` block IS present in the real engine JSON, reconfirming
+  D-235H's own earlier proof on a fresh run.
+- Step 21 (D-235J extraction): **SUCCESS** -- `lost_semantic_atom_
+  diagnostics` block IS present in the real engine JSON. **This is the
+  first real-media proof of D-235J's own engine change** -- until this run,
+  D-235J's own verdict (B) rested entirely on offline tests; this run
+  proves the block actually serializes on genuine RAW output, not merely
+  in synthetic fixtures.
+- Steps 44/45/46 (D-218R/D-221/D-225 -- `pacing_v2`/`pacing_v2_
+  handle_aware` extraction): **FAILURE** (same `MISSING_FROM_
+  SERIALIZATION` shape as D-235/D-235F/D-235H) -- the Pacing V2 diagnostic
+  blocks still did not serialize on this run.
+- Steps 22/23/24 (frozen-selection-lock / architecture / Human-Gold
+  regression): **FAILURE** -- all three independently reconfirmed as
+  `VIDEO00_SPECIFIC_ORACLE_NOISE` per D-235F's own already-established
+  classification; not treated as engine regression evidence.
+- Steps 38-43 (P1, Language Spine, P2, Ordering compact diagnostics): all
+  **SUCCESS** -- none of these upstream layers crashed or regressed on
+  this source.
+- Step 25 (quality ladder): **SUCCESS** (runs regardless; Video00-
+  comparison-shaped, `REFERENCE_PARITY_NOT_AVAILABLE_FOR_SIBLING` per
+  existing D-227/D-228 convention).
+
+**Structural inference (high confidence, code-consistent, NOT a direct
+field read -- same caveat D-235H applied to its own equivalent inference):**
+given D-218R/D-221/D-225 failed with the identical `MISSING_FROM_
+SERIALIZATION` shape as every prior sibling run, and given D-235G/D-235J's
+own extraction steps both succeeded, the only code-consistent explanation
+(the Pacing V2 construction and both observability blocks are all reached
+only after the same `if freeze_blocked: ... else: ...` split) is that
+**`freeze_blocked` was again `True` on this run**, with `pacing_seam_
+reached` correspondingly `False` -- the same shape as D-235/D-235F/D-235H/
+D-235I. This is consistent with, but does not independently confirm,
+continuity of the same underlying lost-semantic-atom finding this entire
+D-235 sub-thread has been chasing.
+
+**Not retrievable this session (honestly marked, not guessed) -- every
+single field this task's own directive asked about:** `lost_atom_count`,
+`blocking_lost_atom_count`, `non_blocking_lost_atom_count`, every blocking
+atom's `clip_id`, bounded text excerpt, `classification`, coverage counts,
+suppression/preservation metadata, reviewer-finding mapping, repair-loop
+mapping and terminal reason, and therefore every per-atom materiality
+judgment and the overall Freeze-correctness classification. None of these
+can be answered from evidence this session could actually retrieve.
+
+### Primary questions (per directive) -- answered honestly
+
+Questions 1-10 (bounded text/content, source clip, blocking state,
+classification, coverage counts, equivalent-meaning check, uniqueness,
+materiality, claim/meaning effect, paraphrase/residue/redundant) **cannot
+be answered** -- doing so from the trigger-category shape alone (as D-235H/
+D-235I already established for the analogous "which trigger fired"
+question) would be exactly the "invent equivalence" / classify from the
+label alone that this directive's own "Data Model Limitation" and "NO
+SPECULATION"-equivalent instructions forbid. This gate does not have the
+one thing it needs to answer them: the actual `lost_semantic_atom_
+diagnostics` content.
+
+### Repair loop / resolver (per directive) -- reported at the shape level
+only, not the actual-run level
+
+The CODE-LEVEL shape D-235I already proved with certainty (not re-derived
+here, not re-verified against this run's own actual data, since that data
+is unretrievable): `reviewer_finding_kind = UNIQUE_FACT_LOST`;
+`_REPAIR_STRATEGIES` has no entry for `UNIQUE_FACT_LOST`, so
+`repaired = False`, `reason = "no_repair_strategy_exists_for_this_finding_
+kind"` is the loop's own designed terminal state whenever a `UNIQUE_FACT_
+LOST` finding is present with nothing else repairable. Whether that shape
+actually occurred on THIS run's own data (as opposed to being the loop's
+generic behavior for this finding kind) cannot be confirmed from anything
+retrieved this gate. Resolver status: unretrievable this run for the same
+reason; D-235I's own orthogonality analysis (`SEMANTICALLY_RESOLVED`
+answers "was every family confidently resolved," a different question from
+the coverage ledger's own check) remains code-level truth, not re-verified
+against this specific run's own resolver_status field.
+
+### Freeze correctness classification
+
+**INSUFFICIENT_EVIDENCE.** None of `CORRECT_ABSTENTION` /
+`SAFE_BUT_OVER_CONSERVATIVE` / `CLEAR_FALSE_POSITIVE` / `MIXED_
+MULTIPLE_ATOMS` can be justified without the atom's own retrieved content.
+
+### D-235K primary result
+
+**F -- CURRENT RETAINED EVIDENCE IS STILL INSUFFICIENT.** Not because the
+engine failed to compute or serialize the evidence (steps 20 and 21 both
+independently PROVED, for the first time on real media, that both
+`selection_freeze_diagnostics` and `lost_semantic_atom_diagnostics` are
+present in the real engine JSON on this run) -- but because every
+retrieval channel available to this session for reading that already-
+computed, already-small, already-bounded content remains blocked:
+Azure Blob Storage artifact download (403, host-category block, reconfirmed
+on a fresh signed URL against a different specific hostname than D-235H's
+own), GitHub's own first-party log-delivery host
+`results-receiver.actions.githubusercontent.com` (403, a NEW finding this
+gate establishes -- the block is not Azure-specific), and the job-log
+text-extraction fallback (hard content-size cap, precisely measured this
+gate at an earliest-reachable timestamp of `13:51:08.80Z`, roughly 2-3
+seconds after step 21's own `13:51:06Z`-`13:51:07Z` output window).
+
+**Per "IF F": the single missing evidence field required, named exactly.**
+The complete content of `diagnostics["lost_semantic_atom_diagnostics"]`
+from run 34606402933 (equivalently, the full content of `artifact/
+lost-semantic-atom-diagnostics.json` inside the `cutsell-video00-modal-
+validator-reports` artifact, or the raw stdout of job 103285781671's own
+step 21, timestamped `13:51:06Z`-`13:51:07Z`) -- this single retrieval, once
+achieved by any means, answers every one of this gate's ten primary
+questions and both count/materiality classifications in one step, since
+D-235J's own engine change already computes and bounds exactly that
+content; no further engine work is needed to produce it, only a way to
+read it.
+
+**No RAW was run automatically in response to this finding**, per the
+directive's explicit "Do not run another RAW automatically" instruction.
+
+### Exact next recommendation (not authorized to implement here)
+
+Unchanged in kind from D-235H's own recommendation, now sharpened by this
+gate's own broader finding: (a) a session/environment egress-allowlist
+change is the only fix that closes this permanently and for BOTH blocked
+host categories (`*.blob.core.windows.net` AND `results-receiver.actions.
+githubusercontent.com`) at once -- an infrastructure decision, outside this
+task's own scope; or (b) a further-bounded workflow reordering that moves
+D-235G's/D-235J's own two extraction steps (or, more surgically, adds one
+additional COMPACT, already-small print of just `lost_semantic_atom_
+diagnostics` alone) to run AFTER the dense P1/P2/Ordering/Pacing compact-
+diagnostic steps rather than before them, so its own small output falls
+inside this session's `get_job_logs` reachable tail window instead of being
+pushed out by later, larger dumps. Neither is implemented in this gate.
+Until one of these exists, any future materiality qualification attempt on
+this same sibling would very likely hit the identical retrieval wall
+regardless of how many additional RAWs were spent -- so the correct next
+step remains a retrieval-channel fix, not another RAW.
+
+### Audio Join / Pacing status
+
+Unchanged from D-234/D-235H's own snapshot (`PACING_V2_AUDIO_JOIN_
+TREATMENT_LIVE_DIAGNOSTICS_READY`): `diagnostics["audio_join_treatment_
+v2"]`/`pacing_v2`/`pacing_v2_handle_aware` almost certainly remain absent on
+this run for the identical, expected, non-defective reason as every prior
+sibling run (Freeze blocked before the shared seam), not because D-230-
+D-234's own code failed. Not modified by this gate.
+
+### Video00 oracle noise vs. generic failures
+
+Unchanged from D-235F's own classification: frozen-selection-lock,
+architecture, and Human-Gold regression QA remain `VIDEO00_SPECIFIC_
+ORACLE_NOISE`; P1/Language Spine/P2/Ordering remain generically healthy (no
+crash, no new failure class); reference parity:
+`REFERENCE_PARITY_NOT_AVAILABLE_FOR_SIBLING`.
+
+### App-roadmap status
+
+Unchanged from D-235J's own snapshot. The chain remains: Audio Join stack
+READY -> sibling qualification attempted -> Freeze blocked before Pacing
+(D-235) -> true internal Freeze established (D-235F) -> exact Freeze
+observability READY (D-235G) -> exact-trigger attempt inconclusive due to a
+retrieval-channel gap (D-235H) -> the two triggers proven to be one finding
+(D-235I) -> lost-atom-detail observability READY, offline-proven, verdict B
+(D-235J) -> lost-atom-detail now PROVEN to serialize on real media, but its
+CONTENT remains behind the same, now more precisely characterized,
+retrieval-channel gap (D-235K, this gate). The decision of whether to
+pursue a retrieval-channel fix, broaden egress for both blocked host
+categories, or proceed on a different basis remains Product Owner
+territory.
+
+**Engine patch required?** No -- and none was made or considered; D-235G's
+and D-235J's own engine changes are independently proven correct on real
+media by this gate (both extraction steps succeeded).
+**Paid compute required after this?** No, not for closing this specific
+retrieval question -- a retrieval-channel fix and re-reading THIS
+ALREADY-COMPLETED run's own artifact (id 10266797439, expires
+2026-09-25T13:51:09Z) would suffice; no RAW is needed to get it once the
+channel is fixed.
+**Additional RAW required?** No.
+
+**Confirmed:** no second RAW, no provider, no engine/workflow/test patch,
+no Freeze/Pacing/Audio-Join/authority/threshold/semantic-atom/repair-loop/
+resolver change was made or attempted by this task -- diagnostic only, per
+its own explicit instruction. The corrective gate this finding might
+eventually motivate (a retrieval-channel fix) was NOT implemented here, per
+the directive's own explicit "Wait for Product Owner coordination"
+instruction.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- the decision needed is
+how to close the retrieval-channel gap this gate sharpens (broaden this
+session's egress allowlist for BOTH the Azure Blob Storage AND the
+`results-receiver.actions.githubusercontent.com` hosts, or authorize a
+small, workflow-only reordering of the D-235G/D-235J print steps) before
+any further lost-semantic-atom materiality qualification attempt would be
+worth another RAW. No further action is taken on it by this task.
+
+---
