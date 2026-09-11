@@ -47821,3 +47821,470 @@ offline, no RAW) as the next, separately-scoped engineering turn. No
 further action is taken.
 
 ---
+
+## D-222: Pacing V2 Source Audio Handle / Pre-Roll / Post-Roll Architecture Forensic (post D-221)
+
+**Status: VERDICT A -- SOURCE AUDIO HANDLE GAP CONFIRMED, CURRENT POST-
+BOUNDARY PACING VIEW IS TOO NARROW. Direct code inspection proves the
+evidence-adapter layer (D-217) restricts J/L candidate-window derivation
+strictly to the region INSIDE each clip's own Boundary-finalized
+`[start, end)` -- while the renderer (D-214) already supports an audio
+window anywhere within the FULL original source file, and the decision
+layer (D-215) already has an unused, explicitly-documented extensibility
+point for a wider word-timing proof. This is a real, converging,
+multi-point architectural gap, not speculation. Whether closing it would
+have changed D-221's own specific `0/26` real-media result on THIS video
+cannot be determined from existing evidence alone (D-221's zero-candidate
+root cause is therefore classified C, not B, below) -- but the gap
+itself is unambiguously confirmed by code, independent of that
+uncertainty. Docs decision entry only -- no `cutsell_worker/*.py` file,
+test, workflow, or RAW touched; the canonical architecture doc (D-098)
+is NOT edited by this entry, per this task's own stated preference for
+"decision entry only" unless the forensic conclusion strictly requires
+otherwise (it does not -- the recommendation in item 23 is sufficient).**
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, HEAD unchanged at `04044f5` (D-221). This
+entry's own commit is the only change to HEAD.
+
+### 2. Files changed
+`docs/CUTSELL_DECISIONS.md` (this entry) only. No `cutsell_worker/*.py`
+file, test file, or workflow file touched. `docs/CUTSELL_CANONICAL_
+ENGINE_ARCHITECTURE_D098.md` NOT edited (item 23 explains why not
+required).
+
+### 3. Current J lead derivation
+**Confirmed, quoted verbatim from `cutsell_worker/pacing_v2_evidence_
+adapter.py`:**
+```python
+def available_silent_head_sec(clip: DraftClip) -> Optional[float]:
+    """Room, INSIDE `clip`'s own already-selected span, between `clip.
+    start` (the visual cut point) and its earliest real spoken word."""
+    if not clip.words:
+        return None
+    first_word_start = min(float(w.start) for w in clip.words)
+    return max(0.0, first_word_start - float(clip.start))
+```
+`candidate_timing_for_pair` sets `lead = available_silent_head_sec(right)`.
+This is measured STRICTLY between `right.start` (the Boundary-finalized
+video cut point) and `right`'s own first word -- it never looks at
+anything before `right.start` in the original source media, even though
+`right.start` may sit well after the true beginning of that speaker's
+audio in the source file (e.g. after Boundary's own audio-edge silence
+trim, item 9).
+
+### 4. Current L tail derivation
+Symmetric, quoted verbatim: `available_silent_tail_sec(clip)` measures
+room between `clip`'s own last word and `clip.end`; `candidate_timing_
+for_pair` sets `tail = available_silent_tail_sec(left)`. Never looks
+past `left.end` into the original source media.
+
+### 5. Current max-safe-window scope
+**Confirmed: strictly INSIDE the Boundary-finalized VIDEO window
+(`[clip.start, clip.end)`), never outside it.** Answering the Primary
+Question directly: YES, the adapter computes the RIGHT J lead only from
+`clip.start -> first_word_start` and the LEFT L tail only from `last_
+word_end -> clip.end`, while completely ignoring any safe source audio
+that may physically exist before `clip.start` or after `clip.end` in
+the original media. This is not an inference -- it is the literal,
+complete body of both functions (item 3-4).
+
+### 6. D-214 independent-window intent
+**YES -- explicitly and unambiguously intended to allow `audio_start <
+video_start` and `audio_end > video_end` WITHIN THE SAME ORIGINAL
+SOURCE MEDIA, with no tie to the clip's own Boundary-finalized window.**
+Proven two ways:
+- `render_plan.py`'s own docstring on `RenderSegment.audio_start`/
+  `audio_end`: "`audio_start < start` is a LEADING audio window (this
+  segment's own audio begins before its own video -- the per-segment
+  primitive under a J-cut...)"; "`audio_end > end` is a TRAILING audio
+  window..." -- describing exactly the pre-roll/post-roll handle shape
+  this task names, already built.
+- `render.py`'s own `validate_audio_window` (quoted verbatim): checks
+  `audio_start >= 0` and `audio_end <= probe.duration_sec` -- where
+  `probe = probe_media(segment.source_path)` reads the REAL, FULL
+  original source file's own probed duration at render time. There is
+  NO check anywhere in this function (or anywhere in `render.py`) tying
+  `audio_start`/`audio_end` to the clip's OWN `.start`/`.end`. The
+  renderer's only real constraint is "stay within the physical source
+  file," full stop.
+
+**Given this, D-217's own restriction (item 5) is an INCOMPLETE
+integration of a contract D-214 already fully supports -- not a
+limitation D-214 itself imposes.** This directly answers this task's
+own "why does D-217 only derive timing inside clip.start/clip.end?"
+question: no architectural reason found in D-214 requires it; D-217
+simply never extended its own derivation to look further.
+
+### 7. Original source coordinate availability
+**AVAILABLE (`source_asset_id`)** -- every `DraftClip`/`CandidateTake`
+carries its own `source_asset_id` unchanged throughout the pipeline
+(D-050A's own passthrough discipline, confirmed in `contracts.py`).
+**LOST (pre-Boundary original span, on the clip object itself)** --
+`DraftClip` has exactly one `start`/`end` pair; there is no `original_
+start`/`original_end` field on the dataclass itself (confirmed: `grep`
+of the full `DraftClip` definition in `contracts.py` finds no such
+field). Once a Boundary authority trims a clip via `dataclasses.replace
+(clip, start=new_start, end=new_end, ...)`, the WIDER pre-trim span is
+gone from the clip object -- see item 10 for where (partially) it
+survives elsewhere.
+
+### 8. Source-duration availability
+**PARTIAL.** `contracts.SourceAsset.duration_sec` exists and is the
+authoritative full-source-file duration -- but `DraftTimeline` (the
+object `pacing_v2_evidence_adapter.py`/`pacing_v2_live_diagnostics_
+integration.py` actually operate on) has NO field retaining `SourceAsset`
+objects or their `duration_sec` (confirmed: `DraftTimeline`'s full field
+list is `schema_version/project_id/strategy/selected/alternates/
+discarded/diagnostics/captions_enabled/caption_preset/text_overlays/
+media_overlays` -- no source-asset list). The true full-file duration
+IS still recoverable, but only downstream, at RENDER time, via `probe_
+media(segment.source_path)` (item 6) -- which reads the real file
+fresh, independent of any DraftTimeline bookkeeping. So: LOST at the
+Pacing DECISION/evidence-adapter layer today; AVAILABLE (by direct file
+probe, already-proven mechanism) at the RENDER layer.
+
+### 9. Pre-Boundary coordinate availability
+**PARTIAL, per-authority, ephemeral, never consolidated.** At least two
+Boundary-adjacent authorities explicitly retain pre-trim vs post-trim
+coordinates in their OWN diagnostics output, keyed by `clip_id`:
+- `boundary_engine_pass.py` (its own audio-edge silence-trim pass, D-
+  097.C/E): for every clip it actually trims, appends an `audit` record
+  containing `"original_start"`/`"original_end"` (pre-trim) AND `"result_
+  start"`/`"result_end"` (post-trim), quoted verbatim from the code:
+  `"original_start": round(start, 3), "original_end": round(end, 3),
+  "result_start": round(new_start, 3), "result_end": round(new_end, 3)`.
+  This record is stored in `draft.diagnostics["boundary_engine_pass"]`
+  (confirmed: `universal_clean_cut.py` line 845, `"boundary_engine_
+  pass": boundary_pass_stage`), which DOES persist all the way through
+  to the Pacing V2 live-diagnostics call site -- `pacing_v2_live_
+  diagnostics_integration.py`'s own orchestration function already
+  receives the FULL `draft.diagnostics` dict as its `boundary_
+  diagnostics` parameter (passed straight through to `decide_transition`
+  for D-142 baseline computation) -- but item 12 confirms this record is
+  never actually READ for candidate-timing purposes.
+- `post_selection_edge_only_boundary.py` retains an equivalent `original_
+  start`/`original_end` pair in its own diagnostics for its own edge
+  decisions.
+Crucially: only clips a given authority ACTUALLY trimmed get an audit
+entry -- an untouched clip's "original" span trivially equals its
+current span, so this is not a gap for those clips, but there is no
+SINGLE, canonical, always-populated "what did Boundary originally look
+like before ANY authority touched it" record consolidating every
+authority's own trims into one place. Answer: **PARTIAL**, not
+`AVAILABLE` (no universal guarantee) and not `LOST` (real data exists
+for the audio-edge-trim authorities that most directly compete with
+Pacing's own interest in silent-edge material).
+
+### 10. Boundary provenance availability
+Restates item 9's own finding as a direct answer to this task's own
+"Does Boundary retain original_start/original_end vs trimmed_start/
+trimmed_end... can we know what material Boundary removed without
+rerunning Boundary?" question: **YES, for at least the audio-edge-trim
+authorities (item 9), without rerunning anything** -- the audit records
+already exist in `draft.diagnostics["boundary_engine_pass"]`/
+equivalent keys from the SAME RAW run that already produced the final
+selected clips. This is a real, already-computed, already-serialized
+(in the full engine JSON, not yet in any small bounded artifact)
+resource nothing downstream currently consumes for Pacing purposes.
+
+### 11. Out-of-boundary word-timing availability
+**LOST at the DraftTimeline/Pacing level, by construction -- `DraftClip.
+words` is filtered to the clip's own already-selected span at
+construction time** (confirmed: no code path threads a full per-source-
+asset `TranscriptSegment` list, or any word outside `[clip.start, clip.
+end)`, into `DraftTimeline` or any of its clips). `contracts.
+TranscriptSegment` (a full-source-asset transcript structure, distinct
+from `DraftClip`) DOES exist and is used upstream (`asr.py`, `take_
+segmentation.py`, `whole_video_*` modules) -- meaning the FULL original
+ASR word timeline for each source asset almost certainly existed at
+SOME earlier pipeline stage -- but by the time `DraftTimeline`/Pacing
+V2 runs, that broader transcript is not retained anywhere reachable
+from `result.draft`. **Exact lost seam: between `take_segmentation.py`
+slicing the full per-asset `TranscriptSegment` list into per-candidate
+spans, and `DraftTimeline` construction, the wider transcript is
+dropped -- only each individual clip's own already-sliced `.words`
+subset survives.** No ASR rerun is proposed to recover this (per this
+task's own explicit instruction); the point is only to name where the
+seam is.
+
+### 12. Current audio-handle accessibility
+**NOT ACCESSIBLE TODAY, despite two of its prerequisites already
+existing.** `candidate_timing_for_pair(left, right)` (D-217's own J/L
+window deriver) takes ONLY `left`/`right` `DraftClip` objects as
+arguments -- it does not accept, and its caller (`build_pacing_v2_
+live_diagnostics_with_real_evidence`) does not pass, `boundary_
+diagnostics` (item 9-10's own already-available audit trail) or any
+wider word-timing sequence, even though `decide_transition` (D-215)
+ALREADY defines exactly the parameter needed for the latter --
+`left_words`/`right_words`, quoted verbatim from its own docstring: **"
+`left_words`/`right_words` default to each clip's own `.words`; a
+caller with broader source-context word timings may supply a wider
+sequence for a stronger word-safety proof."** This parameter has never
+been exercised by any caller in this codebase (confirmed: `pacing_v2_
+live_diagnostics_integration.py`'s own call to `decide_transition` never
+passes `left_words=`/`right_words=`). This is the clearest single piece
+of evidence in this forensic: **D-215's own decision layer was already
+designed, at least one gate ago, with the exact extensibility point a
+source-audio-handle model would need, and no caller has ever used it.**
+
+### 13. J handle feasibility
+**Architecturally feasible today, contingent on a new, bounded
+derivation step -- not on any renderer or decision-layer change.**
+Given items 6/12, a J-cut handle (RIGHT's audio beginning before `right.
+start`, sourced from the SAME `right.source_asset_id`'s own physical
+file) requires only: (a) a safe upper bound on how far before `right.
+start` to look (bounded by the physical source file itself, per item 6,
+and by not crossing into a neighboring clip's own span, item 17); (b) a
+word-safety proof over that extended window, which `decide_transition`
+already supports via `right_words=` (item 12) -- a caller would supply
+the union of `right.words` plus whatever real words (if any) fall in
+the extended pre-roll region; (c) the renderer mapping is already fully
+proven (D-214, `RenderSegment.audio_start`). No new renderer capability,
+no new decision-layer capability -- only a new, bounded EVIDENCE-
+DERIVATION step (the smallest next gate, item 24).
+
+### 14. L handle feasibility
+Symmetric to item 13 -- an L-cut handle (LEFT's audio continuing past
+`left.end`) is equally feasible under the same three conditions,
+mirrored.
+
+### 15. False-start/retry reintroduction risk
+**Real and must be actively guarded, but a concrete, already-available
+guard exists.** Boundary's own audio-edge silence trim (`boundary_
+engine_pass.py`) only ever removes SILENCE, never crosses into a real
+word (proven: its own trim candidate is clamped via `candidate = max
+(candidate, last_word_end)` before ever being applied) -- so material
+THAT SPECIFIC trim removes is, by construction, non-lexical and
+structurally safe from a false-start/retry standpoint. The BROADER risk
+this task names -- a naive handle reaching past a clip's own edge into
+an ENTIRELY DIFFERENT, DISCARDED clip's own real speech (an abandoned
+attempt, a retry, setup/reset speech Selection correctly excluded) -- is
+real and would NOT be caught by word-safety alone (discarded speech is
+still real speech, and a broad-enough word-timing proof might even show
+it as "safe" if it lacks CRITICAL claims). **The concrete guard already
+available without new evidence: `DraftTimeline.discarded` -- the tuple
+of discarded `DraftClip`s is already retained on every `DraftTimeline`
+result.** A future handle-derivation step can and must cross-reference
+any candidate pre-roll/post-roll window against every `discarded` clip's
+own `[start, end)` span (same `source_asset_id`) and refuse the window
+outright if it overlaps one -- a simple, already-available interval
+check, no new evidence required.
+
+### 16. Word/meaning safety requirement
+Restated, not weakened: an audio handle containing negation, numbers,
+factual content, abandoned speech, or retry/correction material must
+never be reused merely because it is physically present in the source
+file -- exactly D-215's own existing meaning-safety contract (D-038's
+`classify_claim`), which a future handle-derivation step must run
+against whatever the extended window's own word-timing evidence shows,
+via the ALREADY-EXISTING `left_words`/`right_words` extensibility point
+(item 12) -- no new meaning-safety logic needs inventing, only a wider
+input to the existing check.
+
+### 17. Non-speech-handle feasibility
+Feasible in principle (items 13-14), with one additional structural
+guard beyond items 15-16: a candidate pre-roll/post-roll window must
+also never cross into a NEIGHBORING SELECTED clip's own `[start, end)`
+span (distinct from the discarded-clip guard, item 15) -- reusing
+another selected clip's own audio material as a "handle" for a
+different join would corrupt that other clip's own timeline placement.
+This is a straightforward interval check against `DraftTimeline.
+selected`'s own other clips (same `source_asset_id`), already available,
+no new evidence required.
+
+### 18. Room-tone evidence current status
+**MISSING (as a distinct audio-SIGNAL analysis).** `silence_analysis.py`
+(the only module in this codebase computing anything shaped like
+"quiet"/"gap" evidence) provides `SilenceGap`/`word_silence_gaps`/
+`silence_ratio` -- all derived PURELY from WORD-TIMING GAPS (the
+absence of a word), never from actual decoded AUDIO SIGNAL analysis
+(no RMS, no loudness measurement, no noise-floor estimate, no acoustic
+similarity/continuity measure between two audio regions exists anywhere
+in this codebase). This is a genuine, confirmed gap distinct from mere
+silence-boundary detection (which DOES exist) -- "no word is present
+here" is not the same evidence as "this sounds like the same ambience
+as its neighbor," and the latter does not exist today in any form.
+
+### 19. Audio Join Treatment dependency
+**Direct and structural, not incidental.** D-220C's own Section 16.5
+already names `SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_
+RIGHT`/`AMBIENCE_BRIDGE` as requiring a speech-vs-non-speech
+distinction (Section 16.7) before any authority -- this forensic adds
+the sharper finding that ALL FOUR of those future treatments, exactly
+like J/L timing, would need to reach OUTSIDE a clip's own Boundary-
+finalized window to find safe non-speech/room-tone material to carry or
+bridge with (an `AMBIENCE_CARRY_LEFT`, by D-220C's own definition,
+"carries safe non-speech/room-tone material from the outgoing clip
+ACROSS THE JOIN" -- material that, by definition, sits at or beyond
+that clip's own edge). **A Source Audio Handle Foundation (item 24) is
+therefore shared infrastructure for J/L timing AND every named Audio
+Join Treatment mode, not a J/L-specific mechanism** -- confirming this
+task's own "avoid building separate duplicate mechanisms" instruction
+should be honored by building ONE handle-derivation foundation, not one
+per consuming feature.
+
+### 20. D-221 zero-candidate root-cause classification
+**C. BOTH A AND B MAY CONTRIBUTE; EXISTING EVIDENCE CANNOT DISTINGUISH.**
+This forensic PROVES a genuine, real, code-confirmed architectural
+restriction exists (items 3-6, 12) -- satisfying the core of hypothesis
+B ("current adapter hides potentially usable audio handles"). But
+proving the RESTRICTION exists is not the same as proving it EXPLAINS
+D-221's specific `0/26` result on Video00 -- that would require the
+actual per-pair Boundary audit values (item 9's `original_start`/
+`original_end` vs `result_start`/`result_end`) from the real D-221 RAW
+run, which were never retrieved or analyzed by this task (out of scope:
+this is a docs/forensic-only task, no new RAW, no new artifact
+extraction). It remains equally possible that Video00's own audio-edge
+trims were themselves negligible (i.e., Boundary found almost no silent
+material to trim in the first place, matching hypothesis A -- "Video00
+genuinely contains no usable J/L material even with source audio
+handles"). **Grounded in code/data, not speculation: the gap is real
+(A/B's shared premise); which hypothesis dominates on THIS specific
+video's real numbers is not determinable from evidence already in hand.**
+
+### 21. D-220 tuning impact
+**Explicit, direct impact, stated per this task's own requirement.**
+D-220's own `max_safe_lead`/`max_safe_tail` inputs are, by item 5's own
+finding, artificially bounded to the region INSIDE the Boundary-
+finalized video window. This means: **D-220's anchor-word-duration
+heuristic (`chosen_duration = min(max_safe_window, anchor_word_
+duration)`) cannot yet be properly real-media tuned, because the `max_
+safe_window` half of that formula is itself measuring a structurally
+narrower quantity than what may actually be safely available in the
+source media.** D-220 is NOT redesigned by this task (per its own
+explicit instruction) -- this is a scoping finding about the INPUT
+D-220 receives, not a finding about D-220's own internal formula, which
+remains exactly as D-220 left it, unchanged.
+
+### 22. Controlled-fixture sequencing decision
+**Fixtures should come AFTER the handle gap is addressed**, per this
+task's own explicit conditional ("If current candidate windows are
+structurally incomplete: fixtures should come AFTER the handle gap is
+addressed") -- which this forensic's own verdict (A, item 26) directly
+triggers. **This supersedes D-221's own prior recommendation** (this
+same decision log's own D-221 entry, item 28, named "D-222 -- Pacing V2
+J/L Timing Controlled Perceptual Fixture Qualification" as the
+immediately-next gate) -- that recommendation is not wrong on its own
+terms, but this forensic's own finding means running it BEFORE the
+handle gap is addressed would risk qualifying D-220's own timing
+heuristic against an artificially-narrow evidence source, producing
+conclusions that would need to be re-validated once the handle
+foundation exists anyway. The perceptual-fixture work is not
+cancelled -- only reordered to follow the handle foundation (item 24).
+
+### 23. Canonical clarification recommendation
+**Recommended, not performed by this task** (per its own explicit "Do
+NOT edit canonical doc during D-222 unless explicitly required by the
+forensic conclusion... Docs decision entry only is preferred" -- this
+recommendation does not strictly require the canonical doc edit to be
+usable; it is recorded here for a future, separately-authorized docs
+turn): D-098 Section 16 should eventually clarify that the Boundary-
+finalized VIDEO WINDOW (Section 16.4's own Transition Decision
+authority boundary) is DISTINCT from a Pacing-authorized AUDIO HANDLE
+WINDOW (a new concept this forensic names, sitting conceptually between
+Section 16.4's Transition Decision and Section 16.5's Audio Join
+Treatment) -- the AUDIO handle window may legitimately extend outside
+the VIDEO window within the same physical source file, under the
+safety guards named in items 15-17, without in any way reopening or
+weakening Boundary's own VISUAL/SEMANTIC in-out decision (restates this
+task's own "Using an audio handle must NOT mean Boundary was wrong"
+instruction verbatim). This is a NAMING/CONCEPTUAL clarification only --
+it does not itself authorize any implementation.
+
+### 24. Smallest next gate
+**D-223 -- Pacing V2 Source Audio Handle Foundation (offline only).**
+Renumbered from this task's own implied "D-222 ... AUDIO HANDLE
+FOUNDATION" naming convention, since D-222 is this forensic entry
+itself. Scope for that future, separately-authorized turn: extend
+`pacing_v2_evidence_adapter.py`'s own candidate-timing derivation (never
+`pacing_transition_decision.py`'s own eligibility logic, never `render.
+py`/`render_plan.py`, both already sufficient per items 6/12-14) to
+optionally look outside `[clip.start, clip.end)` within the SAME
+`source_asset_id`'s own physical file, bounded by: (a) the real source
+file's own probed duration (item 6, already-proven mechanism); (b)
+never crossing into any `DraftTimeline.discarded` clip's own span (item
+15); (c) never crossing into any OTHER `DraftTimeline.selected` clip's
+own span (item 17); (d) a word-safety/meaning-safety proof over the
+WIDER window via `decide_transition`'s own already-existing `left_
+words`/`right_words` parameter (item 12/16) -- no new safety logic,
+only a wider input to the existing one. Still zero live authority, zero
+RAW, zero renderer change, zero timing-heuristic change (D-220 itself
+untouched, only its own INPUT potentially widened by a later,
+separately-authorized turn).
+
+### 25. Additional RAW required: NO
+This forensic is answered entirely from existing code and this
+project's own already-documented decision history (D-213 through
+D-221) -- no new RAW, no re-analysis of the D-221 RAW's own full
+artifact, was needed or performed.
+
+### 26. D-222 verdict
+**A. SOURCE AUDIO HANDLE GAP CONFIRMED -- CURRENT POST-BOUNDARY PACING
+VIEW IS TOO NARROW.**
+
+### 27. J/L authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed modes.
+This forensic introduces, enables, or implements no authority of any
+kind -- it is a documentation-only entry, no `cutsell_worker/*.py` file
+touched.
+
+### 28. Audio Join Treatment status
+Unchanged from D-220C: `CLICK_FADE` existing/live; `SHORT_CROSSFADE`/
+`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE` remain
+`ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_AUTHORITY`. This
+forensic sharpens (item 19), never begins, their own shared dependency
+on the same Source Audio Handle Foundation (item 24) D-220C's own
+Section 16.13 already anticipated needing.
+
+### 29. Renderer status
+Unchanged. `render.py`/`render_plan.py` not touched by this task --
+their own existing D-214 mechanical contract is READ and CITED (items 6,
+13-14) as ALREADY SUFFICIENT for the audio-handle model, never modified
+or extended.
+
+### 30. App-roadmap status
+P1/P2/Ordering/Boundary CLOSED ENOUGH (unchanged). Pacing V2: renderer
+execution proven (D-214) -> decision foundation proven (D-215) -> live
+diagnostics/evidence proven (D-216/D-217) -> real-media safety/
+usefulness proven (D-218R) -> fallback identity fixed (D-218F) ->
+advanced-authority architecture forensic (D-219) -> J/L timing policy
+mechanism offline-proven (D-220) -> canonical join/audio-treatment model
+(D-220C) -> J/L timing-amount real-media quality tuning: insufficient
+real examples on Video00 (D-221) -> **source audio handle gap confirmed,
+current Pacing view too narrow (D-222, this entry)** -> next: D-223
+Source Audio Handle Foundation (offline only, NOT implemented here) ->
+[reordered per item 22] controlled perceptual J/L fixture qualification
+(now AFTER the handle foundation) -> bounded J/L authority -> Audio
+Join Treatment architecture/forensic (now explicitly sharing the same
+handle foundation, item 19/24) -> `SHORT_CROSSFADE`/`AMBIENCE_*`
+execution + decision-layer implementation -> micro-overlap final
+authority -> Renderer/export qualification -> unseen-RAW generalization/
+Human Gold parity -> product hardening -> TestFlight -> App Store.
+
+### 31. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. `docs/
+CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` intentionally NOT edited
+(item 23's recommendation is recorded here for a future, separately-
+authorized docs-only turn, per this task's own stated preference).
+
+### 32. Confirmation
+NO `cutsell_worker/*.py` file touched. NO test file added or modified.
+NO workflow file touched. NO RAW dispatched. NO provider/network call.
+NO Boundary behavior change (items 9-10's own audit trail is READ about,
+never modified; no Boundary authority's own trim logic touched). NO
+Renderer change (items 6, 13-14, 29 -- D-214's own contract is cited as
+already sufficient, never extended). NO timing-heuristic change (D-220
+itself, `pacing_v2_timing_policy.py`, untouched -- item 21 is a scoping
+finding about its INPUT, not a change to its own formula). NO live
+authority created, enabled, or implemented anywhere in this task.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+explicit "Then STOP. Wait for Product Owner coordination," the decision
+needed is whether to authorize D-223 (Source Audio Handle Foundation,
+offline only, item 24) as the next, separately-scoped engineering turn,
+and separately, whether to authorize item 23's own canonical-doc
+clarification as an independent, small, docs-only turn. No further
+action is taken on either.
+
+---
