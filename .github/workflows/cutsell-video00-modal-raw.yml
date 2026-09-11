@@ -5603,6 +5603,351 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True, default=str))
           PY
 
+      - name: D-225 Pacing V2 Handle-Aware -> Video00 real-media diagnostic qualification
+        # D-225 (docs/CUTSELL_DECISIONS.md D-225): pure re-projection of
+        # `diagnostics["pacing_v2_handle_aware"]` (D-224, unmodified) --
+        # the SAME already-computed, already-serialized block the engine
+        # already attaches when CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED=1.
+        # Reads the SAME `artifact/video00-modal.json` the D-218R step
+        # above reads. Recomputes NO handle derivation, NO transition
+        # decision, NO timing policy -- every count below is either
+        # copied verbatim from the already-computed block, or a PURE
+        # FILTER/AGGREGATION over its own already-serialized rows (same
+        # convention as D-221's own pure projection of D-218R). The one
+        # exception is `double_count_violation_count`, which re-derives
+        # the source-coordinate interval union from already-serialized
+        # handle/in-window fields ONLY as an audit check confirming
+        # `pacing_v2_handle_aware_evidence._merged_interval_length`'s own
+        # already-offline-proven arithmetic (D-224 test 19) held on this
+        # real run -- this is verification, not a new editorial decision,
+        # and writes back into nothing. FAILS LOUDLY (non-zero exit) when
+        # the block is absent, same as D-218R's own precedent -- D-225's
+        # own directive requires this failure be impossible to miss.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          def merged_interval_length(intervals):
+              # Verification-only reimplementation of D-224's own
+              # `_merged_interval_length` -- used here ONLY to audit that
+              # the already-serialized `combined_j_available_window`/
+              # `combined_l_available_window` values match a real
+              # interval union of the already-serialized handle/in-window
+              # geometry. Never a new decision, never written back.
+              cleaned = sorted((float(s), float(e)) for (s, e) in intervals if e > s)
+              if not cleaned:
+                  return 0.0
+              merged = [list(cleaned[0])]
+              for start, end in cleaned[1:]:
+                  last = merged[-1]
+                  if start <= last[1]:
+                      last[1] = max(last[1], end)
+                  else:
+                      merged.append([start, end])
+              return sum(e - s for s, e in merged)
+
+          def close(a, b, eps=1e-3):
+              if a is None or b is None:
+                  return a == b
+              return abs(float(a) - float(b)) <= eps
+
+          engine = load("artifact/video00-modal.json")
+          out_path = "artifact/d225_pacing_v2_handle_aware_real_media_qualification.json"
+
+          if not isinstance(engine, dict):
+              print("ERROR: artifact/video00-modal.json missing or unparseable -- cannot qualify handle-aware Pacing V2.", file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d225_pacing_v2_handle_aware_real_media_qualification.v1",
+                             "source_status": "engine_json_missing_or_unparseable"}, f, indent=2)
+              sys.exit(1)
+
+          diag = engine.get("diagnostics") if isinstance(engine.get("diagnostics"), dict) else {}
+          block = diag.get("pacing_v2_handle_aware")
+          old_block = diag.get("pacing_v2") if isinstance(diag.get("pacing_v2"), dict) else {}
+          old_rows = old_block.get("transitions") or []
+
+          if not isinstance(block, dict):
+              print("=" * 78, file=sys.stderr)
+              print("ERROR: diagnostics['pacing_v2_handle_aware'] IS MISSING FROM THE SERIALIZED RESULT.", file=sys.stderr)
+              print("Either CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED was not set for this run, or", file=sys.stderr)
+              print("Freeze was blocked before the Pacing seam was ever reached, or a real", file=sys.stderr)
+              print("regression. FAILING LOUDLY per this task's own explicit requirement.", file=sys.stderr)
+              print("=" * 78, file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d225_pacing_v2_handle_aware_real_media_qualification.v1",
+                             "source_status": "engine_json_present", "handle_aware_block_status": "MISSING_FROM_SERIALIZATION",
+                             "primary_d225_answer": "HANDLE_EVIDENCE_INSUFFICIENT"},
+                            f, indent=2)
+              sys.exit(1)
+
+          summary = {"schema_version": "cutsell.video00.d225_pacing_v2_handle_aware_real_media_qualification.v1"}
+          summary["source_status"] = "engine_json_present"
+          summary["handle_aware_block_status"] = "PRESENT"
+          summary["transition_count"] = block.get("transition_count")
+          rows = block.get("transitions") or []
+          summary["transitions"] = rows
+          handles = block.get("handle_diagnostics") or []
+          summary["handle_diagnostics"] = handles
+          run_summary = block.get("run_summary") or {}
+          summary["run_summary"] = run_summary
+
+          # --- Handle summary (item "HANDLE SUMMARY") -- pure counts/
+          # filters over already-serialized handle_diagnostics rows. ---
+          pre_handles = [h for h in handles if h.get("direction") == "PRE_ROLL"]
+          post_handles = [h for h in handles if h.get("direction") == "POST_ROLL"]
+          summary["pre_handle_count"] = len(pre_handles)
+          summary["post_handle_count"] = len(post_handles)
+          summary["safe_pre_handle_count"] = run_summary.get("safe_pre_handle_count")
+          summary["safe_post_handle_count"] = run_summary.get("safe_post_handle_count")
+          summary["blocked_pre_handle_count"] = run_summary.get("blocked_pre_handle_count")
+          summary["blocked_post_handle_count"] = run_summary.get("blocked_post_handle_count")
+          summary["unknown_pre_handle_count"] = sum(1 for h in pre_handles if h.get("word_coverage_status") == "WORD_COVERAGE_UNKNOWN")
+          summary["unknown_post_handle_count"] = sum(1 for h in post_handles if h.get("word_coverage_status") == "WORD_COVERAGE_UNKNOWN")
+          summary["speech_present_pre_handle_count"] = sum(1 for h in pre_handles if h.get("word_coverage_status") == "WORDS_PRESENT")
+          summary["speech_present_post_handle_count"] = sum(1 for h in post_handles if h.get("word_coverage_status") == "WORDS_PRESENT")
+          summary["total_safe_pre_handle_duration"] = sum(
+              float(h.get("available_duration") or 0.0) for h in pre_handles if h.get("handle_status") == "SAFE_NON_SPEECH_HANDLE"
+          )
+          summary["total_safe_post_handle_duration"] = sum(
+              float(h.get("available_duration") or 0.0) for h in post_handles if h.get("handle_status") == "SAFE_NON_SPEECH_HANDLE"
+          )
+
+          # --- False-start/retry safety audit -- a "violation" here means
+          # a handle whose OWN already-computed discarded_overlap_status
+          # says it touches discarded material, yet its OWN already-
+          # computed handle_status is nonetheless SAFE_NON_SPEECH_HANDLE
+          # -- a firewall bypass, never expected, and never fixable from
+          # this workflow step (would be a cutsell_worker change, out of
+          # this task's own scope; only reported). ---
+          discarded_cases = [h for h in handles if h.get("discarded_overlap_status") == "OVERLAPS_DISCARDED_MATERIAL"]
+          summary["discarded_handle_case_count"] = len(discarded_cases)
+          summary["discarded_handle_reuse_violation_count"] = sum(
+              1 for h in discarded_cases if h.get("handle_status") == "SAFE_NON_SPEECH_HANDLE"
+          )
+
+          # --- Meaning firewall audit (symmetric logic). ---
+          meaning_blocked = [h for h in handles if h.get("handle_status") == "BLOCKED_MEANING_CRITICAL"]
+          summary["meaning_blocked_handle_count"] = len(meaning_blocked)
+          summary["meaning_handle_violation_count"] = sum(
+              1 for h in handles
+              if h.get("meaning_safety_status") == "BLOCKED_MEANING_CRITICAL" and h.get("handle_status") == "SAFE_NON_SPEECH_HANDLE"
+          )
+
+          # --- Word-coverage firewall audit (symmetric logic). ---
+          unknown_coverage = [h for h in handles if h.get("word_coverage_status") == "WORD_COVERAGE_UNKNOWN"]
+          summary["unknown_word_coverage_handle_count"] = len(unknown_coverage)
+          summary["unknown_word_coverage_reuse_violation_count"] = sum(
+              1 for h in unknown_coverage if h.get("handle_status") == "SAFE_NON_SPEECH_HANDLE"
+          )
+
+          # --- Old vs handle-aware J/L availability aggregates -- copied
+          # verbatim from the already-computed run_summary. ---
+          summary["old_j_candidate_count"] = run_summary.get("old_j_candidate_count")
+          summary["handle_aware_j_candidate_count"] = run_summary.get("handle_aware_j_candidate_count")
+          summary["j_candidates_unlocked_by_handle_count"] = run_summary.get("j_candidates_unlocked_by_handle_count")
+          summary["old_l_candidate_count"] = run_summary.get("old_l_candidate_count")
+          summary["handle_aware_l_candidate_count"] = run_summary.get("handle_aware_l_candidate_count")
+          summary["l_candidates_unlocked_by_handle_count"] = run_summary.get("l_candidates_unlocked_by_handle_count")
+          summary["unknown_handle_count"] = run_summary.get("unknown_handle_count")
+
+          # --- No-double-counting audit -- re-derives the interval union
+          # from already-serialized fields per row and compares against
+          # the already-serialized combined_*_available_window. A safe
+          # (non-eligible) handle contributes nothing to the expected
+          # union, mirroring D-224's own eligibility gate exactly. ---
+          double_count_violations = 0
+          for row in rows:
+              # J side. `expected_j` is `None` ONLY when BOTH the old
+              # in-window value is genuinely unknown (`None`, never `0.0`
+              # -- a real measured zero is not "unknown") AND no eligible
+              # handle contributes -- mirrors D-224's own `_combined_j_
+              # availability` exactly, so a known-zero combined result
+              # (`0.0`) is never mistaken for a violation against `None`.
+              old_head = row.get("old_in_window_j_head")
+              pre_status = row.get("right_pre_handle_status")
+              pre_start = row.get("right_pre_handle_start")
+              pre_end = row.get("right_pre_handle_end")
+              combined_j = row.get("combined_j_available_window")
+              handle_j_duration = pre_end - pre_start if (
+                  pre_status == "SAFE_NON_SPEECH_HANDLE" and pre_start is not None and pre_end is not None
+              ) else 0.0
+              if old_head is None and handle_j_duration <= 0.0:
+                  expected_j = None
+              else:
+                  intervals = []
+                  if old_head is not None and old_head > 0 and pre_end is not None:
+                      intervals.append((pre_end, pre_end + old_head))
+                  elif old_head is not None and old_head > 0:
+                      # No handle geometry available at all -- old-only
+                      # interval, anchored arbitrarily since only its
+                      # LENGTH is checked.
+                      intervals.append((0.0, old_head))
+                  if handle_j_duration > 0.0:
+                      intervals.append((pre_start, pre_end))
+                  expected_j = merged_interval_length(intervals)
+              if not close(expected_j, combined_j):
+                  double_count_violations += 1
+
+              # L side, symmetric.
+              old_tail = row.get("old_in_window_l_tail")
+              post_status = row.get("left_post_handle_status")
+              post_start = row.get("left_post_handle_start")
+              post_end = row.get("left_post_handle_end")
+              combined_l = row.get("combined_l_available_window")
+              handle_l_duration = post_end - post_start if (
+                  post_status == "SAFE_NON_SPEECH_HANDLE" and post_start is not None and post_end is not None
+              ) else 0.0
+              if old_tail is None and handle_l_duration <= 0.0:
+                  expected_l = None
+              else:
+                  intervals_l = []
+                  if old_tail is not None and old_tail > 0 and post_start is not None:
+                      intervals_l.append((post_start - old_tail, post_start))
+                  elif old_tail is not None and old_tail > 0:
+                      intervals_l.append((0.0, old_tail))
+                  if handle_l_duration > 0.0:
+                      intervals_l.append((post_start, post_end))
+                  expected_l = merged_interval_length(intervals_l)
+              if not close(expected_l, combined_l):
+                  double_count_violations += 1
+          summary["double_count_violation_count"] = double_count_violations
+
+          # --- Primary D-225 question. ---
+          unlocked_total = (summary["j_candidates_unlocked_by_handle_count"] or 0) + (summary["l_candidates_unlocked_by_handle_count"] or 0)
+          safe_total = (summary["safe_pre_handle_count"] or 0) + (summary["safe_post_handle_count"] or 0)
+          if unlocked_total > 0:
+              summary["primary_d225_answer"] = "HANDLES_UNLOCK_REAL_JL_CANDIDATES"
+          elif safe_total > 0:
+              summary["primary_d225_answer"] = "SAFE_HANDLES_EXIST_BUT_DO_NOT_UNLOCK_JL"
+          else:
+              summary["primary_d225_answer"] = "NO_SAFE_HANDLES_EXIST_ON_VIDEO00"
+
+          # --- Mode distribution (old vs handle-aware). ---
+          def mode_counts(field):
+              return {
+                  "hard_cut": sum(1 for r in rows if r.get(field) == "HARD_CUT"),
+                  "tight_cut": sum(1 for r in rows if r.get(field) == "TIGHT_CUT"),
+                  "j_cut": sum(1 for r in rows if r.get(field) == "J_CUT"),
+                  "l_cut": sum(1 for r in rows if r.get(field) == "L_CUT"),
+              }
+          summary["old_mode_distribution"] = mode_counts("old_d215_mode")
+          summary["handle_aware_mode_distribution"] = mode_counts("new_handle_aware_diagnostic_mode")
+
+          # --- Cross-reference the OLD-evidence plan's own already-
+          # serialized word/meaning/double-speech safety fields from the
+          # D-216/D-217 `pacing_v2` block at the SAME transition index --
+          # the NEW (handle-aware) plan's own per-field safety diagnostics
+          # are not separately serialized by D-224 (an honest gap, same
+          # convention as D-221's own anchor-word-duration gap -- never
+          # fabricated, never recomputed by re-invoking decide_transition
+          # here, which would require the original clip objects this
+          # artifact does not carry). ---
+          def old_safety_for_index(idx):
+              if 0 <= idx < len(old_rows):
+                  r = old_rows[idx]
+                  return {
+                      "relationship_hint": r.get("relationship_hint"),
+                      "old_plan_word_safety_status": r.get("word_safety_status"),
+                      "old_plan_meaning_safety_status": r.get("meaning_safety_status"),
+                      "old_plan_double_speech_status": r.get("double_speech_status"),
+                      "new_plan_safety_fields_status": "NOT_SEPARATELY_SERIALIZED_BY_D224_ONLY_OLD_PLAN_SAFETY_AVAILABLE",
+                  }
+              return {
+                  "relationship_hint": None, "old_plan_word_safety_status": None,
+                  "old_plan_meaning_safety_status": None, "old_plan_double_speech_status": None,
+                  "new_plan_safety_fields_status": "OLD_ROW_NOT_FOUND_AT_THIS_INDEX",
+              }
+
+          j_unlock_cases = []
+          l_unlock_cases = []
+          for idx, row in enumerate(rows):
+              old_mode = row.get("old_d215_mode")
+              new_mode = row.get("new_handle_aware_diagnostic_mode")
+              if new_mode == "J_CUT" and old_mode != "J_CUT":
+                  case = {
+                      "transition_index": idx,
+                      "right_clip_id": row.get("right_clip_id"),
+                      "right_pre_handle_start": row.get("right_pre_handle_start"),
+                      "right_pre_handle_end": row.get("right_pre_handle_end"),
+                      "right_pre_handle_status": row.get("right_pre_handle_status"),
+                      "combined_j_available_window": row.get("combined_j_available_window"),
+                      "combined_j_source": row.get("combined_j_source"),
+                      "d220_max_safe_window_evaluated": row.get("d220_j_max_safe_window_evaluated"),
+                      "d220_chosen_duration": row.get("d220_j_chosen_duration"),
+                  }
+                  case.update(old_safety_for_index(idx))
+                  j_unlock_cases.append(case)
+              if new_mode == "L_CUT" and old_mode != "L_CUT":
+                  case = {
+                      "transition_index": idx,
+                      "left_clip_id": row.get("left_clip_id"),
+                      "left_post_handle_start": row.get("left_post_handle_start"),
+                      "left_post_handle_end": row.get("left_post_handle_end"),
+                      "left_post_handle_status": row.get("left_post_handle_status"),
+                      "combined_l_available_window": row.get("combined_l_available_window"),
+                      "combined_l_source": row.get("combined_l_source"),
+                      "d220_max_safe_window_evaluated": row.get("d220_l_max_safe_window_evaluated"),
+                      "d220_chosen_duration": row.get("d220_l_chosen_duration"),
+                  }
+                  case.update(old_safety_for_index(idx))
+                  l_unlock_cases.append(case)
+          summary["j_unlock_cases"] = j_unlock_cases
+          summary["l_unlock_cases"] = l_unlock_cases
+
+          # --- D-142/renderer firewall facts -- structural, never re-
+          # derived (D-216/D-217/D-224 already offline-prove these are
+          # always 0/0 by construction: neither module ever writes back
+          # into `draft.selected`, D-142's own live mode, or any
+          # `RenderSegment`). ---
+          summary["advanced_recommendation_count"] = unlocked_total
+          summary["advanced_execution_count"] = 0
+          summary["live_independent_audio_window_count"] = 0
+
+          # --- Future Audio Join Treatment candidates -- NOT room tone,
+          # NOT an implementation, only a count of already-classified safe
+          # non-speech handles that a future, separately-authorized gate
+          # could consider. ---
+          summary["future_audio_join_treatment_candidate_count"] = safe_total
+          summary["room_tone_classification_status"] = "ROOM_TONE_CLASSIFICATION_NOT_YET_AVAILABLE"
+
+          # --- Usefulness classification (reporting-only vocabulary this
+          # task's own directive names). ---
+          if double_count_violations > 0 or summary["discarded_handle_reuse_violation_count"] or summary["meaning_handle_violation_count"] or summary["unknown_word_coverage_reuse_violation_count"]:
+              usefulness = "MATERIALLY_WRONG"
+          elif unlocked_total > 0:
+              usefulness = "USEFUL_AND_BOUNDED"
+          elif safe_total > 0:
+              usefulness = "USEFUL_BUT_LIMITED"
+          else:
+              usefulness = "SAFE_BUT_NO_NEW_VALUE_ON_VIDEO00"
+          summary["pacing_value_classification"] = usefulness
+
+          os.makedirs("artifact", exist_ok=True)
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True, default=str)
+
+          size = os.path.getsize(out_path)
+          print("--- D-225 Pacing V2 Handle-Aware -> Video00 Real-Media Diagnostic Qualification (pure re-projection + audit-only recheck of already-computed diagnostics['pacing_v2_handle_aware'] -- recomputes NO handle/transition/timing decision) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps({k: v for k, v in summary.items() if k not in ("transitions", "handle_diagnostics")}, indent=2, sort_keys=True, default=str))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -5636,6 +5981,7 @@ jobs:
             artifact/d209_ordering_real_media_qualification.json
             artifact/d218_pacing_v2_real_media_qualification.json
             artifact/d221_pacing_v2_jl_timing_candidates.json
+            artifact/d225_pacing_v2_handle_aware_real_media_qualification.json
           retention-days: 14
           if-no-files-found: warn
 
