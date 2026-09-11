@@ -54646,3 +54646,190 @@ authorization before proceeding. No further action is taken on it by
 this task. Waiting for Product Owner coordination, per directive.
 
 ---
+
+## D-235P — SHARED ATTEMPT/PROPOSITION IDENTITY SEAM: CANONICAL WORD-MEMBERSHIP IMPLEMENTATION (OFFLINE ONLY)
+
+**Status:** IMPLEMENTED, OFFLINE ONLY. No RAW/Modal/RunPod/provider run. No
+Freeze/materiality/repair-loop/resolver/P1-grouping/P2/BestTake/Family/
+Ordering/Boundary/Pacing/Audio-Join authority change.
+
+**Objective (post D-235O verdict C):** implement the smallest additive
+provenance seam D-235O designed — exact canonical word-index-set membership
+bridging a reconstructed attempt (`CandidateTake`, post
+`attempt_reconstruction.py`) to a `LanguageAttempt` — as a bounded, pure,
+non-live-wired module.
+
+**Contiguity proof (required before choosing a representation):**
+reconstructed-attempt word membership is NOT PROVABLY ALWAYS CONTIGUOUS.
+`take_segmentation.py`'s own join logic (`_join_takes` call sites in
+`_repair_boundary_fragments`, and the D-097-Priority-D polarity rejoin)
+explicitly tolerates a small negative gap (`-0.02 <= gap`), i.e. a
+candidate may begin fractionally before its predecessor ends — direct,
+literal evidence against an unconditional "always non-overlapping,
+therefore always contiguous in the canonical per-source sort" claim, since
+nothing in the codebase forbids a third candidate's words from falling
+inside such a window in a degenerate/adversarial timing case. Both real
+global-order authorities already in this codebase
+(`language_spine.adapt_words_to_language_words`, `canonical_asr_evidence`)
+explicitly RE-SORT by `(start, end)` rather than trusting segment/candidate
+order — itself evidence the codebase's own authors never treated that
+assumption as safe to skip. Per the task's own "do not assume" instruction,
+the reconstructed-attempt side therefore uses an explicit immutable index
+SET (`word_indices: Tuple[int, ...]`), never a bare start/end range.
+
+The `LanguageAttempt` side is the opposite and PROVABLY contiguous: an
+utterance's `phrase_start_index`/`phrase_end_index` is built by direct
+slicing; an attempt's `utterance_ids` are always CONSECUTIVE utterances
+(`build_language_attempts` only ever appends the NEXT utterance, never
+skips one) — so its word-index range is a genuine composition of
+already-contiguous ranges over the shared canonical ordinal space
+(`LanguageWord.word_index`). Both sides are still materialized as the same
+`word_indices` tuple shape for one uniform comparison code path (proven
+by `test_language_attempt_word_membership_always_contiguous`).
+
+**Word identity source:** every canonical index used is
+`language_spine.LanguageWord.word_index` — the same numbering
+`language_spine_live_integration.build_live_language_spine_for_source`
+already assigns from `RawUnderstandingMap.word_timings` (D-235O's own
+forensic: the exact same `contracts.Word` objects `CandidateTake.words`
+already carries, no second ASR pass). Matching is a deterministic,
+monotonic positional value-match on `(start, end, text)` — never Python
+object identity, never a fuzzy/text-similarity search, never a
+timestamp-proximity threshold.
+
+**New production module:** `cutsell_worker/shared_attempt_word_identity.py`.
+Key exports: `WordMembership`; `build_reconstructed_attempt_word_membership`;
+`build_language_attempt_word_membership`;
+`classify_word_membership_relationship` (pairwise, pure set arithmetic);
+`match_reconstructed_attempt_against_language_attempts` (N-way, supports
+1→N exact partition and containment, never forces a false 1:1);
+`build_attempt_language_identity_matches_for_source` (batch, per-source);
+`exact_proposition_candidate_ids_for_match` (returns the exact bounded SET
+of proposition ids only for `AUTHORITATIVE_RELATIONSHIP_STATUSES` —
+`EXACT_SAME_MEMBERSHIP` and the exact 1→N partition; containment and
+partial overlap are evidence, never auto-promoted, per the task's own
+"conservative rule"); `p1_identity_provenance_for_clip` (Part 4 bounded P1
+adapter — exact word identity always wins when authoritative, the existing
+D-199 heuristic bridge is honestly labelled `HEURISTIC_OVERLAP`, never
+silently reported as exact); `attempt_language_identity_match_diagnostics`
+/ `shared_attempt_word_identity_diagnostics` (tail-safe, no transcript
+dump).
+
+**Relationship vocabulary (8 values, exactly as specified):**
+`EXACT_SAME_MEMBERSHIP`, `EXACT_RECONSTRUCTED_CONTAINS_LANGUAGE`,
+`EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED`,
+`ONE_RECONSTRUCTED_TO_MULTIPLE_LANGUAGE_ATTEMPTS_EXACT_PARTITION`,
+`EXACT_PARTIAL_WORD_MEMBERSHIP_OVERLAP`, `DISJOINT`, `SOURCE_MISMATCH`,
+`MISSING_WORD_IDENTITY`, plus `AMBIGUOUS` for a partial-identity-status
+input. No numeric threshold, no IoU/overlap-ratio anywhere.
+
+**1→N / N→1:** a reconstructed attempt subdivided into an exact partition
+of multiple `LanguageAttempt`s is `ONE_RECONSTRUCTED_TO_MULTIPLE_
+LANGUAGE_ATTEMPTS_EXACT_PARTITION` (AUTHORITATIVE) whenever the candidates'
+word-index sets are pairwise disjoint and their union exactly equals the
+reconstructed set — no time heuristic, proven by
+`test_06_exact_one_to_n_partition`/`test_06b_...never_called_ambiguous`.
+N→1 (multiple reconstructed attempts inside one `LanguageAttempt`) is not
+forced into a false 1:1 either — each classifies honestly as containment
+(proven by `test_07_n_to_one_structurally_possible_not_forced_to_1to1`).
+
+**Retry/correction/continuation/process-speech safety:** proven via
+distinct canonical word-index positions for repeated identical text at
+different source positions, retries, corrections, false starts, and
+recording-process speech (tests 13–18) — membership never collapses on
+shared text.
+
+**Multilingual safety:** pure value matching on `(start, end, text)`; no
+`if language == ...` branch anywhere (grep-verified, tests 19–21).
+
+**Existing IDs unchanged:** `clip_id`/`attempt_id`
+(`canonical_identity.mint_attempt_id`)/`LanguageAttempt.attempt_id`
+(`language_utterance_attempt._attempt_id`)/`PropositionCandidate.
+proposition_candidate_id`/P1's `editorial_moment_id` are none minted, read
+as an authority, or touched by this module (grep-verified absence of
+`mint_attempt_id`/`_attempt_id(`/`_proposition_id(`/`hashlib`/
+`editorial_moment_id`/`classify_editorial_moment` in the module's own
+code, tests 25–28).
+
+**Additive schema field:** `contracts.CandidateTake.word_indices:
+Tuple[int, ...] = ()` — same D-050A "shadow field, no consumer yet"
+precedent as `source_span_id`/`attempt_id`/`realization_id`. NOT set by
+any live call site (`take_segmentation.py`/`attempt_reconstruction.py`/
+`pipeline.py` all confirmed absent of `word_indices=`, test
+`test_no_live_call_site_sets_word_indices`); the module computes
+membership fresh from `.words` every time, never reading this field back.
+Old artifacts / missing-field candidates fail open to
+`MISSING_WORD_IDENTITY`, never a guess. `DraftClip` is deliberately left
+untouched — nothing in the D-235J–D-235O lost-atom evidence chain needs
+this field ON `DraftClip` itself; a `clip_id`-keyed exact-identity lookup
+(this module's own Part 4 output) is sufficient, and `DraftClip.clip_id ==
+CandidateTake.clip_id` 1:1 (D-235N's own confirmed identity chain), so no
+`pipeline.py::_draft_clip` change was needed or made.
+
+**No live wiring:** confirmed absent from `pipeline.py`,
+`take_segmentation.py`, `attempt_reconstruction.py`,
+`editorial_moment_sequence_integration.py`,
+`language_spine_live_integration.py`, `take_judge.py`,
+`deterministic_best_take_authority.py`, `boundary_engine_pass.py`,
+`dialogue_pacing_transition.py`, `repair_loop.py`,
+`hybrid_session_cleanup.py`, `semantic_idea_equivalence.py`,
+`universal_clean_cut.py` (module-leaf grep tests). D-235N's own forensic
+(maximum-time-overlap bridging is non-authoritative) is NOT superseded in
+the live path — `language_spine_live_integration.language_attempts_by_
+span_id_for_source` remains completely unchanged and still the only
+bridge any live P1 call site consults; this module offers a separate,
+more precise evidence source a future, separately-authorized task
+(D-235Q+) may choose to wire in.
+
+**Atom ownership NOT solved (by design):** `exact_proposition_candidate_
+ids_for_match` returns the WHOLE exact set when a reconstructed attempt
+maps to multiple propositions; it never guesses which individual
+proposition owns a specific lost atom — out of scope per the task's own
+"Do Not Solve Atom Ownership Yet" instruction (proven by
+`test_32_multiple_propositions_retained_as_a_set` returning the full
+set, and `test_33_no_atom_level_proposition_guessing`'s structural check).
+
+**D-235M/N/O impact:** none of the three prior modules were modified
+(grep-confirmed zero references to `shared_attempt_word_identity` in
+either); D-235N's own forensic stays regression truth (test
+`test_46_language_spine_live_integration_bridge_still_labelled_maximum_
+overlap`). D-235O's own test suite required one small, expected update:
+`test_17_no_new_canonical_id_minted_by_this_gate`'s file-family snapshot
+was widened to include this gate's own authorized new file (the two
+specific filenames D-235O's design text itself proposed are still both
+absent, per `test_16`) — a non-behavioral test-only fix, the same pattern
+D-235J used to repair D-235G's own test when a later, legitimate change
+broke an over-narrow snapshot assertion.
+
+**Backward compatibility:** fully additive. No existing field renamed or
+removed, no migration required.
+
+**Tests:** `tests/test_cutsell_d235p_shared_attempt_word_identity.py`, 60
+tests covering the full 47-item fixture matrix plus AST-based (never
+self-referential string-content) structural safety checks for no fuzzy
+text, no timestamp/IoU threshold authority, no object-identity dependence,
+no provider/network/subprocess call, and no live-authority import. One
+test-only fix to `test_cutsell_d235o_shared_attempt_proposition_identity_
+design.py` (documented above). D-235 cumulative bundle:
+307/307 (246 pre-existing D-235J–O + 60 new + 1 fixed = confirmed via
+`pytest tests/ -k d235`). Full offline suite: see confirmation below.
+`compileall` clean (excluding the chronic pre-existing, unrelated
+`jobs_smoke.py` syntax error).
+
+**Verdict: A** — SHARED WORD-MEMBERSHIP IDENTITY SEAM OFFLINE PROVEN:
+exact ATTEMPT→LANGUAGEATTEMPT→PROPOSITION SET is available whenever
+canonical word evidence exists on both sides, end-to-end through the real
+Language Spine pipeline (`test_end_to_end_exact_match_through_real_
+language_spine`). Canonical status:
+`SHARED_ATTEMPT_PROPOSITION_IDENTITY_WORD_MEMBERSHIP_OFFLINE_PROVEN`.
+
+**Exact next gate named, NOT implemented here:** D-235Q — COMPLETE
+EDITORIAL-REQUIREMENT + LOST-ATOM MATERIALITY INTEGRATION, OFFLINE ONLY
+(may consume this gate's exact proposition-SET identity to close D-235L's
+own `EDITORIALLY_REQUIRED` reachability gap; still no Freeze authority).
+
+**Engine patch required after this?** No — this gate's own scope is
+complete; D-235Q is a separate, not-yet-authorized integration task.
+**Paid compute required?** No. **RAW required?** No.
+
+Then STOP. Do NOT implement D-235Q. Wait for Product Owner coordination.

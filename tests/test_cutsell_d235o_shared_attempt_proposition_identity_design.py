@@ -149,16 +149,24 @@ class TestDesignOnlyNoImplementation:
         assert not os.path.exists("cutsell_worker/shared_attempt_proposition_identity.py")
 
     def test_17_no_new_canonical_id_minted_by_this_gate(self):
-        # This gate's own production footprint is exactly zero new files
-        # (test_16 above) -- there is no module for a new id-minting
-        # function to live in.
+        # This gate's (D-235O's) own production footprint is exactly zero
+        # new files (test_16 above) -- there is no module for a new
+        # id-minting function to live in. D-235P (a SEPARATELY-authorized,
+        # later gate) went on to implement D-235O's own verdict-C
+        # recommendation as `shared_attempt_word_identity.py` -- neither
+        # of the two specific filenames D-235O's own design text proposed
+        # (test_16, still both absent) -- so this snapshot is widened to
+        # include that later, authorized addition rather than pretending
+        # the family can never grow; it still proves D-235O's OWN gate,
+        # by itself, minted zero new canonical ids in zero new files.
         import os
         new_files = [
             f for f in os.listdir("cutsell_worker")
             if f.startswith("lost_atom_") or f.startswith("shared_attempt_")
         ]
-        expected_pre_existing = {
+        expected_after_d235o_and_authorized_successors = {
             "lost_atom_editorial_requirement_evidence.py",
             "lost_atom_proposition_identity_forensic.py",
+            "shared_attempt_word_identity.py",
         }
-        assert set(new_files) == expected_pre_existing
+        assert set(new_files) == expected_after_d235o_and_authorized_successors

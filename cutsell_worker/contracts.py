@@ -135,6 +135,21 @@ class CandidateTake:
     source_span_id: Optional[str] = None
     attempt_id: Optional[str] = None
     realization_id: Optional[str] = None
+    # D-235P: additive-only canonical word-membership provenance for this
+    # reconstructed attempt -- the exact set of canonical, source-scoped
+    # word ordinal positions (`language_spine.LanguageWord.word_index`'s
+    # own numbering) this candidate's own `.words` occupy. Same D-050A
+    # "shadow field, no consumer yet" precedent as the three ids above:
+    # defaulted to `()` so every existing construction site stays valid
+    # unchanged, and NOT populated by any live call site in
+    # `take_segmentation.py`/`attempt_reconstruction.py`/`pipeline.py` --
+    # only `shared_attempt_word_identity.py`'s own OFFLINE derivation
+    # helper computes this (fresh, from `.words`, never read back from
+    # this field), and only a caller that explicitly attaches it via
+    # `dataclasses.replace()` would ever see it non-empty. See
+    # `shared_attempt_word_identity.py`'s module docstring for the full
+    # design note and docs/CUTSELL_DECISIONS.md D-235P.
+    word_indices: Tuple[int, ...] = ()
 
     @property
     def duration_sec(self) -> float:
