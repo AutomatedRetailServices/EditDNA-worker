@@ -53930,3 +53930,208 @@ completeness investigation first. No further action is taken on it by
 this task. Waiting for Product Owner coordination, per directive.
 
 ---
+
+## D-235M -- Lost Semantic Atom EDITORIAL-REQUIREMENT Evidence Foundation, OFFLINE ONLY (post D-235L)
+
+**Branch/HEAD verified before edits:** `feature/runpod-pod-on-demand` @
+`8fde80a` (D-235L), clean tree.
+
+**Objective.** D-235L's own verdict was B: `EDITORIALLY_REQUIRED` (content
+necessary for story completeness -- setup/consequence/causal bridge/
+required CTA/conclusion -- without being meaning-critical at the claim
+level) had no reachable evidence path. This task's job was to AUDIT
+existing story/coverage/proposition/P1/P2 structures for a real,
+deterministic identity bridge from a `_lost_semantic_atoms()` row's own
+`clip_id`, and build the smallest safe evidence foundation from whatever
+that audit found -- never a live Freeze authority, never a second story
+engine.
+
+### The identity audit (the core finding)
+
+Traced end to end through the real, current code (no modification):
+
+1. **`clip_id` -> P1 `EditorialMoment` is EXACT.**
+   `editorial_moment_sequence_integration.py::build_editorial_moments_
+   for_source` sets `EditorialMomentUnderstanding.attempt_id = take.
+   clip_id` and `EditorialMoment.source_span_id = take.clip_id` verbatim
+   ("reuse the REAL existing canonical clip identity -- no new id
+   minted"), built over the FULL per-source candidate pool
+   (`takes_for_source: Iterable[CandidateTake]`), not only the selected
+   subset -- a discarded clip genuinely has its own `EditorialMoment`
+   when a matching `UnderstandingSpan` exists.
+2. **`clip_id` -> P2 `WholeVideoEditorialRegion.moment_ids` is EXACT**
+   (inherited directly from item 1); its `proposition_candidate_ids`
+   field inherits the SAME non-exact bridge as item 3.
+3. **`clip_id` -> `PropositionCandidate.editorial_slot_evidence` (the
+   ONLY structured object in the codebase carrying a story-FUNCTION/slot
+   signal distinct from meaning-criticality -- `SLOT_HOOK`/`SLOT_SETUP`/
+   `SLOT_PROBLEM`/`SLOT_FEATURE`/`SLOT_PROOF`/`SLOT_CONCLUSION`/
+   `SLOT_CTA`/`SLOT_OTHER`) has NO EXACT IDENTITY BRIDGE.**
+   `PropositionCandidate` (`language_proposition_relation.py`, D-169) has
+   no `clip_id` field at all -- it is keyed by `source_asset_id` +
+   `attempt_ids` from the Language Spine's OWN, INDEPENDENT word-timing-
+   gap + structural-boundary segmentation (D-166/D-168), which
+   `language_spine_live_integration.py`'s own module docstring says
+   explicitly "will not, in general, align exactly with" P1's take-keyed
+   spans. The only bridge, `language_attempts_by_span_id_for_source`, is
+   a "deterministic MAXIMUM-OVERLAP match" -- not an identity equality.
+   **This is the one identity seam this task names as still missing.**
+4. **Family-level coverage** (`missing_idea_coverage`, D-235L's own
+   `critical_claim_conflict` concept) is real and reusable but IDEA-
+   scoped, never proof of one specific discarded atom's own unique
+   function within an otherwise-complete idea.
+5. **Downstream causal dependency** (`causal_order_validator.py`'s
+   `find_causal_order_breaks`, real `clip_id`-keyed
+   `required_clip_id`/`dependent_clip_id` pairs) is genuine and exact but
+   only a VALIDATION check (fires on an already-frozen order break) with
+   an optional, provider-backed arbiter -- not a general query this
+   module can invoke itself without a provider call.
+
+### What was built
+
+**`cutsell_worker/lost_atom_editorial_requirement_evidence.py`** (new):
+pure module, zero live-authority imports, zero P1/P2/proposition
+CONSTRUCTION calls (only read-only `MOMENT_ROLE_*`/`AUDIENCE_DELIVERY_*`/
+`SLOT_*` vocabulary constants imported, never redefined). Core type
+`LostAtomEditorialRequirementEvidence` (frozen dataclass): `clip_id`,
+`coverage_status`, `story_role_status`, `slot_evidence_status`,
+`unique_story_function_status`, `replacement_coverage_status`,
+`downstream_dependency_status` (all tri-state `FOUND`/`NOT_FOUND`/
+`UNKNOWN`), `editorial_requirement_status`, `reason_codes`, `provenance`.
+No master score.
+
+**Requirement-status vocabulary** (exactly the directive's five states):
+`REQUIRED`, `NOT_REQUIRED`, `REDUNDANT_REQUIRED_FUNCTION_PRESERVED`,
+`INSUFFICIENT_EVIDENCE`, `CONFLICTED`.
+
+**Identity bridge used:** the function accepts ONLY caller-supplied,
+already-resolved signals -- it performs no P1/P2/proposition lookup
+itself. An `identity_mapping_status` parameter
+(`EXACT`/`HEURISTIC_OVERLAP`/`AMBIGUOUS`/`NONE`) forces the caller to be
+honest about HOW a signal was resolved; `editorial_slot_evidence` is only
+ever treated as authoritative when its own `slot_evidence_source ==
+EXACT` -- since no such exact source currently exists in the real engine
+(per finding 3 above), this path is provably reachable only via a
+synthetic/hypothetical fixture today, never real data, and the module
+documents this honestly rather than silently accepting the overlap match.
+
+**Source-clip mapping:** exact, via `clip_id` (P1 `EditorialMoment`
+role/`audience_delivery_status`).
+**Proposition mapping:** NOT exact -- the one missing seam.
+**P1 mapping:** exact, reused (recording-process role, audience-delivery
+support).
+**P2 mapping:** exact for moment membership; not independently exact for
+proposition-derived fields (inherits the seam).
+**Story-completeness reuse:** `idea_coverage_status` parameter, mirroring
+D-235L's own `critical_claim_conflict` pattern (idea/family-scoped, never
+invented as atom-scoped).
+**Coverage-ledger reuse:** row's own `content_loss_suppressed_by`/
+`preserving_realization_id` reused as the closest existing proxy for
+`REDUNDANT_REQUIRED_FUNCTION_PRESERVED` when no dedicated function-level
+signal is supplied (honestly labelled as a proxy in a reason code).
+**Slot-evidence reuse:** `editorial_slot_evidence`/`slot_evidence_source`,
+gated as above.
+**Dependency evidence:** `downstream_dependency_present`, caller-supplied
+from real `causal_order_validator.py` evidence only, never guessed from
+chronology.
+**Chronology firewall:** no raw timing/ordering parameter exists on the
+function signature at all -- test-enforced.
+**Retry/process firewall:** a clip whose EXACT P1 role is process-shaped
+(`RECORDING_PROCESS`/`FALSE_START`/`ABANDONED_ATTEMPT`/`RETRY`/
+`CORRECTION`/`POST_TAKE_RESET`/`PRE_TAKE_SETUP`/`BREAKING_CHARACTER` --
+mirrors `whole_video_editorial_reasoning.py`'s own private `_PROCESS_
+ROLES` verbatim, rebuilt from public constants rather than importing a
+private name) is NEVER promoted to `REQUIRED`, even when a `REQUIRED`
+signal (idea coverage, downstream dependency) is simultaneously present
+-- test-proven (`test_09`, `test_10`).
+**Criticality firewall:** the module has no parameter or field referencing
+meaning-criticality at all and never imports `lost_semantic_atom_
+materiality.py` -- test-enforced; the intended calling convention is to
+consult this module only once D-235L's own critical-safety floor has not
+already fired.
+
+### Tests
+
+`tests/test_cutsell_d235m_lost_atom_editorial_requirement_evidence.py` --
+40 tests: no-identity-mapping (2, incl. the D-235K-shape fixture); ambiguous
+mapping (1); retry/process firewall (5); chronology firewall (1, signature
+inspection); required fixtures (9, incl. exact-slot HOOK/CTA/CONCLUSION,
+SLOT_OTHER never required, HEURISTIC_OVERLAP never authoritative, missing
+source defaults non-authoritative); optional-detail/clearance (3); redundant-
+function (4); conflicting signals (1); criticality firewall (2); no-live-
+wiring/no-mutation (6); determinism/diagnostics (4); module qualification
+(2). All 40 pass.
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker/ tests/`: clean (excl. the one
+  pre-existing, untouched `jobs_smoke.py` chronic error).
+- D-235 bundle (`tests/test_cutsell_d235*.py`): 190 passed (150 pre-D-235M
+  + 40 new).
+- P1/P2/Language-Spine regression bundle (`test_cutsell_d16*`/`d19*`/
+  `d20*`): 1,033 passed, zero new failures -- confirms this task's own
+  read-only vocabulary imports introduced no behavior change to any of
+  the audited modules.
+- Full offline suite: PASS (see commit log for exact count), zero new
+  failures beyond the chronic pre-existing D-044 hybrid-semantic-parity
+  class already tracked in every prior D-235 gate.
+
+### D-235M verdict
+
+**B -- PARTIALLY PROVEN, ONE IDENTITY/COVERAGE SEAM IS STILL MISSING.**
+Four of the five audited evidence sources (P1 recording-process/audience-
+delivery, family-level idea coverage, row-level suppression/preservation
+proxy, causal-order dependency) have a real, exact, `clip_id`-based or
+otherwise non-fuzzy path and are now genuinely usable by this evidence
+foundation. The ONE missing seam, named exactly: **`PropositionCandidate.
+editorial_slot_evidence` -- the only structured signal distinguishing
+setup/CTA/conclusion story FUNCTION from ordinary content -- has no
+`clip_id` field and no exact identity bridge from a lost-atom row; only a
+deterministic-but-heuristic maximum-overlap time-based join
+(`language_attempts_by_span_id_for_source`) connects the two
+independently-segmented spaces, which this task's own scope explicitly
+disqualifies as authority for a `REQUIRED` determination.** Closing this
+seam would require either minting a REAL shared identity between
+`attempt_reconstruction.py`'s clip-level `attempt_id` and the Language
+Spine's own independent `LanguageAttempt` segmentation (a structural
+engine change, explicitly out of this task's scope) or accepting that
+`editorial_slot_evidence` will only ever inform this evidence type via
+`HEURISTIC_OVERLAP` (permanently non-authoritative for `REQUIRED`, per
+this module's own binding design) -- a genuine Product Owner decision, not
+resolved here.
+
+**Per "IF B/C/D": STOP. One blocker only, named exactly above.** No
+D-235N is implemented or authorized by this task.
+
+**Canonical status:** `LOST_ATOM_EDITORIAL_REQUIREMENT_EVIDENCE_
+FOUNDATION_PARTIALLY_PROVEN_PROPOSITION_IDENTITY_SEAM`.
+
+**Exact next gate (not authorized to implement here):** D-235N -- Complete
+Lost-Atom Materiality Discriminator (offline only), combining
+`MEANING_CRITICAL` (D-235L), `EDITORIALLY_REQUIRED` (this task, bounded by
+the identity seam above), `NON_MATERIAL_REAL_CONTENT`, `RETRY_OR_
+RECORDING_RESIDUE`, `REDUNDANT_EQUIVALENT` into the final offline
+`BLOCK`/`DO_NOT_BLOCK`/`ABSTAIN` recommendation -- still no live Freeze
+authority. Named but NOT implemented, per directive.
+
+**Engine patch required now?** No -- and none was made; this module is
+additive and dormant (imported by nothing outside its own test file).
+**Paid compute required next?** No.
+**RAW required next?** No.
+
+**Confirmed:** no RAW, no Modal, no RunPod, no provider call. No Freeze/
+repair-loop/resolver/threshold/Pacing/Audio-Join/Boundary/Ordering/Family/
+BestTake change was made or attempted -- offline evidence foundation only,
+per this task's own explicit instruction.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- the Product Owner decision
+needed is how to treat the `PropositionCandidate` identity seam before
+D-235N could combine `EDITORIALLY_REQUIRED` into a final recommendation:
+accept it as permanently `HEURISTIC_OVERLAP`-bounded (never authoritative
+for `REQUIRED`, scoping D-235N to lean on the four other, exact evidence
+sources only), or authorize a separate, larger-scoped identity-unification
+investigation between `attempt_reconstruction.py`'s and the Language
+Spine's own independent segmentations first. No further action is taken on
+it by this task. Waiting for Product Owner coordination, per directive.
+
+---
