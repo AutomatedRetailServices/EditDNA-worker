@@ -168,6 +168,21 @@ def process_universal_clean_cut_sources(
         boundary_owner="post_freeze",
     )
 
+    # D-235X Part A: the live exact-identity context `pipeline.py::build_
+    # flow_b_draft` optionally built (see `ProcessingResult.lost_atom_
+    # exact_identity_context`'s own docstring) -- `{}` defaults whenever
+    # it was never built (flag off, or no live Language Spine evidence),
+    # so both call sites below stay byte-identical to every pre-D-235X
+    # caller in that case.
+    _lost_atom_exact_identity_context = getattr(result, "lost_atom_exact_identity_context", None) or {}
+    _exact_match_by_clip_id = _lost_atom_exact_identity_context.get("exact_match_by_clip_id") or {}
+    _proposition_candidate_ids_by_attempt_id = (
+        _lost_atom_exact_identity_context.get("proposition_candidate_ids_by_attempt_id") or {}
+    )
+    _proposition_slot_evidence_by_id = (
+        _lost_atom_exact_identity_context.get("proposition_slot_evidence_by_id") or {}
+    )
+
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
         if clean_cut_core_v1_enabled:
@@ -225,6 +240,10 @@ def process_universal_clean_cut_sources(
                     semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
                     claim_equivalence_arbiter=claim_equivalence_arbiter,
                     clause_role_arbiter=clause_role_arbiter,
+                    # D-235X Part A: see this function's own extraction comment above.
+                    exact_match_by_clip_id=_exact_match_by_clip_id,
+                    proposition_candidate_ids_by_attempt_id=_proposition_candidate_ids_by_attempt_id,
+                    proposition_slot_evidence_by_id=_proposition_slot_evidence_by_id,
                 ),
             )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
@@ -299,7 +318,16 @@ def process_universal_clean_cut_sources(
         # EVIDENCE for comparison once the authoritative pass below
         # recomputes these same three diagnostics keys on the resolver's
         # OWN resolved draft and takes over as the real ones Freeze reads.
-        repair_result = run_repair_loop(result.draft, causal_order_arbiter=causal_order_arbiter)
+        repair_result = run_repair_loop(
+            result.draft, causal_order_arbiter=causal_order_arbiter,
+            # D-235X Part B: the SAME already-computed D-235Q result the
+            # Freeze-composition pass above stored on this exact draft --
+            # `{}` (the field's own default) whenever the materiality flag
+            # is off, preserving byte-identical prior behavior.
+            lost_atom_materiality_by_provenance_id=getattr(
+                result.draft, "lost_atom_materiality_by_provenance_id", None,
+            ),
+        )
         edit_plan = repair_result.final_plan
         review_result = repair_result.final_review
         result = replace(result, draft=repair_result.final_draft)
@@ -532,6 +560,10 @@ def process_universal_clean_cut_sources(
                 semantic_preservation_proofs=semantic_preservation_proofs,
                 critical_claim_preservation_index=critical_claim_preservation_index,
                 canonical_effective_importance_index=canonical_effective_importance_index,
+                # D-235X Part A: SAME context as the legacy-resolving pass above.
+                exact_match_by_clip_id=_exact_match_by_clip_id,
+                proposition_candidate_ids_by_attempt_id=_proposition_candidate_ids_by_attempt_id,
+                proposition_slot_evidence_by_id=_proposition_slot_evidence_by_id,
             )
             signature_after_validation = semantic_selection_signature(
                 authoritative_draft, authority_identity=source_identity,
@@ -556,6 +588,11 @@ def process_universal_clean_cut_sources(
                 authoritative_draft,
                 causal_order_arbiter=causal_order_arbiter,
                 authoritative_source=authoritative_plan_source,
+                # D-235X Part B: SAME already-computed D-235Q result the
+                # AUTHORITATIVE pass above stored on this exact draft.
+                lost_atom_materiality_by_provenance_id=getattr(
+                    authoritative_draft, "lost_atom_materiality_by_provenance_id", None,
+                ),
             )
             edit_plan = repair_result.final_plan
             review_result = repair_result.final_review

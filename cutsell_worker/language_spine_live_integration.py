@@ -372,6 +372,19 @@ def proposition_candidate_ids_by_attempt_id_for(
     return result
 
 
+def proposition_slot_evidence_by_id_for(
+    proposition_candidates: Tuple[PropositionCandidate, ...],
+) -> dict[str, str]:
+    """D-235X Part A: trivial passthrough projection of each
+    ``PropositionCandidate``'s own already-computed ``editorial_slot_
+    evidence`` field (D-169) -- never a re-derivation, never a new slot
+    classifier. The exact ``proposition_slot_evidence_by_id`` lookup
+    ``complete_lost_semantic_atom_materiality.assess_complete_lost_
+    semantic_atom_materiality`` already accepts as an optional parameter
+    (D-235Q), now given a real live producer."""
+    return {prop.proposition_candidate_id: prop.editorial_slot_evidence for prop in proposition_candidates}
+
+
 def relation_evidence_by_proposition_pair(
     relation_evidence: Tuple[RelationEvidence, ...],
 ) -> dict[Tuple[str, str], RelationEvidence]:

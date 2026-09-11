@@ -128,7 +128,21 @@ from .language_spine_live_integration import (
     build_live_language_spine_for_source,
     live_language_spine_diagnostics_enabled,
     live_language_spine_run_summary,
+    proposition_candidate_ids_by_attempt_id_for,
+    proposition_slot_evidence_by_id_for,
+    CAPABILITY_AVAILABLE,
 )
+# D-235X Part A: the exact word/proposition identity bridge (D-235P), reused
+# verbatim -- this module never reimplements matching logic, only drives
+# the existing per-source batch matcher over live Language Spine evidence.
+# See lost_atom_exact_identity_context's own construction below.
+from .shared_attempt_word_identity import (
+    AUTHORITATIVE_RELATIONSHIP_STATUSES,
+    build_attempt_language_identity_matches_for_source,
+)
+# D-235X: the SAME default-OFF flag D-235R/W already gate the Freeze-
+# composition seam on -- reused here unchanged, never a new flag.
+from .lost_semantic_atom_freeze_authority import lost_atom_materiality_freeze_authority_enabled
 # D-203 (docs/CUTSELL_DECISIONS.md D-203): P2 Whole-Video Editorial
 # Reasoning, Phase B -- DIAGNOSTICS ONLY, default OFF, no authority, no
 # provider, no RAW. Consumes ONLY the already-computed `editorial_moment_
@@ -2569,6 +2583,65 @@ def build_flow_b_draft(
         editorial_moment_understandings = ()
         live_language_spine_by_source = {}
 
+    # D-235X Part A (docs/CUTSELL_DECISIONS.md D-235W's own "GAP A"):
+    # THE live exact-identity data-source seam -- the smallest owner with
+    # BOTH live `CandidateTake.word_indices`/`.words` (`take_tuple`, this
+    # function's own complete candidate pool) AND the live Language
+    # Spine's real `LanguageAttempt`/`PropositionCandidate` evidence
+    # (`live_language_spine_by_source`, built above -- `{}` whenever the
+    # P1/D-199 diagnostics flags are off, honestly propagating that
+    # absence rather than fabricating one). Gated behind the SAME
+    # `CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED` flag D-235R/
+    # W already use -- `{}` (zero extra work, not merely unused) when it
+    # is off. Never a heuristic-overlap bridge (unlike `language_attempts_
+    # by_span_id_for_source` above, which stays P1-diagnostics-only and is
+    # never consulted here): only D-235P's own exact word-membership
+    # matcher (`build_attempt_language_identity_matches_for_source`,
+    # reused verbatim) ever populates `exact_match_by_clip_id`, and only
+    # for a clip whose match reached an `AUTHORITATIVE_RELATIONSHIP_
+    # STATUSES` verdict -- "if exact identity unavailable: no authoritative
+    # entry" (this task's own instruction), never a heuristic promotion.
+    exact_match_by_clip_id: dict[str, object] = {}
+    proposition_candidate_ids_by_attempt_id: dict[str, tuple] = {}
+    proposition_slot_evidence_by_id: dict[str, str] = {}
+    if lost_atom_materiality_freeze_authority_enabled():
+        takes_by_source: dict[str, list] = {}
+        for take in take_tuple:
+            takes_by_source.setdefault(take.source_asset_id, []).append(take)
+        for source_asset_id, source_takes in takes_by_source.items():
+            evidence = live_language_spine_by_source.get(source_asset_id)
+            if evidence is None or evidence.capability_status != CAPABILITY_AVAILABLE:
+                continue  # fail-closed: no real Language Spine for this source -- no entry
+            utterances_by_id = {u.utterance_id: u for u in evidence.utterances}
+            matches = build_attempt_language_identity_matches_for_source(
+                reconstructed_attempts=tuple(source_takes),
+                canonical_words=evidence.words,
+                language_attempts=evidence.attempts,
+                utterances_by_id=utterances_by_id,
+                phrases=evidence.phrases,
+            )
+            for take, match in zip(source_takes, matches):
+                if match.relationship_status in AUTHORITATIVE_RELATIONSHIP_STATUSES:
+                    exact_match_by_clip_id[take.clip_id] = match
+            proposition_candidate_ids_by_attempt_id.update(
+                proposition_candidate_ids_by_attempt_id_for(evidence.proposition_candidates)
+            )
+            proposition_slot_evidence_by_id.update(
+                proposition_slot_evidence_by_id_for(evidence.proposition_candidates)
+            )
+    lost_atom_exact_identity_context = (
+        {
+            "exact_match_by_clip_id": exact_match_by_clip_id,
+            "proposition_candidate_ids_by_attempt_id": proposition_candidate_ids_by_attempt_id,
+            "proposition_slot_evidence_by_id": proposition_slot_evidence_by_id,
+            # D-235X diagnostics (tail-safe counts only, no transcript dump).
+            "exact_identity_map_clip_count": len(take_tuple),
+            "exact_identity_match_count": len(exact_match_by_clip_id),
+            "exact_identity_missing_count": len(take_tuple) - len(exact_match_by_clip_id),
+        }
+        if lost_atom_materiality_freeze_authority_enabled() else None
+    )
+
     # D-203 (docs/CUTSELL_DECISIONS.md D-203): P2 Whole-Video Editorial
     # Reasoning compact summary -- {"status": "disabled"} when the
     # (separate, default-OFF) `CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_
@@ -2978,4 +3051,6 @@ def build_flow_b_draft(
             "composer": composer_stage,
             "draft_review": review_stage,
         },
+        # D-235X Part A: see this variable's own construction comment above.
+        lost_atom_exact_identity_context=lost_atom_exact_identity_context,
     )

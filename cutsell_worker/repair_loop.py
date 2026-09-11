@@ -142,6 +142,17 @@ def run_repair_loop(
     max_attempts: int = DEFAULT_MAX_REPAIR_ATTEMPTS,
     causal_order_arbiter: CausalOrderArbiter | None = None,
     authoritative_source: AuthoritativePlanSource | None = None,
+    # D-235X: an optional, caller-supplied `lost_atom_provenance_id ->
+    # CompleteLostSemanticAtomMateriality` map -- the SAME already-computed
+    # D-235Q result `final_story_coherence_validation.py`'s own Freeze-
+    # composition seam produced (see `DraftTimeline.lost_atom_materiality_
+    # by_provenance_id`, the natural source a caller passes here). Forwarded
+    # unchanged to `all_blocking_findings_safely_suppressed` below so D-235T
+    # reads the SAME result D-235R already used, instead of recomputing an
+    # incomplete row-only materiality. `None` (the default, every pre-
+    # D-235X caller) preserves the exact prior behavior -- no global
+    # mutable state, no module singleton cache, purely a per-call parameter.
+    lost_atom_materiality_by_provenance_id: dict | None = None,
 ) -> RepairLoopResult:
     """Build CanonicalEditPlan v1, review it, and -- only for finding types
     with a safe repair strategy -- apply bounded, targeted repairs and
@@ -179,7 +190,9 @@ def run_repair_loop(
             # module docstring). Default-OFF and byte-identical to the
             # pre-D-235T behavior below whenever the flag is off or even
             # one finding does not unanimously qualify.
-            all_suppressed, suppression_decisions = all_blocking_findings_safely_suppressed(result.findings)
+            all_suppressed, suppression_decisions = all_blocking_findings_safely_suppressed(
+                result.findings, materiality_by_provenance_id=lost_atom_materiality_by_provenance_id,
+            )
             if all_suppressed:
                 for finding, decision in zip(result.findings, suppression_decisions):
                     attempts.append(RepairAttempt(

@@ -1351,11 +1351,54 @@ def _lost_atom_materiality_orchestration_diagnostics(
             cid: freeze_decisions_by_clip_id[cid].authority_status
             for cid in clip_ids if cid in freeze_decisions_by_clip_id
         },
-        # See this function's own docstring above: honestly NOT computed at
-        # this seam -- D-235T's own live call site is `repair_loop.py`, out
-        # of this task's authorized scope.
+        # D-235X: the actual D-235T suppression decision still happens at
+        # its own live call site (`repair_loop.py`, fed by `DraftTimeline.
+        # lost_atom_materiality_by_provenance_id` this same pass now also
+        # populates) -- never recomputed or duplicated here.
         "lost_atom_repair_suppression_status": "NOT_COMPUTED_AT_THIS_SEAM_SEE_REPAIR_LOOP",
+        # D-235X diagnostics (tail-safe counts only, no transcript dump).
+        "lost_atom_materiality_context_count": len(materiality_by_clip_id),
+        "lost_atom_non_material_count": sum(
+            1 for m in materiality_by_clip_id.values()
+            if m.final_materiality_status in (
+                "NON_MATERIAL_REAL_CONTENT", "RETRY_OR_RECORDING_RESIDUE", "REDUNDANT_EQUIVALENT",
+            )
+        ),
+        "lost_atom_block_count": sum(
+            1 for d in freeze_decisions_by_clip_id.values() if d.effective_blocking
+        ),
+        "lost_atom_abstain_count": sum(
+            1 for d in freeze_decisions_by_clip_id.values()
+            if d.authority_status == "ABSTAIN_PRESERVE_BLOCK"
+        ),
     }
+
+
+# ---------------------------------------------------------------------------
+# D-235X Part B: re-key the SAME already-computed `CompleteLostSemanticAtom
+# Materiality` map (never recomputed) by each row's own `lost_atom_
+# provenance_id` (D-235S) instead of `clip_id` -- the exact same-atom
+# identity D-235T's own suppression check keys on. Pure re-keying, zero
+# extra computation beyond a dict lookup per row.
+# ---------------------------------------------------------------------------
+def _materiality_by_provenance_id(
+    lost_semantic_atoms: Sequence[Mapping],
+    materiality_by_clip_id: Optional[Mapping[str, CompleteLostSemanticAtomMateriality]],
+) -> dict[str, CompleteLostSemanticAtomMateriality]:
+    if not materiality_by_clip_id:
+        return {}
+    result: dict[str, CompleteLostSemanticAtomMateriality] = {}
+    for row in lost_semantic_atoms:
+        if not isinstance(row, Mapping):
+            continue
+        provenance_id = row.get("lost_atom_provenance_id")
+        clip_id = str(row.get("clip_id") or "")
+        if not provenance_id or not clip_id:
+            continue
+        materiality = materiality_by_clip_id.get(clip_id)
+        if materiality is not None:
+            result[str(provenance_id)] = materiality
+    return result
 
 
 def apply_final_story_coherence_validation(
@@ -1581,7 +1624,12 @@ def apply_final_story_coherence_validation(
             "general_non_numeric_non_negation_contradiction_detection",
         ],
     }
-    return replace(draft, diagnostics=diagnostics)
+    return replace(
+        draft, diagnostics=diagnostics,
+        lost_atom_materiality_by_provenance_id=_materiality_by_provenance_id(
+            lost_semantic_atoms, materiality_by_clip_id,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1800,7 +1848,12 @@ def _apply_post_authority_validation_only(
             "general_non_numeric_non_negation_contradiction_detection",
         ],
     }
-    return replace(validated, diagnostics=diagnostics)
+    return replace(
+        validated, diagnostics=diagnostics,
+        lost_atom_materiality_by_provenance_id=_materiality_by_provenance_id(
+            lost_semantic_atoms, materiality_by_clip_id,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

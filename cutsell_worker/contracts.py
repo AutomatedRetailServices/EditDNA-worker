@@ -366,6 +366,23 @@ class DraftTimeline:
     caption_preset: str = "classic"
     text_overlays: Tuple[TextOverlay, ...] = ()
     media_overlays: Tuple[MediaOverlay, ...] = ()
+    # D-235X Part B: the ONE computed-once D-235Q `CompleteLostSemanticAtom
+    # Materiality` result per lost atom, keyed by its own `lost_atom_
+    # provenance_id` (D-235S) -- never `clip_id` (a clip may carry several
+    # lost-atom rows/ordinals; the provenance id is the exact same-atom
+    # identity D-235T's own suppression check keys on). Populated by
+    # `final_story_coherence_validation.py` ONLY behind the SAME existing
+    # `CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED` flag D-235R/
+    # W already gate on -- `{}` (not merely unused) when the flag is off,
+    # so flag-off stays byte-identical. Consumed downstream by
+    # `repair_loop.run_repair_loop`'s own optional parameter of the same
+    # name so D-235R and D-235T read the SAME computed result, never each
+    # independently recomputing it. Values are real
+    # `complete_lost_semantic_atom_materiality.CompleteLostSemanticAtomMateriality`
+    # instances (never JSON-projected here, unlike `diagnostics` above --
+    # this field is a typed-object carrier, not a diagnostics/logging
+    # channel; see this task's own decision-log entry).
+    lost_atom_materiality_by_provenance_id: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -399,3 +416,23 @@ class ProcessingResult:
     state: JobState
     draft: DraftTimeline
     stage_status: Dict[str, object]
+    # D-235X Part A: the ONE production data-source seam GAP A (docs/
+    # CUTSELL_DECISIONS.md D-235W) named -- an optional, additive per-
+    # source live lost-atom exact-identity context, built ONCE inside
+    # `pipeline.py::build_flow_b_draft` (the smallest owner with BOTH live
+    # `CandidateTake.word_indices`/`.words` AND the live Language Spine's
+    # `LanguageAttempt`/`PropositionCandidate` evidence) behind the SAME
+    # `CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED` flag.
+    # `None` (not just empty) whenever that flag is off, or whenever no
+    # live Language Spine evidence was built for any source (fail-closed
+    # default; see this task's own decision-log entry for the honest
+    # triple-flag dependency). When present, a dict with exactly three
+    # keys -- `exact_match_by_clip_id` (clip_id -> real
+    # `shared_attempt_word_identity.AttemptLanguageIdentityMatch`),
+    # `proposition_candidate_ids_by_attempt_id`, and
+    # `proposition_slot_evidence_by_id` -- consumed only by
+    # `universal_clean_cut.py`'s own D-235W/X call sites into
+    # `apply_final_story_coherence_validation`/`apply_post_authority_
+    # story_validation`. Never JSON-projected (typed-object carrier, same
+    # as `DraftTimeline.lost_atom_materiality_by_provenance_id` above).
+    lost_atom_exact_identity_context: Optional[Dict[str, object]] = None

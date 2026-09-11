@@ -56144,3 +56144,214 @@ policy, threshold, P1/P2, BestTake/Family/Ordering/Boundary, or
 Pacing/Audio-Join logic changed.
 
 Then STOP. Do NOT launch D-235X. Wait for Product Owner coordination.
+
+## D-235X — COMPLETE PRODUCTION LOST-ATOM AUTHORITY DATA-SOURCE + REPAIR CONTEXT WIRING (POST D-235W)
+
+**Status:** OFFLINE ONLY. No RAW, no Modal, no RunPod, no provider. No
+materiality/Freeze/Repair policy, threshold, resolver, P1/P2 authority,
+BestTake/Family/Ordering/Boundary, or Pacing/Audio-Join change.
+
+**Objective:** close D-235W's own two remaining GAPs (verdict D) so one
+production execution CAN carry `CandidateTake.word_indices → exact
+AttemptLanguageIdentityMatch → exact PropositionCandidate set → D-235Q
+complete materiality → D-235R Freeze decision → same authoritative
+context keyed by `lost_atom_provenance_id` → D-235T RepairLoop
+suppression`, end to end.
+
+**GAP A closed — live exact-identity data-source producer:**
+`pipeline.py::build_flow_b_draft` is the smallest owner with BOTH live
+`CandidateTake.word_indices`/`.words` (`take_tuple`) AND the live
+Language Spine's real `LanguageAttempt`/`PropositionCandidate` evidence
+(`live_language_spine_by_source`, D-199's own construction, built when
+its own pre-existing P1/D-199 diagnostics flags are on). It now builds
+`exact_match_by_clip_id`/`proposition_candidate_ids_by_attempt_id`/
+`proposition_slot_evidence_by_id` by calling D-235P's own
+`build_attempt_language_identity_matches_for_source` VERBATIM (no new
+matching logic) per source, gated behind the SAME
+`CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED` flag D-235R/W
+already use. `exact_match_by_clip_id` receives an entry ONLY when the
+match's own `relationship_status` is in `AUTHORITATIVE_RELATIONSHIP_
+STATUSES` — never a heuristic-overlap entry (the PRE-EXISTING
+`language_attempts_by_span_id_for_source` temporal-overlap bridge stays
+P1-diagnostics-only, never consulted here). A NEW additive
+`ProcessingResult.lost_atom_exact_identity_context` field (`contracts.py`)
+carries this map from `pipeline.py` to `universal_clean_cut.py`, which
+extracts it (`getattr`-safe against test doubles) and threads it into
+BOTH `apply_final_story_coherence_validation`/`apply_post_authority_
+story_validation` call sites.
+
+**GAP B closed — compute-once materiality, D-235R and D-235T reading the
+SAME result:** `final_story_coherence_validation.py`'s new
+`_materiality_by_provenance_id()` re-keys the SAME already-computed
+`CompleteLostSemanticAtomMateriality` map (never recomputed) by each
+row's own `lost_atom_provenance_id` (D-235S, already minted on every
+`_lost_semantic_atoms()` row) instead of `clip_id`. Stored on a NEW
+additive `DraftTimeline.lost_atom_materiality_by_provenance_id` field
+(`contracts.py`), populated at both existing `freeze_blocked`
+composition return sites. `repair_loop.run_repair_loop` gained a new
+optional `lost_atom_materiality_by_provenance_id` parameter, forwarded to
+`lost_atom_repair_suppression.all_blocking_findings_safely_suppressed`,
+forwarded to `decide_lost_atom_repair_suppression`'s own new optional
+`materiality_by_provenance_id` parameter: when a real
+`CompleteLostSemanticAtomMateriality` entry exists for the Finding's own
+provenance id, it is used INSTEAD of the pre-D-235X row-only
+`assess_complete_lost_semantic_atom_materiality(row)` recompute — an
+INPUT-SOURCE substitution only; the 10-condition suppression gate, the
+firewalls, the flag, and the provenance-uniqueness requirement in
+`decide_lost_semantic_atom_freeze_authority`/`classify_lost_atom_
+reviewer_finding_link` are completely unchanged. `universal_clean_cut.py`
+threads `draft.lost_atom_materiality_by_provenance_id`
+(`getattr`-safe) into both `run_repair_loop` call sites.
+
+**Real end-to-end proof (offline, not a controlled all-fields-forced
+fixture):** built a REAL Language Spine (`adapt_words_to_language_words →
+segment_language_phrases → segment_language_utterances →
+build_language_attempts → build_proposition_candidates`) from raw
+`Word` timings for one source, a REAL `CandidateTake` reconstructing the
+exact same words, ran `build_attempt_language_identity_matches_for_
+source` (unmodified D-235P) to get a genuine `EXACT_SAME_MEMBERSHIP`
+match, fed the SAME real `exact_match_by_clip_id`/proposition maps into
+`apply_final_story_coherence_validation` with a monkeypatched
+`_lost_semantic_atoms` returning a D-235U-shaped row: `freeze_blocked`
+flips `True → False`; `out.lost_atom_materiality_by_provenance_id`
+contains the row's own `lost_atom_provenance_id` key with
+`final_materiality_status == NON_MATERIAL_REAL_CONTENT`; feeding this
+SAME map into `decide_lost_atom_repair_suppression` on an equivalent
+`UNIQUE_FACT_LOST` Finding yields `suppression_status ==
+SUPPRESS_SAME_NON_MATERIAL_ATOM`, `suppress_repair_escalation=True` —
+the SAME atom that could not be suppressed anywhere in D-235W (D-235T's
+own recompute always abstained) is now suppressed via the shared
+compute-once context. Omitting the map (or the exact-identity context)
+reproduces the exact pre-D-235X behavior (`ABSTAIN_PRESERVE_ESCALATION`)
+— confirmed by direct comparison in the same test run.
+
+**Safety controls verified:** meaning-critical/editorially-required/
+contradiction/lost-critical-claim firewalls are untouched D-235Q/R logic
+(unaffected by an input-source substitution) and remain enforced;
+critical context UNKNOWN still yields `None` never a guessed `False`;
+missing/heuristic-only exact identity still fails closed (D-235Q's own
+`exact_identity_available` gate, unmodified); a `materiality_by_
+provenance_id` map with NO entry for a Finding's own provenance id falls
+back to the unchanged legacy recompute — never a partial/best-effort
+merge of the two sources (verified: an unrelated-key map behaves
+identically to no map at all).
+
+**Multiple atoms / multiple sources:** the map is keyed independently per
+`lost_atom_provenance_id`; one suppressible atom's entry can never affect
+another's decision (each `decide_lost_atom_repair_suppression` call reads
+only its own Finding's own key). Exact word identity stays source-scoped
+throughout (D-235P's own `source_asset_id` equality gate, unmodified;
+confirmed: identical timestamps on two different sources never produce
+an authoritative cross-source match).
+
+**No circular authority:** `repair_loop.py`/`lost_atom_repair_
+suppression.py` are NEVER imported by `final_story_coherence_
+validation.py` (confirmed by source-truth test) — context flows forward
+only, via the draft object and explicit parameters; RepairLoop never
+calls back into Freeze.
+
+**No global mutable state:** the new parameter is a per-call argument on
+`run_repair_loop`/`decide_lost_atom_repair_suppression`/`all_blocking_
+findings_safely_suppressed`; no module-level cache, no `lru_cache`, no
+singleton (confirmed by source-truth test).
+
+**Diagnostics added (tail-safe, no transcript dump):**
+`exact_identity_map_clip_count`/`exact_identity_match_count`/
+`exact_identity_missing_count` (in `ProcessingResult.lost_atom_exact_
+identity_context`, `pipeline.py`); `lost_atom_materiality_context_count`/
+`lost_atom_non_material_count`/`lost_atom_block_count`/`lost_atom_
+abstain_count` (extending `_lost_atom_materiality_orchestration_
+diagnostics`, `final_story_coherence_validation.py`);
+`repair_context_received_count`/`repair_same_atom_suppressed_count`
+(extending `lost_atom_repair_suppression_diagnostics`,
+`lost_atom_repair_suppression.py`).
+
+**Honest scope boundary — the triple-flag dependency:**
+`exact_match_by_clip_id` is genuinely non-empty in a real production run
+ONLY when `CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED` AND
+the two PRE-EXISTING, unrelated D-195/D-199 diagnostics flags
+(`editorial_moment_sequence_diagnostics_enabled`/`live_language_spine_
+diagnostics_enabled`) are ALL on — `pipeline.py` never force-constructs
+the Language Spine on this task's own authority (that would be a P1/P2
+authority change, explicitly out of scope; "Do NOT duplicate Language
+Spine construction" is honored literally). This is a PRE-EXISTING
+operational precondition (D-199's own module docstring already
+documents when Language Spine gets built), not a new gap this task
+leaves unclosed — the CONSUMPTION+PRODUCTION wiring itself is complete
+and proven; whether real Video00 data reaches `AUTHORITATIVE_
+RELATIONSHIP_STATUSES` for the actual target atom is an empirical
+question for the next real-media run, not a structural gap.
+
+**Files changed:** `cutsell_worker/contracts.py` (additive
+`DraftTimeline.lost_atom_materiality_by_provenance_id`,
+`ProcessingResult.lost_atom_exact_identity_context`),
+`cutsell_worker/pipeline.py` (exact-identity map construction + 3 new
+imports + diagnostics), `cutsell_worker/language_spine_live_
+integration.py` (additive `proposition_slot_evidence_by_id_for`),
+`cutsell_worker/final_story_coherence_validation.py`
+(`_materiality_by_provenance_id`, both return sites, extended
+diagnostics), `cutsell_worker/lost_atom_repair_suppression.py`
+(`materiality_by_provenance_id` optional param on both entry points,
+input-source substitution, extended diagnostics),
+`cutsell_worker/repair_loop.py` (`lost_atom_materiality_by_provenance_id`
+optional param, forwarded), `cutsell_worker/universal_clean_cut.py`
+(context extraction + threading into all 4 call sites, `getattr`-safe).
+One pre-existing D-235P "no live module imports this gate" source-truth
+test updated to assert the new, intentional `pipeline.py` wiring
+(mirroring the exact D-235W precedent for this kind of test).
+
+**Tests:** new `tests/test_cutsell_d235x_production_lost_atom_authority_
+wiring.py` (14 tests: live exact-identity data source over REAL Language
+Spine objects x4, compute-once/same-result consumption x6, fail-closed/
+parity/no-circular-authority/no-global-state x4) — all pass. Full D-235
+family + coherence/Freeze/RepairLoop + Language-Spine/P1/P2/CleanCutBench
+regression suites — all pass (one D-235P source-truth test updated as
+above; one pre-existing git-diff-based "untouched" test self-resolved on
+commit, matching the established D-235W pattern). `python3 -m compileall
+cutsell_worker tests` — clean. Full suite
+(`pytest tests/ --ignore=tests/test_semantic_stitch.py`): **6344 passed**,
+the SAME 5 pre-existing unrelated failures this session has consistently
+tracked (`test_video00_modal_hybrid_semantic_parity.py` x4,
+`test_hybrid_story_guard_incomplete_retry.py` x1). One genuinely NEW
+failure was found and fixed during this task's own qualification pass:
+`test_cutsell_universal_clean_cut.py`'s own test double
+(`types.SimpleNamespace` standing in for `ProcessingResult`) lacked the
+new `lost_atom_exact_identity_context` attribute — fixed by reading it
+via `getattr(..., None)` at all 3 new attribute-access sites in
+`universal_clean_cut.py` rather than direct attribute access, so any
+caller's test double missing these new, additive fields degrades safely
+to the pre-D-235X default. Zero new genuine failures after that fix.
+
+**Verdict: A — COMPLETE PRODUCTION LOST-ATOM AUTHORITY CONTEXT WIRING
+OFFLINE PROVEN.** Both GAP A and GAP B are closed: the exact-identity
+data-source producer is live in `pipeline.py`, and D-235R/D-235T now
+provably consume the SAME compute-once materiality result keyed by
+`lost_atom_provenance_id`, proven end to end with real (not fully-
+controlled) Language Spine objects. The triple-flag operational
+dependency above is disclosed honestly, not hidden, and is not treated
+as disqualifying this verdict — it is a pre-existing precondition this
+task was explicitly forbidden from changing.
+
+**Canonical status:**
+`COMPLETE_PRODUCTION_LOST_ATOM_AUTHORITY_CONTEXT_WIRING_OFFLINE_PROVEN`.
+
+**Exact next gate:** D-235Y — FINAL REAL-MEDIA FREEZE REQUALIFICATION.
+Exactly ONE RAW maximum, same sibling
+(`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`),
+authority flag ON, full diagnostic stack ON. **Not launched
+automatically** — this task's own directive requires Product Owner
+coordination first, regardless of this verdict.
+
+**Engine patch required after this?** No — the wiring is complete;
+D-235Y would only REQUALIFY it against real media. **Provider required?**
+No. **RAW required?** Yes, for D-235Y specifically (not this task).
+**Paid compute required?** No, not by this task.
+
+**Confirmation:** OFFLINE ONLY. All work proven by direct code reads,
+real (non-mocked) Language Spine construction, and offline fixture/unit/
+integration tests. Zero RAW, zero Modal, zero RunPod, zero provider calls
+made. No materiality/Freeze/Repair policy, threshold, resolver, P1/P2
+authority, BestTake/Family/Ordering/Boundary, or Pacing/Audio-Join logic
+changed.
+
+Then STOP. Do NOT launch D-235Y. Wait for Product Owner coordination.

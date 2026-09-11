@@ -251,6 +251,7 @@ def decide_lost_atom_repair_suppression(
     *,
     all_findings: Optional[Sequence[Finding]] = None,
     enabled: Optional[bool] = None,
+    materiality_by_provenance_id: Optional[Mapping[str, CompleteLostSemanticAtomMateriality]] = None,
 ) -> LostAtomRepairSuppressionDecision:
     """The one D-235T entry point for a single Finding. Pure; mutates
     nothing, mints nothing, calls only already-existing D-235Q/D-235R/
@@ -262,7 +263,21 @@ def decide_lost_atom_repair_suppression(
     Defaults to `(finding,)` when omitted -- correct for a lone finding,
     but a real caller with multiple findings MUST pass the full set, or
     an accidental duplicate provenance id across findings would not be
-    caught."""
+    caught.
+
+    `materiality_by_provenance_id` (D-235X): an optional, caller-supplied
+    `lost_atom_provenance_id -> CompleteLostSemanticAtomMateriality` map --
+    the SAME already-computed D-235Q result `final_story_coherence_
+    validation.py`'s own Freeze-composition seam produced (see
+    `DraftTimeline.lost_atom_materiality_by_provenance_id`), so D-235R and
+    D-235T read the identical result instead of D-235T independently
+    recomputing an incomplete, row-only materiality. `None` (the default,
+    every pre-D-235X caller) preserves the exact prior behavior: fresh
+    row-only recomputation below. Purely an INPUT-SOURCE substitution --
+    the suppression GATE itself (which statuses suppress, the firewalls,
+    the feature flag, the provenance-uniqueness requirement) is completely
+    unchanged either way; this task's own directive explicitly authorizes
+    only this substitution, nothing else."""
     is_enabled = enabled if enabled is not None else lost_atom_materiality_freeze_authority_enabled()
     if not is_enabled:
         return _not_applicable(finding, reason="lost_atom_materiality_freeze_authority_disabled")
@@ -297,12 +312,24 @@ def decide_lost_atom_repair_suppression(
             reason=f"provenance_link_{link.link_status.lower()}",
         )
 
-    try:
-        materiality = assess_complete_lost_semantic_atom_materiality(row)
-    except Exception:
-        # Fail-closed: never suppress on a malformed/exception-raising row.
-        return _abstain(finding, provenance_id=provenance_id, materiality_status=None,
-                         reason="materiality_assessment_raised_fail_closed")
+    # D-235X: prefer the SAME already-computed D-235Q result the Freeze-
+    # composition seam produced (keyed by this exact `lost_atom_
+    # provenance_id`) over an incomplete row-only recomputation -- an
+    # INPUT-SOURCE substitution only, never a gate change (see this
+    # function's own docstring). Falls through to the unchanged pre-
+    # D-235X recompute whenever no map was supplied, or it has no entry
+    # for this provenance id (never a partial/best-effort merge of the
+    # two sources).
+    precomputed = (materiality_by_provenance_id or {}).get(provenance_id)
+    if isinstance(precomputed, CompleteLostSemanticAtomMateriality):
+        materiality = precomputed
+    else:
+        try:
+            materiality = assess_complete_lost_semantic_atom_materiality(row)
+        except Exception:
+            # Fail-closed: never suppress on a malformed/exception-raising row.
+            return _abstain(finding, provenance_id=provenance_id, materiality_status=None,
+                             reason="materiality_assessment_raised_fail_closed")
 
     if not isinstance(materiality, CompleteLostSemanticAtomMateriality):
         return _abstain(finding, provenance_id=provenance_id, materiality_status=None,
@@ -354,18 +381,28 @@ def all_blocking_findings_safely_suppressed(
     findings: Sequence[Finding],
     *,
     enabled: Optional[bool] = None,
+    materiality_by_provenance_id: Optional[Mapping[str, CompleteLostSemanticAtomMateriality]] = None,
 ) -> Tuple[bool, Tuple[LostAtomRepairSuppressionDecision, ...]]:
     """The one entry point `repair_loop.py` calls. Requires EVERY finding
     in `findings` (never a majority, never just the first) to
     independently qualify for suppression -- see module docstring's
     "Multiple-findings semantics" section. Returns `(False, ())` for an
     empty `findings` (nothing to suppress, nothing to preserve either --
-    the caller's own pre-existing "no findings" handling is untouched)."""
+    the caller's own pre-existing "no findings" handling is untouched).
+
+    `materiality_by_provenance_id` (D-235X): forwarded unchanged to every
+    `decide_lost_atom_repair_suppression` call below -- see that
+    function's own identically-named parameter docstring. `None` (the
+    default, every pre-D-235X caller) preserves the exact prior
+    behavior."""
     findings = tuple(findings)
     if not findings:
         return False, ()
     decisions = tuple(
-        decide_lost_atom_repair_suppression(f, all_findings=findings, enabled=enabled)
+        decide_lost_atom_repair_suppression(
+            f, all_findings=findings, enabled=enabled,
+            materiality_by_provenance_id=materiality_by_provenance_id,
+        )
         for f in findings
     )
     return all(d.suppress_repair_escalation for d in decisions), decisions
@@ -379,6 +416,7 @@ def lost_atom_repair_suppression_diagnostics(
     decisions: Optional[Sequence[LostAtomRepairSuppressionDecision]] = None,
     all_suppressed: Optional[bool] = None,
     enabled: Optional[bool] = None,
+    materiality_by_provenance_id: Optional[Mapping[str, CompleteLostSemanticAtomMateriality]] = None,
 ) -> dict:
     decisions = tuple(decisions or ())
     return {
@@ -389,5 +427,15 @@ def lost_atom_repair_suppression_diagnostics(
             bool(decisions) and all(d.suppress_repair_escalation for d in decisions)
         ),
         "decisions": [d.as_dict() for d in decisions],
+        # D-235X diagnostics (tail-safe counts only, no transcript dump):
+        # whether this call was fed the D-235X precomputed compute-once
+        # context at all, and how many of THIS batch's decisions actually
+        # suppressed via `SUPPRESS_SAME_NON_MATERIAL_ATOM` (a strict
+        # subset of `suppressed_count` above, which also counts pre-D-235X
+        # row-only suppressions).
+        "repair_context_received_count": len(materiality_by_provenance_id or {}),
+        "repair_same_atom_suppressed_count": sum(
+            1 for d in decisions if d.suppression_status == SUPPRESS_SAME_NON_MATERIAL_ATOM
+        ),
         "provenance": (SCHEMA_VERSION, "lost_atom_repair_suppression_diagnostics"),
     }

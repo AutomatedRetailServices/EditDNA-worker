@@ -524,9 +524,19 @@ class TestNoLiveWiring:
     )
 
     def test_40_no_live_module_imports_this_gate(self):
+        """D-235X intentionally wires this module INTO `pipeline.py`
+        (docs/CUTSELL_DECISIONS.md D-235X's own Part A -- the ONE
+        production data-source owner named by that task) -- the remaining
+        LIVE_MODULES stay unwired, exactly as before D-235X."""
         for path in self.LIVE_MODULES:
+            if path == "cutsell_worker/pipeline.py":
+                continue
             content = _read(path)
             assert "shared_attempt_word_identity" not in content, f"live wiring leaked into {path}"
+
+        # The one intentional D-235X wiring seam.
+        pipeline_content = _read("cutsell_worker/pipeline.py")
+        assert "shared_attempt_word_identity" in pipeline_content
 
 
 # ---------------------------------------------------------------------------
