@@ -773,21 +773,6 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-235 Audio Join Treatment Live Diagnostics for this run: CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
-          # D-235U: optional D-235Q/D-235R/D-235T lost-atom materiality
-          # Freeze-authority + same-atom RepairLoop-suppression overlay,
-          # applied only when the dispatch input is exactly "1"; code
-          # default (OFF) otherwise. SEPARATE from every flag above --
-          # never auto-linked. FAIL-CLOSED: never suppresses MEANING_
-          # CRITICAL/EDITORIALLY_REQUIRED/CONFLICTED/INSUFFICIENT_EVIDENCE/
-          # BLOCK -- see cutsell_worker/lost_semantic_atom_freeze_
-          # authority.py and cutsell_worker/lost_atom_repair_
-          # suppression.py's own module docstrings and docs/CUTSELL_
-          # DECISIONS.md D-235Q/D-235R/D-235S/D-235T for the full contract.
-          if [ "${{ github.event.inputs.lost_atom_materiality_freeze_authority_enabled }}" = "1" ]; then
-            jq -c '. + {CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
-            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
-          fi
-          echo "D-235U Lost-Atom Materiality Freeze Authority for this run: CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED=$(jq -r '.CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -824,6 +809,41 @@ jobs:
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
           echo "CUTSELL_ENV_JSON_PATH=/tmp/cutsell-env.json" >> "$GITHUB_ENV"
+
+      - name: D-235U lost-atom materiality Freeze authority overlay
+        # Kept as its OWN step (rather than appended inline into the
+        # "Build masked Modal env-secret file" step above, which already
+        # holds ~17 prior overlay conditions in one enormous `run:` block)
+        # because adding an 18th `${{ github.event.inputs.X }}` reference
+        # there tipped that single step over GitHub Actions' own workflow-
+        # parser expression-length ceiling ("Exceeded max expression
+        # length 21000" at dispatch time) -- confirmed live: this exact
+        # addition, inline, made `run_workflow` fail to parse the workflow
+        # at all, for every input, not just this one. Moving it to its own
+        # step is a purely mechanical, non-behavioral split: it reads and
+        # rewrites the SAME /tmp/cutsell-env.json the prior step produced
+        # (steps in one job share the runner's filesystem) and runs before
+        # "Submit canonical Video00 payload" reads it, so the overlay still
+        # lands in the payload identically to every other flag above.
+        #
+        # D-235Q/D-235R/D-235S/D-235T lost-atom materiality Freeze-
+        # authority + same-atom RepairLoop-suppression overlay, applied
+        # only when the dispatch input is exactly "1"; code default (OFF)
+        # otherwise. SEPARATE from every flag above -- never auto-linked.
+        # FAIL-CLOSED: never suppresses MEANING_CRITICAL/EDITORIALLY_
+        # REQUIRED/CONFLICTED/INSUFFICIENT_EVIDENCE/BLOCK -- see
+        # cutsell_worker/lost_semantic_atom_freeze_authority.py and
+        # cutsell_worker/lost_atom_repair_suppression.py's own module
+        # docstrings and docs/CUTSELL_DECISIONS.md D-235Q/D-235R/D-235S/
+        # D-235T for the full contract.
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.lost_atom_materiality_freeze_authority_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-235U Lost-Atom Materiality Freeze Authority for this run: CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED=$(jq -r '.CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
 
       - name: Verify canonical Video00 path present
         shell: bash
