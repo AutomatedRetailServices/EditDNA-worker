@@ -614,8 +614,14 @@ class TestPipelineWiring:
         monkeypatch.setenv("CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED", "1")
         on_out, _ = self._run_pipeline_stub(monkeypatch, object())
         assert off_out.draft.diagnostics["dialogue_pacing_transition"] == on_out.draft.diagnostics["dialogue_pacing_transition"]
-        off_keys = {k: v for k, v in off_out.draft.diagnostics.items() if k not in ("pacing_v2",)}
-        on_keys = {k: v for k, v in on_out.draft.diagnostics.items() if k not in ("pacing_v2",)}
+        # D-224 adds one more additive-only key (`pacing_v2_handle_aware`)
+        # under the SAME flag -- excluded here for the same reason
+        # `pacing_v2` already was: this test proves every OTHER diagnostics
+        # key is byte-identical regardless of the flag, not that the flag
+        # adds nothing at all.
+        excluded = ("pacing_v2", "pacing_v2_handle_aware")
+        off_keys = {k: v for k, v in off_out.draft.diagnostics.items() if k not in excluded}
+        on_keys = {k: v for k, v in on_out.draft.diagnostics.items() if k not in excluded}
         assert off_keys == on_keys
 
 

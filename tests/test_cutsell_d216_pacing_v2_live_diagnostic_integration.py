@@ -442,8 +442,13 @@ class TestPipelineWiring:
         off_out, _ = self._run_pipeline_stub(monkeypatch, object())
         monkeypatch.setenv("CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED", "1")
         on_out, _ = self._run_pipeline_stub(monkeypatch, object())
-        off_keys = {k: v for k, v in off_out.draft.diagnostics.items() if k != "pacing_v2"}
-        on_keys = {k: v for k, v in on_out.draft.diagnostics.items() if k != "pacing_v2"}
+        # D-224 adds one more additive-only key (`pacing_v2_handle_aware`)
+        # under the SAME flag -- excluded here for the same reason
+        # `pacing_v2` already was: this test proves every OTHER diagnostics
+        # key is byte-identical regardless of the flag.
+        excluded = ("pacing_v2", "pacing_v2_handle_aware")
+        off_keys = {k: v for k, v in off_out.draft.diagnostics.items() if k not in excluded}
+        on_keys = {k: v for k, v in on_out.draft.diagnostics.items() if k not in excluded}
         assert off_keys == on_keys
         assert "pacing_v2" not in off_out.draft.diagnostics
         assert "pacing_v2" in on_out.draft.diagnostics
@@ -656,7 +661,12 @@ class TestStructuralAudits:
     def test_wiring_import_present_and_additive_only(self):
         source = (REPO_ROOT / "cutsell_worker" / "universal_clean_cut.py").read_text()
         assert "from .pacing_v2_live_diagnostics_integration import" in source
-        assert 'diagnostics={**result.draft.diagnostics, "pacing_v2": pacing_v2_diag}' in source
+        # D-224 reformatted this call site's own dict literal across
+        # multiple lines (adding its own additive "pacing_v2_handle_aware"
+        # key alongside this one) -- an exact-substring match on the
+        # original single-line shape is no longer meaningful; a plain
+        # "key: value" substring survives any such reformatting.
+        assert '"pacing_v2": pacing_v2_diag' in source
 
     def test_ast_no_module_level_side_effects(self):
         tree = ast.parse(MODULE_SOURCE)

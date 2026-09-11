@@ -75,6 +75,7 @@ from .boundary_engine_pass import apply_post_freeze_boundary_pass
 from .dialogue_pacing_transition import apply_dialogue_pacing_transition_pass
 from .pacing_v2_live_diagnostics_integration import pacing_v2_diagnostics_enabled
 from .pacing_v2_evidence_adapter import build_pacing_v2_live_diagnostics_with_real_evidence
+from .pacing_v2_handle_aware_evidence import build_handle_aware_pacing_v2_diagnostics
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -791,8 +792,42 @@ def process_universal_clean_cut_sources(
                     editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
                     take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
                 )
+                # D-224: Source Audio Handle live evidence integration --
+                # SAME flag, purely additive `diagnostics["pacing_v2_
+                # handle_aware"]` key. Reads ONLY already-computed real
+                # state already on `result.draft`/`request` at this exact
+                # seam (boundary_engine_pass's own audio-edge audit trail,
+                # post_selection_edge_only_boundary's own audit trail,
+                # `draft.discarded`, `request.sources[*].duration_sec`) --
+                # never a new provider call, never an ASR rerun. Still
+                # zero live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority: D-142's
+                # own `pacing_stage` above remains the only mode ever
+                # actually executed; this block only ever reads from
+                # `result.draft`, it is never written back onto `selected`,
+                # `RenderSegment`, or any Boundary/Ordering/BestTake state.
+                boundary_engine_pass_diag = result.draft.diagnostics.get("boundary_engine_pass") or {}
+                handle_aware_diag = build_handle_aware_pacing_v2_diagnostics(
+                    result.draft.selected,
+                    dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+                    boundary_diagnostics=result.draft.diagnostics,
+                    discarded=result.draft.discarded,
+                    boundary_engine_pass_audit=tuple(boundary_engine_pass_diag.get("audio_edge_rows") or ()),
+                    post_selection_edge_only_boundary_audit=tuple(
+                        result.draft.diagnostics.get("post_selection_edge_only_boundary") or ()
+                    ),
+                    source_duration_by_asset={
+                        source.source_asset_id: source.duration_sec
+                        for source in getattr(request, "sources", ()) or ()
+                    },
+                    editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
+                    take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
+                )
                 result = replace(result, draft=replace(
-                    result.draft, diagnostics={**result.draft.diagnostics, "pacing_v2": pacing_v2_diag},
+                    result.draft, diagnostics={
+                        **result.draft.diagnostics,
+                        "pacing_v2": pacing_v2_diag,
+                        "pacing_v2_handle_aware": handle_aware_diag,
+                    },
                 ))
     else:
         selection_stage = "not_applicable_missing_draft_contract"

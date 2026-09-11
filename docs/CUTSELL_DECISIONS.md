@@ -48611,3 +48611,395 @@ to authorize item 32's own canonical-doc clarification as an independent,
 small, docs-only turn. No further action is taken on either.
 
 ---
+
+## D-224: Pacing V2 Source Audio Handle Live Evidence Integration (post D-223)
+
+**Status: VERDICT A -- SOURCE AUDIO HANDLE LIVE EVIDENCE INTEGRATION
+OFFLINE PROVEN, HANDLE-AWARE J/L DIAGNOSTICS READY FOR REAL MEDIA.** Adds
+`PACING_V2_SOURCE_AUDIO_HANDLE_LIVE_INTEGRATION_OFFLINE_PROVEN`. Builds
+one new, standalone module (`cutsell_worker/pacing_v2_handle_aware_
+evidence.py`) that combines D-223's own `SourceAudioHandle` foundation
+with today's existing in-window silent-head/tail geometry into ONE
+deterministic combined-availability contract, wires it into the SAME
+`CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED` flag `universal_clean_cut.py`
+already gates D-216/D-217's own diagnostics on, and proves offline (via
+the exact D-221 scarcity shape) that a real Video00-style pair with ZERO
+in-window J/L candidate room can, once a safe audio handle exists, show
+a POSITIVE handle-aware candidate window -- still zero live J_CUT/L_CUT/
+MICRO_AUDIO_OVERLAP authority; D-142's own live mode remains `HARD_CUT`/
+`TIGHT_CUT` only. Names D-225 ("HANDLE-AWARE PACING V2 VIDEO00 REAL-
+MEDIA DIAGNOSTIC QUALIFICATION," exactly ONE Video00 RAW) as the next
+gate, without launching it.
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, starting HEAD `79e21c1` (D-223). This
+entry's own commit is the only remaining change to HEAD after the
+implementation commit.
+
+### 2. Files changed
+New: `cutsell_worker/pacing_v2_handle_aware_evidence.py`, `tests/
+test_cutsell_d224_pacing_v2_source_audio_handle_live_evidence_
+integration.py` (48 tests). Modified: `cutsell_worker/universal_clean_
+cut.py` (one additive wiring block, same flag, same seam D-216/D-217
+already use), `tests/test_cutsell_d216_pacing_v2_live_diagnostic_
+integration.py` and `tests/test_cutsell_d217_pacing_v2_real_evidence_
+source_wiring.py` (both had one pre-existing "off-keys == on-keys minus
+`pacing_v2`" parity assertion that needed the new additive `pacing_v2_
+handle_aware` key added to its own exclusion set, plus D-216's own exact-
+substring wiring-presence check updated to survive this task's own
+multi-line reformat of the same dict literal -- both now AST/substring-
+robust, neither test's own underlying guarantee weakened). No `pacing_v2_
+source_audio_handle.py` (D-223), `pacing_transition_decision.py` (D-215),
+`pacing_v2_timing_policy.py` (D-220), `render.py`/`render_plan.py`
+(D-214), or `boundary_engine_pass.py` file touched.
+
+### 3. Live handle integration seam
+The SAME `if pacing_v2_diagnostics_enabled():` block `universal_clean_
+cut.py` already runs D-216/D-217's own diagnostics in, immediately after
+the existing `build_pacing_v2_live_diagnostics_with_real_evidence` call,
+strictly after D-142's own live `apply_dialogue_pacing_transition_pass`
+and the real `apply_post_freeze_boundary_pass`. Reads from `result.draft`
+(`.selected`, `.discarded`, `.diagnostics["boundary_engine_pass"]
+["audio_edge_rows"]`, `.diagnostics["post_selection_edge_only_
+boundary"]`) and `request.sources[*].duration_sec` (via `getattr(request,
+"sources", ())`, matching this exact call site's own pre-existing `getattr
+(request, "dialogue_overlap_enabled", False)` defensive convention).
+Writes ONLY one new additive `diagnostics["pacing_v2_handle_aware"]` key;
+`diagnostics["pacing_v2"]` (D-216/D-217) is untouched.
+
+### 4. Pre-handle mapping
+`build_source_audio_handles` (D-223, unmodified) is called ONCE over the
+full `selected` sequence, producing both a PRE_ROLL and POST_ROLL handle
+per clip; a lookup keyed by `(owner_clip_id, direction)` retrieves
+`right`'s own PRE_ROLL handle for each adjacent pair -- never a second,
+duplicate handle-derivation path.
+
+### 5. Post-handle mapping
+Symmetric: `left`'s own POST_ROLL handle from the same one-shot lookup.
+
+### 6. Broader-word mapping
+`broader_word_timings` is accepted as an optional parameter, passed
+straight through to D-223's own builder (never re-derived, never
+duplicated) -- honestly empty at the real live seam today (D-222 item 11's
+own confirmed gap: no per-source transcript survives to `DraftTimeline`),
+proven populated only in this task's own offline fixtures (tests 11,
+15, 26).
+
+### 7. Boundary provenance mapping
+`draft.diagnostics["boundary_engine_pass"]["audio_edge_rows"]` (the
+EXACT list `boundary_engine_pass.tighten_selected_audio_edges` already
+returns and `apply_post_freeze_boundary_pass` already stores, confirmed
+by direct code read) and `draft.diagnostics["post_selection_edge_only_
+boundary"]` (a flat, already-accumulated list) are passed straight
+through to D-223's own `build_source_audio_handles` as its own `boundary_
+engine_pass_audit`/`post_selection_edge_only_boundary_audit` parameters
+-- no new audit shape invented, no re-execution of either authority.
+
+### 8. Discarded-span mapping
+`draft.discarded` (the `DraftTimeline` field D-222 item 15 already named
+as the ready-made firewall) passed straight through, unmodified, to
+D-223's own builder.
+
+### 9. Combined J availability contract
+`combined_j_available_window` = real source-coordinate interval UNION
+(never a blind sum) of (a) `[right.start, right.start + in_window_head)`
+when the EXISTING `available_silent_head_sec(right)` (D-217, unmodified)
+is positive, and (b) `[handle.handle_source_start, handle.handle_source_
+end)` when `right`'s own PRE_ROLL `SourceAudioHandle` (D-223) has
+`handle_status == SAFE_NON_SPEECH_HANDLE` -- every other handle status
+contributes ZERO. `None` (not `0.0`) only when BOTH sides are genuinely
+unknown/absent, preserving today's own exact "unknown, never asserted
+safe" semantics when no handle evidence exists at all. `combined_j_
+source` classifies the pair as `IN_WINDOW_ONLY`/`HANDLE_ONLY`/`IN_WINDOW_
+PLUS_HANDLE`/`NONE`.
+
+### 10. Combined L availability contract
+Symmetric, mirrored around `left.end` and `left`'s own POST_ROLL handle.
+
+### 11. No-double-count contract
+`_merged_interval_length` sorts and merges touching/overlapping source-
+coordinate intervals before summing -- proven directly (test 19) on a
+deliberately overlapping synthetic pair (`[1.0,2.0)`+`[1.5,2.5)` ->
+`1.5`, not the blindly-summed `2.0`), independent of whether today's real
+derivation ever actually produces an overlapping pair (it does not: the
+handle's own edge is, by D-223's own derivation, always exactly the
+clip's current `.start`/`.end`, so the two intervals only ever touch).
+
+### 12. Safe handle eligibility
+Only `HANDLE_STATUS_SAFE_NON_SPEECH` (D-223's own vocabulary) extends
+availability -- this task's own explicit gate, `_eligible_handle_
+duration`, never broadened. `SAFE_SPEECH_HANDLE` remains defined but
+never assignable (restated from D-223, not reopened here).
+
+### 13. Blocked handle behavior
+`BLOCKED_DISCARDED_MATERIAL`/`BLOCKED_NEIGHBOR_SELECTED_CLIP`/`BLOCKED_
+RETRY_OR_CORRECTION`/`BLOCKED_MEANING_CRITICAL` all contribute exactly
+ZERO to the combined window -- `combined_*_available_window` falls back
+to the old in-window-only value, never partial credit (tests 7-8, 12-15).
+
+### 14. Unknown handle behavior
+`UNKNOWN_WORD_COVERAGE` contributes ZERO -- fails closed, proven both via
+a direct synthetic `SourceAudioHandle` (tests 9-10, since neither of
+today's two real provenance sources actually produces this status, per
+D-223's own honest finding) and via the shared decision-table sweep this
+task's own `_eligible_handle_duration` gate enforces unconditionally.
+
+### 15. Speech-present behavior
+`SPEECH_PRESENT_NOT_AUTHORITATIVE` (D-223's own conservative status)
+contributes ZERO -- word presence alone never authorizes reuse, restated
+and re-proven at this seam (test 11), never weakened.
+
+### 16. Old J count fixture
+`old_in_window_j_head`/`old_d215_mode` reproduce, byte-for-byte, exactly
+what `pacing_v2_evidence_adapter.available_silent_head_sec`/`decide_
+transition` already compute today at the live seam -- the honest "before"
+baseline (test 01, and every fixture's own `old_*` fields).
+
+### 17. New J count fixture
+`combined_j_available_window`/`new_handle_aware_diagnostic_mode` --
+`decide_transition` (D-215, unmodified) called a SECOND time with the
+wider evidence, isolating exactly the handle's own effect (tests 02, 04,
+05).
+
+### 18. Old L count fixture / 19. New L count fixture
+Symmetric to items 16-17 (tests 03, 04, 06).
+
+### 20. J unlock result
+The exact D-221 scarcity replay: `old_in_window_j_head == 0.0` (right's
+first word starts exactly at `right.start`, matching D-221's own real
+`0/26` shape) plus a real `boundary_engine_pass`-shaped audit row ->
+`combined_j_available_window == 0.5`, `combined_j_source == HANDLE_ONLY`
+-- proven BOTH as a direct unit call (test 05) AND end-to-end through the
+REAL `universal_clean_cut.process_universal_clean_cut_sources` seam
+(`TestPipelineWiring.test_d221_scarcity_replay_end_to_end`), stubbing
+only `apply_post_freeze_boundary_pass`'s own OUTPUT (the same convention
+this exact test class already used for `polish_human_boundaries_v5`/
+`enforce_complete_idea_boundaries`) so the test proves the SEAM this task
+adds, not `boundary_engine_pass.py`'s own already-separately-tested
+correctness.
+
+### 21. L unlock result
+Symmetric (test 06).
+
+### 22. D-215 reuse
+`pacing_transition_decision.decide_transition` is imported, never
+redefined (AST-proven, test 29) -- called twice per pair (old/new
+evidence), identical relationship/Prosodic evidence both times, isolating
+only the candidate-window difference. No second J/L classifier is
+written anywhere in this module.
+
+### 23. D-220 relationship
+`pacing_v2_timing_policy.decide_jcut_timing`/`decide_lcut_timing`
+imported, never redefined (AST-proven, test 30), evaluated ONLY on a pair
+the wider evidence itself found J_CUT/L_CUT-eligible, with a direct-call
+parity test (30b) proving this module's own `d220_j_chosen_duration`
+exactly matches calling `decide_jcut_timing` directly with the same
+`max_safe_lead` -- D-220's own anchor-word-duration formula is completely
+untouched, only its INPUT is optionally widened, purely as a diagnostic
+curiosity never consulted live.
+
+### 24. Source identity
+Every handle/diagnostics row carries its own `source_asset_id` (test 25);
+discarded/neighbor firewalls (D-223, reused) filter by it before any
+overlap check.
+
+### 25. Multi-source
+A cross-source pair (`left`/`right` on different `source_asset_id`s)
+computes without error, each side's own handle strictly scoped to its own
+source file (test 24) -- no raw timestamp is ever compared across files.
+
+### 26. Diagnostics
+Every adjacent pair's row carries exactly this task's own required set:
+`left_clip_id, right_clip_id, old_in_window_j_head, old_in_window_l_tail,
+right_pre_handle_id/status/start/end/duration, left_post_handle_id/
+status/start/end/duration, combined_j_available_window, combined_l_
+available_window, combined_j_source, combined_l_source, old_d215_mode,
+new_handle_aware_diagnostic_mode, d220_j_max_safe_window_evaluated,
+d220_j_chosen_duration, d220_l_max_safe_window_evaluated, d220_l_chosen_
+duration` (test 38) -- no transcript text (`handle_diagnostics` rows
+carry only `words_present_count`, never raw word text, restating D-223's
+own convention).
+
+### 27. Summary
+`transition_count, pre_handle_available_count, post_handle_available_
+count, safe_pre_handle_count, safe_post_handle_count, blocked_pre_handle_
+count, blocked_post_handle_count, old_j_candidate_count, old_l_candidate_
+count, handle_aware_j_candidate_count, handle_aware_l_candidate_count,
+j_candidates_unlocked_by_handle_count, l_candidates_unlocked_by_handle_
+count, unknown_handle_count` (test 39) -- COUNTS ONLY, no master/global
+score (AST-scanned via this module's own docstring-cited convention,
+same as D-220/D-223).
+
+### 28. Default-off parity
+Flag OFF: neither `pacing_v2` nor `pacing_v2_handle_aware` ever appears
+in `draft.diagnostics` (`TestPipelineWiring.test_default_off_no_handle_
+aware_key`) -- zero compute, byte-identical output to before this task.
+
+### 29. Flag-on immutability
+`draft.diagnostics["dialogue_pacing_transition"]` (D-142's own live
+output) is asserted byte-identical between flag-off and flag-on runs
+(`test_flag_on_d142_unchanged_vs_off`); every other diagnostics key
+(excluding the two additive `pacing_v2*` keys) is asserted identical too,
+in both the pre-existing D-216 and D-217 test suites (updated this task,
+item 2) and this task's own new suite.
+
+### 30. Boundary immutability
+`boundary_engine_pass.py`/`post_selection_edge_only_boundary.py` are read
+(their own audit output), never re-executed, never altered -- no import
+of either module's own transformation functions beyond reading the
+already-computed diagnostics dict keys (AST-proven, `test_no_boundary_
+authority_module_imported`... this task's own module imports neither
+module at all).
+
+### 31. Ordering immutability
+Pair index order mirrors `selected`'s own already-fixed sequence exactly
+-- no re-ordering, no `sorted()` call anywhere in this module (test 33).
+
+### 32. D-142 immutability
+Restates item 29 -- `apply_dialogue_pacing_transition_pass`'s own live
+output is never read back into by this module, never touched.
+
+### 33. RenderSegment immutability
+`render_plan.RenderSegment` is never constructed, never imported (AST-
+proven, `test_no_renderer_module_imported`) -- `right_pre_handle_start`/
+`end` etc. are plain diagnostics floats, never a live audio-window field.
+
+### 34. Renderer-command immutability
+`render.py` is never imported (same AST test, item 33) -- no ffmpeg
+command construction of any kind exists in this module.
+
+### 35. No ASR/provider
+No `asr` module import (AST-proven, test 27); no provider-shaped
+identifier referenced anywhere (`analyze_prosodic_delivery`,
+`WholeVideoProvider`, `ASRProvider`, `CleanCutProvider` -- AST-proven,
+test 28).
+
+### 36. No crossfade/ambience/micro authority
+`SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_
+BRIDGE` never appear as an identifier in this module (AST-proven, tests
+40-41); `MICRO_AUDIO_OVERLAP` is never imported (AST-proven, test 42) --
+D-215's own existing, unmodified micro-overlap diagnostics (already
+present in `decide_transition`'s own output) are neither amplified nor
+suppressed by this task; this module adds nothing micro-specific.
+
+### 37. Tests
+48 new tests (`tests/test_cutsell_d224_pacing_v2_source_audio_handle_
+live_evidence_integration.py`), covering this task's own full 48-item
+matrix (combined-availability derivation, every blocked/unknown/speech-
+present control, no-double-count on a synthetic overlap, source-bound
+violations, multi-source, D-215/D-220 reuse and parity, full immutability/
+determinism/ordering, diagnostics/summary shape, AST-based layering
+audits, and the live-seam `TestPipelineWiring` class covering default-off
+parity, flag-on immutability, and the D-221 scarcity replay end-to-end).
+
+### 38. D-223 regression
+`tests/test_cutsell_d223_pacing_v2_source_audio_handle_foundation.py` --
+45/45 passed, unmodified by this task.
+
+### 39. Pacing regression
+`pytest -k "pacing or ... or d224"` -- 878 passed, 0 failed (up from
+D-223's own 830, +48 this task's own new tests; two pre-existing D-216/
+D-217 parity assertions updated per item 2, both still passing on their
+own strengthened terms).
+
+### 40. Boundary regression
+Included in item 39's own `-k "boundary"` filter -- 0 failures; `boundary_
+engine_pass.py`/`post_selection_edge_only_boundary.py`'s own test suites
+unaffected (neither file was modified).
+
+### 41. Renderer regression
+Included in item 39's own `-k "render"` filter -- 0 failures; `render.py`/
+`render_plan.py` untouched.
+
+### 42. Full offline suite
+`pytest tests/ --ignore=tests/test_semantic_stitch.py` -- `5429 passed, 5
+failed` (up from D-223's own `5381 passed, 5 failed`, +48 this task's own
+new tests, zero regressions elsewhere).
+
+### 43. New failures
+NONE. The same 5 pre-existing, unrelated failures as D-223's own baseline
+(`test_hybrid_story_guard_incomplete_retry.py`'s one test, and four in
+`test_video00_modal_hybrid_semantic_parity.py` -- D-044's own Modal env-
+secret overlay workflow test) -- neither this task's new module, its
+test file, nor its one-line `universal_clean_cut.py` wiring touches
+`active_path_identity.py`, the D-044 Modal workflow, or any `hybrid_
+story_guard`-adjacent code.
+
+### 44. D-224 verdict
+**A. SOURCE AUDIO HANDLE LIVE EVIDENCE INTEGRATION OFFLINE PROVEN --
+HANDLE-AWARE J/L DIAGNOSTICS READY FOR REAL MEDIA.**
+
+### 45. Canonical Pacing status / exact D-225 gate
+Adds `PACING_V2_SOURCE_AUDIO_HANDLE_LIVE_INTEGRATION_OFFLINE_PROVEN`.
+Names **D-225 -- Handle-Aware Pacing V2 Video00 Real-Media Diagnostic
+Qualification**, NOT launched here: exactly ONE Video00 RAW, purpose
+"does widening J/L candidate-availability evidence with real `SourceAudio
+Handle`s actually unlock any real J/L candidates on Video00 itself" --
+still zero live authority, still diagnostics-only, requiring separate
+Product Owner authorization (per this task's own explicit "Do not
+implement/launch automatically" instruction).
+
+### 46. Live authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed
+transition modes. This task introduces, enables, or implements zero live
+authority anywhere -- `pacing_v2_handle_aware_evidence.py`'s own output is
+read by nothing else in the codebase; it is a pure additive diagnostics
+leaf.
+
+### 47. Audio Join Treatment status
+Unchanged from D-220C/D-222/D-223: `CLICK_FADE` existing/live; `SHORT_
+CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE`
+remain `ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_AUTHORITY`. This
+task's own `handle_diagnostics` output (item 26) is shaped so a future,
+separately-authorized gate could reuse it for any of these four
+treatments' own eventual evidence needs, per D-222 item 19's own
+"shared foundation, not duplicated per feature" finding -- no such
+treatment is implemented, decided, or authorized here.
+
+### 48. Renderer status
+Unchanged. `render.py`/`render_plan.py` not touched by this task; D-214's
+own contract remains cited (via D-223, unmodified) as already sufficient,
+never extended or exercised live by anything this task adds.
+
+### 49. App-roadmap status
+Unchanged sequence through D-223, then: Source Audio Handle Foundation
+offline-proven (D-223) -> **Source Audio Handle live evidence integration
+offline-proven, handle-aware J/L diagnostics ready for real media, this
+entry (D-224)** -> next: D-225 handle-aware Video00 real-media diagnostic
+qualification (exactly ONE RAW, diagnostic only, no authority, NOT
+launched here) -> [per D-222 item 22] controlled perceptual J/L fixture
+qualification (now against real handle-widened evidence, if D-225 finds
+real unlocks) -> bounded J/L authority -> Audio Join Treatment
+architecture/forensic (sharing this same handle foundation) -> `SHORT_
+CROSSFADE`/`AMBIENCE_*` execution + decision-layer implementation ->
+micro-overlap final authority -> Renderer/export qualification ->
+unseen-RAW generalization/Human Gold parity -> product hardening ->
+TestFlight -> App Store.
+
+### 50. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. `docs/
+CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` NOT edited (this task's
+own scope did not require or authorize it; D-222 item 23's own future
+clarification recommendation still stands, unperformed).
+
+### 51. Confirmation
+NO RAW dispatched. NO provider/network call. NO live J_CUT/L_CUT/MICRO_
+AUDIO_OVERLAP authority created, enabled, or implemented. NO Audio Join
+Treatment implemented. NO renderer live audio-handle use (`RenderSegment.
+audio_start`/`audio_end` never populated from a handle anywhere in this
+task). NO Boundary/Ordering/Family/BestTake behavior change (both audit
+trails and `draft.discarded` are READ only). NO timing-heuristic change
+(`pacing_v2_timing_policy.py`, D-220, untouched, its own formula never
+modified -- only optionally given a wider input, purely diagnostically).
+NO D-223 module (`pacing_v2_source_audio_handle.py`) modified. Zero new
+recurring paid infrastructure, zero secret exposure, zero destructive
+repository action.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/C/G) -- per this task's own
+explicit "Then STOP. Do NOT launch D-225. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-225 (exactly
+ONE Video00 RAW, diagnostic only, no authority) as the next, separately-
+scoped and separately-paid-compute-authorized engineering turn. No RAW is
+dispatched by this task.
+
+---
