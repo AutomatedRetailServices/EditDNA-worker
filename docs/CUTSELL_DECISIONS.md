@@ -54833,3 +54833,141 @@ complete; D-235Q is a separate, not-yet-authorized integration task.
 **Paid compute required?** No. **RAW required?** No.
 
 Then STOP. Do NOT implement D-235Q. Wait for Product Owner coordination.
+
+## D-235Q — COMPLETE EDITORIAL-REQUIREMENT + LOST-ATOM MATERIALITY INTEGRATION (OFFLINE ONLY)
+
+**Status:** IMPLEMENTED, OFFLINE ONLY. No RAW/Modal/RunPod/provider run. No
+live Freeze authority, repair-loop, resolver, threshold, P1/P2 authority,
+BestTake/Family/Ordering/Boundary/Pacing/Audio-Join change.
+
+**Objective (post D-235P verdict A):** combine D-235L (meaning-critical
+materiality), D-235M (editorial requirement), and D-235P (exact canonical
+word-membership identity) into ONE bounded decision object,
+`CompleteLostSemanticAtomMateriality`, via a new integration module —
+none of the three prior modules modified.
+
+**New production module:** `cutsell_worker/complete_lost_semantic_atom_materiality.py`.
+
+**"Upgrading D-235M" interpretation:** `lost_atom_editorial_requirement_
+evidence.py`'s own `assess_editorial_requirement_evidence()` already
+accepted `identity_mapping_status=EXACT` plus a real `editorial_slot_
+evidence` value as parameters — it simply never had a caller able to
+construct them from a genuinely exact identity before D-235P existed.
+D-235Q is that first real caller: it builds those exact inputs from a
+`shared_attempt_word_identity.AttemptLanguageIdentityMatch` and calls
+D-235M's existing function UNCHANGED. Zero diff to `lost_semantic_atom_
+materiality.py`, `lost_atom_editorial_requirement_evidence.py`, or
+`shared_attempt_word_identity.py` (grep-confirmed in tests).
+
+**Final materiality vocabulary:** reused VERBATIM from D-235L's own 7-value
+set (`MEANING_CRITICAL`, `EDITORIALLY_REQUIRED`, `NON_MATERIAL_REAL_
+CONTENT`, `RETRY_OR_RECORDING_RESIDUE`, `REDUNDANT_EQUIVALENT`,
+`INSUFFICIENT_EVIDENCE`, `CONFLICTED`) — the directive's own requested
+vocabulary is identical to D-235L's, so this module imports rather than
+redefines it (`test_final_materiality_vocabulary_matches_d235l_exactly`).
+Blocking vocabulary (`BLOCK`/`DO_NOT_BLOCK`/`ABSTAIN`) likewise reused
+verbatim from D-235L.
+
+**Decision precedence (strict ordered if/elif chain, first match wins):**
+1. Meaning safety (`materiality.materiality_status == MEANING_CRITICAL`)
+   → BLOCK, structurally first, never downgradable by any later branch.
+2. Editorial requirement (`requirement.editorial_requirement_status ==
+   REQUIRED`) → BLOCK.
+3. Conflict/unknown safety (`materiality` or `requirement` CONFLICTED, or
+   an unresolved multi-proposition ownership ambiguity with no
+   independent redundancy proof) → ABSTAIN (`CONFLICTED`).
+4. Retry/recording residue (`materiality.materiality_status ==
+   RETRY_OR_RECORDING_RESIDUE`) → DO_NOT_BLOCK.
+5. Redundant equivalent (`materiality` REDUNDANT_EQUIVALENT, `requirement`
+   REDUNDANT_REQUIRED_FUNCTION_PRESERVED, or `replacement_function_
+   preserved is True`) → DO_NOT_BLOCK.
+6. Non-material real content (`materiality.materiality_status ==
+   NON_MATERIAL_REAL_CONTENT` AND the identity-sufficiency gate below is
+   clear) → DO_NOT_BLOCK.
+7. Otherwise → ABSTAIN (`INSUFFICIENT_EVIDENCE`).
+
+**Identity-sufficiency gate (the D-235K real-shape distinction, the core
+new logic this task contributes):** step 6 requires EITHER
+`requirement.editorial_requirement_status == NOT_REQUIRED` (a firewall/
+explicit-clearance branch that never needed slot evidence — always safe)
+OR `requirement.editorial_requirement_status == INSUFFICIENT_EVIDENCE`
+**AND** `exact_identity_available` is True (D-235M's own generic "nothing
+found" default is trustworthy only when the slot channel it was given was
+genuinely exact and empty, never when the channel itself was unavailable
+or heuristic-only). This precisely distinguishes the D-235K real-shape
+fixture (exact identity available, nothing required found → DO_NOT_BLOCK)
+from fixtures 19/20 (identity missing/heuristic-only → ABSTAIN) even
+though D-235M's own raw output value (`INSUFFICIENT_EVIDENCE`) is
+identical in both cases — "requirement depends on identity" is
+operationalized as `exact_identity_available`, never inferred from
+D-235M's status value alone.
+
+**Multi-proposition safety:** a single-proposition exact match supplies
+its `editorial_slot_evidence` directly (unambiguous ownership). A
+multi-proposition exact partition NEVER attributes the atom to one
+member: if ANY proposition in the set carries a story-function slot
+(`SLOT_HOOK`/`SLOT_CTA`/`SLOT_CONCLUSION` — `_STORY_FUNCTION_SLOTS`
+mirrored verbatim from D-235M's own private set, built from the same
+public constants, never importing a private cross-module name),
+`ownership_ambiguous` is set and NO slot evidence is passed to D-235M for
+that row at all (never a guessed single value); the ambiguity resolves at
+step 3 unless an independent redundancy signal already proves the
+function is preserved elsewhere ("unless another exact signal proves
+redundancy/preservation" — the directive's own carve-out).
+
+**Exact identity use:** `exact_match.relationship_status` is checked
+against D-235P's own `AUTHORITATIVE_RELATIONSHIP_STATUSES` before any
+slot evidence is read — non-authoritative containment/partial-overlap/
+heuristic matches never supply `editorial_slot_evidence` (structurally
+guaranteed: grep-verified that `exact_slot_evidence` is only ever
+assigned inside the `if exact_identity_available:` branch).
+
+**Retry/redundancy firewalls:** both are structurally incapable of
+overriding steps 1-2 by construction of the ordered chain (retry/
+redundant are steps 4-5, checked only after meaning-critical/editorial-
+required have already been ruled out) — proven by fixtures 23-25 (retry
++ critical fact, retry + required setup, redundant + critical fact, all
+→ BLOCK).
+
+**D-235K real shape:** a generic fixture (never hardcoding the literal
+phrase — grep-verified) matching the real case (`REAL_CONTENT_LOSS`,
+`blocking=true` upstream, zero missing critical atoms, no contradiction,
+no lost critical claim, exact proposition identity available but no
+editorial requirement proven) now correctly resolves to
+`NON_MATERIAL_REAL_CONTENT` / `DO_NOT_BLOCK` — and the same shape with
+ambiguous exact proposition-set evidence correctly resolves to `ABSTAIN`
+instead, exactly as this task's own directive specified.
+
+**Tests:** `tests/test_cutsell_d235q_complete_lost_semantic_atom_
+materiality.py`, 59 tests covering the full 55-item fixture/proof matrix
+(all 10 meaning-critical BLOCK fixtures, 4 retry/process DO_NOT_BLOCK, 4
+redundant/optional/non-material DO_NOT_BLOCK, 3 identity-dependent
+ABSTAIN, conflict-precedence-never-DO_NOT_BLOCK, mixed-materiality batch
+isolation, same-topic-no-equivalence ABSTAIN, completeness fixtures,
+D-235K-shape fixture (2 variants) + no-hardcoded-phrase proof,
+determinism/order-independence/multi-source isolation, multilingual
+pass-through, diagnostics shape, structural no-fuzzy-text/no-timestamp-
+authority/no-provider/no-master-score proofs, no-Freeze/RepairLoop/
+resolver-import proofs, sibling-module zero-diff proofs, vocabulary-reuse
+proofs). D-235 cumulative bundle: 366/366 (307 pre-existing + 59 new).
+CleanCutBench parity: 1/1. `compileall` clean (excluding the chronic
+pre-existing, unrelated `jobs_smoke.py` syntax error).
+
+**Backward compatibility:** fully additive, new module only, no existing
+field/function signature changed.
+
+**Verdict: A** — COMPLETE LOST-ATOM MATERIALITY INTEGRATION OFFLINE
+PROVEN, ready for a bounded Freeze authority adapter. Canonical status:
+`COMPLETE_LOST_SEMANTIC_ATOM_MATERIALITY_OFFLINE_PROVEN`.
+
+**Exact next gate named, NOT implemented here:** D-235R — BOUNDED
+LOST-ATOM FREEZE AUTHORITY ADAPTER, OFFLINE FIRST. May alter a Freeze
+recommendation ONLY under `final_materiality_status in
+{NON_MATERIAL_REAL_CONTENT, RETRY_OR_RECORDING_RESIDUE,
+REDUNDANT_EQUIVALENT}` AND `blocking_recommendation == DO_NOT_BLOCK` AND
+no critical/editorial/conflict signal exists. Still offline first.
+
+**Engine patch required after this?** No. **Paid compute required?**
+No. **RAW required?** No.
+
+Then STOP. Do NOT implement D-235R. Wait for Product Owner coordination.
