@@ -51298,3 +51298,288 @@ separately-scoped engineering work. No further action is taken on it by
 this task.
 
 ---
+## D-232: Pacing V2 Audio Join Treatment Decision Foundation, Offline Only (post D-231)
+
+Builds `cutsell_worker/pacing_v2_audio_join_treatment_decision.py` --
+D-098 Section 16.5's own named Layer 3 (AUDIO JOIN TREATMENT), choosing
+a treatment RECOMMENDATION (never executing one) from D-231's
+`AudioJoinUnderstanding`. Offline only, zero live wiring, zero
+execution authority.
+
+1. **Canonical position, restated.** `EVIDENCE -> JOIN UNDERSTANDING
+   (D-231) -> TRANSITION DECISION (D-215, separate axis) -> TIMING
+   POLICY (D-220 for J/L; future for treatment) -> AUDIO JOIN TREATMENT
+   (this module) -> RENDERER EXECUTION (D-214)`. This module never
+   selects/recomputes `KEEP_PAUSE`/`HARD_CUT`/`TIGHT_CUT`/`J_CUT`/
+   `L_CUT`/`MICRO_AUDIO_OVERLAP` -- `primary_transition_mode` is always
+   a caller-supplied, already-decided D-215 value (tested: neither
+   `J_CUT` nor `L_CUT` literal appears anywhere in `build_audio_join_
+   treatment_decision`'s own source).
+2. **`AudioJoinTreatmentDecision` type**, all directive-recommended
+   fields plus three extras this task's own directive explicitly
+   allowed for beyond the "recommended" list (`compatibility_status`,
+   `renderer_capability_status`, `loudness_polish_status` -- each
+   needed to satisfy the directive's own separately-required run-summary
+   counts and diagnostics). No transcript dump, no master score.
+3. **Treatment vocabulary** -- the FIRST module in this track to define
+   it (D-231's own test suite explicitly proved it defines none):
+   `NONE`/`CLICK_FADE`/`SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/
+   `AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE`, exactly six values, no
+   variants (`TREATMENT_VALUES`, tested to have exactly 6 members and
+   to never contain `MICRO_AUDIO_OVERLAP`).
+4. **Treatment-status vocabulary reused, not redefined.** `TREATMENT_
+   STATUS_SUPPORTED`/`SAFE_FALLBACK`/`INSUFFICIENT_EVIDENCE`/
+   `CONFLICTED`/`UNKNOWN` are D-230's own `EVIDENCE_STATUS_*` constants
+   imported verbatim -- the exact five-value shape this task's own
+   directive asked for, already established by that earlier module.
+5. **NONE is a first-class success**, never a failure marker. Item 1/2
+   (continuous HARD/TIGHT joins) proven to resolve to `NONE` or
+   `CLICK_FADE` with `treatment_status=SUPPORTED`.
+6. **CLICK_FADE contract preserved verbatim.** The module never touches
+   `render.py`'s own `_AUDIO_JOIN_FADE_SEC`/`_AUDIO_JOIN_FADE_MIN_
+   SEGMENT_SEC` (confirmed: `render.py` is never imported by this
+   module) -- `CLICK_FADE` here is a RECOMMENDATION string only, always
+   compatible with every primary mode (`_COMPATIBILITY` matrix, every
+   `(mode, CLICK_FADE)` pair is `SUPPORTED`).
+7. **SHORT_CROSSFADE contract.** Requires acoustic continuity `DIFFERENT`
+   + both retained edges evaluable (`short_crossfade_evidence_status ==
+   TREATMENT_EVIDENCE_READY`, D-231's own field, unmodified) + speech
+   safety `SAFE` + meaning safety `SAFE` (both fully RESOLVED, not
+   merely absent-of-a-known-block -- a genuine design decision explained
+   in item 15 below). Items 3/4 (abrupt HARD/TIGHT joins) directly
+   proven; item 5 (speech-speech unsafe) directly proven to block it.
+8. **AMBIENCE_CARRY_LEFT contract.** Requires D-231's own `ambience_
+   carry_left_evidence_status == TREATMENT_EVIDENCE_READY` (handle-based,
+   independent of retained-edge safety) + acoustic continuity `DIFFERENT`.
+   Item 12/15 proven.
+9. **AMBIENCE_CARRY_RIGHT contract.** Symmetric, item 13/16 proven.
+10. **AMBIENCE_BRIDGE contract.** Requires D-231's own `ambience_bridge_
+    evidence_status == TREATMENT_EVIDENCE_READY` (both sides ready AND
+    a measured discontinuity, already gated by D-231 itself) -- reached
+    only when crossfade/ambience-left/ambience-right did not already win
+    by precedence (item 17, directly proven with an explicit precedence
+    trace: crossfade NOT_READY by construction, both ambience-carry
+    sides READY, `AMBIENCE_CARRY_LEFT` wins deterministically over
+    `AMBIENCE_BRIDGE` per step 4-before-step-6 ordering). Never called
+    "room-tone match" (item 44/item 28 of the room-tone-honesty
+    requirement, directly tested).
+11. **Compatibility matrix**, complete and static over all 36 `(primary
+    mode, treatment)` pairs across the six D-215 modes and six Layer-3
+    treatments. `MICRO_AUDIO_OVERLAP` paired with any treatment beyond
+    `NONE`/`CLICK_FADE` is `DISALLOWED` (item 31, all four disallowed
+    pairs directly enumerated and tested) -- **and this is load-bearing
+    in the real decision path, not an accessory**: item 31b proves a
+    candidate `AMBIENCE_CARRY_LEFT` recommendation is downgraded to
+    `CLICK_FADE`/`SAFE_FALLBACK` when `primary_transition_mode ==
+    MICRO_AUDIO_OVERLAP`, with `CONFLICT_COMPATIBILITY_DISALLOWED`
+    recorded in `conflict_flags`. J/L pairs (items 26-30) all proven
+    exactly per the directive's own minimum matrix.
+12. **One treatment per join** -- structurally guaranteed (`treatment`
+    is a single string field, never a list); item 32 proven.
+13. **Speech firewall.** `LEXICAL_SPEECH_PRESENT` on either side where a
+    treatment would need to overlap it folds into `speech_safety_status`
+    (a new aggregate field combining `word_safety_status` +
+    `double_speech_status`) -- `SAFETY_BLOCKED` there forces `CLICK_
+    FADE`/`SAFE_FALLBACK` before any advanced treatment is even
+    considered (double-speech-both-sides-lexical critical test, directly
+    proven).
+14. **Word firewall.** Unknown word coverage never becomes a safe
+    overlap -- `word_safety_status == SAFETY_UNKNOWN` is folded into
+    `speech_safety_status == SAFETY_UNKNOWN`, which still blocks
+    `SHORT_CROSSFADE` specifically (crossfade requires `speech_safety ==
+    SAFETY_SAFE`, an exact-match check, not merely "not BLOCKED").
+15. **Meaning firewall.** `meaning_safety_status == SAFETY_BLOCKED`
+    (D-038's negation/numbers/factual-qualifier/correction/critical-
+    clause vocabulary, reused via D-231, never re-classified) blocks
+    every treatment beyond `CLICK_FADE`/`NONE` (items 7/8, both sides
+    independently proven).
+16. **Double-speech firewall.** `JOIN_DOUBLE_SPEECH_BOTH_SIDES_LEXICAL`
+    folds into `speech_safety_status == SAFETY_BLOCKED`, blocking every
+    treatment beyond `CLICK_FADE`/`NONE` (directly proven).
+17. **A genuine design fix found during this module's own test
+    authoring** (not a pre-existing repo bug -- caught before this module
+    ever shipped): the first implementation draft applied the "speech/
+    meaning safety UNKNOWN -> abstain to CLICK_FADE" check EARLY,
+    before evaluating ambience readiness at all. Since D-231's own
+    ambience-readiness fields (`ambience_carry_left/right_evidence_
+    status`) are handle-based and structurally independent of the
+    RETAINED edges' own safety resolution, this wrongly blocked a
+    legitimately safe, independently-evidenced ambience candidate
+    whenever the OTHER, unrelated retained edge's word/meaning coverage
+    happened to be unresolved. Fixed by moving the UNKNOWN-abstention
+    check to the END of the decision table (after crossfade AND all
+    three ambience treatments have been tried), while the genuinely
+    BLOCKED (not merely unknown) checks for meaning/speech safety and
+    the retry/correction veto remain at the TOP, unweakened -- a known
+    danger still blocks everything; an unresolved-but-irrelevant unknown
+    no longer does. Documented in the module's own inline comments
+    at each affected step (tests 13/14/15/16/17/31b all exercise this
+    fix directly, each isolating ambience-only evidence via a single
+    retained edge deliberately omitted so `SHORT_CROSSFADE` stays
+    structurally `NOT_READY` per D-231's own "both edges required"
+    rule).
+18. **Retry/Correction hard veto**, restating D-215's own identical veto
+    at Layer 2, never re-derived -- read straight from `understanding.
+    relationship_hint` (items 9/10, both directly proven).
+    `RELATIONSHIP_CONTINUATION` never appears as a positive condition
+    anywhere in the decision table (structurally verified via `inspect.
+    getsource`, not merely behaviorally) -- item 11's own "never
+    sufficient alone" requirement satisfied by construction, not by
+    convention.
+19. **Prosodic role** -- surfaced verbatim from `understanding.
+    prosodic_status` in every diagnostic row (D-231's own vocabulary,
+    never re-derived); remains optional corroboration only, never a
+    BestTake ranking signal, per this task's own restated instruction
+    (no direct gate on it in `_decide_treatment` -- Prosodic evidence
+    is diagnostic context here, exactly as D-215's own `_prosody_
+    supports_overlap` already treats it as corroboration, never a hard
+    requirement).
+20. **Acoustic-continuity role and level-continuity role** both surfaced
+    verbatim from `understanding.acoustic_continuity_status`/`level_
+    continuity_status` -- never re-derived, never conflated (items
+    19-21 directly prove the "ACOUSTIC CHARACTER != LOUDNESS" separation
+    survives into the treatment decision: same background/different gain
+    -> `SIMILAR` continuity, `LOUDNESS_POLISH_NEEDED` diagnostic, but
+    treatment stays `NONE`/`CLICK_FADE`, never escalated to a heavier
+    treatment merely because of the level mismatch).
+21. **Loudness ownership firewall.** `loudness_polish_status`
+    (`LOUDNESS_POLISH_NEEDED`/`NOT_NEEDED`/`UNKNOWN`) OBSERVES a
+    same-background-different-level mismatch but never triggers a gain
+    correction and never influences `treatment` selection (item 21
+    directly proven: the diagnostic fires, `SHORT_CROSSFADE` is never
+    chosen "to fix" the mismatch). No `normalize_gain`/`apply_gain`/
+    `correct_loudness` symbol exists anywhere in the module (tested).
+    Actual correction remains D-024/Audio Polish territory, unchanged.
+22. **Crossfade-vs-loudness distinction**, structurally proven by items
+    19-21 together: a pure gain difference (`SIMILAR` continuity,
+    `LOUDNESS_POLISH_NEEDED`) never selects `SHORT_CROSSFADE`; a genuine
+    background-character difference (`DIFFERENT` continuity) does,
+    regardless of matched or mismatched gain (item 20).
+23. **SourceAudioHandle reuse, no reconstruction.** `left_post_roll_
+    handle_status`/`right_pre_roll_handle_status` are optional caller-
+    supplied D-223 `handle_status` strings, passed straight through to
+    diagnostics (tested: passed-through verbatim) -- the actual
+    ambience-readiness GATE was already decided upstream by D-231's own
+    fields, never re-evaluated from the raw handle here. Zero import of
+    `pacing_v2_source_audio_handle.build_source_audio_handles` or any
+    handle-construction function.
+24. **Room-tone honesty**, restated. `room_tone_classification_status`
+    surfaces D-230/D-231's own `"NOT_YET_AVAILABLE"` verbatim; no
+    `ROOM_TONE_MATCH`/`ROOM_TONE_MISMATCH` symbol exists anywhere in the
+    module (tested via `vars()` inspection).
+25. **Same-source / multi-source**, both proven (items 34/35) --
+    `AudioJoinUnderstanding`'s own source-local design (D-231, D-230)
+    is inherited unmodified; this module never compares raw timestamps
+    itself (it never even reads `window_start`/`window_end` -- those
+    fields do not exist on `AudioJoinUnderstanding` at all).
+26. **No-treatment-needed result** (item 25) and **safe-crossfade
+    result** (items 3/4/34) and **blocked-crossfade result** (item 5)
+    all directly proven.
+27. **Timing-policy status, honestly incomplete.** `candidate_duration_
+    sec` stays `None` and `timing_status` stays `TIMING_POLICY_NOT_YET_
+    IMPLEMENTED` for every decision this module produces today (item
+    36, directly proven, including that supplying a caller-provided
+    duration never changes which treatment gets selected -- selection
+    and duration are fully separable, per this task's own explicit
+    requirement).
+28. **Renderer capability status preserved verbatim** (D-229's own
+    forensic findings, docs/CUTSELL_DECISIONS.md D-229 items 30-34):
+    `SHORT_CROSSFADE -> EXTENSION_REQUIRED`, `AMBIENCE_CARRY_LEFT/
+    RIGHT/BRIDGE -> SUPPORTED_NOW` (item 52, all four directly asserted
+    against the module's own `renderer_capability_status()` function --
+    never modified by any decision this module makes, never used to
+    gate a decision itself, purely a surfaced diagnostic).
+29. **Deterministic result.** Identical `(understanding, primary_
+    transition_mode)` inputs produce an identical, `==`-equal
+    `AudioJoinTreatmentDecision` (item 33, directly proven). Every
+    dataclass is frozen (mutation raises).
+30. **Diagnostics + run summary**, no transcript dump, no master score
+    (items 37/38-ish coverage; `json.dumps` round-tripped, a supplied
+    word literal asserted absent).
+31. **No RAW/provider/ASR/Boundary/Ordering/Family/BestTake/renderer/
+    Micro/J-L-authority reach** -- all structurally proven by direct
+    source/AST inspection (items 37-46), not docstring substring scans:
+    no `render`/`render_plan` import; no `whisper`/`transcribe`/`asr_`
+    substring; no `requests.`/`openai`/`genai`/`gemini`/`modal.`/
+    `boto3` substring; no `from .boundary`/`from .ordering`/`from
+    .family`/`from .best_take` import, no `dataclasses.replace` call;
+    no `normalize_gain`/`apply_gain`/`correct_loudness` symbol; `MICRO_
+    AUDIO_OVERLAP` structurally absent from `TREATMENT_VALUES`; neither
+    `J_CUT` nor `L_CUT` literal appears in `build_audio_join_treatment_
+    decision`'s own source.
+
+**Test evidence.** `tests/test_cutsell_d232_pacing_v2_audio_join_
+treatment_decision.py`: 59 tests, all passing (`59 passed in 0.50s`).
+Covers all 53 numbered generic-fixture-matrix items plus additional
+critical-property tests (speech-safety/word-safety independent-field
+proof, double-speech-both-sides block, conflicted-understanding
+propagation, handle-status pass-through, unknown-coverage-does-not-
+block-independent-ambience-candidate).
+
+**Regression evidence.**
+- `python3 -m compileall -q cutsell_worker tests` -- clean.
+- D-231/D-230/Pacing/SourceAudioHandle/Prosodic/Silence regressions
+  (`test_cutsell_d231_*`, `d230_*`, `d223_*`, `d224_*`, `d214_*`,
+  `d215_*`, `d216_*`, `d217_*`, `d218f_*`, `d218r_*`, `d220_*`, `d226_*`,
+  `d187_*`, `d095_2_*`): 673 passed, 0 failed.
+- Renderer regressions (`test_cutsell_clean_worker_render.py`,
+  `test_cutsell_clean_worker_caption_render.py`): 9 passed, 0 failed.
+- Full offline suite (`pytest tests/ --ignore=tests/test_semantic_
+  stitch.py`): **5697 passed** (up from D-231's own 5638 by exactly the
+  59 new D-232 tests), **5 failed**, 13 subtests passed (158.07s). The 5
+  failures are the SAME chronic, pre-existing D-044 hybrid-semantic-
+  parity failures D-230/D-231's own entries already documented and
+  reproduced against the unmodified baseline -- byte-identical failure
+  names, zero new genuine failures.
+
+**No RAW, no Modal/RunPod, no provider call, no live authority.** No
+`.github/workflows/*.yml` file touched. No `render.py`/`render_plan.py`/
+`pacing_v2_source_audio_handle.py`/`pacing_transition_decision.py`/
+`dialogue_pacing_transition.py`/`pacing_v2_audio_join_understanding.py`/
+`pacing_v2_acoustic_edge_evidence.py`/Boundary/Ordering/Family/BestTake
+file touched (all read-only inputs, reused via import only). No feature
+flag, no `universal_clean_cut.py` wiring (directly verified via `grep
+-rl`). No crossfade/ambience execution of any kind.
+
+**D-232 verdict: A -- AUDIO JOIN TREATMENT DECISION FOUNDATION OFFLINE
+PROVEN, RENDERER/TIMING QUALIFICATION READY.** Every treatment contract
+D-098 Section 16.5/this task's own directive named (`NONE`/`CLICK_FADE`/
+`SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/
+`AMBIENCE_BRIDGE`) is now reachable via one deterministic, fully-tested
+decision table with a complete Layer-2/Layer-3 compatibility matrix,
+zero regressions, and zero live authority granted.
+
+Canonical status added: `PACING_V2_AUDIO_JOIN_TREATMENT_DECISION_
+OFFLINE_PROVEN`.
+
+Names D-233 (Audio Join Treatment Renderer/Timing Contract, offline
+only -- implementing/parameterizing `SHORT_CROSSFADE`, formalizing the
+ambience execution mapping, a treatment timing policy, synthetic
+fixtures, still no live authority) -- **NOT implemented by this task**.
+
+Audio Join Treatment status: a full DECISION now exists per join
+(this task); EXECUTION and TIMING remain entirely unauthorized and
+unimplemented (D-233's own future gate). J/L status: unchanged from
+D-228/D-229/D-230/D-231 (bounded, real-media-eligibility-contingent,
+zero live authority). Micro (`MICRO_AUDIO_OVERLAP`) status: unchanged,
+structurally impossible as a Layer-3 treatment value, diagnostics-only
+at Layer 2, highest safety bar, last in the roadmap per D-098 Section
+16.14. Renderer status: unchanged, zero behavior change, zero new call
+site, capability findings preserved verbatim. App-roadmap status:
+Pacing HARD/TIGHT stable, J/L optional, Acoustic Evidence DONE (D-230),
+Audio Join Understanding DONE (D-231), Audio Treatment Decision DONE
+(this task) -- treatment renderer/timing is the next named, not-yet-
+authorized step.
+
+Zero RAW/Modal/RunPod/provider call. Zero treatment execution/authority
+of any kind. Zero Boundary/Ordering/Family/BestTake/Renderer behavior
+change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+"Then STOP. Do NOT implement D-233. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-233 (Audio
+Join Treatment Renderer/Timing Contract, offline only) as the next,
+separately-scoped engineering work. No further action is taken on it by
+this task.
+
+---
