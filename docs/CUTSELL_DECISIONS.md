@@ -55652,3 +55652,231 @@ authorized dispatch possible.
 
 Then STOP. Do NOT launch a further RAW. Wait for Product Owner
 coordination.
+
+## D-235V — LIVE LOST-ATOM MATERIALITY / FREEZE AUTHORITY WIRING FORENSIC (POST D-235U)
+
+**Status:** FORENSIC ONLY. No RAW, no Modal, no RunPod, no provider, no
+engine/threshold/Freeze/RepairLoop/materiality/P1/P2/BestTake/Family/
+Ordering/Boundary/Pacing/Audio-Join code change. All findings below are
+grounded in direct reads of the current, unmodified live code — never
+inferred from module existence or from D-235Q/R/S/T's own offline test
+suites (which remain valid and unchanged).
+
+**Objective (post D-235U's inconclusive real-media result):** D-235U's
+recovered validator evidence (run 34640040803: `freeze_blocked=true`,
+the SAME historical `REAL_CONTENT_LOSS` atom still blocking, `RepairLoop
+status=NEEDS_HUMAN_REVIEW` with reason `no_repair_strategy_exists_for_
+this_finding_kind`) proves the target atom survived real execution.
+D-235V traces WHY — not whether D-235Q/R/S/T's own logic is correct
+(507/507 offline tests already prove that), but whether the LIVE
+pipeline actually constructs and passes the inputs those components need.
+
+**Stage-by-stage trace (source-code-truth, not inferred):**
+
+| Stage | Status | Evidence |
+|---|---|---|
+| `_lost_semantic_atoms()` | CALLED | Live, unconditional, in `apply_final_story_coherence_validation()`. |
+| Lost atom row → D-235Q | CALLED_WITH_INCOMPLETE_INPUT | Only reachable via D-235R's/D-235T's OWN internal row-only call (`assess_complete_lost_semantic_atom_materiality(row)`, zero kwargs) — no dedicated live call site ever supplies `critical_claim_conflict`, `recording_process_evidence`, or `exact_match`. |
+| D-235Q → D-235R Freeze authority | CALLED_WITH_INCOMPLETE_INPUT | `lost_semantic_atom_freeze_trigger_present(lost_semantic_atoms)` — TWO live call sites in `final_story_coherence_validation.py` (lines ~1307, ~1481), both positional-only, no `materiality_by_clip_id` ever passed. |
+| D-235R → FinalEditReviewer | RESULT_NOT_PROPAGATED (by design, D-235R never touches the reviewer) | `freeze_blocked` only gates a PRIOR aggregate; the row's own `blocking=True` still flows unmutated into `edit_plan.lost_semantic_atoms` → `review()`'s `UNIQUE_FACT_LOST` finding — exactly PATH B, unchanged, exactly as D-235T's own module docstring already disclosed. |
+| FinalEditReviewer → D-235S provenance | CALLED | `detail=dict(row)` unconditional; `lost_atom_provenance_id` (minted unconditionally inside `_lost_semantic_atoms()`) reaches `Finding.detail` live, no flag needed. |
+| D-235S → RepairLoop | CALLED | `RepairAttempt.source_lost_atom_provenance_id` populated unconditionally via `finding.detail.get(...)` at all 3 construction sites — structural, confirmed by code read (unchanged since D-235S). |
+| RepairLoop → D-235T suppression | CALLED_WITH_INCOMPLETE_INPUT (by design, not a bug) | `all_blocking_findings_safely_suppressed()` self-sufficiently recomputes materiality/authority from `finding.detail` alone (D-235T's own deliberate design — see its module docstring) — it correctly reproduces the SAME upstream-limited verdict D-235R would reach, so it correctly does NOT suppress here. This is D-235T behaving exactly as designed given the upstream gap, not a fourth broken seam. |
+| D-235T → `freeze_blocked` | RESULT_NOT_PROPAGATED as SUPPRESS (correctly, given the above) | `blocking_findings_suppressed=False`; RepairLoop terminal status `NEEDS_HUMAN_REVIEW` — matches D-235U's real observed result exactly. |
+
+**STAGE 1/2 — word identity live population:** `CandidateTake.word_indices`
+default `()` is the ONLY value ever seen live — `grep` across every
+`.py` in `cutsell_worker/` confirms `word_indices=` is assigned ONLY
+inside `shared_attempt_word_identity.py` itself (on its own internal
+`WordMembership`/match-construction code), never at any `CandidateTake(`
+construction site (`take_segmentation.py`, `attempt_reconstruction.py`,
+or anywhere else). D-235P's own "unpopulated by any live call site"
+finding is **STILL TRUE, unchanged, as of D-235V**.
+`shared_attempt_word_identity` is imported by exactly two files:
+`complete_lost_semantic_atom_materiality.py` (D-235Q's own offline
+consumer) and `contracts.py` (comment-only, no functional import). It is
+imported by NEITHER `final_story_coherence_validation.py` NOR
+`universal_clean_cut.py` NOR `pipeline.py`. **Status:
+`OFFLINE_ONLY_NOT_LIVE_WIRED`**, confirmed.
+
+**STAGE 3/4 — D-235Q live construction, precisely:** `assess_complete_
+lost_semantic_atom_materiality` IS called live — twice, transitively —
+inside `lost_semantic_atom_freeze_authority.py::lost_semantic_atom_
+freeze_trigger_present()` (D-235R's own live seam) and inside
+`lost_atom_repair_suppression.py::decide_lost_atom_repair_suppression()`
+(D-235T's own live seam). Neither call site supplies ANY of the optional
+richer-context kwargs (`critical_claim_conflict`, `recording_process_
+evidence`, `exact_match`, `proposition_candidate_ids_by_attempt_id`,
+`proposition_slot_evidence_by_id`, `recording_process_status`,
+`audience_delivery_status`, `idea_coverage_status`, `replacement_
+function_preserved`, `downstream_dependency_present`) — all default to
+`None`/`False` because BOTH live call sites are, by design (D-235R's own
+"live seam" documentation, honestly disclosed at the time), row-only.
+
+**STAGE 5 — the actual, code-proven blocking mechanism (broader than the
+directive's own hypothesis):** `assess_lost_semantic_atom_materiality`'s
+own `NON_MATERIAL_REAL_CONTENT` branch (`lost_semantic_atom_materiality.py`
+line ~332) requires `critical_claim_conflict is False` — an EXPLICIT
+`False`, never inferred from absence (`None` never satisfies this
+check, by design — "never inferred from absence" is literally the
+branch's own comment). Since NO live call site EVER passes
+`critical_claim_conflict=False` (confirmed: `grep -rln
+"critical_claim_conflict" cutsell_worker/*.py` matches ONLY the four
+D-235 family files themselves — no orchestration function anywhere
+computes this signal), a `REAL_CONTENT_LOSS` row with no `pre_group_
+restart_consultations`/`suppressed_by`/`preserving_realization_id`
+(exactly the D-235U atom's shape) can **NEVER** reach `NON_MATERIAL_
+REAL_CONTENT` on the live path — it falls through to D-235L's own
+"honest default" (`MATERIALITY_INSUFFICIENT_EVIDENCE`, `RECOMMEND_
+ABSTAIN`), which D-235Q's own precedence (`complete_lost_semantic_
+atom_materiality.py`'s final `else` branch) then also carries forward
+unchanged to `final_materiality_status=MATERIALITY_INSUFFICIENT_
+EVIDENCE`. D-235R's own condition 7/8 (`conflict_or_insufficient`) then
+returns `AUTHORITY_ABSTAIN_PRESERVE_BLOCK` — `effective_blocking=True`.
+This chain, by itself, is SUFFICIENT to explain D-235U's exact observed
+result, independent of and prior to any word-identity question.
+**RETRY_OR_RECORDING_RESIDUE and REDUNDANT_EQUIVALENT remain live-
+reachable** (confirmed: both depend only on row-native fields —
+`pre_group_restart_consultations`, `suppressed_by`,
+`preserving_realization_id` — none of which need an external kwarg).
+**NON_MATERIAL_REAL_CONTENT is NOT live-reachable for ANY row shape**,
+not just this one, because the ONE live-reachable path into it
+(`critical_claim_conflict is False`) is never populated by any caller.
+
+**Relationship to the directive's own "MOST LIKELY GAP" hypothesis
+(word_indices → exact identity → editorial requirement → NON_MATERIAL
+unreachable):** CONFIRMED TRUE as an independent, real, second gap — but
+NOT, by itself, sufficient to explain the block, and NOT the most
+proximate one. Fixing ONLY the word-identity chain (STAGE 1/2) would
+leave `critical_claim_conflict` at `None` and this exact atom would
+STILL land in `INSUFFICIENT_EVIDENCE`/`ABSTAIN` — the identity gap
+governs `requirement_genuinely_clear`, which is consulted ONLY inside
+the `NON_MATERIAL_REAL_CONTENT` branch of D-235Q's precedence, a branch
+`materiality.materiality_status` never even reaches on the live path
+today. Both gaps are real; both are independent; fixing either alone is
+insufficient.
+
+**STAGE 6 — D-235S provenance live path:** Verified structural and
+unconditional (not flag-gated) at all three points named: `lost_atom_
+provenance_id` minted unconditionally inside `_lost_semantic_atoms()`;
+`Finding.detail` carries it via `review()`'s existing `detail=dict(row)`;
+`RepairAttempt.source_lost_atom_provenance_id` populated via `finding.
+detail.get(...)` at all 3 construction sites in `repair_loop.py`. No gap
+here — this wiring works exactly as D-235S proved it would.
+
+**STAGE 7 — D-235T live input:** `repair_loop.py`'s `all_blocking_
+findings_safely_suppressed()` does NOT need (and does not receive) an
+externally-injected D-235R authority decision or D-235Q materiality
+result — by design (see `lost_atom_repair_suppression.py`'s own module
+docstring), it independently re-derives both from `finding.detail`
+(which IS `dict(row)`) using the identical pure functions D-235R itself
+uses. This is confirmed CORRECT, not a missing seam: given the SAME
+upstream row-only limitation, D-235T reproduces the SAME (safe, non-
+suppressing) verdict D-235R would reach — proven consistent by
+construction, not accidentally consistent.
+
+**STAGE 8 — feature flag propagation:** Traced end to end, confirmed
+CORRECT, no gap. `lost_atom_materiality_freeze_authority_enabled` input
+→ `D-235U lost-atom materiality Freeze authority overlay` step writes
+`CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED:"1"` into
+`/tmp/cutsell-env.json` → `CUTSELL_ENV_JSON_PATH` (set via `$GITHUB_ENV`,
+persists to the Modal step) → `modal_video00_full_benchmark.py`'s own
+`cutsell_env_secret` reads that exact path and builds `modal.Secret.
+from_dict(...)` → passed as `secrets=[cutsell_env_secret]` on the remote
+function decorator, landing in the container's real `os.environ`. Both
+`lost_semantic_atom_freeze_authority.lost_atom_materiality_freeze_
+authority_enabled()` and `lost_atom_repair_suppression.decide_lost_atom_
+repair_suppression()` read this via `os.environ` with no `enabled=`
+override at their own live call sites — both correctly see it ON. D-235U's
+own recovered evidence (`CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_
+ENABLED=1` present in the run's printed environment) independently
+corroborates this. **No flag-propagation gap exists.**
+
+**STAGE 9 — exact owning production function, identified with certainty:**
+`final_story_coherence_validation.py::apply_final_story_coherence_
+validation()` — BOTH `freeze_blocked` compositions (the legacy-resolving
+pass at line ~1301 and the AUTHORITATIVE second pass at line ~1476) live
+inside this ONE function, and at the EXACT point each calls `lost_
+semantic_atom_freeze_trigger_present(lost_semantic_atoms)`, the SAME
+local scope ALREADY holds `contradiction_findings` and `lost_critical_
+claims` (computed a few lines earlier, in both passes) — real, already-
+computed signals a caller could cheaply project into a per-clip
+`critical_claim_conflict_by_clip_id` map, but which are never threaded
+through today. The function's own signature has NO parameter through
+which `universal_clean_cut.py` (the sole real caller, confirmed via
+`pipeline.py` having zero references to any of this — `pipeline.py` is
+NOT involved in this chain at all) could supply such a map even if it
+wanted to. `universal_clean_cut.py` itself constructs no `CandidateTake`s
+and holds no exact-identity context either.
+
+**Smallest FUTURE fix (named, NOT implemented):** two independent,
+separately-addressable seams:
+1. Inside `apply_final_story_coherence_validation()`, derive a per-clip
+   `critical_claim_conflict_by_clip_id` map from the ALREADY-LOCAL
+   `contradiction_findings`/`lost_critical_claims` (e.g., `False` when a
+   clip's own lost atom is not named by any contradiction/lost-critical-
+   claim row, `True`/left unset otherwise) and pass it through a new
+   `materiality_by_clip_id` argument to `lost_semantic_atom_freeze_
+   trigger_present(...)`. This alone would let the D-235U atom shape (no
+   contradiction/critical-claim overlap) reach `NON_MATERIAL_REAL_
+   CONTENT`/`DO_NOT_BLOCK` for the FIRST time live — smallest, single-
+   file candidate fix for THIS specific atom shape.
+2. Separately, live-populate `CandidateTake.word_indices` at its
+   construction sites (`take_segmentation.py`, `attempt_reconstruction.py`)
+   and wire `shared_attempt_word_identity.py`'s functions into the same
+   orchestration point to supply `exact_match` — needed for the
+   `requirement_genuinely_clear`/exact-identity path D-235M/D-235Q's own
+   richer editorial-requirement reasoning depends on, independent of (1).
+Neither is implemented here.
+
+**Number of production files (estimate, not implemented):** fix (1) alone:
+1 file (`final_story_coherence_validation.py`). Fix (2), the full exact-
+identity chain: an estimated 3-5 additional files (the `CandidateTake`
+construction sites, `shared_attempt_word_identity.py`'s own live-call
+wiring, and `apply_final_story_coherence_validation()`'s own signature/
+call site again to accept and use the identity map).
+
+**Schema migration required?** No — `CandidateTake.word_indices` and
+`lost_atom_provenance_id` are both already additive, already-existing
+fields; nothing new needs to be minted. **New ID required?** No.
+**Materiality/Freeze/RepairLoop logic change required?** No — D-235Q/
+D-235R/D-235S/D-235T's own decision logic is unchanged and correct; this
+is an ORCHESTRATION/input-construction gap in the caller, not a defect
+in any of the four components themselves. **P1/P2/BestTake/Family/
+Ordering/Boundary/Pacing/Audio-Join change required?** No.
+
+**D-235U reinterpretation:** D-235U's own verdict E (observability/
+execution regression) is now superseded by a MORE PRECISE, code-
+grounded explanation: the real result was not primarily an observability
+gap — Freeze genuinely stayed blocked because the live orchestration
+never supplies the two context signals (`critical_claim_conflict`,
+`exact_match`) either D-235R's or D-235T's own materiality-suppression
+logic requires to ever reach `NON_MATERIAL_REAL_CONTENT`. D-235U's
+`pacing_v2` observability gap (missing dispatch flags) remains a
+genuine, separate, correctly-diagnosed finding of that gate and is
+unaffected by this one.
+
+**Verdict: E — MULTIPLE LIVE-WIRING SEAMS ARE MISSING.** Two
+independent, code-confirmed gaps (per-clip `critical_claim_conflict`/
+`recording_process_evidence` context, and exact word/proposition
+identity via D-235P) — neither alone explains the full picture, both
+verified with direct code reads, neither touched by this task.
+
+**Canonical status:**
+`LIVE_LOST_ATOM_ORCHESTRATION_CONTEXT_GAP_IDENTIFIED_NOT_FIXED`.
+
+**Exact next gate:** none launched automatically. A future, separately-
+authorized D-235W (or similar) would implement fix (1) above (the
+smaller, single-file, higher-leverage one) OFFLINE FIRST, behind the
+SAME existing flag, with mandatory flag-off byte-identical parity,
+before any further RAW — a Product Owner decision, not resumed here.
+
+**Engine patch required after this?** No — not by this task. **Provider
+required?** No. **RAW required?** No. **Paid compute required?** No.
+
+**Confirmation:** FORENSIC ONLY. Zero production files changed. Zero
+tests changed. No fix implemented despite two precisely-named candidate
+fixes. No RAW launched.
+
+Then STOP. Do NOT implement the fix. Do NOT launch RAW. Wait for
+Product Owner coordination.
