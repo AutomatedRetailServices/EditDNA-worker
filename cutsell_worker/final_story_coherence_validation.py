@@ -756,6 +756,24 @@ def _lost_semantic_atoms(
     no_usable_clip_ids = _no_usable_realization_clip_ids(draft)
     no_usable_basis = _no_usable_realization_basis_by_clip(draft)
 
+    # D-235S: a narrow, LOCAL provenance handle (never a new canonical/
+    # semantic/attempt/proposition id -- see lost_atom_reviewer_finding_
+    # provenance.py's own module docstring for the full design note and
+    # the code-verified audit finding it rests on). Deterministic from
+    # only two already-stable inputs: this clip's own real `clip_id` and
+    # its ordinal position among rows sharing that clip_id WITHIN THIS
+    # SAME BUILD (list order, never dict iteration order/memory address/
+    # hash()/provider ordering/timestamp fuzzy matching) -- degenerates to
+    # ordinal 0 for every row today, since this function's own `for clip
+    # in draft.discarded:` loop is structurally proven to append at most
+    # one row per clip_id (a genuine audit finding, not an assumption).
+    _lost_atom_provenance_ordinal: dict[str, int] = {}
+
+    def _mint_lost_atom_provenance_id(clip_id: str) -> str:
+        ordinal = _lost_atom_provenance_ordinal.get(clip_id, 0)
+        _lost_atom_provenance_ordinal[clip_id] = ordinal + 1
+        return f"latom_{clip_id}_{ordinal}"
+
     findings: list[dict] = []
     for clip in draft.discarded:
         text = str(clip.text or "")
@@ -770,6 +788,7 @@ def _lost_semantic_atoms(
                 "kind": "LOST_IN_NO_USABLE_REALIZATION_FAMILY",
                 "basis": no_usable_basis.get(clip.clip_id),
                 "blocking": False,
+                "lost_atom_provenance_id": _mint_lost_atom_provenance_id(clip.clip_id),
             })
             continue
         if len(text.split()) < 3:
@@ -892,6 +911,7 @@ def _lost_semantic_atoms(
                 "SEMANTICALLY_COVERED_BY_SELECTED_REALIZATION" if suppressed_reason and not blocking
                 else "REAL_CONTENT_LOSS"
             ),
+            "lost_atom_provenance_id": _mint_lost_atom_provenance_id(clip.clip_id),
         }
         if suppressed_reason is not None:
             row["content_loss_suppressed_by"] = suppressed_reason

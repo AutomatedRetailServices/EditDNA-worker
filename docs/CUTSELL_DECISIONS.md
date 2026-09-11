@@ -55153,3 +55153,140 @@ complete; a future D-235S may extend the repair-loop linkage OFFLINE only.
 **Paid compute required?** No. **RAW required?** No.
 
 Then STOP. Do NOT launch D-235S. Wait for Product Owner coordination.
+
+## D-235S — EXACT LOST-ATOM → REVIEWER FINDING PROVENANCE LINK (OFFLINE ONLY)
+
+**Status:** IMPLEMENTED, OFFLINE ONLY, identity/observability only. No RAW/
+Modal/RunPod/provider run. No RepairLoop/Freeze behavior change, no
+materiality authority expansion, no threshold/resolver/P1/P2/BestTake/
+Family/Ordering/Boundary/Pacing/Audio-Join change.
+
+**Objective (post D-235R verdict B):** establish EXACT identity between one
+`_lost_semantic_atoms()` row and its corresponding `FinalEditReviewer
+UNIQUE_FACT_LOST` finding(s), and trace whether that identity survives into
+`RepairLoop` — never suppressing anything.
+
+**The audit this task's own directive required (a genuine code-truth
+correction of the directive's own assumed premise):** the directive assumed
+"one clip may yield lost atom A and lost atom B", making bare `clip_id`
+potentially insufficient. Traced mechanically through
+`final_story_coherence_validation.py::_lost_semantic_atoms()`'s own
+`for clip in draft.discarded:` loop: each iteration produces AT MOST ONE
+row (either the early `LOST_IN_NO_USABLE_REALIZATION_FAMILY` row via
+`continue`, or the general coverage-ledger row at the loop's tail, never
+both, never more than one). **Under the current, unmodified data model,
+one `clip_id` cannot structurally produce two rows** — a code fact, not
+an assumption, reported honestly rather than building a heuristic to
+match an incorrect premise, per this whole series' established
+discipline. This does NOT mean the linkage classifier trusts the
+invariant blindly forever: it independently re-verifies uniqueness from
+whatever evidence it is actually given, every call (see "AMBIGUOUS"
+below), defensively covering a future regression or a hand-built/
+malformed row list.
+
+**Provenance-id design (Options A+B combined, the smallest safe
+mint):** `lost_atom_provenance_id = f"latom_{clip_id}_{ordinal}"`, where
+`ordinal` is the 0-based count of prior rows THIS SAME BUILD already
+produced for the same `clip_id` (deterministic list order only — never
+dict iteration order, `hash()`, memory address, or provider ordering).
+Degenerates to `latom_{clip_id}_0` for every real row today (per the
+audit above), but is already correctly shaped for a hypothetical future
+multi-row-per-clip case with no further design change. NOT a new
+canonical/semantic/attempt/proposition/clip id — a narrow, LOCAL
+provenance handle for exactly one purpose.
+
+**Mint location:** inside `_lost_semantic_atoms()` itself, for BOTH row
+shapes (the `LOST_IN_NO_USABLE_REALIZATION_FAMILY` early-continue row and
+the general coverage-ledger row).
+
+**Reviewer propagation — a genuine "zero code change needed" finding:**
+`final_edit_reviewer.py::review()`'s own `UNIQUE_FACT_LOST` construction
+already does `detail=dict(row)` — a full, verbatim, key-for-key copy —
+so `lost_atom_provenance_id` reaches `Finding.detail["lost_atom_
+provenance_id"]` automatically, with NO modification to `final_edit_
+reviewer.py` (confirmed: that file's own content is unchanged, grep-
+verified in tests).
+
+**RepairLoop propagation — one additive field, no behavior change:**
+`RepairAttempt` did not already carry provenance (`previous_realization`/
+`replacement_realization` are plain clip-id tuples, never a `detail`
+passthrough). Added `source_lost_atom_provenance_id: str | None = None`
+and populated it (via `finding.detail.get("lost_atom_provenance_id")`,
+never re-derived or re-matched) at all three `RepairAttempt` construction
+sites in `run_repair_loop()`. No decision/termination logic touched.
+
+**New production module:** `cutsell_worker/lost_atom_reviewer_finding_provenance.py`.
+`LostAtomReviewerFindingLink` type (no score). Link vocabulary:
+`EXACT_MATCH`/`NO_MATCH`/`AMBIGUOUS`/`MISSING_PROVENANCE`/
+`UNSUPPORTED_FINDING_KIND`. `classify_lost_atom_reviewer_finding_link()`
+is scoped exactly to `UNIQUE_FACT_LOST` by default (an explicit
+`target_finding_kind` parameter returns `UNSUPPORTED_FINDING_KIND`
+immediately for any other kind — `STORY_ORDER_BREAK`/`CONTRADICTION`/
+`IDEA_COVERAGE_LOST`/`CRITICAL_CLAIM_LOST`/`CAUSAL_ORDER_BREAK` and every
+other kind are never linked here). `lost_atom_provenance_survived_into_
+repair_attempt()` checks the RepairLoop side by exact string equality
+only.
+
+**Proven end to end with the REAL functions (not mocks):** a synthetic
+`draft`/`CanonicalEditPlan` fixture carrying `lost_atom_provenance_id` on
+its row was run through the real `build_canonical_edit_plan()`,
+`review()`, and `run_repair_loop()` — the SAME provenance id was
+confirmed present on the resulting `Finding.detail` AND on the resulting
+`RepairAttempt.source_lost_atom_provenance_id`, for the D-235K generic
+replay shape and for two-different-clips/multi-row fixtures alike.
+
+**Multiple lost atoms, same clip (the directive's own mandatory
+fixture):** a defensive synthetic test (two rows sharing one `clip_id`
+with distinct provenance ids — a shape the real pipeline cannot produce
+per the audit, but the classifier must still handle correctly) proves
+the classifier identifies only the requested atom's own finding; the
+other remains unrelated.
+
+**Historical payloads:** a row without `lost_atom_provenance_id` remains
+fully valid and still blocks Freeze exactly as before; the classifier
+reports `MISSING_PROVENANCE`, never inferring exact linkage for it.
+
+**Parity:** `NEEDS_HUMAN_REVIEW` status, `RepairAttempt.repaired`,
+`freeze_blocked`, and every `CompleteLostSemanticAtomMateriality`/
+`LostSemanticAtomFreezeAuthorityDecision` behavior are unchanged (grep-
+verified this module is never imported by `lost_semantic_atom_freeze_
+authority.py` or `complete_lost_semantic_atom_materiality.py`, and the
+full coherence/reviewer/repair-loop regression suite — 602 tests —
+passed unchanged).
+
+**Tests:** `tests/test_cutsell_d235s_lost_atom_reviewer_finding_provenance.py`,
+35 tests covering the full 37-item fixture/proof matrix, exercising the
+REAL `review()`/`run_repair_loop()` functions end to end. D-235 cumulative
+bundle: 455/455 (420 pre-existing + 35 new). Two pre-existing snapshot
+tests (D-235O's own `test_17`, D-235P's own `test_44`) required the same
+expected, non-behavioral file-family-set widening D-235J/D-235P's own
+precedent already established, to include the new `lost_atom_reviewer_
+finding_provenance.py` file. Reviewer/RepairLoop/coherence/Freeze/
+CanonicalEditPlan regression suite: 602/602 unchanged. CleanCutBench:
+1/1. `compileall` clean (excluding the chronic pre-existing, unrelated
+`jobs_smoke.py` syntax error).
+
+**Backward compatibility:** fully additive. `lost_atom_provenance_id` is
+a new dict key (old consumers using `.get()` unaffected); `RepairAttempt.
+source_lost_atom_provenance_id` defaults to `None`.
+
+**Verdict: A** — EXACT LOST-ATOM→REVIEWER→REPAIR PROVENANCE LINK OFFLINE
+PROVEN (provenance survives all three stages with the real functions,
+correcting D-235R's own more pessimistic framing of this gap — the
+repair-loop side was genuinely fixable with one additive field, never a
+behavior change). Canonical status:
+`EXACT_LOST_ATOM_REVIEWER_REPAIR_PROVENANCE_LINK_OFFLINE_PROVEN`.
+
+**Exact next gate named, NOT implemented here:** D-235T — BOUNDED
+SAME-ATOM REPAIR-LOOP SUPPRESSION ADAPTER, OFFLINE FIRST. May suppress
+ONLY `UNIQUE_FACT_LOST → NEEDS_HUMAN_REVIEW` when exact provenance links
+the finding to the same lost atom, D-235R already deemed that atom safely
+suppressed, D-235Q result is `DO_NOT_BLOCK`, final materiality is one of
+the three suppressible categories, and no other reviewer/repair blocker
+remains. Still offline first.
+
+**Engine patch required after this?** No — D-235T is a separate,
+not-yet-authorized suppression gate. **Paid compute required?** No.
+**RAW required?** No.
+
+Then STOP. Do NOT implement D-235T. Wait for Product Owner coordination.

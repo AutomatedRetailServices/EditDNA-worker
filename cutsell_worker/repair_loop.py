@@ -66,6 +66,17 @@ class RepairAttempt:
     reason: str
     unaffected_ideas_changed: bool
     repaired: bool
+    # D-235S: purely additive provenance passthrough -- carries the SAME
+    # `lost_atom_provenance_id` a `_lost_semantic_atoms()` row already
+    # minted (see final_story_coherence_validation.py) all the way through
+    # to whichever attempt row records `finding` here, WHEN that finding's
+    # own `detail` carries one (only ever true for a UNIQUE_FACT_LOST
+    # finding; every other finding kind's own `detail` never has this key,
+    # so `.get()` below is `None` for them, exactly as before this task).
+    # No behavior change: this field is never read by this loop's own
+    # repair/termination decisions, only recorded for a future,
+    # separately-authorized consumer (D-235T).
+    source_lost_atom_provenance_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +171,7 @@ def run_repair_loop(
                 reason="no_repair_strategy_exists_for_this_finding_kind",
                 unaffected_ideas_changed=False,
                 repaired=False,
+                source_lost_atom_provenance_id=unrepairable.detail.get("lost_atom_provenance_id"),
             ))
             break  # nothing this loop knows how to fix -- stop, do not guess
 
@@ -183,6 +195,7 @@ def run_repair_loop(
                 reason="no_repair_strategy_could_apply_safely",
                 unaffected_ideas_changed=False,
                 repaired=False,
+                source_lost_atom_provenance_id=finding.detail.get("lost_atom_provenance_id"),
             ))
             break
 
@@ -208,6 +221,7 @@ def run_repair_loop(
             reason="reordered_composite_components_to_recording_order",
             unaffected_ideas_changed=unaffected_changed,
             repaired=True,
+            source_lost_atom_provenance_id=finding.detail.get("lost_atom_provenance_id"),
         ))
 
         current_draft = repaired_draft
