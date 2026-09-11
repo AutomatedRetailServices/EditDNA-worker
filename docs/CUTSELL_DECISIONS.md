@@ -49300,3 +49300,292 @@ next, separately-scoped engineering work. No further action is taken on
 any of them by this task.
 
 ---
+
+## D-226: Pacing V2 Controlled J/L Perceptual Timing Qualification (post D-225)
+
+**Status: VERDICT A -- D-220 PERCEPTUALLY SUPPORTED ON STRUCTURAL +
+CONTROLLED-MEDIA EVIDENCE; BOUNDED J/L AUTHORITY CAN BE DESIGNED NEXT
+(D-227), OFFLINE FIRST, MICRO STILL DEFERRED.** OFFLINE / LOCAL MEDIA
+ONLY. D-225 proved Video00 itself offers zero real J/L handle material
+(item 4-16 there), so it could never qualify D-220's own timing-AMOUNT
+heuristic perceptually. This task built a controlled, purely-local
+fixture lab (`tests/d226_jl_fixture_lab.py`) that exercises the REAL,
+UNMODIFIED D-220 policy (`decide_jcut_timing`/`decide_lcut_timing`) and
+the REAL, UNMODIFIED D-214 renderer
+(`render_timeline_with_audio_windows`) end-to-end on 6 deterministic
+tone-burst fixtures (3 J-cut, 3 L-cut; moderate/large/small safe
+windows), producing 24 real, small (~30KB each) rendered MP4 comparison
+clips across 4 timing variants (BASELINE/D220_POLICY/MAX_SAFE/
+SHORTER_CONTROL) plus a labeled human-review artifact. All 66 new tests
+pass; the full offline suite shows zero regressions.
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, `d851401` (D-225) -> this task's own
+commit (test-support files + this decision entry only; **zero
+`cutsell_worker/*.py` files touched**, per this task's own strict
+scope).
+
+### 2. Fixture construction method
+`tests/d226_jl_fixture_lab.py` (new, ~370 lines, NOT part of the
+`cutsell_worker` package, never imported by it). No natural speech
+fixture exists in this repository (confirmed by search) and none was
+synthesized via TTS/network/provider (out of scope) -- every "word" is a
+short, exactly-timed sine-tone burst (`ffmpeg`'s `volume=...:eval=frame`
+gating a `sine` lavfi source), gated into known-boundary bursts standing
+in for spoken words. This is the documented, honest limitation this
+task's own directive names as acceptable when no real fixture exists.
+Video is a solid-color `color` lavfi source, one distinct color per
+clip (red/blue for the J pair, green/yellow for the L pair) -- the only
+visual cut marker, matching the directive's "visually distinct" and
+"generic content" requirements. `max_safe_window` in every fixture
+models genuine, physically-present PRE_ROLL/POST_ROLL room (matching
+D-223's `SourceAudioHandle` shape) rather than D-217's narrower
+in-window-only evidence, because only the former is realizable by the
+unmodified D-214 renderer (D-222's own forensic already flagged this
+exact mismatch; see the module's own docstring for the full reasoning).
+
+### 3. Renderer timeline-capacity finding (new, structural)
+Building the lab surfaced a genuine, previously-undocumented renderer
+constraint: a J-cut's `max_safe_window` (room physically present in the
+RIGHT clip's own source audio) is NECESSARY but NOT SUFFICIENT for
+realizability -- `render.py`'s own `_validate_audio_placements` ALSO
+requires enough PRECEDING OUTPUT-TIMELINE duration (the LEFT segment's
+own rendered video length) to place that much lead audio into, and
+fails closed (`audio_lead_exceeds_available_timeline`) rather than
+silently clamping when it doesn't. The lab's shared LEFT-J fixture clip
+was undersized on first construction (1.6s) against the largest J-case
+window (2.0s, `J2_large`) and reproducibly hit this exact error; fixed
+by sizing the shared clip's own trailing silent padding (`_LEFT_J_END =
+2.5`) to exceed every J-case's own window. `render.py`/`render_plan.py`
+themselves are unmodified -- this is a fixture-construction fix, not a
+renderer defect, and is now documented at both the fixture-lab module
+docstring and inline at `_LEFT_J_END`. Consequence for a real caller:
+whatever evidence adapter assembles `max_safe_lead`/`max_safe_tail`
+before calling `decide_jcut_timing`/`decide_lcut_timing` must cap it by
+the preceding segment's own rendered duration, not source room alone --
+a candidate item for a future Audio Join Treatment / evidence-adapter
+task, NOT implemented here (D-220 itself is unmodified and was never
+told about this constraint). No equivalent constraint exists on the
+L-cut/trailing side (confirmed structurally: extending a LEFT segment's
+own `audio_end` never moves that segment's own timeline placement).
+
+### 4-9. J/L cases and timing table
+All values from the real, unmodified `decide_jcut_timing`/
+`decide_lcut_timing`, `max_safe_lead`/`max_safe_tail` built as genuine
+physical pre-roll/post-roll room (item 2):
+
+| case | dir | max_safe_window | anchor_word_duration | D-220 chosen | timing_status | timing_basis |
+|---|---|---|---|---|---|---|
+| J1_moderate | J_CUT | 0.600s | 0.400s | 0.400s | SUPPORTED | WORD_GEOMETRY |
+| J2_large | J_CUT | 2.000s | 0.400s | 0.400s | SUPPORTED | WORD_GEOMETRY |
+| J3_small | J_CUT | 0.150s | 0.400s | 0.150s | SUPPORTED | WORD_GEOMETRY |
+| L1_moderate | L_CUT | 0.600s | 0.400s | 0.400s | SUPPORTED | WORD_GEOMETRY |
+| L2_large | L_CUT | 2.000s | 0.400s | 0.400s | SUPPORTED | WORD_GEOMETRY |
+| L3_small | L_CUT | 0.150s | 0.400s | 0.150s | SUPPORTED | WORD_GEOMETRY |
+
+Anchor = left's own last word duration (J) / right's own first word
+duration (L), both 0.400s by fixture construction (unrelated to the
+window size, exactly per D-220's own formula). `chosen_duration =
+min(max_safe_window, anchor_word_duration)` in every case, confirming
+D-220's formula on real rendered media, not just unit-level arithmetic.
+
+### 10. Anchor-cap heuristic result (large-window cases)
+J2_large/L2_large: `max_safe_window`=2.000s but D-220 chose only
+0.400s -- 5x smaller than the full window, and well under half of it
+(`test_anchor_cap_dominates_on_large_window_j/l`, both PASS). The
+MAX_SAFE control variant, rendered at the FULL 2.0s window for
+comparison, is the concrete evidence for why the cap matters: on
+L2_large it produces a rendered file whose AUDIO track (3.0s, extended
+to `left.end + 2.0`) is genuinely LONGER than its own VIDEO track
+(~2.5s) -- confirmed directly via per-stream `ffprobe` duration
+(`test_17b_max_safe_variant_may_extend_audio_beyond_video_large_window`,
+PASS) -- a real, audible "audio plays past the visual cut" artifact the
+anchor cap exists to avoid. This is real-media evidence for the
+anchor-cap heuristic's own value, not merely a restated formula.
+
+### 11. Small-window behavior result
+J3_small/L3_small: `max_safe_window`=0.150s, well under the 0.400s
+anchor -- D-220 chose exactly 0.150s (the window itself), never
+reaching for its own larger anchor value
+(`test_small_window_never_exceeded_j/l`, both PASS). The ceiling is
+respected on real rendered media in both directions.
+
+### 12. Prosodic optionality result
+Every case re-evaluated with NO Prosodic evidence (the default; basis
+= `WORD_GEOMETRY`, matching D-220's own "absent = same as never asked"
+contract) and with a deterministic, locally-constructed
+`vocal_continuity_state="CONTINUOUS"` stand-in (no provider call): basis
+shifts to `WORD_PLUS_PROSODIC` but the CHOSEN DURATION is unchanged in
+all 6 cases (`test_prosodic_optionality_*`, both PASS) -- matching
+D-220's own documented CONTINUOUS-continuity behavior
+(`chosen=structural_cap`, unchanged). No new provider Prosodic
+computation was performed; only the existing deterministic fixture
+value.
+
+### 13. Structural safety matrix (30-item requirement)
+All required checks pass on the ACTUAL rendered output, not
+theoretically: word safety (no truncation, all 6 cases), source
+identity/availability (`.mp4`, has_audio, duration>0), `chosen <=
+max_safe` (all 6, within 1e-6), renderer exact timing (video-track
+duration invariant across all 4 variants per case, within a 2-frame
+tolerance for a pre-existing, unmodified `render.py` encoder rounding
+behavior -- not a D-226 defect), no speech truncation, no duplicate
+speech region (true by construction: every added window is pure
+pre-roll/post-roll silence, never a word span), deterministic repeat
+(identical `AdvancedTransitionTimingDecision` on a second call, all 6
+cases), all 4 variants actually rendered and non-empty for all 6 cases.
+66/66 tests pass
+(`tests/test_cutsell_d226_pacing_v2_controlled_jl_perceptual_qualification.py`).
+
+### 14. No-Video00 / no-network / no-provider / no-authority checks
+AST-based (this track's own established convention, avoiding the
+substring false-positive class D-218F/D-220/D-223 already hit): zero
+network modules imported (`requests`/`urllib`/`socket`/`boto3`/`modal`),
+zero provider identifiers referenced (`tts`/`openai`/
+`analyze_prosodic_delivery`/etc.), zero Boundary/Ordering/pipeline
+modules imported, zero `SHORT_CROSSFADE`/`AMBIENCE_*` identifiers, zero
+`MICRO_AUDIO_OVERLAP` import, lab module never imported by
+`cutsell_worker/*.py`, `_EXPERIMENTAL_SHORTER_CONTROL_FRACTION` never
+referenced in production code. All PASS.
+
+### 15. Perceptual review status
+**PENDING HUMAN WATCH+LISTEN** -- honestly unresolved by this task, per
+its own explicit "do NOT automatically treat a mathematical metric as
+human preference" instruction. A labeled comparison artifact was
+published for Product Owner review: **https://claude.ai/code/artifact/f5e00c3f-0088-42da-9bd4-194764853c85**
+("J/L Timing Qualification") -- all 24 rendered clips embedded, grouped
+by case, each with its own NATURAL/TOO_SHORT/TOO_LONG/
+NO_MEANINGFUL_DIFFERENCE/NOT_EVALUABLE judgment selector and notes
+field (saved to the viewer's own browser only). No perceptual quality
+judgment is asserted by this entry -- only the structural evidence
+above (items 4-14) is claimed as machine-verified.
+
+### 16. Room-tone / Audio Join Treatment note
+No room-tone discontinuity was flagged during construction (fixtures
+use a single continuous silent bed per clip, not a room-tone splice) --
+nothing here informs the future `SHORT_CROSSFADE`/`AMBIENCE_*` roadmap
+beyond item 3's own evidence-capping note. `SHORT_CROSSFADE`/
+`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE` remain
+unimplemented, per this task's own explicit scope boundary.
+
+### 17. Video00 status
+Unchanged from D-225: `NO_SAFE_HANDLES_EXIST_ON_VIDEO00`. This task
+never re-ran Video00 (no RAW, no Modal, no RunPod, per its own scope) --
+D-226's own controlled qualification is deliberately decoupled from
+Video00 and does NOT imply Video00 should use J/L; Video00 remains
+`HARD_CUT`/`TIGHT_CUT` only.
+
+### 18. MICRO_AUDIO_OVERLAP status
+Unchanged: `DEFERRED`/`DIAGNOSTIC_ONLY`. Not tested, not authorized,
+zero references in the new fixture lab (item 14).
+
+### 19. Audio Join Treatment status
+Unchanged: `CLICK_FADE` existing/live; `SHORT_CROSSFADE`/`AMBIENCE_*`
+remain `ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_AUTHORITY`. Item
+3's evidence-capping note is additive context for that future task, not
+an implementation.
+
+### 20. Live J/L authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the only live-executed
+transition modes everywhere in production. This task introduces zero
+live authority, zero production pipeline wiring -- every new file lives
+under `tests/`, never imported by `universal_clean_cut.py`, `pipeline.py`,
+or any live call site (item 14).
+
+### 21. Renderer status
+`render.py`/`render_plan.py` remain completely unmodified. Item 3's
+finding is a documentation/fixture-construction note, not a code
+change to either module.
+
+### 22. Regression status
+Full offline suite: `python3 -m compileall cutsell_worker tests` clean;
+`pytest tests/` (excluding the separately pre-existing, unrelated
+`tests/test_semantic_stitch.py` collection error --
+`score_take()`/`tag_slot()` signature drift predating this entire D-2xx
+track, not touched by it): **5495 passed, 5 failed** (13 subtests
+passed). The 5 failures are the SAME pre-existing, unrelated D-044/
+`hybrid_story_guard` workflow-config and claim-coverage tests already
+chronic in this track's own history
+(`test_hybrid_story_guard_incomplete_retry.py`,
+`test_video00_modal_hybrid_semantic_parity.py`) -- confirmed unrelated
+by inspection (they assert on `cutsell-video00-modal-raw.yml`'s own jq
+env-merge filter and an unrelated claim-coverage retry case; D-226
+touches neither file, neither workflow, nor
+`hybrid_story_guard`/`claim_coverage_best_take` code). Zero new
+failures introduced by this task's own 66 new tests plus the fixture
+lab.
+
+### 23. J result classification
+**SUPPORTED_AS_IS** -- D-220's own formula
+(`chosen=min(max_safe_window, anchor_word_duration)`) behaves correctly
+on real rendered media across moderate/large/small windows (items 4-11,
+13); no structural defect found; perceptual confirmation still pending
+(item 15).
+
+### 24. L result classification
+**SUPPORTED_AS_IS** -- identical finding, symmetric formula, same
+evidence quality (items 4-11, 13); perceptual confirmation still
+pending (item 15).
+
+### 25. D-226 verdict
+**A. D-220 IS PERCEPTUALLY SUPPORTED ON AVAILABLE (STRUCTURAL +
+CONTROLLED-MEDIA) EVIDENCE; A BOUNDED J/L ADVANCED AUTHORITY CAN BE
+DESIGNED NEXT.** Per this task's own "IF A" branch, this names but does
+NOT implement **D-227: bounded J/L advanced authority, default OFF,
+offline-first, MICRO_AUDIO_OVERLAP still deferred**. The verdict rests
+on structural proof plus controlled-media construction proof; the final
+human Watch+Listen pass on the published review artifact (item 15) is
+the Product Owner's own remaining confirmation step before D-227 is
+authorized to begin, per this task's own explicit STOP instruction.
+
+### 26. Exact next gate
+Per item 25's "IF A" branch: **STOP here.** D-227 (bounded J/L advanced
+authority, default off, offline first) is named, not implemented,
+pending (a) the Product Owner's own Watch+Listen pass on the item-15
+artifact and (b) explicit Product Owner authorization to begin design/
+implementation. `MICRO_AUDIO_OVERLAP` stays deferred/diagnostic-only
+inside D-227's own eventual scope, per this task's directive.
+
+### 27. App-roadmap status
+Unchanged sequence through D-225, then: controlled offline J/L
+perceptual timing qualification complete, D-220 structurally and
+controlled-media-perceptually supported, human Watch+Listen pending
+(**this entry, D-226**) -> next (NOT launched here): Product Owner
+Watch+Listen confirmation on the item-15 artifact, then (if confirmed)
+D-227 bounded J/L advanced authority (default off, offline first) run
+in parallel with the independent Audio Join Treatment roadmap
+(`SHORT_CROSSFADE`/`AMBIENCE_*`) -> micro-overlap final authority ->
+Renderer/export qualification -> unseen-RAW generalization/Human Gold
+parity -> product hardening -> TestFlight -> App Store.
+
+### 28. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. `docs/
+CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` NOT edited (out of this
+task's own scope).
+
+### 29. Confirmation
+NO Video00 RAW, NO Modal, NO RunPod, NO provider call of any kind
+anywhere in this task (confirmed structurally, item 14, and by this
+task's own file list -- every new file lives under `tests/`). NO live
+J/L/MICRO_AUDIO_OVERLAP authority created, enabled, or implemented
+(item 20). NO production pipeline wiring (item 20). NO
+`cutsell_worker/*.py` file touched (item 1) -- `render.py`/
+`render_plan.py`/`pacing_v2_timing_policy.py` remain byte-for-byte
+unmodified; every real behavior exercised in this task is the
+production code's own, already-existing, unmodified public surface. NO
+`SHORT_CROSSFADE`/`AMBIENCE_*` implementation (item 19). NO Boundary/
+Ordering change (item 14, item 20). Generated comparison media kept
+small (24 clips, 320x180, ~844KB total) and temporary/local
+(`/tmp/...`, never committed to the repository as binary files) except
+the one published, embedded review artifact (item 15).
+
+**HUMAN ACTION REQUIRED:** YES (condition F -- human editorial
+acceptance of a real rendered artifact) -- per this task's own explicit
+"Then STOP. Do NOT implement D-227. Wait for Product Owner
+coordination," the Product Owner's own Watch+Listen pass on the item-15
+review artifact (NATURAL/TOO_SHORT/TOO_LONG/NO_MEANINGFUL_DIFFERENCE/
+NOT_EVALUABLE per case/variant) is the one remaining confirmation before
+D-227 may be authorized. No further action is taken on D-227 by this
+task.
+
+---
