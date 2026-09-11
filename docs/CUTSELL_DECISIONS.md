@@ -54971,3 +54971,185 @@ no critical/editorial/conflict signal exists. Still offline first.
 No. **RAW required?** No.
 
 Then STOP. Do NOT implement D-235R. Wait for Product Owner coordination.
+
+## D-235R — BOUNDED LOST-ATOM FREEZE AUTHORITY ADAPTER (OFFLINE FIRST)
+
+**Status:** IMPLEMENTED, default-OFF flag. No RAW/Modal/RunPod/provider run.
+No threshold/RepairLoop/resolver/P1/P2/BestTake/Family/Ordering/Boundary/
+Pacing/Audio-Join change.
+
+**Objective (post D-235Q verdict A):** implement ONE bounded adapter
+determining whether an existing lost-semantic-atom Freeze blocker should
+remain blocking, wired behind a new default-OFF flag at the ONE existing
+Freeze-composition seam, with mandatory byte-identical parity when OFF.
+
+**New production module:** `cutsell_worker/lost_semantic_atom_freeze_authority.py`.
+
+**Authority decision type:** `LostSemanticAtomFreezeAuthorityDecision`
+(clip_id, original_blocking, materiality_status, materiality_recommendation,
+authority_status, effective_blocking, suppression_applied, suppression_reason,
+safety_block_reason, provenance). No master score.
+
+**Authority vocabulary:** `PRESERVE_BLOCK` / `SUPPRESS_NON_MATERIAL_BLOCK` /
+`ABSTAIN_PRESERVE_BLOCK` / `NOT_APPLICABLE`. No numeric confidence.
+
+**Suppression eligibility (10-condition gate, independently re-checked —
+never trusting D-235Q's own internal precedence as the sole safety net):**
+implemented as a strict ordered gate in `decide_lost_semantic_atom_freeze_
+authority()` — original blocking=True; real `CompleteLostSemanticAtomMateriality`
+instance present (type-checked, not duck-typed); `blocking_recommendation
+== DO_NOT_BLOCK`; `final_materiality_status` exactly one of
+`NON_MATERIAL_REAL_CONTENT`/`RETRY_OR_RECORDING_RESIDUE`/`REDUNDANT_EQUIVALENT`
+(imported from D-235Q, never redefined); `meaning_materiality_status !=
+MEANING_CRITICAL`; `editorial_requirement_status != REQUIRED`; no
+CONFLICTED anywhere; `blocking_recommendation != BLOCK`; and a scoped
+identity-sufficiency re-verification (condition 10, see below).
+
+**Fail-closed contract:** exactly one path to `effective_blocking=False`
+for an originally-blocking row; every other branch preserves `True`.
+Missing/malformed/unknown/conflicted/insufficient/heuristic-only-where-
+exact-was-required evidence never suppresses (structurally guaranteed,
+tested).
+
+**Meaning-critical / editorially-required firewalls:** absolute — both
+are checked as named, separately-tested branches (not merely implied by
+the 10-condition gate), and cannot be bypassed by a co-occurring retry/
+redundant/non-material signal on the same row, because D-235Q's own
+precedence already ranks them first and this module independently
+re-checks the same firewall a second time (defense in depth).
+
+**A design correction found and fixed during this task (documented
+honestly, not hidden):** an initial version of condition 8 ("no
+INSUFFICIENT_EVIDENCE anywhere") incorrectly included `editorial_
+requirement_status`, which broke legitimate retry/redundant suppression
+— D-235M genuinely has nothing to say about story-function requirement on
+an ordinary retry/redundant row (no slot/coverage signal was ever
+supplied), so `editorial_requirement_status == INSUFFICIENT_EVIDENCE` is
+the CORRECT, expected value there, not a violation. Fixed by scoping
+condition 8 to the overall `final_materiality_status`/`meaning_
+materiality_status` only, and scoping the identity-sufficiency
+re-verification (condition 10) to the ONE combination where it actually
+matters: `NON_MATERIAL_REAL_CONTENT` reached with `editorial_requirement_
+status == INSUFFICIENT_EVIDENCE` AND `exact_identity_available == False`
+— caught by a smoke test before the full test suite was written.
+
+**Multiple lost atoms:** `lost_semantic_atom_freeze_trigger_present()`
+computes one decision per row and returns `any(effective_blocking)` —
+never a majority vote; one unsuppressed originally-blocking atom keeps
+the overall trigger present regardless of how many others were safely
+suppressed. Non-blocking atoms are never reinterpreted or promoted
+(`AUTHORITY_NOT_APPLICABLE`, unconditional).
+
+**Freeze composition seam (the only production wiring this task
+performs):** `final_story_coherence_validation.py`'s two `freeze_blocked`
+computation sites both replace `any(row.get("blocking", True) for row in
+lost_semantic_atoms)` with `lost_semantic_atom_freeze_trigger_present(
+lost_semantic_atoms)`. Every other Freeze term (`contradiction_findings`,
+`missing_idea_coverage`, `lost_critical_claims`, `authority_membership_
+findings`, repair-loop status, resolver status, D-090 integrity) is
+byte-for-byte unchanged (grep-verified all four terms still present).
+
+**Feature flag:** `CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_AUTHORITY_ENABLED`,
+default OFF (same `_env_true_default_false` pattern as `language_spine_
+live_integration.live_language_spine_diagnostics_enabled`).
+
+**Default-off parity:** mandatory and tested — `lost_semantic_atom_freeze_
+trigger_present(..., enabled=False)` returns the textually-identical
+`any(row.get("blocking", True) for row in rows)` expression; the full
+coherence/Freeze-adjacent regression suite (799 tests across D-038-D-097)
+was re-run with the flag at its real default and is unchanged.
+
+**Flag-ON behavior and its honest scope boundary (not hidden):** with the
+flag ON, the live seam calls D-235Q's `assess_complete_lost_semantic_atom_
+materiality(row)` using ONLY the row itself — no `critical_claim_conflict`
+override, no D-235P exact-identity match, no editorial-requirement
+signals, because building either would require either (a) a new per-
+`clip_id` correlation against the plan-level `contradiction_findings`/
+`missing_idea_coverage`/`lost_critical_claims` lists that this task's own
+scope does not authorize inventing, or (b) live Language Spine
+construction (itself gated behind its own separate default-OFF
+diagnostics flag, not built at this call site). Consequence, proven by
+this task's own tests: `RETRY_OR_RECORDING_RESIDUE` (from the row's own
+`pre_group_restart_consultations`) and `REDUNDANT_EQUIVALENT` (from the
+row's own `content_loss_suppressed_by`/`preserving_realization_id`)
+suppression ARE genuinely reachable through the live seam today, using
+only real row-native fields with zero invented correlation.
+`NON_MATERIAL_REAL_CONTENT` suppression is fully proven OFFLINE (the
+D-235K real-shape replay, full context supplied directly) but is NOT
+automatically reachable through the bare live seam without that
+separately-authorized correlation work — it honestly ABSTAINS/preserves
+live rather than guessing.
+
+**D-235K real-shape replay:** a generic fixture (never hardcoding the
+literal phrase, grep-verified) proves, offline, with the full context
+supplied directly (`critical_claim_conflict=False`, `idea_coverage_status=
+False`), that `lost_semantic_atom_freeze_trigger_present` correctly
+returns `False` for a lone such atom (flag ON) and `True` (flag OFF) —
+exactly as specified. The bare live seam with zero extra context (the
+current real-world wiring) honestly preserves the block for this exact
+shape, per the scope boundary above.
+
+**Contradiction/idea-loss/critical-claim/authority-membership/integrity
+firewalls:** all four OTHER Freeze trigger terms are untouched source
+text (grep-verified); this task's own module never reads or writes any
+of `contradiction_findings`, `missing_idea_coverage`, `lost_critical_
+claims`, `authority_membership_findings`, or D-090 integrity state.
+
+**RepairLoop / FinalEditReviewer — NOT touched (verdict B):** D-235J's
+own already-established finding shows a real, exact (never text-matched)
+`clip_id`-based linkage CAN exist between a lost-atom row and a repair-
+loop attempt, and `final_edit_reviewer.py::review()` maps every row to
+exactly one `UNIQUE_FACT_LOST` Finding 1:1 by construction — but actually
+preventing RepairLoop from escalating such a finding to `NEEDS_HUMAN_
+REVIEW` would require a change to `repair_loop.py` itself, which this
+task's own banner ("NO REPAIR-LOOP CHANGE") forbids regardless of whether
+the identity linkage exists. This module therefore implements the
+linkage as OBSERVABILITY ONLY (`suppressed_atom_repair_finding_labels()`,
+mirroring D-235J's own `_find_repair_link` exact-id-only shape, never a
+new text-based reconstruction) and never imports, calls, or is imported
+by `repair_loop.py`/`final_edit_reviewer.py` (grep-verified). `STORY_
+ORDER_BREAK`, contradiction, critical-claim-loss, idea-loss, and
+integrity-failure reviewer finding kinds are completely out of scope and
+untouched.
+
+**Diagnostics:** `lost_semantic_atom_freeze_authority_diagnostics()`
+provides all required fields (`lost_atom_materiality_authority_enabled`,
+`lost_atom_original_blocking_count`, `lost_atom_effective_blocking_count`,
+`lost_atom_suppressed_count`, `lost_atom_preserved_blocking_count`,
+`lost_atom_suppression_status`, `lost_atom_suppression_reasons`,
+`repair_findings_suppressed_count`) — a standalone function in the new
+module, not wired into `selection_freeze_diagnostics.py`'s own block by
+this task (a future caller may compose them; that file is unmodified).
+No transcript dump.
+
+**Tests:** `tests/test_cutsell_d235r_lost_semantic_atom_freeze_authority.py`,
+54 tests covering the full 48-item fixture/proof matrix (suppression x3,
+preservation x7, multi-atom x7, other-triggers-untouched, repair-loop-
+observability-only x2, unrelated-findings-unchanged x2, flag-parity x3,
+D-235K-shape replay x4, determinism/isolation x3, structural safety x9,
+sibling-module-zero-diff x3, Freeze-seam-wiring proof x2, diagnostics x3,
+vocabulary x3). D-235 cumulative bundle: 420/420 (366 pre-existing + 54
+new). Coherence/Freeze-adjacent regression suite (D-038-D-097, 799 tests):
+unchanged, flag at real default. CleanCutBench parity: 1/1. `compileall`
+clean (excluding the chronic pre-existing, unrelated `jobs_smoke.py`
+syntax error).
+
+**Backward compatibility:** fully additive; the two `final_story_
+coherence_validation.py` call-site edits are one-line substitutions of an
+equivalent-when-off expression, with a proven byte-identical default.
+
+**Verdict: B** — FREEZE AUTHORITY OFFLINE PROVEN; REPAIR-LOOP SAME-ATOM
+LINKAGE GAP REMAINS (an exact identity linkage exists structurally, but
+acting on it would require a `repair_loop.py` change this task's own
+banner explicitly forbids, per the directive's own escape hatch for this
+exact situation). Canonical status: the Freeze-adapter half is proven;
+the repair-loop half is an honestly-documented, separately-authorized gap.
+
+**Exact next gate named, NOT implemented here:** D-235S — EXACT LOST-
+ATOM→REVIEWER FINDING PROVENANCE LINK, OFFLINE ONLY. No RAW.
+
+**Engine patch required after this?** No — the adapter mechanics are
+complete; a future D-235S may extend the repair-loop linkage OFFLINE only.
+**Paid compute required?** No. **RAW required?** No.
+
+Then STOP. Do NOT launch D-235S. Wait for Product Owner coordination.

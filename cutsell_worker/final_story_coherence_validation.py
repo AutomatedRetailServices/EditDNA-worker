@@ -117,6 +117,11 @@ from .canonical_identity import mint_semantic_idea_id
 from .contracts import effective_parent_semantic_clip_id
 from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 from .final_sibling_grouping import _content, _negations, _numbers
+# D-235R: the ONE Freeze-composition seam this task's own directive
+# authorizes touching -- see lost_semantic_atom_freeze_authority.py's own
+# module docstring for the full design note (default-OFF flag, byte-
+# identical parity when off). Every other Freeze term below is unchanged.
+from .lost_semantic_atom_freeze_authority import lost_semantic_atom_freeze_trigger_present
 from .semantic_atom_importance import (
     CONTEXTUAL as ATOM_CONTEXTUAL,
     SemanticAtomImportanceArbiter,
@@ -1279,7 +1284,7 @@ def apply_final_story_coherence_validation(
     freeze_blocked = (
         bool(contradiction_findings)
         or bool(missing_idea_coverage)
-        or any(row.get("blocking", True) for row in lost_semantic_atoms)
+        or lost_semantic_atom_freeze_trigger_present(lost_semantic_atoms)
         or bool(lost_critical_claims)
     )
 
@@ -1453,7 +1458,7 @@ def _apply_post_authority_validation_only(
     freeze_blocked = (
         bool(contradiction_findings)
         or bool(missing_idea_coverage)
-        or any(row.get("blocking", True) for row in lost_semantic_atoms)
+        or lost_semantic_atom_freeze_trigger_present(lost_semantic_atoms)
         or bool(lost_critical_claims)
         or bool(authority_membership_findings)
     )
