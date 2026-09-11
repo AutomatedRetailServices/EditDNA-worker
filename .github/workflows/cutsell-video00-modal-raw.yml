@@ -351,6 +351,26 @@ on:
         required: false
         default: ""
         type: string
+      audio_join_treatment_diagnostics_enabled:
+        # D-235 (docs/CUTSELL_DECISIONS.md D-230 through D-234): "1"
+        # overlays CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED=1
+        # (cutsell_worker/pacing_v2_audio_join_treatment_live_
+        # diagnostics.py's live diagnostic integration, D-234, wired into
+        # universal_clean_cut.py at the same live Pacing seam, SEPARATE
+        # flag from pacing_v2_diagnostics_enabled above). DIAGNOSTICS
+        # ONLY: builds D-230 AcousticEdgeEvidence -> D-231
+        # AudioJoinUnderstanding -> D-232 AudioJoinTreatmentDecision ->
+        # D-233 AudioJoinTreatmentTimingPlan per adjacent join and attaches
+        # one additive diagnostics["audio_join_treatment_v2"] key; never
+        # executes an advanced audio treatment, never mutates the render
+        # plan/RenderSegment audio windows, never changes Boundary/
+        # Ordering/Family/BestTake/the primary Pacing transition mode.
+        # Empty (default) = code default OFF, byte-identical to every run
+        # before D-234.
+        description: "Optional: '1' enables CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED (D-234, diagnostic-only, no live audio-treatment authority). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -708,6 +728,19 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-218 Pacing V2 Live Diagnostics for this run: CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-235: optional D-234 Audio Join Treatment live diagnostic
+          # overlay, applied only when the dispatch input is exactly "1";
+          # code default (OFF) otherwise. SEPARATE flag from pacing_v2_
+          # diagnostics_enabled above -- never auto-linked -- see
+          # cutsell_worker/pacing_v2_audio_join_treatment_live_
+          # diagnostics.py's own module docstring and docs/CUTSELL_
+          # DECISIONS.md D-230 through D-234 for the full no-authority
+          # contract.
+          if [ "${{ github.event.inputs.audio_join_treatment_diagnostics_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-235 Audio Join Treatment Live Diagnostics for this run: CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
