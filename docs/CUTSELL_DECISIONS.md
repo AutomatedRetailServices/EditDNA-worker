@@ -53022,3 +53022,187 @@ any further exact-trigger qualification attempt would be worth another
 RAW. No further action is taken on it by this task.
 
 ---
+
+
+## D-235I -- Lost Semantic Atom + Repair Loop Causality Forensic (post D-235H, forensic only, no fix)
+
+**Branch/HEAD verified:** `feature/runpod-pod-on-demand` @ `5d4c00a`,
+clean tree. No file touched by this task except this decision-log entry.
+
+**Input data caveat, stated honestly up front.** This forensic works
+from the exact field values the directive supplied as "CONFIRMED D-235H
+TRIGGERS" (`freeze_blocked=true`, `trigger_categories=[COHERENCE_
+BLOCKING_LOST_SEMANTIC_ATOM, REPAIR_LOOP_NEEDS_HUMAN_REVIEW]`,
+`resolver_status=SEMANTICALLY_RESOLVED`, the five other sub-reasons
+`NOT_FOUND`, `selected_count_before_freeze=5`). D-235H's own verdict was
+**D -- exact trigger not retrievable this session** (the small validator
+artifact remains blocked by this session's persistent Azure Blob
+Storage egress restriction, and job-log text retrieval hits a content-
+size cap before reaching that step's own output). This task could not
+independently re-confirm those exact values from the raw artifact
+either. What follows analyzes the CODE-LEVEL causality that would
+produce exactly this reported shape, given those values as stated input
+-- it does not certify that the values themselves were correctly read
+off a real artifact this session actually opened.
+
+### Primary finding: the two trigger categories are not two independent
+### problems -- they are the SAME single finding, surfacing at two
+### separate authority layers that both correctly treat it as blocking
+
+Traced end to end through the real, current code (no modification):
+
+1. `final_story_coherence_validation.py`'s `_lost_semantic_atoms()`
+   (called once, from `_apply_post_authority_validation_only`) compares
+   every DISCARDED clip's own text against the union of all SELECTED
+   clips' text. A row is marked `blocking=True` when EITHER (a) a
+   missing number/negation atom classifies as CRITICAL or UNCERTAIN
+   (never CONTEXTUAL-only), or (b) the broader content-vocabulary
+   signal fires (the clip has >=5 own content tokens, >=4 of them
+   missing from the kept timeline, and coverage against the kept
+   timeline is <0.45) AND none of the four suppression mechanisms
+   (same-idea paraphrase credit, pre-group wrong-take credit, pre-group
+   restart credit, a verified `SemanticPreservationProof`) applied.
+2. That EXACT SAME row list is threaded onto `CanonicalEditPlan.
+   lost_semantic_atoms` (via `canonical_edit_plan.py`, reading
+   `diagnostics["final_story_coherence_validation"]`) -- not
+   recomputed, not a second check.
+3. `universal_clean_cut.py`'s own `coherence_diag["freeze_blocked"]`
+   OR's in `any(row.get("blocking", True) for row in lost_semantic_
+   atoms)` directly -- this is exactly D-235G's
+   `COHERENCE_BLOCKING_LOST_SEMANTIC_ATOM` trigger category.
+4. SEPARATELY, `final_edit_reviewer.py::review()` reads the SAME
+   `edit_plan.lost_semantic_atoms` rows and turns each `blocking=True`
+   one into a `UNIQUE_FACT_LOST` `Finding` (`owning_authority=
+   "StoryValidator"`, `blocking=bool(row.get("blocking", True))`) --
+   line-for-line the same boolean, re-expressed as a different
+   authority's finding kind.
+5. `repair_loop.py::run_repair_loop()` only has a real repair strategy
+   for `STORY_ORDER_BREAK` (`_REPAIR_STRATEGIES = {STORY_ORDER_BREAK:
+   _repair_story_order_break}`). `UNIQUE_FACT_LOST` is explicitly,
+   BY DESIGN, absent from that table -- the module's own docstring:
+   *"an automatic 'fix' for any of them means the system guessing which
+   content is correct... guessing here is a regression in editorial
+   judgment, not a repair."* When `review()` returns a `UNIQUE_FACT_
+   LOST` finding and nothing else repairable, `repairable = [f for f in
+   result.findings if f.kind in _REPAIR_STRATEGIES]` is empty, the loop
+   records `reason="no_repair_strategy_exists_for_this_finding_kind"`
+   with `repaired=False` and **zero actual repair attempts**, and
+   breaks immediately -- `result.status` never reaches `PASS`, so
+   `repair_result.status = "NEEDS_HUMAN_REVIEW"`.
+
+**Conclusion: `COHERENCE_BLOCKING_LOST_SEMANTIC_ATOM` and `REPAIR_LOOP_
+NEEDS_HUMAN_REVIEW` are the identical underlying evidence (one lost-
+atom finding), observed through two authority checkpoints that each,
+correctly and by explicit design, refuse to let it reach Freeze without
+review.** This is not two independent safety objections and not an
+inconsistency -- it is the intended, documented shape of exactly one
+kind of blocker.
+
+### Resolver tension resolved: not an inconsistency -- different questions
+
+`realization_resolver.py`'s `status = AUTHORITATIVE_REVIEW_REQUIRED if
+any_review_required else SEMANTICALLY_RESOLVED` answers ONE question:
+*for every intended idea/family, could the resolver confidently pick
+ONE winning realization (a single take, or a well-formed composite)
+without needing a human to break a tie between competing candidates?*
+`SEMANTICALLY_RESOLVED` means yes -- every family was confidently
+resolved.
+
+The lost-semantic-atom coverage ledger answers a COMPLETELY DIFFERENT,
+downstream question: *does the FINAL KEPT TIMELINE's own vocabulary
+still contain every standalone fact/number/negation any DISCARDED clip
+carried?* A resolver can be fully confident about WHICH take should
+represent an idea (there was no ambiguity about the winner) while the
+correctly-discarded LOSING alternate(s) still carried some standalone
+content that happens not to reappear anywhere in the (here, very short
+-- 5-clip) final selection. These two checks were designed to catch
+different failure modes (D-031's own docstring: this coverage ledger
+exists precisely BECAUSE family-level resolution has no visibility into
+whether a clip it correctly discards was the sole carrier of some fact).
+**No inconsistency; two authorities checking two orthogonal properties,
+and both reporting truthfully for this run.**
+
+### Repair-loop terminal reason, named exactly
+
+`reason = "no_repair_strategy_exists_for_this_finding_kind"`,
+`repaired = False`, attempt count = 1 (the single audit-trail record
+this exact branch always writes), zero clips mutated. This is the
+loop's own designed, correct terminal state for any `UNIQUE_FACT_LOST`
+finding -- **the repair loop did not malfunction or over-escalate; it
+executed its documented, intentional refusal to guess.**
+
+### What cannot be determined from available evidence (honestly marked,
+### not guessed)
+
+The EXACT lost atom's identity is not retrievable this session (same
+egress/log-retrieval constraint D-235H already hit): `atom_id`,
+`source_span`/`proposition_id`, `semantic_role`, `source clip_id`,
+`candidate realization`, the specific missing text, and therefore
+whether the true underlying cause was (a) a missing critical number/
+negation atom or (b) the broader content-vocabulary signal, are all
+`NOT_RETRIEVABLE_THIS_SESSION`. Materiality (`MEANING_CRITICAL` /
+`EDITORIALLY_REQUIRED` / `REDUNDANT_EQUIVALENT_PRESENT` / `OPTIONAL_
+DETAIL`) cannot be classified without that content -- classifying it
+from the trigger name alone would be exactly the "invent equivalence"
+/ "assume every Freeze is a bug (or correct)" the directive explicitly
+forbids. One circumstantial, non-dispositive observation: `selected_
+count_before_freeze = 5` is a very small final selection; with so few
+kept clips, a discarded clip's own vocabulary has structurally less
+surviving text to be "covered by" elsewhere, which is consistent with
+(but does not prove) either a genuinely thin story or a coverage check
+firing on a small sample. This is recorded as context, not evidence,
+per the directive's own "no speculation" instruction.
+
+### Generalization question
+
+**CORRECT_ABSTENTION vs OVER_CONSERVATIVE_BUT_SAFE vs CLEAR_FALSE_
+POSITIVE: cannot be answered from available evidence** -- each of the
+three would require knowing whether the specific lost atom is
+genuinely unique content, editorially minor, or a paraphrase/retry
+structure the four existing suppression mechanisms should have (but
+apparently did not) credit. What CAN be answered:
+**INSUFFICIENT_EVIDENCE is the only honest choice among the four**,
+though the mechanism analysis above (Section "Primary finding") is
+itself a genuine, code-certain result, not a null finding.
+
+### D-235I verdict
+
+**E -- INSUFFICIENT EVIDENCE.** With one important qualification proven
+with code-level certainty rather than left open: this is definitively
+**NOT** "D. Repair loop escalated incorrectly" -- the repair loop's
+`NEEDS_HUMAN_REVIEW` terminal state is its correct, by-design behavior
+for a `UNIQUE_FACT_LOST` finding (zero repair strategies exist for that
+finding kind, by explicit architectural choice, not a bug or
+misconfiguration). Whether the underlying lost-atom finding itself is
+A (material, Freeze correct), B (non-material, over-conservative), or C
+(false positive/equivalent meaning exists) cannot be determined without
+the atom's own identity and text, which remains blocked behind the same
+retrieval-channel gap D-235H already named.
+
+**Exact next gate (not authorized to implement here):** the retrieval-
+channel fix D-235H already named (broaden this session's egress
+allowlist for the artifact-download host, or reorder the workflow to
+print the relevant diagnostic block early enough in the job log to stay
+inside this session's log-retrieval window) remains the correct
+prerequisite -- for THIS SPECIFIC forensic, what is additionally needed
+is the actual `lost_semantic_atoms` row content (clip_id, missing_
+critical_atoms, classification) from the real engine JSON, which lives
+in the same blocked artifact. No RAW is needed to get it -- only a
+successful read of D-235's or D-235H's own already-completed run's
+artifact, once the retrieval channel is fixed.
+
+**Engine patch required?** No -- and none was made or considered; the
+mechanism this forensic uncovered is working exactly as designed.
+**Paid compute required?** No, not for closing this specific question
+(a retrieval-channel fix and re-reading an ALREADY-COMPLETED run's
+artifact would suffice; the current-CleanCutBench/offline test suite
+could also be checked for whether an equivalent-shaped fixture already
+exists, as a lower-cost alternative to real-artifact retrieval).
+**Additional RAW required?** No.
+
+**Confirmed:** no RAW, no Modal, no RunPod, no provider call. No engine,
+threshold, Freeze, Pacing, Audio Join, or authority change was made or
+attempted by this task -- forensic only, per its own explicit
+instruction.
+
+---
