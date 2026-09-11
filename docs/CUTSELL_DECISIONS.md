@@ -52364,3 +52364,236 @@ Boundary/Ordering/Family/BestTake/loudness/audio-cleanup authority was
 touched.
 
 ---
+
+
+## D-235F -- Sibling RAW Freeze / Pacing Live-Seam Forensic (post D-235, forensic only, no fix)
+
+**Branch/HEAD verified:** `feature/runpod-pod-on-demand` @ `3da4b9e`, clean
+tree. No `cutsell_worker`, workflow, validator, test, or threshold file was
+touched by this task -- forensic-only, confirmed by `git status` before and
+after.
+
+**Retrieval attempt, reported honestly:** this task re-attempted downloading
+`cutsell-video00-modal-validator-reports` (artifact 10194945908) twice,
+independently, via a fresh signed URL each time. Both attempts failed
+identically: `curl` against the Azure Blob Storage host
+(`productionresultssa9.blob.core.windows.net`) returned `CONNECT tunnel
+failed, response 403` at this session's egress proxy -- confirmed to be an
+organization-policy block, not a transient error, the same failure mode
+D-235 already recorded. **This task could NOT independently verify the
+directive's cited artifact numbers** (`actual_selected_count=5`,
+`expected_selected_count=23`, `selection_locked=false`) from the raw JSON
+itself. What COULD be verified: those exact field names
+(`expected_selected_count`, `actual_selected_count`, `selection_locked`)
+are precisely the fields `benchmarks/validate_video00_selection_lock.py`
+actually emits (read directly from the local repo, no egress needed) --
+so the cited numbers are structurally consistent with a real report from
+that script, but their specific values for this run remain
+`NOT_INDEPENDENTLY_CONFIRMED_THIS_SESSION` rather than treated as verified
+fact.
+
+**Primary question answered from the engine's own local source, not from
+the blocked artifact.**
+
+### 1. Internal engine Freeze definition and location
+
+`cutsell_worker/universal_clean_cut.py` (~line 674-695):
+```
+coherence_diag = (result.draft.diagnostics or {}).get("final_story_coherence_validation") or {}
+freeze_blocked = bool(coherence_diag.get("freeze_blocked")) or repair_result.status == "NEEDS_HUMAN_REVIEW"
+if authoritative_result is not None and authoritative_result.status == AUTHORITATIVE_REVIEW_REQUIRED:
+    freeze_blocked = True
+if post_authority_integrity_failed:
+    freeze_blocked = True
+```
+Four independent OR'd triggers can set `freeze_blocked = True`: (1) Final
+Story Coherence Validation's own `freeze_blocked` flag (contradiction or a
+whole intended idea losing every selected member), (2) the repair loop's
+`NEEDS_HUMAN_REVIEW` status, (3) the resolver's `AUTHORITATIVE_REVIEW_
+REQUIRED` status, (4) a D-090 post-authority integrity failure. **This is
+the true internal Freeze state -- entirely distinct from, and never read
+by, the Video00 golden-file validators below.**
+
+### 2. Exact Pacing seam guard
+
+Immediately below, `if freeze_blocked: ... else: ...` -- the `else` branch
+is the ONLY place `apply_dialogue_pacing_transition_pass`,
+`pacing_v2_diagnostics_enabled()`'s block (D-216/D-217, `diagnostics
+["pacing_v2"]`), and `audio_join_treatment_diagnostics_enabled()`'s block
+(D-234, `diagnostics["audio_join_treatment_v2"]`) are ever reached. When
+`freeze_blocked` is True, `pacing_stage` is explicitly set to
+`"not_applicable_freeze_blocked_by_coherence_validation"` and NONE of
+Boundary-pass/polish/Pacing-transition/Pacing-V2-diagnostics ever execute
+-- by construction, not by omission. There is no separate, independent
+"live-seam eligibility" gate beyond this one boolean and the earlier,
+unrelated "does a draft contract exist at all" branch (ruled out below).
+
+### 3. D-234 env flag propagation -- confirmed correct
+
+Traced end to end, entirely from local source (no egress needed):
+`cutsell-video00-modal-raw.yml`'s overlay step
+(`if [ "${{ github.event.inputs.audio_join_treatment_diagnostics_enabled }}" = "1" ]; then jq ...`)
+merges `CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED=1` into
+`/tmp/cutsell-env.json` whenever the dispatch input is exactly `"1"` --
+confirmed set on the D-235 dispatch (`inputs.audio_join_treatment_
+diagnostics_enabled: "1"`, echoed back by the dispatch call itself).
+`modal_video00_full_benchmark.py`'s `_resolve_env_secret()` reads that
+ENTIRE JSON file and turns every key into a real Modal Secret
+(`modal.Secret.from_dict(...)`), injected as actual process environment
+variables in the remote container. **The flag reached the runtime
+process.** This rules out "flag never propagated" as a candidate cause.
+
+### 4. Ruling out the other upstream gate
+
+A separate, EARLIER branch in the same function
+(`selection_stage = "not_applicable_missing_draft_contract"`) applies only
+when no draft contract exists at all (a Clean-Cut-only request with no
+Selection ever attempted). A non-zero selected-clip count (5, per the
+directive's cited, structurally-plausible-but-unverified numbers) is
+incompatible with that branch -- Selection clearly ran and produced
+output. This is ruled out as the cause.
+
+### 5. Conclusion: only one code path explains the observed symptom
+
+Given (a) the flag reached the runtime, (b) Selection produced output
+(non-zero selected count), and (c) `diagnostics["pacing_v2"]` /
+`["pacing_v2_handle_aware"]` were BOTH independently, honestly reported
+`MISSING_FROM_SERIALIZATION` by their own extractor scripts reading the
+REAL engine JSON (`artifact/video00-modal.json`, not a golden file) --
+the only remaining, code-consistent explanation is that `freeze_blocked`
+evaluated **True** on this run. **This is inferred with high confidence
+from the code's own structure plus the directly-confirmed serialization
+symptom (D-218R's/D-225's own stderr, captured verbatim in the D-235
+job log) -- it is not a direct read of the `freeze_blocked` boolean
+itself**, since that field lives only in the blocked artifact. No
+alternative code path produces the same symptom.
+
+### 6. Which of the four triggers fired -- not retrievable, not guessed
+
+The specific trigger among the four OR'd conditions (coherence-validator
+contradiction/idea-loss vs. repair-loop `NEEDS_HUMAN_REVIEW` vs. resolver
+`AUTHORITATIVE_REVIEW_REQUIRED` vs. D-090 integrity failure) requires the
+real `diagnostics["final_story_coherence_validation"]` /
+`diagnostics["selection_boundary_contract"]` content, which lives only in
+the blocked 68.7 MB artifact. **Marked `NOT_RETRIEVABLE_THIS_SESSION`,
+not fabricated.**
+
+### 7. Video00-specific validator audit (separate, independently true, fact)
+
+- **"Verify frozen Selection lock"** calls `benchmarks/validate_video00_
+  selection_lock.py`, which compares `result["selected"]` against a
+  HARDCODED Video00 golden file (`benchmarks/video00_selection_lock.json`,
+  the canonical thyroid-cancer story segments) via ordered semantic text
+  alignment, and never reads the internal `freeze_blocked` field at all.
+  **Classification: VIDEO00_SPECIFIC_ORACLE.** For ANY non-Video00 source
+  this will always report `selection_locked: false` and a wall of
+  `missing_segment` errors, regardless of whether that source's OWN
+  internal Freeze succeeded -- its failure carries zero information about
+  the sibling's own Freeze state.
+- **"Verify Video00 architecture"** gates on
+  `jq -e '.source_duration_sec > 350 and ...'` -- a hardcoded duration
+  threshold tuned to Video00's own length -- before even calling
+  `validate_video00_architecture.py`. **Classification: VIDEO00_SPECIFIC_
+  ORACLE** (at minimum via the duration threshold; a different-duration
+  sibling can fail this independent of Freeze).
+- **"Verify Human Gold regression QA (18-check manifest)"** calls
+  `benchmarks/validate_video00_regression_qa.py` against
+  `benchmarks/video00_regression_qa.json`, the same golden-file family.
+  **Classification: VIDEO00_SPECIFIC_ORACLE.**
+
+The workflow's OWN existing comment on the architecture step (predating
+this task, D-050C3 Section 8) already states: *"a BLOCKED Freeze is
+itself a valid benchmark result -- it must never cause this validator to
+be skipped,"* and explicitly labels the selection-lock step
+**"LEGACY-selection-shaped."** This is the repo's own prior
+acknowledgment that these three validators' failure is expected and
+non-diagnostic for a blocked-Freeze (or non-canonical-source) run --
+directly matching the D-228 precedent this task was asked to compare
+against. **D-235 repeated exactly that same harmless-validator pattern.**
+
+### 8. Distinguishing the two things, explicitly
+
+Internal engine Freeze (`freeze_blocked` in `universal_clean_cut.py`) and
+the Video00 golden-file selection-lock validator are two SEPARATE
+mechanisms that happen to both be able to "fail" on a sibling RAW for
+DIFFERENT reasons: the validator will structurally fail on ANY sibling
+regardless of Freeze (content mismatch against Video00's own story), while
+the internal Freeze gate is a real, content-independent engine decision
+about THIS source's own selection. Both were probably unhealthy-looking on
+this run, but only the internal Freeze gate actually explains why Pacing
+V2 (and therefore Audio Join Treatment) diagnostics never serialized; the
+validator failures are a red herring for that specific question, exactly
+as the directive's own "IMPORTANT NEW EVIDENCE" warned.
+
+### 9. Serialization trace (construction -> workflow extraction)
+
+Construction (`build_pacing_v2_live_diagnostics_with_real_evidence`,
+`build_handle_aware_pacing_v2_diagnostics`, `build_audio_join_treatment_
+live_diagnostics`) -> `extra_diagnostics` dict merge -> `draft.diagnostics`
+replace -> `ProcessingResult` serialization -> S3 persisted result JSON ->
+workflow's `artifact/video00-modal.json` download -> D-218R/D-225
+extraction scripts. **First missing link: the construction step itself,
+inside the `else` (non-blocked) branch, never runs** when `freeze_blocked`
+is True -- every step downstream of construction (`extra_diagnostics`
+insertion, serialization, workflow extraction) is consequently a no-op by
+definition, not a broken link of its own. This is a genuine "never
+constructed," not a "constructed but lost in transit" gap -- ruling out
+Category D (serialization/reporting gap) as the answer.
+
+### 10. Answers to the five lettered candidates
+
+- **A. TRUE ENGINE SELECTION FREEZE BLOCK** -- supported, with the
+  confidence caveat in item 5 above (inferred from code + confirmed
+  symptom, not a direct field read).
+- **B. LIVE-SEAM ELIGIBILITY CONDITION NOT MET** -- ruled out; the only
+  seam-local eligibility gate (fewer than two selected clips) is
+  incompatible with a non-zero selected count, and no other seam-local
+  condition exists besides `freeze_blocked` itself.
+- **C. WORKFLOW/VALIDATOR ASSUMPTION STILL TIED TO VIDEO00** -- TRUE, but
+  ONLY for the three named QA validators (frozen-lock/architecture/Human-
+  Gold), which is a SEPARATE fact from why Pacing V2 didn't serialize.
+- **D. SERIALIZATION/REPORTING GAP** -- ruled out (item 9).
+- **E. OTHER** -- not needed; A explains the primary question, C explains
+  the validator noise.
+
+### D-235F verdict
+
+**A -- D-235 WAS (ALSO) A TRUE ENGINE FREEZE BLOCKER**, with the
+qualification that the three named QA validators' own failures are
+INDEPENDENTLY, CORRECTLY classified as Video00-specific false blockers
+(Category B pattern for those three specifically, matching D-228's own
+precedent) and carry no diagnostic weight on their own. Do not conflate
+"the golden-file validators failed" with "the engine's Freeze failed" --
+they are separate facts that happened to co-occur on this run; the
+engine-level Freeze block is the one that actually explains the missing
+Pacing V2 / Audio Join Treatment diagnostics.
+
+**Per "IF A": the exact Freeze blocker is named as the mechanism**
+(`freeze_blocked` in `universal_clean_cut.py`, one of its four OR'd
+triggers), **not the specific trigger**, which remains `NOT_RETRIEVABLE_
+THIS_SESSION` without the blocked artifact. No fix is made -- forensic
+only, per this task's own explicit instruction.
+
+**Exact next gate (not authorized to implement here):** a small,
+workflow-only, D-218R-style extractor step that copies
+`diagnostics["final_story_coherence_validation"]` /
+`diagnostics["selection_boundary_contract"]` (whichever specific field
+carries the true trigger reason) into the ALREADY-small, always-
+retrievable `cutsell-video00-modal-validator-reports` artifact -- so a
+future forensic on a Freeze-blocked sibling RAW does not depend on the
+68.7 MB blocked artifact at all. This is the smallest fix that would make
+this exact investigation retrievable next time; it is NOT implemented in
+this forensic-only gate.
+
+**Additional RAW required?** No -- this forensic used only the already-
+completed D-235 run's own artifacts/logs. **Engine patch required?** Not
+in this gate (forensic only); a future, separately-authorized gate may
+choose to add the small extractor step named above. **Paid compute
+required next?** No, not for the extractor-step gate itself (workflow-
+only change, validated offline before any RAW, per this repo's own
+established precedent for every prior D-218R/D-221/D-225-style step).
+
+**Confirmed: no RAW, no Modal, no RunPod, no provider, no engine patch,
+no authority change was made or attempted by this task.**
+
+---
