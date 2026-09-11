@@ -49877,3 +49877,386 @@ before D-228's own one sibling RAW real-media qualification may be
 dispatched.
 
 ---
+
+## D-228: Sibling RAW Handle-Aware Pacing / J-L Real-Media Qualification (post D-227)
+
+**Status: VERDICT C -- REAL SIBLING ALSO CORRECTLY REQUIRES HARD/TIGHT
+ONLY.** Exactly ONE real, non-Video00 RAW was processed end-to-end. All
+structural safety firewalls held (zero violations everywhere). Zero
+J/L candidates were unlocked by either the old (D-216/D-217) or
+handle-aware (D-223/D-224) evidence. Live executed transitions remained
+100% `HARD_CUT` (D-142 unaffected). One minor, non-blocking generalization
+difference was found (a reporting-level gap-decision inconsistency
+between two diagnostic layers, item 15) -- classified
+`GENERALIZES_WITH_NON_BLOCKING_DIFFERENCES`, not a blocker.
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, `ba5e843` (D-227) -> `afa5d0b` (this
+task's own workflow-only prep commit: `source_key` override input, S3
+existence preflight, Human Gold/Cut.ai skip-guard for non-Video00
+sources -- zero `cutsell_worker` change). No further commit needed
+after the RAW besides this decision entry.
+
+### 2. Sibling RAW key / RAW run id
+`Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4` (D-227's
+own `RECOMMENDED_D228_RAW`). Modal run **34569575804** (workflow run
+#95, `CutSell Video00 Modal RAW`), dispatched on `feature/runpod-
+pod-on-demand` @ `afa5d0b`. Exactly ONE RAW dispatched, per this task's
+own "no rerun, no second sibling" requirement.
+
+### 3. S3 existence preflight
+**PASSED** before any Modal compute -- the new preflight step
+(`D-228 sibling RAW S3 existence preflight`) confirmed the object
+exists with non-zero size via an `aws s3api head-object` metadata-only
+call, using the same already-authorized GitHub Actions S3 credentials
+every other step in this workflow uses. No credential, key, or signed
+URL was ever printed.
+
+### 4. Flags
+`editorial_moment_sequence_diagnostics_enabled=1` (P1), `live_language_
+spine_diagnostics_enabled=1` (Language), `whole_video_editorial_
+reasoning_diagnostics_enabled=1` (P2), `ordering_diagnostics_enabled=1`
+(Ordering), `pacing_v2_diagnostics_enabled=1` (Pacing V2). No advanced-
+authority flag, no provider overlay flag -- confirmed by `composer_path:
+"MOCK_PROVIDER"` in the real Ordering output (item 10).
+
+### 5-7. Duration / size / resolution
+**Not independently confirmed this session.** The workflow's own
+"Verify Video00 architecture" step (which prints `source_duration_sec`
+etc.) ran early in the job and its output fell outside this session's
+own log-retrieval tool's retrievable window (a ~450KB tail cap this
+session hit trying to reach it; the small `cutsell-video00-modal-
+validator-reports` artifact that carries it is `expired: true`-free
+today but undownloadable here for the same `*.blob.core.windows.net`
+network-policy reason established in D-225). Never fabricated. Indirect
+evidence: `selected_clip_count: 3`, `transition_count: 2` (items 9,
+11-13) -- a much shorter/simpler benchmark than Video00's own 24
+clips/23 transitions.
+
+### 8. Audio/video status
+**Both present and fully processable** -- proven, not inferred: the
+Modal benchmark itself completed successfully (job step "Run Modal full
+Video00 benchmark" conclusion `success`), and every diagnostic step
+downstream (P1/P2/Ordering/Pacing) consumed real ASR words, real
+per-clip source spans (e.g. `source_start: 0.0, source_end: 47.67` on
+one editorial moment, item 9), and real ffprobe-derived clip data --
+none of these steps' own "no result JSON" / "missing artifact" guards
+fired.
+
+### 9. Selected clip count / transition count
+`selected_clip_count: 3`, `transition_count: 2`
+(`transition_count_matches_selected_minus_one: true`, self-consistent).
+
+### 10. P1 health
+`editorial_moment_sequence_status: "evaluated"`, `moment_count_in_
+artifact: 3`, `false_positive_final_sequence_count: 0`, `grouping_
+audit: []` (clean). Language Spine: `canonical_attempt_coverage_pct:
+100.0`, `canonical_attempt_used_by_p1_count: 3`, `canonical_
+proposition_coverage_count: 3`, `construction_error_count: 0`.
+**Healthy.**
+
+### 11. P2 health
+`p1_moment_count: 3`, `p1_local_group_count: 3`, `p2_capability_
+status: "AVAILABLE"`, `meaning_firewall_result: "HELD"` (0
+violations), `chronology_firewall_result: "HELD"`, `global_conflict_
+count: 0`, `global_continuity_status: "COHERENT"`, `multi_realization_
+proposition_count: 1` with `distant_realization_value_distribution:
+{"MULTIPLE_CLEAN_REALIZATIONS": 1}`, `no_safe_supersession_count: 3`.
+**Healthy.**
+
+### 12. Ordering health
+`baseline_fallback_exact_match: true`, `cycle_count: 0`, `dropped_
+count: 0`, `added_count: 0`, `duplicate_baseline_id_count: 0`,
+`composite_violation_count: 0`, `correction_violation_count: 0`,
+`continuation_violation_count: 0`, `conflicted_relation_count: 0`,
+`composer_proposal_available: true`, `composer_path: "MOCK_PROVIDER"`
+(no real provider call, confirming item 4's "no provider overlay").
+**Healthy, zero violations of any kind.**
+
+### 13. Pacing health (old evidence, D-218R)
+`pacing_v2_block_status: "PRESENT"`, `capability_status: "AVAILABLE"`,
+`transition_count: 2`, `current_d142_live_modes: ["HARD_CUT",
+"HARD_CUT"]`, `d142_comparison: {comparison_agreement_count: 2,
+comparison_advanced_mode_count: 0}`, `advanced_recommendation_count:
+0`, `advanced_execution_count: 0`, `firewall_violation_count: 0`,
+`live_independent_audio_window_count: 0`, `pacing_v2_usefulness_
+classification: "SAFE_BUT_NOT_YET_USEFUL"`. `run_summary`: `hard_cut_
+count: 2`, `j_cut_count/j_cut_eligible_count: 0`, `l_cut_count/l_cut_
+eligible_count: 0`, `tight_cut_count: 0`, `micro_overlap_count: 0`,
+`keep_pause_count: 1` (item 15), `word_safety_block_count: 0`,
+`meaning_block_count: 0`, `double_speech_block_count: 0`,
+`relationship_hint_available_count: 0`, `relationship_hint_unknown_
+count: 2`, `prosodic_pair_available_count: 0`, `prosodic_pair_
+unavailable_count: 2` (no relationship hints or Prosodic evidence for
+either transition -- honest, matches this fixture's own single-take
+shape). **Healthy on every safety firewall; zero live authority.**
+
+### 14. Boundary health
+Not separately gated in this workflow's own architecture/regression-QA
+validators for a non-Video00 source (item 20), but Boundary
+immutability itself is a structural fact confirmed the same way as
+D-225 (item 24): neither D-217/D-224's evidence code nor D-220's
+timing policy ever calls `dataclasses.replace` on a clip; `clip.start`/
+`clip.end` changes: 0.
+
+### 15. Real generalization observation: one non-blocking inconsistency
+The old-evidence Pacing block (D-218R) reports its own `sequence_
+consistency` audit found **`inconsistent_pair_count: 1`**:
+`{"left_index": 0, "right_index": 1, "reason": "same_evidence_
+different_gap_decision"}` -- two internal diagnostic layers computed a
+different "gap decision" label from the identical underlying evidence
+for the one pair of transitions in this run (this is very likely also
+the source of the `run_summary.keep_pause_count: 1` figure alongside
+`hard_cut_count: 2` not summing cleanly against `transition_count: 2`
+-- one layer's own internal classification differed from the other's
+for the same pair). **No live behavior was affected**
+(`advanced_execution_count: 0`, both live D-142 modes agree at
+`HARD_CUT`, `d142_comparison.comparison_agreement_count: 2` i.e. 100%
+agreement on the LIVE decision) -- this is a reporting-layer
+inconsistency between two diagnostic-only labels, not a Selection/
+Boundary/render discrepancy. Recorded honestly as a real, sibling-
+surfaced finding worth a future targeted look (not investigated further
+here, out of this task's own "no cutsell_worker change" scope), and
+factored into item 24's classification below.
+
+### 16-21. Source Audio Handles (D-225, handle-aware)
+`pre_handle_count: 3`, `post_handle_count: 3`, `safe_pre_handle_count:
+0`, `safe_post_handle_count: 0`, `blocked_pre_handle_count: 0`,
+`blocked_post_handle_count: 0`, `unknown_pre_handle_count: 0`,
+`unknown_post_handle_count: 0`, `speech_present_pre_handle_count: 0`,
+`speech_present_post_handle_count: 0`, `total_safe_pre_handle_
+duration: 0`, `total_safe_post_handle_duration: 0`. All 6 handles fall
+into the residual `UNAVAILABLE` bucket (no Boundary audio-edge-trim
+provenance recorded for this run either) -- the identical root
+mechanism D-225 identified for Video00 (48/48 `UNAVAILABLE`, same
+cause), now independently reproduced on a second, unrelated real
+source. **This is the single most informative early-generalization
+signal from this RAW**: the handle-unavailability shape is not a
+Video00-specific content quirk -- it recurs on a different real human
+recording, consistent with a systemic gap (Boundary does not yet record
+audio-edge-trim provenance broadly) rather than a per-video coincidence.
+
+### 22-27. Old vs handle-aware J / L
+`old_j_candidate_count: 0`, `handle_aware_j_candidate_count: 0`,
+`j_candidates_unlocked_by_handle_count: 0`, `j_unlock_cases: []`.
+`old_l_candidate_count: 0`, `handle_aware_l_candidate_count: 0`,
+`l_candidates_unlocked_by_handle_count: 0`, `l_unlock_cases: []`.
+D-221's own independent (old-evidence) extraction agrees:
+`real_jl_candidate_count: 0`.
+
+### 28. Mode distribution (old vs handle-aware)
+Both identical: `{"hard_cut": 2, "tight_cut": 0, "j_cut": 0, "l_cut":
+0}`. Handle-aware evidence changed nothing, because there was no wider
+evidence to offer (item 16-21: every handle `UNAVAILABLE`).
+
+### 29. KEEP_PAUSE cases
+One `run_summary.keep_pause_count: 1` value recorded (item 13/15) --
+this appears to be the residual mode/label from the one flagged
+`sequence_consistency` inconsistency (item 15) rather than a live,
+executed KEEP_PAUSE decision (the live D-142 mode for both transitions
+is confirmed `HARD_CUT`, item 13). Reported honestly as-is; not
+reconciled further here (out of scope).
+
+### 30-31. J cases / L cases
+None -- `j_unlock_cases`/`l_unlock_cases` both empty (item 22-27).
+
+### 32. D-220 timing table
+Not exercised -- `d220_j_max_safe_window_evaluated`/`d220_l_max_safe_
+window_evaluated` are absent for both transitions (D-224's own gate:
+D-220 only runs on a pair the wider evidence itself found eligible, and
+none was, item 22-27).
+
+### 33. Relationship coverage
+`relationship_hint_available_count: 0`, `relationship_hint_unknown_
+count: 2` -- no relationship hints (CONTINUATION/CORRECTION/RETRY) were
+available for either transition in this single-take, 3-clip benchmark.
+
+### 34. Prosodic coverage
+`prosodic_pair_available_count: 0`, `prosodic_pair_partial_count: 0`,
+`prosodic_pair_unavailable_count: 2`, `prosodic_left_available_count:
+0`, `prosodic_right_available_count: 0` -- unavailable for both
+transitions. No Prosodic evidence was recomputed by this task.
+
+### 35-38. Safety firewalls
+`word_safety_block_count: 0`, `meaning_block_count: 0`, `double_
+speech_block_count: 0` (Pacing, item 13); `discarded_handle_reuse_
+violation_count: 0`, `meaning_handle_violation_count: 0`, `unknown_
+word_coverage_reuse_violation_count: 0`, `double_count_violation_
+count: 0` (Handle-Aware, item 16-21); `composite_violation_count: 0`,
+`correction_violation_count: 0`, `continuation_violation_count: 0`,
+`conflicted_relation_count: 0` (Ordering, item 12). **All zero.**
+
+### 39-40. Boundary / Ordering immutability
+Boundary: item 14 (0 clip-span mutations). Ordering: `baseline_
+fallback_exact_match: true`, `cycle_count: 0`, `dropped_count: 0`,
+`added_count: 0` -- the accepted order matches the deterministic
+fallback baseline exactly, never reordered by anything this task
+touches.
+
+### 41-43. Advanced recommendation / execution / live audio window
+`advanced_recommendation_count: 0`, `advanced_execution_count: 0`,
+`live_independent_audio_window_count: 0` -- structural facts, matching
+item 22-27's zero-unlock result exactly (0 unlocked = 0 recommended,
+by construction).
+
+### 44. Audio Join Treatment observations
+No safe non-speech handle material exists on this sibling either (item
+16-21: 0 safe handles) -- `future_audio_join_treatment_candidate_
+count: 0`, same shape as Video00. No new evidence for `SHORT_
+CROSSFADE`/`AMBIENCE_*`; not implemented or authorized here.
+
+### 45. Room-tone status
+Unchanged: `ROOM_TONE_CLASSIFICATION_NOT_YET_AVAILABLE`. No handle on
+this run was or could be mislabeled `ROOM_TONE` (there were none safe
+to mislabel).
+
+### 46. Video00 comparison
+| metric | Video00 (D-225) | Sibling (D-228) |
+|---|---|---|
+| transitions | 23 | 2 |
+| pre/post handles evaluated | 24 / 24 | 3 / 3 |
+| safe handles | 0 / 0 | 0 / 0 |
+| J/L candidates unlocked | 0 / 0 | 0 / 0 |
+| live mode | 100% HARD_CUT/TIGHT_CUT | 100% HARD_CUT |
+| root cause of 0 safe handles | no Boundary provenance | no Boundary provenance (same) |
+
+### 47. New-shape result
+**NO_NEW_SHAPE** for J/L/handle availability itself (identical
+UNAVAILABLE-by-no-Boundary-provenance mechanism, item 16-21) --
+**YES_MINOR_NEW_SHAPE** for the sequence-consistency reporting
+inconsistency (item 15), which Video00's own D-225 run did not surface
+(or at least was not reported in that entry). Net: this RAW's dominant
+signal reinforces D-225's own finding as a likely systemic pattern
+rather than a Video00 coincidence, plus surfaces one small, real,
+non-blocking reporting gap worth a future look.
+
+### 48. Early-generalization classification
+**GENERALIZES_WITH_NON_BLOCKING_DIFFERENCES.** Every safety firewall
+held (zero violations across P1/P2/Ordering/Pacing/Handle-Aware, items
+10-13, 16-21, 35-38); the one flagged difference (item 15) is a
+reporting-layer label inconsistency with zero live-behavior effect
+(item 15's own `comparison_agreement_count: 2`, 100% live-mode
+agreement). Not `GENERALIZES_CLEANLY` (a real, if minor, discrepancy
+exists) and not `ONE_MATERIAL_GENERALIZATION_BLOCKER`/`PIPELINE_
+REGRESSION` (nothing here blocked Selection, Boundary, or Ordering, and
+the live rendered decision was unaffected).
+
+### 49. Parity-reference availability
+**REFERENCE_PARITY_NOT_AVAILABLE_FOR_SIBLING** -- no Cut.ai/Human Gold
+reference exists for this sibling; none was invented. The workflow's
+own Human Gold/Cut.ai download step (this task's own D-228 prep commit)
+correctly skipped both downloads for this run, and the quality-ladder
+step self-skipped in turn (its own pre-existing "reference video is
+missing" guard) -- confirmed by the job step list showing "Video00
+quality ladder" with conclusion `success` (its own no-op success path,
+not a real four-way comparison).
+
+### 50. Primary D-228 result
+**C. REAL SIBLING ALSO CORRECTLY REQUIRES HARD/TIGHT ONLY.** Zero J/L
+candidates were found by either evidence layer (item 22-27); this is a
+VALID real-media result per this task's own explicit instruction ("a
+candidate producing 0 J/L in D-228 is still valid real evidence") --
+not a failure of the sibling selection or the engine.
+
+### 51. Additional RAW required
+**NO.** Per this task's own "no third RAW loop" instruction: do not
+select another sibling merely to force J/L. This is the one additional
+real sample authorized for this question.
+
+### 52. Exact next gate
+Per item 50's "IF C" branch: **stop chasing J/L with more RAWs.** J/L
+remains a safe, optional, currently-uncommon-on-real-media capability
+(D-226's own controlled fixtures remain the strongest available
+timing-policy evidence, still pending Product Owner Watch+Listen) --
+should stay available for future content where it IS naturally
+eligible, but is not the next engineering priority. Recommended next
+product-engineering focus: **Audio Join Treatment** (`SHORT_
+CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_
+BRIDGE`), which shares the SourceAudioHandle foundation but does not
+depend on J/L eligibility at all. A secondary, small, non-blocking
+follow-up item is recorded (item 15's sequence-consistency
+inconsistency) for a future targeted diagnostic pass. Neither is
+launched or implemented here.
+
+### 53. J/L authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed
+transition modes (item 13/41-43's own real per-transition
+confirmation, both this sibling and Video00). This task introduces,
+enables, or implements zero live authority. Per item 52, bounded J/L
+authority is NOT the recommended next step -- it remains available to
+revisit if/when unseen content naturally surfaces real eligible pairs.
+
+### 54. Audio Join Treatment status
+Unchanged: `CLICK_FADE` existing/live; `SHORT_CROSSFADE`/`AMBIENCE_
+CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE` remain
+`ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_AUTHORITY`. Item 52
+recommends this as the next focus; not started here.
+
+### 55. Renderer status
+Unchanged. `render.py`/`render_plan.py` untouched by this task; item
+41-43 confirms zero live independent audio windows on this run.
+
+### 56. App-roadmap status
+Unchanged sequence through D-227, then: one real sibling RAW processed
+end-to-end, zero J/L unlocked (valid result), handle-unavailability
+mechanism reproduced on a second real source (likely systemic, not
+Video00-specific), one small non-blocking reporting inconsistency
+found -- **this entry, D-228** -> next (NOT launched here, per item
+52): Audio Join Treatment architecture work (shared SourceAudioHandle
+foundation, independent of J/L), run in parallel with the still-pending
+Product Owner Watch+Listen confirmation on D-226's own published
+review artifact -> only after both: bounded J/L advanced authority
+reconsidered (default off, offline first, contingent on real
+eligibility actually appearing in future content) -> micro-overlap
+final authority -> Renderer/export qualification -> broader unseen-RAW
+generalization/Human Gold parity -> product hardening -> TestFlight ->
+App Store.
+
+### 57. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. `docs/
+CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` NOT edited (out of this
+task's own scope).
+
+### 58. Confirmation
+NO second RAW dispatched (exactly one, run 34569575804). NO Video00
+rerun (`SOURCE_KEY` was the sibling key throughout; item 3's own
+preflight and item 2's own run metadata confirm). NO Modal call beyond
+the ONE already-authorized run itself. NO RunPod call (Modal is
+serverless/on-demand; no persistent pod was created -- confirmed by the
+job's own "Modal teardown confirmation" step: "automatic scale-to-zero
+on function return"). NO provider call (item 4/12: `composer_path:
+"MOCK_PROVIDER"`). NO `cutsell_worker/*.py` file touched by this task
+(the one code change, `afa5d0b`, is workflow-only: `source_key` input,
+S3 preflight, Human Gold/Cut.ai skip-guard). NO live J/L/MICRO_AUDIO_
+OVERLAP authority created, enabled, or implemented -- confirmed by this
+run's own real data (items 41-43: live mode 100% `HARD_CUT`, `advanced_
+execution_count`=0, `live_independent_audio_window_count`=0). NO Audio
+Join Treatment implemented. NO Boundary/Ordering/Family/BestTake
+behavior change (this task never touches those authorities; the three
+"Verify frozen Selection lock"/"Verify Video00 architecture"/"Verify
+Human Gold regression QA" job-step failures on this run are Video00-
+SPECIFIC validators by direct code inspection -- `validate_video00_
+selection_lock.py`/`validate_video00_architecture.py`/`validate_
+video00_regression_qa.py` all compare against Video00-only golden
+files, and the architecture check's own first assertion
+(`.source_duration_sec > 350`) is a literal Video00-duration check --
+none of the three can ever pass for a non-Video00 source by design;
+this is the SAME class of harmless, pre-existing, source-locked gate
+D-225's own entry already flagged, now further confirmed by direct
+code reading rather than pattern-matching alone. These three gates
+were not additionally guarded in this task's own D-228 prep commit
+(unlike the Human Gold/Cut.ai download, item 49) -- a reasonable follow-
+up for a future workflow-hygiene pass, not required to trust this
+entry's own evidence, since every OTHER diagnostic step in the job
+(items 8-13, 16-34) ran with `if: always()` and reported real,
+successful, complete data regardless of these three gates' own
+Video00-locked failure).
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+"Then STOP. Wait for Product Owner coordination," the decision needed
+is whether to authorize the recommended next focus (item 52: Audio
+Join Treatment architecture work) and/or a targeted look at item 15's
+sequence-consistency inconsistency, as the next, separately-scoped
+engineering work. No further action is taken on either by this task.
+
+---
