@@ -287,6 +287,21 @@ class DraftClip:
     # assemble a composite out of fragments that were never a complete,
     # independently-usable delivery in the first place.
     complete_idea: Optional[bool] = None
+    # D-235W: carried unchanged from the CandidateTake this clip was built
+    # from (pipeline.py's `_draft_clip`, same passthrough pattern as
+    # `source_span_id`/`attempt_id` above) -- see `CandidateTake.word_
+    # indices`'s own docstring (D-235P) for the canonical, source-scoped
+    # word-ordinal contract. `DraftClip` already carries `.words` (the raw
+    # `Word` objects) and `.attempt_id`/`.source_span_id`/`.clip_id`/
+    # `.source_asset_id` -- exactly the shape `shared_attempt_word_
+    # identity.build_reconstructed_attempt_word_membership()` needs -- so
+    # a future caller can compute exact word-membership identity directly
+    # from a `DraftClip` without any new field; this one is additive
+    # observability/parity with `CandidateTake`, not a hard dependency of
+    # that computation. Defaulted to `()` so every existing construction
+    # site (serde.py's external-payload deserialization included) stays
+    # valid unchanged.
+    word_indices: Tuple[int, ...] = ()
 
 
 def effective_render_fragment_id(clip) -> str:

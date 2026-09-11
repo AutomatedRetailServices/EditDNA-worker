@@ -692,7 +692,15 @@ class TestContractsAdditiveField:
         content = _read(CONTRACTS_PATH)
         assert "word_indices: Tuple[int, ...] = ()" in content
 
-    def test_no_live_call_site_sets_word_indices(self):
+    def test_live_call_sites_now_populate_word_indices_d235w(self):
+        """D-235W Part B closes this GAP intentionally (canonical, source-
+        scoped word-index population via `take_segmentation.py`'s own
+        `_canonical_word_index_lookup`/`_word_indices_for`, carried forward
+        through `_join_takes`/`_merge_attempt`/`_draft_clip` -- never fuzzy
+        text, never timestamp-overlap identity, never a second ordinal
+        system; see docs/CUTSELL_DECISIONS.md D-235W). This test now
+        asserts the POSITIVE, intentional state that the pre-D-235W
+        version of this test recorded as absent."""
         live_sites = (
             "cutsell_worker/take_segmentation.py",
             "cutsell_worker/attempt_reconstruction.py",
@@ -700,4 +708,4 @@ class TestContractsAdditiveField:
         )
         for path in live_sites:
             content = _read(path)
-            assert "word_indices=" not in content
+            assert "word_indices=" in content

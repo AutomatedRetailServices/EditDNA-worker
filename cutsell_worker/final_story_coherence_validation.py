@@ -111,9 +111,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 from itertools import combinations
-from typing import Mapping
+from typing import Mapping, Optional, Sequence, Tuple
 
 from .canonical_identity import mint_semantic_idea_id
+from .complete_lost_semantic_atom_materiality import (
+    CompleteLostSemanticAtomMateriality,
+    assess_complete_lost_semantic_atom_materiality,
+)
 from .contracts import effective_parent_semantic_clip_id
 from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 from .final_sibling_grouping import _content, _negations, _numbers
@@ -121,7 +125,18 @@ from .final_sibling_grouping import _content, _negations, _numbers
 # authorizes touching -- see lost_semantic_atom_freeze_authority.py's own
 # module docstring for the full design note (default-OFF flag, byte-
 # identical parity when off). Every other Freeze term below is unchanged.
-from .lost_semantic_atom_freeze_authority import lost_semantic_atom_freeze_trigger_present
+from .lost_semantic_atom_freeze_authority import (
+    decide_lost_semantic_atoms_freeze_decisions,
+    lost_atom_materiality_freeze_authority_enabled,
+    lost_semantic_atom_freeze_trigger_present,
+)
+# D-235W Part C: the already-proven D-235P exact word/proposition identity
+# bridge, wired in here ONLY as an optional, caller-supplied input type --
+# this module never imports language_spine/language_utterance_attempt/
+# language_proposition_relation itself, never constructs an
+# AttemptLanguageIdentityMatch, never touches P1/P2 architecture. See
+# `_complete_lost_semantic_atom_materiality_by_clip_id`'s own docstring.
+from .shared_attempt_word_identity import AttemptLanguageIdentityMatch
 from .semantic_atom_importance import (
     CONTEXTUAL as ATOM_CONTEXTUAL,
     SemanticAtomImportanceArbiter,
@@ -1166,6 +1181,183 @@ def _lost_critical_claims(
     return findings, confirmations
 
 
+# ---------------------------------------------------------------------------
+# D-235W Part A: live per-clip critical-claim-conflict context, derived ONLY
+# from already-computed evidence in THIS SAME function (contradiction_
+# findings/lost_critical_claims/claim_coverage_confirmations/clip_id_to_
+# group) -- never a new claim/contradiction detector, per this task's own
+# instruction. See D-235V (docs/CUTSELL_DECISIONS.md) for the forensic
+# finding this closes: no live caller ever supplied `critical_claim_
+# conflict` to `assess_lost_semantic_atom_materiality`, so its own
+# NON_MATERIAL_REAL_CONTENT branch (which requires an EXPLICIT `False`,
+# never inferred from absence) was structurally unreachable live.
+# ---------------------------------------------------------------------------
+def _critical_claim_conflict_by_clip_id(
+    lost_semantic_atoms: Sequence[Mapping],
+    contradiction_findings: Sequence[Mapping],
+    lost_critical_claims: Sequence[Mapping],
+    clip_id_to_group: Mapping[str, tuple],
+) -> dict[str, Optional[bool]]:
+    """Tri-state per clip_id (never a default `False` from a merely-empty
+    global list -- see module's own "Do not over-correlate" contract):
+
+    True  -- this EXACT clip is directly implicated by a real, already-
+             detected contradiction finding (`left_clip_id`/
+             `right_clip_id`) or lost-critical-claim finding
+             (`source_clip_id`) -- a genuine conflict, never inferred.
+    False -- this EXACT clip belongs to a real, >=2-member `take_judge_
+             groups` retry family (`clip_id_to_group`, the SAME mapping
+             `_lost_critical_claims` above iterates -- `_lost_critical_
+             claims` genuinely RAN its own critical-claim extraction over
+             every member of that family) and was NOT named by any
+             conflict finding for it -- positive evidence the relevant
+             critical-claim context was actually evaluated and found
+             clear, never an assumption from a globally-empty list.
+    None  -- this clip was never part of any evaluated family (a pre-
+             group discard, or a family this pass never reached) --
+             insufficient evidence, never guessed.
+    """
+    conflict_clip_ids: set[str] = set()
+    for finding in contradiction_findings:
+        if not isinstance(finding, Mapping):
+            continue
+        for key in ("left_clip_id", "right_clip_id"):
+            cid = finding.get(key)
+            if cid:
+                conflict_clip_ids.add(str(cid))
+    for finding in lost_critical_claims:
+        if not isinstance(finding, Mapping):
+            continue
+        cid = finding.get("source_clip_id")
+        if cid:
+            conflict_clip_ids.add(str(cid))
+
+    result: dict[str, Optional[bool]] = {}
+    for row in lost_semantic_atoms:
+        if not isinstance(row, Mapping):
+            continue
+        clip_id = str(row.get("clip_id") or "")
+        if not clip_id or clip_id in result:
+            continue
+        if clip_id in conflict_clip_ids:
+            result[clip_id] = True
+            continue
+        # `clip_id_to_group` (built by `_clip_id_to_group_members`) already
+        # filters to genuine 2+-member contests only -- membership here IS
+        # the "this family was evaluated" proof, never re-derived.
+        result[clip_id] = False if clip_id in clip_id_to_group else None
+    return result
+
+
+def _complete_lost_semantic_atom_materiality_by_clip_id(
+    lost_semantic_atoms: Sequence[Mapping],
+    contradiction_findings: Sequence[Mapping],
+    lost_critical_claims: Sequence[Mapping],
+    clip_id_to_group: Mapping[str, tuple],
+    *,
+    exact_match_by_clip_id: Optional[Mapping[str, AttemptLanguageIdentityMatch]] = None,
+    proposition_candidate_ids_by_attempt_id: Optional[Mapping[str, Tuple[str, ...]]] = None,
+    proposition_slot_evidence_by_id: Optional[Mapping[str, str]] = None,
+) -> dict[str, CompleteLostSemanticAtomMateriality]:
+    """D-235W orchestration seam (Parts A + C combined): builds the one
+    `materiality_by_clip_id` map `lost_semantic_atom_freeze_trigger_
+    present()` accepts, calling the SAME D-235Q pure function D-235R/
+    D-235T's own row-only internal calls already use -- but now WITH the
+    live `critical_claim_conflict` context Part A derives, and WITH
+    `exact_match`/proposition context Part C accepts from a caller that
+    has it (none does yet -- see docs/CUTSELL_DECISIONS.md D-235W's own
+    "what remains unconnected" section; `exact_match_by_clip_id` defaults
+    to `None` everywhere today, so `exact_identity_available` stays
+    `False` exactly as before this task unless a FUTURE caller supplies
+    it). Only ever called behind the SAME default-OFF flag this whole
+    seam already used (see the two live call sites below) -- never
+    computed when the flag is off, so the flag-off path stays byte-
+    identical with zero extra work, not just an unused result."""
+    exact_match_by_clip_id = exact_match_by_clip_id or {}
+    critical_claim_conflict_by_clip_id = _critical_claim_conflict_by_clip_id(
+        lost_semantic_atoms, contradiction_findings, lost_critical_claims, clip_id_to_group,
+    )
+    result: dict[str, CompleteLostSemanticAtomMateriality] = {}
+    for row in lost_semantic_atoms:
+        if not isinstance(row, Mapping):
+            continue
+        clip_id = str(row.get("clip_id") or "")
+        if not clip_id or clip_id in result:
+            continue
+        result[clip_id] = assess_complete_lost_semantic_atom_materiality(
+            row,
+            critical_claim_conflict=critical_claim_conflict_by_clip_id.get(clip_id),
+            exact_match=exact_match_by_clip_id.get(clip_id),
+            proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
+            proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# D-235W: compact live observability for the Part A+C orchestration seam --
+# tail-safe (bounded per-clip maps of ids/statuses only), never a transcript
+# dump (no `text`/`bounded_excerpt` field is ever copied into this). Reports
+# `lost_atom_repair_suppression_status` honestly as NOT computed at this
+# seam: D-235T's own `decide_lost_atom_repair_suppression()` is called from
+# `repair_loop.py`, not from here, and (per this task's own forensic finding
+# -- see docs/CUTSELL_DECISIONS.md D-235W) recomputes materiality FRESH from
+# the row alone with no critical_claim_conflict/exact_match override, so it
+# cannot reach this same live context without its own, separately-
+# authorized wiring seam. This module never claims a status it did not
+# itself compute.
+# ---------------------------------------------------------------------------
+def _lost_atom_materiality_orchestration_diagnostics(
+    materiality_by_clip_id: Optional[Mapping[str, CompleteLostSemanticAtomMateriality]],
+    lost_semantic_atoms: Sequence[Mapping],
+    critical_claim_conflict_by_clip_id: Optional[Mapping[str, Optional[bool]]] = None,
+) -> dict:
+    materiality_by_clip_id = materiality_by_clip_id or {}
+    critical_claim_conflict_by_clip_id = critical_claim_conflict_by_clip_id or {}
+    clip_ids = [
+        str(row.get("clip_id") or "") for row in lost_semantic_atoms
+        if isinstance(row, Mapping) and row.get("clip_id")
+    ]
+    freeze_decisions_by_clip_id = {
+        d.clip_id: d
+        for d in decide_lost_semantic_atoms_freeze_decisions(lost_semantic_atoms, materiality_by_clip_id)
+    }
+    return {
+        "lost_atom_exact_word_identity_available": {
+            cid: bool(materiality_by_clip_id[cid].exact_identity_available)
+            for cid in clip_ids if cid in materiality_by_clip_id
+        },
+        "lost_atom_language_attempt_ids": {
+            cid: list(materiality_by_clip_id[cid].exact_language_attempt_ids)
+            for cid in clip_ids if cid in materiality_by_clip_id
+        },
+        "lost_atom_proposition_candidate_ids": {
+            cid: list(materiality_by_clip_id[cid].exact_proposition_candidate_ids)
+            for cid in clip_ids if cid in materiality_by_clip_id
+        },
+        "lost_atom_critical_claim_conflict_status": {
+            cid: critical_claim_conflict_by_clip_id[cid]
+            for cid in clip_ids if cid in critical_claim_conflict_by_clip_id
+        },
+        "lost_atom_complete_materiality_status": {
+            cid: materiality_by_clip_id[cid].final_materiality_status
+            for cid in clip_ids if cid in materiality_by_clip_id
+        },
+        "lost_atom_blocking_recommendation": {
+            cid: materiality_by_clip_id[cid].blocking_recommendation
+            for cid in clip_ids if cid in materiality_by_clip_id
+        },
+        "lost_atom_freeze_authority_status": {
+            cid: freeze_decisions_by_clip_id[cid].authority_status
+            for cid in clip_ids if cid in freeze_decisions_by_clip_id
+        },
+        # See this function's own docstring above: honestly NOT computed at
+        # this seam -- D-235T's own live call site is `repair_loop.py`, out
+        # of this task's authorized scope.
+        "lost_atom_repair_suppression_status": "NOT_COMPUTED_AT_THIS_SEAM_SEE_REPAIR_LOOP",
+    }
+
+
 def apply_final_story_coherence_validation(
     draft,
     *,
@@ -1194,6 +1386,16 @@ def apply_final_story_coherence_validation(
     # parameter alone -- never inferred from a diagnostics key, from two
     # selected clips, or from a composite label.
     post_authority_context: PostAuthorityValidationContext | None = None,
+    # D-235W Part C: an optional, pre-built clip_id -> AttemptLanguageIdentityMatch
+    # map (`shared_attempt_word_identity.py`'s own D-235P bridge, built by a
+    # caller that has real LanguageAttempt/canonical-word data -- no caller
+    # does yet; see docs/CUTSELL_DECISIONS.md D-235W's own "what remains
+    # unconnected" section). None everywhere today -- exact_identity_
+    # available then stays False exactly as before this task. Only ever
+    # consulted behind the SAME default-OFF authority flag as Part A.
+    exact_match_by_clip_id: Mapping[str, AttemptLanguageIdentityMatch] | None = None,
+    proposition_candidate_ids_by_attempt_id: Mapping[str, Tuple[str, ...]] | None = None,
+    proposition_slot_evidence_by_id: Mapping[str, str] | None = None,
 ):
     """Legacy resolving pass -- see the module docstring's authority
     boundary. For the post-authority validation-only pass use
@@ -1211,6 +1413,9 @@ def apply_final_story_coherence_validation(
             semantic_preservation_proofs=semantic_preservation_proofs,
             critical_claim_preservation_index=critical_claim_preservation_index,
             canonical_effective_importance_index=canonical_effective_importance_index,
+            exact_match_by_clip_id=exact_match_by_clip_id,
+            proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
+            proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
         )
     draft = _fold_alternates_into_discarded(draft)
 
@@ -1293,6 +1498,36 @@ def apply_final_story_coherence_validation(
         critical_claim_preservation_index=critical_claim_preservation_index,
         canonical_effective_importance_index=canonical_effective_importance_index,
     )
+    # D-235W: byte-identical when the flag is off (`materiality_by_clip_id`
+    # stays `None`, so `lost_semantic_atom_freeze_trigger_present` returns
+    # its own original `any(row.get("blocking", True) ...)` expression, and
+    # the map below is never even built -- zero extra work, not just an
+    # unused result). When on, Parts A+C's own live context (see
+    # `_complete_lost_semantic_atom_materiality_by_clip_id`'s own
+    # docstring) is threaded through.
+    _group_members_for_materiality = _clip_id_to_group_members((draft.diagnostics or {}).get("take_judge_groups"))
+    _materiality_authority_enabled = lost_atom_materiality_freeze_authority_enabled()
+    # D-235W diagnostics: recomputed alongside (not reused from) the map
+    # below purely for compact per-clip observability -- cheap and pure,
+    # never load-bearing (see `_lost_atom_materiality_orchestration_
+    # diagnostics`'s own docstring). Also gated on the same flag: `None`
+    # when off, exactly zero extra work.
+    critical_claim_conflict_by_clip_id = (
+        _critical_claim_conflict_by_clip_id(
+            lost_semantic_atoms, contradiction_findings, lost_critical_claims, _group_members_for_materiality,
+        )
+        if _materiality_authority_enabled else None
+    )
+    materiality_by_clip_id = (
+        _complete_lost_semantic_atom_materiality_by_clip_id(
+            lost_semantic_atoms, contradiction_findings, lost_critical_claims,
+            _group_members_for_materiality,
+            exact_match_by_clip_id=exact_match_by_clip_id,
+            proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
+            proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+        )
+        if _materiality_authority_enabled else None
+    )
     # D-031: a lost_semantic_atoms finding only blocks Freeze when its own
     # `blocking` field says so (a genuinely critical/uncertain atom, or the
     # broader content-loss signal) -- a CONTEXTUAL-only atom loss (e.g. an
@@ -1304,7 +1539,9 @@ def apply_final_story_coherence_validation(
     freeze_blocked = (
         bool(contradiction_findings)
         or bool(missing_idea_coverage)
-        or lost_semantic_atom_freeze_trigger_present(lost_semantic_atoms)
+        or lost_semantic_atom_freeze_trigger_present(
+            lost_semantic_atoms, materiality_by_clip_id=materiality_by_clip_id,
+        )
         or bool(lost_critical_claims)
     )
 
@@ -1333,6 +1570,12 @@ def apply_final_story_coherence_validation(
         # evidence that a suppression happened.
         "claim_coverage_confirmations": claim_coverage_confirmations,
         "freeze_blocked": freeze_blocked,
+        # D-235W: compact live observability for the Part A+C orchestration
+        # seam -- see `_lost_atom_materiality_orchestration_diagnostics`'s
+        # own docstring. Empty maps (not omitted) when the flag is off.
+        "lost_atom_materiality_orchestration": _lost_atom_materiality_orchestration_diagnostics(
+            materiality_by_clip_id, lost_semantic_atoms, critical_claim_conflict_by_clip_id,
+        ),
         "validation_mode": LEGACY_RESOLVING_MODE,
         "not_implemented": [
             "general_non_numeric_non_negation_contradiction_detection",
@@ -1383,6 +1626,11 @@ def _apply_post_authority_validation_only(
     semantic_preservation_proofs: Mapping[str, object] | None = None,
     critical_claim_preservation_index: Mapping[str, object] | None = None,
     canonical_effective_importance_index: Mapping[str, object] | None = None,
+    # D-235W Part C: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring.
+    exact_match_by_clip_id: Mapping[str, AttemptLanguageIdentityMatch] | None = None,
+    proposition_candidate_ids_by_attempt_id: Mapping[str, Tuple[str, ...]] | None = None,
+    proposition_slot_evidence_by_id: Mapping[str, str] | None = None,
 ):
     """StoryValidator after the one semantic authority has ruled: validate
     and report on the resolver's applied selection, never edit it.
@@ -1475,10 +1723,32 @@ def _apply_post_authority_validation_only(
         canonical_effective_importance_index=canonical_effective_importance_index,
         clause_role_arbiter=clause_role_arbiter,
     )
+    # D-235W: same seam as the legacy-resolving pass above -- byte-identical
+    # when the flag is off; see that pass's own comment for the full note.
+    _group_members_for_materiality = _clip_id_to_group_members((working.diagnostics or {}).get("take_judge_groups"))
+    _materiality_authority_enabled = lost_atom_materiality_freeze_authority_enabled()
+    critical_claim_conflict_by_clip_id = (
+        _critical_claim_conflict_by_clip_id(
+            lost_semantic_atoms, contradiction_findings, lost_critical_claims, _group_members_for_materiality,
+        )
+        if _materiality_authority_enabled else None
+    )
+    materiality_by_clip_id = (
+        _complete_lost_semantic_atom_materiality_by_clip_id(
+            lost_semantic_atoms, contradiction_findings, lost_critical_claims,
+            _group_members_for_materiality,
+            exact_match_by_clip_id=exact_match_by_clip_id,
+            proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
+            proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+        )
+        if _materiality_authority_enabled else None
+    )
     freeze_blocked = (
         bool(contradiction_findings)
         or bool(missing_idea_coverage)
-        or lost_semantic_atom_freeze_trigger_present(lost_semantic_atoms)
+        or lost_semantic_atom_freeze_trigger_present(
+            lost_semantic_atoms, materiality_by_clip_id=materiality_by_clip_id,
+        )
         or bool(lost_critical_claims)
         or bool(authority_membership_findings)
     )
@@ -1521,6 +1791,10 @@ def _apply_post_authority_validation_only(
         "permitted_incidental_omissions": permitted_incidental_omissions,
         "permitted_incidental_omission_count": len(permitted_incidental_omissions),
         "freeze_blocked": freeze_blocked,
+        # D-235W: see the legacy-resolving pass's own identically-named field.
+        "lost_atom_materiality_orchestration": _lost_atom_materiality_orchestration_diagnostics(
+            materiality_by_clip_id, lost_semantic_atoms, critical_claim_conflict_by_clip_id,
+        ),
         "selection_mutation_self_check": mutation_report_to_diagnostics(self_check),
         "not_implemented": [
             "general_non_numeric_non_negation_contradiction_detection",
@@ -1715,6 +1989,11 @@ def apply_post_authority_story_validation(
     critical_claim_preservation_index: Mapping[str, object] | None = None,
     canonical_effective_importance_index: Mapping[str, object] | None = None,
     integrity_failure: tuple[str, str] | None = None,
+    # D-235W Part C: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring.
+    exact_match_by_clip_id: Mapping[str, AttemptLanguageIdentityMatch] | None = None,
+    proposition_candidate_ids_by_attempt_id: Mapping[str, Tuple[str, ...]] | None = None,
+    proposition_slot_evidence_by_id: Mapping[str, str] | None = None,
 ):
     """The ONE entry point for the AUTHORITATIVE second pass. Requires the
     typed `context`; a missing context (or a caller-reported
@@ -1759,4 +2038,7 @@ def apply_post_authority_story_validation(
         semantic_preservation_proofs=semantic_preservation_proofs,
         critical_claim_preservation_index=critical_claim_preservation_index,
         canonical_effective_importance_index=canonical_effective_importance_index,
+        exact_match_by_clip_id=exact_match_by_clip_id,
+        proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
+        proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
     )

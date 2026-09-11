@@ -198,6 +198,66 @@ def _merge_signals(left: CandidateTake, right: CandidateTake) -> MediaSignals | 
     )
 
 
+def _canonical_word_index_lookup(segments: Iterable[TranscriptSegment]) -> dict[str, dict[tuple, list[int]]]:
+    """D-235W Part B: the SAME canonical per-source word ordering the
+    Language Spine's own word-adapter derives (`sorted(words, key=lambda
+    word: (word.start, word.end))`, enumerate) -- built here,
+    from the SAME original (pre-`_speech_units`-split) segments
+    `raw_understanding_map.word_timings` is itself built from (D-235O's
+    own confirmed finding: no second ASR pass, ever), so `CandidateTake.
+    word_indices` can be populated at construction using EXACTLY the
+    identity contract D-235P's own module docstring requires: source-
+    scoped `(source_asset_id, canonical_word_index)`, never Python object
+    identity, never a second word-ordinal system.
+
+    Returns `{source_asset_id: {(start, end): [ordinal, ordinal, ...]}}`
+    -- a LIST per `(start, end)` key (not a single value), so a genuine
+    duplicate-timestamp pair (rare in real ASR, never assumed impossible)
+    is matched positionally by `_word_indices_for` below rather than
+    silently colliding on one shared index."""
+    words_by_source: dict[str, list[Word]] = {}
+    for segment in segments:
+        words_by_source.setdefault(segment.source_asset_id, []).extend(segment.words)
+    lookup: dict[str, dict[tuple, list[int]]] = {}
+    for source_asset_id, words in words_by_source.items():
+        ordered = sorted(words, key=lambda word: (word.start, word.end))
+        per_key: dict[tuple, list[int]] = {}
+        for index, word in enumerate(ordered):
+            per_key.setdefault((word.start, word.end), []).append(index)
+        lookup[source_asset_id] = per_key
+    return lookup
+
+
+def _word_indices_for(
+    words: Tuple[Word, ...], source_asset_id: str, lookup: Mapping[str, Mapping[tuple, list]],
+) -> Tuple[int, ...]:
+    """Looks up each of ``words``' own canonical ordinal in ``lookup``
+    (built by `_canonical_word_index_lookup` above) by exact `(start,
+    end)` value match -- never a timestamp-overlap/fuzzy match. A word
+    genuinely absent from the canonical source list (should not happen in
+    practice; defensively handled anyway) is simply skipped -- fail
+    closed, never a fabricated index."""
+    per_key = lookup.get(source_asset_id) or {}
+    cursors: dict[tuple, int] = {}
+    indices: list[int] = []
+    for word in words:
+        key = (word.start, word.end)
+        candidates = per_key.get(key)
+        if not candidates:
+            continue
+        cursor = cursors.get(key, 0)
+        if cursor < len(candidates):
+            indices.append(candidates[cursor])
+            cursors[key] = cursor + 1
+        else:
+            # Every distinct canonical slot for this exact (start, end)
+            # has already been consumed by an earlier word in THIS SAME
+            # take -- reuse the last one rather than silently dropping
+            # the word's own membership.
+            indices.append(candidates[-1])
+    return tuple(indices)
+
+
 def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
     text = f"{left.text.rstrip()} {right.text.lstrip()}".strip()
     duration = max(0.0, right.end - left.start)
@@ -218,6 +278,11 @@ def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
         signals=_merge_signals(left, right),
         complete_idea=_looks_complete_idea(text, duration),
         source_span_id=mint_source_span_id(left.source_asset_id, left.start, right.end, text),
+        # D-235W: concatenate the two operands' own already-resolved
+        # canonical word-index tuples -- never re-derived here, never
+        # simplified to a start/end range (D-235P's own "not provably
+        # always contiguous" finding still applies to a repaired join).
+        word_indices=tuple(left.word_indices) + tuple(right.word_indices),
     )
 
 
@@ -337,6 +402,10 @@ def segment_takes(
         # this function sees it. Everything below is unchanged -- it simply
         # now receives already-canonicalized segments.
         segment_tuple = normalize_transcript_segments(segment_tuple)
+    # D-235W Part B: the canonical per-source word-index lookup, built ONCE
+    # from the original (pre-`_speech_units`-split) segments -- see
+    # `_canonical_word_index_lookup`'s own docstring.
+    word_index_lookup = _canonical_word_index_lookup(segment_tuple)
     output = []
     for original_segment in segment_tuple:
         if original_segment.source_asset_id not in source_map:
@@ -369,6 +438,10 @@ def segment_takes(
                 # D-050A: the raw physical-observation identity for this
                 # exact ASR span (see canonical_identity.py).
                 source_span_id=mint_source_span_id(source.source_asset_id, start, end, text),
+                # D-235W Part B: exact, source-scoped canonical word-index
+                # membership for this take's own `.words` -- see
+                # `_word_indices_for`'s own docstring.
+                word_indices=_word_indices_for(segment.words, source.source_asset_id, word_index_lookup),
             ))
     polarity_rejoins: list[dict] = []
     repaired = _repair_boundary_fragments(output, polarity_rejoins=polarity_rejoins)

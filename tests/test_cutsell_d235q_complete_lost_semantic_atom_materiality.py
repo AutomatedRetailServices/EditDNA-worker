@@ -504,16 +504,28 @@ class TestNoLiveAuthorityMutation:
             assert needle not in content
 
     def test_no_live_module_imports_this_gate(self):
+        """D-235W Part A+C intentionally wires this module INTO
+        `final_story_coherence_validation.py` (the one orchestration owner
+        the task named) -- see docs/CUTSELL_DECISIONS.md D-235W. The
+        remaining live modules stay unwired, exactly as before D-235W:
+        `universal_clean_cut.py` still does not construct real live
+        exact-identity/proposition data (that would touch P1/P2
+        architecture, explicitly out of scope), and `final_edit_
+        reviewer.py`/`repair_loop.py` are untouched (see D-235R/T's own
+        "NOT touched" invariants, still binding)."""
         live_modules = (
             "cutsell_worker/pipeline.py",
             "cutsell_worker/universal_clean_cut.py",
-            "cutsell_worker/final_story_coherence_validation.py",
             "cutsell_worker/final_edit_reviewer.py",
             "cutsell_worker/repair_loop.py",
         )
         for path in live_modules:
             content = _read(path)
             assert "complete_lost_semantic_atom_materiality" not in content
+
+        # The one intentional D-235W wiring seam.
+        coherence_content = _read("cutsell_worker/final_story_coherence_validation.py")
+        assert "complete_lost_semantic_atom_materiality" in coherence_content
 
 
 # ---------------------------------------------------------------------------

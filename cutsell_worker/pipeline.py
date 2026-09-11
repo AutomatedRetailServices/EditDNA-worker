@@ -793,6 +793,9 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
         # DraftClip.source_span_id/.attempt_id's own docstring.
         source_span_id=take.source_span_id,
         attempt_id=take.attempt_id,
+        # D-235W: carried unchanged from the CandidateTake -- see
+        # DraftClip.word_indices's own docstring.
+        word_indices=take.word_indices,
     )
 
 

@@ -363,6 +363,10 @@ def _merge_attempt(members: tuple[CandidateTake, ...]) -> CandidateTake:
         # must not hide an unfinished final fragment.
         complete_idea=members[-1].complete_idea,
         attempt_id=attempt_id,
+        # D-235W Part B: concatenate each member's own already-resolved
+        # canonical word-index tuple, same convention as `words` above --
+        # never re-derived, never simplified to a start/end range.
+        word_indices=tuple(index for member in members for index in member.word_indices),
     )
 
 

@@ -437,11 +437,21 @@ class TestSiblingRegressions:
 class TestFreezeSeamWiring:
     def test_coherence_module_imports_the_adapter(self):
         content = _read(COHERENCE_PATH)
-        assert "from .lost_semantic_atom_freeze_authority import lost_semantic_atom_freeze_trigger_present" in content
+        # D-235V/D-235W widened this to a multi-line import (also pulling in
+        # `lost_atom_materiality_freeze_authority_enabled`) -- the exact
+        # single-line form this test originally checked no longer appears,
+        # but the adapter itself is still imported from the same module.
+        assert "from .lost_semantic_atom_freeze_authority import (" in content
+        assert "lost_semantic_atom_freeze_trigger_present," in content
 
     def test_coherence_module_calls_adapter_at_both_sites(self):
         content = _read(COHERENCE_PATH)
-        assert content.count("lost_semantic_atom_freeze_trigger_present(lost_semantic_atoms)") == 2
+        # D-235W widened both call sites to also pass the live
+        # `materiality_by_clip_id=` context Parts A+C compute -- the exact
+        # bare-argument literal this test originally checked no longer
+        # appears, but the adapter is still called at exactly both sites.
+        assert content.count("lost_semantic_atom_freeze_trigger_present(\n") == 2
+        assert content.count("materiality_by_clip_id=materiality_by_clip_id,") == 2
         assert "any(row.get(\"blocking\", True) for row in lost_semantic_atoms)" not in content
 
 
