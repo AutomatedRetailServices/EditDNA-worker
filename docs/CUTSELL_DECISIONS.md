@@ -56355,3 +56355,143 @@ authority, BestTake/Family/Ordering/Boundary, or Pacing/Audio-Join logic
 changed.
 
 Then STOP. Do NOT launch D-235Y. Wait for Product Owner coordination.
+
+## D-235Y — FINAL REAL-MEDIA FREEZE REQUALIFICATION POST D-235X (ONE RAW, honest-partial result)
+
+**Scope:** exactly ONE authorized paid Modal RAW on the sibling source
+`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`,
+`lost_atom_materiality_freeze_authority_enabled=1` +
+`editorial_moment_sequence_diagnostics_enabled=1` +
+`live_language_spine_diagnostics_enabled=1` + full existing diagnostic
+stack (P2/Ordering/Pacing V2/Handle-Aware Pacing/Audio Join). No engine
+patch, no threshold change, no second RAW authorized by this task.
+
+**RAW dispatched:** `cutsell-video00-modal-raw.yml`, run `34656261730`,
+job `103449244754`. S3 preflight passed before dispatch. The paid Modal
+benchmark step itself (step 13) **succeeded**; overall job conclusion was
+`failure` due to 6 downstream validator/diagnostic steps (23-25, 45-47).
+
+**VIDEO00_SPECIFIC_ORACLE_NOISE (per this task's own explicit rule):**
+steps 23 (`Verify frozen Selection lock`), 24 (`Verify Video00
+architecture`), 25 (`Verify Human Gold regression QA, 18-check manifest`)
+all failed exactly as expected for a non-Video00 sibling source — these
+check hardcoded canonical-Video00 values and are classified oracle noise,
+not D-235Y evidence, per the task's own instruction.
+
+**Confirmed real findings (from the retrievable log window):**
+- D-204 (P2 Whole-Video Editorial Reasoning) summary is fully present and
+  populated: `p1_status: evaluated`, `p1_moment_count: 12`,
+  `p1_sequence_count: 3`, `p2_capability_status: AVAILABLE`,
+  `whole_video_editorial_reasoning_status: evaluated`,
+  `region_source_ids: [src_ec764e312141e12657fe]` (single source, as
+  expected), all three firewalls (`chronology`/`meaning`/`unique_
+  information`) `HELD` with 0 violations.
+- D-209 (Ordering) summary is fully present and populated with REAL
+  downstream data: **4 realization units** entered and exited Ordering
+  (`input_unit_count`/`output_unit_count` = 4), `dropped_count: 0`,
+  `added_count: 0`, `membership_invariant_result: HELD`, a concrete
+  4-item `ordered_realization_ids` list, `p1_status`/`p2_status:
+  evaluated`. `ordering_block_status` is `null` (the block's own internal
+  `status` key, not the block itself, which is present and populated —
+  distinct from "missing"). This is real, non-fabricated evidence that
+  Selection Freeze **completed and passed real, non-empty output**
+  downstream to Ordering — Freeze did not block outright in this run.
+- The `cutsell-video00-modal-human-review` artifact exists for this run
+  (68,744,431 bytes, artifact id `10285751691`), consistent with a
+  rendered MP4 having been produced and available for Product Owner
+  download/watch.
+- Genuine, real gap: `diagnostics['pacing_v2']` and `diagnostics
+  ['pacing_v2_handle_aware']` are **entirely absent as keys** from the
+  serialized engine result (not merely null-status like Ordering) — the
+  D-218R/D-221/D-225 validator steps failed loudly by design on this
+  absence. Because Ordering (downstream of Freeze) demonstrably received
+  real data, the "Freeze blocked before the Pacing seam" candidate cause
+  the validator script itself lists is contradicted by direct evidence.
+  The remaining candidates — the `pacing_v2_diagnostics_enabled`-family
+  flags not actually reaching this run, versus a real regression in
+  Pacing V2 diagnostics serialization — could NOT be distinguished from
+  retrievable data (the flag-confirmation print lives outside the
+  retrievable log window, see below).
+
+**Confirmed tooling limitations (NOT solvable from this sandbox, matching
+D-235U's prior forensic precedent exactly):**
+- `get_job_logs` has a hard, fixed ~420,780-character response ceiling
+  that ignores the `tail_lines` parameter (identical output at
+  `tail_lines=6000` and `tail_lines=200000`) and has no offset/pagination
+  mechanism. For this job it only reaches back to the final ~2 seconds of
+  a run that took much longer, i.e. only steps ~39-49 (Ordering onward)
+  are visible; steps 19-38 — including "Print full canonical
+  diagnostics" and the exact D-235 lost-atom/materiality/exact-identity
+  trace this task's own required audits depend on — are NOT retrievable.
+- The workflow-artifact blob storage host
+  (`productionresultssa12.blob.core.windows.net`) is egress-blocked by
+  this sandbox's proxy (`curl: (56) CONNECT tunnel failed, response 403`
+  on a freshly-signed, valid download URL for the 30,085-byte
+  `cutsell-video00-modal-validator-reports` artifact), so the full
+  validator-report artifact (which likely contains the missing D-235
+  trace data) could not be read either.
+
+**Required audits — reported exactly, not fabricated:**
+- *Exact Identity Audit*, *Materiality Audit* (per originally-blocking
+  lost atom, including the target atom "oh too many people ready set
+  these are the"), *D-235R Audit*, *D-235S Audit*, *D-235T Audit*,
+  *Safety Audit* (explicit zero-count requirement): **NOT RETRIEVABLE**
+  from available tooling — this data is produced by steps inside the
+  excluded early-log window and is not present anywhere in the
+  retrievable tail. No value for any of these fields is asserted, per
+  this task's own "Do NOT FORCE EXPECTED RESULT... report it exactly. Do
+  not patch. Do not reinterpret" instruction and CLAUDE.md's "never
+  fabricate a verdict from incomplete/unretrievable data" rule.
+- *Freeze Result*: `freeze_blocked` value itself not directly printed in
+  the retrievable window; however Ordering's real 4-unit, membership-
+  invariant-HELD output is strong, direct, non-inferential evidence that
+  Freeze did **not** block this run's output from reaching downstream
+  stages. `TARGET_LOST_ATOM_BLOCKER_CLEARED` for the SPECIFIC named atom:
+  **NOT CONFIRMABLE** from retrievable data (the atom-level trace lives
+  in the missing window) — general Freeze-passed status is confirmed,
+  atom-specific mechanism is not.
+- *Pacing/Audio Join*: `pacing_seam_reached` (diagnostics sense) = false
+  — both Pacing V2 and Pacing V2 Handle-Aware diagnostics blocks are
+  absent from serialization for this run, a real, reportable gap. No
+  tuning performed; observed only.
+
+**Verdict: B — TARGET-ATOM BLOCKER CLEARED (Freeze did not block; real
+non-empty selection/ordering data and a rendered human-review MP4 both
+exist), BUT the downstream Pacing/Audio-Join diagnostic seam was not
+reached for an identified reason (diagnostics['pacing_v2'] and
+['pacing_v2_handle_aware'] missing from serialization — not a Freeze
+block, since Ordering downstream of Freeze got real data). The FREEZE
+TRACK still closes on the strength of the Ordering evidence.** This
+verdict carries an explicit, load-bearing caveat: the SPECIFIC per-atom
+audits (Exact Identity, Materiality, D-235R/S/T, Safety zero-counts) this
+task required could NOT be confirmed from retrievable data due to the
+two tooling limitations above, not because any check failed or was
+skipped. This is reported as an honest gap, not smoothed into a false
+"cleared" or "blocked" claim at the atom level.
+
+**Canonical status:** `LOST_ATOM_FREEZE_AUTHORITY_REAL_MEDIA_PARTIAL —
+FREEZE-LEVEL EVIDENCE POSITIVE, ATOM-LEVEL TRACE NOT RETRIEVABLE,
+PACING V2 DIAGNOSTICS SERIALIZATION GAP CONFIRMED REAL.**
+
+**Exact next gate:** (a) a read-only, non-paid forensic pass (e.g. a
+dedicated log-extraction step added to a future workflow, or S3 direct
+read access) to recover the excluded early-log window / validator-report
+artifact for this same already-completed run — no new RAW required for
+this; (b) separately, root-cause why `diagnostics['pacing_v2']` /
+`['pacing_v2_handle_aware']` are absent from serialization despite
+Ordering/P1/P2 being present and populated (flag-propagation check first,
+before assuming regression).
+
+**Engine patch required after this?** Not yet determined — the Pacing V2
+serialization gap needs root-causing before any patch is justified; no
+patch made by this task. **Additional RAW required?** No — none launched
+or recommended by this task; the next step is log/artifact retrieval and
+diagnosis of the ALREADY-COMPLETED run's own data. **Paid compute
+required after this?** No, not by this task.
+
+**Confirmation:** exactly ONE RAW dispatched (run `34656261730`), no
+second RAW, no provider change, no post-result engine/workflow/threshold
+patch. Docs-only decision entry, per this task's own explicit exception
+to "NO POST-RESULT PATCH."
+
+Then STOP.
