@@ -76,6 +76,10 @@ from .dialogue_pacing_transition import apply_dialogue_pacing_transition_pass
 from .pacing_v2_live_diagnostics_integration import pacing_v2_diagnostics_enabled
 from .pacing_v2_evidence_adapter import build_pacing_v2_live_diagnostics_with_real_evidence
 from .pacing_v2_handle_aware_evidence import build_handle_aware_pacing_v2_diagnostics
+from .pacing_v2_audio_join_treatment_live_diagnostics import (
+    audio_join_treatment_diagnostics_enabled,
+    build_audio_join_treatment_live_diagnostics,
+)
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -822,11 +826,51 @@ def process_universal_clean_cut_sources(
                     editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
                     take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
                 )
+                extra_diagnostics = {
+                    "pacing_v2": pacing_v2_diag,
+                    "pacing_v2_handle_aware": handle_aware_diag,
+                }
+
+                # D-234: Audio Join Treatment live diagnostic integration --
+                # SEPARATE flag (default OFF), strictly additive
+                # `diagnostics["audio_join_treatment_v2"]` key. Reuses the
+                # SAME `handles`/relationship-hint/Prosodic evidence
+                # foundation as D-224/D-217 above (own internal recompute,
+                # cheap and pure -- no new provider, no ASR rerun); the
+                # D-230->D-231->D-232->D-233 chain is DIAGNOSTIC ONLY. This
+                # block never writes back onto `result.draft.selected`,
+                # `RenderSegment`, Boundary, Ordering, Family/BestTake, or
+                # the D-142 primary transition mode above -- and never
+                # imports `render_plan`/`render`'s D-233 offline treatment
+                # executor. `advanced_treatment_executed_count` and
+                # `live_audio_window_mutation_count` in its own summary are
+                # therefore always 0, structurally, not merely asserted.
+                if audio_join_treatment_diagnostics_enabled():
+                    extra_diagnostics["audio_join_treatment_v2"] = build_audio_join_treatment_live_diagnostics(
+                        result.draft.selected,
+                        dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+                        boundary_diagnostics=result.draft.diagnostics,
+                        discarded=result.draft.discarded,
+                        boundary_engine_pass_audit=tuple(boundary_engine_pass_diag.get("audio_edge_rows") or ()),
+                        post_selection_edge_only_boundary_audit=tuple(
+                            result.draft.diagnostics.get("post_selection_edge_only_boundary") or ()
+                        ),
+                        source_duration_by_asset={
+                            source.source_asset_id: source.duration_sec
+                            for source in getattr(request, "sources", ()) or ()
+                        },
+                        editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
+                        take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
+                        live_transition_modes=tuple(
+                            row.get("mode")
+                            for row in (result.draft.diagnostics.get("dialogue_pacing_transition") or {}).get("transitions", ())
+                        ),
+                    )
+
                 result = replace(result, draft=replace(
                     result.draft, diagnostics={
                         **result.draft.diagnostics,
-                        "pacing_v2": pacing_v2_diag,
-                        "pacing_v2_handle_aware": handle_aware_diag,
+                        **extra_diagnostics,
                     },
                 ))
     else:

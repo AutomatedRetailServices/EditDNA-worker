@@ -51885,3 +51885,240 @@ separately-scoped engineering work. No further action is taken on it by
 this task.
 
 ---
+
+
+## D-234 -- Pacing V2 Audio Join Treatment: Live Diagnostic Integration, NO AUTHORITY (post D-233)
+
+**Branch/HEAD verified before work:** `feature/runpod-pod-on-demand` @
+`e1d2e4a` (D-233), clean working tree.
+
+**Objective (authorized scope only):** wire the closed, offline-proven
+D-230 -> D-231 -> D-232 -> D-233 chain (`AcousticEdgeEvidence` ->
+`AudioJoinUnderstanding` -> `AudioJoinTreatmentDecision` ->
+`AudioJoinTreatmentTimingPlan`) into the EXISTING live Clean Cut
+diagnostic seam in `universal_clean_cut.py`, behind one new default-OFF
+diagnostic flag, DIAGNOSTIC ONLY -- no live audio-treatment execution,
+no render-plan mutation, no Boundary/Ordering/Family/BestTake/primary-
+Pacing change, no RAW.
+
+**Integration seam.** The exact seam D-216 (`pacing_v2`)/D-217/D-224
+(`pacing_v2_handle_aware`) already occupy in
+`process_universal_clean_cut_sources` (`universal_clean_cut.py`,
+immediately after `apply_dialogue_pacing_transition_pass`, strictly
+after Freeze/post-Freeze BoundaryEngine/D-142's own live pass, never
+before it). D-234 does not fork a parallel pipeline: it adds one more
+`if audio_join_treatment_diagnostics_enabled(): ...` block, under its
+OWN separate flag, immediately after the existing D-216/D-224 block,
+merging one more additive key (`audio_join_treatment_v2`) into the same
+`extra_diagnostics` dict already being assembled for
+`draft.diagnostics`.
+
+**Feature flag.** `CUTSELL_AUDIO_JOIN_TREATMENT_DIAGNOSTICS_ENABLED`
+(new `pacing_v2_audio_join_treatment_live_diagnostics.
+audio_join_treatment_diagnostics_enabled()`), same `_env_true_default_
+false` pattern as D-216's own `pacing_v2_diagnostics_enabled` (default
+OFF; `"1"/"true"/"yes"/"on"`, case-insensitive, enable it). OFF: the new
+`if` block in `universal_clean_cut.py` never executes -- D-142/D-216/
+D-224's own live output stays byte-identical, and no
+`audio_join_treatment_v2` key is ever added to `draft.diagnostics`.
+
+**New module:**
+`cutsell_worker/pacing_v2_audio_join_treatment_live_diagnostics.py` --
+the one D-234 entry point,
+`build_audio_join_treatment_live_diagnostics(selected, *, dialogue_
+overlap_enabled, boundary_diagnostics=None, discarded=(),
+boundary_engine_pass_audit=(), post_selection_edge_only_boundary_
+audit=(), source_duration_by_asset=None, editorial_moment_sequence_
+diagnostics=None, take_judge_groups=(), live_transition_modes=(),
+_source_audio_cache=None)`. Mirrors D-224's `build_handle_aware_
+pacing_v2_diagnostics` signature almost exactly (same live inputs, same
+reuse contract) plus `live_transition_modes` for D-142's own already-
+executed primary mode.
+
+**D-230 live construction.** For each adjacent join, bounded retained-
+edge evidence is built for the left clip's `LEFT_END` and the right
+clip's `RIGHT_START` via `derive_retained_edge_window` (the clip's own
+already-known `words` tuple, converted to `(start, end, text)` triples)
++ `build_acoustic_edge_evidence(..., audio=None, word_coverage_
+known=True)`. `audio=None` ALWAYS -- this module never decodes a raw
+audio sample; a clip with no word timing at all correctly yields
+`window=None` -> evidence `None` -> the join reports `INSUFFICIENT`/
+`UNAVAILABLE` honestly rather than fabricate a window (proven by test
+11, no crash). Handle-edge evidence (`PRE_HANDLE`/`POST_HANDLE`) is
+additionally built, where a handle exists, purely from the D-223
+`SourceAudioHandle`'s own already-computed fields
+(`build_acoustic_edge_evidence(..., source_handle=handle)`), per D-230's
+documented "shape 1" convention -- no invented handle, no widened D-223
+contract (handles come only from `build_source_audio_handles`, called
+exactly as D-224 calls it).
+
+**D-231 live construction.** One `AudioJoinUnderstanding` per adjacent
+join via `build_audio_join_understanding`, fed the D-230 edge evidence
+above, `compare_acoustic_edges(left, right)` (only when both retained
+edges resolved -- `None` otherwise, never fabricated), the same-flag
+D-217 relationship hint / Prosodic evidence (`build_pacing_v2_real_
+evidence`, called internally, not duplicated from a second source), and
+the clip's own word tuples. Every field D-231 defines (speech/non-
+speech/silence per side, acoustic/level continuity, relationship,
+Prosody, word/meaning/double-speech safety, treatment-evidence
+readiness per candidate) survives into the diagnostic row via D-231's
+own `audio_join_understanding_diagnostics()` -- reused verbatim, not
+reimplemented.
+
+**D-232 live decision.** `build_audio_join_treatment_decision(
+understanding, primary_transition_mode=<D-142's own live mode read from
+`draft.diagnostics["dialogue_pacing_transition"]["transitions"][i]
+["mode"]`, read-only>, left/right handle status, candidate_duration_sec=
+min(left post-roll, right pre-roll) when both handles exist else
+`None`)`. Recommendation only; `audio_join_treatment_decision_
+diagnostics()` reused verbatim for the per-join row. `primary_
+transition_mode` is inspected, never recomputed or overwritten -- D-142's
+own `pacing_stage` above this block remains the only mode ever
+executed.
+
+**D-233 live timing-plan construction.** `build_audio_join_treatment_
+timing_plan(decision, ...)` is called for every join (the D-233 module
+itself returns a `NOT_APPLICABLE`-shaped plan for `NONE`/`CLICK_FADE`,
+so calling it unconditionally is simplest and cannot substitute a
+different advanced treatment -- `decision.treatment` is read-only input
+to it, verified never reassigned, test 17). Never executed: this module
+never imports `render.py`'s D-233 `render_audio_join_treatment_preview`
+(grep-verified, test 31/40) and never imports `render`/`render_plan` at
+all.
+
+**Diagnostic structure.** `draft.diagnostics["audio_join_treatment_v2"]
+= {schema_version, status, join_count, per_join: [...], summary: {...}}`.
+`status` in `AVAILABLE`/`PARTIAL`/`UNAVAILABLE`/`CONFLICTED` (derived
+from the joins' own D-231 `understanding_status` + D-230 edge-evidence
+availability, never a claimed authority). Each `per_join` row carries
+`transition_index`, `left_clip_id`/`right_clip_id`,
+`primary_transition_mode`, `acoustic_evidence_status`, the full D-231
+understanding dict, the full D-232 decision dict, the full D-233 timing
+dict, and `recommended_audio_treatment` -- no transcript text anywhere
+(test 37 asserts the source clip text never appears in the serialized
+JSON).
+
+**Summary (no master score, plain counts only, JSON-safe, test 44-45):**
+`join_count`, `evidence_available/partial/unknown_count`,
+`understanding_available/partial/conflicted_count`, `none/click_fade/
+short_crossfade/ambience_left/ambience_right/ambience_bridge_count`,
+`timing_supported/timing_blocked_count`, `advanced_treatment_
+recommended_count`, `advanced_timing_supported_count`,
+`advanced_treatment_executed_count` (structurally always `0` -- this
+module never calls the D-233 executor), `live_audio_window_mutation_
+count` (structurally always `0` -- this module never imports `render_
+plan`/`render` and only ever returns a plain dict, never written back
+onto `RenderSegment`), `word/meaning/double_speech_block_count`,
+`safe_left/right_handle_count`, `acoustically_similar/different/
+insufficient_count`, `loudness_polish_needed_count`.
+
+**Source-audio caching.** An optional, bounded, in-run-only
+`_source_audio_cache` dict, keyed by `(kind, source_asset_id, clip_id,
+edge)` for retained edges and `(kind, handle_id)` for handle edges,
+avoids recomputing the same clip's/handle's D-230 edge evidence across
+joins that reuse it (a shared middle clip touches two joins). No
+persistent cache infrastructure -- the caller owns the dict's lifetime,
+and passing none simply recomputes per-join (test 28).
+
+**Live-authority firewall -- structurally proven, not merely asserted:**
+- `advanced_treatment_executed_count` is a literal `0` in `_summary()`,
+  never a computed count of executor calls that happen to be zero --
+  there is no code path in this module capable of calling an executor.
+- `live_audio_window_mutation_count` is a literal `0` for the same
+  reason.
+- `render_audio_join_treatment_preview` does not appear anywhere in
+  this module's source except inside its own docstring explaining that
+  it is never imported (AST-checked, test 31); `universal_clean_cut.py`
+  does not reference it either (test 40).
+- The new `universal_clean_cut.py` block only ever merges a new key
+  into `extra_diagnostics`, then into `draft.diagnostics` -- it never
+  touches `result.draft.selected`, `RenderSegment`, the D-142 `pacing_
+  stage` variable, or any Boundary/Ordering/Family/BestTake state
+  above it (byte-identical diff to those regions, confirmed by reading
+  the surrounding code before and after the edit).
+- `decision.treatment` and `understanding`'s own fields are read-only
+  inputs into the D-233 timing-plan call; nothing in this module
+  reassigns them afterward.
+- The existing 12 ms technical click fade (`render.py`'s `_AUDIO_JOIN_
+  FADE_SEC = 0.012`) is untouched (test 43) and is not counted as new
+  D-234 treatment authority -- `CLICK_FADE`'s `renderer_capability_
+  status` (`EXISTING_LIVE_UNCHANGED`, D-232's own vocabulary) already
+  says so.
+- No `MICRO` treatment value exists or can exist (D-232's own closed
+  `TREATMENT_VALUES` tuple has six members, none containing `"MICRO"` --
+  test 34).
+
+**No provider / no ASR / no semantic rerun (structurally proven, test
+30):** this module's only imports are the D-230/D-231/D-232/D-233
+modules themselves, D-223's `build_source_audio_handles`, D-217's
+`build_pacing_v2_real_evidence`, and `contracts.DraftClip` -- no ASR
+provider, no visual/whole-video provider, no take-judge provider, no
+`google.generativeai` import anywhere in the module (AST-verified).
+
+**Tests:** new
+`tests/test_cutsell_d234_pacing_v2_audio_join_treatment_live_
+diagnostics.py`, 47 tests -- flag default-OFF/variants, join mapping and
+identity preservation (transition_index/clip ids/primary mode),
+evidence construction and soft-fail on no-word clips, decision/timing
+construction, treatment-vocabulary closure, unsupported-timing honesty,
+firewall diagnostics (word/meaning/double-speech), relationship-hint/
+Prosodic/handle passthrough, same-source/multi-source pairs, cache
+reuse, determinism, no-provider/no-render import (AST), advanced-
+execution and audio-window counts fixed at zero, no-MICRO, no-
+loudness-authority, JSON-safety, no-transcript-dump, seam-wiring
+presence, compileall, click-fade-unchanged, and summary-shape/no-
+master-score checks. All 47 pass on first real run against the actual
+D-230-D-233 modules (no mocks of the chain itself).
+
+**Regressions.** `compileall` clean.
+`test_cutsell_d234_*` + `test_cutsell_d233_*` (53, incl. real-ffmpeg
+Goertzel) + `test_cutsell_d232_*` (59) + `test_cutsell_d231_*` (68) +
+`test_cutsell_d230_*` (75): **302 passed.** Full Pacing/SourceAudioHandle/
+Renderer bundle (`-k "pacing or source_audio_handle or SourceAudioHandle
+or render"`, excluding the chronically-broken `test_semantic_stitch.py`
+collection error -- confirmed pre-existing at baseline HEAD `e1d2e4a` via
+`git stash`, unrelated to this task): **998 passed.** Full offline suite
+(`tests/`, same exclusion): see result below.
+
+**D-234 verdict: A -- AUDIO JOIN TREATMENT LIVE DIAGNOSTICS INTEGRATED,
+REAL-MEDIA QUALIFICATION READY.**
+
+Canonical status added: `PACING_V2_AUDIO_JOIN_TREATMENT_LIVE_
+DIAGNOSTICS_READY` (joins `PACING_V2_ACOUSTIC_EVIDENCE_FOUNDATION_
+OFFLINE_PROVEN`, `PACING_V2_AUDIO_JOIN_UNDERSTANDING_OFFLINE_PROVEN`,
+`PACING_V2_AUDIO_JOIN_TREATMENT_DECISION_OFFLINE_PROVEN`, `PACING_V2_
+AUDIO_JOIN_TREATMENT_RENDERER_TIMING_OFFLINE_PROVEN`).
+
+Names D-235 (Audio Join Treatment Real-Media Qualification -- exactly
+ONE RAW, preferred `Editdna longform validation/
+copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`, diagnostic only, no
+authority, no advanced execution) -- **NOT implemented by this task.**
+Reserve sibling: `Editdna longform validation/
+VIDEO-2026-07-30-09-24-13.mp4`. Historical evidence only:
+`Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4`.
+
+Audio Join Treatment status: EVIDENCE (D-230) + UNDERSTANDING (D-231) +
+DECISION (D-232) + RENDERER/TIMING PROOF (D-233) + LIVE DIAGNOSTIC
+INTEGRATION (this task) all closed; only REAL-MEDIA QUALIFICATION
+(D-235) and BOUNDED AUTHORITY (a later, separately-named gate) remain.
+J/L status: unchanged. Micro status: unchanged, still structurally
+impossible as a Layer-3 value. Renderer status: unchanged from D-233 --
+the four production/test-capability functions plus the one additive
+D-233 offline executor, none touched by this task; D-234 adds zero new
+renderer code. App-roadmap: Pacing HARD/TIGHT stable, J/L optional,
+Acoustic Evidence / Audio Join Understanding / Audio Treatment Decision
+/ Renderer-Timing / Live Diagnostics all DONE -- Real-Media Qualification
+is the next named, not-yet-authorized step.
+
+Zero RAW/Modal/RunPod/provider call in this gate. Zero live audio-
+treatment authority. Zero audio treatment execution in final render.
+Zero Micro authority. Zero Boundary/Ordering/Family/BestTake change.
+Zero loudness correction. Zero audio cleanup.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+"Then STOP. Do NOT implement D-235. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-235 (Audio
+Join Treatment Real-Media Qualification, exactly ONE RAW) as the next,
+separately-scoped work. No further action is taken on it by this task.
+
+---
