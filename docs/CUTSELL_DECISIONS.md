@@ -53692,3 +53692,241 @@ any further lost-semantic-atom materiality qualification attempt would be
 worth another RAW. No further action is taken on it by this task.
 
 ---
+
+## D-235L -- Lost Semantic Atom MATERIALITY DISCRIMINATOR, OFFLINE ONLY (post D-235K, no live wiring)
+
+**Branch/HEAD verified before edits:** `feature/runpod-pod-on-demand` @
+`49fc5a5` (D-235K), clean tree.
+
+**Objective.** D-235K's own real-media evidence (RAW 34606402933, sibling
+`copy_9E4975E5-...`) showed a blocking `REAL_CONTENT_LOSS` row with
+`missing_critical_atom_count=0`, `preserved_claim_count=0`, no
+contradiction, no global idea loss, no lost critical claim, no integrity
+failure -- the coarse content-vocabulary signal alone still blocked
+Selection Freeze. This task builds, OFFLINE ONLY, a materiality
+discriminator that classifies whether the EXISTING evidence a
+`_lost_semantic_atoms()` row already carries supports treating a loss as
+genuinely material or as a real-but-non-material/retry/redundant loss --
+without touching Freeze, repair, resolver, Pacing, Audio-Join, Boundary,
+Ordering, Family, or BestTake in any way. No RAW, no Modal, no provider.
+
+### What was built
+
+**`cutsell_worker/lost_semantic_atom_materiality.py`** (new): pure module,
+zero live-authority imports. Core type `LostSemanticAtomMateriality`
+(frozen dataclass): `clip_id`, `bounded_excerpt` (160-char cap, same
+bounding discipline as D-235J), `existing_loss_classification` (the row's
+own `classification`/`kind`, copied verbatim), `materiality_status`,
+`meaning_critical_status`/`retry_or_process_status`/`redundancy_status`
+(tri-state `FOUND`/`NOT_FOUND`/`UNKNOWN`), `critical_atom_count`,
+`preserved_claim_count`, `blocking_recommendation`, `reason_codes` (short
+strings, never free text), `confidence_state`, `provenance`. No master
+score anywhere.
+
+**Materiality vocabulary** (exactly the directive's seven categories):
+`MEANING_CRITICAL`, `EDITORIALLY_REQUIRED`, `NON_MATERIAL_REAL_CONTENT`,
+`RETRY_OR_RECORDING_RESIDUE`, `REDUNDANT_EQUIVALENT`,
+`INSUFFICIENT_EVIDENCE`, `CONFLICTED`.
+
+**Blocking-recommendation vocabulary**: `BLOCK` / `DO_NOT_BLOCK` /
+`ABSTAIN` -- advisory only, never read by any live path this task touches.
+
+**Reused evidence inputs (no new semantic engine, no provider):**
+- `atom_classifications` on the row itself (D-031's own
+  `CRITICAL`/`CONTEXTUAL`/`UNCERTAIN` vocabulary, imported directly from
+  `semantic_atom_importance.py` -- never redefined, never re-thresholded);
+- `pre_group_restart_consultations` (D-097.1's own retry-adjacency arbiter
+  record -- consumed as structural evidence of retry adjacency even when
+  the recorded `same_idea` verdict itself is `False`, since
+  `_pre_group_retry_relation`'s own timing/prefix match is itself real,
+  deterministic, already-computed evidence, independent of the semantic
+  question);
+- `content_loss_suppressed_by` / `preserving_realization_id` /
+  `preserved_claim_ids` (D-061/D-076's own suppression/preservation
+  evidence);
+- two OPTIONAL, explicitly caller-supplied context flags this module never
+  discovers itself: `critical_claim_conflict` (from `CanonicalEditPlan.
+  lost_critical_claims`/`contradiction_findings`/`missing_idea_coverage`,
+  none of which this module reads) and `recording_process_evidence` (from
+  `editorial_moment_sequence`'s own per-clip `recording_process_status`/
+  `FALSE_START`/`ABANDONED_ATTEMPT`/`POST_TAKE_RESET` role, D-196) --
+  `None` by default (`"not checked"`, never treated as either a floor
+  trigger or a clearance).
+
+**Critical safety floor (binding, always evaluated first):** a `CRITICAL`
+atom classification, an explicit `critical_claim_conflict=True`, or
+malformed/missing atom-importance data (schema drift) forces `BLOCK` or
+`ABSTAIN` -- code-verified to NEVER produce `DO_NOT_BLOCK`. An `UNCERTAIN`
+atom with no `CRITICAL` present also floors to `ABSTAIN` (D-031's own
+"WHEN UNCERTAIN, KEEP," reused verbatim as "WHEN UNCERTAIN, ABSTAIN" for
+this advisory layer).
+
+**Retry/process handling:** structural retry-adjacency
+(`pre_group_restart_consultations` non-empty) OR an explicit
+`recording_process_evidence=True` -> `RETRY_OR_RECORDING_RESIDUE`,
+`DO_NOT_BLOCK`. A bare abandoned/incomplete fragment with NEITHER signal
+never reaches this category by itself (per the directive's own "incomplete
+by itself is not enough").
+
+**Redundant-equivalent handling:** only from already-structurally-supported
+evidence (`content_loss_suppressed_by` or `preserving_realization_id`
+present) -- never invented fuzzy equivalence. Honestly noted: for a row
+that is STILL `blocking=True` under the current engine's own logic, these
+fields are essentially always absent by construction (setting either one
+already flips `content_loss`/`blocking` to `False` upstream in
+`_lost_semantic_atoms()` unless a separate critical atom exists, which the
+floor already catches first) -- so `REDUNDANT_EQUIVALENT` is a real,
+tested code path but will rarely fire on a row this module is actually
+asked to arbitrate in practice; recorded as an honest structural
+observation, not a defect.
+
+**Incomplete-fragment handling:** length/coverage numbers are only ever
+appended as `reason_codes` corroboration alongside an explicit clearance
+signal (`critical_claim_conflict=False`) -- never the sole basis for any
+classification. Proven by a dedicated test (`test_19_...`) that a short
+and a long fragment given the SAME explicit signal land on the SAME
+classification.
+
+**Optional-detail handling:** modeled identically to "non-material" --
+`critical_claim_conflict=False` (explicit) and no retry/redundancy
+evidence -> `NON_MATERIAL_REAL_CONTENT`, `DO_NOT_BLOCK`.
+
+**Unknown-evidence handling:** with no explicit context supplied and no
+retry/redundancy signal, the module's honest default is
+`INSUFFICIENT_EVIDENCE` / `ABSTAIN` -- **this is the D-235K real shape's
+own outcome** under this module (see below).
+
+**Conflict handling:** reused directly from the row's OWN already-recorded
+`pre_group_restart_consultations` -- if two or more consultation entries
+disagree on `same_idea`, the row is `CONFLICTED`/`ABSTAIN`. No new
+heuristic invented for this; it is a straightforward internal-consistency
+check on data the engine already collected.
+
+**D-235K-shape fixture** (`test_25_d235k_shape_fixture_...`): reproduces
+the STRUCTURAL shape only (`REAL_CONTENT_LOSS`, zero missing critical
+atoms, zero preserved claims, no context supplied) -- the module's own
+source file contains no literal transcript string from the real RAW
+(verified by a dedicated test scanning the module source for the three
+real phrases D-235K reported). Result: `INSUFFICIENT_EVIDENCE`,
+`ABSTAIN` -- never `MEANING_CRITICAL`/`BLOCK`, matching the directive's own
+explicit "the discriminator should NOT automatically classify this as
+MEANING_CRITICAL" instruction.
+
+### Tests
+
+`tests/test_cutsell_d235l_lost_semantic_atom_materiality.py` -- 42 tests
+covering: critical safety floor (11: negation/number/product-fact/
+qualifier/CTA/causal/correction fixtures 1-7, real-content-loss-with-
+critical-atom 17, short-fragment-still-blocks 18, retry-plus-critical-
+mixed-still-blocks 21, explicit critical_claim_conflict override tests);
+uncertain/malformed floor (2: fixture 14, uncertain-atom); retry/recording-
+process (4: fixtures 8/9/10/20); redundant-equivalent (2: fixture 12 +
+suppressed_by-alone variant); non-material/optional-detail (5: fixtures
+13/16/19/25 + source-never-hardcodes-the-real-phrase); abandoned fragment
+(1: fixture 11); conflicting evidence (1: fixture 15); multiple/
+determinism (3: fixtures 22/23 + per-clip-scoped batch context); no-
+usable-realization row shape (1); diagnostics/bounding (3: JSON-safety, no
+transcript dump, schema version, non-empty reason codes); behavior
+neutrality (6: no provider/arbiter reference, no RAW/Modal/RunPod
+reference, no Freeze/repair/resolver/Pacing/Boundary/Ordering import, no
+input mutation, output has no `blocking` field, and an explicit sweep
+proving `EDITORIALLY_REQUIRED` is honestly unreachable from any currently-
+supported input combination); module qualification (2: compiles, reuses
+the real `semantic_atom_importance` constants rather than redefining
+them). All 42 pass.
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker/ tests/`: clean (excluding the
+  one pre-existing, untouched `jobs_smoke.py` chronic syntax error, unrelated
+  to this task, already noted in D-235J).
+- Targeted D-235 bundle (`tests/test_cutsell_d235*.py`): 150 passed (108
+  pre-D-235L + 42 new).
+- Full offline suite (`tests/`, `--ignore=tests/test_semantic_stitch.py`
+  for the one pre-existing, untouched collection error): PASS, zero new
+  failures beyond the chronic pre-existing D-044 hybrid-semantic-parity
+  class already tracked in every prior D-235 gate.
+
+### No-live-wiring proof
+
+`grep` over `cutsell_worker/universal_clean_cut.py`,
+`final_story_coherence_validation.py`, `final_edit_reviewer.py`, and
+`repair_loop.py` confirms none of them import
+`lost_semantic_atom_materiality` -- this module is reachable only by a
+test file and any future, separately-authorized caller. The module's own
+source contains no import of any Freeze/repair/resolver/Pacing/Audio-Join/
+Boundary/Ordering module (test-enforced). `row["blocking"]` is never read
+by name as an input to any decision here (the module reads
+`atom_classifications`/`content_loss_suppressed_by`/etc., never the
+`blocking` boolean itself) and is never written.
+
+### Honest gap: `EDITORIALLY_REQUIRED` has no reachable path
+
+The current engine has no atom-scoped "this fragment is necessary for
+story completeness" signal distinct from (a) `missing_critical_atom_count`
+(already `MEANING_CRITICAL`) and (b) idea/family-level completeness checks
+(`missing_idea_coverage`, `dropped_no_usable_realization` -- both scoped to
+whole retry families, never to one discarded clip's own content
+contribution). Building a heuristic to bridge this gap here would be
+exactly the "second semantic engine" / "new heuristic" this task's own
+scope forbids. A dedicated test (`test_editorially_required_has_no_
+reachable_path_honestly`) sweeps a broad combination of every currently-
+supported input and asserts `EDITORIALLY_REQUIRED` never appears -- proving
+this is a genuine, documented property of the current design, not an
+oversight.
+
+### D-235L verdict
+
+**B -- MATERIALITY DISCRIMINATOR PARTIALLY PROVEN, ONE EVIDENCE GAP
+REMAINS.** The six other categories (`MEANING_CRITICAL`,
+`NON_MATERIAL_REAL_CONTENT`, `RETRY_OR_RECORDING_RESIDUE`,
+`REDUNDANT_EQUIVALENT`, `INSUFFICIENT_EVIDENCE`, `CONFLICTED`) are each
+offline-proven against the full required fixture matrix, deterministic,
+and demonstrably never override the critical safety floor. The ONE gap:
+`EDITORIALLY_REQUIRED` has no existing, reusable, atom-scoped evidence
+source in the current engine -- closing it would require either (a) a new
+idea-level "this atom is necessary for THIS idea's own story completeness"
+check (a genuinely new, larger-scoped mechanism, not a bounded discriminator
+addition), or (b) accepting that this category is currently theoretical
+vocabulary with no discriminator path, which this task does NOT resolve
+here, per its own "no second semantic engine" scope.
+
+**Per "IF B/C/D": STOP. One blocker only, named exactly above.** No
+D-235M is implemented or authorized by this task.
+
+**Canonical status:** not `LOST_SEMANTIC_ATOM_MATERIALITY_DISCRIMINATOR_
+OFFLINE_PROVEN` (that requires verdict A) -- recorded instead as
+`LOST_SEMANTIC_ATOM_MATERIALITY_DISCRIMINATOR_PARTIALLY_PROVEN_
+EDITORIALLY_REQUIRED_GAP`.
+
+**App roadmap:** unchanged in position -- Pacing is NOT reopened by this
+task. The chain remains: Audio Join stack READY -> sibling RAW reached
+Freeze -> exact cause identified (D-235I) -> lost-atom materiality issue
+identified (D-235K) -> materiality discriminator [THIS, partially proven]
+-> (pending Product Owner decision on the EDITORIALLY_REQUIRED gap) ->
+bounded Freeze adapter (a future D-235M, NOT implemented here) -> one real
+RAW requalification -> return to Audio Join qualification -> audio cleanup/
+loudness -> renderer/export -> visual continuity -> unseen multilingual
+validation -> product hardening -> TestFlight -> App Store.
+
+**Engine patch required now?** No -- and none was made; this module is
+additive and dormant (imported by nothing outside its own test file).
+**Paid compute required next?** No.
+**Additional RAW required now?** No.
+
+**Confirmed:** no RAW, no Modal, no RunPod, no provider call. No Freeze/
+Pacing/Audio-Join/Boundary/Ordering/Family/BestTake/repair-loop/resolver/
+threshold change was made or attempted -- offline discriminator only, per
+this task's own explicit instruction.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- the Product Owner decision
+needed is how to treat the `EDITORIALLY_REQUIRED` gap before any bounded
+Freeze adapter (D-235M) could be authorized: accept the discriminator as
+proven for its six other categories and scope D-235M to only ever suppress
+on `NON_MATERIAL_REAL_CONTENT`/`RETRY_OR_RECORDING_RESIDUE`/
+`REDUNDANT_EQUIVALENT` (as the directive's own "IF A" language already
+anticipates), or authorize a separate, larger-scoped idea-level story-
+completeness investigation first. No further action is taken on it by
+this task. Waiting for Product Owner coordination, per directive.
+
+---
