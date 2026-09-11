@@ -54135,3 +54135,211 @@ Spine's own independent segmentations first. No further action is taken on
 it by this task. Waiting for Product Owner coordination, per directive.
 
 ---
+
+## D-235N -- Exact Proposition Identity Bridge Forensic (post D-235M, forensic only, no identity changes)
+
+**Branch/HEAD verified before edits:** `feature/runpod-pod-on-demand` @
+`30ec2e7` (D-235M), clean tree.
+
+**Objective.** D-235M's own verdict was B, naming one missing seam: no
+exact identity bridge from a lost-atom row's own `clip_id` to
+`PropositionCandidate.editorial_slot_evidence`, only a "deterministic
+MAXIMUM-OVERLAP match", disqualified as authority. This task forensically
+traces each of the five seams mechanically, using ONLY the real, current,
+unmodified code -- no new ID, no schema change, no live wiring.
+
+### The five seams, traced precisely
+
+**Seam 1 (`lost_atom.clip_id` -> canonical clip): EXACT.**
+`_lost_semantic_atoms()` copies `clip.clip_id` verbatim; `pipeline.py::
+_draft_clip` sets `clip_id=take.clip_id` verbatim (`pipeline.py` line
+~768). A pure field copy at every hop -- a static code fact, not runtime-
+dependent.
+
+**Seam 2 (canonical clip -> P1 `EditorialMoment`): EXACT.**
+`editorial_moment_sequence_integration.py` sets `source_span_id=take.
+clip_id` verbatim (confirmed via direct source-code grep, test-enforced)
+-- built over the FULL per-source candidate pool, not only selected
+clips.
+
+**Seam 3 (P1 `EditorialMoment.proposition_candidate_ids`): NEVER EXACT
+-- the decisive finding.** Mechanically traced to
+`editorial_moment_sequence_integration.py`'s own construction:
+`real_attempt = language_attempts_by_span_id.get(take.clip_id)`, where
+`language_attempts_by_span_id` is itself the output of `language_spine_
+live_integration.py::language_attempts_by_span_id_for_source` -- that
+module's OWN docstring states plainly the Language Spine's independent
+`LanguageAttempt` segmentation "will not, in general, align exactly"
+with P1's clip-keyed spans, bridged only by "a deterministic MAXIMUM-
+OVERLAP match." Even in the `LANGUAGE_EVIDENCE_CANONICAL` case (where
+`proposition_candidate_ids` genuinely populates), the identification of
+WHICH real `LanguageAttempt` corresponds to a clip_id is itself that
+overlap match's own output -- never upgraded to identity regardless of
+how many ids result. In the `LANGUAGE_EVIDENCE_D157_FALLBACK` case, the
+lookup is guaranteed empty (a fallback-derived attempt_id "never appears
+in a real PropositionCandidate's attempt_ids", per that call site's own
+comment). **Independently confirmed structural proof (not merely
+observed behavior) that the two ID spaces cannot coincide by design:**
+`DraftClip.attempt_id` is minted by `attempt_reconstruction.py` via
+`canonical_identity.mint_attempt_id(member_source_span_ids)`, while
+`LanguageAttempt.attempt_id` (D-168) is minted by an entirely separate
+function, `language_utterance_attempt.py::_attempt_id(member_utterance_
+ids)` -- different module, different input space, different hash.
+**Also confirmed:** the entire Language Spine construction path is gated
+behind `live_language_spine_diagnostics_enabled()` (`pipeline.py`
+~line 2480), an explicit, off-by-default DIAGNOSTICS flag (D-199's own
+naming) -- on the engine's STANDARD/default run, `proposition_candidate_
+ids` is unconditionally empty for every moment, independent of the
+heuristic's own quality.
+
+**Seam 4 (`proposition_candidate_id` -> `PropositionCandidate` object):
+EXACT, once a real id is in hand.** `build_proposition_candidates` mints
+exactly one candidate per `LanguageAttempt`, a strict 1:1, deterministic
+id (`_proposition_id`) -- a plain dict lookup is unambiguous. This seam
+was never the weak link.
+
+**Seam 5 (`PropositionCandidate` -> `editorial_slot_evidence`): EXACT.**
+A direct, always-present dataclass field, no lookup, no ambiguity.
+
+### One-to-many / atom-ownership finding (honestly resolved as MOOT)
+
+`language_attempts_by_span_id.get(take.clip_id)` returns AT MOST ONE
+`LanguageAttempt` (a `.get()`, never a set), and `build_proposition_
+candidates` is strictly 1:1 attempt-to-candidate. **Under the current
+architecture, one clip can never resolve to more than one proposition_
+candidate_id at all** -- the "atom ownership ambiguity inside a multi-
+proposition clip" scenario the directive asked to investigate is
+honestly MOOT for this codebase today: not solved, but structurally
+unreachable, because the overlap match itself is single-valued.
+`proposition_candidate_ids`'s plural (tuple) shape is documented schema
+headroom for a possible future multi-attempt widening, not evidence that
+multiple propositions are produced today.
+
+### What was built
+
+**`cutsell_worker/lost_atom_proposition_identity_forensic.py`** (new):
+pure classifier module, zero live-authority imports, zero P1/P2/
+proposition CONSTRUCTION calls (only the two read-only `LANGUAGE_
+EVIDENCE_CANONICAL`/`LANGUAGE_EVIDENCE_D157_FALLBACK` constants imported,
+never redefined). `classify_seam2_clip_to_p1_moment`, `classify_seam3_
+moment_to_proposition_ids` (by design can NEVER return `EXACT`/`ONE_TO_
+MANY_EXACT` for the canonical source -- mechanically enforces "no fuzzy
+matching as authority" rather than merely restating it),
+`classify_seam4_proposition_id_to_candidate`, `classify_seam5_candidate_
+to_slot_evidence`, and `classify_proposition_identity_bridge` (end-to-end,
+weakest-seam-wins aggregation). Frozen output type `PropositionIdentity
+BridgeForensic`. No new canonical ID, no schema migration, no new
+lost-atom field -- every function classifies already-existing objects/
+values the caller supplies.
+
+### Tests
+
+`tests/test_cutsell_d235n_lost_atom_proposition_identity_forensic.py` --
+40 tests: Seam 2 (3), Seam 3 -- the decisive seam (9, incl. canonical-
+populated-never-exact, fallback-always-missing, multiple-ids-never-
+promoted), Seam 4 (3), Seam 5 (2), end-to-end chain (7, incl. multi-
+source isolation, determinism, JSON-safety), **source-code-truth tests
+(9)** that verify this task's own forensic claims are grounded in the
+ACTUAL current source (`clip_id=take.clip_id` in `pipeline.py`,
+`source_span_id=take.clip_id` in the P1 integration, the overlap-match
+docstring language, the off-default diagnostics gate, the two
+independently-defined attempt-id-minting functions, `build_proposition_
+candidates`'s own 1:1 loop) rather than merely asserted, no-text-fuzzy/
+no-time-overlap-authority-in-this-module (2), no-new-identity/no-live-
+wiring (6, incl. "not imported by any live module"), module compiles (1).
+All 40 pass.
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker/ tests/`: clean (excl. the
+  one pre-existing, untouched `jobs_smoke.py` chronic error).
+- D-235 bundle (`tests/test_cutsell_d235*.py`): 230 passed (190 pre-
+  D-235N + 40 new).
+- P1/P2/Language-Spine regression bundle (`test_cutsell_d16*`/`d19*`/
+  `d20*`): 1,033 passed, zero new failures.
+- Full offline suite: PASS, zero new failures beyond the chronic pre-
+  existing D-044 hybrid-semantic-parity class already tracked in every
+  prior D-235 gate.
+
+### D-235N verdict
+
+**D -- NO EXACT PROPOSITION IDENTITY BRIDGE EXISTS.** Not a live-
+retention gap (option C) -- the Language Spine construction IS invoked
+live (`pipeline.py` calls `build_live_language_spine_for_source` when its
+diagnostics flag is on) and DOES populate `proposition_candidate_ids` in
+the canonical case; the deficiency is structural and by design: the ONE
+mechanism connecting the two independently-segmented ID spaces
+(`language_attempts_by_span_id_for_source`) is, in its own module's own
+words, a maximum-overlap heuristic, never an identity equality -- true in
+the canonical case as much as the fallback case, and additionally gated
+behind an off-by-default diagnostics flag on top of that. D-235M did NOT
+miss a reusable exact bridge (ruling out option A): `EditorialMoment.
+proposition_candidate_ids` existing as a populated field does not change
+that its own population is causally downstream of the disqualified
+overlap match.
+
+**Per the directive's "IF D": only then recommend a bounded proposition-
+identity engineering gate.** The smallest missing seam, named exactly:
+a REAL, shared identity between `attempt_reconstruction.py`'s
+clip-level `attempt_id` (or `source_span_id`) and the Language Spine's
+own independent `LanguageAttempt` segmentation. Two directions exist,
+NEITHER implemented or authorized here: (a) mint the Language Spine's own
+`LanguageUtterance`/`LanguageAttempt` boundaries FROM the same clip/take
+segmentation the rest of the pipeline already uses (removing the
+independent-segmentation problem at its root -- the larger, more
+invasive option), or (b) retain source-proposition ownership at the
+point `_lost_semantic_atoms()` itself is constructed, IF and ONLY IF a
+future, separately-authorized gate first solves (a) or an equivalent
+exact linkage -- there is no smaller fix available today because the
+independent-segmentation design is the root cause, not a downstream gap.
+
+**Identity-unification engineering required?** Yes, if this dimension is
+ever to be closed with real authority -- but NOT authorized, scoped, or
+attempted by this task.
+
+**D-235M impact:** none -- D-235M's own verdict (B, `HEURISTIC_OVERLAP`-
+bounded) is reconfirmed exactly, now with a mechanical, code-grounded
+proof rather than a documented observation. D-235M's own module
+(`lost_atom_editorial_requirement_evidence.py`) required no change: its
+own design (treating `editorial_slot_evidence` as authoritative ONLY when
+`slot_evidence_source == EXACT`, an impossible value on the real engine)
+was already correct given this forensic's own findings.
+
+**D-235L impact:** none -- D-235L's own `EDITORIALLY_REQUIRED` gap
+finding is unaffected; this task traced a narrower, adjacent question
+(D-235M's own specific seam) and found the same underlying limitation.
+
+**Canonical status:** `LOST_ATOM_PROPOSITION_IDENTITY_BRIDGE_FORENSIC_
+NO_EXACT_BRIDGE_CONFIRMED`.
+
+**Exact next gate (NOT authorized, NOT implemented here):** a bounded
+proposition-identity engineering investigation -- scoping whether
+minting the Language Spine's own attempt boundaries from the existing
+clip/take segmentation (rather than an independent word-timing-gap
+algorithm) is feasible without destabilizing D-166/D-168/D-169's own
+already-vetted builders. Product Owner decision required before any such
+gate proceeds; D-235O (a hypothetical "complete lost-atom materiality
+discriminator using an existing exact bridge") is NOT authorized -- that
+outcome required verdict A, which this forensic did not find.
+
+**Engine patch required next?** Only if the Product Owner authorizes the
+identity-unification gate named above -- not required by this task
+itself.
+**Paid compute required?** No.
+**RAW required?** No.
+
+**Confirmed:** no RAW, no Modal, no RunPod, no provider call. No new
+canonical ID, no schema migration, no new lost-atom field, no live
+serialization change, no Freeze/repair-loop/resolver/materiality/Pacing/
+Audio-Join authority change was made or attempted -- forensic only, per
+this task's own explicit instruction.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- the decision needed is
+whether to authorize a bounded proposition-identity engineering
+investigation (the smallest missing seam named above), given it would
+require touching the Language Spine's own independent segmentation
+design, a materially different and larger scope than any single D-235
+sub-gate has taken so far. No further action is taken on it by this
+task. Waiting for Product Owner coordination, per directive.
+
+---
