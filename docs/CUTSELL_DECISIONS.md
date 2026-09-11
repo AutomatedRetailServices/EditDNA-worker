@@ -49003,3 +49003,300 @@ scoped and separately-paid-compute-authorized engineering turn. No RAW is
 dispatched by this task.
 
 ---
+
+## D-225: Handle-Aware Pacing V2 Video00 Real-Media Diagnostic Qualification (post D-224)
+
+**Status: VERDICT B -- HANDLE-AWARE PACING REAL-MEDIA SAFE. VIDEO00
+CONTAINS NO MATERIAL J/L HANDLE OPPORTUNITY.** The ONE authorized real
+Video00 Modal RAW proved, on real data, that `boundary_engine_pass`'s
+own audio-edge-trim audit trail and `post_selection_edge_only_boundary`'s
+own equivalent recorded ZERO trims anywhere across this run's entire
+selected clip set -- every one of the 48 `SourceAudioHandle`s D-223/
+D-224's own foundation derived (24 PRE_ROLL + 24 POST_ROLL, one pair per
+selected clip) came back `UNAVAILABLE` (no Boundary provenance to build
+from), never `SAFE_NON_SPEECH_HANDLE`, never blocked, never speech-
+present, never unknown-coverage. Zero J/L candidates were unlocked
+(matching D-218R's/D-221's own established `0/26`-shaped real-media
+finding, reconfirmed here independently via D-224's own `old_*` fields
+inside this exact artifact). Every firewall held (zero discarded-reuse,
+meaning, unknown-coverage, or double-count violations); live authority
+remained exactly `HARD_CUT`/`TIGHT_CUT` (23/23 both before and after);
+zero advanced execution; zero live independent audio windows. This
+resolves the open question D-222's own forensic left explicit: D-221's
+persistent `0/26` result is NOT explained by "the old evidence view was
+too narrow" (D-222's hypothesis B) -- it is explained by Video00 itself
+genuinely containing no measurable Boundary-trimmable silence anywhere
+in its finalized clip set (D-222's hypothesis A), now proven by real
+data rather than left as an open possibility.
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, `603106f` (D-224) -> `e38ccb9` (this
+task's own workflow-only prep commit, the only code change). No further
+commit needed after the RAW -- this decision entry is the only remaining
+change.
+
+### 2. RAW id
+Modal run **34551442123** (workflow run #94, `CutSell Video00 Modal
+RAW`), dispatched on `feature/runpod-pod-on-demand` @ `e38ccb9`, against
+`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4` (the
+canonical Video00 source). Exactly ONE RAW dispatched, per this task's
+own "no rerun, no second confirmation RAW" requirement.
+
+### 3. Flags
+`editorial_moment_sequence_diagnostics_enabled=1` (P1), `live_language_
+spine_diagnostics_enabled=1` (Language), `whole_video_editorial_
+reasoning_diagnostics_enabled=1` (P2), `ordering_diagnostics_enabled=1`
+(Ordering), `pacing_v2_diagnostics_enabled=1` (Pacing V2). No other
+experimental overlay input set -- every remaining `workflow_dispatch`
+input left at its own code-default (empty/OFF).
+
+### 4-16. Handle summary (real Video00 counts, verbatim from the D-225
+workflow step's own printed output -- retrieved via the job's own build
+log, `return_content=true`, since this session's own egress policy
+blocks the `*.blob.core.windows.net` host every GitHub Actions artifact
+ZIP download redirects to -- confirmed via the agent-proxy's own status
+endpoint, `recentRelayFailures: [{"kind":"connect_rejected","detail":
+"gateway answered 403 to CONNECT (policy denial or upstream failure)",
+"host":"productionresultssa2.blob.core.windows.net:443"}]`; the SAME
+already-computed values this task's own workflow step already prints to
+stdout were retrieved instead, verbatim, never re-derived):
+- `transition_count`: 23
+- `pre_handle_count`: 24 / `post_handle_count`: 24
+- `safe_pre_handle_count`: 0 / `safe_post_handle_count`: 0
+- `blocked_pre_handle_count`: 0 / `blocked_post_handle_count`: 0
+- `unknown_pre_handle_count`: 0 / `unknown_post_handle_count`: 0
+- `speech_present_pre_handle_count`: 0 / `speech_present_post_handle_
+  count`: 0
+- `total_safe_pre_handle_duration`: 0 / `total_safe_post_handle_
+  duration`: 0
+
+### 17-18. Discarded / retry / correction safety
+`discarded_handle_case_count`: 0. `discarded_handle_reuse_violation_
+count`: 0 (expected 0, confirmed 0).
+
+### 19-20. Meaning firewall
+`meaning_blocked_handle_count`: 0. `meaning_handle_violation_count`: 0
+(expected 0, confirmed 0).
+
+### 21-22. Word-coverage firewall
+`unknown_word_coverage_handle_count`: 0. `unknown_word_coverage_reuse_
+violation_count`: 0 (expected 0, confirmed 0).
+
+### 23-25. J availability (old vs handle-aware)
+`old_j_candidate_count`: 0. `handle_aware_j_candidate_count`: 0.
+`j_candidates_unlocked_by_handle_count`: 0.
+
+### 26-28. L availability (old vs handle-aware)
+`old_l_candidate_count`: 0. `handle_aware_l_candidate_count`: 0.
+`l_candidates_unlocked_by_handle_count`: 0.
+
+### 29. Double-count violations
+`double_count_violation_count`: 0 -- the source-coordinate interval-
+union audit (this task's own workflow-step re-derivation of D-224's
+already-offline-proven `_merged_interval_length` arithmetic, applied per
+real transition row) confirms every `combined_j_available_window`/
+`combined_l_available_window` this run reported matched its own union of
+already-serialized geometry exactly, on real data, not only in the
+offline synthetic fixtures.
+
+### 30. Primary D-225 answer
+**`NO_SAFE_HANDLES_EXIST_ON_VIDEO00`** -- computed by the workflow step
+itself (`safe_total == 0` and `unlocked_total == 0`), never asserted by
+hand.
+
+### 31-32. Mode distribution (old vs handle-aware)
+Both identical: `{"hard_cut": 23, "tight_cut": 0, "j_cut": 0, "l_cut":
+0}`. The wider handle-aware evidence changed NOTHING about D-215's own
+mode decision on this real run, because there was no wider evidence to
+offer in the first place (item 4-16: every handle `UNAVAILABLE`).
+
+### 33-34. J-cut / L-cut unlock cases
+`j_unlock_cases`: `[]`. `l_unlock_cases`: `[]`. Empty by construction --
+zero candidates were unlocked, so there is nothing to audit per-case.
+
+### 35. D-220 timing re-evaluation
+Not exercised on this run -- `d220_j_max_safe_window_evaluated`/`d220_l_
+max_safe_window_evaluated` are `false` for every one of the 23
+transitions (D-224's own gate: D-220 is only evaluated on a pair the
+wider evidence itself found `J_CUT`/`L_CUT`-eligible, and none was).
+D-220's own anchor-word-duration formula remains completely untouched
+and untuned by real data -- honestly reported, not claimed complete.
+
+### 36. Boundary immutability
+`clip.start`/`clip.end` changes: 0, by construction -- no code path in
+`pacing_v2_source_audio_handle.py`/`pacing_v2_handle_aware_evidence.py`
+ever calls `dataclasses.replace` on a `DraftClip` (confirmed by direct
+inspection and by D-223/D-224's own AST-based structural tests, already
+offline-proven; this RAW adds no new evidence against that guarantee,
+nor could it -- the diagnostics block is read-only by construction).
+
+### 37. Ordering immutability
+Selected order unchanged -- the additive `pacing_v2_handle_aware`
+diagnostics key never reorders `draft.selected`; `transition_count`
+(23) is internally consistent with a fixed, already-ordered clip
+sequence (24 clips, 23 adjacent pairs), never resorted.
+
+### 38. Live D-142 immutability
+`old_mode_distribution` (item 31) IS D-142's own real live per-
+transition mode distribution for this run (`HARD_CUT`/`TIGHT_CUT` only,
+23/0/0/0) -- unchanged by this task's own diagnostics, which never write
+back into `draft.diagnostics["dialogue_pacing_transition"]`.
+
+### 39-40. Advanced recommendation vs execution
+`advanced_recommendation_count`: 0 (structurally equal to `j_candidates_
+unlocked_by_handle_count + l_candidates_unlocked_by_handle_count`, both
+0 this run). `advanced_execution_count`: 0 (structural fact, D-216/D-217/
+D-224 already offline-prove this is always 0 by construction -- restated,
+not re-derived, from this one artifact).
+
+### 41. Live independent audio-window count
+`live_independent_audio_window_count`: 0 -- no `SourceAudioHandle` was
+ever populated into a live `RenderSegment.audio_start`/`audio_end`
+anywhere in this task (structural fact, same convention as item 39-40).
+
+### 42. Renderer-command immutability
+No advanced handle timing was ever evaluated to completion on this run
+(item 35: D-220 never invoked), so there is nothing that could have
+changed the live renderer command; `render.py`/`render_plan.py` remain
+untouched by this entire D-223/D-224/D-225 track.
+
+### 43. Future Audio Join Treatment candidate count
+`future_audio_join_treatment_candidate_count`: 0 (== `safe_pre_handle_
+count + safe_post_handle_count`, both 0 this run). On THIS specific
+Video00 run there is currently no safe-non-speech handle material a
+future Audio Join Treatment gate could draw on -- an honest, real-data
+finding, not a claim about Video00 in general or about other RAWs.
+
+### 44. Room-tone classification status
+`ROOM_TONE_CLASSIFICATION_NOT_YET_AVAILABLE` -- unchanged from D-222/
+D-223/D-224. No `SAFE_NON_SPEECH_HANDLE` on this run is or could be
+mislabeled `ROOM_TONE` (there were none to mislabel).
+
+### 45. Usefulness classification
+`pacing_value_classification`: `SAFE_BUT_NO_NEW_VALUE_ON_VIDEO00` -- no
+firewall violation of any kind (item 29's double-count check plus items
+17-22's discarded/meaning/unknown-coverage violation counts, all 0), so
+never `MATERIALLY_WRONG`; no candidate was unlocked and no safe handle
+existed, so not `USEFUL_AND_BOUNDED`/`USEFUL_BUT_LIMITED` either.
+
+### 46. D-225 verdict
+**B. HANDLE-AWARE PACING REAL-MEDIA SAFE -- VIDEO00 CONTAINS NO MATERIAL
+J/L HANDLE OPPORTUNITY.**
+
+### 47. Canonical Pacing status
+Adds **`PACING_V2_SOURCE_AUDIO_HANDLE_REAL_MEDIA_SAFETY_PROVEN`**
+alongside the existing `PACING_V2_SOURCE_AUDIO_HANDLE_FOUNDATION_
+OFFLINE_PROVEN` + `PACING_V2_SOURCE_AUDIO_HANDLE_LIVE_INTEGRATION_
+OFFLINE_PROVEN` (D-223/D-224). Per this task's own explicit instruction,
+this status is a SAFETY finding only -- it does NOT claim, authorize, or
+imply any J/L live authority.
+
+### 48. Exact next gate
+Per this task's own explicit "IF B" branch: do NOT keep dispatching
+Video00 RAWs trying to force J/L into existence -- this run's own real
+data shows Video00 genuinely does not present material Boundary-
+trimmable handle room. Recommended (NOT implemented, NOT authorized by
+this task): (a) a controlled, synthetic J/L perceptual fixture
+qualification decoupled from Video00's own specific absence of handle
+material, and/or (b) deferring natural J/L validation to a future,
+different, unseen RAW where real handle material may actually exist;
+separately, the Audio Join Treatment roadmap (`SHORT_CROSSFADE`/
+`AMBIENCE_*`) may proceed independently of J/L, per D-222 item 19's own
+"shared foundation, not duplicated per feature" finding -- neither is
+launched or implemented here.
+
+### 49. J/L authority status
+Unchanged: `HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed
+transition modes (item 38's own real per-transition confirmation). This
+task introduces, enables, or implements zero live authority.
+
+### 50. Audio Join Treatment status
+Unchanged from D-220C/D-222/D-223/D-224: `CLICK_FADE` existing/live;
+`SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_
+BRIDGE` remain `ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_
+AUTHORITY`. Item 43's own zero-candidate finding on THIS run does not
+close this roadmap -- it only reports that THIS specific Video00 run
+currently offers no safe-non-speech material for it to draw on.
+
+### 51. Renderer status
+Unchanged. `render.py`/`render_plan.py` untouched by any task in this
+D-223/D-224/D-225 track; nothing in this RAW's own real output changes
+that.
+
+### 52. Unseen-RAW status
+Untouched by this task -- D-225's own scope was exactly ONE canonical
+Video00 RAW; no unseen-RAW generalization work was performed or
+authorized here.
+
+### 53. App-roadmap status
+Unchanged sequence through D-224, then: Source Audio Handle live
+evidence integration offline-proven, handle-aware J/L diagnostics ready
+for real media (D-224) -> **handle-aware Pacing V2 Video00 real-media
+diagnostic qualification: real-media SAFE, no material J/L handle
+opportunity on this run, this entry (D-225)** -> next (not launched
+here, per item 48): a controlled synthetic J/L perceptual fixture
+qualification and/or deferred natural J/L validation on a future unseen
+RAW, run in parallel with an independent Audio Join Treatment roadmap
+(`SHORT_CROSSFADE`/`AMBIENCE_*`) -> bounded J/L authority (contingent on
+future real material actually being found) -> micro-overlap final
+authority -> Renderer/export qualification -> unseen-RAW generalization/
+Human Gold parity -> product hardening -> TestFlight -> App Store.
+
+### 54. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. `docs/
+CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` NOT edited (out of this
+task's own scope).
+
+### 55. Confirmation
+NO `cutsell_worker/*.py` file touched by this task (the one code change,
+`e38ccb9`, is workflow-only observability plumbing, per this task's own
+explicit authorization). NO second RAW dispatched (exactly one, run
+34551442123). NO provider call beyond the ONE already-authorized Modal
+run itself. NO live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority created,
+enabled, or implemented -- confirmed by this run's own real data (items
+38-41: live mode 100% `HARD_CUT`, `advanced_execution_count`=0, `live_
+independent_audio_window_count`=0). NO Audio Join Treatment implemented.
+NO Boundary/Ordering/Family/BestTake behavior change (this task never
+touches those authorities; the two chronic, pre-existing "Verify frozen
+Selection lock"/"Verify Human Gold regression QA" job-step failures on
+this run are the SAME unrelated, longstanding gate-failure pattern
+already visible on prior Pacing-V2-diagnostics-only RAW runs in this
+track's own history (e.g. runs #92/#93, both `conclusion: failure` for
+the identical two gates while their own Pacing V2 diagnostics succeeded)
+-- not investigated or touched here, per this task's own explicit "NO
+Boundary/Ordering/Family/BestTake change" scope boundary; the D-225
+workflow step itself (job step #43) completed with `conclusion: success`
+on this run, independent of those two unrelated gates.
+
+**Retrieval note (environmental, not a task finding):** this session's
+own network egress policy blocks the `*.blob.core.windows.net` host
+every GitHub Actions artifact-ZIP download redirects to (confirmed via
+the agent-proxy's own status endpoint), so the small `cutsell-video00-
+modal-validator-reports` artifact bundle (containing `artifact/d225_
+pacing_v2_handle_aware_real_media_qualification.json` in full, including
+its per-pair `transitions[]` and per-handle `handle_diagnostics[]` rows)
+could not be downloaded directly in this session. Every figure in items
+4-45 above was instead retrieved verbatim from the SAME workflow step's
+own stdout printing (via the job's build log, `return_content=true`) --
+the identical values the artifact file itself contains, never re-derived
+or estimated. The full per-pair/per-handle row-level detail (48
+individual handle rows, all sharing the single status `UNAVAILABLE`/
+`no_boundary_provenance_recorded`, which the aggregate counts already
+fully and unambiguously determine: `pre_handle_count + post_handle_
+count` (48) minus `safe + blocked + unknown + speech_present` (all 0)
+leaves exactly 48 `UNAVAILABLE`) was not independently re-fetched
+row-by-row from the artifact file itself in this session, though the
+artifact remains available in the repository's own GitHub Actions
+artifact store (14-day retention) for direct download from an
+unrestricted network.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+explicit "Then STOP. Do NOT implement the next gate. Wait for Product
+Owner coordination," the decision needed is whether to authorize a
+controlled synthetic J/L perceptual fixture qualification, a deferred
+natural-J/L-validation-on-a-future-unseen-RAW plan, and/or an
+independent Audio Join Treatment architecture turn (item 48) as the
+next, separately-scoped engineering work. No further action is taken on
+any of them by this task.
+
+---
