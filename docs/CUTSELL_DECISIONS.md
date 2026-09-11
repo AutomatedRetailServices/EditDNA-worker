@@ -54343,3 +54343,306 @@ sub-gate has taken so far. No further action is taken on it by this
 task. Waiting for Product Owner coordination, per directive.
 
 ---
+
+## D-235O -- Shared Attempt/Proposition Identity Seam: Architecture + Bounded Engineering Design (post D-235N, forensic + design only, no implementation)
+
+**Branch/HEAD verified before edits:** `feature/runpod-pod-on-demand` @
+`026ca90` (D-235N), clean tree.
+
+**Objective.** D-235N's own verdict was D: no exact proposition identity
+bridge exists between a lost-atom row's own `clip_id` and
+`PropositionCandidate.editorial_slot_evidence`. This task designs the
+SMALLEST identity seam that would let the reconstructed-attempt side and
+the Language Spine side share exact provenance -- forensic + design only,
+NOT implemented here.
+
+### Reconstructed-attempt id semantics (attempt_reconstruction.py)
+
+`attempt_id = mint_attempt_id(_member_span_ids(members))` -- minted from
+each member's own `source_span_id` (itself minted in `take_segmentation.py`
+from `(source_asset_id, start, end, text)`), "content/membership-anchored,
+never timestamp-anchored" per that call site's own comment. It represents
+a PHYSICAL/EDITORIAL recording-attempt grouping concept (retry/reset/
+lexical-restart-boundary-aware), not a linguistic segmentation. It DOES
+survive into `CandidateTake`/`DraftClip` (`pipeline.py::_draft_clip`
+threads it through unchanged).
+
+### LanguageAttempt id semantics (D-168, language_utterance_attempt.py)
+
+`attempt_id = _attempt_id(utterance_ids)` -- an entirely separate minting
+function, over a DIFFERENT input space (`LanguageUtterance.utterance_id`
+values, themselves built from `LanguagePhrase.phrase_id` values, built
+from `LanguageWord.word_index`-addressed ranges). Represents a LINGUISTIC
+segmentation (word-timing-gap + structural-boundary algorithm, D-166/
+D-168), independent of attempt_reconstruction.py's own recording-process-
+aware boundary rules.
+
+### Shared upstream source evidence -- the key finding
+
+Both segmenters consume the SAME underlying ASR `contracts.Word` objects,
+never a second transcription pass:
+- `raw_understanding_map.py::build_raw_understanding_map`: `word_timings
+  = tuple(word for seg in segments for word in seg.words)` -- built
+  directly from `transcript_segments`.
+- `take_segmentation.py` builds `CandidateTake.words` from that SAME
+  `segment.words` collection.
+- `attempt_reconstruction.py::_merge_attempt`: `words=tuple(word for
+  member in members for word in member.words)` -- a verbatim
+  concatenation of the SAME `Word` objects, never re-derived.
+- `language_spine_live_integration.py`: `adapt_words_to_language_words
+  (source_asset_id, raw_understanding_map.word_timings)` -- the Language
+  Spine's own `LanguageWord` tier is built from that SAME `word_timings`
+  tuple.
+
+**Canonical word identity already exists, structurally, on the Language
+Spine side.** `language_spine.py::adapt_words_to_language_words` sorts
+the input words by `(word.start, word.end)` and assigns `word_index=
+index` -- `LanguageWord.word_index` is a stable, deterministic ordinal
+position in the per-source canonical word list. `LanguagePhrase.word_
+start_index`/`word_end_index` and `LanguageUtterance.phrase_start_index`/
+`phrase_end_index` (transitively resolving to a word-index range) both
+carry this identity forward. `LanguageAttempt` itself has no DIRECT
+word-index field, but its own word-index range is fully, exactly
+derivable via `utterance_ids` -> each `LanguageUtterance`'s own
+`phrase_start_index`/`phrase_end_index` -> each `LanguagePhrase`'s own
+`word_start_index`/`word_end_index`.
+
+**The reconstructed-attempt side has NO equivalent field today.**
+`CandidateTake`/`DraftClip` retain the raw `Word` VALUE objects (`.words`
+tuple) but never a computed word-index range into the SAME canonical
+per-source ordering `LanguageWord`'s own builder already establishes.
+This is confirmed by direct inspection (test-enforced): neither dataclass
+has a `word_start_index`/`word_end_index`/`canonical_word_start_index`
+field.
+
+### Cross-segmentation matrix (word-index-range framing, never time overlap)
+
+Because both a reconstructed clip's own constituent words and a
+`LanguageAttempt`'s own (transitively-derived) word-index range are
+INTEGER, ORDINAL positions in ONE shared canonical list, "does clip X
+share any canonical word with attempt Y" becomes an EXACT SET-
+INTERSECTION test, categorically different from a floating-point time-
+interval overlap score:
+- **1 reconstructed attempt -> 1 LanguageAttempt**: the common, expected
+  case when both boundary algorithms happen to agree.
+- **1 reconstructed attempt -> N LanguageAttempts**: possible -- the
+  Language Spine's own word-timing-gap/structural-boundary algorithm can
+  split where attempt_reconstruction.py's own retry/reset/lexical-restart
+  rules joined.
+- **N reconstructed attempts -> 1 LanguageAttempt**: possible -- the
+  reverse, when attempt_reconstruction.py's own multimodal-reset evidence
+  splits something the (text/pause-only) Language Spine treated as one
+  continuous utterance.
+- **N:N**: with an exact word-index-range representation this is NEVER
+  "ambiguous" at the SET level (every LanguageAttempt sharing at least
+  one canonical word index with a clip is a hard, deterministic member of
+  that clip's own exact set) -- "ambiguity" only arises if a caller then
+  tries to pick a SINGLE owning member from a multi-member set, which is
+  the separate, honestly-flagged atom-ownership question below.
+
+### Retry/correction/continuation safety
+
+This seam operates PURELY at the shared-word-membership level -- it never
+merges or reinterprets either segmenter's own retry/correction/
+continuation/recording-process boundary decisions. It only ever answers
+"which already-independently-drawn objects, from two independent boundary
+systems, happen to share canonical words" -- a provenance/bridging fact,
+never a semantic merge. Confirmed safe by construction: adding a word-
+index-range field changes nothing about how either segmenter decides
+where ITS OWN boundaries fall.
+
+### Option analysis
+
+**A -- propagate the existing reconstructed `attempt_id` directly:
+INSUFFICIENT alone.** `DraftClip.attempt_id` and `LanguageAttempt.
+attempt_id` are minted by two independently-defined functions
+(`canonical_identity.mint_attempt_id` vs. `language_utterance_attempt.py
+::_attempt_id`) over disjoint input spaces -- "propagating" one into the
+other's own field does not establish equality; a real bridge is still
+needed underneath. Confirmed by D-235N's own forensic, reconfirmed here.
+
+**B -- add a shared upstream attempt-provenance id BEFORE both
+segmenters diverge: LARGER than necessary.** Would require both
+`attempt_reconstruction.py`'s own boundary algorithm and the Language
+Spine's own D-166-168 boundary algorithm to consume or emit one common
+id at the point they first diverge -- effectively coupling two
+independently-designed, already-vetted boundary systems. Not the
+smallest seam; a bounded word-level bridge (Option C) achieves the same
+end without touching either boundary algorithm.
+
+**C -- exact canonical word-membership identity: THE SMALLEST SAFE
+SEAM, RECOMMENDED.** Both sides already, structurally, derive from the
+identical underlying `Word` sequence; the Language Spine already
+maintains a canonical, deterministic word-index space
+(`LanguageWord.word_index`) that the reconstructed-attempt side simply
+never recorded. Adding one additive provenance field pair to the
+already-existing `CandidateTake`/`DraftClip` dataclasses -- computed via
+an EXACT (start, end) value lookup against the SAME sorted-word-list
+convention `adapt_words_to_language_words` already uses -- requires no
+change to either segmenter's own boundary logic, no new global id
+scheme, no P1/P2/Language-Spine rewrite.
+
+**D -- another smaller existing seam:** none found. Every genuinely
+smaller candidate (reusing `source_span_id` alone, reusing `clip_id`
+alone) still ultimately requires the same word-level correspondence
+Option C establishes explicitly; those ids alone do not encode it.
+
+### Recommended seam, precisely
+
+**New, additive fields** (2, matching the directive's own "2-4 additive
+dataclass fields maximum" bound): `canonical_word_start_index: Optional
+[int] = None` and `canonical_word_end_index: Optional[int] = None`, added
+to `CandidateTake` and threaded unchanged into `DraftClip` (same
+passthrough convention as `attempt_id`/`realization_id`/`source_span_id`
+today).
+
+**Mint location:** wherever a `CandidateTake` is finalized with its own
+`.words` tuple populated (`take_segmentation.py` for a raw candidate,
+`attempt_reconstruction.py::_merge_attempt` for a fused one) -- computed
+by locating this candidate's own first/last `Word` (by exact `(start,
+end)` value match) within the SAME canonical, source-wide, sorted-by-
+`(start, end)` word ordering `language_spine.py::adapt_words_to_
+language_words` already builds from `RawUnderstandingMap.word_timings`.
+No new sort algorithm -- the exact same `sorted(words, key=lambda word:
+(word.start, word.end))` convention, reused, not reinvented.
+
+**Propagation path:** `CandidateTake` -> `pipeline.py::_draft_clip` ->
+`DraftClip` -> `_lost_semantic_atoms()`'s own row (a THIRD additive field
+on the row itself, e.g. `clip_canonical_word_range`) -- mirrors exactly
+how `clip_id` already flows end to end today.
+
+**Proposition-set identity result.** Given this seam, a caller could
+compute, EXACTLY (integer range intersection, never time overlap or text
+similarity): the SET of `LanguageAttempt`s (and, since Seam 4 is already
+exact, transitively the SET of `PropositionCandidate`s) whose own
+word-index range intersects a lost atom's own clip's word-index range.
+This is precisely the directive's own desired chain: "lost atom/clip ->
+exact attempt identity -> exact SET of propositions generated FROM that
+attempt."
+
+**Remaining atom-level ambiguity, NOT hidden.** When that SET has more
+than one member (the 1:N/N:1 cases above), determining WHICH SPECIFIC
+proposition inside a multi-proposition clip the LOST ATOM's own missing
+text belongs to is a SEPARATE, finer question this seam does not answer
+by itself -- `_lost_semantic_atoms()`'s own `missing_critical_atoms`/
+`atom_classifications` currently reference only the atom's own literal
+string, never a word-sub-range within its own clip. Closing that would
+need a further, smaller refinement (attributing the atom's own missing
+text to a word-sub-range within the clip, using the SAME canonical
+word-index space) -- explicitly NOT designed or scoped here.
+
+### Backward compatibility / migration policy
+
+Purely additive: two new `Optional[int] = None` fields on `CandidateTake`/
+`DraftClip`, one new optional field on the lost-atom row. Every existing
+`clip_id`/`retry_family_id`/`semantic_idea_id`/`attempt_id`/`realization_
+id`/`source_span_id`, every `LanguageAttempt`/`PropositionCandidate`/P1
+moment/P2 region id, and every already-serialized diagnostic or historical
+fixture is UNCHANGED -- no schema migration required for historical
+artifacts (a document with the field absent behaves exactly as it does
+today, `None` meaning "not computed," the same tri-state discipline
+D-235G/L/M/N already established). Matches the directive's own "prefer
+additive provenance over replacing existing identifiers" instruction
+exactly.
+
+### Blast radius (for a future D-235P, NOT this task)
+
+`contracts.py` (2 new `Optional[int]` fields x2 dataclasses),
+`take_segmentation.py` and `attempt_reconstruction.py` (mint the range at
+each candidate's own finalization point), `pipeline.py::_draft_clip`
+(thread through, one line, same pattern as `attempt_id`), `final_story_
+coherence_validation.py::_lost_semantic_atoms()` (one new optional row
+field, additive). Estimated test burden: a per-mint-site unit test matrix
+(1:1/1:N/N:1 word-index-range fixtures), plus a handful of regression
+tests confirming every existing `attempt_id`/`clip_id`/`source_span_id`
+test still passes unchanged (they should, since nothing existing is
+touched). No broad schema rewrite required -- within the directive's own
+"small provenance module or helper + narrow pipeline propagation +
+tests" bound.
+
+### D-235M / D-235N impact
+
+**D-235M impact:** none required by this task -- a future D-235P could
+extend `lost_atom_editorial_requirement_evidence.py`'s own optional
+`editorial_slot_evidence`/`slot_evidence_source` parameters to accept an
+`EXACT`-labelled value once this seam exists, without changing that
+module's own decision logic (which already, correctly, refuses to treat
+`HEURISTIC_OVERLAP` as authoritative).
+**D-235N impact:** none -- D-235N's own forensic classifier
+(`lost_atom_proposition_identity_forensic.py`) would gain a genuine
+`SEAM_EXACT` (or `SEAM_ONE_TO_MANY_EXACT`, for the 1:N/N:1 cases) path
+for Seam 3 once this design is implemented and wired -- not attempted
+here.
+**Freeze impact:** none, now or ever from this seam alone -- word-
+membership provenance is a pure identity fact, never wired to any
+Freeze/repair/resolver/authority decision by this task or by the design
+itself.
+
+### D-235O verdict
+
+**C -- EXACT WORD-MEMBERSHIP IDENTITY IS THE SMALLEST SAFE SEAM.**
+
+**Canonical status:** `SHARED_ATTEMPT_PROPOSITION_IDENTITY_SEAM_DESIGN_
+WORD_MEMBERSHIP_RECOMMENDED`.
+
+**Exact D-235P scope (named, NOT implemented here):** D-235P -- Shared
+Attempt/Proposition Identity Seam Implementation, OFFLINE ONLY. Adds the
+two additive `canonical_word_start_index`/`canonical_word_end_index`
+fields to `CandidateTake`/`DraftClip`, mints them at each candidate's own
+finalization point (reusing the existing sorted-word-list convention,
+never a new algorithm), threads the range onto the lost-atom row, and
+proves the exact word-index-range-intersection query against real P1/
+Language-Spine objects offline -- still NO live Freeze/materiality/
+editorial-requirement wiring, that remains a separately-authorized future
+gate beyond D-235P itself.
+
+### Tests
+
+`tests/test_cutsell_d235o_shared_attempt_proposition_identity_design.py`
+-- 17 source-code-truth tests (the same technique D-235N's own suite
+established) grounding every factual claim in this decision entry in the
+ACTUAL, current, unmodified source: `Word`'s own lack of an id field,
+`LanguageWord.word_index`/`adapt_words_to_language_words`'s own sort-and-
+index construction, the adapter's real call site consuming `raw_
+understanding_map.word_timings`, `LanguagePhrase`/`LanguageUtterance`'s
+own word/phrase index-range fields, `LanguageAttempt`'s own confirmed
+ABSENCE of a direct word-index field, the shared-word-source chain across
+`raw_understanding_map.py`/`take_segmentation.py`/`attempt_reconstruction.
+py`, the two independently-defined `attempt_id` minting functions
+(reconfirming D-235N), and confirmation that `CandidateTake`/`DraftClip`
+carry no word-index-range field today -- plus explicit "no new production
+module created by this gate" / "no new canonical id minted by this gate"
+proofs. All 17 pass.
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker/ tests/`: clean (excl. the
+  one pre-existing, untouched `jobs_smoke.py` chronic error).
+- D-235 bundle (`tests/test_cutsell_d235*.py`): 247 passed (230 pre-
+  D-235O + 17 new).
+- Full offline suite: verified against the established chronic baseline
+  (no new production module exists to regress anything -- this gate is
+  documentation + tests only).
+
+**Engine patch required next?** Yes, if D-235P is authorized -- not
+required by, nor made in, this task itself (zero production code changed).
+**Paid compute required?** No.
+**RAW required?** No.
+
+**Confirmed:** no RAW, no Modal, no RunPod, no provider call. No schema
+migration, no new canonical id IMPLEMENTED (only designed/named), no
+Freeze/repair-loop/resolver/materiality/P1/P2/Pacing/Audio-Join authority
+change -- forensic + design only, per this task's own explicit
+instruction.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- the decision needed is
+whether to authorize D-235P (the bounded, additive, offline-only
+implementation of the word-membership seam named above). This is a
+genuinely SMALL, bounded engineering gate by this task's own analysis
+(2-3 additive fields, narrow propagation, no schema migration) -- but
+still a real code change to `contracts.py`/`take_segmentation.py`/
+`attempt_reconstruction.py`/`pipeline.py`, requiring explicit
+authorization before proceeding. No further action is taken on it by
+this task. Waiting for Product Owner coordination, per directive.
+
+---
