@@ -48288,3 +48288,326 @@ clarification as an independent, small, docs-only turn. No further
 action is taken on either.
 
 ---
+
+## D-223: Pacing V2 Source Audio Handle Foundation (post D-222)
+
+**Status: VERDICT A -- SOURCE AUDIO HANDLE FOUNDATION OFFLINE PROVEN.**
+Adds `PACING_V2_SOURCE_AUDIO_HANDLE_FOUNDATION_OFFLINE_PROVEN`. Builds one
+new, standalone, offline-only module (`cutsell_worker/pacing_v2_source_
+audio_handle.py`) that derives a `SourceAudioHandle` per clip per direction
+from TWO already-computed, already-accepted Boundary-adjacent audit trails
+(`boundary_engine_pass.tighten_selected_audio_edges` and `post_selection_
+edge_only_boundary.trim_locked_selection_edges`) -- never a new detector,
+never a renderer/decision-layer change, never a live wire-up. Names D-224
+("PACING V2 AUDIO-HANDLE LIVE EVIDENCE INTEGRATION -- DIAGNOSTIC ONLY -- NO
+AUTHORITY") as the next, separately-authorized gate, without implementing
+it.
+
+### 1. Branch / HEAD
+`feature/runpod-pod-on-demand`, starting HEAD `20e9f39` (D-222), clean tree
+confirmed at task start per this task's own mandatory startup check.
+
+### 2. Files changed
+`cutsell_worker/pacing_v2_source_audio_handle.py` (new, 1 module) and
+`tests/test_cutsell_d223_pacing_v2_source_audio_handle_foundation.py` (new,
+45 tests) plus this decision-log entry. No other `cutsell_worker/*.py`
+file touched -- `pacing_v2_evidence_adapter.py`, `pacing_transition_
+decision.py`, `pacing_v2_timing_policy.py`, `render.py`, `render_plan.py`,
+`boundary_engine_pass.py`, `post_selection_edge_only_boundary.py` are all
+READ, none MODIFIED. No workflow file touched. No feature flag added.
+
+### 3. `SourceAudioHandle` type
+Frozen dataclass: `schema_version, handle_id, source_asset_id, owner_
+clip_id, owner_realization_id, direction, video_start, video_end, handle_
+source_start, handle_source_end, available_duration, word_intervals_
+present, speech_presence_status, discarded_overlap_status, meaning_
+safety_status, handle_status, conflict_flags, provenance`. `word_
+intervals_present` is `Tuple[(start, end, text), ...]` rather than a
+`word_ids` list -- `contracts.Word` carries no id field (confirmed, D-222
+item's own full-field enumeration), so intervals-with-text are the direct,
+honest representation available.
+
+### 4. Handle-status vocabulary
+This task's own named 7 -- `SAFE_NON_SPEECH_HANDLE`, `SAFE_SPEECH_HANDLE`,
+`BLOCKED_DISCARDED_MATERIAL`, `BLOCKED_MEANING_CRITICAL`, `BLOCKED_RETRY_
+OR_CORRECTION`, `UNKNOWN_WORD_COVERAGE`, `UNAVAILABLE` -- plus two
+justified additions: `SPEECH_PRESENT_NOT_AUTHORITATIVE` (see item 12) and
+`BLOCKED_NEIGHBOR_SELECTED_CLIP` (a distinct interval-safety guard from
+`BLOCKED_DISCARDED_MATERIAL`, named directly by D-222 item 17: a candidate
+window must also never reach into a DIFFERENT selected clip's own span).
+All 9 live in one closed `CLOSED_HANDLE_STATUSES` frozenset.
+
+### 5. Pre-roll / post-roll derivation
+Both directions are derived from the SAME mechanism: whichever of the two
+Boundary-adjacent audit trails recorded a trim for this clip supplies an
+`original_start`/`original_end` (pre-trim, wider) vs `result_start`/
+`result_end` (post-trim, == the clip's own current `.start`/`.end`) pair.
+PRE_ROLL = `[original_start, result_start)` when `original_start <
+result_start`; POST_ROLL = `[result_end, original_end)` when `original_end
+> result_end`. No trim recorded for a clip/direction -> `UNAVAILABLE`,
+never a guessed window. When both audit trails carry a row for the same
+clip (defensive, not expected on today's mutually-exclusive `boundary_
+owner` configurations), the WIDEST available candidate wins (item 24 of
+the D-223 test file proves this explicitly).
+
+### 6. Source-duration invariant
+`0 <= handle_source_start < handle_source_end <= source_duration_sec`
+(when a duration is supplied), mirroring -- without importing -- `render.
+py`'s own `validate_audio_window` shape (D-214, untouched). Invalid
+geometry or an out-of-bounds end is `UNAVAILABLE` with an explicit
+conflict flag, never silently clamped.
+
+### 7. Boundary provenance contract
+Reads `draft.diagnostics["boundary_engine_pass"]`'s own audit list (item 9
+of D-222, already reaching this seam) and `post_selection_edge_only_
+boundary`'s own equivalent list -- both already-computed, already-
+serialized, from the SAME RAW run that already produced the final selected
+clips. Neither authority is re-executed, re-derived, or altered by this
+task. A `result_start`/`result_end` that no longer matches the clip's
+CURRENT `.start`/`.end` (a later pass moved it further) is treated as
+`BOUNDARY_PROVENANCE_STALE_RESULT_MISMATCH` -> `UNAVAILABLE`, never used.
+
+### 8. Broader-word-timing contract
+`broader_word_timings: Mapping[source_asset_id, Sequence[Word]]`, EMPTY by
+every live caller today (D-222 item 11's own confirmed gap: no seam
+threads a full per-source transcript into `DraftTimeline`) -- accepted
+purely for future extensibility and for this task's own offline fixture
+proof of the meaning firewall (tests 25-28). No ASR rerun, no new
+provider call, no new evidence-acquisition seam is built by accepting
+this optional parameter.
+
+### 9. Discarded-span firewall
+`build_*_audio_handle`'s `discarded: Sequence[DraftClip]` parameter is
+cross-referenced by `source_asset_id` + interval overlap against the
+candidate handle window; any overlap -> `BLOCKED_DISCARDED_MATERIAL`,
+checked BEFORE any speech/meaning classification (highest priority in
+the decision table, per D-222 item 15's own "concrete guard already
+available"). Proven by tests 08-09, 12 (cross-source never blocks).
+
+### 10. Neighbor-selected-clip firewall
+`other_selected: Sequence[DraftClip]` (every OTHER currently-selected
+clip, same source) is checked the same way -> `BLOCKED_NEIGHBOR_SELECTED_
+CLIP` (D-222 item 17's own named guard, distinct status from item 9's).
+Proven by tests 10-11.
+
+### 11. Retry/correction/BTS firewall
+`post_selection_edge_only_boundary`'s own already-computed event-kind
+evidence (`"event:<kind>:<confidence>"` strings, never re-derived) is
+classified into exactly two closed, READ-ONLY buckets copied verbatim
+from that module's own private `_AUTHORITATIVE`/`_RESET` sets: `unintent
+ional_dead_air` (safe) vs everything else (`retry_setup`, `searching_for_
+words`, `false_start`, `wrong_take`, `breaking_character`, `camera_
+adjustment`, and all four `*_reset_candidate` kinds) -> `BLOCKED_RETRY_OR_
+CORRECTION`, restating CLAUDE.md's own binding "Remove real failed/retry/
+BTS material" rule even where no aligned word exists in the trimmed room.
+`boundary_engine_pass`'s own audio-silence-event trim carries no such kind
+(literal RMS/silence-event confirmed only) and is never subject to this
+block. Proven by the 10-case parametrized sweep (tests covering every
+named kind).
+
+### 12. Meaning firewall
+Reuses `semantic_claims.classify_claim` (D-038) verbatim -- no duplicate
+semantic engine. Applied only when `broader_word_timings` surfaces real
+words inside the handle window (today: no live caller ever does, item 8).
+`CRITICAL` importance -> `BLOCKED_MEANING_CRITICAL`. Proven by tests
+25-27 (negation, quantity-with-unit-marker).
+
+### 13. Why `SAFE_SPEECH_HANDLE` is defined but never assigned
+This task's own directive requires BOTH that `SAFE_SPEECH_HANDLE` exist in
+the vocabulary AND that "presence of words alone must NOT authorize
+reuse... keep the handle non-authoritative." No mechanism in this
+codebase proves SOURCE-AUDIO-level word/double-speech reuse safety --
+that proof (`_word_safety`, double-speech overlap safety) is `pacing_
+transition_decision.decide_transition`'s (D-215's) own authority over a
+WHOLE TRANSITION window, never duplicated here. This module therefore
+defines `SAFE_SPEECH_HANDLE` (reserved for a future gate that wires a
+real proof through this foundation) but a word-present, non-critical
+handle is instead `SPEECH_PRESENT_NOT_AUTHORITATIVE` -- honestly
+representable, never treated as safe-to-use. `test_42_decision_table_
+never_assigns_safe_speech_handle` sweeps every combination of the
+decision table's own inputs (including `overlap`/`retry`/`meaning`/
+`speech_presence` cross product) and proves `SAFE_SPEECH_HANDLE` is
+unreachable from `_decide_handle_status` while remaining a defined member
+of `CLOSED_HANDLE_STATUSES`.
+
+### 14. Speech/non-speech classification level
+Minimum 3-value vocabulary (`NO_WORDS_PRESENT`/`WORDS_PRESENT`/`WORD_
+COVERAGE_UNKNOWN`), no new acoustic speech detector (D-222 item 18: none
+exists, none added). `NO_WORDS_PRESENT` is the default for every handle
+this module actually derives today -- a STRUCTURAL PROOF from the owning
+Boundary authority's own word-boundary clamp (`candidate = max(candidate,
+last_word_end)` / `min(candidate, first_word_start)`), not merely "no
+evidence was found." `WORD_COVERAGE_UNKNOWN` is defined and fully
+decision-table-tested (`test_42`) but not reachable from either of
+today's two real provenance sources, both of which supply the positive
+proof -- reserved honestly for a future provenance source that does not.
+
+### 15. Handle search bounds -- Option (A), justified not guessed
+Chosen: bound strictly to each clip's own already-recorded "original"
+Boundary-audit span (Option A), never a speculative reach into the full
+physical source file (Option B). Justification, grounded in current
+architecture (module docstring, "Scope decision" section, restated here):
+D-222 proved the RENDERER (item 6) and DECISION layer (item 12) already
+support Option B in principle, but also proved (item 11) that Option B's
+own precondition -- "broader word evidence that safely supports it" -- is
+NOT reachable from `DraftTimeline` today (the full per-source transcript
+is dropped between `take_segmentation.py` and `DraftTimeline`
+construction), and this task is explicitly scoped to "minimum identity/
+provenance helpers," not a new full-transcript retention seam or a new
+acoustic silence/room-tone detector (item 18: none exists). Option A uses
+ONLY evidence two existing, accepted authorities have ALREADY computed
+and ALREADY proved safe by their own accepted decision.
+
+### 16. Stable, deterministic handle identity
+`handle_id = f"handle:{source_asset_id}:{owner_clip_id}:{direction}:
+{round(handle_source_start,3)}:{round(handle_source_end,3)}"` -- no random
+UUID (tests 34-36 prove determinism, geometry-sensitivity, and non-UUID
+shape).
+
+### 17. Multi-source behavior
+Every discarded/neighbor-overlap check filters by `source_asset_id`
+first; a handle is never compared to a clip from a different physical
+file (test 45).
+
+### 18. D-222 central replay result
+The exact fixture D-222 named as "the central architecture proof" --
+source `0.0->10.0`, Boundary-finalized clip `2.0->8.0`, one Boundary
+audit row (`original_start=1.5, original_end=8.5, result_start=2.0,
+result_end=8.0`) -- reproduces PRE handle available `0.5` and POST handle
+available `0.5`, both `SAFE_NON_SPEECH_HANDLE`, with `clip.start`/`clip.
+end` themselves asserted unchanged before and after both builder calls
+(`test_29_d222_root_cause_replay_central_proof`). PROVEN.
+
+### 19. J-cut / L-cut / Audio Join Treatment reuse contracts
+This module chooses no J/L timing and implements no Audio Join Treatment
+-- both remain exactly as D-220/D-220C left them. AST-based structural
+tests (38-41, this track's own established convention over substring
+scans) prove `pacing_v2_source_audio_handle.py` imports neither `render`/
+`render_plan`, nor `pacing_transition_decision`/`pacing_v2_timing_
+policy`/`pacing_v2_evidence_adapter`, and defines no `J_CUT`/`L_CUT`/
+`decide_transition` identifier of its own. A future D-224 gate would
+consume `SourceAudioHandle` objects to widen `pacing_v2_evidence_
+adapter.py`'s own `left_words`/`right_words`-mediated candidate-timing
+derivation -- not built here.
+
+### 20. Room-tone/ambience status
+Unchanged from D-222 item 18: `ROOM_TONE_CLASSIFICATION_NOT_YET_
+AVAILABLE`. No RMS/loudness/noise-floor/acoustic-continuity primitive is
+implemented by this task -- `silence_analysis.py` remains the only
+"quiet"-shaped module in this codebase, still word-timing-gap-derived
+only.
+
+### 21. Diagnostics
+`source_audio_handle_diagnostics(handle)` returns exactly this task's own
+required per-handle row: `handle_id, direction, source_asset_id, owner_
+clip_id, video_start, video_end, handle_start, handle_end, available_
+duration, word_coverage_status, words_present_count, discarded_overlap_
+status, meaning_safety_status, handle_status, conflict_flags,
+provenance` (test 43 asserts every key present).
+
+### 22. Run summary
+`source_audio_handle_run_summary(handles)` returns COUNTS ONLY -- `pre_
+roll_handle_count, post_roll_handle_count, safe_non_speech_handle_count,
+speech_present_handle_count, speech_present_not_authoritative_count,
+blocked_discarded_count, blocked_neighbor_selected_clip_count, blocked_
+retry_or_correction_count, blocked_meaning_count, unknown_word_coverage_
+count, unavailable_count, total_safe_handle_duration` -- no master/global
+score of any kind (AST-based identifier scan, test 41, this track's own
+D-220-established convention).
+
+### 23. Determinism / no global state
+Every builder is a pure function of its own explicit inputs; no module-
+level mutable state, no monkeypatch install, no singleton registry.
+
+### 24. Video-window immutability
+`clip.start`/`clip.end` are read-only inputs everywhere in this module;
+no `dataclasses.replace` of a `DraftClip` occurs anywhere in `pacing_v2_
+source_audio_handle.py` (confirmed by direct inspection; test 37 proves
+it behaviorally across both directions).
+
+### 25. No ASR/provider call
+Zero network call, zero provider call, zero ASR rerun anywhere in this
+module -- every input is either an already-computed audit dict or an
+already-constructed `DraftClip`/`Word` object.
+
+### 26. No renderer live wiring
+`render.py`/`render_plan.py` are not imported (test 38) and not modified.
+No `RenderSegment` is constructed or consulted by this module. `Source
+AudioHandle` objects are not passed to any render/QC call site.
+
+### 27. Regression: compileall
+`python3 -m compileall cutsell_worker tests` -- clean, zero errors.
+
+### 28. Regression: targeted Pacing/Boundary/Renderer suites
+`pytest -k "pacing or boundary or render or d214 or d215 or d216 or d217
+or d218 or d220 or d222 or d223"` -- 830 passed, 0 failed (includes this
+task's own 45 new tests).
+
+### 29. Regression: full offline suite
+`pytest tests/ --ignore=tests/test_semantic_stitch.py` -- `5 failed, 5381 passed, 13 subtests passed` -- the FAILED 5 are `test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_retry_is_covered_when_prior_delivery_preserves_numbers_and_negation` and four in `test_video00_modal_hybrid_semantic_parity.py` (D-044's own Modal env-secret overlay workflow test), all pre-existing and unrelated to this task -- neither `cutsell_worker/pacing_v2_source_audio_handle.py` nor its own test file touches `active_path_identity.py`, the D-044 Modal workflow, or `hybrid_story_guard`-adjacent code. ZERO new failures introduced by this task.
+
+### 30. Verdict
+**A. SOURCE AUDIO HANDLE FOUNDATION OFFLINE PROVEN.** Adds `PACING_V2_
+SOURCE_AUDIO_HANDLE_FOUNDATION_OFFLINE_PROVEN`.
+
+### 31. Canonical status / next gate
+Names **D-224 -- PACING V2 AUDIO-HANDLE LIVE EVIDENCE INTEGRATION --
+DIAGNOSTIC ONLY -- NO AUTHORITY** as the next, separately-authorized gate
+(NOT implemented here): wire `SourceAudioHandle` objects into `pacing_v2_
+evidence_adapter.py`'s own candidate-timing derivation as DIAGNOSTIC-ONLY
+additional evidence rows (never authority) -- still zero live mode
+change, still `HARD_CUT`/`TIGHT_CUT` as the only executed modes.
+
+### 32. Canonical clarification recommendation (recorded, not performed)
+Restates D-222 item 23, not performed here either (scope unchanged):
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` should eventually
+clarify that the Boundary-finalized VIDEO WINDOW (Section 16.4) is
+DISTINCT from a Pacing-authorized AUDIO HANDLE WINDOW (this task's own
+concrete `SourceAudioHandle` type now gives that concept a real,
+implemented, offline-proven shape) -- a future, separately-authorized
+docs-only turn.
+
+### 33. App-roadmap status
+Unchanged sequence through D-222, then: source audio handle gap
+confirmed (D-222) -> **Source Audio Handle Foundation offline-proven,
+this entry (D-223)** -> next: D-224 audio-handle live evidence
+integration, diagnostic only, no authority (NOT implemented here) ->
+[reordered per D-222 item 22] controlled perceptual J/L fixture
+qualification (now against real handle-widened evidence) -> bounded J/L
+authority -> Audio Join Treatment architecture/forensic (sharing this
+same handle foundation) -> `SHORT_CROSSFADE`/`AMBIENCE_*` execution +
+decision-layer implementation -> micro-overlap final authority ->
+Renderer/export qualification -> unseen-RAW generalization/Human Gold
+parity -> product hardening -> TestFlight -> App Store.
+
+### 34. Authority/status fields (unchanged)
+`HARD_CUT`/`TIGHT_CUT` remain the ONLY live-executed transition modes.
+`CLICK_FADE` remains the only live Audio Join Treatment; `SHORT_
+CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE`
+remain `ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_AUTHORITY`. This
+task introduces, enables, or implements zero live authority anywhere.
+
+### 35. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. `docs/
+CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` intentionally NOT edited
+(item 32's recommendation recorded here for a future, separately-
+authorized docs-only turn).
+
+### 36. Confirmation
+NO Boundary/Ordering/Family/BestTake behavior change (both audit trails
+are READ, never re-executed or altered). NO Renderer change (`render.py`/
+`render_plan.py` untouched). NO timing-heuristic change (`pacing_v2_
+timing_policy.py`, D-220, untouched and unimported). NO Audio Join
+Treatment implemented. NO J/L mode selection performed or changed. NO
+pipeline reordering. NO RAW dispatched. NO provider/network call. NO live
+authority of any kind created, enabled, or implemented in this task.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+explicit "Then STOP. Do NOT implement D-224. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-224 (Pacing
+V2 Audio-Handle Live Evidence Integration, diagnostic only, no authority)
+as the next, separately-scoped engineering turn, and separately, whether
+to authorize item 32's own canonical-doc clarification as an independent,
+small, docs-only turn. No further action is taken on either.
+
+---
