@@ -25,6 +25,22 @@ name: CutSell Video00 Modal RAW
 on:
   workflow_dispatch:
     inputs:
+      source_key:
+        # D-228: optional override of the exact S3 object this RAW processes.
+        # Empty (default) = the existing hardcoded Video00 canonical source,
+        # i.e. byte-identical behaviour to every run before D-228. Setting
+        # this is a one-off, explicitly-authorized real-sibling-RAW decision
+        # (docs/CUTSELL_DECISIONS.md D-227/D-228) -- it changes ONLY which
+        # object is downloaded/processed; it never changes engine behavior,
+        # never touches cutsell_worker, and disables the Video00-specific
+        # Human Gold/Cut.ai quality-ladder comparison for that one run only
+        # (those references are Video00-specific edits and are not valid
+        # comparisons for a different source; see the "Download Human Gold
+        # reference video" and "Video00 quality ladder" steps below).
+        description: "Optional exact S3 key override (e.g. for a D-227-selected sibling RAW). Empty = canonical Video00."
+        required: false
+        default: ""
+        type: string
       hybrid_max_edit_usd:
         # D-094.F2: per-edit hybrid dollar ceiling override
         # (CUTSELL_HYBRID_MAX_EDIT_USD). Empty (default) = code default
@@ -344,12 +360,19 @@ permissions:
   contents: read
 
 env:
-  SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+  # D-228: an explicit workflow_dispatch source_key input overrides the
+  # canonical Video00 default -- every run before D-228, and every run that
+  # leaves this input empty, is byte-identical to prior behavior.
+  SOURCE_KEY: ${{ github.event.inputs.source_key || 'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4' }}
+  CANONICAL_VIDEO00_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
   # QA-only authoritative Human Gold reference -- never read by production
-  # Selection/Boundary code, never part of the run_op() payload.
+  # Selection/Boundary code, never part of the run_op() payload. Video00-
+  # specific: only a valid comparison when SOURCE_KEY is Video00 itself
+  # (see the "Download Human Gold reference video" step's own D-228 guard).
   HUMAN_GOLD_KEY: Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
   # D-095 QA-only Cut.ai commercial-baseline reference (docs/video00-reference-oracles.md)
-  # -- same rule as Human Gold: never read by production code, never in the payload.
+  # -- same rule as Human Gold: never read by production code, never in the payload,
+  # and (D-228) Video00-specific only.
   CUTAI_REFERENCE_KEY: Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4
   BENCHMARK_ID: video00-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -419,6 +442,46 @@ jobs:
             --output /tmp/templates.json
           jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
           test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: D-228 sibling RAW S3 existence preflight (metadata only, before paid compute)
+        # Mandatory pre-dispatch check per docs/CUTSELL_DECISIONS.md D-228:
+        # a HEAD-object-equivalent metadata lookup only, using the same
+        # already-authorized GitHub Actions S3 credentials every other step
+        # in this workflow already uses (via the RunPod template env values
+        # loaded above) -- no new credential source, no signed URL, no
+        # credential value ever printed (masked exactly like every other
+        # step in this file). When SOURCE_KEY is the unchanged Video00
+        # default this is a no-op safety re-confirmation of an object this
+        # workflow has downloaded successfully on every prior run; it only
+        # matters functionally for an explicit source_key override.
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          echo "Preflight target key: \"$SOURCE_KEY\""
+          if aws s3api head-object --bucket "$S3_BUCKET" --key "$SOURCE_KEY" \
+              > /tmp/source-head.json 2> /tmp/source-head-error.txt; then
+            SIZE=$(jq -r '.ContentLength // 0' /tmp/source-head.json)
+            LASTMOD=$(jq -r '.LastModified // "unknown"' /tmp/source-head.json)
+            CONTENTTYPE=$(jq -r '.ContentType // "unknown"' /tmp/source-head.json)
+            echo "SOURCE_OBJECT_FOUND size_bytes=$SIZE last_modified=\"$LASTMOD\" content_type=\"$CONTENTTYPE\""
+            if [ "$SIZE" -le 0 ]; then
+              echo "SOURCE_OBJECT_NOT_AVAILABLE (object exists but is zero-byte)"
+              exit 3
+            fi
+          else
+            echo "SOURCE_OBJECT_NOT_AVAILABLE"
+            # aws CLI head-object error text never contains the object body,
+            # credentials, or a signed URL -- only an HTTP status/error code.
+            cat /tmp/source-head-error.txt || true
+            exit 3
+          fi
 
       - name: Build masked Modal env-secret file
         shell: bash
@@ -857,12 +920,23 @@ jobs:
             echo "::add-mask::$value"
             export "$key=$value"
           done
-          aws s3 cp "s3://$S3_BUCKET/$HUMAN_GOLD_KEY" artifact/human-gold-video00.mp4
-          test -s artifact/human-gold-video00.mp4
-          # D-095: Cut.ai commercial baseline (QA-only) + the RAW source for the
-          # four-way quality ladder below.
-          aws s3 cp "s3://$S3_BUCKET/$CUTAI_REFERENCE_KEY" artifact/cutai-video00.mp4
-          test -s artifact/cutai-video00.mp4
+          # D-228: Human Gold / Cut.ai are edits OF Video00 -- never a valid
+          # comparison for a different SOURCE_KEY. Skip both downloads (and
+          # therefore the quality-ladder step below self-skips too, per its
+          # own existing "reference video is missing" guard) rather than
+          # inventing a parity result for a sibling RAW that has no such
+          # reference (docs/CUTSELL_DECISIONS.md D-228: REFERENCE_PARITY_
+          # NOT_AVAILABLE_FOR_SIBLING).
+          if [ "$SOURCE_KEY" = "$CANONICAL_VIDEO00_KEY" ]; then
+            aws s3 cp "s3://$S3_BUCKET/$HUMAN_GOLD_KEY" artifact/human-gold-video00.mp4
+            test -s artifact/human-gold-video00.mp4
+            # D-095: Cut.ai commercial baseline (QA-only) + the RAW source for the
+            # four-way quality ladder below.
+            aws s3 cp "s3://$S3_BUCKET/$CUTAI_REFERENCE_KEY" artifact/cutai-video00.mp4
+            test -s artifact/cutai-video00.mp4
+          else
+            echo "SOURCE_KEY is not canonical Video00 -- skipping Human Gold/Cut.ai reference download. REFERENCE_PARITY_NOT_AVAILABLE_FOR_SIBLING."
+          fi
           aws s3 cp "s3://$S3_BUCKET/$SOURCE_KEY" artifact/raw-video00.mp4
           test -s artifact/raw-video00.mp4
 
