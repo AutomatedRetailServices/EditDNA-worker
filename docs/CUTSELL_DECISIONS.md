@@ -49589,3 +49589,291 @@ D-227 may be authorized. No further action is taken on D-227 by this
 task.
 
 ---
+
+## D-227: S3 Sibling RAW Discovery / Candidate Selection (post D-226)
+
+**Status: VERDICT A -- REAL SIBLING RAW SELECTED. D-228 ONE-RAW
+QUALIFICATION READY.** FORENSIC / DISCOVERY ONLY. Per the Product
+Owner's sequencing override, D-227 replaces the previously-named
+"bounded J/L advanced authority" as the next gate: before any live J/L
+authority, one real-media sibling RAW (distinct from Video00) must be
+qualified (D-228). This task discovered and selected that sibling using
+only already-authorized, already-completed evidence -- zero new RAW,
+zero Modal, zero RunPod, zero provider call, zero `cutsell_worker/*.py`
+change.
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, unchanged at `998d779` (D-226) --
+**zero files changed** by this task; the only artifact is this decision
+entry.
+
+### 2. Canonical S3 prefix
+`Editdna longform validation/` -- confirmed as `CLEAN_CUT_GOLD_PREFIX`
+in `cutsell_worker/validation_job.py` and as the `CUTSELL_VALIDATION_
+PREFIX`/hardcoded `SOURCE_KEY` value across every relevant workflow
+(`cutsell-video00-v2-rerun.yml`, `cutsell-video00-human-gold-audit.yml`,
+`cutsell-run38-gold-one-shot.yml`, `cutsell-raw-clean-benchmark.yml`,
+`cutsell-unseen-clean-cut-benchmark.yml`, `benchmark52-round13-*.yml`).
+Bucket name resolves from the GitHub Actions secret `S3_BUCKET` --
+never present as plaintext in this repository (by design), and this
+session's own local `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`
+environment values are NOT valid AWS credentials for this or any bucket
+(`boto3.list_buckets()` returned `InvalidAccessKeyId` -- confirmed, not
+guessed), so this session cannot perform a live `list_objects_v2` call
+itself. No credential, key, or signed URL is reproduced anywhere in this
+entry.
+
+### 3. Sibling media count (from static repository evidence)
+Exactly 3 real `.mp4` filenames under this exact prefix are referenced
+across the repository's own workflow/ops configuration as a standing,
+repeatedly-reused "focused Gold RAW" set (`ops/round14_capacity_
+failover.py`, `ops/round18_cpu_fallback.py`,
+`benchmark52-round13-broad-availability.yml`, `-expanded-sequential.yml`,
+`-failover.yml`):
+- `VIDEO-2026-07-30-09-18-03.mp4` -- Video00 itself (the canonical
+  source; excluded as a sibling per this task's own instruction).
+- `VIDEO-2026-07-30-09-24-13.mp4` -- real sibling candidate #2.
+- `VIDEO-2026-07-30-10-22-46.mp4` -- real sibling candidate #1
+  (selected, see item 15).
+Two additional `.MP4` filenames appear under the same prefix but are
+NOT raw sibling candidates (item 5): the Human Gold and Cut.ai QA
+oracle references named in `CLAUDE.md`'s own canonical quality-ladder
+section. No other real video filename under this prefix was found
+anywhere in the repository's static configuration; this session has no
+live-listing capability to confirm whether additional, never-referenced
+objects also exist under the prefix (honestly unconfirmed -- see item
+19).
+
+### 4. Usable RAW count
+**2** real sibling candidates identified (item 3); both independently
+PROVEN real, valid, and fully processable by direct historical evidence
+(item 6), not merely by filename pattern-matching.
+
+### 5. Duplicate / derivative exclusions
+- `VIDEO-2026-07-30-09-18-03.mp4` -- excluded: this IS Video00, the
+  canonical source itself, not a sibling.
+- `5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4` -- excluded: this is the
+  HUMAN GOLD QA oracle reference (`CLAUDE.md`'s canonical quality-ladder
+  section; also the `GOLD_BASENAME` in `cutsell-video00-human-gold-
+  audit.yml`) -- a curated editorial reference output, never raw
+  footage, and QA-ONLY per `CLAUDE.md` (never exposed to production
+  selection logic).
+- `D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4` -- excluded: this is the
+  CUT.AI QA oracle reference (`CLAUDE.md`'s same section) -- a rendered
+  commercial-baseline comparison output, never raw footage.
+No byte-identical-copy check was possible (no live S3 access, item 2),
+but both exclusions above rest on identity (exact filename match to a
+named, documented QA reference), not size/hash heuristics -- the
+strongest available evidence in this session.
+
+### 6. Decisive real-evidence discovery (beyond static grep)
+Static filename evidence alone (item 3) would only support a WEAK
+candidate claim. This task went further: it found two CHECKED-IN,
+non-code JSON pointer files (`ops/round14-live.json`, `ops/round18-
+live.json`, both pre-existing on this branch, untouched by this task)
+recording real historical GitHub Actions run ids
+(`32609632136`/`32612783785`) for exactly these two ops scripts. Reading
+those ALREADY-COMPLETED runs' own job logs (read-only, via `get_job_
+logs`, zero new dispatch) proved:
+- Run **32612783785** (`Video 00 round-18 direct-cpu 00-02-03
+  benchmark`, `ops/round18_cpu_fallback.py`, CPU-only -- no RunPod GPU
+  pod required) ran `run_focused_clean_cut_benchmark` against exactly
+  the 3 keys in item 3 and its own hard assertions (`result.get(
+  "source_count") != 3 or result.get("completed_count") != 3` and
+  `result.get("execution_failure_count") or result.get(
+  "provider_failure_count")`) did NOT raise -- meaning **all 3 sources,
+  including both sibling candidates, completed the ENTIRE CutSell
+  pipeline (S3 download, faster-whisper ASR, mediapipe vision, Selection)
+  with zero execution failures and zero provider failures**, confirmed
+  by the job's own log lines (`faster-whisper`/`mediapipe` inference
+  activity between 02:27 and 02:42 UTC) and by three real preview MP4s
+  actually rendered and uploaded (`cutsell-focused-round18-previews-...`,
+  118,633,603 bytes, 3 files). The run's own EVENTUAL failure was a
+  content-specific `validate_gold` assertion (`ops/round14_capacity_
+  failover.py:278`, checking for the word "sonograf" between 119.5s and
+  123.5s) -- a Video00-Gold-comparison-specific check, unrelated to
+  either sibling's own validity as raw material.
+- Run **32609632136** (`Video 00 round-14 capacity-failover ...`,
+  GPU-based) failed earlier, before real processing (`focused-previews/
+  *.mp4` never produced) -- superseded by the CPU-fallback run above as
+  the authoritative real-evidence source.
+- Both artifact ZIPs from run 32612783785 are now `expired: true`
+  (14-day retention, this run is from 2026-08-23) -- the per-source
+  `focused-result.json` (with exact `source_duration_sec` per file) is
+  no longer retrievable; the job LOG excerpt above is the surviving
+  evidence and is sufficient to prove real-media validity, if not exact
+  duration/resolution.
+- Three other historical runs (`benchmark52-round13-broad-
+  availability.yml` run 32613926219, `-expanded-sequential.yml` run
+  32614063602, `-failover.yml` run 32609487344 = the same run id as
+  32609632136 above under a different display name) were also checked
+  and confirmed to have failed during RunPod GPU ACQUISITION, before
+  ever reaching real S3/processing -- they contribute no metadata and
+  are recorded here only to show the search was exhaustive across every
+  workflow referencing these keys.
+
+### 7. Candidate #1 (RECOMMENDED)
+`Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4`. Size:
+not independently confirmed this session (no live S3 access; the
+expired artifact would have carried it). Duration: not independently
+confirmed (same reason). Audio present: **YES** (proven by item 6 --
+faster-whisper ASR ran to completion against it as part of the same
+3-source run with zero execution failures). Video present: **YES**
+(proven by item 6 -- mediapipe vision processing ran to completion
+against it, and a real preview MP4 was rendered and uploaded).
+Resolution: not independently confirmed. Why useful for D-228: real,
+proven-processable human-speech source footage, temporally the most
+separated from Video00 (~64 minutes later, same recording date) of the
+two candidates -- most likely to be a distinct topic/take from Video00
+rather than an immediate re-take, maximizing early-generalization value
+per this task's own "different enough from Video00" preference. Risks/
+unknowns: exact duration/resolution/join count unconfirmed; whether it
+still exists unchanged in S3 today (last confirmed 2026-08-23, ~19 days
+before this entry) is not independently re-verified this session (no
+live S3 access); a small chance the object has since moved or been
+deleted, though this prefix is documented (`CLAUDE.md`) as a stable,
+long-lived validation dataset, not a transient path.
+
+### 8. Candidate #2 (alternate)
+`Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4`. Same
+proof of audio/video presence and full processability as candidate #1
+(item 6 -- part of the identical 3-source, zero-failure run). Size/
+duration/resolution: not independently confirmed, same reason. Why
+useful for D-228: also real, proven-processable, human-speech source
+footage; closer in time to Video00 (~6 minutes later) -- plausibly a
+continuation or adjacent take from the same session, which could still
+offer genuine generalization value (a different specific recording) but
+carries a higher chance of resembling Video00's own content/structure
+than candidate #1. Risks/unknowns: identical to item 7's unknowns, plus
+the added uncertainty of closer content similarity to Video00.
+
+### 9. Candidates #3-5
+None found. Static repository/ops search (item 3) surfaced only these 2
+real sibling candidates under the canonical prefix; no third, fourth,
+or fifth real sibling filename appears anywhere in this repository's
+own configuration. This is an honest limitation of a config-based
+search, not proof no further siblings exist in the bucket (item 19).
+
+### 10-14. Sizes / durations / audio / video / resolution
+Reported per-candidate in items 7-8. No numeric size/duration/resolution
+value is asserted for either candidate -- only binary audio/video
+presence (proven) and processability (proven). Fabricating numeric
+values from the expired artifact would violate this contract's "never
+fabricate a verdict from incomplete/unretrievable data" rule; they are
+honestly reported as unconfirmed instead.
+
+### 15. Selected RECOMMENDED_D228_RAW
+**`Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4`**
+
+### 16. Selection rationale
+Both candidates are proven real, valid, human-speech source media with
+zero execution failures across the full CutSell pipeline (item 6) --
+categorically stronger evidence than a bare ffprobe metadata probe
+would have given (which would only prove container validity, not full
+pipeline processability). Between the two, candidate #1 is preferred
+for its greater temporal separation from Video00 (more likely a
+genuinely distinct recording/topic, better satisfying this task's own
+"different enough from Video00 to provide generalization value"
+criterion) while candidate #2 remains a fully qualified, ready
+alternate if candidate #1 turns out unsuitable once actually opened in
+D-228 (e.g. if it is unexpectedly short, or its content resembles
+Video00 too closely).
+
+### 17. Risks / unknowns
+Exact duration, resolution, codec, and object size for both candidates
+are unconfirmed (item 6's expired-artifact limitation). Current live
+existence in S3 is not re-verified this session (last confirmed
+2026-08-23). Whether either candidate contains genuine J/L-eligible
+pauses/pre-roll/post-roll is UNKNOWN and explicitly not required by
+this task's own instruction ("a candidate producing 0 J/L in D-228 is
+still valid real evidence"). No claim is made about either candidate's
+own editorial content, claims, or safety-relevant material -- D-228's
+own processing will surface that.
+
+### 18. Early-generalization value
+Both candidates are genuinely independent recordings from Video00 (per
+their own S3 keys and the same-session, different-timestamp evidence in
+item 6) that have never been used for any Pacing V2 (D-21x-D-226)
+diagnostic -- exercising SourceAudioHandle/D-215/D-220/Pacing
+diagnostics against either would be the FIRST real-media generalization
+test of this entire track outside Video00 itself, directly answering
+D-225's own open question ("is Video00's zero-handle result Video00-
+specific, or does it generalize?").
+
+### 19. Honest limitation: bucket completeness unknown
+This task found REAL sibling candidates entirely through STATIC
+repository/ops-configuration search plus READ-ONLY historical CI log
+forensics -- never a live `list_objects_v2` call (this session's own
+local AWS credentials are invalid, item 2, and no new workflow was
+authored or dispatched to obtain one, per this task's own "no workflow
+behavioral changes" scope boundary). This means: (a) the 2 candidates
+above are CONFIRMED real and processable, to a stronger standard than a
+plain listing would give; but (b) this task CANNOT rule out that
+additional, never-yet-referenced sibling objects exist under the same
+prefix -- only that no other filename appears anywhere in this
+repository's own configuration. A live bucket listing remains a
+legitimate follow-up (see item 21) but is not required to proceed with
+D-228, since item 15's candidate is already independently proven
+sufficient.
+
+### 20. D-226 relationship
+D-226 (controlled J/L timing qualification, synthetic tone-burst
+fixtures) is unchanged and NOT replaced -- its own decision entry and
+published review artifact stand as-is, still pending Product Owner
+Watch+Listen (D-226 item 15). D-228 will complement, not supersede,
+D-226's synthetic-fixture evidence with real human source media.
+
+### 21. Authority deferral status
+Unchanged: NO live J/L authority exists, and none is authorized by this
+task. The Product Owner's sequencing override (this task's own header)
+supersedes D-226's own "names D-227 = bounded J/L authority" language --
+D-227 is now this S3 discovery gate, and bounded J/L authority is
+renamed/deferred to a FUTURE gate (D-229 or later), contingent on BOTH
+(a) Product Owner Watch+Listen confirmation on D-226's artifact, AND
+(b) D-228's own real-media qualification result. A genuine, safe
+lightweight S3-listing mechanism (item 19) -- e.g. a new, minimal,
+workflow_dispatch-only, zero-RunPod/zero-Modal/zero-CutSell-processing
+step that calls `list_validation_videos`/`list_objects_v2` against this
+prefix and nothing else -- remains a reasonable, low-risk follow-up
+recommendation for a FUTURE separately-authorized gate, not started
+here.
+
+### 22. D-227 verdict
+**A. REAL SIBLING RAW SELECTED -- D-228 ONE-RAW QUALIFICATION READY.**
+Selected: `Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4`
+(item 15), proven real and fully processable by direct historical
+evidence (item 6), not merely by filename inference.
+
+### 23. Exact D-228 gate
+D-228 -- ONE SIBLING RAW REAL-MEDIA HANDLE-AWARE PACING / J-L
+QUALIFICATION, against `VIDEO-2026-07-30-10-22-46.mp4`, evaluating
+SourceAudioHandle availability, old-vs-handle-aware J/L candidate
+windows, D-215 transition recommendation, D-220 timing policy where
+eligible, word/meaning/double-speech firewalls, and Pacing diagnostics
+-- exactly mirroring D-225's own methodology against Video00. Still: NO
+live J/L authority. Not started here -- named only, per this task's own
+"Then STOP. Do NOT launch D-228" instruction.
+
+### 24. Confirmation
+NO RAW dispatched by this task (all evidence is READ-ONLY historical
+log inspection of ALREADY-COMPLETED runs from 2026-08-23, pre-dating
+this task). NO Modal, NO RunPod, NO provider call initiated by this
+task. NO live J/L authority. NO `cutsell_worker/*.py` change (item 1:
+zero files changed). NO workflow behavioral change (zero `.yml` files
+touched or authored). NO credential, access key, secret value, or
+signed URL revealed anywhere in this entry (item 2). NO CutSell RAW
+processing initiated by this task (the processing evidence in item 6
+comes from a pre-existing, already-completed run this task only read).
+
+### 25. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. No other
+file changed.
+
+**HUMAN ACTION REQUIRED:** NO for this gate's own scope (forensic
+discovery is complete and self-contained); YES at the next gate --
+per this task's own "Then STOP. Do NOT launch D-228. Wait for Product
+Owner coordination," explicit Product Owner authorization is required
+before D-228's own one sibling RAW real-media qualification may be
+dispatched.
+
+---
