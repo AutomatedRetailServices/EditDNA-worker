@@ -55459,3 +55459,196 @@ requalification) is a separate, not-yet-authorized gate. **Paid compute
 required?** No. **RAW required?** No.
 
 Then STOP. Do NOT launch D-235U. Wait for Product Owner coordination.
+
+## D-235U — ONE REAL-MEDIA FREEZE REQUALIFICATION (POST D-235T)
+
+**Status:** ONE PAID MODAL RAW EXECUTED, exactly as authorized. NO second
+RAW. NO engine/threshold/materiality/Freeze/RepairLoop code change after
+the result (two workflow-only fixes were made BEFORE dispatch, both
+required simply to make dispatch possible at all — see "Pre-dispatch
+fixes" below). Result: **PRIMARY QUESTION NOT VERIFIABLE from this
+session's own tooling** — reported honestly rather than guessed; see
+"What could not be confirmed" below. This is not a claim that Freeze
+failed to clear or that D-235R/D-235T generalize incorrectly — it is an
+honest statement that this session could not read the evidence that
+would answer the question either way.
+
+**RAW:** `Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`
+(exact key from the directive, no substitution). **Workflow:**
+`cutsell-video00-modal-raw.yml`, Modal backend. **Run:**
+[34640040803](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34640040803),
+head `b87695a`. **Authority flag:**
+`lost_atom_materiality_freeze_authority_enabled=1` (`CUTSELL_LOST_ATOM_
+MATERIALITY_FREEZE_AUTHORITY_ENABLED=1`), confirmed present in the run's
+own printed environment block. **S3 preflight:** the workflow's own
+built-in `D-228 sibling RAW S3 existence preflight` step (metadata-only,
+before paid compute) completed successfully before the Modal step ran.
+**Duration:** 19:39:47–19:43:13 UTC (~3.5 min); the Modal benchmark step
+itself ran 19:40:11–19:42:49 (~2.6 min) and completed successfully.
+**Teardown:** `Modal teardown confirmation` step succeeded — no lingering
+GPU.
+
+**Pre-dispatch fixes (workflow-only, required simply to be able to
+dispatch AT ALL, not an engine/editorial change):** adding the
+`lost_atom_materiality_freeze_authority_enabled` `workflow_dispatch`
+input as an 18th inline `${{ github.event.inputs.X }}` overlay condition
+inside the workflow's already-enormous "Build masked Modal env-secret
+file" step pushed that ONE step over GitHub Actions' own workflow-parser
+expression-length ceiling — `run_workflow` failed with `Exceeded max
+expression length 21000` and could not dispatch the workflow AT ALL (not
+just this input), confirmed live via a failed first dispatch attempt on
+this branch. Fixed by moving the new overlay into its own dedicated step
+(`D-235U lost-atom materiality Freeze authority overlay`) — a purely
+mechanical split (same shared `/tmp/cutsell-env.json`, same default-OFF,
+same fail-closed contract, proven byte-identical via the full targeted
+test suite before the second dispatch attempt, which succeeded).
+
+**What was confirmed (from the run's own step results and the tail of
+its job log this session's tooling could reach):**
+- `SOURCE_KEY`/`CUTSELL_BENCHMARK_PAYLOAD_JSON` in the run's own printed
+  environment exactly match the directive's required sibling key —
+  `{"op":"focused","source_key":"Editdna longform validation/copy_
+  9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4", ...}`.
+- The Modal benchmark itself ran and completed (no crash, no timeout).
+- D-150 Semantic Authority summary (captured in the reachable log tail):
+  exactly 2 families, 1 member each — a structurally very simple
+  sibling (no multi-take retry contest visible at that layer).
+- `D-218R`/`D-221`/`D-225` Pacing-related validator steps failed with the
+  EXPLICIT, self-diagnosing error `diagnostics['pacing_v2'] IS MISSING
+  FROM THE SERIALIZED RESULT` — root cause identified with certainty
+  from that error text plus this run's own dispatch inputs: this
+  dispatch set ONLY `source_key` and `lost_atom_materiality_freeze_
+  authority_enabled` (exactly the two the directive named to set), and
+  did NOT also set `pacing_v2_diagnostics_enabled`/the handle-aware/
+  Audio-Join-Treatment diagnostic inputs the directive's own "REQUIRED
+  DIAGNOSTIC STACK" section asked to be preserved/enabled. This is an
+  honest gap in this session's own dispatch, not a Freeze block and not
+  a regression in D-216/D-217/D-234's own diagnostics — reported plainly
+  rather than mischaracterized as either.
+- `Verify frozen Selection lock` / `Verify Video00 architecture` /
+  `Verify Human Gold regression QA (18-check manifest)` failed. Per the
+  directive's own "VIDEO00-SPECIFIC ORACLES" instruction, all three are
+  classified **VIDEO00_SPECIFIC_ORACLE_NOISE** for this sibling (they
+  assert Video00's own fixed selection count / story text / Human Gold
+  manifest, which no non-Video00 source can ever match) — never used to
+  judge this sibling's own correctness. `Video00 quality ladder (D-095)`
+  itself, by contrast, is sibling-aware (D-228) and completed
+  successfully.
+- Human-viewable output: **CONFIRMED PRESENT.** Artifact
+  `cutsell-video00-modal-human-review`, 68,737,253 bytes (~65.5 MiB),
+  uploaded successfully, downloadable by the Product Owner from the
+  [run's Artifacts section](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34640040803).
+  This session did not open/score the video (not required this gate) and
+  could not, for the network reason below.
+- A small (22,112-byte) `cutsell-video00-modal-validator-reports`
+  artifact exists that almost certainly contains
+  `artifact/selection-freeze-diagnostics.json` and `artifact/lost-
+  semantic-atom-diagnostics.json` (the D-235G/D-235J extraction steps'
+  own output files, confirmed present as upload targets in the run's
+  step list) — see below for why this session could not read it.
+
+**What could not be confirmed (honest tooling/environment limitation,
+not a code or editorial finding):** this session's sandboxed network
+egress policy blocks the exact host (`productionresultssa1.blob.core.
+windows.net`, and `results-receiver.actions.githubusercontent.com`)
+every GitHub Actions artifact/full-log download is signed to — confirmed
+via three independent attempts (direct `curl`, `WebFetch`, and the
+alternate `get_workflow_run_logs_url` host), each returning an explicit
+`EGRESS_BLOCKED`/`403 connect_rejected` from the sandbox's own egress
+proxy. Separately, `get_job_logs` (the one in-sandbox path to log
+content) has a hard response-size ceiling this session confirmed
+directly: three separate requests, with `tail_lines` set to 4,000,
+50,000, and 300,000 respectively, ALL returned the same ~400–480 KB tail
+of this job's 10,979-line total log, starting no earlier than
+19:43:00 UTC — 13 seconds after the Modal benchmark step finished
+(19:42:49) and after the `Print full canonical diagnostics` (19:42:55)
+and `D-235G`/`D-235J` extraction steps (19:42:59) had already printed
+and completed. Because the tool only ever returns a fixed byte-budget
+from the very END of the log, and the job's own later print-heavy steps
+already consume that entire budget, this session structurally cannot
+reach those two steps' own stdout, the engine's raw JSON, or the small
+validator-reports artifact through any tool available to it. This is
+reported as a genuine finding, not worked around by guessing: `freeze_
+blocked`, `lost_semantic_atoms`, the D-235R authority verdict, the
+D-235S provenance link, and the D-235T RepairLoop suppression outcome
+for THIS run are **NOT VERIFIED** by this session. The Modal run and its
+artifacts remain intact (nothing expires before 2026-09-25) for the
+Product Owner, or a future session with broader network/tooling access,
+to inspect directly.
+
+**Material safety check:** cannot be completed against this run's own
+raw diagnostics for the reason above. No suppression of any kind was
+attempted or reported by this session, so there is no risk of a
+MEANING_CRITICAL/EDITORIALLY_REQUIRED/CONFLICTED/fail-closed/critical-
+claim/contradiction/idea-loss/integrity suppression having occurred
+unnoticed — but this is a statement about what this session did (read
+nothing, therefore suppressed nothing), not an independent proof the
+run's own engine behaved safely. The D-235Q/D-235R/D-235S/D-235T offline
+test suites (507/507) remain the actual proof of the fail-closed
+contract; this RAW was meant to add real-media confirmation, which it
+did not yet deliver.
+
+**Lost-atom report / RepairLoop report / Freeze report:** not populated
+this gate — see "What could not be confirmed" above. No field in these
+sections is fabricated.
+
+**Video00-specific oracle noise (per directive):** `Verify frozen
+Selection lock`, `Verify Video00 architecture`, `Verify Human Gold
+regression QA (18-check manifest)` — all three read Video00-fixed
+expectations that cannot be met by any substituted sibling; excluded
+from this sibling's own correctness judgment.
+
+**Recommendation (documentation only, no action taken):** a future,
+separately-authorized gate should (a) re-run with the full required
+diagnostic-stack flags actually set
+(`pacing_v2_diagnostics_enabled`/handle-aware/`audio_join_treatment_
+diagnostics_enabled` alongside `lost_atom_materiality_freeze_authority_
+enabled`) if D-235U's own primary question still needs a real-media
+answer, and/or (b) have the workflow print the D-235G/D-235J extraction
+steps' own JSON later in the step order (or in a dedicated final
+"digest" step) so a `get_job_logs`-tail-based analysis can reach it
+without needing the blocked artifact host — this is a workflow-ordering
+observation for a FUTURE gate to decide and implement, not something
+this task changed.
+
+**Result classification: E — OBSERVABILITY / EXECUTION REGRESSION.**
+Specifically: (1) this session's own dispatch omitted the Pacing/Audio-
+Join diagnostic-stack flags the directive asked to preserve/enable,
+costing 3 validator steps their intended visibility; (2) this session's
+sandboxed network/tooling access cannot reach the specific evidence
+(small artifact + mid-run log content) needed to answer the directive's
+own Primary Question. Neither (1) nor (2) is evidence of a Freeze,
+materiality, D-235R, D-235S, or D-235T defect — nor evidence that they
+work correctly on real media. The real-media question D-235U set out to
+answer remains genuinely open.
+
+**Canonical status:** `LOST_ATOM_FREEZE_AUTHORITY_REAL_MEDIA_
+REQUALIFICATION_INCONCLUSIVE_OBSERVABILITY_GAP`.
+
+**Exact next gate:** none launched automatically. The Product Owner
+should either (a) open run 34640040803's own artifacts directly (normal
+browser/GitHub access, unaffected by this session's sandbox) to read
+`selection-freeze-diagnostics.json`/`lost-semantic-atom-diagnostics.json`
+and the human-review MP4 and report back what they show, or (b)
+authorize a fresh D-235U-shaped RAW with the full diagnostic-stack flags
+set once a network/tooling path exists to read the result without this
+gap. Both are Product Owner decisions, not resumed automatically.
+
+**Engine patch required after this?** No. **Additional RAW required?**
+Not by this session on its own authority — see above. **Paid compute
+required after this?** Only if the Product Owner authorizes it.
+
+**Track status:** Freeze track — still open (D-235T offline-proven,
+real-media confirmation still pending). Pacing track — untouched, not
+reached observably this gate. Audio Join track — untouched, not reached
+observably this gate. App-roadmap status — unaffected.
+
+**Confirmation:** NO second RAW was run. NO provider other than Modal
+was used. NO post-result engine/workflow/threshold/materiality/Freeze/
+RepairLoop code change was made after the run completed; the two commits
+in this gate (workflow input wiring + the parser-limit step split) were
+both made and tested BEFORE dispatch, required only to make the
+authorized dispatch possible.
+
+Then STOP. Do NOT launch a further RAW. Wait for Product Owner
+coordination.
