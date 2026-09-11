@@ -80,6 +80,7 @@ from .pacing_v2_audio_join_treatment_live_diagnostics import (
     audio_join_treatment_diagnostics_enabled,
     build_audio_join_treatment_live_diagnostics,
 )
+from .selection_freeze_diagnostics import build_selection_freeze_diagnostics
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -873,6 +874,39 @@ def process_universal_clean_cut_sources(
                         **extra_diagnostics,
                     },
                 ))
+
+        # D-235G: Selection Freeze blocker OBSERVABILITY ONLY -- runs
+        # after the freeze_blocked if/else above either way, reading
+        # ONLY the already-final `freeze_blocked` boolean and the
+        # already-computed evidence this function already built above
+        # (`coherence_diag`, `repair_result.status`, `authoritative_
+        # result.status`, `post_authority_integrity_failed`). Never
+        # recomputes whether Freeze should block, never changes it;
+        # `pacing_seam_reached` is the plain negation of the SAME
+        # `freeze_blocked` value already used to gate the Pacing gate
+        # above -- not a second decision. `*_serialized` fields are pure
+        # key-presence checks on `result.draft.diagnostics`, never a new
+        # evidence source. Sibling-safe: no Video00 golden-file content,
+        # no hardcoded expected count, generic for any source.
+        _post_authority_diag = (result.draft.diagnostics or {}).get("post_authority_validation") or {}
+        selection_freeze_diag = build_selection_freeze_diagnostics(
+            freeze_blocked=freeze_blocked,
+            coherence_diag=coherence_diag,
+            repair_loop_status=getattr(repair_result, "status", None),
+            resolver_status=getattr(authoritative_result, "status", None) if authoritative_result is not None else None,
+            post_authority_integrity_failed=post_authority_integrity_failed,
+            post_authority_integrity_failure_codes=_post_authority_diag.get("integrity_failures") or (),
+            selected_count_before_freeze=len(result.draft.selected) if result.draft.selected is not None else None,
+            pacing_v2_serialized="pacing_v2" in (result.draft.diagnostics or {}),
+            pacing_v2_handle_aware_serialized="pacing_v2_handle_aware" in (result.draft.diagnostics or {}),
+            audio_join_treatment_v2_serialized="audio_join_treatment_v2" in (result.draft.diagnostics or {}),
+        )
+        result = replace(result, draft=replace(
+            result.draft, diagnostics={
+                **result.draft.diagnostics,
+                "selection_freeze_diagnostics": selection_freeze_diag,
+            },
+        ))
     else:
         selection_stage = "not_applicable_missing_draft_contract"
         polish_stage = "not_applicable_missing_draft_contract"

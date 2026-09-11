@@ -52597,3 +52597,226 @@ established precedent for every prior D-218R/D-221/D-225-style step).
 no authority change was made or attempted by this task.**
 
 ---
+
+
+## D-235G -- Selection Freeze Blocker Observability + Sibling Qualification Instrumentation (post D-235F, observability only)
+
+**Branch/HEAD verified before work:** `feature/runpod-pod-on-demand` @
+`5e05b15` (D-235F), clean tree.
+
+**Objective (authorized scope only):** make the Selection Freeze decision
+already computed in `universal_clean_cut.py` -- and the resulting Pacing V2
+/ Audio Join Treatment seam reachability -- observable inside the SMALL,
+always-retrievable validator artifact, so a future sibling RAW never again
+needs the blocked 68.7 MB artifact to answer "why didn't Pacing run?".
+OBSERVABILITY ONLY: no Freeze/coherence/repair-loop/resolver/D-090/Pacing
+decision logic touched.
+
+**Exact freeze guard location.** `cutsell_worker/universal_clean_cut.py`,
+~line 675-696: `freeze_blocked = bool(coherence_diag.get("freeze_blocked"))
+or repair_result.status == "NEEDS_HUMAN_REVIEW"`, OR'd with `authoritative_
+result.status == AUTHORITATIVE_REVIEW_REQUIRED` and `post_authority_
+integrity_failed`. Unchanged by this task -- verified byte-identical before
+and after (this task's own diff touches only lines strictly AFTER the
+`if freeze_blocked: ... else: ...` compound statement closes).
+
+**The real, current trigger families (D-235F's own audit, verified against
+today's actual code, not renamed):**
+1. `final_story_coherence_validation.py`'s own `freeze_blocked` (StoryValidator,
+   D-020/D-050C2) -- itself the OR of FIVE sub-reasons, each individually
+   surfaced by this task for the first time: `contradiction_findings`,
+   `missing_idea_coverage`, a blocking row in `lost_semantic_atoms`,
+   `lost_critical_claims`, `authority_membership_findings` -- plus a
+   `status == "integrity_failure"` shape (missing post-authority context,
+   `apply_post_authority_story_validation`'s own fail-closed branch).
+2. `repair_result.status == "NEEDS_HUMAN_REVIEW"` (bounded repair loop).
+3. `authoritative_result.status == AUTHORITATIVE_REVIEW_REQUIRED`
+   (`realization_resolver.py`'s own literal `"REVIEW_REQUIRED"`).
+4. `post_authority_integrity_failed` (D-090), with its own real failure
+   codes (`post_authority_validation.py`'s `POST_AUTHORITY_CONTEXT_MISSING`,
+   `POST_AUTHORITY_SELECTION_MUTATION`).
+
+**New diagnostic type.**
+`cutsell_worker/selection_freeze_diagnostics.py` --
+`build_selection_freeze_diagnostics(*, freeze_blocked, coherence_diag=None,
+repair_loop_status=None, resolver_status=None, post_authority_integrity_
+failed=None, post_authority_integrity_failure_codes=(), selected_count_
+before_freeze=None, pacing_v2_serialized=None, pacing_v2_handle_aware_
+serialized=None, audio_join_treatment_v2_serialized=None)`. A pure
+function of already-computed caller state: never imports or calls any
+Freeze/coherence/repair/resolver/D-090/Pacing decision module (verified,
+test 13/15-19), never recomputes `freeze_blocked` (it is the same boolean
+the caller already used to gate the Pacing seam -- `pacing_seam_reached`
+is its plain negation), and returns a bounded dict of counts/booleans/
+short category-code strings only -- no finding lists, no transcript text
+(test 29), size stays under ~2 KB even with 100+ upstream findings
+(test 33, since raw finding content is never copied in, only counted).
+
+**Tri-state honesty.** Every sub-reason status is `FOUND` / `NOT_FOUND` /
+`UNKNOWN` -- `UNKNOWN` when the supporting key was never observed (an
+empty `coherence_diag`, or a key absent from a non-empty one), never
+collapsed to `NOT_FOUND`/False (tests 11/11b/11c). Multiple simultaneous
+triggers are all preserved as a list, never collapsed to a first match
+(test 10) -- matching engine semantics, since `freeze_blocked` is itself
+an OR across all of them.
+
+**Sibling-safe, generic.** No Video00 golden-file content, no hardcoded
+expected-selection-count, no semantic alignment logic anywhere in this
+module (tests 27/28, checked against the module's own code lines with the
+docstring stripped, since the docstring's own prose legitimately explains
+what `benchmarks/validate_video00_selection_lock.py` does elsewhere).
+Deliberately contrasted, in the module's own docstring, with the three
+Video00-specific oracles D-235F already classified.
+
+**Live wiring (behavior-neutral, verified).**
+`universal_clean_cut.py`: one new import, and ONE new call site inserted
+immediately after the existing `if freeze_blocked: ... else: ...`
+compound statement closes (still inside the outer "draft contract
+exists" branch, so it runs for BOTH the blocked and non-blocked cases,
+using the exact same already-in-scope `freeze_blocked`, `coherence_diag`,
+`repair_result`, `authoritative_result`, `post_authority_integrity_failed`
+locals -- no new parameters threaded in, no recomputation). `pacing_v2_
+serialized` / `pacing_v2_handle_aware_serialized` / `audio_join_treatment_
+v2_serialized` are plain `"key" in result.draft.diagnostics` checks on the
+already-finalized dict -- never a new evidence source. The result is
+merged into `result.draft.diagnostics["selection_freeze_diagnostics"]`
+via the same additive `{**result.draft.diagnostics, ...}` pattern every
+other diagnostic block in this file already uses. The "no draft contract
+at all" outer branch (Clean-Cut-only mode) is left untouched -- it never
+had Boundary/Pacing diagnostics either, and adding this block there would
+require inventing state that never existed; its absence there is
+consistent with every other diagnostic key.
+
+**Behavior-neutral proof.** `tests/test_cutsell_universal_clean_cut.py` +
+`tests/test_cutsell_universal_clean_cut_validation_empty.py` +
+`tests/test_cutsell_universal_clean_cut_validation_live_render_qc.py`:
+**22 passed**, byte-identical to before this change (same assertions on
+selected clips, Boundary, Ordering, Pacing, final stage labels -- none of
+which reference the new key, and none of which broke). This is the
+direct behavior-neutrality proof the directive required: same inputs ->
+same `freeze_blocked` -> same selected clips -> same Boundary/Ordering/
+Pacing reachability, with the new diagnostic present.
+
+**D-235 shape reconstruction (offline, no RAW).** A dedicated fixture
+reproduces D-235's own control shape (`freeze_blocked=True`, `coherence_
+diag={}` for "specific trigger not retrievable", `selected_count_before_
+freeze=5`, no Pacing keys) and proves the new report correctly names
+`FREEZE_BLOCKED_BEFORE_PACING`, `pacing_seam_reached=False`, `trigger_
+count=0` with every sub-reason honestly `UNKNOWN` -- exactly the shape a
+future sibling RAW's SMALL artifact would need to answer "why didn't
+Pacing run?" without the blocked 68.7 MB artifact.
+
+**Tests:** new
+`tests/test_cutsell_d235g_selection_freeze_diagnostics.py` (44 tests --
+serialization, all nine trigger fixtures (contradiction, idea-loss,
+blocking lost-semantic-atom, lost-critical-claim, authority-membership-
+finding, coherence-integrity-failure, repair-loop, resolver, post-
+authority-integrity) individually and in combination, no-trigger state,
+UNKNOWN-vs-False honesty (3 variants), selected-count/pacing-seam
+reporting (6 variants), sibling-safety (no Video00 oracle, no expected-23
+dependency, no transcript dump), determinism, the D-235 shape
+reconstruction, immutability/no-import proofs (7 variants), seam-wiring
+presence, artifact-size bound, compileall, no-provider/no-RAW/no-Modal/
+no-RunPod) plus `tests/test_cutsell_d235g_workflow_extraction.py` (10
+tests, described above) -- **54 new tests total, all passing on first
+real run.**
+
+**Regressions -- one genuine issue found and fixed.** The first full
+offline suite run surfaced 2 new-looking failures beyond the 5 chronic
+ones: `test_cutsell_d216_pacing_v2_live_diagnostic_integration.py::
+TestPipelineWiring::test_40_default_off_parity_all_other_keys_identical`
+and `test_cutsell_d217_pacing_v2_real_evidence_source_wiring.py::
+TestPipelineWiring::test_flag_on_d142_diagnostics_unchanged_vs_off`.
+Diagnosed: both tests assert every diagnostics key OTHER than a small,
+explicit exclusion list (`pacing_v2`, `pacing_v2_handle_aware`) stays
+byte-identical between `CUTSELL_PACING_V2_DIAGNOSTICS_ENABLED=0` and
+`=1`. D-235G's new `selection_freeze_diagnostics` key is present
+UNCONDITIONALLY (correct -- it does not depend on that flag at all), but
+its own `pacing_v2_serialized`/`pacing_v2_handle_aware_serialized`
+sub-fields are a deliberate, honest key-presence OBSERVATION of that
+exact flag's effect -- so its content legitimately differs between the
+two runs, exactly the same shape D-224's own `pacing_v2_handle_aware`
+key already required an exclusion-list entry for. **Fixed** by adding
+`selection_freeze_diagnostics` to both tests' own existing exclusion
+tuples, with a comment explaining why (not a hidden leak -- the field
+doing its intended job). Not a `cutsell_worker` behavior change; a
+correction to two pre-existing tests' exclusion lists to account for a
+new, legitimate, additive-only diagnostic key. Re-ran both files (107
+passed) and the full suite a second time.
+
+**Regressions, final.** `compileall` clean. D-235G (both new files) +
+universal_clean_cut (3 suites) + D-234 bundle: **123 passed.** D-216 +
+D-217 (post-fix): **107 passed.** Full offline suite (second run):
+5797 passed, 5 failed -- the same chronic pre-existing D-044 hybrid-
+semantic-parity failures (confirmed identical names/count to every
+prior gate this session), zero new failures.
+
+**Workflow extraction: implemented.** New workflow step "D-235G
+Selection Freeze diagnostics -> sibling-safe extraction" in `.github/
+workflows/cutsell-video00-modal-raw.yml`, positioned right after "Upload
+Video00 Modal diagnostic artifact" and before "Verify frozen Selection
+lock" (runs `if: always()`, regardless of Freeze outcome -- its own job
+is to explain a blocked Freeze, not depend on an unblocked one). Mirrors
+the D-218R/D-221/D-225 precedent exactly: reads the same `artifact/
+video00-modal.json` those steps already read, PURE-PROJECTS
+`diagnostics["selection_freeze_diagnostics"]` verbatim into a new small,
+bounded, sibling-safe `artifact/selection-freeze-diagnostics.json` (no
+Video00 golden-file content, no expected-selection-count assumption),
+and FAILS LOUDLY (non-zero exit, clear stderr banner) if the block is
+absent -- it is expected on every run once a draft contract exists,
+blocked or not; a silent absence would itself be the kind of undetected
+gap D-218 already found once for Pacing V2. The new artifact path is
+registered in the existing "Upload validator reports" small-artifact
+bundle alongside D-218R/D-221/D-225's own files.
+
+**Workflow extraction offline validation (no paid RAW spent).** New
+`tests/test_cutsell_d235g_workflow_extraction.py`, 10 tests -- extracts
+the step's ACTUAL embedded Python via `yaml.safe_load` (the same dedent
+GitHub Actions performs on a `run: |` block scalar, never a raw-text
+slice, exactly the D-218R test's own technique) and executes it against
+synthetic `artifact/video00-modal.json` fixtures: a present, freeze-
+blocked sibling block extracts correctly (`FREEZE_BLOCKED_BEFORE_
+PACING`, `selected_clip_count_top_level` correct); a present, non-
+blocked block extracts correctly (`pacing_seam_reached: true`); the
+output never contains Video00-specific fields or content; the
+extraction is a pure re-projection (a deliberately nonsensical
+`trigger_count` value passes through byte-identical, proving no
+recomputation); a missing block, a missing engine JSON, and unparseable
+engine JSON all FAIL LOUDLY; the new artifact path is registered in the
+upload step; the step's `if: always()` is confirmed. All 10 pass on
+first real run.
+
+**D-235G verdict: A -- FREEZE BLOCKER OBSERVABILITY READY, EXACT
+TRIGGER CAN BE RECOVERED ON NEXT QUALIFICATION.** The engine now
+computes and serializes a complete, faithful, sibling-safe `selection_
+freeze_diagnostics` block on every run (Video00 or sibling, blocked or
+not) with zero authority and zero behavior change, AND the small,
+always-retrievable validator-reports artifact now carries that block
+verbatim -- a future sibling qualification RAW will never again need the
+blocked 68.7 MB `cutsell-video00-modal-human-review` artifact to answer
+"why didn't Pacing run, and which trigger fired?". Every real trigger-
+family detail the engine has ever computed is captured (verified by the
+nine-fixture engine-side test matrix plus the workflow-extraction test
+matrix); nothing is missing at either layer.
+
+Canonical status added: `SELECTION_FREEZE_BLOCKER_OBSERVABILITY_READY`.
+
+Names D-235H (Exact Freeze-Trigger Qualification -- ONE RAW maximum,
+same sibling `Editdna longform validation/
+copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`, purpose is to IDENTIFY
+the exact Freeze trigger using the now-retrievable `selection-freeze-
+diagnostics.json`, NOT to fix it) -- **NOT implemented, NOT run by this
+task.** Requires separate Product Owner paid-compute authorization per
+this task's own explicit instruction ("Do NOT run D-235H automatically").
+
+No RAW/Modal/RunPod/provider call was made or attempted. No engine patch
+beyond the additive, behavior-neutral diagnostic block and its
+sibling-safe workflow extraction. No Freeze/Pacing/authority/threshold
+change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G/C) -- the decision needed
+is whether to authorize D-235H (one paid Modal RAW, same sibling, to
+identify the exact Freeze trigger using the now-retrievable small
+artifact). No further action is taken on it by this task.
+
+---

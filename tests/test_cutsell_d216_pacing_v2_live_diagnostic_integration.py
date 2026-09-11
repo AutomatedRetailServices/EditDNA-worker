@@ -446,7 +446,17 @@ class TestPipelineWiring:
         # under the SAME flag -- excluded here for the same reason
         # `pacing_v2` already was: this test proves every OTHER diagnostics
         # key is byte-identical regardless of the flag.
-        excluded = ("pacing_v2", "pacing_v2_handle_aware")
+        # D-235G adds `selection_freeze_diagnostics`, present UNCONDITIONALLY
+        # (not gated by this flag at all) -- but its own `pacing_v2_
+        # serialized`/`pacing_v2_handle_aware_serialized` fields are a
+        # deliberate, honest key-presence OBSERVATION of this exact flag's
+        # effect (see `cutsell_worker/selection_freeze_diagnostics.py`), so
+        # its content legitimately differs between the off/on runs -- that
+        # is the fields doing their job, not a leak. Excluded for the same
+        # reason as the two keys above: this test proves every OTHER key
+        # (i.e. everything NOT already known to observe this flag) is
+        # byte-identical regardless of it.
+        excluded = ("pacing_v2", "pacing_v2_handle_aware", "selection_freeze_diagnostics")
         off_keys = {k: v for k, v in off_out.draft.diagnostics.items() if k not in excluded}
         on_keys = {k: v for k, v in on_out.draft.diagnostics.items() if k not in excluded}
         assert off_keys == on_keys
