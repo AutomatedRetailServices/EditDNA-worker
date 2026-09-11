@@ -310,7 +310,13 @@ class TestPropagationProofs:
     def test_16_provenance_survives_repair_loop_via_additive_field(self):
         content = _read(REPAIR_PATH)
         assert "source_lost_atom_provenance_id" in content
-        assert content.count("source_lost_atom_provenance_id=finding.detail.get(\"lost_atom_provenance_id\")") == 2
+        # D-235T (a SEPARATELY-authorized, later gate) added a THIRD
+        # `RepairAttempt` construction site (the same-atom suppression
+        # branch, also `finding.detail.get(...)`-populated) alongside this
+        # gate's own original two -- widened here for the same reason as
+        # D-235O's own test_17/D-235P's own test_44 (see those files' own
+        # comments); this gate's own two sites are still both present.
+        assert content.count("source_lost_atom_provenance_id=finding.detail.get(\"lost_atom_provenance_id\")") == 3
         assert "source_lost_atom_provenance_id=unrepairable.detail.get(\"lost_atom_provenance_id\")" in content
 
 

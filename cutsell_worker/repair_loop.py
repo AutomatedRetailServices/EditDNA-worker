@@ -47,6 +47,11 @@ from dataclasses import dataclass, replace
 from .canonical_edit_plan import AuthoritativePlanSource, CanonicalEditPlan, build_canonical_edit_plan
 from .causal_order_validator import CausalOrderArbiter
 from .final_edit_reviewer import STORY_ORDER_BREAK, FinalEditReviewResult, review
+from .lost_atom_repair_suppression import (
+    REASON_NO_REPAIR_STRATEGY,
+    REASON_SUPPRESSED_SAME_ATOM,
+    all_blocking_findings_safely_suppressed,
+)
 
 DEFAULT_MAX_REPAIR_ATTEMPTS = 3
 
@@ -86,6 +91,17 @@ class RepairLoopResult:
     final_plan: CanonicalEditPlan
     final_review: FinalEditReviewResult
     attempts: tuple[RepairAttempt, ...]
+    # D-235T: purely additive. `final_review` above is NEVER mutated by
+    # this task -- it is always the real, honest `FinalEditReviewResult`
+    # `review()` returned, so `final_review.status` can still legitimately
+    # read "FAIL" with its own real findings even when THIS loop's own
+    # `status` above reads "PASS" because every one of those findings
+    # independently, deterministically re-verified (same D-235Q/D-235R
+    # pure functions, same row data) as an already-safely-suppressed
+    # non-material/retry/redundant lost atom. Defaults to `False` for
+    # every pre-existing code path and every flag-off run -- see
+    # `lost_atom_repair_suppression.py`'s own module docstring.
+    blocking_findings_suppressed: bool = False
 
 
 def _repair_story_order_break(draft, finding):
@@ -147,15 +163,49 @@ def run_repair_loop(
     plan = build_canonical_edit_plan(current_draft, authoritative_source=authoritative_source)
     result = review(plan, causal_order_arbiter=causal_order_arbiter)
     attempts: list[RepairAttempt] = []
+    blocking_findings_suppressed = False
 
     for _ in range(max_attempts):
         if result.status == "PASS":
             break
         repairable = [f for f in result.findings if f.kind in _REPAIR_STRATEGIES]
         if not repairable:
-            # Record why the loop is stopping (for the audit trail) rather
-            # than stopping silently -- no strategy exists for any current
-            # blocking finding, so guessing one is not an option.
+            # D-235T: before unconditionally escalating to NEEDS_HUMAN_
+            # REVIEW over the first blocking finding, check whether EVERY
+            # current blocking finding independently, deterministically
+            # re-verifies as an already-safely-suppressed non-material/
+            # retry/redundant lost atom (same pure D-235Q/D-235R functions,
+            # same row data -- see lost_atom_repair_suppression.py's own
+            # module docstring). Default-OFF and byte-identical to the
+            # pre-D-235T behavior below whenever the flag is off or even
+            # one finding does not unanimously qualify.
+            all_suppressed, suppression_decisions = all_blocking_findings_safely_suppressed(result.findings)
+            if all_suppressed:
+                for finding, decision in zip(result.findings, suppression_decisions):
+                    attempts.append(RepairAttempt(
+                        plan_id=plan.plan_id,
+                        previous_plan_version=plan.plan_version,
+                        new_plan_version=plan.plan_version,
+                        finding_kind=finding.kind,
+                        idea_id=finding.idea_id,
+                        owning_authority=finding.owning_authority,
+                        previous_realization=finding.clip_ids,
+                        replacement_realization=finding.clip_ids,
+                        coverage_before=_idea_coverage_label(plan, finding.idea_id),
+                        coverage_after=_idea_coverage_label(plan, finding.idea_id),
+                        reason=REASON_SUPPRESSED_SAME_ATOM,
+                        unaffected_ideas_changed=False,
+                        repaired=False,
+                        source_lost_atom_provenance_id=finding.detail.get("lost_atom_provenance_id"),
+                    ))
+                blocking_findings_suppressed = True
+                break  # every blocking finding safely suppressed -- no guess made, nothing repaired
+
+            # Unchanged pre-D-235T behavior: record why the loop is
+            # stopping (for the audit trail) rather than stopping silently
+            # -- no strategy exists for any current blocking finding, and
+            # this batch of findings did not unanimously qualify for
+            # same-atom suppression, so guessing one is not an option.
             unrepairable = result.findings[0]
             attempts.append(RepairAttempt(
                 plan_id=plan.plan_id,
@@ -168,7 +218,7 @@ def run_repair_loop(
                 replacement_realization=unrepairable.clip_ids,
                 coverage_before=_idea_coverage_label(plan, unrepairable.idea_id),
                 coverage_after=_idea_coverage_label(plan, unrepairable.idea_id),
-                reason="no_repair_strategy_exists_for_this_finding_kind",
+                reason=REASON_NO_REPAIR_STRATEGY,
                 unaffected_ideas_changed=False,
                 repaired=False,
                 source_lost_atom_provenance_id=unrepairable.detail.get("lost_atom_provenance_id"),
@@ -228,11 +278,17 @@ def run_repair_loop(
         plan = new_plan
         result = new_result
 
-    status = "PASS" if result.status == "PASS" else "NEEDS_HUMAN_REVIEW"
+    # D-235T: `blocking_findings_suppressed` reuses the loop's own existing
+    # "PASS" value (the narrowest existing non-human-review terminal
+    # status -- no third value invented) whenever every blocking finding
+    # was safely suppressed above; `result` (-> `final_review`) itself is
+    # NEVER mutated, so the real reviewer verdict stays honestly readable.
+    status = "PASS" if (result.status == "PASS" or blocking_findings_suppressed) else "NEEDS_HUMAN_REVIEW"
     return RepairLoopResult(
         status=status,
         final_draft=current_draft,
         final_plan=plan,
         final_review=result,
         attempts=tuple(attempts),
+        blocking_findings_suppressed=blocking_findings_suppressed,
     )

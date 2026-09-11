@@ -55290,3 +55290,172 @@ not-yet-authorized suppression gate. **Paid compute required?** No.
 **RAW required?** No.
 
 Then STOP. Do NOT implement D-235T. Wait for Product Owner coordination.
+
+## D-235T — BOUNDED SAME-ATOM REPAIR-LOOP SUPPRESSION ADAPTER (OFFLINE FIRST)
+
+**Status:** IMPLEMENTED, OFFLINE FIRST, default-OFF flag. No RAW/Modal/
+RunPod/provider run. No general Freeze/RepairLoop redesign, no threshold/
+resolver/P1/P2/BestTake/Family/Ordering/Boundary/Pacing/Audio-Join
+change.
+
+**Objective (post D-235S verdict A):** close PATH B of the double-block
+this task's own core principle names — a `_lost_semantic_atoms()` row
+D-235R's own gate would (or does) safely suppress at the Freeze seam
+(`lost_semantic_atom.blocking`, PATH A) can still separately reach
+`repair_loop.py`'s "no repair strategy exists" branch as a genuine
+`UNIQUE_FACT_LOST` finding and unconditionally escalate to
+`NEEDS_HUMAN_REVIEW` — a second block on the same already-adjudicated
+atom. D-235R deliberately never touched RepairLoop; D-235S proved the
+exact provenance link survives into a `RepairAttempt` but suppressed
+nothing. This task suppresses PATH B, and only for a finding proven, via
+exact provenance plus independent re-verification, to be the SAME atom.
+
+**Why re-computation, not a passed-in decision, proves "the SAME atom":**
+`run_repair_loop()` has no live channel carrying D-235R's own
+`LostSemanticAtomFreezeAuthorityDecision` objects downstream, and
+building one would itself be a "general RepairLoop redesign". Instead:
+D-235S's own confirmed finding (`final_edit_reviewer.py::review()`'s
+`UNIQUE_FACT_LOST` construction already does `detail=dict(row)`) means
+`finding.detail` IS, byte-for-byte, the exact row D-235R's own gate would
+score at the coherence seam. Calling the SAME pure, deterministic
+functions (`assess_complete_lost_semantic_atom_materiality`,
+`decide_lost_semantic_atom_freeze_authority`) again on that identical row
+produces the identical verdict — never a second, independently-arrived-at
+opinion that could disagree. `lost_atom_provenance_id` (D-235S) is used
+here as an ADDITIONAL integrity check only (via `classify_lost_atom_
+reviewer_finding_link`, called here for the first time as a gating input
+rather than pure observability) — never as the suppression basis by
+itself: missing, ambiguous, or mismatched provenance fails closed
+(ABSTAIN).
+
+**RepairLoop terminal-vocabulary audit (required before touching the
+seam, done via direct code read, not assumed):** `RepairLoopResult.
+status` had, and has, EXACTLY two values — `"PASS"` and
+`"NEEDS_HUMAN_REVIEW"`. No third value is invented. When every current
+blocking finding is safely suppressed, the loop reuses the existing
+`"PASS"` value (the narrowest existing non-human-review terminal status,
+exactly as required) — but because reusing an existing value for a
+genuinely different situation would otherwise be indistinguishable and
+dishonest (CLAUDE.md: never declare success from green CI/duration/counts
+alone), `RepairLoopResult` gains ONE new, purely additive field,
+`blocking_findings_suppressed: bool = False`, defaulting `False` on every
+pre-existing path. `final_review` (the real `FinalEditReviewResult` from
+`review()`) is NEVER mutated or replaced — it still, honestly, reports
+`status == "FAIL"` with its own real findings even when the loop's own
+`status` reads `"PASS"` because of suppression.
+
+**New production module:** `cutsell_worker/lost_atom_repair_suppression.py`.
+`LostAtomRepairSuppressionDecision` type (no score) with fields
+`lost_atom_provenance_id`, `reviewer_finding_kind`, `repair_attempt_
+status`, `freeze_authority_status`, `materiality_status`, `suppression_
+status`, `suppress_repair_escalation`, `reason`, `provenance`.
+Suppression-status vocabulary: `SUPPRESS_SAME_NON_MATERIAL_ATOM` /
+`PRESERVE_REPAIR_ESCALATION` / `ABSTAIN_PRESERVE_ESCALATION` /
+`NOT_APPLICABLE`. `decide_lost_atom_repair_suppression(finding, *,
+all_findings=None, enabled=None)` — the one per-Finding entry point,
+scoped exactly to `UNIQUE_FACT_LOST` (D-235S's own bridge pattern), self-
+gated on the SAME flag as D-235R (`CUTSELL_LOST_ATOM_MATERIALITY_FREEZE_
+AUTHORITY_ENABLED`, no new flag), reusing D-235R's own absolute firewalls
+(meaning-critical/editorially-required/conflicted-or-insufficient/BLOCK)
+via `decide_lost_semantic_atom_freeze_authority` plus its own independent
+firewalls (missing/malformed/ambiguous provenance, unsupported finding
+kind). `all_blocking_findings_safely_suppressed(findings, *, enabled=
+None)` — the one entry point `repair_loop.py` calls; requires EVERY
+finding, never a majority, to independently qualify (`all(...)`, never
+`any(...)`).
+
+**`repair_loop.py` seam (the smallest change, only the "no repair
+strategy exists" branch):** before recording the pre-existing single
+`findings[0]` attempt and escalating, `run_repair_loop()` now calls
+`all_blocking_findings_safely_suppressed(result.findings)`. If every
+finding qualifies, it records ONE `RepairAttempt` per finding (never a
+fake repair — `repaired=False` always, `reason=
+"finding_safely_suppressed_as_non_material_same_atom"`, distinct from the
+pre-existing `"no_repair_strategy_exists_for_this_finding_kind"`), sets
+`blocking_findings_suppressed=True`, and breaks; the final `status`
+computation becomes `"PASS" if (result.status == "PASS" or
+blocking_findings_suppressed) else "NEEDS_HUMAN_REVIEW"`. Otherwise
+(flag off, or even one finding does not unanimously qualify) the loop
+falls through to the EXACT pre-D-235T branch unchanged — byte-identical
+by construction, since `decide_lost_atom_repair_suppression` always
+returns `NOT_APPLICABLE`/`suppress_repair_escalation=False` when the flag
+is off. The repair-strategy branch (`STORY_ORDER_BREAK`), `max_attempts`
+bound, and every `CanonicalEditPlan`/`review()` call are unchanged.
+
+**Proven end to end with the REAL functions (not mocks):** synthetic
+D-235K-generic-shape fixtures run through the real `build_canonical_edit_
+plan()`, `review()`, `run_repair_loop()` confirm: (1) a single suppressible
+atom → loop `status=="PASS"`, `final_review.status=="FAIL"` (never
+lied about), `blocking_findings_suppressed=True`, one non-repaired
+attempt; (2) flag off → `NEEDS_HUMAN_REVIEW`, byte-identical to pre-
+D-235T; (3) two suppressible atoms (distinct clips, distinct provenance
+ids) → both suppress; (4) one suppressible + one `MEANING_CRITICAL` atom
+→ escalation preserved; (5) a legacy row with no `lost_atom_provenance_id`
+→ escalation preserved (fail-closed); (6) a suppressible atom mixed with
+an unrelated `CONTRADICTION` finding → escalation preserved, mixed kinds
+never suppress; (7) a genuinely repairable `STORY_ORDER_BREAK` finding
+still repairs via the pre-existing, untouched strategy.
+
+**No fake repair:** every suppression-path `RepairAttempt.repaired` is
+`False`; `reason` distinguishes suppression from "no strategy exists".
+
+**Multiple-findings semantics (no majority voting):** proven directly —
+two suppressible findings both suppress; one suppressible + one critical
+preserves the WHOLE batch's escalation; one suppressible + one unrelated
+kind preserves escalation; three suppressible + one preserved still
+preserves overall escalation (never "3 of 4 is enough").
+
+**Parity:** flag-off byte-identical proven both at the adapter level
+(`enabled=False` always returns `NOT_APPLICABLE`) and end-to-end via
+`run_repair_loop()`. `RepairLoopResult.blocking_findings_suppressed`
+defaults `False`; all pre-existing `RepairAttempt`/`RepairLoopResult`
+construction and field shapes unchanged except the one additive field.
+
+**Tests:** `tests/test_cutsell_d235t_lost_atom_repair_suppression.py`, 52
+tests covering the fixture matrix (terminal-vocabulary audit, suppression
+vocabulary, flag-off invariance, absolute firewalls, provenance
+integrity, single- and multi-finding semantics, full RepairLoop
+integration with the real functions, no-fake-repair proof, structural
+safety — no fuzzy text/timestamp/provider/P1/P2/BestTake/Family/
+Ordering/Boundary/Pacing/Audio-Join reasoning — diagnostics, file-family
+snapshot). D-235 cumulative bundle: 507/507 (455 pre-existing + 52 new).
+Three pre-existing snapshot tests (D-235O's own `test_17`, D-235P's own
+`test_44`, D-235S's own `test_16`) required the same expected, non-
+behavioral widening D-235J/O/P/S's own precedent already established, to
+include the new `lost_atom_repair_suppression.py` file and its third
+`RepairAttempt` construction site. `compileall` clean. Reviewer/
+RepairLoop/coherence/CleanCutBench targeted suites green (34 + 7 + 55).
+Full suite: 6304 passed, 5 failed — all 5 the SAME pre-existing, unrelated
+failures already known before this task (`test_video00_modal_hybrid_
+semantic_parity.py` x4, `test_hybrid_story_guard_incomplete_retry.py`
+x1) — zero new failures introduced.
+
+**Backward compatibility:** fully additive. New module, one new
+`RepairLoopResult` field defaulting `False`, no changed signatures, no
+changed pre-existing behavior when the flag is off (the default).
+
+**Verdict: A** — BOUNDED SAME-ATOM REPAIR-LOOP SUPPRESSION OFFLINE
+PROVEN (PATH B closed for the exact-provenance, independently-re-verified
+same-atom case only; PATH A from D-235R and this gate now agree by
+construction since both call the identical pure functions on the
+identical row; every absolute firewall and multi-finding requirement
+proven with the real functions, not mocks). Canonical status:
+`BOUNDED_SAME_ATOM_REPAIR_LOOP_SUPPRESSION_OFFLINE_PROVEN`.
+
+**Known, deliberately unaddressed limitation (banner-bound, not fixed
+here):** when a batch of findings does NOT unanimously suppress, the
+pre-existing "no repair strategy" branch still only records an attempt
+for `result.findings[0]` (a single-finding audit-trail limitation that
+predates this task) — so if `findings[0]` happens to be the suppressible
+one while a LATER finding is the actual blocker, the recorded attempt
+names the suppressible one, not the blocker. This is unchanged, pre-
+existing `repair_loop.py` behavior; widening it to record one attempt per
+non-suppressible finding would be a general RepairLoop audit-trail
+change beyond this task's own "smallest seam" scope, so it is reported
+here rather than silently fixed.
+
+**Engine patch required after this?** No — D-235U (real-media
+requalification) is a separate, not-yet-authorized gate. **Paid compute
+required?** No. **RAW required?** No.
+
+Then STOP. Do NOT launch D-235U. Wait for Product Owner coordination.
