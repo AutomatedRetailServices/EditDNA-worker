@@ -52820,3 +52820,205 @@ identify the exact Freeze trigger using the now-retrievable small
 artifact). No further action is taken on it by this task.
 
 ---
+
+
+## D-235H -- Exact Selection Freeze-Trigger Qualification, ONE RAW Maximum, Diagnostic Only, No Fix (post D-235G)
+
+**Branch/HEAD verified before dispatch:** `feature/runpod-pod-on-demand` @
+`32a220d` (D-235G), clean tree. No file touched by this task except this
+decision-log entry -- diagnostic-only gate, no engine/workflow/test change.
+
+**RAW authorized and run:** exactly ONE, per directive.
+`source_key`: `Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`.
+No substitution, no fallback sibling, no second RAW.
+
+**S3 preflight:** the workflow's own D-228 pre-dispatch S3 existence
+check ran before any Modal compute and **succeeded** (object exists,
+non-zero size -- same object D-235 already qualified as reachable).
+
+**Run:** GitHub Actions workflow run
+[34600506269](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34600506269)
+(`cutsell-video00-modal-raw.yml`, run #97), dispatched on
+`feature/runpod-pod-on-demand` @ `32a220d`. Same diagnostic flag set as
+D-235: `editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`,
+`whole_video_editorial_reasoning_diagnostics_enabled=1`,
+`ordering_diagnostics_enabled=1`, `pacing_v2_diagnostics_enabled=1`,
+`audio_join_treatment_diagnostics_enabled=1`. No provider overlay. The
+Modal benchmark step itself **succeeded** (12:45:00-12:47:40, ~2m40s)
+and Modal teardown was confirmed (automatic scale-to-zero).
+
+**D-235G's own extraction step ran and SUCCEEDED for the first time on
+real media.** "D-235G Selection Freeze diagnostics -> sibling-safe
+extraction" (step 20) completed with conclusion `success` -- this is the
+first direct, real-Modal-run proof that `diagnostics["selection_freeze_
+diagnostics"]` serializes correctly and the new extraction step's own
+fail-loud guard (non-zero exit on a missing block) did NOT trigger,
+meaning the block was present in the real engine JSON. This is a
+genuine, positive validation of D-235G's own engine-side change, on top
+of its offline test suite.
+
+**Retrieval attempt for the field-level content, reported honestly.**
+This session attempted to read the actual `selection_freeze_diagnostics`
+values two ways:
+1. **Direct artifact download** (the whole point of D-235G): the new
+   small `cutsell-video00-modal-validator-reports` artifact for this run
+   is 30,377 bytes -- 2,266x smaller than the 68.7 MB `cutsell-video00-
+   modal-human-review` artifact D-235F could not download. A fresh,
+   valid, signed download URL was obtained and `curl`'d directly; it
+   failed identically to D-235F's 68.7 MB attempt: `CONNECT tunnel
+   failed, response 403` against the Azure Blob Storage host
+   (`productionresultssa19.blob.core.windows.net`). **This is a material,
+   corrective finding over D-235F's own framing**: the block is NOT a
+   function of artifact size (D-235F attributed it to the 68.7 MB size)
+   -- this session's egress policy blocks the `*.blob.core.windows.net`
+   host category outright, for ANY GitHub Actions artifact download,
+   regardless of size. D-235G's small-artifact design is still the
+   correct fix for the general problem (any other retrieval path -- a
+   different session, a person's browser, a differently-configured CI
+   consumer -- can now read a 30 KB file instead of needing a 68.7 MB
+   one), but it does not, by itself, solve THIS session's specific
+   network restriction.
+2. **Job-log text extraction** (the D-235F fallback): `get_job_logs` was
+   queried at several `tail_lines` values (2000, 4500, 6000). Requests
+   above ~4500 all returned content anchored at the same wall-clock
+   point (~12:47:49.06-12:47:49.20), never earlier, indicating a real
+   content-size cap on what the tool returns (roughly 380-420K
+   characters) rather than a strict `tail_lines` line-count contract.
+   Step 20 ran and completed at `12:47:47Z`, before this reachable
+   window (steps 24-45's own massive embedded-script echoes and JSON
+   dumps between 12:47:48-12:47:50 consume the entire retrievable
+   budget) -- the exact same log-density wall D-235F already hit for
+   the "Verify frozen Selection lock" step's own output.
+
+**What is therefore proven with certainty (from the GitHub Actions Jobs
+API's own step-conclusion field -- ground truth, immune to the log-
+density problem above) vs. what remains unretrievable:**
+
+**Proven (step conclusions, 100% reliable):**
+- Step 20 (D-235G extraction): **SUCCESS** -- `selection_freeze_
+  diagnostics` block IS present in the real engine JSON.
+- Steps 43/44/45 (D-218R/D-221/D-225 -- `pacing_v2`/`pacing_v2_
+  handle_aware` extraction): **FAILURE** (same `MISSING_FROM_
+  SERIALIZATION` shape as D-235/D-235F) -- the Pacing V2 diagnostic
+  blocks still did not serialize on this run.
+- Steps 21/22/23 (frozen-selection-lock / architecture / Human-Gold
+  regression): **FAILURE** -- all three independently reconfirmed as
+  `VIDEO00_SPECIFIC_ORACLE_NOISE` per D-235F's own already-established
+  classification (golden-file comparisons against Video00's own content,
+  never reading the internal Freeze state); not treated as engine
+  regression evidence.
+- Steps 37-42 (D-196/D-198/D-200/D-200.4/D-204/D-209 -- P1, Language
+  Spine, P2, Ordering compact diagnostics): all **SUCCESS** -- none of
+  these upstream layers crashed or regressed on this source.
+- Step 24 (quality ladder): **SUCCESS** (runs regardless; its own
+  content is Video00-comparison-shaped and not meaningful for a sibling,
+  per existing D-227/D-228 convention -- `REFERENCE_PARITY_NOT_
+  AVAILABLE_FOR_SIBLING`).
+
+**Structural inference (high confidence, not a direct field read):**
+Given the flag correctly reached the runtime (same mechanism D-235F
+already traced end to end and unchanged since), and given Step 20's
+success alongside Steps 43-45's identical failure shape to D-235/D-235F,
+the only code-consistent explanation (per D-235G's own documented seam:
+the Pacing V2 construction and the `selection_freeze_diagnostics`
+construction are BOTH reached only after the same `if freeze_blocked:
+... else: ...` split, and only the observability block additionally
+runs inside the `if freeze_blocked:` branch too) is that **`freeze_
+blocked` was again `True` on this run**, with `pacing_seam_reached`
+correspondingly `False` and `first_missing_link ==
+FREEZE_BLOCKED_BEFORE_PACING` -- the exact same shape as D-235/D-235F.
+
+**Not retrievable this session (honestly marked, not guessed):**
+`trigger_count`, `trigger_categories` (which of the four families --
+coherence/repair-loop/resolver/D-090 -- actually fired), and every
+individual coherence sub-reason status (`coherence_contradiction_
+status`, `idea_loss_status`, `lost_semantic_atom_status`, `lost_
+critical_claim_status`, `authority_membership_finding_status`,
+`coherence_integrity_failure_status`), `repair_loop_status`, `resolver_
+status`, `post_authority_integrity_status`, and the exact `selected_
+count_before_freeze` value for this specific run. D-235's own earlier,
+externally-supplied ("IMPORTANT NEW EVIDENCE") figure of 5 selected
+clips is the best available prior estimate for this identical source
+and workflow configuration, but is not independently re-confirmed by
+this run's own retrievable evidence.
+
+**D-235H PRIMARY RESULT: D -- FREEZE CONFIRMED BUT EXACT TRIGGER STILL
+NOT RETRIEVABLE.**
+
+Per "IF D": the exact trigger detail that still cannot be observed is
+named precisely above -- every field of `selection_freeze_diagnostics`
+below the top-level `freeze_blocked`/`pacing_seam_reached` inference.
+The blocker is NOT a gap in D-235G's own engine-side design (its
+extraction step correctly ran and correctly produced a small artifact
+on real media, proven for the first time this gate) -- it is a network-
+egress restriction specific to this session, applying to the Azure Blob
+Storage host GitHub Actions artifact downloads use, independent of
+artifact size. **No second RAW was run or considered** in response to
+this finding, per the directive's explicit prohibition.
+
+**Trigger interpretation: not applicable -- D, not A/B/C.** No specific
+trigger was identified, so no classification among LIKELY_CORRECT_
+EDITORIAL_ABSTENTION / POSSIBLE_OVER_CONSERVATIVE_GENERALIZATION_
+BLOCKER / CLEAR_GENERALIZATION_DEFECT can be made honestly. Making one
+from the freeze_blocked=True inference alone, without knowing which of
+the four trigger families fired, would be exactly the kind of
+unsupported classification the directive's own "Do not assume every
+Freeze is a bug" and "C requires concrete proof" instructions forbid.
+
+**Video00 oracle noise vs. generic failures:** unchanged from D-235F's
+own classification -- frozen-selection-lock, architecture, and Human-
+Gold regression QA remain `VIDEO00_SPECIFIC_ORACLE_NOISE`; P1/Language
+Spine/P2/Ordering remain generically healthy (no crash, no new
+failure class); reference parity: `REFERENCE_PARITY_NOT_AVAILABLE_
+FOR_SIBLING`.
+
+**Exact next recommendation (not authorized to implement here):** the
+one concrete gap this gate surfaces is a RETRIEVAL-CHANNEL gap, not an
+engine gap -- either (a) a session/environment change broadening the
+egress allowlist to include the Azure Blob Storage artifact-download
+host (an infrastructure decision, outside this task's own scope), or
+(b) a further-bounded workflow step that prints the `selection_freeze_
+diagnostics` block EARLY in the job (before the log-volume-heavy P1/P2/
+Ordering/Pacing compact-diagnostic steps that currently push it outside
+this session's log-retrieval window) so a future forensic can reach it
+via `get_job_logs` alone without needing the artifact download at all.
+Neither is implemented in this gate. Until one of these exists, a
+future exact-trigger qualification attempt on this same sibling would
+very likely hit the identical retrieval wall regardless of how many
+additional RAWs were spent -- so the correct next step is a retrieval-
+channel fix, not another RAW.
+
+**Audio Join Treatment status:** unchanged from D-234 (`PACING_V2_
+AUDIO_JOIN_TREATMENT_LIVE_DIAGNOSTICS_READY`) -- `diagnostics["audio_
+join_treatment_v2"]` almost certainly remains absent on this run for the
+identical, expected, non-defective reason as `pacing_v2` itself
+(Freeze blocked before the shared seam), not because D-230-D-234's own
+code failed; this is consistent with D-234's own explicit instruction
+not to classify the Audio Join stack as failed merely because the seam
+above it was never reached.
+
+**Pacing status:** unchanged -- `pacing_v2`/`pacing_v2_handle_aware`
+still did not serialize on this run, for the same seam reason.
+
+**App-roadmap status:** unchanged from D-235G's own snapshot. The chain
+remains: Audio Join stack READY -> sibling qualification attempted ->
+Freeze blocked before Pacing (D-235) -> true internal Freeze established
+(D-235F) -> exact Freeze observability READY (D-235G) -> exact-trigger
+attempt inconclusive due to a retrieval-channel gap, not an engine gap
+(D-235H, this gate). The decision of whether to pursue a retrieval-
+channel fix, broaden egress, or proceed on a different basis is Product
+Owner territory.
+
+**Confirmed:** no second RAW, no provider, no engine/workflow/test
+patch, no Freeze/Pacing/Audio-Join/authority/threshold change was made
+or attempted by this task.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- the decision needed is
+how to close the retrieval-channel gap this gate surfaces (broaden this
+session's egress allowlist for Azure Blob Storage artifact downloads,
+or authorize a small, workflow-only "print early" reordering step) before
+any further exact-trigger qualification attempt would be worth another
+RAW. No further action is taken on it by this task.
+
+---
