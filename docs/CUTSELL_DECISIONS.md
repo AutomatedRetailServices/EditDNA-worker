@@ -51024,3 +51024,277 @@ Join Understanding Foundation, offline only) as the next, separately-
 scoped engineering work. No further action is taken on it by this task.
 
 ---
+## D-231: Pacing V2 Audio Join Understanding Foundation, Offline Only (post D-230)
+
+Builds `cutsell_worker/pacing_v2_audio_join_understanding.py` -- D-098
+Section 16.3's own named Layer 1 (JOIN UNDERSTANDING), combining
+already-existing evidence (D-230 acoustic edge evidence, D-223
+`SourceAudioHandle`, D-217 relationship-hint/Prosodic evidence, D-038
+`classify_claim`) into ONE structured `AudioJoinUnderstanding` per
+adjacent join. Offline only, zero live wiring, zero treatment decision.
+
+1. **Canonical position, restated.** `EVIDENCE -> JOIN UNDERSTANDING
+   (this module) -> TRANSITION DECISION (D-215) -> TIMING POLICY (D-220)
+   -> AUDIO JOIN TREATMENT (future D-232) -> RENDERER EXECUTION (D-214)`.
+   This module never calls `pacing_transition_decision.decide_transition`
+   (proven by test: `decide_transition(` does not appear anywhere in the
+   module's own source) -- calling a downstream, mode-specific authority
+   from an upstream, mode-agnostic evidence layer would invert the
+   canonical pipeline shape D-098 Section 16.2 defines.
+2. **`AudioJoinUnderstanding` type** built exactly per the directive's
+   own recommended field list (33 fields): identity (`transition_index`,
+   both clip/source ids), D-230 edge/handle references (`left/right_edge_
+   evidence_id`, `left/right_handle_ids`), the six per-side speech/non-
+   speech/silence fields, `acoustic_continuity_status`/`level_continuity_
+   status`, `relationship_hint`, `prosodic_status`, `word_safety_status`/
+   `meaning_safety_status`/`double_speech_status`, `join_audio_role`,
+   `understanding_status`, the four treatment-evidence readiness fields
+   plus `no_treatment_evidence_status`, `room_tone_classification_status`,
+   `conflict_flags`, `provenance`. No transcript dump anywhere (tested:
+   a supplied word literal is asserted absent from the JSON-serialized
+   diagnostic row). No master score anywhere (tested: no summary/type
+   field name contains "score").
+3. **Join Audio Role vocabulary** -- all ten named values implemented
+   (`CLEAN_DIRECT_JOIN`/`SPEECH_TO_SPEECH`/`SPEECH_TO_NON_SPEECH`/
+   `NON_SPEECH_TO_SPEECH`/`NON_SPEECH_TO_NON_SPEECH`/`SILENCE_BOUNDARY`/
+   `ACOUSTIC_DISCONTINUITY`/`AMBIGUOUS`/`CONFLICTED`/`UNKNOWN`), derived
+   via one priority-ordered, exhaustive decision table (`_join_audio_
+   role`) directly proven by 9 fixture tests covering every named
+   speech/non-speech/silence/continuity combination (items 1-9 of the
+   generic matrix). Descriptive understanding only -- proven never a
+   treatment selection (see item 14 below).
+4. **Speech occupancy reuse.** `left/right_speech_status` read verbatim
+   from D-230's own `AcousticEdgeEvidence.speech_status`
+   (`LEXICAL_SPEECH_PRESENT`/`NO_LEXICAL_SPEECH_OBSERVED`/`SPEECH_
+   STATUS_UNKNOWN`) -- never re-derived, never "no word = ambience"
+   (item 10: unknown coverage on either side collapses `join_audio_role`
+   to `UNKNOWN` and `understanding_status` to `UNKNOWN`, never a safe
+   default).
+5. **Non-speech reuse.** `left/right_non_speech_status` read verbatim
+   from D-230's `non_speech_status` (`SAFE_NON_SPEECH_CANDIDATE` used
+   only when D-230 already proved it; `NON_SPEECH_UNCONFIRMED` never
+   silently upgraded to safe -- structural, since this module never
+   writes to those fields, only reads them).
+6. **Silence reuse.** `left/right_silence_status` read verbatim from
+   D-230's `silence_status`. Silence is a valid, distinct join state
+   (`SILENCE_BOUNDARY`, item 9) never confused with ambience-carry
+   material (see item 8's own handle-vs-silence distinction).
+7. **Acoustic continuity reuse.** `acoustic_continuity_status` reads
+   D-230's `AcousticContinuityComparison.continuity_status`
+   (`SIMILAR`/`DIFFERENT`/`INSUFFICIENT_EVIDENCE`/`CONFLICTED`) directly
+   -- no second spectral comparator; a new `ACOUSTIC_CONTINUITY_STATUS_
+   UNKNOWN` value is added ONLY for "no comparison was supplied at all"
+   (distinct from D-230's own `INSUFFICIENT_EVIDENCE`, which means "a
+   comparison was attempted and lacked signature evidence" -- tests 
+   confirm both are handled distinctly).
+8. **Level continuity, one new labeled heuristic.** `level_continuity_
+   status` (`SIMILAR_LEVEL`/`LEFT_LOUDER`/`RIGHT_LOUDER`/`INSUFFICIENT_
+   EVIDENCE`) derived from D-230's own `level_delta_db` via ONE new,
+   explicitly labeled, isolated threshold: `ACOUSTIC_HEURISTIC_OFFLINE_
+   NOT_REAL_MEDIA_TUNED_LEVEL_SIMILARITY_THRESHOLD_DB = 3.0` (mirrors
+   D-230's own naming convention exactly). **CRITICAL property directly
+   proven** (items 17-18): the same background at different gain reports
+   `acoustic_continuity_status=SIMILAR` + `level_continuity_status=
+   RIGHT_LOUDER` (character preserved, loudness genuinely differs);
+   different background at matched gain reports `DIFFERENT` +
+   `SIMILAR_LEVEL` (the inverse) -- acoustic character and loudness are
+   two independently observable fields, never conflated, per the
+   directive's own "ACOUSTIC CHARACTER != LOUDNESS" section. Never a
+   gain correction (`normalize_gain`/`apply_gain`/`correct_loudness` do
+   not exist anywhere in the module -- tested).
+9. **SourceAudioHandle reuse.** `left_post_roll_handle`/`right_pre_roll_
+   handle` (D-223) consumed by id/status directly, never rebuilt. A
+   discarded/retry-blocked handle NEVER reads as ambience-ready even if
+   a caller also supplied handle-edge acoustic evidence alongside it
+   (tests: discarded and retry-blocked handles both force `TREATMENT_
+   EVIDENCE_NOT_READY`, restating D-230's own discarded/retry firewall
+   at this layer). A silence-only `SAFE_NON_SPEECH_HANDLE` correctly
+   does NOT read as ambience-carry-ready (restated D-230 finding,
+   directly tested).
+10. **Relationship hint reuse.** `relationship_hint` passed straight
+    through from the caller (`RELATIONSHIP_CORRECTION`/`RELATIONSHIP_
+    CONTINUATION`/`RELATIONSHIP_RETRY`/`None`, the exact D-215/D-217
+    values, imported not redefined) -- P1 is never recomputed here
+    (items 19-22, all four pass-through cases proven).
+11. **Prosodic evidence reuse.** `prosodic_status`
+    (`CONTINUOUS`/`RESTART`/`HESITATION`/`UNAVAILABLE`/`UNKNOWN`) derived
+    via the SAME duck-typed attribute access (`restart_or_interruption_
+    state`/`vocal_continuity_state` via `getattr`) `pacing_transition_
+    decision._prosody_supports_overlap` already uses -- no new Prosodic
+    call, no BestTake ranking (items 23-25 proven).
+12. **Word safety, a layer distinction not a duplicate.** `word_safety_
+    status` (join-local, mode-agnostic: `SAFETY_BLOCKED` means "known
+    lexical speech already sits at this join's own retained edge", never
+    a specific candidate window's verdict like D-215's own field of the
+    same name) derived purely from the two edges' own `speech_status` --
+    directly tested to remain `BLOCKED` from D-230 evidence alone, even
+    when no meaning-safety word text was separately supplied (proving
+    the two safety fields are genuinely independent inputs, not one
+    computation feeding the other).
+13. **Meaning safety, reused not duplicated.** `meaning_safety_status`
+    calls `semantic_claims.classify_claim` (D-038) directly on supplied
+    near-edge word text -- the EXACT function `pacing_transition_
+    decision._meaning_safety` already calls, no second implementation.
+    Restates D-230's own firewall: unknown word coverage on EITHER side
+    never becomes `SAFETY_SAFE` (tested), and a genuinely `CRITICAL`
+    claim (negation/dosage-safety language) at either edge independently
+    blocks the whole join (items 26-27, plus a positive control at 27b
+    proving ordinary non-critical text correctly reads `SAFETY_SAFE`,
+    not a false-positive block).
+14. **Double-speech, new join-local vocabulary (not `pacing_transition_
+    decision`'s own mode-specific one).** `JOIN_DOUBLE_SPEECH_BOTH_
+    SIDES_LEXICAL`/`LEFT_ONLY_LEXICAL`/`RIGHT_ONLY_LEXICAL`/`NEITHER_
+    LEXICAL`/`STATUS_UNKNOWN` -- deliberately distinct names from D-215's
+    own `DOUBLE_SPEECH_SAFE_J_CUT`/`SAFE_L_CUT`/`SAFE_MICRO_OVERLAP` (a
+    SPECIFIC candidate window's mode-relative verdict, meaningless before
+    a Timing Policy exists) to avoid re-creating the exact kind of
+    geometric/semantic vocabulary collision D-229/D-230 already found
+    between `MICRO_AUDIO_OVERLAP` and `AMBIENCE_BRIDGE`. Item 28 proven;
+    additional tests prove all four resolved states.
+15. **Treatment-evidence readiness, categorical not boolean.** Per the
+    directive's own explicit "if such booleans risk conflating evidence
+    with authority, prefer categorical readiness statuses" instruction,
+    all four fields (`short_crossfade_evidence_status`/`ambience_carry_
+    left_evidence_status`/`ambience_carry_right_evidence_status`/
+    `ambience_bridge_evidence_status`) use a shared three-value
+    vocabulary (`TREATMENT_EVIDENCE_READY`/`NOT_READY`/`UNKNOWN`), never
+    a bool -- `READY` means "evaluable by a future gate", never "apply
+    now" (module docstring, restated in every readiness helper's own
+    docstring). Items 29-33 all proven: crossfade readiness needs both
+    retained edges + resolvable continuity/safety (29-30); each ambience-
+    carry side needs its own safe, non-silent handle material (31-32);
+    the bridge needs BOTH sides ready AND a measured discontinuity (33,
+    plus a negative control proving one-sided readiness alone is
+    insufficient).
+16. **No-overprocessing signal.** `no_treatment_evidence_status`
+    (`NO_ADDITIONAL_AUDIO_TREATMENT_EVIDENCE`/`ADDITIONAL_TREATMENT_
+    EVIDENCE_PRESENT`/`TREATMENT_NEED_UNKNOWN`) lets a future treatment
+    engine choose NONE on a join that is already acoustically similar,
+    level-similar, word-safe, and free of lexical speech on both sides
+    (item 34, directly proven) -- restating this task's own "we need the
+    future treatment engine to be able to choose NONE" requirement.
+17. **Room-tone honesty.** `room_tone_classification_status` surfaces
+    D-230's own `ROOM_TONE_CLASSIFICATION_STATUS = "NOT_YET_AVAILABLE"`
+    verbatim on every row; the module defines no `ROOM_TONE_MATCH`/
+    `ROOM_TONE_MISMATCH` symbol anywhere (tested via `vars(aju)`
+    inspection, not a docstring substring scan) and no diagnostic ever
+    emits one (item 47/D-098-restated honesty, directly tested).
+18. **No treatment selection anywhere.** Structurally proven (not
+    asserted): no `treatment`/`selected_treatment` dataclass field
+    exists on `AudioJoinUnderstanding`, and no string field on a built
+    instance ever equals `SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/
+    `AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE` (item 39). No renderer
+    import, no provider call, no ASR rerun, no Boundary/Ordering/
+    BestTake/Family import or `dataclasses.replace` mutation anywhere in
+    the module's own source (items 40-43, all four checked by direct
+    AST/source inspection, not docstring scans). No loudness-correction
+    function/symbol exists (item 44/D-230's own loudness-ownership
+    firewall, restated not reopened).
+19. **Pairwise only.** `build_audio_join_understanding`'s own signature
+    carries no `selected`/`clips` sequence parameter -- structurally one
+    join per call, no global optimizer (item 48, directly tested via
+    `inspect.signature`). Same-source and cross-source pairs both
+    supported (items 35-36) -- source-local comparison only, D-230's own
+    "never raw timestamps" contract inherited unmodified since this
+    module never re-derives continuity itself.
+20. **Determinism.** Identical inputs produce an identical, `==`-equal
+    `AudioJoinUnderstanding` (item 37); provenance is a SORTED set, so
+    identical inputs always produce identically-ordered provenance
+    regardless of internal dict/insertion order (item 38). Every
+    dataclass is frozen (direct mutation raises).
+21. **D-230 bug-fix contract, preserved.** The genuine evidence-quality-
+    vs-firewall-conflict distinction D-230 fixed (an evidence-quality
+    gap like "no audio supplied" must never collapse a known `LEXICAL_
+    SPEECH_PRESENT` edge into an unsafe-looking `UNKNOWN`) is inherited
+    structurally: this module reads `AcousticEdgeEvidence.speech_status`
+    directly (already correctly firewalled by D-230's own fix) and never
+    re-derives it, so the distinction cannot be re-collapsed here. No
+    new firewall-conflation bug was introduced by this module's own
+    fresh decision tables (`_word_safety_status`/`_meaning_safety_
+    status`/readiness helpers) -- each was designed and tested against
+    the SAME distinction from the start (items 26/27 use a resolved
+    opposite-side edge specifically to avoid conflating "untested" with
+    "unknown", a lesson carried over from D-230's own test-authoring
+    experience).
+
+**Test evidence.** `tests/test_cutsell_d231_pacing_v2_audio_join_
+understanding.py`: 68 tests, all passing (`68 passed in 0.57s`). Covers
+all 53 numbered generic-fixture-matrix items plus additional critical-
+property tests (word-safety/meaning-safety independence, all four
+double-speech states, ambience-bridge negative control, silence-only-
+handle-is-not-ambience-material, retry-blocked-handle-firewall-holds-
+even-with-supplied-edge-evidence, handle-id recording).
+
+**Regression evidence.**
+- `python3 -m compileall -q cutsell_worker tests` -- clean.
+- D-230/Pacing/SourceAudioHandle/Prosodic/Silence regressions
+  (`test_cutsell_d230_*`, `d223_*`, `d224_*`, `d214_*`, `d215_*`,
+  `d216_*`, `d217_*`, `d218f_*`, `d218r_*`, `d220_*`, `d226_*`, `d187_*`,
+  `d095_2_*`): 605 passed, 0 failed.
+- Renderer regressions (`test_cutsell_clean_worker_render.py`,
+  `test_cutsell_clean_worker_caption_render.py`): 9 passed, 0 failed.
+- Full offline suite (`pytest tests/ --ignore=tests/test_semantic_
+  stitch.py`): **5638 passed** (up from D-230's own 5570 by exactly the
+  68 new D-231 tests), **5 failed**, 13 subtests passed (161.87s). The 5
+  failures are the SAME chronic, pre-existing D-044 hybrid-semantic-
+  parity failures D-230's own entry already documented and reproduced
+  against the unmodified baseline -- byte-identical failure names, zero
+  new genuine failures. `tests/test_semantic_stitch.py` remains excluded
+  for its own pre-existing, unrelated module-import-time `TypeError`
+  (commit `8077aa4`, long predating this task, zero lines touched here).
+
+**No RAW, no Modal/RunPod, no provider call, no live authority.** No
+`.github/workflows/*.yml` file touched. No `render.py`/`render_plan.py`/
+`pacing_v2_source_audio_handle.py`/`pacing_transition_decision.py`/
+`dialogue_pacing_transition.py`/`pacing_v2_evidence_adapter.py`/
+`pacing_v2_handle_aware_evidence.py`/`pacing_v2_acoustic_edge_evidence.
+py`/Boundary/Ordering/Family/BestTake file touched (all read-only
+inputs, reused via import only). No feature flag, no `universal_clean_
+cut.py` wiring (directly verified via `grep -rl`). No crossfade/ambience
+execution of any kind -- `SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/
+`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE`/`J_CUT`/`L_CUT`/`MICRO_AUDIO_
+OVERLAP` remain exactly as D-228/D-229/D-230 left them: zero live
+authority, `HARD_CUT`/`TIGHT_CUT` the only executed modes.
+
+**D-231 verdict: A -- AUDIO JOIN UNDERSTANDING FOUNDATION OFFLINE
+PROVEN, TREATMENT DECISION FOUNDATION READY.** Every evidence dimension
+D-098 Section 16.3 named for Layer 1 (speech/non-speech occupancy,
+silence, acoustic continuity, level observation, SourceAudioHandle
+availability, relationship hint, Prosodic edge context, word/meaning/
+double-speech safety, treatment-evidence readiness, room-tone honesty,
+no-overprocessing signal) is now combined into ONE structured,
+tested, offline-qualified `AudioJoinUnderstanding` type with zero
+regressions.
+
+Canonical status added: `PACING_V2_AUDIO_JOIN_UNDERSTANDING_OFFLINE_
+PROVEN`.
+
+Names D-232 (Audio Join Treatment Decision Foundation, offline only --
+choosing among `NONE`/`CLICK_FADE`/`SHORT_CROSSFADE`/`AMBIENCE_CARRY_
+LEFT`/`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE`, still no live
+authority) -- **NOT implemented by this task**.
+
+Audio Join Treatment status: readiness EVIDENCE now exists per join
+(this task); the DECISION itself remains entirely unauthorized and
+unimplemented (D-232's own future gate). J/L status: unchanged from
+D-228/D-229 (bounded, real-media-eligibility-contingent, zero live
+authority). Micro (`MICRO_AUDIO_OVERLAP`) status: unchanged, diagnostics-
+only, highest safety bar, last in the roadmap per D-098 Section 16.14.
+Renderer status: unchanged, zero behavior change, zero new call site.
+App-roadmap status: Pacing HARD/TIGHT stable, J/L optional, Acoustic
+Evidence foundation DONE (D-230), Audio Join Understanding DONE (this
+task) -- Audio Treatment Decision is the next named, not-yet-authorized
+step.
+
+Zero RAW/Modal/RunPod/provider call. Zero treatment execution/authority
+of any kind. Zero Boundary/Ordering/Family/BestTake/Renderer behavior
+change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+"Then STOP. Do NOT implement D-232. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-232 (Audio
+Join Treatment Decision Foundation, offline only) as the next,
+separately-scoped engineering work. No further action is taken on it by
+this task.
+
+---
