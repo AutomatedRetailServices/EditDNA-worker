@@ -50787,3 +50787,240 @@ foundation gate) as the next, separately-scoped engineering work. No
 further action is taken on it by this task.
 
 ---
+## D-230: Pacing V2 Acoustic Edge Evidence Foundation, Offline Only (post D-229)
+
+Closes the ONE gap D-229's own forensic named (verdict B): every existing
+speech/non-speech signal in this codebase was WORD-TIMING ONLY. This task
+built `cutsell_worker/pacing_v2_acoustic_edge_evidence.py` -- a genuinely
+acoustic (ffmpeg-decoded PCM, numpy RMS/FFT, `audio_silence.py`'s real
+`silencedetect`) evidence layer, offline only, zero live wiring.
+
+1. **Primitive reuse, no fourth RMS implementation.** D-229 found three
+   independent RMS implementations (`prosodic_audio_v2.py`,
+   `perceptual_watch_listen.py`, `human_gold_decision_map.py`). This module
+   selects `prosodic_audio_v2.py`'s `AudioSamples`/`_slice_samples`/
+   `_rms_frames` as the ONE canonical primitive to build on -- imported
+   directly (`from .prosodic_audio_v2 import AudioSamples, _rms_frames,
+   _slice_samples`), never re-implemented. `_NEAR_SILENT_RMS = 1e-4`
+   matches that module's own inline `overall_rms < 1e-4` check verbatim
+   (test 19).
+2. **Silence, reused verbatim, never a second detector.** The module
+   takes `silence_intervals` as a caller-supplied parameter (from
+   `audio_silence.detect_audio_silence_intervals`) -- it contains zero
+   `subprocess`/`ffmpeg silencedetect` invocation of its own (test 16,
+   proven via AST import inspection + code-only text scan, not a naive
+   docstring substring match). `silence_intervals=None` ("never checked")
+   is distinguished from `()` ("checked, found none") -- items 11-12.
+3. **New acoustic signature (the one genuinely new capability).**
+   `AcousticWindowSignature` adds a numpy-only (`np.fft.rfft`, already a
+   hard dependency; no scipy/librosa) band-energy-ratio + spectral-
+   centroid descriptor. Both are mathematically gain-invariant by
+   construction (a global amplitude scale cancels out of a ratio or a
+   weighted average) -- proven directly, not asserted: test 40 shows the
+   same 300 Hz tone at amplitude 0.05 vs. 0.5 (10x gain difference, raw
+   RMS genuinely differs) still compares SIMILAR on signature, while
+   test 41 shows two different frequencies (150 Hz vs. 4000 Hz, same
+   gain) compare DIFFERENT. The raw, un-normalized `rms` field is kept
+   as a SEPARATE field precisely so absolute level is never lost, but
+   is never itself the comparison basis (test 66).
+4. **Speech / non-speech / evidence status contracts.** Full vocabulary
+   built per the directive's own naming: `SPEECH_STATUS_LEXICAL_PRESENT
+   /NO_LEXICAL_SPEECH_OBSERVED/SPEECH_STATUS_UNKNOWN`,
+   `NON_SPEECH_SAFE_CANDIDATE/NON_SPEECH_UNCONFIRMED/NON_SPEECH_
+   SPEECH_PRESENT/NON_SPEECH_SILENCE/NON_SPEECH_UNKNOWN`,
+   `EVIDENCE_STATUS_SUPPORTED/SAFE_FALLBACK/INSUFFICIENT_EVIDENCE/
+   CONFLICTED/UNKNOWN`. `_decide_non_speech_status`/`_decide_evidence_
+   status` are the two exhaustive, priority-ordered decision tables
+   (mirroring `_decide_handle_status`'s own shape).
+5. **A genuine bug found and fixed during this module's own test
+   authoring** (not a pre-existing repo bug -- caught before this module
+   ever shipped): the first implementation draft treated ANY entry in
+   `conflict_flags` (including mere evidence-QUALITY gaps like
+   `CONFLICT_AUDIO_EXTRACTION_UNAVAILABLE`/`CONFLICT_WINDOW_TOO_SHORT`,
+   which simply mean "no audio track was supplied" or "the window falls
+   outside the decoded span") as equivalent to a true FIREWALL block
+   (`CONFLICT_DISCARDED_MATERIAL`/`CONFLICT_RETRY_OR_CORRECTION`/
+   `CONFLICT_MEANING_CRITICAL`). This wrongly downgraded an already-KNOWN
+   `LEXICAL_SPEECH_PRESENT` window (known from word timing, independent
+   of whether acoustic audio was even supplied) to `NON_SPEECH_UNKNOWN`
+   merely because no `AudioSamples` happened to be passed in. Fixed by
+   introducing `_FIREWALL_CONFLICTS` (exactly the three firewall kinds)
+   and `_has_firewall_conflict()`, used in place of a bare truthiness
+   check on the full `conflict_flags` list in both decision functions.
+   Evidence-quality gaps now correctly fall through to the ordinary
+   `INSUFFICIENT_EVIDENCE`/`NON_SPEECH_UNCONFIRMED` checks (via the
+   already-existing `energy_status == ENERGY_STATUS_UNKNOWN` path) rather
+   than being conflated with an active safety block. Documented as an
+   explicit correction in the module's own docstring "Firewalls" section
+   (tests 08/25/26/29/74/75 cover both the bug's reproduction and the fix).
+6. **Correction to D-229's own item 14, restated (not new).**
+   `pacing_v2_source_audio_handle._decide_handle_status` already checks
+   `retry_evidence_kinds` BEFORE ever returning `HANDLE_STATUS_SAFE_
+   NON_SPEECH` -- a handle already at `SAFE_NON_SPEECH_HANDLE` can never
+   be retry/BTS-derived by construction, so no ADDITIONAL provenance
+   re-check is needed beyond reading `handle_status` itself (confirmed
+   again by direct inspection during this task; D-229 overstated this as
+   a still-open gap).
+7. **SourceAudioHandle integration, no second pre/post-handle
+   abstraction.** `build_acoustic_edge_evidence(..., source_handle=<a
+   real SourceAudioHandle>)` reads `handle_status`/`speech_presence_
+   status`/`word_intervals_present` DIRECTLY -- never re-derives them
+   (tests 27-32). A silence-only `SAFE_NON_SPEECH_HANDLE` correctly does
+   NOT become a non-speech CANDIDATE with usable acoustic material (test
+   28 -- "silence != ambience material", the AMBIENCE_CARRY relevance
+   the directive asked for).
+8. **Retained-edge word-geometry derivation, no invented fixed window.**
+   `derive_retained_edge_window(words, edge)` uses the clip's own last/
+   first word interval -- never a fixed duration; returns `None` (never a
+   fabricated window) when the clip carries no word timing at all (tests
+   33-36).
+9. **Firewalls proven, not merely asserted.** CRITICAL properties directly
+   tested: silence != ambience (test 23), word absence != safe ambience
+   (test 09), lexical speech != safe non-speech (tests 08/10), unknown
+   word coverage != safe non-speech (test 09), discarded/retry provenance
+   blocks reuse (tests 26/31/32/58), gain change alone does not become a
+   semantic "different room" (test 40), MICRO (speech-governed) vs.
+   AMBIENCE_BRIDGE (non-lexical-only) semantic separation -- a speech-
+   present window is CONFLICTED, never SIMILAR/DIFFERENT, as an ambience
+   comparison (test 46).
+10. **Continuity comparison, no magic global score.** `compare_acoustic_
+    edges(left, right) -> SIMILAR/DIFFERENT/INSUFFICIENT_EVIDENCE/
+    CONFLICTED`. Same-background pairs (same or cross-source) compare
+    SIMILAR (tests 44/50/51); different-background pairs compare
+    DIFFERENT (tests 45/52); missing signature or speech-present input
+    compares INSUFFICIENT/CONFLICTED, never a guessed DIFFERENT (tests
+    46-48). Never compares raw timestamps -- proven behaviorally (test
+    49, `dataclasses.replace` on `window_start`/`window_end` alone,
+    holding every other field fixed, yields an identical verdict and an
+    identical `reason` string), not by a docstring substring scan (an
+    earlier draft of this same test falsely flagged the module's own
+    docstring prose explaining this very property; fixed to check
+    behavior instead).
+11. **The one bounded, isolated, explicitly-labeled threshold the
+    directive allows.** `ACOUSTIC_HEURISTIC_OFFLINE_NOT_REAL_MEDIA_
+    TUNED_SIMILARITY_THRESHOLD = 0.20` (signature-distance comparison)
+    and `ACOUSTIC_HEURISTIC_OFFLINE_NOT_REAL_MEDIA_TUNED_LOW_ENERGY_
+    CEILING = 0.015` (LOW_ENERGY vs. ACTIVE_ENERGY, descriptive only,
+    never gates a firewall) -- exactly two, both named per this track's
+    existing `QUALITY_HEURISTIC_NOT_YET_REAL_MEDIA_TUNED` (D-220)
+    convention, both directly tested (tests 39-41, 20-21), neither reused
+    as a production Layer-3 authority constant.
+12. **Room tone: honest, not implemented.** `ROOM_TONE_CLASSIFICATION_
+    STATUS = "NOT_YET_AVAILABLE"` (module constant, surfaced in every
+    per-window diagnostic row) -- unchanged from D-222/D-225/D-228/D-229's
+    own established status (test 63).
+13. **Loudness ownership firewall, held.** The module observes `rms`/a
+    `level_delta_db` between two edges (test 64) but has no gain-
+    normalization/denoise/de-click/de-breath/de-plosive/EQ/compress
+    function or symbol anywhere (test 60), and `AcousticContinuityCompar
+    ison` carries no `recommend*`/`correction`/`target_gain` field (test
+    65) -- loudness CORRECTION remains `finishing_contract.py`'s (D-024)
+    or a future gain-match step's territory, never this module's.
+14. **No treatment/authority/renderer/Boundary/Ordering/Family/BestTake
+    reach.** No `SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_
+    CARRY_RIGHT`/`AMBIENCE_BRIDGE`/`J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP`
+    defined as a module symbol (test 59, checked against `vars(aee)` and
+    each function's own bytecode `co_names`, not a docstring scan --
+    those names legitimately appear in prose explaining what the module
+    never decides). Zero import of `render`/`render_plan`/`boundary`/
+    `best_take` (test 61). Zero reference to this module anywhere in
+    `universal_clean_cut.py` (test 62, `grep -rl` verified). No feature
+    flag.
+15. **Diagnostics, no transcript dump, no master score.**
+    `acoustic_edge_evidence_diagnostics`/`acoustic_continuity_
+    diagnostics` are plain JSON-serializable dicts (tests 53-54,
+    `json.dumps` round-tripped) that never leak raw word text (test 53,
+    a supplied word literal is asserted absent from the serialized
+    diagnostic). `acoustic_edge_evidence_run_summary` returns plain
+    counts (`window_count`, `silence_count`, `non_silent_count`,
+    `lexical_speech_count`, `safe_non_speech_candidate_count`,
+    `unknown_speech_count`, `signature_available_count`/
+    `signature_missing_count`, `similar_pair_count`/`different_pair_
+    count`/`insufficient_pair_count`, `discarded_block_count`,
+    `unknown_word_block_count`) -- no field name containing "score"
+    (test 55).
+16. **Determinism.** Evidence ids are derived purely from identity/
+    geometry inputs, never a random UUID (tests 03-04). Repeated
+    construction from the SAME real ffmpeg-decoded source yields
+    byte-identical `AcousticEdgeEvidence` objects (test 71, full
+    ffmpeg-decode round-trip). Every dataclass is frozen (tests 67-68).
+17. **Real ffmpeg-decode integration, not fixture-authored-by-ffmpeg.**
+    Following the established D-187 pattern, all 71 synthetic fixtures
+    are numpy-authored `AudioSamples` (deterministic, no ffmpeg
+    dependency for authoring); exactly 3 tests (69-71) exercise the real
+    `extract_source_audio_samples` ffmpeg-decode path end-to-end on a
+    stdlib-`wave`-written WAV file, including a missing-ffmpeg-binary
+    fail-open check (test 70, matching this module's fail-open posture
+    throughout -- no exception anywhere in the module).
+
+**Test evidence.** `tests/test_cutsell_d230_pacing_v2_acoustic_edge_
+evidence.py`: 75 tests, all passing (`75 passed in 0.80s`). Fifteen
+required synthetic categories are covered across silence, steady tone,
+different-frequency tone, same-tone-different-gain, gated "speech-like"
+bursts with supplied word timings, no-word non-silent audio, unknown
+word coverage, discarded/retry/meaning-critical handle provenance,
+same-background and different-background adjacent windows, safe-handle
+ambience candidate, silence-only handle, lexical-speech handle, and
+cross-source similar/different background pairs.
+
+**Regression evidence.**
+- `python3 -m compileall -q cutsell_worker tests` -- clean.
+- Pacing/SourceAudioHandle/Prosodic/Silence regressions (`test_cutsell_
+  d223_*`, `d224_*`, `d214_*`, `d215_*`, `d216_*`, `d217_*`, `d218f_*`,
+  `d218r_*`, `d220_*`, `d226_*`, `d187_*`, `d095_2_*`): 530 passed, 0
+  failed.
+- Renderer regressions (`test_cutsell_clean_worker_render.py`,
+  `test_cutsell_clean_worker_caption_render.py`): 9 passed, 0 failed.
+- Full offline suite (`pytest tests/ --ignore=tests/test_semantic_
+  stitch.py`): **5 failed, 5570 passed, 13 subtests passed** (162.29s).
+  `tests/test_semantic_stitch.py` fails collection with a pre-existing
+  `TypeError: score_take() missing 1 required positional argument:
+  'slot'` at MODULE IMPORT TIME (a top-level script-style `print()`
+  call, not a pytest test function); confirmed via `git log -1
+  --oneline -- tests/test_semantic_stitch.py` (commit `8077aa4`, long
+  predating this task, zero lines touched by D-230) that this is a
+  chronic, unrelated, pre-existing collection error, not a regression
+  introduced here. The 5 failures (`test_hybrid_story_guard_incomplete_
+  retry.py::test_incomplete_failed_retry_is_covered_when_prior_delivery_
+  preserves_numbers_and_negation` and 4 in `test_video00_modal_hybrid_
+  semantic_parity.py`) are the SAME chronic D-044 hybrid-semantic-parity
+  failures this whole track has carried since before D-227 -- directly
+  re-verified in THIS task by `git stash`-ing both new D-230 files and
+  re-running just those two test files against the unmodified baseline
+  HEAD (`939db74`): identical 5 failures, byte-identical failure names,
+  before any D-230 change existed. Zero new genuine failures.
+
+**No RAW, no Modal/RunPod, no provider call, no live authority.** No
+`.github/workflows/*.yml` file touched. No `pacing_v2_source_audio_
+handle.py`/`render.py`/`render_plan.py`/Boundary/Ordering/Family/
+BestTake file touched (all read-only inputs). No feature flag, no
+`universal_clean_cut.py` wiring.
+
+**D-230 verdict: A -- PACING_V2_ACOUSTIC_EVIDENCE_FOUNDATION_OFFLINE_
+PROVEN.** The one gap D-229 named (a genuinely acoustic, non-word-timing
+speech/non-speech/background-continuity evidence layer) is now built,
+tested, and offline-qualified with zero regressions. Names D-231 (Audio
+Join Understanding Foundation, offline only -- combining word evidence,
+`audio_silence.py` silence evidence, `SourceAudioHandle` (D-223), and
+this task's acoustic edge evidence + continuity comparison into one
+unified `JoinUnderstanding` evidence object per D-098 Section 16's
+JOIN UNDERSTANDING layer) -- NOT implemented by this task.
+
+Canonical status added: `PACING_V2_ACOUSTIC_EVIDENCE_FOUNDATION_
+OFFLINE_PROVEN`.
+
+Zero `cutsell_worker/pacing_v2_source_audio_handle.py`/`render.py`/
+`render_plan.py`/Boundary/Ordering/Family/BestTake behavior change. Zero
+RAW/Modal/RunPod/provider call. Zero live authority granted to any
+Audio Join Treatment value (`SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/
+`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE`) or any Layer-2 transition
+value (`J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP`) -- all remain exactly as
+D-228/D-229 left them.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+"Then STOP. Do NOT implement D-231. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-231 (Audio
+Join Understanding Foundation, offline only) as the next, separately-
+scoped engineering work. No further action is taken on it by this task.
+
+---
