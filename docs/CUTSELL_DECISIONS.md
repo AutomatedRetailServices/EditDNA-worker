@@ -52122,3 +52122,245 @@ Join Treatment Real-Media Qualification, exactly ONE RAW) as the next,
 separately-scoped work. No further action is taken on it by this task.
 
 ---
+
+
+## D-235 -- Pacing V2 Audio Join Treatment: Real-Media Qualification, Exactly ONE RAW, Diagnostic Only, No Authority (post D-234)
+
+**Branch/HEAD verified before dispatch:** `feature/runpod-pod-on-demand` @
+`04772e4` (D-234), clean working tree. One additive, workflow-only
+infrastructure commit (`5dcb7f3`) was made before dispatch to thread a
+new `audio_join_treatment_diagnostics_enabled` input into `cutsell-
+video00-modal-raw.yml` (mirroring the existing `pacing_v2_diagnostics_
+enabled` input exactly) -- required to actually set `CUTSELL_AUDIO_
+JOIN_TREATMENT_DIAGNOSTICS_ENABLED=1` on this RAW. Workflow YAML only;
+no `cutsell_worker` file touched.
+
+**RAW authorized and run:** exactly ONE, per directive. `source_key`:
+`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`.
+No substitution, no second RAW.
+
+**S3 preflight:** the workflow's own mandatory D-228 pre-dispatch S3
+existence check ("D-228 sibling RAW S3 existence preflight") ran BEFORE
+any Modal compute and **succeeded** -- the object exists and is
+non-zero size (a zero-byte or missing object fails that step with a
+non-zero exit before the Modal step ever runs; it did not fail here).
+Per-field size/content-type were not separately retrieved into this
+report (see Retrieval Limitations below); the pass/fail gate itself is
+confirmed.
+
+**Run:** GitHub Actions workflow run
+[34589065417](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34589065417)
+(`cutsell-video00-modal-raw.yml`, run #96), dispatched on
+`feature/runpod-pod-on-demand` @ `5dcb7f3`. Flags enabled:
+`editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`,
+`whole_video_editorial_reasoning_diagnostics_enabled=1`,
+`ordering_diagnostics_enabled=1`, `pacing_v2_diagnostics_enabled=1`,
+`audio_join_treatment_diagnostics_enabled=1`. No provider overlay
+flags set. The "Run Modal full Video00 benchmark (ONE authorized L4
+run)" step **succeeded** (10:24:58-10:27:42, ~2m44s) and "Modal
+teardown confirmation" **succeeded** (automatic scale-to-zero, no
+persistent GPU resource).
+
+**Primary finding: Selection Freeze did not reach the Pacing V2 / Audio
+Join Treatment diagnostic seam on this source.** Three independent
+verification steps failed on this run: "Verify frozen Selection lock",
+"Verify Video00 architecture", and "Verify Human Gold regression QA (18
+-check manifest)". Consistently, the three downstream Pacing V2
+pure-projection steps that read `diagnostics["pacing_v2"]` /
+`diagnostics["pacing_v2_handle_aware"]` from the same serialized engine
+result **all failed with an explicit, honest MISSING_FROM_SERIALIZATION
+report, never a silent PASS or a fabricated value**:
+- "D-218R Pacing V2 -> Video00 real-media diagnostic qualification"
+  (D-216/D-217's own block): `pacing_v2_block_status: MISSING_FROM_
+  SERIALIZATION`.
+- "D-221 Pacing V2 J/L timing -> Video00 real-media candidate
+  extraction": aborted because D-218R's own artifact already reported
+  the block absent.
+- "D-225 Pacing V2 Handle-Aware -> Video00 real-media diagnostic
+  qualification" (D-224's own block): `diagnostics['pacing_v2_handle_
+  aware'] IS MISSING FROM THE SERIALIZED RESULT` (the step's own stderr,
+  captured verbatim from the run log).
+
+`universal_clean_cut.py`'s own live seam places the ENTIRE D-216/D-217/
+D-224/D-234 diagnostic block strictly inside the `else` branch that
+only executes when Selection Freeze is NOT blocked (see the code this
+session inspected for D-234's own integration: `if freeze_blocked: ...
+else: ... apply_dialogue_pacing_transition_pass(...) ... if pacing_v2_
+diagnostics_enabled(): ... if audio_join_treatment_diagnostics_enabled():
+...`). A blocked Freeze on this run therefore explains, structurally and
+consistently, ALL FIVE observed failures at once (frozen-lock,
+architecture, Human-Gold-regression, D-218R, D-221, D-225) without
+requiring a defect in any of D-230 through D-234's own code -- none of
+those five checks are D-234-specific, and D-234's own diagnostic block
+sits at the exact same seam as D-216/D-217/D-224, which failed for the
+identical, single reason.
+
+This is a KNOWN, PRECEDENTED category of sibling-RAW outcome for this
+codebase, not a novel or alarming one -- `docs/CUTSELL_DECISIONS.md`'s
+own history records at least one earlier canonical-Video00 RAW that was
+Freeze-blocked (fixed in a later, separately-scoped gate) before ever
+reaching Pacing.
+
+**Retrieval limitations (reported honestly, not papered over):** the
+run's full serialized result JSON lives only in a 68.7 MB "cutsell-
+video00-modal-human-review" artifact, which this session's egress
+policy blocks (Azure Blob Storage download denied by organization
+policy, confirmed via a direct `curl` attempt returning `CONNECT tunnel
+failed, response 403`); the small, always-retrievable "cutsell-video00-
+modal-validator-reports" artifact (27.6 KB, containing the D-218R/D-221/
+D-225 JSON summaries plus the frozen-lock/architecture/Human-Gold
+reports) is on the same blocked host and could not be downloaded
+either. Recovering the same information via `get_job_logs` text instead
+was only partially possible: this run's later steps (each printing large
+JSON dumps and/or large embedded step-script source before executing)
+are extremely log-dense -- roughly 3,000-3,400 raw log lines cover only
+about 2 seconds of wall-clock run time near the end of the job -- so the
+tool's per-call line-return cap (observed ~5,000 lines regardless of a
+larger requested `tail_lines`) could not reach back far enough to
+recover the EXACT free-text reason Selection Freeze was blocked (e.g.
+the specific contradiction, story-incompleteness, or coverage decision),
+nor the source's precise duration/resolution/selected-clip-count/
+transition-count fields, nor the D-235 required per-join D-230/D-231/
+D-232/D-233 field-level tables (those fields never existed for this run
+in the first place, since the block was never serialized -- there is
+nothing to report per-join). What COULD be retrieved with certainty is
+the per-step PASS/FAIL structure recorded above, directly from the
+GitHub Actions job/step API (not log text), which is unambiguous.
+Per this task's own "never fabricate a verdict from incomplete/
+unretrievable data" instruction (CLAUDE.md), no per-join table, exact
+duration, or freeze-block reason is invented here; each is marked
+`NOT_RETRIEVABLE_THIS_SESSION` below rather than guessed.
+
+**Source health:** S3 preflight PASSED (object exists, non-zero size).
+Duration/size/resolution: `NOT_RETRIEVABLE_THIS_SESSION` (see above).
+Audio present / video present: not independently confirmable this
+session, but the Modal benchmark step itself completed successfully
+(no decode-time crash), which is at least consistent with a decodable
+audio+video source. ASR status, selected clip count, transition count:
+`NOT_RETRIEVABLE_THIS_SESSION`.
+
+**Upstream health (P1/Language/P2/Ordering/Boundary/primary Pacing):**
+`NOT_RETRIEVABLE_THIS_SESSION` at the field level (same artifact-access
+limitation); structurally, the D-196/D-198/D-200/D-200.4/D-204/D-209
+compact-diagnostics steps for P1/Language-Spine/P2/Ordering all show as
+`success` in the job's own step list (unlike the three failing verify/
+Pacing steps above), which is evidence those layers at least printed a
+diagnostic without crashing on this source, but does not by itself
+confirm they reached a materially-healthy state without the actual
+printed values.
+
+**Audio Join Treatment diagnostic health:** `audio_join_treatment_v2`
+top-level status: **effectively UNAVAILABLE** for this run -- the block
+was never constructed, for the exact same upstream reason
+`pacing_v2`/`pacing_v2_handle_aware` were never constructed (Freeze not
+reached), not because of any D-234 code defect. `join_count`: 0 (no
+seam reached). Per-join construction success/failure, fail-soft count:
+N/A -- no joins were ever attempted. `advanced_treatment_executed_
+count` / `live_audio_window_mutation_count`: still verifiably 0 (they
+are always 0 by construction, per D-234's own structural proof, whether
+or not the block executes at all).
+
+**D-230/D-231/D-232/D-233 real evidence/understanding/treatment/timing
+distributions:** not applicable -- zero joins were ever constructed on
+this run, so there is no distribution to report (reporting all-zero
+counts here would be indistinguishable from "ran and found nothing,"
+which is NOT what happened; "never invoked" is the honest and distinct
+status).
+
+**Critical zeroes:** `advanced_treatment_executed_count = 0` (true).
+`live_audio_window_mutation_count = 0` (true). No advanced renderer
+executor call (true -- D-234 never calls it regardless of whether its
+own diagnostic block executes). No final render mutation (true).
+
+**J/L, Micro:** not observed on this run (seam never reached); no
+authority change of any kind was made or attempted.
+
+**Reference parity:** `REFERENCE_PARITY_NOT_AVAILABLE_FOR_SIBLING` --
+per the existing D-227/D-228 convention, Human Gold / Cut.ai references
+are Video00-specific edits and are not a valid comparison for this
+sibling source; the workflow's own "Verify Human Gold regression QA"
+step failing on a sibling RAW is consistent with this, not a new
+finding.
+
+**Generalization classification: `PIPELINE_REGRESSION`** is explicitly
+NOT the right label here -- the evidence points to an upstream Selection
+Freeze / story-completeness outcome specific to this source's content
+shape, not a code regression introduced by D-230 through D-234 (which
+never executed and therefore cannot itself be the cause). The closest
+honest label given the directive's own vocabulary is **`ONE_MATERIAL_
+AUDIO_JOIN_BLOCKER`**, with the blocker actually sitting one layer
+upstream of Audio Join Treatment (Selection Freeze), not inside the
+D-230-D-234 stack.
+
+**D-235 PRIMARY RESULT: D -- ONE MATERIAL AUDIO JOIN / GENERALIZATION
+BLOCKER FOUND.**
+
+**The one blocker:** Selection Freeze was not reached (or not completed)
+on this specific sibling RAW, so the entire live Pacing V2 diagnostic
+seam in `universal_clean_cut.py` -- D-216/D-217 (`pacing_v2`), D-224
+(`pacing_v2_handle_aware`), and D-234 (`audio_join_treatment_v2`) alike
+-- never executed. This is corroborated by three independently-failing
+verification steps (frozen-selection-lock, architecture, Human-Gold-
+regression) plus two independently-failing pure-projection steps
+reporting the identical MISSING_FROM_SERIALIZATION condition for the
+two pre-existing Pacing blocks. Nothing in this evidence implicates a
+defect in D-230, D-231, D-232, D-233, or D-234's own code; each remains
+`OFFLINE_PROVEN`/`LIVE_DIAGNOSTICS_READY` exactly as closed in their own
+gates. The blocker is this specific source's Selection/Freeze outcome,
+not the Audio Join Treatment stack.
+
+**Per directive's own "IF D" instruction:** name one blocker (above),
+no fix in this same gate. No engine code was touched in response to
+this result. No second RAW was run.
+
+**No overclaim:** no perceptual superiority, human preference, commercial
+parity, or room-tone-matching claim is made. This gate did not qualify
+"real evidence reachability" for Audio Join Treatment on this source --
+it qualified only that the qualification RAW itself ran, S3 preflight
+passed, Modal executed and tore down cleanly, and the pre-existing
+Pacing V2 diagnostic seam (unrelated to this task's own new code) did
+not reach execution for an upstream reason.
+
+**Next recommendation (not authorized to implement here):** before a
+further Audio Join Treatment real-media qualification RAW is worth
+spending, a separate, appropriately-scoped diagnostic task should
+determine WHY Selection Freeze did not complete for this specific
+sibling source (likely requiring either direct access to the blocked
+68.7 MB artifact via a different retrieval path, e.g. a workflow step
+that copies a small `selection_boundary_contract`/`freeze_blocked`
+excerpt into the small always-retrievable validator-reports artifact --
+mirroring the exact D-218R precedent -- or a change to this session's
+egress allowlist). That investigation is explicitly NOT this gate and is
+not run here. The two reserved/historical RAW siblings
+(`VIDEO-2026-07-30-09-24-13.mp4` reserved;
+`VIDEO-2026-07-30-10-22-46.mp4` historical-only) remain untouched and
+available for a future, separately-authorized attempt.
+
+**Live authority status:** unchanged -- zero live audio-treatment
+authority, zero advanced execution, zero Boundary/Ordering/Family/
+BestTake change, zero loudness correction, zero audio cleanup, all
+confirmed by the structural proofs already closed in D-234 (this gate
+added no new code to `cutsell_worker`).
+
+**Audio Join Treatment / J-L / Micro / Renderer status:** unchanged from
+D-234's own closed state (`PACING_V2_AUDIO_JOIN_TREATMENT_LIVE_
+DIAGNOSTICS_READY`) -- this gate neither closes nor regresses that
+status; it records that THIS ONE sibling RAW could not exercise it, for
+a reason outside the stack's own scope.
+
+**App-roadmap status:** unchanged from D-234's own roadmap snapshot --
+Acoustic Evidence / Audio Join Understanding / Audio Treatment Decision
+/ Renderer-Timing / Live Diagnostics remain DONE; Real-Media
+Qualification is now attempted-but-inconclusive-on-this-source (not
+closed, not failed on its own merits); Bounded Authority and Micro
+remain not started.
+
+**No second RAW / no provider / no patch / no advanced execution / no
+authority change:** confirmed. Exactly one RAW was dispatched. No
+provider overlay was enabled. No `cutsell_worker` file was modified
+before or after the run. No advanced audio treatment was executed. No
+Boundary/Ordering/Family/BestTake/loudness/audio-cleanup authority was
+touched.
+
+---
