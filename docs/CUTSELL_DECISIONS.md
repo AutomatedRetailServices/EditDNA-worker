@@ -50260,3 +50260,530 @@ sequence-consistency inconsistency, as the next, separately-scoped
 engineering work. No further action is taken on either by this task.
 
 ---
+
+## D-229: Pacing V2 Audio Join Treatment Architecture / Forensic (post D-228)
+
+**Status: VERDICT B -- AUDIO JOIN TREATMENT PARTIALLY READY. ONE
+ACOUSTIC EVIDENCE GAP MUST BE CLOSED FIRST.** DOCS / FORENSIC ONLY.
+Zero `cutsell_worker/*.py` change, zero `tests/*.py` change, zero
+workflow change, zero RAW, zero provider call, zero authority granted.
+This entry audits, by direct code inspection, what evidence and
+renderer capability already exist for Audio Join Treatment
+(`SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/`AMBIENCE_CARRY_RIGHT`/
+`AMBIENCE_BRIDGE`) against D-098 Section 16's own canonical doctrine,
+and names (does not implement) the smallest next gate.
+
+### 1. Branch / new HEAD
+`feature/runpod-pod-on-demand`, unchanged at `7fd3043` (D-228) -- this
+decision entry is the only change.
+
+### 2. Files changed
+`docs/CUTSELL_DECISIONS.md` only (this entry). No code, test, or
+workflow file touched.
+
+### 3. Current CLICK_FADE contract (audited, unchanged)
+`render.py`'s `_AUDIO_JOIN_FADE_SEC = 0.012` (12 ms), `_AUDIO_JOIN_
+FADE_MIN_SEGMENT_SEC = 0.20` (segments shorter than this are left
+untouched). `_audio_join_fade_filters` emits `afade=t=in:st=0:d=0.012`
++ `afade=t=out:st=<dur-0.012>:d=0.012`, applied to EVERY segment's OWN
+audio edges independently at all three render call sites
+(`_segment_command` line 181, `_concat_render_command` line 259-260,
+`_concat_render_command_with_audio_windows` line 546) -- confirmed
+universal, mode-independent, purely technical click-prevention. Never
+a cross-segment operation, never editorial, never varies with Pacing's
+own transition mode. Matches D-098 Section 16.5's own description
+exactly. **Preserved unchanged; not touched by this task.**
+
+### 4. SHORT_CROSSFADE ownership
+Canonical purpose (restated from D-098 16.5): smooth an abrupt audible
+discontinuity between adjacent clips without requiring dialogue
+overlap. Status: `ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_
+AUTHORITY` -- confirmed, no `acrossfade` filter and no cross-segment
+`afade` shaping exists anywhere in `render.py` today (grep-confirmed
+repo-wide). Renderer capability: item 31.
+
+### 5. AMBIENCE_CARRY_LEFT ownership
+Canonical purpose: safe non-speech/room-tone material from the
+OUTGOING (left) clip continues briefly across the join. Status:
+`ARCHITECTURALLY_DEFINED`/`NOT_IMPLEMENTED`/`NO_AUTHORITY`. Renderer
+capability: item 32.
+
+### 6. AMBIENCE_CARRY_RIGHT ownership
+Canonical purpose: safe non-speech/room-tone material from the
+INCOMING (right) clip may begin before its primary join point. Status:
+same as item 5. Renderer capability: item 33.
+
+### 7. AMBIENCE_BRIDGE ownership
+Canonical purpose: non-speech ambience smooths a perceptible room-
+tone/background discontinuity across the join; distinct from
+J_CUT/L_CUT/MICRO_AUDIO_OVERLAP (those are Layer-2 temporal relations;
+this is a Layer-3 audio-texture treatment, D-098 16.5/16.6). Status:
+same as item 5. Renderer capability: item 34. **Mechanical-shape
+finding:** `render.py`'s own `_infer_transition_mode` (read-only
+diagnostic label, D-214) classifies a join where BOTH `right_leads`
+AND `left_trails` simultaneously as `MICRO_AUDIO_OVERLAP` -- the
+IDENTICAL geometric shape a true AMBIENCE_BRIDGE would need (both
+sides' independent audio windows diverging at once). The renderer
+cannot distinguish "two speech streams overlapping" (unsafe, deferred)
+from "two non-speech ambience beds overlapping" (exactly what
+AMBIENCE_BRIDGE needs) by geometry alone -- only the SEMANTIC content
+differs. This is a naming/vocabulary consideration for the future
+Layer-3 design (Section 16.6's own orthogonality contract), not a bug:
+`_infer_transition_mode` is explicitly documented as "never a
+decision."
+
+### 8. Current speech/non-speech evidence
+**WORD-TIMING ONLY, not acoustic.** `pacing_v2_source_audio_handle.
+py`'s own `_classify_speech_presence` classifies a handle span as
+`WORDS_PRESENT` only if a caller-supplied `broader_word_timings`
+interval overlaps it (empty for every live caller today, a confirmed
+D-222 gap) -- otherwise `SPEECH_PRESENCE_NO_WORDS` by default, which
+this module's own docstring explicitly does NOT equate with "safe to
+reuse": `SAFE_NON_SPEECH_HANDLE` additionally requires the span to come
+from Boundary's own already-applied, word-boundary-clamped trim
+(`boundary_engine_pass.tighten_selected_audio_edges` /
+`post_selection_edge_only_boundary.trim_locked_selection_edges`), never
+a raw "no ASR word here" inference alone. This module's own docstring
+states outright, twice: **"D-222 item 18: none exists"** -- no acoustic
+speech/room-tone detector exists anywhere in this codebase, confirmed
+by direct inspection, not inferred.
+
+### 9. Current silence evidence
+**AVAILABLE**, genuinely acoustic (not word-timing-based).
+`audio_silence.py`'s `detect_audio_silence_intervals`/`audio_silence_
+events`: real `ffmpeg silencedetect` on the whole source, per source
+asset, dual-floor (`-35 dB`/confidence 1.0 primary, `-30 dB`/confidence
+0.90 relaxed, merged with a 0.30s gap-merge to avoid fragmenting one
+pause on near-floor noise), published as `audio_silence_interval`
+`TemporalEvent`s already consumed by the interior-gap trimmer
+(`post_selection_interior_gap_trim`) and Boundary's own audio-edge
+tightening. **This is the strongest existing candidate acoustic
+primitive for Join Understanding's own "silence availability"
+dimension** -- already computed, already wired into `WholeVideoContext`,
+reusable without a new detector.
+
+### 10. Current VAD status
+**NOT AVAILABLE as an independent, reusable evidence primitive.**
+`faster_whisper`'s own internal `VadOptions` (referenced in `asr.py`)
+is an ASR-INTERNAL parameter controlling Whisper's own silence-skipping
+during transcription -- it is never exposed, surfaced, or reused as a
+standalone speech-activity signal for Pacing or Join Understanding.
+
+### 11. Current RMS/loudness evidence
+**PARTIAL, real but not yet wired for Join Understanding.**
+`prosodic_audio_v2.py` computes genuine per-20ms-frame RMS energy from
+ffmpeg-decoded PCM (`_rms_frames`, `_FRAME_SEC = 0.020`) for D-187/D-190
+Prosodic delivery evidence, on an already-SELECTED candidate span (not
+a SourceAudioHandle pre/post-roll span). It already classifies a
+near-silent span (`overall_rms < 1e-4`) as `NO_SPEECH` -- a genuine,
+working acoustic near-silence check. Its own energy-dynamics metric
+(coefficient of variation, `energy_std/energy_mean`) is DELIBERATELY
+gain-scale-invariant (a global loudness multiplier cancels out
+identically), so it is NOT usable as-is for absolute loudness/gain
+matching -- a different, absolute-level measurement (the raw
+`overall_rms`/an ffmpeg `astats`/`loudnorm` pass) would be needed for
+that, not yet computed anywhere. `perceptual_watch_listen.py` and
+`human_gold_decision_map.py` each have their OWN separate RMS/dBFS or
+RMS+ZCR computations, used respectively for post-render perceptual QC
+and Human-Gold-alignment (QA-only) -- three independent RMS
+implementations exist in the repo today, none shared, none wired to
+Join Understanding.
+
+### 12. Current room-tone evidence
+**MISSING.** No spectral, embedding, or cross-clip similarity
+comparator exists anywhere in the repo (confirmed by repo-wide grep:
+zero hits for spectral/embedding-based ambience comparison). Nothing
+today can answer "does the room tone at the end of clip A resemble the
+room tone at the start of clip B" -- only whether EACH span, taken
+alone, is loud/quiet (item 9/11).
+
+### 13. Current background/ambience evidence
+**MISSING as a dedicated signal; PARTIAL by inference.** No module
+directly measures "background ambience" as its own dimension. The only
+INDIRECT proxy is `audio_silence.py`'s own silence intervals (item 9) --
+a span below the noise floor is presumptively non-speech, but (Section
+16's own "word-timing limit" concern, generalized) a quiet span could
+also be room tone, breath, distant background speech, or quiet
+unrecognized speech; `silencedetect` alone cannot distinguish these.
+
+### 14. SourceAudioHandle relationship
+`pacing_v2_source_audio_handle.py`'s own module docstring explicitly
+anticipates this: "does not implement any Audio Join Treatment
+(`SHORT_CROSSFADE`/`AMBIENCE_*`, D-220C Section 16.5, still `NOT_
+IMPLEMENTED`/`NO_AUTHORITY`)" is listed among what the module does NOT
+do -- meaning it is written with future Ambience reuse in view. A
+`SourceAudioHandle` with `handle_status == HANDLE_STATUS_SAFE_NON_
+SPEECH` is EXACTLY the evidence shape `AMBIENCE_CARRY_LEFT`/`_RIGHT`/
+`_BRIDGE` would consume (a proven-safe, word-boundary-clamped, non-
+overlapping-with-discarded-or-neighbor-selected span immediately
+outside a clip's own selected window) -- no second handle system is
+needed. **One safety nuance this task surfaces, not previously
+recorded:** a handle's own provenance distinguishes `unintentional_
+dead_air` (genuine measured silence) from confirmed retry/BTS/false-
+start debris that an owning Boundary authority already excised for
+CONTENT reasons (CLAUDE.md's "remove real failed/retry/BTS material").
+A future Ambience-carry decision layer must gate on this provenance,
+not merely on `handle_status == SAFE_NON_SPEECH_HANDLE` -- carrying
+audio FROM excised retry/BTS material, even if technically "safe non-
+speech" by the current classifier, would still be reusing material
+Boundary already decided does not belong in the delivery. Recorded as
+a named requirement for the future decision layer; not implemented.
+
+### 15. Handle requirements by treatment
+`SHORT_CROSSFADE` does **NOT** require a `SourceAudioHandle` --
+directive's own "current handle limitation" framing is confirmed
+correct: it operates entirely WITHIN the two already-selected,
+already-Boundary-approved clip spans (a small mutual overlap carved
+from each side's own already-kept content, played simultaneously),
+never reaching into pre/post-roll territory. `AMBIENCE_CARRY_LEFT`/
+`_RIGHT`/`_BRIDGE` **DO** require a `SourceAudioHandle` (or an
+equivalent evidence source) by definition -- they carry material FROM
+OUTSIDE the primary selected span, which is precisely what
+`SourceAudioHandle` was built (D-223) to represent.
+
+### 16. No-handle treatments
+`SHORT_CROSSFADE` (item 15). `CLICK_FADE`/`NONE` trivially require no
+handle (already-live, or no-op).
+
+### 17. Join Understanding evidence contract (proposed, not implemented)
+A future `JoinUnderstanding` object (name not fixed, per D-098 16.3)
+would carry, using ONLY already-existing primitives:
+- `left_speech_occupancy_near_edge` / `right_speech_occupancy_near_
+  edge` -- from ASR word timing (existing, `Word` objects already on
+  `DraftClip`).
+- `left_non_speech_available_sec` / `right_non_speech_available_sec` --
+  from `SourceAudioHandle.available_duration` where `handle_status ==
+  SAFE_NON_SPEECH_HANDLE` AND provenance is `unintentional_dead_air`
+  (item 14's own gating requirement), never retry/BTS-derived.
+- `silence_availability` -- from `audio_silence.py`'s own already-
+  computed `audio_silence_interval` events (item 9), reused verbatim.
+- `same_source_identity` -- from `DraftClip.source_asset_id` equality
+  (already trivially available).
+- `loudness_continuity_status` -- **NOT YET COMPUTABLE**: would need a
+  new, small, absolute-level RMS comparison immediately before/after
+  the edge (adapting `prosodic_audio_v2.py`'s existing `_rms_frames`
+  primitive, un-normalized, item 11), not yet built.
+- `background_similarity_status` -- **NOT YET COMPUTABLE** (item 12):
+  honestly `EVIDENCE_UNAVAILABLE`, never fabricated.
+- `word_safety`/`meaning_safety` -- reused verbatim from D-038/D-215
+  (existing).
+- `relationship_hint` -- reused verbatim from D-215's own
+  `CONTINUATION`/`CORRECTION`/`RETRY`/`UNKNOWN` vocabulary (existing).
+- `prosodic_edge_state` -- reused verbatim from D-187/D-190 (existing,
+  though currently computed on selected-candidate spans, not join
+  edges specifically -- an adaptation, not a new module).
+**No threshold is proposed here**, per D-098 Section 6's own binding
+anti-loop contract (naming a dimension authorizes no algorithm).
+
+### 18. Proposed treatment decision type (design only, not implemented)
+`AudioJoinTreatmentDecision` (name illustrative): `transition_index`,
+`treatment` (item 19), `treatment_status` (item 20), `left_audio_role`/
+`right_audio_role` (free-text or enum: `SOURCE`/`RECEIVER`/`NEUTRAL`),
+`speech_safety_status`, `ambience_status`, `loudness_status`,
+`candidate_duration`, `timing_status`, `fallback_reason`, `conflict_
+flags: tuple[str, ...]`, `provenance: tuple[tuple[str, str], ...]` --
+mirroring `AdvancedTransitionTimingDecision`'s (D-220) own frozen-
+dataclass shape and field-naming convention exactly, for consistency
+with the existing Pacing V2 module family. Not implemented.
+
+### 19. Treatment vocabulary (canonical, D-098 16.5, restated)
+`NONE`, `CLICK_FADE` (existing/live), `SHORT_CROSSFADE`, `AMBIENCE_
+CARRY_LEFT`, `AMBIENCE_CARRY_RIGHT`, `AMBIENCE_BRIDGE`. Exactly six
+values; no seventh proposed by this task.
+
+### 20. Treatment status vocabulary (proposed, mirrors D-220's own)
+`SUPPORTED`, `SAFE_FALLBACK`, `INSUFFICIENT_EVIDENCE`, `CONFLICTED`,
+`UNKNOWN` -- identical shape to `pacing_v2_timing_policy`'s own
+`TIMING_STATUS_*` vocabulary (D-220, reused pattern, not reused
+constant). No numeric master score, per this task's own instruction.
+
+### 21. Compatibility-matrix design (conceptual only, not exhaustive)
+| Transition (Layer 2) | Treatment (Layer 3) | Classification |
+|---|---|---|
+| `HARD_CUT` | `CLICK_FADE` | SUPPORTED (today's own live, universal shape) |
+| `HARD_CUT` | `SHORT_CROSSFADE` | POSSIBLE_WITH_CONDITIONS (needs speech/non-speech proof both sides, item 8's own gap) |
+| `TIGHT_CUT` | `SHORT_CROSSFADE` | POSSIBLE_WITH_CONDITIONS (same precondition; `TIGHT_CUT`'s own already-applied Boundary trim may narrow available overlap room) |
+| `KEEP_PAUSE` | `AMBIENCE_BRIDGE` | POSSIBLE_WITH_CONDITIONS (a genuine, intentional pause is exactly where a room-tone bridge could matter most -- contingent entirely on item 12's missing room-tone evidence) |
+| `J_CUT` | `NONE` | SUPPORTED (already today's own implicit shape whenever a J_CUT plan has no explicit treatment) |
+| `J_CUT` | `CLICK_FADE` | SUPPORTED (per-segment click-fade is universal, item 3) |
+| `J_CUT` | `SHORT_CROSSFADE` | UNKNOWN (J_CUT already introduces a one-sided audio/video divergence; layering a crossfade on TOP of that divergence is an unreasoned combination -- named, not resolved, here) |
+| `L_CUT` | `NONE` | SUPPORTED (symmetric to J_CUT+NONE) |
+| `L_CUT` | `SHORT_CROSSFADE` | UNKNOWN (symmetric to J_CUT+SHORT_CROSSFADE) |
+| `MICRO_AUDIO_OVERLAP` | any `AMBIENCE_*` | DISALLOWED until `MICRO_AUDIO_OVERLAP` itself has live authority (it remains deferred, D-219/D-220/D-228) -- and even then, item 7's own geometric-collision finding means the two must be disambiguated by SEMANTIC content, not geometry, before ever co-occurring |
+Exhaustive resolution of every cell is explicitly out of this task's
+own scope (D-098 16.6: "a future decision layer must define the full
+compatibility matrix").
+
+### 22. HARD/TIGHT relationship
+Both remain fully compatible with `CLICK_FADE`/`NONE` (item 21, already
+live/no-op) and, per item 21, `SHORT_CROSSFADE` is a POSSIBLE future
+combination for either, contingent on item 8's own acoustic gap.
+Neither `HARD_CUT` nor `TIGHT_CUT` requires an `AMBIENCE_*` treatment
+by default -- per this task's own "no over-processing" doctrine (item
+36), a join that already sounds natural needs no treatment beyond
+`CLICK_FADE`.
+
+### 23. J/L relationship
+D-225/D-228's own real-media findings (zero J/L candidates on both
+Video00 and one real sibling) mean there is currently no real-media
+J/L join to test any Layer-3 treatment against. Item 21's own `J_CUT`/
+`L_CUT` rows are UNKNOWN, not DISALLOWED -- a future combination
+question, not resolved by this forensic, and not urgent given D-228's
+own "stop chasing J/L with more RAWs" verdict (C).
+
+### 24. Micro relationship
+`MICRO_AUDIO_OVERLAP` remains deferred (unchanged). Item 7's own
+finding (the renderer's read-only `_infer_transition_mode` already
+labels the AMBIENCE_BRIDGE-shaped geometry as `MICRO_AUDIO_OVERLAP`)
+means any future `AMBIENCE_BRIDGE` implementation must be built with
+explicit awareness that it will occupy the SAME renderer execution
+shape MICRO_AUDIO_OVERLAP would eventually use -- a shared execution
+primitive, two different semantic gates. This does not advance MICRO's
+own authority; it remains deferred until after Audio Join Treatment and
+stronger real evidence, per this task's own instruction.
+
+### 25-27. Word / meaning / double-speech firewalls
+All three restate D-098 Section 16.8 verbatim, unweakened: no
+treatment may mask, truncate, double, or blur required lexical content
+(word safety); negation/numbers/factual qualifiers/diagnostic terms/
+corrections/dependent clauses remain protected regardless of any
+smoothness objective (meaning safety, D-038 reused); `MICRO_AUDIO_
+OVERLAP` keeps the highest bar, `SHORT_CROSSFADE` must never become
+accidental double-speech, and any `AMBIENCE_*` treatment must use only
+non-required-speech material unless explicitly paired with a
+separately-authorized speech-overlap mode (double-speech safety). Not
+weakened, not reopened, by this task.
+
+### 28. Loudness ownership
+**Belongs to a SEPARATE, already-named capability: Finishing (D-024),
+not Audio Join Treatment, and not renderer/export global
+normalization as an unnamed guess.** `finishing_contract.py`'s own
+`FinishingSpec.target_loudness_lufs`/`true_peak_ceiling_dbtp` are
+dormant interface fields for exactly this: whole-delivery loudness
+normalization, applied strictly AFTER Selection Freeze/Boundary/Render,
+never mutating semantics. This resolves the directive's own three-way
+question (A/B/C) as **B**, with the caveat that Finishing's own
+whole-delivery LUFS target does NOT by itself solve a narrower, PER-
+JOIN local gain mismatch (two adjacent clips recorded at different
+mic gain) -- that narrower question, if it matters, is Join
+Understanding's own future `loudness_continuity_status` dimension
+(item 17), not Finishing's and not Audio Join Treatment's execution
+layer either; it would inform WHETHER a treatment is needed, while
+Finishing separately normalizes the whole delivered file regardless.
+
+### 29. Crossfade-vs-loudness distinction
+Canonicalized: a crossfade (Layer 3) smooths a DISCONTINUITY SHAPE at
+one join; a gain mismatch is a LEVEL difference, remedied by
+normalization (Finishing, item 28, or a future local gain-match step),
+never by smoothing. Using `SHORT_CROSSFADE` to paper over a genuine
+gain mismatch would hide the actual problem rather than fix it --
+restated here as a binding design principle for the future decision
+layer, not implemented.
+
+### 30. Treatment timing-policy requirement
+Confirmed per D-098 16.9: a future, SEPARATE audio-treatment timing
+policy is required -- NOT folded into D-220 retroactically. Whether it
+needs any NEW constant is, per this task's own "do not create
+constants" instruction, answered as: **likely not, initially** --
+`SHORT_CROSSFADE`'s own candidate duration can plausibly derive
+entirely from already-available non-speech/silence windows (items 9,
+15) and existing fade-envelope mechanics (item 3's own `afade`
+primitive, parameterized rather than hardcoded, item 31); `AMBIENCE_*`
+duration would derive from the relevant `SourceAudioHandle.available_
+duration` (already computed, D-223) exactly as D-220 already derives
+J/L timing from source geometry rather than a fixed constant. A future
+gate would confirm this by direct construction, not assumed here.
+
+### 31. Renderer SHORT_CROSSFADE capability
+**`EXTENSION_REQUIRED` (small, parameterization only -- not a new
+mechanism).** The underlying primitives (`adelay`-placed independent
+per-segment audio streams combined via `amix(normalize=0)`, plus
+`afade` in/out) are ALL already proven together in
+`_concat_render_command_with_audio_windows` (D-214, D-226's own real
+rendered fixtures). The gap: `_audio_join_fade_filters`'s own fade
+duration is currently the FIXED `_AUDIO_JOIN_FADE_SEC` click-prevention
+constant (12 ms), not parameterized to a treatment's own crossfade
+length. Building a genuine `SHORT_CROSSFADE` would need a new fade-
+duration parameter threaded through the SAME call sites, reusing every
+existing primitive -- not a new filtergraph mechanism, not a new ffmpeg
+filter (`acrossfade` is not required; shaped `afade` in/out over an
+`amix`-combined overlap achieves the identical audible result, already
+partially exercised by D-226's own MAX_SAFE variant evidence).
+
+### 32. Renderer AMBIENCE_CARRY_LEFT capability
+**`SUPPORTED_NOW`** for pure mechanical execution. Identical shape to
+`L_CUT` (`RenderSegment.audio_end > end` on the left segment) --
+already fully proven end-to-end by D-214's own contract and D-226's
+own real rendered comparison media. The only missing piece is upstream
+(a decision layer supplying a safe non-speech `audio_end`, item 14/17),
+not the renderer.
+
+### 33. Renderer AMBIENCE_CARRY_RIGHT capability
+**`SUPPORTED_NOW`**, symmetric to item 32 (`RenderSegment.audio_start <
+start` on the right segment, identical shape to `J_CUT`, already
+proven by D-214/D-226).
+
+### 34. Renderer AMBIENCE_BRIDGE capability
+**`SUPPORTED_NOW`** for pure mechanical execution, with the caveat in
+item 7: nothing in `_validate_audio_placements`/`_video_timeline_
+positions` forbids setting divergent audio windows on BOTH sides of one
+join simultaneously (the exact shape `_infer_transition_mode` already
+labels `MICRO_AUDIO_OVERLAP`) -- the renderer mechanism is already
+structurally capable; what is missing is upstream evidence (item 12,
+room-tone availability/stability/discontinuity) and the semantic gate
+distinguishing this from an unsafe double-speech overlap.
+
+### 35. Real-media evidence limitations
+Using D-225/D-228 only (no new RAW, per this task's own scope): both
+real runs found ZERO safe `SourceAudioHandle`s (all `UNAVAILABLE`, no
+Boundary audio-edge-trim provenance recorded) -- meaning neither real
+run offers any observable evidence for `AMBIENCE_CARRY_*`/`AMBIENCE_
+BRIDGE`'s own real-media behavior (they need exactly the handle
+material that was unavailable both times). `SHORT_CROSSFADE`, needing
+no handle (item 15), is theoretically observable on either real run's
+own already-selected clip edges, but neither run's own diagnostics
+computed any acoustic discontinuity measurement at those edges (item
+11's gap) -- so even `SHORT_CROSSFADE`'s own real-media behavior
+remains unobserved. **Every Audio Join Treatment question beyond
+`CLICK_FADE` remains unobservable on real media today** because the
+acoustic evidence layer itself (items 8-13) does not yet exist to
+generate an observation.
+
+### 36. No-over-processing doctrine
+Restated as binding, per this task's own "canonical principle": if a
+join already sounds natural, treatment = `NONE` or existing `CLICK_
+FADE`; a future decision layer must never default to smoothing every
+join or erasing an intentional cut. Mirrors D-098's own video-adaptive
+strategy doctrine (16.10) and the `KEEP_PAUSE` restatement (16.4: a
+retained, intentional silence is a valid, sometimes-correct outcome,
+not a defect to smooth away).
+
+### 37. Full-editor-gap relationship
+Noise reduction, mouth-click/plosive/breath removal, and visual
+continuity/jump-cut concealment are ALL distinct from Audio Join
+Treatment and NOT implemented by naming this section:
+- Noise reduction / mouth clicks / breaths / plosives: closer to
+  Finishing's own future scope (item 28) or a distinct future "Audio
+  Cleanup" capability -- Audio Join Treatment only ever treats the
+  JOIN itself (a bounded window at a cut), never a clip's own interior
+  audio quality.
+- Visual continuity / jump-cut concealment: a Renderer/visual-treatment
+  question entirely outside Pacing's own audio territory; D-098's own
+  app-roadmap already separates "Visual continuity / jump-cut polish"
+  as its own later stage (unchanged by this entry).
+No ownership overlap is created; each capability's own future
+boundary is restated, not touched.
+
+### 38. Smallest implementation path
+Per this task's own preferred shape, reduced where existing capability
+already makes a step unnecessary:
+1. **Acoustic evidence foundation** (the one gap, item 39) -- reuse
+   `audio_silence.py` (silence availability, already available) +
+   `prosodic_audio_v2.py`'s RMS primitive (adapted, un-normalized, for
+   near-silence/energy-level evidence at a JOIN edge specifically,
+   rather than a selected-candidate span) to produce a bounded,
+   honestly-labeled speech/non-speech-ADJACENT signal -- explicitly
+   never claimed as a definitive VAD or room-tone classifier (item 8's
+   own honesty requirement carries forward).
+2. Renderer treatment contract -- **mostly unnecessary as new work**:
+   items 32-34 show `AMBIENCE_*` mechanics already `SUPPORTED_NOW`;
+   only `SHORT_CROSSFADE` needs the small fade-duration parameterization
+   (item 31).
+3. Treatment decision foundation (item 18's own type, `Join
+   Understanding` -> `AudioJoinTreatmentDecision`, offline/diagnostics-
+   only, no authority).
+4. Live diagnostics (mirrors D-216/D-217's own diagnostic-only wiring
+   pattern for Pacing V2).
+5. Real-media qualification (mirrors D-218R/D-225's own methodology).
+6. Bounded authority (only after 1-5, default OFF, offline-proven
+   first -- same discipline as every prior Pacing V2 gate D-213
+   through D-228).
+Given items 32-34's finding, this collapses the directive's own
+7-step preferred shape to effectively 5 substantive steps (renderer
+work for Ambience is not a separate step; it is already proven).
+
+### 39. Exact D-230 gate
+**D-230 -- Pacing V2 Audio Join Treatment Acoustic Evidence
+Foundation (offline only).** Builds the ONE identified gap (item 38
+step 1): a bounded, reused-not-invented evidence layer combining
+`audio_silence.py`'s existing silence intervals with an adapted,
+un-normalized reuse of `prosodic_audio_v2.py`'s RMS-frame primitive, to
+produce honestly-labeled `speech_occupancy`/`silence_availability`/
+`near_silence_energy` evidence AT A JOIN EDGE specifically (not a
+selected-candidate span). Must NOT claim to be a general acoustic
+speech classifier, a VAD, or a room-tone similarity detector (items
+10, 12 remain honestly `MISSING`/`NOT_YET_AVAILABLE` even after D-230,
+unless D-230 itself finds a way to close them with existing
+primitives only -- not assumed here). Offline only, no RAW, no
+provider, no authority, no renderer change. Not started by this
+entry.
+
+### 40. J/L status
+Unchanged: mechanically proven (D-226), safety-proven (D-225/D-228),
+controlled-fixture proven (D-226), optional, zero live authority. Not
+chased further, per D-228's own verdict C and this task's own explicit
+instruction.
+
+### 41. Micro status
+Unchanged: `MICRO_AUDIO_OVERLAP` remains deferred until after Audio
+Join Treatment and stronger real evidence (this task's own instruction,
+restated). Item 24's own shared-geometry finding is additional context
+for that future gate, not an advancement of its authority.
+
+### 42. Renderer status
+Unchanged. `render.py`/`render_plan.py` untouched by this task (docs/
+forensic only). Items 31-34 are audit findings about EXISTING code,
+not changes to it.
+
+### 43. App-roadmap status
+Unchanged sequence through D-228, then: Audio Join Treatment
+architecture/forensic complete, one acoustic-evidence gap identified,
+renderer mechanics for three of four treatments already proven --
+**this entry, D-229** -> next (NOT launched here, per item 39): D-230
+acoustic evidence foundation (offline only) -> treatment decision
+foundation -> live diagnostics -> real-media qualification -> bounded
+authority (default off) -> then (unchanged): micro-overlap final
+authority -> Renderer/export qualification -> Audio cleanup/loudness
+polish (Finishing, item 28/37) -> visual continuity/jump-cut polish ->
+compact unseen-RAW generalization -> product hardening -> TestFlight ->
+App Store.
+
+### 44. D-229 verdict
+**B. AUDIO JOIN TREATMENT PARTIALLY READY -- ONE ACOUSTIC EVIDENCE GAP
+MUST BE CLOSED FIRST.** The gap is genuine speech-vs-non-speech/near-
+silence acoustic evidence beyond word-timing (items 8, 10, 12) --
+everything else (renderer mechanics for `AMBIENCE_*`, the
+`SourceAudioHandle` foundation, the orthogonal Layer-2/Layer-3
+vocabulary, the compatibility-matrix shape, firewalls, timing-policy
+relationship, loudness ownership) is either already proven or already
+well-defined by existing doctrine/code, and does not itself block
+starting D-230.
+
+### 45. Decision entry
+This entry itself, appended to `docs/CUTSELL_DECISIONS.md`. `docs/
+CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` NOT edited (its own
+Section 16 already states this doctrine completely; this entry is the
+forensic Section 16.13 itself named, not a doctrine change).
+
+### 46. Confirmation
+NO `cutsell_worker/*.py` file touched (zero code changes; every
+finding above is from direct inspection of already-existing,
+unmodified code). NO `tests/*.py` file touched. NO `.github/
+workflows/*.yml` file touched. NO RAW dispatched. NO Modal/RunPod call.
+NO provider call. NO crossfade/ambience implementation of any kind.
+NO live authority granted to `SHORT_CROSSFADE`/`AMBIENCE_CARRY_LEFT`/
+`AMBIENCE_CARRY_RIGHT`/`AMBIENCE_BRIDGE`/`MICRO_AUDIO_OVERLAP`/`J_CUT`/
+`L_CUT` (all remain exactly as D-228 left them: zero live authority,
+`HARD_CUT`/`TIGHT_CUT` the only executed modes). NO Boundary/Ordering/
+Family/BestTake behavior change (none of those modules were touched;
+this entry only reads and cites their own already-published audit
+trails). NO renderer behavior change (items 31-34 are audits of
+existing, unmodified code).
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+"Then STOP. Wait for Product Owner coordination," the decision needed
+is whether to authorize D-230 (item 39: the acoustic evidence
+foundation gate) as the next, separately-scoped engineering work. No
+further action is taken on it by this task.
+
+---
