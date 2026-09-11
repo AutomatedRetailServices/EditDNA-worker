@@ -66,6 +66,13 @@ from typing import Mapping, Optional, Sequence
 
 SCHEMA_VERSION = "cutsell.selection_freeze_diagnostics.v1"
 
+# D-235J: sibling schema version for the lost-semantic-atom DETAIL block.
+# Separate top-level diagnostics key (`lost_semantic_atom_diagnostics`),
+# never nested inside `selection_freeze_diagnostics` -- keeps that block's
+# own existing small-size test unaffected and keeps the two concerns
+# (Freeze-trigger shape vs. lost-atom CONTENT) independently readable.
+LOST_ATOM_SCHEMA_VERSION = "cutsell.lost_semantic_atom_diagnostics.v1"
+
 # Trigger category codes -- real code names, not renamed for this task.
 TRIGGER_COHERENCE_CONTRADICTION = "COHERENCE_CONTRADICTION_FINDINGS"
 TRIGGER_COHERENCE_MISSING_IDEA_COVERAGE = "COHERENCE_MISSING_IDEA_COVERAGE"
@@ -237,4 +244,232 @@ def build_selection_freeze_diagnostics(
         "audio_join_treatment_v2_serialized": audio_join_treatment_v2_serialized,
         "first_missing_link": first_missing_link,
         "provenance": (SCHEMA_VERSION, "build_selection_freeze_diagnostics"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# D-235J: Lost Semantic Atom DETAIL observability, OBSERVABILITY ONLY.
+# ---------------------------------------------------------------------------
+#
+# `build_lost_semantic_atom_diagnostics()` exposes the exact ALREADY-COMPUTED
+# per-atom rows `final_story_coherence_validation.py::_lost_semantic_atoms()`
+# already built and `canonical_edit_plan.py` already threaded onto
+# `CanonicalEditPlan.lost_semantic_atoms` -- the SAME rows `final_edit_
+# reviewer.py::review()` reads to mint `UNIQUE_FACT_LOST` Findings. This
+# function recomputes NOTHING: no semantic-atom detection, no materiality
+# judgment (reserved for a future, separately-authorized D-235K), no
+# `blocking` flag change. It is a pure, bounded, JSON-safe re-projection of
+# fields that already exist on the caller's own already-final data.
+#
+# Real, retained fields this function reads verbatim from each row (see
+# `_lost_semantic_atoms()`'s own two row shapes):
+#   - the general coverage-ledger shape: `clip_id`, `text`, `missing_
+#     critical_atoms`, `atom_classifications` (`atom`/`atom_type`/
+#     `importance`/`evidence`/`resolved_by` each), `missing_content_token_
+#     count`, `own_content_token_count`, `coverage_against_final_keep`,
+#     `blocking`, `classification`, optional `content_loss_suppressed_by`,
+#     `pre_group_restart_consultations`, `preserving_realization_id`,
+#     `preserved_claim_ids`, `nonrequired_omissions`;
+#   - the no-usable-realization shape: `clip_id`, `text` (already
+#     pre-truncated to 200 chars by the source function), `kind` ==
+#     "LOST_IN_NO_USABLE_REALIZATION_FAMILY", `basis`, `blocking` (always
+#     False for this shape).
+#
+# Fields the D-235J directive suggested that this engine's CURRENT data
+# model does NOT retain -- listed honestly rather than invented, per the
+# directive's own "Do NOT invent fields that do not exist" instruction.
+# Their absence is a genuine finding of this task, surfaced verbatim in
+# every returned block as `absent_fields_not_retained_by_engine` so a
+# reader never has to re-derive it from a docstring:
+ABSENT_FIELDS_NOT_RETAINED_BY_ENGINE = (
+    "atom_id",              # no stable per-atom identifier is minted; a row
+                             # is identified only by its (clip_id, atom text)
+                             # pair, reconstructed positionally, never a
+                             # persisted id.
+    "source_span_id",       # no span/offset identity into the source
+                             # transcript is retained -- only the clip's own
+                             # `text` (full utterance) and, for missing
+                             # critical atoms, the literal missing token/
+                             # phrase string itself.
+    "source_proposition_id", # no link to a proposition/claim identity object
+                             # is retained for THIS ledger (contrast
+                             # `_lost_critical_claims`, a separate, claim-
+                             # scoped check with its own `idea_id`, not
+                             # threaded through this ledger's own rows).
+    "semantic_role",         # no explicit semantic-role tag (e.g. subject/
+                             # predicate/qualifier) is retained; the closest
+                             # real field is `atom_type` (NUMBER/NEGATION)
+                             # on `atom_classifications` entries, which is a
+                             # narrower, syntactic-not-semantic distinction.
+    "required_or_optional",  # no explicit REQUIRED/OPTIONAL tag is stored;
+                             # the closest real fields are `importance`
+                             # (CRITICAL/UNCERTAIN/CONTEXTUAL, on missing
+                             # critical atoms only) and the row-level
+                             # `blocking` boolean (which folds importance
+                             # and the broader content-loss signal into one
+                             # bit) -- neither is a direct required/optional
+                             # classification.
+)
+
+_TEXT_EXCERPT_MAX_CHARS = 160
+_ATOM_TEXT_MAX_CHARS = 40
+_MAX_ATOMS_SERIALIZED = 25
+
+# Repair-loop linkage vocabulary -- never reconstructed from text similarity,
+# only ever a real id match: `finding_kind == "UNIQUE_FACT_LOST"` and this
+# row's own real `clip_id` appearing in that attempt's real `previous_
+# realization` tuple (both already-persisted, exact identifiers).
+REPAIR_LINK_NOT_DIRECTLY_ATTEMPTED = "NOT_DIRECTLY_ATTEMPTED_THIS_RUN"
+REVIEWER_FINDING_KIND_UNIQUE_FACT_LOST = "UNIQUE_FACT_LOST"
+
+
+def _bounded_text(text: Optional[str], limit: int) -> Optional[str]:
+    """Smallest bounded phrase, hard length cap, never a transcript dump.
+    `None`/empty input stays `None` -- never fabricated as an empty string
+    standing in for "no text retained"."""
+    if not text:
+        return None
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"  # single-char ellipsis, not "..."
+
+
+def _atom_classification_row(entry: Mapping) -> dict:
+    """Bounds one `atom_classifications` entry. `atom` (the literal missing
+    token/phrase, e.g. a number or negation word) is short by construction
+    but still capped; `evidence` is free text from the classifier and is
+    reported as presence-only (`evidence_present`), never dumped verbatim --
+    consistent with this module's "no transcript/large-object dump" rule."""
+    return {
+        "atom": _bounded_text(entry.get("atom"), _ATOM_TEXT_MAX_CHARS),
+        "atom_type": entry.get("atom_type"),
+        "importance": entry.get("importance"),
+        "resolved_by": entry.get("resolved_by"),
+        "evidence_present": bool(entry.get("evidence")),
+    }
+
+
+def _find_repair_link(clip_id: str, repair_loop_attempts: Sequence[Mapping]) -> dict:
+    """Real-id-only linkage to a repair-loop attempt: `finding_kind ==
+    UNIQUE_FACT_LOST` AND `clip_id` appears in that attempt's own real
+    `previous_realization` tuple. Never a text-similarity reconstruction.
+    `repair_loop.py::run_repair_loop` only ever records ONE attempt row per
+    loop iteration when no repairable finding exists (`result.findings[0]`)
+    -- so most `UNIQUE_FACT_LOST` rows genuinely have NO matching attempt
+    even on a run where the repair loop ran and returned NEEDS_HUMAN_REVIEW;
+    that is reported honestly as `NOT_DIRECTLY_ATTEMPTED_THIS_RUN`, never
+    inferred or defaulted to the one attempt that does exist for an
+    unrelated clip."""
+    for index, attempt in enumerate(repair_loop_attempts):
+        if not isinstance(attempt, Mapping):
+            continue
+        if attempt.get("finding_kind") != REVIEWER_FINDING_KIND_UNIQUE_FACT_LOST:
+            continue
+        previous_realization = attempt.get("previous_realization") or ()
+        if clip_id in previous_realization:
+            return {
+                "repair_loop_attempt_status": "MATCHED_BY_CLIP_ID",
+                "repair_loop_attempt_index": index,
+                "repair_loop_reason": attempt.get("reason"),
+                "repair_loop_repaired": bool(attempt.get("repaired")),
+            }
+    return {
+        "repair_loop_attempt_status": REPAIR_LINK_NOT_DIRECTLY_ATTEMPTED,
+        "repair_loop_attempt_index": None,
+        "repair_loop_reason": None,
+        "repair_loop_repaired": None,
+    }
+
+
+def _one_lost_atom_row(row: Mapping, repair_loop_attempts: Sequence[Mapping]) -> dict:
+    clip_id = str(row.get("clip_id") or "")
+    blocking = bool(row.get("blocking", True))
+    kind = row.get("kind")  # "LOST_IN_NO_USABLE_REALIZATION_FAMILY" or absent
+    atom_classifications = row.get("atom_classifications") or ()
+    preserved_claim_ids = row.get("preserved_claim_ids") or ()
+    nonrequired_omissions = row.get("nonrequired_omissions") or ()
+
+    out = {
+        "clip_id": clip_id,
+        "row_kind": kind if kind else "COVERAGE_LEDGER_CONTENT_LOSS",
+        "blocking": blocking,
+        "classification": row.get("classification"),
+        "text_excerpt": _bounded_text(row.get("text"), _TEXT_EXCERPT_MAX_CHARS),
+        "missing_critical_atom_count": len(row.get("missing_critical_atoms") or ()),
+        "atom_classifications": [
+            _atom_classification_row(entry) for entry in atom_classifications if isinstance(entry, Mapping)
+        ],
+        "own_content_token_count": row.get("own_content_token_count"),
+        "missing_content_token_count": row.get("missing_content_token_count"),
+        "coverage_against_final_keep": row.get("coverage_against_final_keep"),
+        "content_loss_suppressed_by": row.get("content_loss_suppressed_by"),
+        "preserving_realization_id": row.get("preserving_realization_id"),
+        "preserved_claim_count": len(preserved_claim_ids),
+        "nonrequired_omission_count": len(nonrequired_omissions),
+        "no_usable_realization_basis": row.get("basis") if kind else None,
+        # Structurally true/false BY CONSTRUCTION for every row in this
+        # ledger -- every row originates from `draft.discarded` (a clip
+        # that existed as a real candidate before Selection Freeze ran and
+        # was not carried into the final KEEP timeline). Never a second
+        # membership check; restated here only because the directive asked
+        # for it explicitly.
+        "present_before_selection": True,
+        "present_after_selection": False,
+        # `final_edit_reviewer.py::review()` maps EVERY row in
+        # `edit_plan.lost_semantic_atoms` to exactly one `UNIQUE_FACT_LOST`
+        # Finding (1:1, by construction, never conditional) -- so this
+        # linkage is a structural fact about the current code, not a
+        # runtime lookup that could fail to match.
+        "reviewer_finding_kind": REVIEWER_FINDING_KIND_UNIQUE_FACT_LOST,
+    }
+    out.update(_find_repair_link(clip_id, repair_loop_attempts))
+    return out
+
+
+def build_lost_semantic_atom_diagnostics(
+    *,
+    lost_semantic_atoms: Optional[Sequence[Mapping]] = None,
+    repair_loop_attempts: Optional[Sequence[Mapping]] = None,
+) -> dict:
+    """The one D-235J entry point. Pure function of the caller's own
+    already-computed `coherence_diag.get("lost_semantic_atoms")` rows and
+    the caller's own already-serialized `diagnostics["repair_loop"]["
+    attempts"]` list -- both already-final data this module never
+    recomputes, reorders, or reinterprets. Bounded to at most
+    `_MAX_ATOMS_SERIALIZED` rows (real overflow is reported via
+    `atoms_truncated` / `atom_count`, never silently dropped without a
+    marker); no full transcript text is ever included, only short bounded
+    excerpts. `lost_semantic_atoms=None` (the coherence stage never ran, or
+    Freeze was blocked before this seam) reports `atom_count=0` with an
+    explicit `ledger_status=UNKNOWN` rather than fabricating "no atoms
+    lost" -- consistent with this module's own tri-state discipline."""
+    repair_loop_attempts = tuple(repair_loop_attempts or ())
+    if lost_semantic_atoms is None:
+        return {
+            "schema_version": LOST_ATOM_SCHEMA_VERSION,
+            "ledger_status": STATE_UNKNOWN,
+            "atom_count": 0,
+            "blocking_atom_count": 0,
+            "atoms_truncated": False,
+            "atoms": [],
+            "absent_fields_not_retained_by_engine": list(ABSENT_FIELDS_NOT_RETAINED_BY_ENGINE),
+            "provenance": (LOST_ATOM_SCHEMA_VERSION, "build_lost_semantic_atom_diagnostics"),
+        }
+
+    rows = [row for row in lost_semantic_atoms if isinstance(row, Mapping)]
+    atom_count = len(rows)
+    blocking_atom_count = sum(1 for row in rows if bool(row.get("blocking", True)))
+    truncated_rows = rows[:_MAX_ATOMS_SERIALIZED]
+    atoms_truncated = atom_count > len(truncated_rows)
+
+    return {
+        "schema_version": LOST_ATOM_SCHEMA_VERSION,
+        "ledger_status": STATE_FOUND if atom_count else STATE_NOT_FOUND,
+        "atom_count": atom_count,
+        "blocking_atom_count": blocking_atom_count,
+        "atoms_truncated": atoms_truncated,
+        "atoms": [_one_lost_atom_row(row, repair_loop_attempts) for row in truncated_rows],
+        "absent_fields_not_retained_by_engine": list(ABSENT_FIELDS_NOT_RETAINED_BY_ENGINE),
+        "provenance": (LOST_ATOM_SCHEMA_VERSION, "build_lost_semantic_atom_diagnostics"),
     }

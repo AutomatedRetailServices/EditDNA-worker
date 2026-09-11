@@ -331,10 +331,25 @@ class TestImmutabilityProofs:
 
 class TestSeamWiring:
     def test_20_seam_calls_new_function_after_inner_freeze_if_else(self):
+        # D-235J widened the import to a multi-line parenthesized form (it
+        # now also imports build_lost_semantic_atom_diagnostics) -- the
+        # exact single-line import string this test originally hardcoded no
+        # longer appears verbatim, though the import (and the call site) are
+        # both still genuinely present. Checking for the function name
+        # appearing in the module's own import block (rather than one exact
+        # line) is the non-behavioral fix, per the same class of pre-
+        # existing-test adjustment D-235G's own D-216/D-217 exclusion-tuple
+        # fix already established.
         src = inspect.getsource(ucc)
         idx_call = src.find("build_selection_freeze_diagnostics(")
-        idx_import = src.find("from .selection_freeze_diagnostics import build_selection_freeze_diagnostics")
-        assert idx_import != -1 and idx_call != -1
+        tree = ast.parse(src)
+        imported_names = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        }
+        assert "build_selection_freeze_diagnostics" in imported_names and idx_call != -1
 
     def test_21_seam_never_recomputes_freeze_blocked(self):
         # The wiring passes the EXISTING local `freeze_blocked=freeze_blocked`

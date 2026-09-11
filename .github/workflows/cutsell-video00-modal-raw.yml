@@ -1328,6 +1328,91 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True, default=str))
           PY
 
+      - name: D-235J Lost Semantic Atom diagnostics -> sibling-safe extraction
+        # D-235J (docs/CUTSELL_DECISIONS.md D-235I/D-235J): D-235I proved
+        # (code-level, not inferred) that `COHERENCE_BLOCKING_LOST_SEMANTIC_
+        # ATOM` and `REPAIR_LOOP_NEEDS_HUMAN_REVIEW` are the SAME underlying
+        # lost-atom finding, but the atom's own CONTENT (which clip, what
+        # text, why it classified as blocking) remained unretrievable behind
+        # the same egress/log-density wall D-235H already named. This step
+        # is the fix, mirroring D-235G's own pattern exactly: read the SAME
+        # `artifact/video00-modal.json`, PURE-PROJECT the already-serialized
+        # `diagnostics["lost_semantic_atom_diagnostics"]` block (D-235J,
+        # `cutsell_worker/selection_freeze_diagnostics.py::build_lost_
+        # semantic_atom_diagnostics`) verbatim into a small, bounded,
+        # SIBLING-SAFE file -- no Video00 golden-file content, no transcript
+        # dump (bounded excerpts only). Recomputes NO semantic atom, NO
+        # materiality, NO blocking flag -- every field is copied, never
+        # re-derived. Runs regardless of whether Freeze blocked (`if:
+        # always()`, same convention as D-235G above) since this step's own
+        # job is to explain a blocked Freeze, not depend on an unblocked
+        # one. FAILS LOUDLY (non-zero exit) when the block is absent -- it
+        # is expected on every run once a draft contract exists.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          out_path = "artifact/lost-semantic-atom-diagnostics.json"
+
+          if not isinstance(engine, dict):
+              print("ERROR: artifact/video00-modal.json missing or unparseable -- cannot extract Lost Semantic Atom diagnostics.", file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d235j_lost_semantic_atom_diagnostics_extraction.v1",
+                             "source_status": "engine_json_missing_or_unparseable"}, f, indent=2)
+              sys.exit(1)
+
+          diag = engine.get("diagnostics") if isinstance(engine.get("diagnostics"), dict) else {}
+          block = diag.get("lost_semantic_atom_diagnostics")
+
+          if not isinstance(block, dict):
+              print("=" * 78, file=sys.stderr)
+              print("ERROR: diagnostics['lost_semantic_atom_diagnostics'] IS MISSING FROM THE SERIALIZED RESULT.", file=sys.stderr)
+              print("Expected on every run once a draft contract exists (Video00 or sibling,", file=sys.stderr)
+              print("Freeze blocked or not) -- see cutsell_worker/selection_freeze_diagnostics.py.", file=sys.stderr)
+              print("FAILING LOUDLY instead of emitting an empty artifact.", file=sys.stderr)
+              print("=" * 78, file=sys.stderr)
+              with open(out_path, "w") as f:
+                  json.dump({"schema_version": "cutsell.video00.d235j_lost_semantic_atom_diagnostics_extraction.v1",
+                             "source_status": "engine_json_present", "lost_semantic_atom_diagnostics_block_status": "MISSING_FROM_SERIALIZATION"},
+                            f, indent=2)
+              sys.exit(1)
+
+          # --- Pure re-projection: every field is copied verbatim from
+          # the already-computed D-235J block -- no semantic atom/
+          # materiality/blocking decision is recomputed here. ---
+          summary = {"schema_version": "cutsell.video00.d235j_lost_semantic_atom_diagnostics_extraction.v1"}
+          summary["source_status"] = "engine_json_present"
+          summary["lost_semantic_atom_diagnostics_block_status"] = "PRESENT"
+          summary["lost_semantic_atom_diagnostics"] = block
+          summary["selected_clip_count_top_level"] = len(engine.get("selected") or [])
+
+          os.makedirs("artifact", exist_ok=True)
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True, default=str)
+
+          size = os.path.getsize(out_path)
+          print("--- D-235J Lost Semantic Atom Diagnostics -> Sibling-Safe Extraction (pure re-projection of already-computed diagnostics['lost_semantic_atom_diagnostics'] -- recomputes NO semantic atom/materiality/blocking decision; sibling-safe, no transcript dump) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+          PY
+
       - name: Verify frozen Selection lock
         shell: bash
         run: |
@@ -6176,6 +6261,7 @@ jobs:
             artifact/d221_pacing_v2_jl_timing_candidates.json
             artifact/d225_pacing_v2_handle_aware_real_media_qualification.json
             artifact/selection-freeze-diagnostics.json
+            artifact/lost-semantic-atom-diagnostics.json
           retention-days: 14
           if-no-files-found: warn
 

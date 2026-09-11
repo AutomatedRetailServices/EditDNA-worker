@@ -53206,3 +53206,188 @@ attempted by this task -- forensic only, per its own explicit
 instruction.
 
 ---
+
+## D-235J -- Lost Semantic Atom DETAIL Observability (post D-235I, observability only, no fix)
+
+**Branch/HEAD verified before edits:** `feature/runpod-pod-on-demand` @
+`538b581` (D-235I), clean tree.
+
+**Objective.** D-235I proved, at the code level, that `COHERENCE_BLOCKING_
+LOST_SEMANTIC_ATOM` and `REPAIR_LOOP_NEEDS_HUMAN_REVIEW` are the SAME
+underlying lost-atom finding surfacing at two authority checkpoints -- but
+the atom's own CONTENT (which clip, what text, why it classified as
+blocking) remained unretrievable behind the persistent Azure Blob Storage
+egress restriction and the job-log content-size cap D-235H already named.
+This task builds the OBSERVABILITY MECHANISM that will answer that question
+on a FUTURE run once the retrieval channel is fixed, or via a small
+extraction artifact that never needs the 68.7 MB "human-review" artifact at
+all. No semantic-atom recomputation, no materiality judgment (explicitly
+reserved for a future, separately-authorized D-235K), no `blocking` flag
+change -- this task changes zero Freeze/coherence/repair/resolver/Pacing/
+Audio-Join/authority behavior.
+
+### What was built
+
+1. **`cutsell_worker/selection_freeze_diagnostics.py`**: new sibling
+   function `build_lost_semantic_atom_diagnostics()` (schema version
+   `cutsell.lost_semantic_atom_diagnostics.v1`), pure re-projection of the
+   caller's own already-computed `coherence_diag.get("lost_semantic_
+   atoms")` rows (`final_story_coherence_validation.py::
+   _lost_semantic_atoms()`'s own real row schema, read verbatim, never
+   recomputed) and the caller's own already-serialized `diagnostics[
+   "repair_loop"]["attempts"]` list. Bounded to 25 atoms per artifact
+   (`atoms_truncated` flag on overflow, real `atom_count` never hidden);
+   text excerpts hard-capped at 160 chars (40 chars for an individual
+   missing-atom token); classifier `evidence` free text reported as
+   presence-only (`evidence_present`), never dumped. Real-id-only linkage
+   to a repair-loop attempt (`finding_kind == "UNIQUE_FACT_LOST"` AND the
+   row's own `clip_id` in that attempt's own `previous_realization` tuple)
+   -- never a text-similarity reconstruction; honestly reports
+   `NOT_DIRECTLY_ATTEMPTED_THIS_RUN` for the (usual) case where
+   `repair_loop.py`'s own `result.findings[0]`-only recording left a given
+   atom's own row with no attempt at all (D-235I's own finding, unchanged
+   here). `reviewer_finding_kind="UNIQUE_FACT_LOST"` and
+   `present_before_selection=True`/`present_after_selection=False` are
+   included as structural constants (true by construction for every row in
+   this ledger), not new lookups.
+2. **Honest gap report, per the directive's own "do not invent fields"
+   instruction**: every returned block carries
+   `absent_fields_not_retained_by_engine` naming exactly which of the
+   directive's suggested fields do not exist in the current data model --
+   `atom_id` (no stable per-atom identifier is minted), `source_span_id`
+   (no transcript span/offset identity retained), `source_proposition_id`
+   (no link to a proposition object from this ledger), `semantic_role` (no
+   explicit role tag; the closest real field is the narrower, syntactic
+   `atom_type` on missing-critical-atom classifications), `required_or_
+   optional` (no explicit tag; the closest real fields are `importance`
+   and the row-level `blocking` boolean, neither a direct match).
+3. **`cutsell_worker/universal_clean_cut.py`**: wired at the exact same
+   D-235G insertion point (after the inner `if freeze_blocked: ... else:
+   ...` closes, before the outer `else:`), reading `coherence_diag.get(
+   "lost_semantic_atoms")` (already in local scope) and `(result.draft.
+   diagnostics or {}).get("repair_loop", {}).get("attempts")` (already
+   serialized by the V1 or AUTHORITATIVE branch above, whichever ran).
+   Written as a SEPARATE top-level diagnostics key,
+   `"lost_semantic_atom_diagnostics"`, sibling to `"selection_freeze_
+   diagnostics"`, never nested inside it -- keeps D-235G's own small-size
+   test unaffected.
+4. **`.github/workflows/cutsell-video00-modal-raw.yml`**: new step "D-235J
+   Lost Semantic Atom diagnostics -> sibling-safe extraction" mirroring
+   D-235G's own pattern exactly, positioned after the D-235G step and
+   before "Verify frozen Selection lock", `if: always()`, reads `artifact/
+   video00-modal.json`, extracts `diagnostics["lost_semantic_atom_
+   diagnostics"]` verbatim into `artifact/lost-semantic-atom-diagnostics.
+   json`, FAILS LOUDLY (non-zero exit) if the key is absent. Registered in
+   the "Upload validator reports" artifact bundle.
+
+### Tests
+
+- `tests/test_cutsell_d235j_lost_semantic_atom_diagnostics.py` (42 tests,
+  engine-side pure-function): bounding/blocking-atom shapes (15), reviewer/
+  repair-loop linkage by real id only (6), atom-classification/count
+  passthrough (5), size bounding/truncation/JSON-safety/determinism (7),
+  behavior neutrality -- no Freeze/coherence/repair/resolver/Pacing/
+  renderer import, no input mutation, no provider/RAW/Modal/RunPod
+  reference, no Video00 golden-file reference, no atom-detection helper
+  defined (8), module/regression qualification (3). All 42 pass.
+- `tests/test_cutsell_d235j_workflow_extraction.py` (12 tests, `yaml.
+  safe_load` + `subprocess.run` against the step's real embedded Python,
+  same technique as D-235G's own workflow-extraction tests): present
+  block, empty ledger, no-Video00-fields, pure-reprojection-no-recompute,
+  no-length-rebounding-in-the-step-itself, missing-block/missing-JSON/
+  unparseable-JSON fail loudly, artifact registered in upload step, `if:
+  always()`, step ordering (after D-235G, before "Verify frozen Selection
+  lock"). All 12 pass.
+- **Pre-existing test fixed (same class as D-235G's own D-216/D-217
+  exclusion-tuple fix)**: `test_cutsell_d235g_selection_freeze_
+  diagnostics.py::TestSeamWiring::test_20_seam_calls_new_function_after_
+  inner_freeze_if_else` hardcoded the exact single-line import string
+  `"from .selection_freeze_diagnostics import build_selection_freeze_
+  diagnostics"`. D-235J widened that import to a multi-line parenthesized
+  form (it now also imports `build_lost_semantic_atom_diagnostics`), so
+  the exact line no longer appears verbatim even though the import (and
+  the call site) both genuinely still exist. Fixed by checking the
+  imported names via `ast.parse`/`ast.ImportFrom` instead of one exact
+  line -- a non-behavioral test-robustness fix, not an engine change.
+- **D-216/D-217 flag-parity exclusion tuples**: checked, NOT updated. The
+  new `lost_semantic_atom_diagnostics` key is unconditional and
+  flag-independent (it never reads any `CUTSELL_PACING_V2_*`/`CUTSELL_
+  AUDIO_JOIN_*` flag) -- confirmed by running both files after the change
+  (107 passed, zero new failures), so no exclusion-tuple entry was needed,
+  unlike D-235G's own `selection_freeze_diagnostics` key (which legitimately
+  observes those flags' effect via its `*_serialized` sub-fields).
+
+### Offline qualification
+
+- `python3 -m compileall -q .`: clean except the one pre-existing,
+  untouched chronic failure (`./jobs_smoke.py`, a stray non-test script with
+  a shell heredoc marker as its first line, last touched `8077aa4` on an
+  unrelated date) -- not part of this task, not a regression.
+- Targeted D-235 bundle (`tests/test_cutsell_d235*.py`): 108 passed (up
+  from 95 pre-D-235J; +42 new D-235J engine tests, +12 new D-235J workflow
+  tests, -1 net after the test_20 fix nets out against the new files).
+- Broader D-2xx observability/Pacing bundle (D-216/D-217/D-218/D-224/D-225/
+  D-230/D-231/D-234): 391 passed, zero new failures.
+- Full offline suite (`tests/`, `--ignore=tests/test_semantic_stitch.py`
+  for the one pre-existing, untouched module-level collection error in that
+  file -- confirmed via `git log`/`git status` to predate and be unrelated
+  to this task): PASS, zero new failures beyond the chronic pre-existing
+  ones already tracked in prior gates (D-044 hybrid-semantic-parity class).
+
+### Verdict
+
+**B -- Lost-atom CONTENT is now surfaced (clip_id, bounded text excerpt,
+missing-critical-atom count and classifications, coverage counts,
+`blocking`, `classification`, suppression reason, reviewer/repair-loop
+linkage), but the FULL set of granular identity/role fields the directive
+suggested is NOT retained by the current engine's data model.** Specifically
+absent, honestly named in every artifact via `absent_fields_not_retained_
+by_engine` rather than invented: `atom_id`, `source_span_id`, `source_
+proposition_id`, `semantic_role`, `required_or_optional`. This is a genuine
+property of `_lost_semantic_atoms()`'s current row schema, not a gap this
+task introduced or could close without inventing new persisted identifiers
+in that function itself -- which this observability-only task's own scope
+explicitly forbids (no semantic-atom logic change).
+
+**What this DOES close:** the D-235H/D-235I retrieval gap for a FUTURE
+run's own lost-atom content no longer requires the 68.7 MB "human-review"
+artifact or a job-log excavation past the content-size cap -- a small,
+bounded `artifact/lost-semantic-atom-diagnostics.json` (same order of
+magnitude as D-235G's own 30 KB artifact) will carry it directly, once a
+future RAW's own extraction step runs.
+
+**What this does NOT close:** this task made no attempt to retrieve D-235's/
+D-235H's/D-235I's OWN already-completed runs' raw content -- those runs
+predate this engine change and never computed `lost_semantic_atom_
+diagnostics` at all. Reading their content (if still needed) would require
+either the still-unresolved Azure Blob Storage egress fix D-235H already
+named, or a fresh RAW on this new head (not authorized by this task; no RAW
+was run or considered here, per the directive's explicit prohibition).
+
+**IF B (per directive):** the missing retained fields are named exactly
+above, without changing engine semantics. No D-235K name is assigned here
+(D-235K is a MATERIALITY forensic once real atom content is retrievable
+from a future run; a hypothetical D-235L -- minting `atom_id`/`source_
+span_id`/`source_proposition_id` identifiers inside `_lost_semantic_atoms()`
+itself -- would be a genuine semantic-atom-model change, materially
+different scope, not authorized or even named as a next gate by this task).
+
+**Engine patch required?** No (beyond the additive, behavior-neutral
+diagnostics wiring described above) -- and none was made to Freeze/
+coherence/repair-loop/resolver/Pacing/Audio-Join/threshold logic.
+**Paid compute required?** No -- no RAW was run or considered.
+**Additional RAW required?** No, not for this task; a future RAW (not
+authorized here) would be the natural way to prove this new observability
+on real media, mirroring D-235H's own proof of D-235G's serialization.
+
+**Confirmed:** no RAW, no Modal, no RunPod, no provider call. No engine,
+threshold, Freeze, Pacing, Audio Join, resolver, or repair-loop DECISION
+logic was changed -- observability only, per this task's own explicit
+instruction.
+
+**HUMAN ACTION REQUIRED:** NO. This task's own scope is complete; the
+retrieval-channel gap (Azure Blob Storage egress) and any future RAW remain
+Product Owner territory as already recorded in D-235H/D-235I, unchanged by
+this task.
+
+---

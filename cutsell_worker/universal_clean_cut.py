@@ -80,7 +80,10 @@ from .pacing_v2_audio_join_treatment_live_diagnostics import (
     audio_join_treatment_diagnostics_enabled,
     build_audio_join_treatment_live_diagnostics,
 )
-from .selection_freeze_diagnostics import build_selection_freeze_diagnostics
+from .selection_freeze_diagnostics import (
+    build_selection_freeze_diagnostics,
+    build_lost_semantic_atom_diagnostics,
+)
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -905,6 +908,29 @@ def process_universal_clean_cut_sources(
             result.draft, diagnostics={
                 **result.draft.diagnostics,
                 "selection_freeze_diagnostics": selection_freeze_diag,
+            },
+        ))
+
+        # D-235J: Lost Semantic Atom DETAIL observability, OBSERVABILITY
+        # ONLY -- reads the SAME already-computed `coherence_diag.get(
+        # "lost_semantic_atoms")` rows this function already threaded into
+        # `freeze_blocked` above (via `_coherence_sub_reasons` inside
+        # `build_selection_freeze_diagnostics`), plus the already-
+        # serialized `diagnostics["repair_loop"]["attempts"]` list this
+        # function already wrote (either the V1 branch above or the
+        # AUTHORITATIVE branch above, whichever ran). No recomputation of
+        # semantic atoms, no materiality judgment, no `blocking` flag
+        # change -- a separate top-level diagnostics key, sibling to
+        # `selection_freeze_diagnostics`, never nested inside it.
+        _repair_loop_diag = (result.draft.diagnostics or {}).get("repair_loop") or {}
+        lost_semantic_atom_diag = build_lost_semantic_atom_diagnostics(
+            lost_semantic_atoms=coherence_diag.get("lost_semantic_atoms"),
+            repair_loop_attempts=_repair_loop_diag.get("attempts") or (),
+        )
+        result = replace(result, draft=replace(
+            result.draft, diagnostics={
+                **result.draft.diagnostics,
+                "lost_semantic_atom_diagnostics": lost_semantic_atom_diag,
             },
         ))
     else:
