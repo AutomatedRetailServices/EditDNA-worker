@@ -56495,3 +56495,219 @@ patch. Docs-only decision entry, per this task's own explicit exception
 to "NO POST-RESULT PATCH."
 
 Then STOP.
+
+## D-235Z — LIVE EXACT-IDENTITY / LANGUAGE-SPINE COLLAPSE FORENSIC POST D-235Y (forensic only, no fix)
+
+**Scope:** forensic-only, no RAW, no engine/threshold/Freeze/materiality/
+repair/Pacing change. D-235Y's own `freeze_blocked=True` correction
+(recovered from run `34656261730`'s own artifacts: `selected_count_
+before_freeze=4`, `lost_semantic_atom_status=FOUND`, `repair_loop_status=
+NEEDS_HUMAN_REVIEW`, target clip `clip_96d437e1ec4859c7219b` /
+`"oh too many people ready set these are the"` / `REAL_CONTENT_LOSS` /
+`blocking=true`) is accepted as corrected fact; D-209 Ordering's own real
+downstream data was upstream of Freeze in this pipeline's real order
+(P2 -> Ordering -> Freeze -> Boundary -> Pacing), so D-235Y's prior use
+of it as Freeze-passed evidence was WRONG, exactly as this task states.
+
+**Root cause, traced by direct code read (not guessed):**
+
+D-200's own recovered counts for this sibling
+(`LanguageWord=252`, `LanguagePhrase=12`, `LanguageUtterance=1`,
+`LanguageAttempt=1`, `PropositionCandidate=1`) trace to ONE confirmed,
+already-disclosed missing seam:
+
+`language_spine_live_integration.py::build_live_language_spine_for_source`
+calls `segment_language_phrases(words)` with **zero** `audio_silence_
+intervals`/`restart_marker_times` arguments (both default to `()`), and
+says so directly in its own source comment: *"No real audio-silence-
+interval/restart-marker evidence is threaded into this seam ...
+Recorded honestly via missing_evidence below, never silently upgraded."*
+`missing_evidence` unconditionally includes `AUDIO_SILENCE_EVIDENCE_
+NOT_SUPPLIED` for every source, confirming this is a structural,
+disclosed gap, not a per-run fluke.
+
+Consequence, traced stage by stage:
+- **Stage 1 (LanguageWord):** healthy by construction — a pure,
+  1:1 adapter over already-real ASR word timings
+  (`language_spine.adapt_words_to_language_words`); no collapse here.
+- **Stage 2 (LanguagePhrase):** healthy in the sense that 12 phrases
+  were produced from real timing/punctuation splits
+  (`segment_language_phrases`'s WEAK-tier `SPEECH_BOUNDARY`/
+  `PUNCTUATION` boundary kinds, the only kinds reachable without audio-
+  silence or restart-marker evidence, plus whatever `END_OF_UTTERANCE`
+  terminal punctuation the ASR transcript happened to carry) — bounded,
+  distinct, real source ranges; collapse is not here either.
+- **Stage 3 (LanguageUtterance) — THE COLLAPSE POINT:**
+  `language_utterance_attempt._pass1_raw_utterances` cuts an utterance
+  boundary ONLY on `_STRONG_BOUNDARY_KINDS = {RESTART_BOUNDARY, PAUSE,
+  END_OF_UTTERANCE}`; the two WEAK kinds (`PUNCTUATION`,
+  `SPEECH_BOUNDARY`) never force a cut on their own (by design — see
+  the module's own "two-pass construction" doctrine). With
+  `audio_silence_intervals=()` and `restart_marker_times=()` at this
+  call site, `PAUSE` and `RESTART_BOUNDARY` are structurally
+  UNREACHABLE, leaving only `END_OF_UTTERANCE` (pure ASR terminal-
+  punctuation detection, `_ends_sentence`) as a possible strong cut.
+  12 phrases collapsing to exactly 1 utterance (the forced final cut
+  only) means none of the first 11 phrase-ending words in this
+  sibling's ASR transcript were recognized as terminal-punctuated —
+  consistent with (not separately verifiable from code alone) sparse
+  ASR punctuation on disfluent/retry-heavy spoken delivery, but the
+  CONFIRMED, code-evidenced cause is the missing audio-silence wiring:
+  even if punctuation had been present on some of the 11, PAUSE
+  evidence (which is real, per-source, already computed elsewhere in
+  this exact pipeline — see below) is structurally excluded from ever
+  contributing a cut at this call site, regardless of transcript
+  punctuation quality.
+- **Stage 4 (LanguageAttempt):** direct, mechanical consequence of
+  Stage 3, not a separate segmentation defect — `build_language_
+  attempts` groups CONSECUTIVE utterances; with exactly 1 utterance
+  there is exactly 1 attempt.
+- **Stage 5 (PropositionCandidate):** direct, mechanical consequence of
+  Stage 4 — `language_proposition_relation.build_proposition_
+  candidates` is documented and implemented as exactly ONE
+  `PropositionCandidate` per `LanguageAttempt` (D-169's own "bounded
+  V1" scope, unchanged, not a bug introduced by this collapse).
+- **Stage 6 (P1 canonical mapping):** `canonical_attempt_used_by_p1_
+  count=12` with only 1 real `LanguageAttempt` is explained exactly as
+  hypothesized — `language_attempts_by_span_id_for_source`'s maximum-
+  overlap bridge trivially matches every one of the 12 P1 moment spans
+  to the SAME single whole-source (0.0-96.9) attempt, because it is
+  the only attempt that exists to overlap against. This is canonical
+  evidence AVAILABILITY in name only, never per-moment attempt
+  identity — confirmed, not assumed.
+- **Stage 7/8 (target exact word identity):** confirmed NO, by exact
+  set-arithmetic rule read directly from `shared_attempt_word_
+  identity.classify_word_membership_relationship`/`match_
+  reconstructed_attempt_against_language_attempts`. Clip
+  `clip_96d437e1ec4859c7219b`'s own `CandidateTake.word_indices` is a
+  small, clip-scoped subset of canonical word indices; the ONE
+  `LanguageAttempt`'s word-index range spans nearly the entire source.
+  Set comparison therefore classifies as `RELATIONSHIP_EXACT_LANGUAGE_
+  CONTAINS_RECONSTRUCTED` (`r < l`) — real, reported evidence, but NOT
+  a member of `AUTHORITATIVE_RELATIONSHIP_STATUSES` (`{EXACT_SAME_
+  MEMBERSHIP, ONE_RECONSTRUCTED_TO_MULTIPLE_LANGUAGE_ATTEMPTS_EXACT_
+  PARTITION}`), by the module's own explicit "Correspondence Authority"
+  rule: containment is reported, never auto-promoted.
+- **Stage 8 (`exact_match_by_clip_id` live shape):** `pipeline.py`
+  (D-235X wiring, line ~2624) only inserts an entry when
+  `match.relationship_status in AUTHORITATIVE_RELATIONSHIP_STATUSES`.
+  Since the target clip's real relationship is `EXACT_LANGUAGE_
+  CONTAINS_RECONSTRUCTED` (not authoritative), `exact_match_by_clip_id`
+  does NOT contain an entry for `clip_96d437e1ec4859c7219b` — confirmed
+  from code, not merely presumed.
+- **Stage 9 (D-235Q):** `_complete_lost_semantic_atom_materiality_by_
+  clip_id` (`final_story_coherence_validation.py`) calls `exact_match_
+  by_clip_id.get(clip_id)`, which returns `None` for the target clip,
+  so `assess_complete_lost_semantic_atom_materiality` is invoked with
+  `exact_match=None` — the exact-identity-driven non-material path is
+  structurally unavailable for this atom, and D-235Q correctly falls
+  back to its own pre-existing content-based classification, which
+  (per the recovered artifact) reached `REAL_CONTENT_LOSS`/
+  `blocking=true`. This is a genuine, correct "insufficient identity
+  evidence, preserve blocking" outcome — not the forced ABSTAIN status
+  this task speculated might appear verbatim, but functionally the
+  same fail-closed result.
+- **Stage 10 (D-235R/D-235S/D-235T):** since D-235Q never reached a
+  non-material verdict for this atom, D-235R has nothing to suppress
+  (blocking is correctly preserved) and D-235T's own suppression path
+  is never triggered for this atom either — both consume the SAME
+  D-235Q result exactly as D-235X wired them to, and both behaved
+  correctly given that result.
+
+**Video00-vs-sibling comparison:** Video00's own historical D-200 result
+(`LanguageWord=623`, `LanguagePhrase=58`, `LanguageUtterance=40`,
+`LanguageAttempt=20`, `PropositionCandidate=20`) shows roughly 1
+utterance per 1.45 phrases; this sibling shows 1 utterance per 12
+phrases. The most direct, code-supported explanation is that Video00's
+own transcript/ASR happened to carry enough real terminal punctuation
+and/or a materially different retry cadence to cross the `END_OF_
+UTTERANCE` strong-boundary threshold far more often, while this
+sibling's transcript did not — the SAME missing audio-silence wiring
+gap applies identically to both sources (neither ever received real
+`audio_silence_intervals`/`restart_marker_times` at this call site);
+Video00 simply happened not to depend on it as heavily. This is not
+independently re-verifiable without reading Video00's own raw ASR
+transcript (out of this forensic's scope), so it is reported as the
+best code-supported explanation, not a proven transcript-level fact.
+
+**Audio-silence evidence audit:** real, already-computed, per-source
+audio-silence-interval evidence DOES exist upstream in this exact
+pipeline today — `audio_silence.py::detect_audio_silence_intervals`/
+`audio_silence_events` (real ffmpeg `silencedetect`), already consumed
+by `parallel_perception.py` (Track B), `flow_b.py`
+(`merge_audio_silence_into_context`), and `attempt_reconstruction.py`
+(D-097.5's own measured-dead-air pause-boundary fix). The exact missing
+seam is that `language_spine_live_integration.build_live_language_
+spine_for_source` never receives or threads any of this already-real
+evidence into its own `segment_language_phrases` call. No new silence
+detector is required or proposed — only a wiring gap, named exactly.
+
+**Root-cause verdict: A — MISSING LIVE AUDIO-SILENCE EVIDENCE CAUSED
+LANGUAGE-SPINE COLLAPSE** (with the caveat that possible ASR terminal-
+punctuation sparsity on this sibling may be a compounding, not
+separately verified, factor — the audio-silence wiring gap is the one
+confirmed, code-evidenced, always-true cause regardless of punctuation
+quality, since it structurally forecloses `PAUSE`/`RESTART_BOUNDARY`
+boundaries no matter what the transcript contains).
+
+**Q/R/S/T verdict:** exonerated again. Given the actual (missing) exact-
+identity input, all four behaved exactly as designed — D-235Q correctly
+declined to claim non-materiality without exact identity, D-235R
+correctly preserved blocking, D-235T correctly never suppressed. The
+defect is entirely upstream, in Language Spine construction, not in the
+D-235Q/R/S/T authority chain D-235W/X built.
+
+**First actual failing seam:** `language_spine_live_integration.
+build_live_language_spine_for_source`'s call to `segment_language_
+phrases(words)` (no `audio_silence_intervals`/`restart_marker_times`
+threaded in).
+
+**Smallest future fix (NOT implemented, NOT authorized here):** thread
+already-computed real audio-silence intervals (and, if available,
+restart-marker times) for the same `source_asset_id` into that one
+call site's optional keyword arguments. No new detector, no new
+threshold, no new heuristic — reuses evidence this pipeline already
+computes elsewhere. Production files a future task would touch:
+`language_spine_live_integration.py` (thread the evidence through) and
+its caller in `pipeline.py` (supply the real per-source interval/marker
+data it already has access to via `RawUnderstandingMap`/`attempt_
+reconstruction`'s own dead-air evidence). No schema migration, no new
+threshold, no provider, no RAW required to IMPLEMENT the fix; a RAW
+would be required to REQUALIFY it afterward (not run here).
+
+**Pacing/Freeze-track reinterpretation:** D-235Y's `pacing_seam_
+reached=false` stands, but for the CORRECT reason this task supplies
+(`first_missing_link=FREEZE_BLOCKED_BEFORE_PACING`), not the D-209-
+Ordering-based reasoning D-235Y previously used. FREEZE TRACK REMAINS
+OPEN — D-235Y's verdict B ("Freeze track closes") is superseded/
+corrected by this task's own findings; the target atom's blocker is
+CONFIRMED STILL PRESENT, root-caused to the Language Spine collapse
+described above, not cleared.
+
+**Verdict: A — MISSING LIVE AUDIO-SILENCE EVIDENCE CAUSED LANGUAGE-
+SPINE COLLAPSE.**
+
+**Canonical status:** `LANGUAGE_SPINE_UTTERANCE_COLLAPSE_ROOT_CAUSED —
+AUDIO_SILENCE_WIRING_GAP_CONFIRMED, Q/R/S/T_EXONERATED, FIX_NOT_
+IMPLEMENTED.`
+
+**Exact next gate:** a separately-authorized D-236 implementation task
+to thread real audio-silence-interval (and restart-marker, if available)
+evidence into `build_live_language_spine_for_source`'s `segment_
+language_phrases` call, with targeted tests proving the utterance/
+attempt counts stop collapsing on fixtures shaped like this sibling's
+transcript, followed by a REQUALIFICATION RAW (not this task's to
+launch).
+
+**Engine patch required?** Yes, for D-236 (not performed here). **New
+threshold required?** No. **New detector required?** No. **Schema
+migration required?** No. **Provider required?** No. **RAW required (by
+this task)?** No. **Paid compute required (by this task)?** No.
+
+**Confirmation:** forensic only. Zero production code changes. Zero
+RAW/Modal/RunPod/provider calls. No Freeze/materiality/repair/Pacing/
+threshold/resolver/BestTake/Family/Ordering/Boundary logic touched.
+Docs-only decision entry.
+
+Then STOP. Do not implement the fix. Do not launch RAW. Wait for Product
+Owner coordination.
