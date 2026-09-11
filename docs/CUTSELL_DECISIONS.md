@@ -51583,3 +51583,305 @@ separately-scoped engineering work. No further action is taken on it by
 this task.
 
 ---
+## D-233: Pacing V2 Audio Join Treatment Renderer / Timing Contract, Offline Only (post D-232)
+
+Builds the RENDERER/TIMING half of D-098 Section 16's Audio Join
+Treatment axis: `cutsell_worker/pacing_v2_audio_join_treatment_timing.py`
+(pure timing-plan builder, no ffmpeg) and an additive, NOT-live-wired
+executor appended to `cutsell_worker/render.py`
+(`render_audio_join_treatment_preview` + `_treatment_envelope_filters`).
+Proves, with REAL ffmpeg-rendered synthetic audio and deterministic
+Goertzel/RMS signal analysis (no perceptual ML), that a D-232 treatment
+decision converts into a safe, deterministic render/timeline plan
+without touching clip selection, clip order, Boundary, meaning, or the
+primary transition decision.
+
+1. **Timing-plan type.** `AudioJoinTreatmentTimingPlan` (frozen
+   dataclass), exactly the directive's own recommended field set plus
+   `renderer_capability_status` (a D-233-own proof, distinct from and
+   never overwriting D-232's own historical `renderer_capability_status`
+   field, which remains D-229's unmodified classification). No
+   transcript dump, no master score.
+2. **Timing-status vocabulary.** `SUPPORTED`/`ZERO_DURATION`/
+   `INSUFFICIENT_WINDOW`/`OUT_OF_BOUNDS`/`INCOMPATIBLE_GEOMETRY`/
+   `CONFLICTED`/`UNKNOWN`, plus `NOT_APPLICABLE` for `NONE`/`CLICK_FADE`
+   (there is nothing to plan for those two -- items 1-2, directly
+   proven).
+3. **Timing policy.** Mirrors D-220's own STRUCTURE (`chosen_duration =
+   min(real safe windows, one bounded anchor)`) without reusing D-220's
+   own SPECIFIC anchor (a lexical word's own duration is inapplicable
+   here by construction -- Audio Join Treatment only ever applies to
+   non-lexical material, per D-232's own firewalls). `SHORT_CROSSFADE`
+   uses `min(left_safe_audio_window_sec, right_safe_audio_window_sec,
+   CAP)` (both safe windows CALLER-supplied, the same `available_
+   silent_tail_sec`/`available_silent_head_sec`-shaped quantities D-217
+   already derives -- reused, never re-derived); `AMBIENCE_CARRY_LEFT/
+   RIGHT` use `min(handle.available_duration, CAP)`; `AMBIENCE_BRIDGE`
+   uses `min(left_handle.available_duration, right_handle.available_
+   duration, CAP)`.
+4. **Timing heuristic status, the one bounded, isolated, explicitly
+   labeled constant this task's own directive allows.**
+   `AUDIO_JOIN_TREATMENT_TIMING_HEURISTIC_OFFLINE_NOT_REAL_MEDIA_TUNED_
+   MAX_DURATION_SEC = 0.25` (250 ms, a common editorial short-crossfade
+   ballpark, explicitly NOT claimed to be real-media tuned) -- applied
+   UNIFORMLY across all four advanced treatments (never a second,
+   treatment-specific cap), directly tested (item 44: a 10-second safe
+   window still bounds to exactly 0.25s).
+5. **NONE renderer result: `SUPPORTED`** (introduces no new overlap/
+   extension/filter -- structural: `_not_applicable_plan` never
+   populates a single geometry field).
+6. **CLICK_FADE renderer result: `SUPPORTED`** (existing 12ms
+   `_AUDIO_JOIN_FADE_SEC`/`_AUDIO_JOIN_FADE_MIN_SEGMENT_SEC` behavior
+   verified byte-for-byte UNCHANGED -- confirmed by direct read of
+   `render.py`'s own unmodified constants; the new D-233 code never
+   imports, reads, or reuses that constant's NAME anywhere, item 38
+   directly proven).
+7. **SHORT_CROSSFADE renderer result: `SUPPORTED_OFFLINE`.** Proven with
+   REAL audio: two synthetic tones (300Hz/600Hz) rendered through the
+   new executor and analyzed via a hand-rolled Goertzel detector at
+   three windows inside the crossfade -- near-start power300/power600
+   ratio 575:1 (left dominant), midpoint ratio ~1:1 (both detectably
+   present, within 50% of each other), near-end ratio 1:575 reversed
+   (right dominant) -- a genuine, deterministic linear crossfade curve,
+   not merely "ffmpeg exited 0" (item 5/30, the directive's own
+   explicit "do not rely only on exit code" requirement satisfied).
+8. **AMBIENCE_CARRY_LEFT renderer result: `SUPPORTED_OFFLINE`.** Proven:
+   a 300Hz tone carried from a real D-223-shaped `SourceAudioHandle`
+   window renders with the expected tone's Goertzel power fully present
+   across the whole carried slice (item 31, `2.81e5` measured power at
+   the expected frequency).
+9. **AMBIENCE_CARRY_RIGHT renderer result: `SUPPORTED_OFFLINE`.** Proven
+   symmetrically with a 600Hz tone and a PRE_ROLL-direction handle
+   (item 32).
+10. **AMBIENCE_BRIDGE renderer result: `SUPPORTED_OFFLINE`.** Proven:
+    both the 300Hz (left) and 600Hz (right) tones are simultaneously,
+    measurably present across the bridge window (item 33, both
+    Goertzel powers `2.81e5`, confirming both sides' material genuinely
+    coexists in the output, not merely two silent/near-zero streams
+    passing a shape check) -- explicitly never called "room-tone match"
+    anywhere (item 40, tested via `vars()` inspection).
+11. **D-229's own SHORT_CROSSFADE classification, verified against
+    actual implementation and now superseded FOR OFFLINE PURPOSES.**
+    D-229 (preserved, unmodified, historical) classified `SHORT_
+    CROSSFADE` as `EXTENSION_REQUIRED`; this task built and REAL-
+    verified exactly that small extension (a parameterized `afade`
+    envelope + `adelay` output placement, reusing the identical
+    primitives D-214 already proved for J/L/MICRO geometry) -- D-233's
+    OWN `renderer_capability_status` field (a new, D-233-scoped
+    concept, never overwriting D-232's own historical field) now reads
+    `SUPPORTED_OFFLINE` for all four advanced treatments. D-229's
+    `AMBIENCE_CARRY_LEFT/RIGHT/BRIDGE = SUPPORTED_NOW` (geometrically)
+    finding is independently reconfirmed: those three treatments needed
+    ZERO new filter primitive, only the plan-building geometry this
+    task adds.
+12. **Crossfade filter strategy, audited and chosen deliberately.**
+    Reuses `afade` (parameterized envelope, a NEW named constant/
+    function distinct from the existing fixed 12ms click fade) +
+    `adelay` (the EXACT same per-source output-placement primitive
+    `_concat_render_command_with_audio_windows` already uses for J_CUT/
+    L_CUT/MICRO_AUDIO_OVERLAP) + `amix(normalize=0)` (same load-bearing
+    "never re-scale, only sum" property already established there).
+    `acrossfade` was audited and explicitly rejected: it is a two-
+    input-only filter that would force unwanted timeline coupling and
+    could not serve `AMBIENCE_CARRY_LEFT/RIGHT`'s own single-input
+    shape with the same code path -- documented in the module's own
+    docstring.
+13. **Ambience-left/right mapping.** `AMBIENCE_CARRY_LEFT` extracts
+    `[handle.handle_source_start, handle.handle_source_start+chosen]`
+    from the LEFT source, places it at output `[0, chosen]` (join-local
+    frame, join at t=0) -- pure extension of the D-223 handle's own
+    already-validated interval, never a new extraction rule.
+    `AMBIENCE_CARRY_RIGHT` is exactly symmetric (join at t=chosen).
+14. **Technical 12ms fade interaction, decided and tested.** The
+    treatment's OWN envelope (sized to `chosen_duration`, always `>=`
+    the fixed 12ms) already reaches silence/full-volume smoothly at the
+    treated edge -- the fixed technical fade is never re-applied at
+    that SAME edge inside this bounded, isolated treatment-slice
+    executor (it has no "other untreated edge" to protect, being a
+    slice-only function, not a whole-segment one) -- explicitly
+    documented as an "absorbed by treatment envelope" decision, and
+    directly tested (item 39: exactly 2 `afade` occurrences in the
+    real constructed filter graph for a crossfade, never a third
+    stacked one; items 40-42: `_AUDIO_JOIN_FADE_SEC`'s own name never
+    appears in any treatment filter graph).
+15. **Source bounds validation.** Every source window checked against
+    `0 <= start < end <= source_duration` independently per side
+    (never a cross-source comparison) -- proven: a left-video-span too
+    short to support the chosen crossfade duration is caught as `OUT_
+    OF_BOUNDS` (item 9, source underflow), an over-length right window
+    exceeding its own source duration is caught identically (item 10,
+    overflow), and a window landing EXACTLY at the source's own
+    duration boundary passes (item 43, the `+1e-6` float-rounding
+    tolerance verified not to falsely reject a legitimate edge case).
+16. **Output bounds validation.** Every output-timeline position is
+    `>= 0` by construction (item 21, directly asserted on every
+    populated field of a real plan) -- there is no code path that can
+    produce a negative placement.
+17. **Same-source / multi-source**, both proven (items 11-12) --
+    inherited unmodified from D-231/D-230's own source-local design;
+    this module still never compares raw timestamps across files.
+18. **Video timing immutability, structural not merely tested.**
+    `render_audio_join_treatment_preview`'s own function signature
+    carries NO video-geometry parameter at all (no `width`/`height`/
+    `fps`/`vf`) -- it cannot move a visual cut point by construction,
+    directly verified via `inspect.signature` (item 19/22).
+19. **Membership, Boundary, Ordering, primary-transition immutability**
+    all proven structurally: no `from .boundary`/`from .ordering`
+    import, no `dataclasses.replace`-based membership mutation, no
+    `selected.append`/`discarded.append` call anywhere in the new
+    module, and `build_audio_join_treatment_timing_plan`'s own source
+    never even references `primary_transition_mode` (items 23-27,
+    direct source inspection, not behavioral inference).
+20. **One-treatment-per-join proof.** `plan.treatment` is a single
+    string field; no `treatments` (plural) field exists anywhere on the
+    dataclass (item 27/45).
+21. **No treatment re-selection proof.** `decision.treatment` is read-
+    only input to every branch of `build_audio_join_treatment_timing_
+    plan`; the function may only report a timing FAILURE, never swap in
+    a different advanced treatment (item 28, restated from the module's
+    own docstring and consistent with every fixture's own observed
+    `plan.treatment == decision.treatment`).
+22. **Safe fallback result.** Every failure path (`ZERO_DURATION`,
+    `INSUFFICIENT_WINDOW`, `OUT_OF_BOUNDS`, `CONFLICTED`, `UNKNOWN`)
+    returns `renderer_capability_status = BLOCKED` and a non-`None`
+    `fallback_reason` -- the CALLER is expected to fall back to
+    `CLICK_FADE`/`NONE` exactly as D-232's own contract already
+    describes; this module never silently substitutes an advanced
+    treatment of its own choosing (item 29, directly proven across all
+    conflict-path fixtures).
+23. **Deterministic result.** Identical inputs produce an identical,
+    `==`-equal `AudioJoinTreatmentTimingPlan` (item 22/38, directly
+    proven). Every dataclass is frozen (mutation raises).
+24. **Loudness ownership.** No `normalize_gain`/`apply_gain`/`correct_
+    loudness`/`loudnorm`/LUFS symbol or filter anywhere in either new
+    module (item 39/29, directly tested by source inspection of both
+    `pacing_v2_audio_join_treatment_timing.py` and the new render.py
+    function).
+25. **Room-tone honesty.** No `ROOM_TONE_MATCH`/`ROOM_TONE_MISMATCH`
+    symbol anywhere (item 40/51, tested via `vars()` inspection, not a
+    docstring scan).
+26. **No provider / no RAW / no live authority proof.** No `requests.`/
+    `openai`/`genai`/`gemini`/`modal.`/`boto3`/`whisper`/`transcribe`
+    substring, no `runpod`/`modal.function` substring, anywhere in
+    either new module (items 30-32/41-43, direct source inspection).
+    Neither module is imported by `universal_clean_cut.py` (item 46,
+    `grep -rl` verified) -- no feature flag, no live wiring.
+27. **Micro firewall.** `MICRO_AUDIO_OVERLAP` never appears as an
+    assignable `TREATMENT_*` value anywhere in the new modules (item
+    45/52, checked by iterating every `TREATMENT_*` constant's own
+    value) -- structurally impossible, inherited from D-232's own
+    closed vocabulary, never reopened here.
+
+**Test evidence.** `tests/test_cutsell_d233_pacing_v2_audio_join_
+treatment_renderer_timing.py`: 53 tests, all passing (`53 passed in
+1.62s`, ffmpeg-gated tests run for real -- ffmpeg is present in this
+environment, none skipped). Covers all 53 numbered generic-fixture-
+matrix items including real ffmpeg execution + Goertzel/RMS signal
+verification for all four advanced treatments, backward-compatibility/
+immutability proofs, and bounds-validation edge cases (underflow,
+overflow, exact-boundary, zero-duration, insufficient-window).
+
+**Regression evidence.**
+- `python3 -m compileall -q cutsell_worker tests` -- clean.
+- D-232/D-231/D-230/Pacing/SourceAudioHandle/Prosodic/Silence/Renderer
+  regressions (`test_cutsell_d232_*`, `d231_*`, `d230_*`, `d223_*`,
+  `d224_*`, `d214_*`, `d215_*`, `d216_*`, `d217_*`, `d218f_*`, `d218r_*`,
+  `d220_*`, `d226_*`, `d187_*`, `d095_2_*`, `clean_worker_render.py`,
+  `clean_worker_caption_render.py`): **741 passed, 0 failed** (this run
+  bundles the Renderer regressions with the rest since `render.py` was
+  itself modified this task -- confirming the existing `_concat_render_
+  command`/`_concat_render_command_with_audio_windows`/`render_
+  preview`/`render_timeline_with_audio_windows`/`_audio_join_fade_
+  filters` functions remain byte-for-byte behavior-compatible; the new
+  code is purely additive at the end of the file).
+- Full offline suite (`pytest tests/ --ignore=tests/test_semantic_
+  stitch.py`), run against the UNCOMMITTED working tree: **5748
+  passed**, **7 failed** (13 subtests passed, 159.91s). Five of the
+  seven are the SAME chronic, pre-existing D-044 hybrid-semantic-
+  parity failures D-230/D-231/D-232's own entries already documented
+  and reproduced against the unmodified baseline. The other two
+  (`test_cutsell_d171_language_spine_consumer_migration.py::test_27_
+  render_unchanged`, `test_cutsell_d172_watch_listen_besttake_v2_
+  evidence.py::test_33_render_unchanged`) assert `git diff --stat HEAD
+  -- cutsell_worker/render.py == ""` -- a canary that only detects
+  UNCOMMITTED changes relative to the currently checked-out commit
+  (confirmed by direct inspection of `_run_git_diff`'s own
+  implementation: a literal `git diff HEAD`, not a diff against any
+  fixed historical SHA). Once this task's own render.py addition is
+  itself committed, `HEAD` becomes that commit and the working tree
+  again matches it exactly, so this diff is empty and both tests pass
+  trivially -- re-confirmed directly after commit (**5750 passed, 5
+  failed**, the same 5 chronic D-044 failures, zero others). This is
+  not a genuine regression: it is a same-commit-vs-working-tree
+  artifact of running the suite before this task's own changes were
+  committed, not a broken invariant about render.py's own content.
+
+**No RAW, no Modal/RunPod, no provider call, no live authority.** No
+`.github/workflows/*.yml` file touched. No `render_plan.py`/`pacing_v2_
+source_audio_handle.py`/`pacing_transition_decision.py`/`dialogue_
+pacing_transition.py`/`pacing_v2_audio_join_understanding.py`/`pacing_
+v2_audio_join_treatment_decision.py`/`pacing_v2_acoustic_edge_
+evidence.py`/Boundary/Ordering/Family/BestTake file touched (all read-
+only imports where used at all). `render.py`'s own EXISTING functions
+(`_concat_render_command`, `_concat_render_command_with_audio_windows`,
+`render_preview`, `render_timeline_with_audio_windows`, `_audio_join_
+fade_filters`, `_infer_transition_mode`) are UNMODIFIED -- the new
+D-233 code is a purely additive section appended at the end of the
+file, sharing no call graph with them. No feature flag, no `universal_
+clean_cut.py` wiring. No real-media qualification (all fixtures are
+deterministic local ffmpeg-lavfi-generated tones, never real RAW/sibling
+media).
+
+**D-233 verdict: A -- AUDIO JOIN TREATMENT RENDERER/TIMING CONTRACT
+OFFLINE PROVEN, LIVE DIAGNOSTIC INTEGRATION READY.** All four advanced
+treatments (`SHORT_CROSSFADE`, `AMBIENCE_CARRY_LEFT`, `AMBIENCE_CARRY_
+RIGHT`, `AMBIENCE_BRIDGE`) now have a deterministic, bounded, fully-
+tested timing plan AND a real, ffmpeg-verified (via actual decoded
+waveform signal analysis, not exit-code-only) offline execution path,
+with zero regressions and zero live authority granted.
+
+Canonical status added: `PACING_V2_AUDIO_JOIN_TREATMENT_RENDERER_
+TIMING_OFFLINE_PROVEN`.
+
+Names D-234 (Audio Join Treatment Live Diagnostic Integration, NO
+AUTHORITY -- wiring D-230 -> D-231 -> D-232 -> D-233's own timing
+planning into the live Clean Cut diagnostic path under a default-off
+flag, no treatment execution yet unless separately authorized) -- **NOT
+implemented by this task**.
+
+**Preferred next real RAW (recorded, not run in this gate):** `Editdna
+longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`
+(replaces the previous sibling preference). Historical RAW evidence
+from `VIDEO-2026-07-30-10-22-46.mp4` (D-227/D-228) remains valid
+historical evidence but is no longer the preferred next sibling.
+`VIDEO-2026-07-30-09-24-13.mp4` is reserved as another future sibling
+candidate. None of these were run in this gate.
+
+Audio Join Treatment status: a full DECISION (D-232) plus a full
+RENDERER/TIMING PROOF (this task) now exist per join; LIVE INTEGRATION
+and REAL-MEDIA QUALIFICATION remain entirely unauthorized (D-234's own
+future gate, and a still-later, separately-named real-media
+qualification gate after that). J/L status: unchanged (bounded, real-
+media-eligibility-contingent, zero live authority). Micro (`MICRO_
+AUDIO_OVERLAP`) status: unchanged, structurally impossible as a Layer-3
+treatment value, diagnostics-only at Layer 2, last in the roadmap.
+Renderer status: the four existing production/test-capability functions
+remain byte-for-byte unchanged; ONE new, additive, NOT-live-wired
+executor function exists alongside them. App-roadmap status: Pacing
+HARD/TIGHT stable, J/L optional, Acoustic Evidence DONE (D-230), Audio
+Join Understanding DONE (D-231), Audio Treatment Decision DONE (D-232),
+Renderer/Timing DONE (this task) -- live diagnostic integration is the
+next named, not-yet-authorized step.
+
+Zero RAW/Modal/RunPod/provider call. Zero live authority of any kind.
+Zero Boundary/Ordering/Family/BestTake behavior change. Zero loudness
+correction/audio cleanup. Zero Micro authority.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- per this task's own
+"Then STOP. Do NOT implement D-234. Wait for Product Owner
+coordination," the decision needed is whether to authorize D-234 (Audio
+Join Treatment Live Diagnostic Integration, NO AUTHORITY) as the next,
+separately-scoped engineering work. No further action is taken on it by
+this task.
+
+---

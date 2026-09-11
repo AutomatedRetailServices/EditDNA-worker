@@ -699,3 +699,163 @@ def dialogue_pacing_transition_execution_diagnostics(
         "rejection_reason": rejection_reason,
         "transitions": rows,
     }
+
+
+# =============================================================================
+# D-233 -- AUDIO JOIN TREATMENT RENDERER/TIMING CONTRACT EXECUTION (OFFLINE
+# ONLY, NOT LIVE-WIRED)
+# =============================================================================
+#
+# Consumes exactly one `pacing_v2_audio_join_treatment_timing.
+# AudioJoinTreatmentTimingPlan` (duck-typed here, never imported, matching
+# this module's own existing D-214 execution-diagnostics precedent of
+# defining local literal constants rather than a cross-module import) and
+# realizes it as a bounded, two-source, AUDIO-ONLY ffmpeg render. This is a
+# test/offline execution CAPABILITY -- like `render_timeline_with_audio_
+# windows` above, it is NOT imported or called by `render_preview`,
+# `universal_clean_cut.py`, `pipeline.py`, or any other production call
+# site, has no feature flag, and is used by tests only.
+#
+# ## Video-timing immutability, structural
+#
+# This function has NO video-geometry parameter anywhere on its signature
+# -- it cannot move a visual cut point by construction, not merely by
+# convention. `plan.visual_join_time` is consumed only as a diagnostic
+# label for waveform verification (see the test file), never as a video
+# position to render.
+#
+# ## Filter strategy: afade + adelay + amix, never acrossfade
+#
+# `acrossfade` is a two-input-only filter that would force this function
+# to always take exactly two inputs and would own its own internal timing
+# model -- unwanted coupling for a shape (AMBIENCE_CARRY_LEFT/RIGHT can be
+# ONE-input-only; AMBIENCE_BRIDGE and SHORT_CROSSFADE need two) that
+# varies per treatment. `afade` (parameterized IN/OUT envelope, distinct
+# constant from the existing fixed 12ms `_AUDIO_JOIN_FADE_SEC` click
+# fade), `adelay` (independent per-source output placement, the EXACT
+# same primitive `_concat_render_command_with_audio_windows` already uses
+# for J_CUT/L_CUT/MICRO_AUDIO_OVERLAP geometry), and `amix(normalize=0)`
+# (the same load-bearing "never re-scale, only sum" property that section
+# already established) compose cleanly across all four treatment shapes
+# with ONE small, deterministic, reused implementation.
+#
+# ## Technical 12ms click-fade interaction (explicit decision)
+#
+# The treatment's OWN envelope (a crossfade's fade-out/fade-in, sized to
+# `plan.chosen_duration`) already reaches silence smoothly at the treated
+# edge -- re-applying the fixed 12ms technical click fade AT THAT SAME
+# EDGE would be a redundant, stacked envelope (a fade-within-a-fade,
+# though harmless in practice since 12 ms is far shorter than any real
+# `chosen_duration`, it is still an unnecessary second envelope). Decision
+# (tested): the treatment's own envelope ABSORBS the technical click fade
+# at the specific edge it covers; this function never calls `_audio_join_
+# fade_filters` at all -- it is a bounded, isolated, two/one-source slice
+# render, not a whole-segment render, so there is no "other, untreated
+# edge" for it to protect in the first place (that remains the
+# unmodified, whole-segment responsibility of `_concat_render_command`/
+# `_concat_render_command_with_audio_windows` in any FUTURE live
+# integration, entirely out of this task's own scope).
+
+_TREATMENT_SHORT_CROSSFADE = "SHORT_CROSSFADE"
+_TREATMENT_AMBIENCE_CARRY_LEFT = "AMBIENCE_CARRY_LEFT"
+_TREATMENT_AMBIENCE_CARRY_RIGHT = "AMBIENCE_CARRY_RIGHT"
+_TREATMENT_AMBIENCE_BRIDGE = "AMBIENCE_BRIDGE"
+_TIMING_SUPPORTED = "SUPPORTED"
+
+
+def _treatment_envelope_filters(kind: str, duration_sec: float) -> list[str]:
+    """Parameterized fade envelope -- distinct constant/purpose from the
+    existing fixed `_AUDIO_JOIN_FADE_SEC` (12 ms) technical click fade;
+    never reuses that constant, never modifies it. `kind` is `"IN"` or
+    `"OUT"`; the WHOLE clip fades across its own full `duration_sec` (a
+    treatment slice IS the fade -- there is no untreated remainder inside
+    this bounded slice)."""
+    d = max(0.0, float(duration_sec))
+    if d <= 0.0:
+        return []
+    if kind == "IN":
+        return [f"afade=t=in:st=0:d={d:.6f}"]
+    return [f"afade=t=out:st=0:d={d:.6f}"]
+
+
+def render_audio_join_treatment_preview(
+    plan: object,
+    output_path: str,
+    *,
+    left_source_path: str | None = None,
+    right_source_path: str | None = None,
+    sample_rate: int = 48000,
+) -> str:
+    """D-233's own bounded, offline, NOT-live-wired executor for exactly
+    ONE `AudioJoinTreatmentTimingPlan` (duck-typed -- see module docstring
+    section above for why no cross-module import is taken). Produces an
+    AUDIO-ONLY output file (a real ffmpeg-encoded audio stream, `.wav` or
+    any ffmpeg-supported audio container the caller names via
+    `output_path`'s own extension) -- video-timing immutability is
+    structural, not merely tested (see above).
+
+    Raises `ValueError` (fails closed, never silently substitutes a
+    different treatment) when `plan.timing_status != "SUPPORTED"` or when
+    the plan's own treatment requires a source path this call did not
+    receive."""
+    timing_status = getattr(plan, "timing_status", None)
+    if timing_status != _TIMING_SUPPORTED:
+        raise ValueError(f"audio_join_treatment_timing_not_supported:{timing_status}")
+    treatment = getattr(plan, "treatment")
+    chosen_duration = float(getattr(plan, "chosen_duration"))
+
+    command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    audio_filters: list[str] = []
+    input_index = 0
+    labels: list[str] = []
+
+    left_start = getattr(plan, "left_source_audio_start", None)
+    if left_start is not None:
+        if not left_source_path:
+            raise ValueError("audio_join_treatment_missing_left_source_path")
+        left_end = float(getattr(plan, "left_source_audio_end"))
+        command += ["-ss", f"{float(left_start):.6f}", "-to", f"{left_end:.6f}", "-i", left_source_path]
+        filter_parts = []
+        if treatment == _TREATMENT_SHORT_CROSSFADE:
+            filter_parts += _treatment_envelope_filters("OUT", chosen_duration)
+        filter_parts.append(f"aformat=sample_fmts=fltp:sample_rates={sample_rate}:channel_layouts=stereo")
+        delay_ms = max(0, round(float(getattr(plan, "left_output_audio_start") or 0.0) * 1000.0))
+        filter_parts.append(f"adelay={delay_ms}|{delay_ms}[left]")
+        audio_filters.append(f"[{input_index}:a]" + ",".join(filter_parts))
+        labels.append("[left]")
+        input_index += 1
+
+    right_start = getattr(plan, "right_source_audio_start", None)
+    if right_start is not None:
+        if not right_source_path:
+            raise ValueError("audio_join_treatment_missing_right_source_path")
+        right_end = float(getattr(plan, "right_source_audio_end"))
+        command += ["-ss", f"{float(right_start):.6f}", "-to", f"{right_end:.6f}", "-i", right_source_path]
+        filter_parts = []
+        if treatment in (_TREATMENT_SHORT_CROSSFADE, _TREATMENT_AMBIENCE_CARRY_RIGHT):
+            filter_parts += _treatment_envelope_filters("IN", chosen_duration)
+        filter_parts.append(f"aformat=sample_fmts=fltp:sample_rates={sample_rate}:channel_layouts=stereo")
+        delay_ms = max(0, round(float(getattr(plan, "right_output_audio_start") or 0.0) * 1000.0))
+        filter_parts.append(f"adelay={delay_ms}|{delay_ms}[right]")
+        audio_filters.append(f"[{input_index}:a]" + ",".join(filter_parts))
+        labels.append("[right]")
+        input_index += 1
+
+    if not labels:
+        raise ValueError("audio_join_treatment_no_source_window_in_plan")
+
+    if len(labels) == 1:
+        audio_filters.append(f"{labels[0]}anull[aout]")
+    else:
+        audio_filters.append("".join(labels) + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0[aout]")
+
+    command += [
+        "-filter_complex", ";".join(audio_filters),
+        "-map", "[aout]",
+        str(output_path),
+    ]
+    _run(command)
+    destination = Path(output_path)
+    if not destination.exists() or destination.stat().st_size <= 0:
+        raise RuntimeError("ffmpeg_audio_join_treatment_missing_output")
+    return str(destination)
