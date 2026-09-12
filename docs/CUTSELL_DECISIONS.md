@@ -57397,3 +57397,139 @@ Language-Spine/Freeze/materiality/repair/P1/P2/Pacing/Audio-Join/
 threshold logic changed.
 
 Then STOP. Do NOT launch D-237H. Wait for Product Owner coordination.
+
+## D-237H — ONE REAL-MEDIA EXACT-IDENTITY TRACE (RAW dispatched, target-level data UNRETRIEVABLE via available tooling)
+
+**Scope:** obtain the exact real-media identity relationship (target lost
+atom vs. its source's LanguageAttempts) using D-237G's new observability,
+before any identity-contract extension is authorized. Banner: exactly ONE
+paid Modal RAW maximum, no second RAW, no RunPod, no provider change, no
+post-result engine patch, no identity-authority/`AUTHORITATIVE_RELATIONSHIP_
+STATUSES`/containment-promotion/Language-Spine/Freeze/materiality/repair/
+P1/P2/Pacing/Audio-Join/threshold change.
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `df4c905`
+(matching D-237G exactly), clean tree -- confirmed. S3 object `Editdna
+longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4` used
+as `source_key` (no substitution).
+
+**RAW:** dispatched `cutsell-video00-modal-raw.yml` on
+`feature/runpod-pod-on-demand`, exactly ONE dispatch, with
+`lost_atom_materiality_freeze_authority_enabled=1`,
+`editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`, plus the existing P2/
+Ordering/Pacing-V2/Audio-Join diagnostic flags. Run id `34669947383`
+(run_number 103, job id `103489301632`), head_sha confirmed matching
+`df4c905`. Completed 03:17:19-03:20:23 UTC (~3.5 min), overall
+`conclusion=failure` -- but the PAID MODAL BENCHMARK STEP ITSELF (step 13)
+SUCCEEDED (03:17:25-03:19:31Z) and produced a rendered MP4
+(`cutsell-video00-modal-human-review`, 68,745,605 bytes -- essentially the
+same render size as D-235Y/D-237). The failure shape is the SAME two known,
+already-classified, unrelated patterns seen on every prior sibling RAW this
+session: steps 23/24/25 (frozen-Selection-lock / Video00-architecture /
+Human-Gold-manifest validators) failed as VIDEO00_SPECIFIC_ORACLE_NOISE
+(they hardcode canonical-Video00 expected values and always fail on this
+sibling); steps 45/46/47 (D-218R/D-221/D-225 Pacing-V2 family) failed again
+on the SAME persistent, still-unroot-caused `diagnostics['pacing_v2']`/
+`['pacing_v2_handle_aware']` missing-from-serialization gap already
+tracked as independent of this task (D-235Y, D-237). All other 40+ steps
+succeeded, including step 41 (D-200 Live-Language-Spine -> P1 compact
+diagnostics), step 43 (D-204 P2), step 44 (D-209 Ordering).
+
+**What WAS retrieved and confirmed (real data, not inferred):** the D-200
+block's real stdout output (captured inside the retrievable log-tail
+window) reconfirms, on THIS run, the exact same real-media baseline D-237
+established: `language_word_count=252`, `language_phrase_count=13`,
+`language_utterance_count=3`, `language_attempt_count=3`,
+`proposition_candidate_count=3`, `audio_silence_interval_count=4`,
+`pause_boundary_count=2`, `language_spine_audio_silence_evidence_status=
+"SUPPLIED"`, single source `source_asset_id="src_c18babee4a999e7a0b0f"`,
+`live_language_spine_status="AVAILABLE"`, zero `construction_error_count`.
+The Language-Spine collapse remains CLOSED; the D-236 fix continues to
+hold on a fresh run of the same real sibling.
+
+**What could NOT be retrieved, and exactly why (both paths genuinely
+attempted, not assumed):**
+1. `get_job_logs` (`return_content=true`) has the same hard, fixed
+   response-size ceiling documented in D-235Z/D-237/D-237F forensics
+   (~418,703 characters this time, 5000 lines) that does NOT respect the
+   `tail_lines` request and has no offset/pagination. This run it captured
+   ONLY the last ~1.5 seconds of the job (03:19:40.716-03:19:42.256Z) --
+   roughly the final ~10-11 of the workflow's ~49 steps (D-200/D-204/D-209
+   diagnostic prints through upload-artifact/teardown). Step 19 ("Print
+   full canonical diagnostics", the step that `jq`-dumps the WHOLE
+   `diagnostics.final_story_coherence_validation` object -- the ONLY place
+   D-237G's new `lost_atom_identity_observability` key is ever printed,
+   since no dedicated artifact JSON file carries it) ran earlier, directly
+   after step 13 completed at 03:19:31Z, and falls entirely outside this
+   retrievable window. `return_content=false` was also tried and returns
+   the same Azure Blob Storage-backed `logs_url` (full-log download), not
+   an alternate host.
+2. The `cutsell-video00-modal-validator-reports` artifact (id
+   `10290862231`, 31,057 bytes) was DOWNLOADED GENUINELY this time (not
+   assumed unretrievable): `GET /repos/.../actions/artifacts/10290862231/
+   zip` with the GitHub token returned an HTTP 302 redirect to
+   `productionresultssa17.blob.core.windows.net`; the sandbox's own egress
+   proxy rejected the CONNECT to that host with `403` (`gateway answered
+   403 to CONNECT (policy denial or upstream failure)`, confirmed via the
+   proxy's own `/__agentproxy/status` `recentRelayFailures` entry). This is
+   the SAME class of Azure Blob Storage host confirmed blocked across
+   multiple differently-numbered subdomains in every prior session that
+   attempted artifact download -- now reconfirmed for THIS run's specific
+   artifact via a direct, explicit attempt, not inferred.
+
+Both the target-atom-specific log output and the artifact file that would
+contain the full `final_story_coherence_validation` diagnostics (and
+therefore D-237G's `lost_atom_identity_observability` rows,
+`AUTHORITATIVE_RELATIONSHIP_STATUSES` verdicts, and `selection-freeze-
+diagnostics.json`/`lost-semantic-atom-diagnostics.json` content) are
+confirmed GENUINELY UNRETRIEVABLE via any tooling available in this
+sandbox for this run. Per CLAUDE.md's binding rule against fabricating a
+verdict from incomplete/unretrievable data, and per D-237H's own text
+("Do NOT classify missing log visibility as absence of identity data if
+the artifact contains it" -- which cuts both ways: the converse, treating
+unretrievable data as if it proves or disproves a specific relationship,
+is equally prohibited), NONE of the following can be honestly reported
+this gate: target lost_atom_provenance_id, clip_id, source_start/end,
+word_index_count/min/max/exact indices; the 3 LanguageAttempts' own
+per-object rows; the relationship matrix; `exact_match_by_clip_id`
+presence/reason; `freeze_blocked`/`trigger_categories`; D-235Q/R/S/T
+per-object results; or the safety/ambiguity checklist. The Pacing-V2
+step failures observed this run are the SAME persistent serialization gap
+already isolated in D-235Y/D-237 as independent of Freeze -- their
+own error text offers three undifferentiated hypotheses (diagnostics flag
+unset / Freeze blocked before the seam / a real regression) and, since the
+diagnostics flag WAS set this run, narrows to the latter two but does not
+distinguish between them; it is NOT used here as evidence for or against
+`freeze_blocked` on the target atom.
+
+**Contract question (`REAL_SINGLETON_CONTAINMENT_OWNERSHIP_PROVEN`):**
+UNDETERMINED -- none of the 5 required evidence points could be checked
+against actual retrieved data this gate.
+
+**Proposition ownership shape (A/B/C/D):** UNDETERMINED for the same
+reason -- not assumed from D-237F's own prior hypothesis.
+
+**Verdict: E -- OBSERVABILITY STILL INSUFFICIENT** (insufficient in the
+sense that this gate's actual retrieval tooling could not surface the
+target-atom-level data D-237G computes and serializes; D-237G's
+computation and serialization logic itself remains OFFLINE-PROVEN and
+uncontradicted -- the gap is retrieval/tooling access to this run's own
+step-19 log output and validator-reports artifact, not the D-237G
+mechanism). Per the task's own verdict-menu instruction for E: **STOP. Do
+not weaken identity authority.** No identity-contract extension, no D-238
+design work, and no second RAW follow from this gate.
+
+**Canonical status:** `D237H_TARGET_IDENTITY_TRACE_UNRETRIEVABLE_VIA_
+AVAILABLE_TOOLING`. Language-Spine baseline (3/3/3, closed per D-236)
+independently reconfirmed on a fresh run of the same real sibling.
+
+**Engine patch required after this?** No. **Paid compute required?** No,
+not by this task (verdict E authorizes no further RAW). **RAW required?**
+No further RAW under any circumstance from this gate.
+
+**Confirmation:** NO code, workflow, threshold, or authority change made.
+Zero second RAW, zero RunPod, zero provider change. This entry is a
+docs-only decision-log addition, the only change permitted post-result.
+
+Then STOP.
