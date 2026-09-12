@@ -163,6 +163,7 @@ from dataclasses import dataclass
 import os
 from typing import Iterable, Mapping, Tuple
 
+from .audio_silence import AUDIO_SILENCE_EVENT_KIND
 from .contracts import Word
 from .language_proposition_relation import (
     PropositionCandidate,
@@ -171,6 +172,8 @@ from .language_proposition_relation import (
     build_relation_evidence,
 )
 from .language_spine import (
+    BOUNDARY_PAUSE,
+    BOUNDARY_RESTART_BOUNDARY,
     LanguagePhrase,
     LanguageWord,
     adapt_words_to_language_words,
@@ -262,6 +265,44 @@ class LiveLanguageSpineEvidence:
     missing_evidence: Tuple[str, ...]
     conflicts: Tuple[str, ...]
     provenance: Tuple[str, ...]
+    # D-236: additive, defaulted so every pre-existing direct construction
+    # site (this module's own two return sites below, plus existing test
+    # fixtures) stays valid without modification -- the real count of
+    # audio-silence intervals actually consumed for this source (0 when
+    # none were available or supplied, never a re-derivation of
+    # `missing_evidence`'s own AUDIO_SILENCE_EVIDENCE_NOT_SUPPLIED flag).
+    audio_silence_interval_count: int = 0
+
+
+def _audio_silence_intervals_from_raw_understanding_map(
+    raw_understanding_map: RawUnderstandingMap | None,
+) -> Tuple[Tuple[float, float], ...]:
+    """D-236: the ONE extraction point for real, already-computed audio-
+    silence-interval evidence into the plain ``(start, end)`` tuple shape
+    ``language_spine.segment_language_phrases`` already accepts. Never
+    recomputes anything -- ``RawUnderstandingMap.audio_events`` (D-155)
+    is itself already filtered to ``audio_silence_interval``-kind events
+    at construction time (``raw_understanding_map.build_raw_
+    understanding_map``), built from ``audio_silence.py``'s own real
+    ffmpeg ``silencedetect`` pass and merged onto the whole-video context
+    once per source in ``flow_b.py`` -- no ffmpeg call, no ASR call, no
+    local-performance recomputation happens here or anywhere downstream
+    of this function. Defensively re-filters by ``kind`` and by this
+    map's OWN ``source_asset_id`` anyway (belt-and-braces, matching this
+    module's own existing "never compared across two different
+    source_asset_id values" posture elsewhere) so a Source A interval can
+    never leak into Source B's phrase segmentation even if some future
+    caller passed a differently-scoped event list. Returns ``()``
+    (fail-open, byte-identical to pre-D-236 behavior) when the map is
+    absent or carries no such evidence -- never raises."""
+    if raw_understanding_map is None:
+        return ()
+    return tuple(
+        (float(event.start), float(event.end))
+        for event in raw_understanding_map.audio_events
+        if event.kind == AUDIO_SILENCE_EVENT_KIND
+        and event.source_asset_id == raw_understanding_map.source_asset_id
+    )
 
 
 def build_live_language_spine_for_source(
@@ -284,18 +325,35 @@ def build_live_language_spine_for_source(
         )
 
     words = adapt_words_to_language_words(source_asset_id, raw_understanding_map.word_timings)
-    # No real audio-silence-interval/restart-marker evidence is threaded
-    # into this seam -- segment_language_phrases's OWN documented fail-
-    # open contract (D-166) applies: timing + punctuation only. Recorded
-    # honestly via missing_evidence below, never silently upgraded.
-    phrases = segment_language_phrases(words)
+    # D-236 (docs/CUTSELL_DECISIONS.md D-235Z/D-236): the real, already-
+    # computed per-source audio-silence-interval evidence
+    # (RawUnderstandingMap.audio_events, D-155, itself sourced from
+    # audio_silence.py's own real ffmpeg silencedetect pass, merged in
+    # flow_b.py -- never recomputed here) is now threaded into phrase
+    # segmentation, closing D-235Z's own confirmed missing-evidence
+    # finding. No restart-marker evidence exists ANYWHERE upstream in
+    # this codebase in a source-wide, pre-computed, timestamp form
+    # (D-236's own audit of clean_cut.py/post_selection_internal_
+    # retake_trim.py/internal_repeat_trim.py found only per-clip lexical
+    # or ad hoc local-variable restart heuristics, never a reusable
+    # per-source marker-time list) -- reported honestly below via
+    # RESTART_MARKER_EVIDENCE_NOT_AVAILABLE rather than invented, per
+    # this task's own "do NOT invent a new detector" instruction.
+    # segment_language_phrases's OWN documented fail-open contract
+    # (D-166) still applies whenever no real interval is available for a
+    # source (empty/no-audio/failed ffmpeg pass): timing + punctuation
+    # only, byte-identical to pre-D-236 behavior in that case.
+    audio_silence_intervals = _audio_silence_intervals_from_raw_understanding_map(raw_understanding_map)
+    phrases = segment_language_phrases(words, audio_silence_intervals=audio_silence_intervals)
     utterances = segment_language_utterances(phrases)
     attempts = build_language_attempts(utterances)
     proposition_candidates = build_proposition_candidates(attempts)
     attempts_by_id = {a.attempt_id: a for a in attempts}
     relation_evidence = build_relation_evidence(proposition_candidates, attempts_by_id)
 
-    missing_evidence: list[str] = ["AUDIO_SILENCE_EVIDENCE_NOT_SUPPLIED"]
+    missing_evidence: list[str] = ["RESTART_MARKER_EVIDENCE_NOT_AVAILABLE"]
+    if not audio_silence_intervals:
+        missing_evidence.append("AUDIO_SILENCE_EVIDENCE_NOT_SUPPLIED")
     if not attempts:
         capability_status = CAPABILITY_NOT_EVALUABLE
         missing_evidence.append("NO_LANGUAGE_ATTEMPT_CONSTRUCTED")
@@ -319,6 +377,7 @@ def build_live_language_spine_for_source(
         missing_evidence=tuple(missing_evidence),
         conflicts=conflicts,
         provenance=("CANONICAL_LANGUAGE_SPINE",),
+        audio_silence_interval_count=len(audio_silence_intervals),
     )
 
 
@@ -421,6 +480,11 @@ def fuse_relation_evidence(
 # compact summary in this codebase). No transcript dump.
 # ---------------------------------------------------------------------------
 def live_language_spine_diagnostics(evidence: LiveLanguageSpineEvidence) -> dict:
+    # D-236: compact, counts-only boundary-kind tally over the already-
+    # built phrases -- no transcript, no re-segmentation, pure re-
+    # projection of what segment_language_phrases already decided.
+    pause_boundary_count = sum(1 for p in evidence.phrases if p.boundary_kind == BOUNDARY_PAUSE)
+    restart_boundary_count = sum(1 for p in evidence.phrases if p.boundary_kind == BOUNDARY_RESTART_BOUNDARY)
     return {
         "source_asset_id": evidence.source_asset_id,
         "capability_status": evidence.capability_status,
@@ -433,6 +497,21 @@ def live_language_spine_diagnostics(evidence: LiveLanguageSpineEvidence) -> dict
         "proposition_candidate_count": len(evidence.proposition_candidates),
         "relation_evidence_count": len(evidence.relation_evidence),
         "provenance": list(evidence.provenance),
+        # D-236 additions -- see docs/CUTSELL_DECISIONS.md D-236.
+        "language_spine_audio_silence_evidence_status": (
+            "SUPPLIED" if "AUDIO_SILENCE_EVIDENCE_NOT_SUPPLIED" not in evidence.missing_evidence
+            else "NOT_SUPPLIED"
+        ),
+        "audio_silence_interval_count": evidence.audio_silence_interval_count,
+        "restart_marker_evidence_status": (
+            "NOT_AVAILABLE" if "RESTART_MARKER_EVIDENCE_NOT_AVAILABLE" in evidence.missing_evidence
+            else "AVAILABLE"
+        ),
+        "phrase_count": len(evidence.phrases),
+        "utterance_count": len(evidence.utterances),
+        "attempt_count": len(evidence.attempts),
+        "pause_boundary_count": pause_boundary_count,
+        "restart_boundary_count": restart_boundary_count,
     }
 
 
@@ -459,4 +538,6 @@ def live_language_spine_run_summary(evidences: Iterable[LiveLanguageSpineEvidenc
         "proposition_candidate_count": sum(len(e.proposition_candidates) for e in evidences),
         "relation_evidence_count": sum(len(e.relation_evidence) for e in evidences),
         "language_conflict_count": sum(len(e.conflicts) for e in evidences),
+        # D-236 addition -- see docs/CUTSELL_DECISIONS.md D-236.
+        "audio_silence_interval_count": sum(e.audio_silence_interval_count for e in evidences),
     }

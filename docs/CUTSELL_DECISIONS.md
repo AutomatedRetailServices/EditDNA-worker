@@ -56711,3 +56711,159 @@ Docs-only decision entry.
 
 Then STOP. Do not implement the fix. Do not launch RAW. Wait for Product
 Owner coordination.
+
+## D-236 — LIVE AUDIO-SILENCE EVIDENCE -> LANGUAGE SPINE WIRING (offline only, POST D-235Z)
+
+**Scope:** implement ONLY D-235Z's own confirmed missing-evidence seam.
+No RAW, no Modal, no RunPod, no provider. No new silence detector, no
+new threshold, no Language-Spine redesign, no Freeze/materiality/
+repair/P1/P2/BestTake/Family/Ordering/Boundary/Pacing/Audio-Join change.
+
+**Source of truth (existing, reused verbatim, never recomputed):**
+`RawUnderstandingMap.audio_events` (D-155's own field) is ALREADY, at
+construction time (`raw_understanding_map.build_raw_understanding_map`),
+filtered to `kind == "audio_silence_interval"` `TemporalEvent` rows,
+themselves sourced from `audio_silence.py`'s real ffmpeg `silencedetect`
+pass (`audio_silence_events`), merged onto the whole-video context once
+per source in `flow_b.py`'s own `merge_audio_silence_into_context` call.
+Since `build_live_language_spine_for_source` already receives this exact
+`RawUnderstandingMap` as its own `raw_understanding_map` parameter, the
+smallest possible fix required ZERO new parameters on the `pipeline.py`
+call site -- the evidence was already flowing to the right object, just
+never read out of it.
+
+**Restart-marker audit (D-236 Part B):** no reusable, source-wide,
+pre-computed restart-marker TIMESTAMP evidence exists anywhere upstream.
+`clean_cut.py`'s `_SHORT_RESTART_MARKERS` is a per-clip LEXICAL phrase
+list ("again"/"otra vez"); `post_selection_internal_retake_trim.py`/
+`internal_repeat_trim.py`'s `restart_time` is an ad hoc LOCAL variable
+computed per-candidate at trim time, never stored as a reusable per-
+source evidence object. Per this task's own explicit instruction, no new
+detector was built -- reported honestly as `RESTART_MARKER_EVIDENCE_
+NOT_AVAILABLE` in `LiveLanguageSpineEvidence.missing_evidence`, and
+`segment_language_phrases` is called with `restart_marker_times`
+defaulted to `()` (unchanged, fail-open, per D-166's own existing
+contract).
+
+**Implementation (`cutsell_worker/language_spine_live_integration.py`
+only, additive):**
+- New `_audio_silence_intervals_from_raw_understanding_map()`: extracts
+  `(start, end)` tuples from `raw_understanding_map.audio_events`,
+  defensively re-filtered by `kind == AUDIO_SILENCE_EVENT_KIND` (imported
+  from `.audio_silence`, never redefined) AND by the map's own
+  `source_asset_id` (belt-and-braces multi-source isolation, proven by a
+  dedicated poisoned-event test). Returns `()` (fail-open, byte-identical
+  to pre-D-236) when the map is absent or carries no such evidence --
+  never raises, never calls ffmpeg/ASR/any provider.
+- `build_live_language_spine_for_source` now calls
+  `segment_language_phrases(words, audio_silence_intervals=...)` with
+  this real evidence, closing D-235Z's own confirmed gap. No other line
+  of `segment_language_phrases`/`segment_language_utterances`/
+  `build_language_attempts`/`build_proposition_candidates` changed --
+  Language Spine identity semantics are byte-identical to pre-D-236 for
+  any source with no real audio-silence evidence (the common case for
+  every existing test fixture and every fixture this task's own suite
+  runs without `audio_events`).
+- `missing_evidence` is now conditional and honest: `AUDIO_SILENCE_
+  EVIDENCE_NOT_SUPPLIED` only appears when no real interval was actually
+  available for the source (was previously unconditional, i.e.
+  structurally always present regardless of whether evidence existed --
+  this was itself part of D-235Z's own root-cause finding);
+  `RESTART_MARKER_EVIDENCE_NOT_AVAILABLE` is now always present (D-236
+  Part B's own honest, unconditional disclosure).
+- `LiveLanguageSpineEvidence` gained one additive, DEFAULTED field
+  (`audio_silence_interval_count: int = 0`) so every pre-existing direct
+  construction site (this module's own two return branches, plus four
+  pre-existing test files that construct this dataclass directly) stays
+  valid unmodified.
+- `live_language_spine_diagnostics()`/`live_language_spine_run_summary()`
+  extended (additive keys only) with the required compact fields:
+  `language_spine_audio_silence_evidence_status`, `audio_silence_
+  interval_count`, `restart_marker_evidence_status`, `phrase_count`,
+  `utterance_count`, `attempt_count`, `pause_boundary_count`,
+  `restart_boundary_count` -- no transcript dump, counts/statuses only.
+
+**D-235Z collapse shape, before/after (generic fixture, no real
+transcript, no target count asserted):** a 12-chunk synthetic fixture
+shaped exactly like the real sibling's own structural conditions
+(sub-strong, WEAK-only phrase-boundary timing gaps, no terminal
+punctuation, no audio-silence evidence) reproduces the SAME collapse
+(12 phrases -> 1 utterance -> 1 attempt -> 1 proposition) BEFORE this
+fix, and yields more than one utterance/attempt/proposition once real
+silence intervals are supplied over several of the fixture's own
+inter-chunk gaps AFTER this fix -- proving the fix addresses the
+structural mechanism D-235Z identified, not a real-transcript-specific
+coincidence. A Video00-style healthy control (punctuation alone already
+creates multi-utterance segmentation) is proven NOT regressed, merged,
+or made non-deterministic by additionally supplying non-conflicting real
+silence evidence.
+
+**D-235X exact-identity compatibility (unmodified, proven compatible,
+not touched):** once real silence-confirmed attempt splits exist, a
+clip-sized reconstructed attempt can reach `EXACT_SAME_MEMBERSHIP`
+against its own real, now-smaller `LanguageAttempt` (previously
+impossible against the one whole-source attempt, which could only ever
+yield the non-authoritative `EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED`
+containment relationship D-235Z root-caused); a reconstructed attempt
+spanning two real, now-distinct `LanguageAttempt`s correctly reaches
+`ONE_RECONSTRUCTED_TO_MULTIPLE_LANGUAGE_ATTEMPTS_EXACT_PARTITION`.
+`shared_attempt_word_identity.py` itself has ZERO diff -- its own exact-
+match-first precedence over containment/partial-overlap is unchanged;
+this task only proves the UPSTREAM data it consumes is no longer
+structurally foreclosed from reaching an authoritative shape.
+
+**Multilingual safety:** Spanish, English, and Spanglish fixtures all
+produce real silence-confirmed attempt splits identically -- no
+language-specific branch anywhere in the new code (matches D-199's own
+existing bilingual-safety posture, unchanged).
+
+**Tests:** new `tests/test_cutsell_d236_live_audio_silence_language_
+spine_wiring.py` (41 tests: consumption/isolation/boundary-creation/
+coexistence/timing-fidelity x10, determinism x4, D-235Z before/after/
+control/no-target-count x4, D-235X exact-identity compatibility x4,
+bilingual safety x3, explicit no-new-detector/threshold/ASR-rerun/
+ffmpeg-rerun/provider/RAW proofs x6 (via import-line-only checks, per
+the same D-235P "no live module imports this gate" precedent -- a bare
+whole-source substring check would false-positive on this module's own
+pre-existing docstring prose, which legitimately discusses these
+concepts by name without violating them), explicit no-P1/P2/BestTake/
+Family/Ordering/Boundary/Freeze/materiality/repair/Pacing/Audio-Join-
+mutation proofs x5, diagnostics-surface x3, backward-compatibility x2).
+All pass. `python3 -m compileall cutsell_worker tests` -- clean. Full
+Language Spine + D-235-family regression suites (D-166/D-168/D-169/D-199/
+D-235P/D-235X) -- 294 passed. Full P1/P2/Ordering/Pacing/Audio-Join/
+D-235-series regression sweep (D-195 through D-234) -- 1702 passed.
+CleanCutBench -- 55/55. Full suite (`pytest tests/ --ignore=tests/
+test_semantic_stitch.py`): **6387 passed**, the SAME 5 pre-existing
+unrelated failures this session has consistently tracked
+(`test_video00_modal_hybrid_semantic_parity.py` x4, `test_hybrid_story_
+guard_incomplete_retry.py` x1). Zero new genuine failures.
+
+**Verdict: A -- LIVE AUDIO-SILENCE -> LANGUAGE SPINE WIRING OFFLINE
+PROVEN, READY FOR ONE REAL-MEDIA REQUALIFICATION.**
+
+**Canonical status:** `LIVE_AUDIO_SILENCE_LANGUAGE_SPINE_WIRING_OFFLINE_
+PROVEN`.
+
+**Exact next gate:** D-237 -- ONE REAL-MEDIA LANGUAGE-SPINE/FREEZE
+REQUALIFICATION. Exactly ONE RAW maximum, same sibling
+(`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`),
+lost-atom authority flag ON, P1 diagnostics ON, Live Language Spine
+diagnostics ON, P2/Ordering/Pacing/Audio-Join diagnostics ON. **Not
+launched automatically** -- this task's own directive requires Product
+Owner coordination first, regardless of this verdict.
+
+**Engine patch required after this?** No -- the wiring is complete and
+offline-proven; D-237 would only REQUALIFY it against real media.
+**Paid compute required?** No, not by this task. **RAW required?** Yes,
+for D-237 specifically (not this task).
+
+**Confirmation:** OFFLINE ONLY. One production file changed
+(`cutsell_worker/language_spine_live_integration.py`, additive-only, 87
+insertions / 6 deletions -- no existing line's BEHAVIOR changed except
+the two intentional, disclosed `missing_evidence` semantics described
+above). Zero RAW, zero Modal, zero RunPod, zero provider calls made. No
+Freeze/materiality/repair/P1/P2 authority/BestTake/Family/Ordering/
+Boundary/Pacing/Audio-Join logic changed.
+
+Then STOP. Do NOT launch D-237. Wait for Product Owner coordination.
