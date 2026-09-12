@@ -62724,3 +62724,86 @@ Do NOT launch D-241. Wait for Product Owner coordination.
 Then STOP.
 
 DO NOT IMPLEMENT. DO NOT LAUNCH RAW.
+
+## D-242 — BOUNDARY EDGE PROVENANCE COMPLETENESS, OFFLINE IMPLEMENTATION ONLY, POST D-241 (Verdict A: BOUNDARY EDGE PROVENANCE COMPLETENESS OFFLINE PROVEN — READY FOR ONE REAL-MEDIA PACING/HANDLE/AUDIO-JOIN QUALIFICATION, next gate D-243, NOT launched)
+
+**Branch/new HEAD:** `feature/runpod-pod-on-demand`, HEAD `f2a135cd53a0c6ab2c2d1d8fa4accc6847ee1218` (expected `1722fd9` — D-241's own commit — confirmed as exact match to actual HEAD before this gate's own commit). Clean tree confirmed before and after.
+
+**Files changed:** `cutsell_worker/boundary_engine_pass.py`, `cutsell_worker/post_selection_edge_only_boundary.py`, `cutsell_worker/pacing_v2_source_audio_handle.py`, `tests/test_cutsell_d097_c_boundary_engine_pass.py` (updated), `tests/test_cutsell_post_selection_edge_only_boundary.py` (updated), `tests/test_cutsell_d242_boundary_edge_provenance_completeness.py` (new, 32 tests), plus this decision entry.
+
+**Boundary audit owner (unchanged from D-241):** `apply_post_freeze_boundary_pass` remains the ONE post-Freeze Boundary pass, sequence unchanged (`trim_locked_selection_edges` → `split_selected_interior_performance_gaps` → `tighten_selected_audio_edges` → `tighten_selected_visual_edges`).
+
+**PRE edge row behavior:** both `tighten_selected_audio_edges` (field `entry_edge_status`) and `trim_locked_selection_edges` (field `leading_edge_status`) now emit a row for every selected clip, always, carrying one of `TRIM_APPLIED` / `EVALUATED_NO_TRIM` / `NO_ELIGIBLE_EVIDENCE` / `NO_SOURCE_ROOM_DETERMINABLE` / `BLOCKED_BY_SAFETY` plus a `*_reason` string.
+
+**POST edge row behavior:** symmetric, `exit_edge_status`/`trailing_edge_status`.
+
+**TRIM_APPLIED status:** an edge's own candidate action survived the per-clip minimum-remaining-duration floor and was applied — timing changes exactly as before D-242 (bit-for-bit, proven by `test_13_boundary_decisions_unchanged_when_trim_applies`).
+
+**EVALUATED_NO_TRIM status:** the edge was evaluated (a silence/word-slack window existed and was inspected) but produced no material, safe, or in-range trim — includes the "nearby evidence found but not corroborated enough" and "slack outside the eligible geometric range" sub-cases (`trim_locked_selection_edges` now distinguishes these via `_edge_evidence`'s new `nearby_seen` return value).
+
+**NO_ELIGIBLE_EVIDENCE status:** the source has recorded events, but none fall near this specific edge.
+
+**NO_SOURCE_ROOM_DETERMINABLE status:** either no events were ever recorded for this clip's source at all, or (edge-only boundary path only) the clip has no word alignment whatsoever — genuinely unknown, never guessed.
+
+**BLOCKED_BY_SAFETY status:** a real, evidence-confirmed candidate trim existed for this edge, but the module's own existing per-clip minimum-remaining-duration floor (`AUDIO_EDGE_MINIMUM_REMAINING_SEC = 0.35s` audio-edge; `0.25s` edge-only) rejected the whole set and the trim was reverted.
+
+**Row-per-edge completeness:** proven for 1-clip and 5-clip fixtures (`test_09_row_emitted_for_every_selected_clip`); no duplicates (`test_10_no_duplicate_rows`).
+
+**Original/result timing preserved:** `result_start == original_start` / `result_end == original_end` on every no-trim row; verified directly (`test_11_timing_unchanged_on_no_trim`).
+
+**Membership unchanged:** clip count/order/identity unaffected (`test_12_selected_membership_unchanged`).
+
+**Boundary decisions unchanged:** the one real trim fixture reused from the pre-existing D-097.C suite still produces the identical numeric outcome and reason (`test_13`).
+
+**Handle adapter change:** `pacing_v2_source_audio_handle.py`'s `_widen_bound` now reads the new per-edge status field from whichever row it finds, via `_edge_status_and_reason_from_row` (handles both the `entry_edge_status`/`exit_edge_status` and `leading_edge_status`/`trailing_edge_status` field-name conventions). When no row shows real widening, a priority ladder (`BLOCKED_BY_SAFETY` > `EVALUATED_NO_TRIM` > `NO_ELIGIBLE_EVIDENCE` > `NO_SOURCE_ROOM_DETERMINABLE`) picks the single most informative status across both audit sources and maps it to one of four new provenance/conflict-flag pairs (`PROVENANCE_EVALUATED_NO_SAFE_WIDENING`/`CONFLICT_EVALUATED_NO_SAFE_WIDENING`, `PROVENANCE_NO_ELIGIBLE_EVIDENCE_AT_EDGE`/`CONFLICT_NO_ELIGIBLE_EVIDENCE_AT_EDGE`, `PROVENANCE_SOURCE_ROOM_UNKNOWN`/`CONFLICT_SOURCE_ROOM_UNKNOWN`, `PROVENANCE_BLOCKED_BY_SAFETY_FLOOR`/`CONFLICT_BLOCKED_BY_SAFETY_FLOOR`).
+
+**`NO_BOUNDARY_PROVENANCE_RECORDED` behavior:** now reserved for the true exceptional case (no row at all was supplied for the clip by either audit source, e.g. a caller that never ran `apply_post_freeze_boundary_pass`) — no longer the everyday result on the live post-Freeze path, since both owning functions now emit a row for every clip unconditionally.
+
+**D-239V-shape replay** (2 selected clips, 1 transition, no previous audit row for either clip's edges — reconstructed from D-239V's own reported real-media shape): with `diagnostics={}` (no `whole_video_context` at all) and both clips' words essentially flush with their clip boundaries (zero leading/trailing slack), `tighten_selected_audio_edges` now reports `NO_SOURCE_ROOM_DETERMINABLE` on both edges of both clips (no event feed exists to consult at all), while `trim_locked_selection_edges` reports `EVALUATED_NO_TRIM` on both edges of both clips (the word-slack geometry itself proves there is no material room to evaluate, independent of any event feed). The handle adapter's priority ladder picks the more informative `EVALUATED_NO_TRIM` reading (`post_selection_edge_only_boundary` outranks the generic "no source room" reading here) and every one of the 4 handles (2 clips × PRE/POST) resolves to:
+`handle_status=UNAVAILABLE`, `provenance=('BOUNDARY_EVALUATED_NO_SAFE_WIDENING', 'boundary_reason:leading_slack_outside_eligible_range'|'boundary_reason:trailing_slack_outside_eligible_range')`, `conflict_flags=('boundary_evaluated_no_safe_widening',)`. **No handle window was invented** — every handle remains exactly as unavailable as it was under D-241's own reading, only the reported REASON changed from the generic `NO_BOUNDARY_PROVENANCE_RECORDED` to the specific, code-provable `BOUNDARY_EVALUATED_NO_SAFE_WIDENING`.
+
+**PRE handle result / POST handle result** (D-239V-shape replay): both directions on both clips resolve identically as above — `UNAVAILABLE`, never `SAFE_NON_SPEECH`, confirming symmetry and fail-closed behavior are preserved exactly.
+
+**J-cut impact / L-cut impact:** unchanged from D-241 — combined-availability credit from these handles is still `0.0` (`_eligible_handle_duration` only credits `HANDLE_STATUS_SAFE_NON_SPEECH`), so J/L candidate windows are exactly as constrained as before; only the diagnostic REASON for that constraint is now specific rather than generic.
+
+**Audio Join impact:** `pacing_v2_audio_join_treatment_live_diagnostics.py` reuses the identical `build_source_audio_handles` foundation; `candidate_duration_sec` is still structurally `0.0`/`None` whenever both handles are unavailable, proven directly against the new, more specific statuses (`test_26`). No Audio Join policy, threshold, or treatment decision changed.
+
+**No new threshold:** `AUDIO_EDGE_PAD_SEC=0.10`, `AUDIO_EDGE_MINIMUM_TRIM_SEC=0.20`, `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC=0.08`, `AUDIO_EDGE_MINIMUM_REMAINING_SEC=0.35` all unchanged (asserted directly, `test_20`); `trim_locked_selection_edges`'s own `0.30`/`0.12`/`3.0`/`0.25` defaults are likewise untouched.
+
+**No heuristic:** the five-value `EDGE_STATUS_*` vocabulary is closed and asserted closed (`test_21`); every classification branch reuses evidence the two functions already compute internally — no new detector, no new numeric literal.
+
+**No provider:** no network/provider-call token (`requests.`, `boto3`, `openai`, `google.generativeai`, `modal.`, `runpod`) appears in any of the three modified files (`test_22`, direct source scan).
+
+**No RAW:** zero paid compute dispatched this gate.
+
+**Freeze unchanged:** `freeze_selection_contract`/`enforce_selection_contract`'s semantic token-stream hash round-trips cleanly through the now-always-emitting post-Freeze pass (`test_24`) — the new rows are diagnostics-only, never touching `draft.selected`'s token content.
+
+**Pacing policy unchanged:** `dialogue_pacing_transition.py`, `pacing_v2_timing_policy.py`, and D-142's own live transition mode are untouched files; D-224's handle-aware diagnostics remain diagnostic-only (never written back to `draft.selected`/`RenderSegment`).
+
+**Audio Join policy unchanged:** `pacing_v2_audio_join_treatment_decision.py`/`_timing_plan.py` untouched; the D-230→D-231→D-232→D-233 chain is unmodified — only its already-existing `SourceAudioHandle` input now carries a more precise `UNAVAILABLE` reason.
+
+**Tests:** 32 new (`test_cutsell_d242_boundary_edge_provenance_completeness.py`), covering all 5 statuses on both authorities, row-per-edge completeness, no-duplicate rows, timing/membership/Boundary-decision invariance, handle-adapter mapping for all 4 new provenance values (parametrized, fail-closed proven for each), PRE/POST symmetry, multi-clip determinism, source isolation, threshold/heuristic/provider-absence proofs, Freeze-contract round-trip, Audio Join zero-fabrication, and the D-239V-shape replay itself. 2 pre-existing tests updated (`test_cutsell_d097_c_boundary_engine_pass.py::test_edge_tightening_ignores_interior_and_immaterial_silences`, `test_cutsell_post_selection_edge_only_boundary.py::test_single_body_motion_does_not_trim`) — both previously asserted `audit == ()` for a no-trim outcome, which is now, by this gate's own explicit design, no longer true; both updated to assert the correct new row content instead of the old absence.
+
+**Boundary regressions:** `test_cutsell_d097_c_boundary_engine_pass.py`, `test_cutsell_d177_boundary_partial_edge_trim.py`, `test_cutsell_d212_boundary_synthetic_target_shape.py`, `test_cutsell_post_selection_edge_only_boundary.py` — all green (post the 2 intentional updates above).
+
+**Pacing regressions:** `test_cutsell_d142_dialogue_pacing_transition_phase1.py`, `test_cutsell_d223_pacing_v2_source_audio_handle_foundation.py`, `test_cutsell_d224_pacing_v2_source_audio_handle_live_evidence_integration.py`, `test_cutsell_d230_pacing_v2_acoustic_edge_evidence.py` — all green, no changes needed (their own fixtures never asserted the now-changed no-row shape).
+
+**Audio Join regressions:** `test_cutsell_d231_pacing_v2_audio_join_understanding.py`, `test_cutsell_d232_pacing_v2_audio_join_treatment_decision.py`, `test_cutsell_d233_pacing_v2_audio_join_treatment_renderer_timing.py` — all green.
+
+**CleanCutBench:** 55/55 in both `CUTSELL_CLEAN_CUT_CORE_V1=1` and `=0` modes (unaffected — this gate never touches Selection/Clustering/BestTake).
+
+**Full suite:** 6813 passed after this gate's own commit (`compileall` clean; `tests/test_semantic_stitch.py` excluded — a pre-existing, unrelated module-level `TypeError` at import time, confirmed present on HEAD before D-242 via `git stash`). 5 failures remain, all confirmed pre-existing and unrelated to this gate's own files (verified against the identical failure signature already visible in this session's own tooling output before D-242 began): `test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_retry_is_covered_when_prior_delivery_preserves_numbers_and_negation` and 4 in `test_video00_modal_hybrid_semantic_parity.py` (a Modal-workflow env-overlay jq-filter issue, wholly unrelated to Boundary/Pacing/Audio-Join). **No new genuine failures.** Three git-diff-based "boundary unchanged" guard tests (`test_cutsell_d171_language_spine_consumer_migration.py::test_25_boundary_unchanged`, `test_cutsell_d172_watch_listen_besttake_v2_evidence.py::test_31_boundary_unchanged`, `test_cutsell_d174_watch_listen_besttake_guard_authority.py::test_37_38_39_boundary_pacing_render_zero_diff`) transiently failed while this gate's own commit was still uncommitted (they assert `git diff HEAD` is empty for `boundary_engine_pass.py`) and pass cleanly once committed — not a regression, an artifact of the qualification run catching mid-edit working-tree state.
+
+**Verdict: A — BOUNDARY EDGE PROVENANCE COMPLETENESS OFFLINE PROVEN — READY FOR ONE REAL-MEDIA PACING/HANDLE/AUDIO-JOIN QUALIFICATION.**
+
+**Canonical status:** `D242_BOUNDARY_EDGE_PROVENANCE_COMPLETENESS_OFFLINE_PROVEN_VERDICT_A_READY_FOR_D243_NOT_LAUNCHED`.
+
+**Exact next gate:** D-243 — ONE REAL-MEDIA PACING V2 / HANDLE-AWARE / AUDIO-JOIN QUALIFICATION, using `PRIMARY_PACING_RAW` (D-240's own selection: `Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`). **Not launched by this gate.**
+
+**RAW required next?** Yes, exactly one, for D-243 (not launched here). **Paid compute required next?** Yes, the same one Modal RAW, when D-243 is authorized.
+
+**Confirmation:** offline implementation only. No RAW dispatched, no Modal, no RunPod, no provider call. No Boundary/Pacing/Audio-Join/Freeze/threshold/heuristic policy change — only additive, always-emitted diagnostic rows and their precise consumption by the handle adapter. No handle window invented; every previously-`UNAVAILABLE` handle in every fixture and in the D-239V-shape replay remains `UNAVAILABLE`. `docs/CUTSELL_DECISIONS.md` plus the three code files and three test files listed above are the only files changed. No prior decision entry rewritten or deleted.
+
+Then STOP.
+
+DO NOT LAUNCH RAW. Wait for Product Owner coordination.
