@@ -59188,3 +59188,182 @@ Language-Spine change; no P1/P2 change; no Pacing/Audio-Join change; no
 RAW, Modal, or RunPod dispatch of any kind in this gate.
 
 Then STOP. Do NOT launch RAW.
+
+## D-239G — FINAL REAL-MEDIA LOST-ATOM OWNERSHIP/MATERIALITY/FREEZE TRACE, POST D-239F (Verdict F: OBSERVABILITY/RETRIEVAL FAILURE — mechanism proven to execute and upload successfully; target diagnostic content unretrievable from this sandbox — FIFTH consecutive gate with this exact structural finding)
+
+**Trigger:** D-239F built and offline-proved (Verdict A) a dedicated,
+behavior-neutral diagnostics artifact
+(`lost-atom-ownership-materiality-diagnostics.json`) that pure-projects
+D-238's ownership result, D-235Q's materiality result, D-235R's freeze-
+authority result, and D-235S/D-235T's repair-suppression result for
+each lost atom — with an explicit "DO NOT RECOMPUTE POLICY" constraint
+and a workflow extraction step that performs one pure provenance-id
+join. D-239G's sole purpose was to dispatch exactly ONE authorized
+Modal RAW on the same real sibling
+(`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`)
+and read that artifact to determine, end to end, whether ownership →
+materiality → freeze authority → repair suppression actually clears the
+historical lost atom (`clip_1d9d2cebaf8ed3004836`, blocker text "too
+many people ready set these are the") on real media, and whether Freeze
+and the Pacing/Audio-Join seam are reached.
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `8750529`,
+clean tree — confirmed exactly as expected before dispatch.
+
+**RAW dispatched:** `cutsell-video00-modal-raw.yml`, Modal backend, run
+id `34683585097` (run_number 107, job id `103526523725`), on head
+`8750529a5f8068a6db2de3c4d8ca1190fae0dc41`. Inputs set exactly per the
+directive's own workflow input names: `source_key` (the exact sibling
+key, no substitution), `lost_atom_materiality_freeze_authority_enabled=1`,
+`editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`,
+`whole_video_editorial_reasoning_diagnostics_enabled=1`,
+`ordering_diagnostics_enabled=1`, `pacing_v2_diagnostics_enabled=1`,
+`audio_join_treatment_diagnostics_enabled=1`. No new authority flag
+introduced; no threshold changed. **Exactly one dispatch — no second
+RAW at any point in this gate.**
+
+**Execution result:** the job completed (`conclusion: failure` at the
+job level, driven entirely by pre-classified Video00-specific oracle
+checks and the pre-existing Pacing-V2 gap — see below), but every step
+germane to this gate's own purpose **succeeded**:
+- **S3 preflight** (step 8): PASSED.
+- **Paid Modal benchmark** (step 13, the one authorized L4 run):
+  SUCCESS.
+- **D-235G/D-235J/D-237I/D-239F sibling-safe extraction steps**
+  (steps 21–24, including the NEW D-239F step this gate exists to
+  exercise): all SUCCESS.
+- **Video00 quality ladder** (step 28): SUCCESS.
+- **Watch+Listen / BestTake / P1 / P2 / Ordering compact-diagnostics
+  summaries** (steps 29–46, one skip at step 37 — an existing,
+  unrelated gate): all SUCCESS.
+- **Validator-reports artifact upload** (step 50): SUCCESS — GitHub's
+  own upload-artifact action reported "Artifact ID is 10295011328...
+  Final size is 34415 bytes", confirming
+  `lost-atom-ownership-materiality-diagnostics.json` (alongside
+  `selection-freeze-diagnostics.json`, `lost-semantic-atom-
+  diagnostics.json`, `exact-identity-observability.json`) was
+  successfully written and included in the upload's own `path:` list.
+- **Modal teardown confirmation** (step 51): SUCCESS — "No persistent
+  Pod/endpoint was created (unlike RunPod) — Modal's own scale-to-zero
+  ...".
+- **Human-review MP4**: produced (`cutsell-video00-modal-human-review`
+  artifact, 68,749,841 bytes), available for Product Owner Watch+Listen.
+
+The only step-level failures were, exactly as pre-classified by this
+gate's own directive:
+- **Steps 25–27** (`Verify frozen Selection lock`, `Verify Video00
+  architecture`, `Verify Human Gold regression QA`): FAILED —
+  **VIDEO00_SPECIFIC_ORACLE_NOISE**, expected on a sibling RAW (these
+  checks assert canonical-Video00-only invariants — a frozen Selection
+  manifest and Human Gold regression baseline that do not apply to this
+  sibling source) and excluded from this gate's verdict per the
+  directive's own instruction.
+- **Steps 47–49** (Pacing V2 / J-L timing / Handle-Aware real-media
+  diagnostics): FAILED — the same **pre-existing, separately-tracked
+  Pacing-V2 gap** this session has repeatedly observed on prior sibling
+  RAWs (D-239 itself hit the structurally identical steps 46–48 under
+  the pre-D-239F step numbering), out of this gate's scope.
+
+**Retrieval attempted, both channels confirmed structurally blocked —
+FIFTH consecutive gate with this exact finding:**
+1. **Validator-reports artifact ZIP download** — `download_workflow_run_
+   artifact` returned a valid signed URL on
+   `productionresultssa1.blob.core.windows.net`; a direct fetch through
+   this sandbox's own egress proxy failed with `CONNECT tunnel failed,
+   response 403` / `connect_rejected (organization policy)`, confirmed
+   again via the proxy's own `/__agentproxy/status` endpoint (`kind:
+   connect_rejected`, `detail: gateway answered 403 to CONNECT (policy
+   denial)`, `host: productionresultssa1.blob.core.windows.net:443`).
+2. **Raw workflow-run logs ZIP download** — `get_workflow_run_logs_url`
+   returned a valid signed URL on
+   `results-receiver.actions.githubusercontent.com`; a direct fetch
+   through the same proxy failed identically: `CONNECT tunnel failed,
+   response 403` / `connect_rejected (organization policy)` against
+   THIS host too — a newly-confirmed second blocked Azure/GitHub-
+   results host, not merely the Blob Storage backend alone.
+3. **Job-log tail retrieval** (`get_job_logs`, `return_content=true`) —
+   attempted at `tail_lines=3000` (268,940 chars returned) and
+   `tail_lines=100000` (418,543 chars returned, effectively the same
+   retrievable window regardless of the requested tail size, matching
+   this session's own previously-documented ~418–430KB response
+   ceiling). Both responses covered only from ~08:36:13 onward — the
+   tail end of the "Upload validator reports" step's own environment
+   echo — and never reached back to 08:36:07–08:36:11, the ~4-second
+   window in which steps 19 ("Print full canonical diagnostics", a
+   whole-engine JSON dump) through 24 (the new D-239F extraction step)
+   actually ran and printed their content. Confirmed by exhaustive
+   string search: zero occurrences of `lost_atom_ownership_materiality_
+   diagnostics`, `EXACT_SINGLETON_OWNERSHIP`, `clip_1d9d2cebaf8ed3004836`,
+   `freeze_blocked`, `lost_atom_repair_suppression_diagnostics`, or
+   `D-239F` anywhere in either retrieved log window.
+
+This is now the **FIFTH** consecutive real-media requalification gate
+(D-237H, D-237J, D-237M, D-239, D-239G) hitting this exact structural
+sandbox-egress limitation — and the first to also confirm a SECOND
+blocked host (`results-receiver.actions.githubusercontent.com`,
+distinct from the previously-documented
+`productionresultssa15`/`productionresultssa1.blob.core.windows.net`),
+ruling out "one misconfigured Blob Storage host" as the root cause: this
+sandbox's organization egress policy blocks GitHub Actions' artifact/log
+delivery infrastructure broadly, not a single endpoint. The underlying
+mechanism (S3 preflight, paid Modal benchmark, all four sibling-safe
+extraction steps including the new D-239F one, validator-reports upload,
+Modal teardown) is proven to execute correctly end to end on this exact
+authorized code and real media — this is an observability/retrieval
+failure specific to THIS session's own execution environment, never an
+engine, ownership, materiality, Freeze, or repair defect.
+
+**`REAL_SINGLETON_CONTAINMENT_OWNERSHIP_PROVEN` / `TARGET_LOST_ATOM_
+BLOCKER_CLEARED`:** **UNDETERMINED** — no field of the target atom's
+actual ownership/D-235Q/D-235R/D-235S/D-235T/Freeze result could be read
+from data this sandbox can retrieve this gate. Per this gate's own
+directive: "Do NOT declare success merely because..." — no partial
+verdict is asserted from unretrieved data.
+
+**Global identity firewall:** structurally unaffected regardless of
+this gate's own retrieval outcome — no code in this task (a RAW
+dispatch plus this docs-only entry) touched
+`AUTHORITATIVE_RELATIONSHIP_STATUSES`, `shared_attempt_word_identity.py`,
+or any ownership/materiality/Freeze/repair policy; D-239F's own
+zero-diff proofs (committed prior to this gate) remain the standing
+evidence.
+
+**Verdict: F — OBSERVABILITY / EXECUTION-RETRIEVAL FAILURE** (not an
+engine or code regression: every step this gate's own purpose depends
+on — S3 preflight, paid Modal run, all four extraction steps, validator
+upload, teardown — succeeded; only the CONTENT of the successfully-
+uploaded artifact could not be read back into this sandbox, via either
+of the two independent retrieval channels available to it, plus the
+job-log fallback). Per the directive's own IF-F instruction: **name the
+exact failure only, no second RAW.**
+
+**Canonical status:** `D239G_MECHANISM_PROVEN_TARGET_CONTENT_
+UNRETRIEVABLE_VIA_AVAILABLE_TOOLING_FIFTH_CONSECUTIVE_GATE`.
+
+**Engine patch required after this?** No — nothing in the engine,
+ownership, materiality, Freeze, or repair path is implicated; the
+gap is entirely this sandbox's own egress policy. **Additional RAW
+required?** No further RAW under any circumstance from this gate — a
+repeat run would face the identical retrieval wall (now confirmed
+against two independent GitHub-results hosts). **Paid compute required
+next?** No, not by this task. The only paths that resolve this without
+further paid compute: (a) a human or a differently-provisioned session
+opening the run's own Actions UI directly
+(https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34683585097)
+and downloading the 34,415-byte `cutsell-video00-modal-validator-
+reports` artifact or viewing the full job log there — both trivially
+available outside this sandbox's egress policy; or (b) a Product Owner/
+infrastructure decision to widen this sandbox's egress allowlist to
+cover GitHub Actions' artifact-storage and results-receiver hosts.
+Neither is an engine change.
+
+**Confirmation:** NO second RAW, NO RunPod, NO provider change. NO
+post-result production code, workflow, threshold, or authority change —
+the only change in this gate is this docs-only decision-log entry
+(the one action explicitly permitted post-result). Modal teardown
+independently confirmed successful; the human-review MP4 remains
+available for Product Owner Watch+Listen review pending a successful
+future retrieval of the target diagnostic content.
+
+Then STOP. Do NOT launch RAW.
