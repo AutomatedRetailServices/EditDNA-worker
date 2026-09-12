@@ -61309,3 +61309,223 @@ promotion.
 EXTRACTION_MECHANISM_PROVEN_TARGET_ROW_UNOBSERVED_VERDICT_E`.
 
 Then STOP.
+
+## D-239Q — EXACT P1 TARGET DIAGNOSTIC DISAPPEARANCE FORENSIC, OFFLINE ONLY, POST D-239P (Verdict E: AUTHORITATIVE PASS'S OWN DIAGNOSTICS-CONSTRUCTION CODE NEVER WRITES THE KEY — `exact_p1_target_evidence_by_clip_id` is accepted as a parameter by `_apply_post_authority_validation_only` but never referenced in its body; a D-239O wiring-completeness gap, not a runtime regression, not a THIRD authority actively erasing it)
+
+**Status: CANONICAL**
+
+Branch `feature/runpod-pod-on-demand`, HEAD `d7fc510` verified exact match
+(clean tree) before any inspection. Read `docs/CUTSELL_DECISIONS.md`
+through D-239P and `CLAUDE.md`.
+
+### Corrected D-239P real result (confirmed)
+
+A Product-Owner-recovered copy of `exact-p1-target-evidence.json` from run
+`34700213828` shows `source_status: MISSING`, `reason: exact_p1_target_
+evidence_key_absent` — the D-239O extractor step itself executed
+correctly (it honestly reports what it found); the engine's own
+serialized `diagnostics['final_story_coherence_validation']['exact_p1_
+target_evidence']` key was genuinely absent from `result.json`. This is
+NOT the D-239P retrieval wall — it is a real wiring gap, now isolated.
+
+### Stage-by-stage trace
+
+**Stage 1 — pipeline.py.** `p1_target_lookup_evidence_by_clip_id`
+(exact spelling) is built at `pipeline.py:2782-2794`, inside the SAME
+`if lost_atom_materiality_freeze_authority_enabled():` conditional
+expression that builds the rest of `lost_atom_exact_identity_context`
+(lines 2737-2796). Value shape: `dict[clip_id -> row]`, built by re-
+keying `exact_p1_target_evidence_for(...)["targets"]` by each row's own
+`clip_id` — bounded to exactly `lost_atom_ownership_by_clip_id`'s own
+population. The gate condition is `lost_atom_materiality_freeze_
+authority_enabled()` (the SAME flag D-239P's dispatch set to `"1"`), and
+the ownership map itself additionally requires `live_language_spine_
+diagnostics_enabled()` to be `"1"` (also set). Given D-239P's own
+corrected real facts show a fully-populated ownership/materiality row
+for the target (`EXACT_SINGLETON_OWNERSHIP`, `editorial_requirement_
+granularity=PROPOSITION_ONLY_INSUFFICIENT`, etc.), `lost_atom_ownership_
+by_clip_id` was non-empty and contained the target's own clip_id on this
+run — so `p1_target_lookup_evidence_by_clip_id` was built NON-EMPTY,
+key WRITTEN (never `None`, never omitted at this stage). `lost_atom_
+exact_identity_context` as a whole survives `process_local_sources`'
+return unchanged (it is returned verbatim as `ProcessingResult.lost_
+atom_exact_identity_context` at `pipeline.py:3209`, with no further
+mutation before return).
+
+**Stage 2 — universal_clean_cut.py.** `_lost_atom_exact_identity_
+context = getattr(result, "lost_atom_exact_identity_context", None) or
+{}` at line 184 — the VERY FIRST statement after `result = process_
+local_sources(...)` returns, before any `result = replace(...)`
+reassignment in the function. `_p1_target_lookup_evidence_by_clip_id`
+is extracted at lines 219-221, same pattern, same point in time. The
+SAME extracted map is supplied verbatim to BOTH call sites: the legacy-
+resolving pass (`exact_p1_target_evidence_by_clip_id=_p1_target_lookup_
+evidence_by_clip_id` at line 291) and the authoritative second pass
+(identical line, 628). No discarding, no staleness, no divergence
+between the two call sites' own input. Stage 2 is clean.
+
+**Stage 3 — legacy Story Validation.** `apply_final_story_coherence_
+validation` is called at line 272 WITHOUT a `post_authority_context`
+argument, so it always executes its own full "legacy resolving" body
+(never the `if post_authority_context is not None: return _apply_post_
+authority_validation_only(...)` early dispatch at the top of that
+function — that branch is for a DIFFERENT caller shape this call site
+never uses). Its own diagnostics dict, `final_story_coherence_
+validation.py:1912-1926`, DOES include `"exact_p1_target_evidence":
+_exact_p1_target_evidence_for_lost_atoms(lost_semantic_atoms, exact_p1_
+target_evidence_by_clip_id)` (line 1920) on its one and only normal
+return path. Confirmed correct.
+
+**Stage 4 — authoritative second pass.** `apply_post_authority_story_
+validation` (line 603 call site) has two paths: (a) `context is None or
+integrity_failure is not None` → returns the FAIL-CLOSED, hand-written
+early diagnostics dict (`final_story_coherence_validation.py:2426-2450`)
+— this dict DOES include `"exact_p1_target_evidence": []` (line 2450,
+added alongside the fail-closed shape's existing `"lost_atom_identity_
+observability": []`); (b) otherwise it calls `_apply_post_authority_
+validation_only` (line 2451), whose own returned `diagnostics["final_
+story_coherence_validation"]` dict (`final_story_coherence_validation.py
+:2148-2202`) does **NOT** contain `"exact_p1_target_evidence"` anywhere
+— confirmed by direct grep: the string `"exact_p1_target_evidence"`
+appears in this file at exactly two lines, 1920 (Stage 3's dict) and
+2450 (the fail-closed early-return dict) — **never** inside `_apply_
+post_authority_validation_only`'s own normal-path dict. The function's
+own signature DOES accept `exact_p1_target_evidence_by_clip_id` as a
+parameter (line 2014, added by D-239O) — but a full scan of the
+function's body (lines 1986-2211) shows this parameter referenced
+EXACTLY ONCE: its own declaration. It is never read, never passed to
+`_exact_p1_target_evidence_for_lost_atoms`, never written into the
+dict. **This is the exact disappearing seam.**
+
+**Stage 5 — diagnostics overwrite.** No THIRD authority overwrites the
+key after Stage 4 — there is nothing to overwrite, because Stage 4
+never wrote it in the first place on the live (normal, non-integrity-
+failure) path. `diagnostics["repair_loop"]` (`universal_clean_cut.py:
+379-390` legacy branch, `:713-720` authoritative branch) is written via
+`dict(result.draft.diagnostics or {})` then setting ONLY the
+`"repair_loop"` key — a merge, never a wholesale replace of `"final_
+story_coherence_validation"`. `authoritative_diagnostics` (`universal_
+clean_cut.py:492-505`, the D-050C3 relabeling step) is built BEFORE
+`_apply_post_authority_validation_only` runs (it relabels the FIRST/
+legacy pass's own `final_story_coherence_validation` key to `_legacy_
+evidence`, a snapshot of Stage 3's OWN correct output, still present
+under that renamed key) — the second pass's own `replace(validated,
+diagnostics=diagnostics)` (line 2210-2211) sets `diagnostics = dict(
+draft.diagnostics or {})` (line 2148) first, so it MERGES onto
+`authoritative_diagnostics` rather than discarding it; only the primary
+`"final_story_coherence_validation"` key gets a NEW value from Stage 4's
+own (incomplete) dict. No stray `replace()`/dict-merge anywhere between
+Stage 4 and final serialization touches this specific key again.
+
+**Stage 6 — repair loop.** `run_repair_loop` (`repair_loop.py:149+`)
+starts from `current_draft = draft` (the `authoritative_draft` Stage 4
+returned) and returns a `RepairLoopResult` whose `final_draft` may differ
+only by a bounded story-order repair (D-090 Section 6's own order-
+insensitive-projection invariant) — it never touches `diagnostics["final_
+story_coherence_validation"]` itself; that key's diagnostics content is
+carried through on `authoritative_draft`/`repair_result.final_draft`
+unchanged from whatever Stage 4 produced. Not modified in this forensic.
+
+**Stage 7 — final serialization.** The serialized `artifact/video00-
+modal.json`'s `diagnostics` mapping is the SAME `result.draft.
+diagnostics` dict this whole chain has been mutating in place (merge-
+and-set, never replace-the-whole-dict) since Stage 2 — the authoritative-
+mode branch (`resolver_mode == RESOLVER_MODE_AUTHORITATIVE`) is what
+executes on every real RAW dispatch, because the workflow's own "Build
+masked Modal env-secret file" step unconditionally overlays
+`CUTSELL_UNIFIED_REALIZATION_RESOLVER:"AUTHORITATIVE"` on every run
+(`.github/workflows/cutsell-video00-modal-raw.yml`, the `jq -c ... +
+{... CUTSELL_UNIFIED_REALIZATION_RESOLVER:"AUTHORITATIVE" ...}` line) —
+so the serializer's input is provably the authoritative-pass draft,
+never the legacy-pass draft, on the exact run D-239P dispatched. Stage 4's
+own gap is therefore the ONE and ONLY reason the key is absent from
+`result.json`.
+
+**Stage 8 — flag/precondition.** The construction gate DID execute
+(Stage 1); `p1_target_lookup_evidence_by_clip_id` was built NON-EMPTY.
+The real artifact's own `source_status: MISSING` / `reason: exact_p1_
+target_evidence_key_absent` is consistent ONLY with "KEY NEVER WRITTEN"
+(Stage 4's gap) — not with "key written as `[]`" (that shape would read
+`source_status: PRESENT`, `exact_p1_target_evidence_row_count: 0`) and
+not with "key written then lost" (nothing overwrites it, per Stage 5).
+
+**Stage 9 — return-path matrix.**
+
+| Path | pipeline map built? | universal map extracted? | legacy key written? | authoritative key written? | repair-loop preserves? | final serialized key present? |
+|---|---|---|---|---|---|---|
+| LEGACY/SHADOW resolver mode (never dispatched by this workflow) | yes (flag-gated) | yes | yes (Stage 3) | n/a (2nd pass never runs) | n/a | **yes** |
+| AUTHORITATIVE, `post_authority_context` present (the LIVE path, D-239P's own run) | yes | yes | yes (1st pass runs too, but its output is relabeled `_legacy_evidence` and discarded from the primary key) | **NO — Stage 4's gap** | n/a (nothing to preserve) | **NO — confirmed absent** |
+| AUTHORITATIVE, `post_authority_context` is `None` / integrity failure | yes | yes | yes (1st pass still runs, relabeled) | yes, as `[]` (the fail-closed dict, line 2450) | n/a | yes, as `[]` |
+
+### Root-cause verdict
+
+**E — AUTHORITATIVE / REPAIR PASS OVERWRITES THE DIAGNOSTICS BLOCK** (most
+precise reading: the authoritative pass's OWN diagnostics-construction
+code, `_apply_post_authority_validation_only`, never writes the key at
+all on its normal-path dict, so its return value effectively replaces
+Stage 3's correct output with an incomplete one for the primary
+`"final_story_coherence_validation"` key — not a THIRD authority
+"erasing" an existing value, but the SAME functional effect on the
+final serialized JSON). Root cause is a D-239O implementation gap: the
+`exact_p1_target_evidence_by_clip_id` parameter was correctly threaded
+through `universal_clean_cut.py` into BOTH call sites and correctly
+declared in `_apply_post_authority_validation_only`'s own signature, but
+never actually consumed inside that function's body when the earlier
+D-239O `Edit` call (intended to touch both of `final_story_coherence_
+validation.py`'s duplicate `_identity_observability_for_lost_atoms`
+call sites via `replace_all: true`) matched and updated only the FIRST
+occurrence (inside `apply_final_story_coherence_validation`'s own legacy
+dict, line ~1894 at the time) and silently missed the SECOND (inside
+`_apply_post_authority_validation_only`, line ~2144 at the time) — the
+tool's own "all occurrences successfully replaced" confirmation was
+accurate for the text it actually matched, not a guarantee both
+textually-similar-but-not-byte-identical sites were touched.
+
+### No fix
+
+Per this gate's own directive: zero implementation, zero code change,
+even one line. `final_story_coherence_validation.py`, `pipeline.py`,
+`universal_clean_cut.py`, `contracts.py`, `editorial_moment_sequence_
+integration.py`, and the workflow file are all read-only this gate.
+
+### Confirmation
+
+Forensic only. Zero files changed except this docs-only entry. No P1/
+retry-process/materiality/Freeze/repair/ownership/Language-Spine
+authority change. No threshold, no heuristic. No RAW, no Modal, no
+RunPod, no provider call.
+
+**Freeze status (from D-239P's own corrected real facts, unchanged by
+this forensic):** `freeze_blocked = true`, `repair_loop_status =
+NEEDS_HUMAN_REVIEW`, `first_missing_link = FREEZE_BLOCKED_BEFORE_
+PACING`. **Pacing status:** not reached (consistent with Freeze blocked
+before the Pacing seam).
+
+**Smallest future fix (named for the record, NOT authorized here):** add
+the same 5-line body `_apply_post_authority_validation_only` is already
+missing —
+```python
+"exact_p1_target_evidence": _exact_p1_target_evidence_for_lost_atoms(
+    lost_semantic_atoms, exact_p1_target_evidence_by_clip_id,
+),
+```
+— to its own `diagnostics["final_story_coherence_validation"]` dict
+(`final_story_coherence_validation.py`, immediately after its own
+`"lost_atom_identity_observability"` entry, mirroring Stage 3's already-
+correct shape exactly). Production files required: `cutsell_worker/
+final_story_coherence_validation.py` only. No workflow change required.
+A new regression test should assert BOTH `apply_final_story_coherence_
+validation` (no `post_authority_context`) AND `apply_post_authority_
+story_validation`/`_apply_post_authority_validation_only` (with a valid
+context) write the same-shaped `exact_p1_target_evidence` key — the
+gap this forensic found is exactly the kind of asymmetry a same-shape
+parity test across both call shapes would have caught at D-239O's own
+qualification gate. No RAW required to implement or verify this fix
+offline; paid compute is only needed for a future confirmatory real-
+media re-trace once the fix lands, mirroring D-239P's own exact
+dispatch shape.
+
+**Canonical status:** `D239Q_EXACT_P1_TARGET_DIAGNOSTIC_DISAPPEARANCE_
+ROOT_CAUSE_ISOLATED_AUTHORITATIVE_PASS_NEVER_WRITES_KEY_VERDICT_E_NO_FIX`.
+
+Then STOP.
