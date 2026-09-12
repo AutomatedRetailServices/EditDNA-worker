@@ -3002,3 +3002,201 @@ Formation, Proposition Identity, Attempt Relationships, BestTake,
 Boundary, Ordering, and Pacing are all restated, never modified, by this
 section. See `docs/CUTSELL_DECISIONS.md` D-220C for the decision-log
 entry recording this section's doctrine.
+
+---
+
+## 17. POST-FREEZE CANONICAL CONSOLIDATION + PRODUCT DIRECTION (D-240)
+
+**Status: additive consolidation, documentation only. No engine behavior
+change, no RAW, no provider call, no P1/P2/materiality/Freeze/Pacing/
+Audio-Join authority change, no threshold change, no feature flag, no
+`cutsell_worker/*.py` file, no `tests/*.py` file, no `.github/workflows/
+*.yml` file touched to write this section.** This section CONSOLIDATES
+what D-239T through D-239V already proved end-to-end on real media
+(restated, never re-litigated) and RECORDS a canonical product-direction
+distinction the engine's own layer boundaries (Sections 2, 15.10-15.12)
+already support but had not yet stated explicitly as a base/premium
+product split.
+
+### 17.1 FREEZE TRACK = CLOSED (real-media-proven chain)
+
+The following chain is now proven end-to-end on real, non-Video00 media
+(D-239T forensic → D-239U offline fix → D-239V real-media confirmation),
+consolidating Section 15.4 (Editorial Moment & Sequence Understanding),
+Section 14 (Language Spine), and Section 15.17's own materiality/Freeze
+doctrine — no new layer, no renumbering:
+
+```
+Language Spine (Section 14, D-166/D-168/D-169, unchanged)
+  v
+Exact lost-atom ownership (D-235S/D-237I, unchanged)
+  v
+Atom-granular editorial requirement (D-235M/D-239L, unchanged)
+  v
+Source-aligned P1 role confidence (D-239T forensic -> D-239U fix,
+  role_evidence_source / role_evidence_confidence, additive to
+  Section 15.4's EditorialMoment, EditorialMoment.confidence itself
+  unchanged)
+  v
+Retry/process materiality (D-235Q, unchanged contract, now REACHED with
+  a role_evidence_confidence=SUPPORTED input for this target for the
+  first time)
+  v
+D-235Q -> D-235R (Freeze authority) -> D-235S (exact-link provenance)
+  -> D-235T (RepairLoop suppression), unchanged contracts throughout
+  v
+ACTUAL FREEZE CLEAR (real media, first time for this specific target)
+```
+
+**D-239V real-media result (Product-Owner-confirmed, this gate's own
+input fact, restated verbatim):** target `role = POST_TAKE_RESET`;
+`EditorialMoment.confidence` (the pre-existing, generic moment
+confidence) **unchanged** by D-239U, as designed; `role_evidence_source
+= BEHAVIOR_HYPOTHESIS`; `role_evidence_confidence = SUPPORTED`; D-239I
+Seam C resolves the target (the exact gap D-239T's forensic identified);
+retry/process materiality resolves under D-235Q's own unmodified
+contract; effective lost-atom blocking clears; RepairLoop's same-atom
+escalation clears (D-235S's exact-link contract, unmodified); `freeze_
+blocked = false`; `pacing_seam_reached = true`.
+
+**Binding:** this is a genuine, real-media-proven CLOSE of the Freeze
+track that D-097 through D-239 pursued. Per this gate's own explicit
+instruction and Section 6's anti-loop contract, **Freeze is NOT to be
+reopened absent a genuinely new material blocker** — a defect discovered
+on a DIFFERENT target/source in a future gate is a new, separately-
+scoped finding, not a reason to relitigate this closed chain. D-235Q's
+own confidence/materiality contract, the D-194 quality-vs-structure
+firewall, `AUTHORITATIVE_RELATIONSHIP_STATUSES`, and `exact_match_by_
+clip_id`'s containment policy are all unchanged and unweakened by this
+closure — the closure is a real-media PROOF that the existing contracts
+correctly resolve this exact target, not a relaxation of any of them.
+
+### 17.2 Canonical Product Direction (new, explicit base/premium split)
+
+**CORE / BASE PRODUCT: Cut.ai-style Talking Head UGC editing.**
+
+> Canonical core promise: a professional talking-head edit from messy
+> RAW.
+
+The core engine is, and remains, exactly the pipeline this document
+already describes (Section 2 Layers 5-9, Section 15.10's Cut.ai Parity
+Stack, unchanged):
+
+```
+RAW Understanding -> Clean Cut -> Best Takes -> Story / Ordering ->
+Freeze -> Boundary -> Pacing -> Audio / Visual polish -> Render / Export
+```
+
+**PREMIUM PRODUCT: Smart Sales Funnel.** This is explicitly **NOT a
+separate voice-over editor** and **NOT a second pipeline** — it is the
+SAME Talking Head UGC editor (the identical core stack above) with
+ADDITIONAL commercial intelligence layered on top, consuming the same
+Freeze/Boundary/Pacing output the base product already produces. This
+consolidates and sharpens, rather than replaces, Section 15.11's
+Commercial Moment Understanding and Section 15.12's Sales Funnel
+Intelligence (both still MISSING/FUTURE, still explicitly POST-PARITY,
+still not implemented by this section):
+
+- Smart Sales Funnel understands commercial beats: `Hook`, `Problem`,
+  `Benefit`, `Feature`, `Demo`, `Proof`, `Objection`, `Offer`, `CTA` —
+  extending Section 15.12's starting vocabulary (`Hook`/`Problem`/
+  `Solution`/`Benefit`/`Proof`/`CTA`) with `Feature`, `Demo`, `Objection`,
+  and `Offer` as additional named beats, all under the SAME "starting
+  vocabulary, explicitly extensible, never the only valid structure"
+  contract Section 15.12 already states.
+- **Flexible funnel (binding, restates and sharpens Section 15.12's own
+  "FLEXIBLE, not rigid" language):** NO mandatory fixed sequence; NO
+  forced `Hook -> Problem -> Benefit -> Proof -> CTA` template. A
+  creator's own natural, already-effective ordering is PRESERVED when it
+  already works — the funnel vocabulary is a set of beats to RECOGNIZE,
+  never a template to IMPOSE. This is CLAUDE.md's own binding "do not
+  force rigid sales-funnel logic during Clean Cut" rule, restated here
+  for the premium layer specifically (Clean Cut/Milestone-1 itself
+  remains entirely out of scope for this vocabulary, unchanged).
+- For each recognized selling beat, Smart Sales Funnel decides a
+  PRESENTATION MODE (a new, named decision surface — not implemented by
+  this section): keep A-roll; punch-in A-roll; insert product B-roll
+  while preserving the primary spoken audio; show a product close-up;
+  show a demo; emphasize captions. This presentation-mode decision
+  consumes Commercial Moment Understanding (15.11) evidence and sits
+  strictly downstream of Freeze/Boundary/Pacing (17.1's own chain,
+  unchanged) — it is a finishing-layer decision, never a membership or
+  Freeze decision.
+
+**A-roll (new canonical term, defined here for the first time):**
+primary talking-head footage in which the creator is visible speaking —
+the base product's own entire output today.
+
+**B-roll (new canonical term, defined here for the first time):**
+supplemental product/demo/close-up footage shown visually while the
+primary spoken audio may continue uninterrupted — an audio-preserving
+visual overlay/insert, never a replacement of the spoken track.
+
+**Pure Voice-Over + B-roll is explicitly NOT the current core product.**
+It may be a FUTURE expansion only, named here for completeness and
+disambiguation, not authorized, not scoped, not scheduled by this
+section. The canonical premium use case for the CURRENT product
+direction is: **Talking Head UGC edit + intelligent B-roll insertion +
+flexible sales-beat optimization** — A-roll (the creator's own spoken
+performance) remains the primary audio and visual anchor throughout;
+B-roll is an insert, never a substitute for it.
+
+### 17.3 Pricing / product-layer distinction (conceptual only)
+
+Canonical conceptual distinction, no numeric pricing set or implied by
+this section (explicitly deferred, per this gate's own "do not invent
+exact prices" instruction):
+
+- **BASE:** professional talking-head edit (Section 17.2's core stack,
+  Milestone 1 target).
+- **PREMIUM:** sales-optimized talking-head edit using Smart Sales
+  Funnel (Section 17.2's premium layer, POST-PARITY, MISSING/FUTURE).
+
+Both layers share ONE engine and ONE Freeze/Boundary/Pacing/Render
+pipeline (17.2's own "same editor, not a second pipeline" contract) —
+BASE vs PREMIUM is a downstream commercial-intelligence layer toggle,
+never a fork of the core editorial authority chain.
+
+### 17.4 Post-Freeze roadmap (canonical next-track ordering, restates
+Section 5's Milestone framing, not an authorization)
+
+With 17.1's Freeze track closed, the canonical next technical track is:
+
+1. **PACING V2 / AUDIO JOIN REAL-MEDIA QUALIFICATION** (immediate next
+   track; Section 16's own three-layer join model, D-220 through D-235U,
+   unchanged; see `docs/CUTSELL_DECISIONS.md` D-240 Part B for the
+   candidate RAW selected for this track — NOT launched by this
+   section).
+2. Audio finishing.
+3. Visual finishing.
+4. Renderer/export hardening.
+5. Calibration Corpus v1.
+6. Complete S3 inventory (Section 17.5's own honest limitation — a live
+   listing was attempted and found unavailable in the authoring
+   session's own environment; remains a legitimate low-cost follow-up,
+   restates D-227 item 21's own recommendation).
+7. Stabilization Program.
+8. 100-200 new diverse RAWs.
+9. Unseen holdout.
+10. CutSell vs Cut.ai vs Human Gold (Milestone 2, Section 5, unchanged
+    precondition: Milestone 1 must close first).
+11. TestFlight / Beta.
+
+This ordering is a RECOMMENDATION restating Section 6's binding anti-loop
+contract — no step here is authorized to begin by this section; each
+requires its own separately-scoped, separately-authorized gate.
+
+### 17.5 Confirmation: documentation only
+
+No `cutsell_worker/*.py` file, no `tests/*.py` file, no `.github/
+workflows/*.yml` file, no feature flag, and no authority contract was
+touched, added, or changed to write this section. No RAW was dispatched
+by this section (D-239V's own real-media proof, restated in 17.1, was
+already established by that separately-authorized gate). No provider/
+network call was made writing this section. Section 15.11/15.12's own
+MISSING/FUTURE status for Commercial Moment Understanding and Sales
+Funnel Intelligence is unchanged — 17.2 extends their named vocabulary
+and states the base/premium product framing explicitly; it does not
+implement, schedule, or authorize either. See `docs/CUTSELL_DECISIONS.md`
+D-240 for the decision-log entry recording this section's doctrine and
+Part B's read-only Pacing RAW selection.

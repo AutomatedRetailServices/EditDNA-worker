@@ -62449,3 +62449,238 @@ EXACT_TARGET_ROW_UNRETRIEVABLE_VERDICT_F_OBSERVABILITY_LIMITATION_
 ELEVENTH_CONSECUTIVE_OCCURRENCE_NO_SECOND_RAW`.
 
 Then STOP.
+
+## D-240 — CANONICAL CONSOLIDATION + PACING RAW SELECTION, OFFLINE/READ-ONLY, POST D-239V (Verdict A: CANONICAL CONSOLIDATION COMPLETE — PACING RAW SELECTED — READY FOR ONE REAL-MEDIA PACING/AUDIO-JOIN QUALIFICATION, next gate D-241, NOT launched)
+
+Read order and Git-state preconditions verified before any edit: branch
+`feature/runpod-pod-on-demand`, HEAD `4535142beadda6411e102d7e183bfd01a01e8783`
+(exact match to this gate's own expected `4535142`), clean tree. Read
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, this file through
+D-239V, and `CLAUDE.md` before any edit.
+
+## PART A — CANONICAL CONSOLIDATION
+
+Added Section 17 ("POST-FREEZE CANONICAL CONSOLIDATION + PRODUCT
+DIRECTION (D-240)") to `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_
+D098.md`. Consolidates existing decisions only — no new architecture,
+no layer renumbering, no Section 2/3 change.
+
+**17.1 FREEZE TRACK = CLOSED.** Records the real-media-proven chain
+(Language Spine → exact lost-atom ownership → atom-granular editorial
+requirement → source-aligned P1 role confidence (D-239T forensic →
+D-239U fix) → retry/process materiality → D-235Q → D-235R → D-235S →
+D-235T → actual Freeze clear) and the D-239V real-media result exactly
+as this gate's own directive supplied it: `role = POST_TAKE_RESET`,
+generic `EditorialMoment.confidence` unchanged, `role_evidence_source =
+BEHAVIOR_HYPOTHESIS`, `role_evidence_confidence = SUPPORTED`, Seam C
+resolves, retry/process materiality resolves, effective lost-atom
+blocking clears, RepairLoop same-atom escalation clears, `freeze_
+blocked = false`, `pacing_seam_reached = true`. Binding: Freeze is NOT
+reopened absent a genuinely new material blocker on a different target;
+D-235Q's own confidence/materiality contract, the D-194 firewall,
+`AUTHORITATIVE_RELATIONSHIP_STATUSES`, and `exact_match_by_clip_id`'s
+containment policy are all unchanged — this is a proof the existing
+contracts resolve this target, never a relaxation of any of them.
+
+**Canonical product direction (17.2-17.3).** Records, for the first
+time explicitly, a BASE/PREMIUM product-layer split the engine's own
+existing layer boundaries already support: BASE = Cut.ai-style Talking
+Head UGC editing (the existing core stack, Section 2 Layers 5-9,
+unchanged); PREMIUM = Smart Sales Funnel — explicitly NOT a separate
+voice-over editor, the SAME editor with additional commercial
+intelligence consuming the same Freeze/Boundary/Pacing output. Extends
+Section 15.12's existing beat vocabulary (`Hook`/`Problem`/`Solution`/
+`Benefit`/`Proof`/`CTA`) with `Feature`/`Demo`/`Objection`/`Offer`, all
+under the same "starting vocabulary, never the only valid structure"
+contract. Restates the flexible-funnel rule (no mandatory fixed
+sequence, no forced template, preserve natural effective ordering) as
+CLAUDE.md's own binding "no rigid sales-funnel logic during Clean Cut"
+rule applied to the premium layer specifically. Names a new presentation-
+mode decision surface (keep A-roll / punch-in A-roll / insert B-roll
+while preserving primary spoken audio / product close-up / demo /
+caption emphasis) — named, not implemented. Defines A-roll (primary
+talking-head footage, creator visibly speaking) and B-roll (supplemental
+product/demo/close-up footage shown while primary spoken audio may
+continue) for the first time as canonical terms. States explicitly that
+pure Voice-Over + B-roll is NOT the current core product — future
+expansion only, not authorized here. Pricing distinction (17.3) is
+conceptual only (BASE vs PREMIUM commercial-intelligence-layer toggle
+over one shared engine) — no numeric price invented or implied.
+
+**Post-Freeze roadmap (17.4):** PACING V2 / AUDIO JOIN REAL-MEDIA
+QUALIFICATION (immediate next track, Part B below selects its
+candidate) → Audio finishing → Visual finishing → Renderer/export
+hardening → Calibration Corpus v1 → Complete S3 inventory → Stabilization
+Program → 100-200 new diverse RAWs → Unseen holdout → CutSell vs Cut.ai
+vs Human Gold → TestFlight/Beta. A recommendation restating Section 6's
+binding anti-loop contract — no step authorized to begin by this entry.
+
+No `cutsell_worker/*.py` file, no `tests/*.py` file, no `.github/
+workflows/*.yml` file, no feature flag, no authority contract touched.
+
+## PART B — PACING RAW SELECTION (read-only, no execution)
+
+**Read-only S3/corpus inventory attempted, found unavailable in this
+session, honestly reported (per this gate's own explicit fallback).**
+This session's AWS credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_
+KEY`) are present as local environment values, and the repository's own
+existing "current tooling" for a cheap, read-only listing
+(`benchmark_s3.py`'s `list_objects_inventory(s3, prefix, extensions)`,
+a pure `list_objects_v2` call, zero GPU/provider cost) was located and
+inspected — but that function requires `S3_BUCKET` (env, a GitHub
+Actions secret) and an explicit allow-listed prefix (`configured_input_
+prefixes()`, also env-sourced), neither of which is present in this
+authoring session's own environment (confirmed: no `S3_BUCKET`, no
+`AWS_REGION`/`AWS_DEFAULT_REGION` present; D-227's own prior finding
+that this session's local AWS credentials are not valid for this bucket,
+`InvalidAccessKeyId`, is also unchanged and independently sufficient).
+No live listing was attempted with a guessed bucket name (would not be a
+genuine "current tooling" use, and risks probing an unauthorized
+resource). Falling back, per this gate's own explicit instruction, to
+already-known repository/decision-log evidence.
+
+**Candidate 1 — `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`
+(Video00, the canonical source).** Richest KNOWN transition surface of
+any candidate by a wide margin: `selected_clip_count` 24-27 and
+`transition_count` 23-26 across multiple real, already-completed Modal
+runs (D-097 series through D-239 series; exact figures recorded at
+multiple points in this file, e.g. "24 clips, 23 transitions" and later
+"`selected_clip_count: 27`, `transition_count: 26`"), `source_duration_
+sec > 350` (a hardcoded architecture-verification check, i.e. Video00 is
+6+ minutes). Multiple real retry families (gynecologist retry, stomach
+family), corrections, pauses, and dead-air reconciliation are all
+already-documented real content on this source. **Already Pacing-V2-
+diagnosed to a definitive, already-known conclusion** (D-218R/D-220/
+D-221/D-225/D-226): zero J/L-eligible handles, `HARD_CUT`/`TIGHT_CUT`
+only — further runs would very likely reproduce this same known result
+for handle-availability specifically, reducing (not eliminating) marginal
+qualification value for THAT axis, though it remains the single richest
+source for exercising Audio Join Treatment's other axes (room-tone,
+amplitude/background continuity, `KEEP_PAUSE` decisions) across many
+real transitions.
+
+**Candidate 2 — `Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4`
+(D-227/D-228 sibling).** KNOWN: `selected_clip_count: 3`, `transition_
+count: 2` (D-228, `transition_count_matches_selected_minus_one: true`,
+self-consistent) — real, proven-processable, but modest. **Already
+Pacing-V2-diagnosed to a definitive conclusion** (D-228 verdict C): zero
+J/L candidates unlocked, live executed transitions 100% `HARD_CUT`,
+classified `GENERALIZES_WITH_NON_BLOCKING_DIFFERENCES`. Already-exhausted
+generalization value for handle-availability specifically, and its own
+transition surface (2 transitions) is the thinnest of the four
+candidates with any real pipeline evidence at all.
+
+**Candidate 3 — `Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4`
+(D-227's alternate, never pipeline-qualified).** KNOWN: real, human-
+speech source media, fully processable (ASR + vision completed with
+zero execution/provider failures in the same D-227 zero-failure run as
+Candidate 2) — but **never run through the full CutSell pipeline with
+Ordering/Freeze/Pacing diagnostics at all**. Zero known `selected_clip_
+count`/`transition_count`/handle-availability evidence exists anywhere
+in this repository. Genuinely unexplored, but for exactly that reason
+carries the WEAKEST evidence base for "maximizing transition richness"
+of the four candidates — selecting it would be a bet, not an
+evidence-based choice, per this gate's own "rank using actual available
+evidence" instruction.
+
+**Candidate 4 — `Editdna longform validation/copy_9E4975E5-79EF-43EF-
+9440-5F06AC0A5581.MP4` (the D-235/D-237/D-239-series sibling, most
+recently used in D-239V).** KNOWN: `selected_count_before_freeze` was
+recorded as `5` (D-235H/D-235I, Product-Owner-supplied) and `3`
+(D-237F, recovered artifact) across different runs as fixes accumulated
+— comfortably above the ">2 clips" floor this gate names, though modest
+next to Video00. This session's own D-239V real-media read (the "Print
+full canonical diagnostics" step's own retrievable tail) showed multiple
+distinct `EditorialMoment`s across a source span of at least ~77-97
+seconds, with different `grouping_action`s (`JOIN`, `SPLIT`) and
+different `grouping_effective_relation`s (`CORRECTION`, `RETRY`) — real,
+non-trivial editorial-transition activity, not a single flat monologue.
+**Critically, and unlike Candidates 1 and 2, this is the ONLY candidate
+for which Freeze has just (D-239V) cleared for the first time on real
+media** — every prior run on this exact file was Freeze-blocked before
+ever reaching Pacing (D-237F: `pacing_seam_reached=false`); D-239V is
+the first time `pacing_seam_reached=true` has ever been true for it.
+Candidates 1 and 2 have BOTH already had their own Pacing V2 seam fully
+exercised to a known, already-recorded zero-handle conclusion — a
+further run against either would very likely re-confirm the same known
+result. This candidate's own Pacing/Audio-Join seam has NEVER been
+observed on real media at all — the highest-information-value next RAW
+specifically for "PACING V2 / AUDIO JOIN REAL-MEDIA QUALIFICATION," the
+exact product this gate's own Part B serves. This gate's own instruction
+to "avoid choosing the sibling just used in D-239V if it still yields
+only 2 clips/1 transition" is read as conditional, not absolute — the
+evidence above (3-5 selected clips historically, multiple distinct
+moments/relations/grouping actions observed) does not support that
+"only 2 clips/1 transition" floor for this file; it supports something
+richer, even though an exact post-Freeze-clear `transition_count` was
+not itself retrievable this session (D-239V's own Verdict F).
+
+**PRIMARY_PACING_RAW:** `Editdna longform validation/copy_9E4975E5-
+79EF-43EF-9440-5F06AC0A5581.MP4`
+
+**Primary selection reason:** this is the ONLY one of the four
+candidates whose Pacing V2/Audio Join seam has never been reached on
+real media before — D-239V just cleared Freeze for it for the first
+time, and every prior run stopped before Pacing. Running it now directly
+continues the exact chain 17.1 just closed and answers the genuinely
+open question (does Pacing V2/Audio Join actually engage, and how, on
+this specific real target) rather than re-confirming an already-known
+zero-handle result on Video00 or the D-228 sibling. Known evidence (3-5
+selected clips across multiple runs; multiple distinct moments with
+`JOIN`/`SPLIT` grouping actions and `CORRECTION`/`RETRY` relations
+across a ~77-97 second span) supports real, non-trivial transition
+surface — above the directive's own ">2 clips" floor, though not
+independently confirmed to the same numeric certainty as Candidates 1-2.
+
+**Expected transition richness:** moderate — historically 3-5 selected
+clips pre-Freeze, multiple relation types observed (not a single flat
+monologue); a materially richer target than Candidate 2's already-known
+2-transition floor, though not approaching Video00's 23-26.
+
+**Prior usage status:** extensively used for lost-atom/materiality/
+Freeze forensic purposes (D-235 series through D-239V) but NEVER
+previously for a real Pacing V2/Audio Join qualification purpose — its
+Pacing seam is genuinely fresh.
+
+**Same sibling avoided?** No — this gate deliberately selects it,
+reading the directive's own avoidance instruction as conditional on the
+"only 2 clips/1 transition" floor, which the evidence above does not
+support for this file.
+
+**BACKUP_PACING_RAW:** `Editdna longform validation/VIDEO-2026-07-30-
+09-18-03.mp4` (Video00 itself) — by far the richest PROVEN transition
+surface of any candidate (24-27 clips, 23-26 transitions), the most
+extensively characterized and lowest-execution-risk RAW in the corpus;
+falls back to this if the primary's actual post-Freeze-clear transition
+count, once run, turns out thinner than the historical 3-5 estimate.
+Candidate 3 (`VIDEO-2026-07-30-09-24-13.mp4`) is named as a third,
+lowest-priority alternate held in reserve for genuine future
+generalization once it is ever run through the full pipeline; Candidate
+2 (`VIDEO-2026-07-30-10-22-46.mp4`) is the lowest priority of all four,
+its own Pacing V2 generalization value already fully exhausted with a
+definitive, uninteresting zero-handle result.
+
+**GPU/provider used?** No. **RAW executed?** No. **Paid compute used?**
+No. **D-241 authorized?** No — named only, per this gate's own explicit
+"Do NOT launch D-241" instruction.
+
+**Verdict: A — CANONICAL CONSOLIDATION COMPLETE — PACING RAW SELECTED —
+READY FOR ONE REAL-MEDIA PACING/AUDIO-JOIN QUALIFICATION.**
+
+**Canonical status:** `D240_CANONICAL_CONSOLIDATION_FREEZE_TRACK_CLOSED_
+PRODUCT_DIRECTION_RECORDED_PACING_RAW_SELECTED_COPY_9E4975E5_PRIMARY_
+VIDEO00_BACKUP_VERDICT_A_READY_FOR_D241_NOT_LAUNCHED`.
+
+**Exact next gate:** D-241 — ONE REAL-MEDIA PACING V2 / AUDIO JOIN
+QUALIFICATION, exactly one RAW (`PRIMARY_PACING_RAW`). **Not launched by
+this gate.** Waiting for Product Owner coordination.
+
+**Confirmation:** offline/read-only only. No RAW dispatched. No Modal,
+no RunPod, no provider call. No engine/threshold/P1/P2/materiality/
+Freeze/Pacing-policy/Audio-Join-policy change. `docs/CUTSELL_CANONICAL_
+ENGINE_ARCHITECTURE_D098.md` and this decision entry are the only files
+changed. No prior decision entry rewritten or deleted.
+
+Then STOP.
+
+Do NOT launch D-241. Wait for Product Owner coordination.
