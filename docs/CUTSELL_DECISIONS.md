@@ -61687,3 +61687,138 @@ Modal, no RunPod, no provider call.
 FIXED_OFFLINE_PROVEN_VERDICT_A_READY_FOR_D239S`.
 
 Then STOP.
+
+## D-239S — ONE REAL-MEDIA EXACT TARGET P1 EVIDENCE TRACE, POST D-239R (Verdict F: OBSERVABILITY/RETRIEVAL FAILURE — the D-239R fix's own extraction step executed and completed successfully on real media; this session cannot observe whether the fixed artifact is actually populated — TENTH consecutive gate with this exact structural finding, not a code defect)
+
+**Status: CANONICAL**
+
+Branch `feature/runpod-pod-on-demand`, HEAD `d3dc97b` verified exact
+match (clean tree) before dispatch. Read `docs/CUTSELL_DECISIONS.md`
+through D-239R and `CLAUDE.md`.
+
+### RAW dispatched
+
+`cutsell-video00-modal-raw.yml` (Modal backend), `feature/runpod-pod-on-demand`
+@ `d3dc97b` (carrying D-239R's fix), `source_key=Editdna longform
+validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4` (no
+substitution, same sibling as D-239P), with `lost_atom_materiality_
+freeze_authority_enabled=1`, `editorial_moment_sequence_diagnostics_
+enabled=1`, `live_language_spine_diagnostics_enabled=1`, `whole_video_
+editorial_reasoning_diagnostics_enabled=1`, `ordering_diagnostics_
+enabled=1`, `pacing_v2_diagnostics_enabled=1`, `audio_join_treatment_
+diagnostics_enabled=1` — the SAME exact flag set D-239P used. Run ID
+`34706918928`, exactly ONE dispatch, no second RAW.
+
+### S3 preflight
+
+The workflow's own mandatory D-228 preflight step PASSED (`conclusion:
+success`) before paid compute.
+
+### Execution result
+
+The paid-compute step ("Run Modal full Video00 benchmark") and the
+D-239O/D-239R extraction step ("D-239O Exact Lost-Atom Target → P1
+Moment observability → dedicated extraction") BOTH completed with
+`conclusion: success` — identical shape to D-239P. The job's overall
+`conclusion: failure` again comes entirely from downstream QA validator
+steps ("Verify frozen Selection lock", "Verify Video00 architecture",
+"Verify Human Gold regression QA", and the three Pacing V2 real-media
+qualification steps), consistent with this sibling's known Freeze-
+blocked history (D-050C3 Section 8's own precedent: a blocked Freeze is
+itself a valid benchmark result). The same retrieved log-line hint as
+D-239P appears again (`"Freeze was blocked before the Pacing seam was
+ever reached, or a real regression"`) — the script's own inference, not
+a directly-observed `freeze_blocked` field this gate could confirm.
+
+### Retrieval attempted
+
+Two independent retrieval paths, both blocked at the sandbox's own
+egress layer (`connect_rejected`, gateway 403 to CONNECT — confirmed
+organization policy, not a code/credential defect):
+1. `download_workflow_run_artifact` for `cutsell-video00-modal-
+   validator-reports` (34,351 bytes) → signed URL on
+   `productionresultssa11.blob.core.windows.net` (a THIRD distinct
+   Azure Blob subdomain across this session's gates, after
+   `productionresultssa5`) → `connect_rejected`.
+2. `get_job_logs` (`tail_lines=50000`) — succeeds, capped at ~436KB,
+   window `17:02:46.13`–`17:02:48.37`. The D-239O/D-239R extraction
+   step's own print (which ran at `17:02:44`, per the job's own step
+   timing) and every earlier diagnostic-extraction step (`lost-semantic-
+   atom-diagnostics.json`, `selection-freeze-diagnostics.json`) fall
+   entirely OUTSIDE this window — confirmed by direct search: no
+   occurrence of `exact_p1_target_evidence`, `p1_target_lookup_status`,
+   `moment_count_in_artifact`'s own printed VALUE, `BLOOPER_SERIES`, or
+   `POST_TAKE_RESET` as real print output anywhere in the reachable
+   436KB (only as literal strings inside echoed step SOURCE CODE, which
+   is not run-specific data). This is the SAME exact structural wall as
+   D-237H, D-237J, D-237M, D-239, D-239G, D-239J, D-239M, and D-239P —
+   the ninth prior gate to hit it, this the tenth.
+
+### What this means for the D-239R fix itself
+
+The extraction step's own `conclusion: success` proves the D-239R-fixed
+code path executed without error on real media (no exception, no crash,
+no malformed-JSON early exit) — but this session has no way to confirm
+whether `exact-p1-target-evidence.json`'s `source_status` is now
+`PRESENT` with the target's own row, or still something else. D-239R's
+own offline qualification (15 parity tests, 256 targeted regressions,
+full suite) remains the only evidence this gate can point to for the
+fix's correctness; this RAW neither confirms nor refutes it on real
+data.
+
+### No post-result patch
+
+Zero production code change, zero workflow behavioral change, zero
+threshold change, zero P1/materiality/Freeze policy change this gate.
+Docs-only decision entry, per this gate's own explicit allowance.
+
+### Verdict
+
+**F — OBSERVABILITY/RETRIEVAL FAILURE** (the closest available label;
+more precisely a RETRIEVAL failure, not an execution regression — the
+D-239R-fixed extraction step is proven, by its own `conclusion:
+success`, to have executed correctly on this real-media run). Exact
+failure named per this gate's own instruction: this sandbox's egress
+policy blocks CONNECT to every GitHub-Actions-results-storage backend
+tried across this session (three distinct Azure Blob subdomains and one
+`results-receiver.actions.githubusercontent.com` host so far, all the
+same `connect_rejected`/403 class), and the one fallback that does work
+(`get_job_logs`) is capped to a window that — on this run's own timing,
+same as every prior gate — never reaches back far enough to contain the
+D-239O/D-239R extraction step's own print output.
+
+### Exact next gate
+
+Not a code fix, and not authorized here regardless. Per this gate's own
+IF-E/F instruction ("Name exact failure only. No second RAW."), no
+further RAW is authorized by this gate. The Product Owner's remaining
+options (named identically by D-239P and every prior gate that hit this
+wall) are unchanged: (a) widen this sandbox's own egress allowlist to
+include the GitHub Actions results-storage backends named above, or (b)
+add a durable, already-reachable persistence path for these specific
+diagnostic artifacts (mirroring D-056.1's own S3 durable-result
+mechanism for `result.json` itself) so a future gate can read them via
+`aws s3api get-object` (already proven reachable in this workflow's own
+D-228 preflight step) instead of the GitHub Actions artifact/log APIs.
+Absent one of these two remedies, a D-239T repeating this exact RAW
+would predictably hit the SAME wall an eleventh time.
+
+**New classifier needed?** No. **New threshold needed?** No. **Provider
+needed?** No. **Additional RAW required?** No — not authorized by this
+gate; a durable-persistence or egress-allowlist fix should precede any
+further real-media trace on this exact question. **Paid compute
+required after this?** Only once one of the two remedies above is in
+place.
+
+### Confirmation
+
+No second RAW. No RunPod. No provider change. No post-result engine
+patch. No P1/retry-process/materiality/Freeze/repair/ownership/
+Language-Spine authority change. No threshold, no heuristic, no
+aggregate→target promotion.
+
+**Canonical status:** `D239S_RETRIEVAL_BLOCKED_TENTH_CONSECUTIVE_GATE_
+D239R_FIX_EXTRACTION_STEP_PROVEN_SUCCESSFUL_ARTIFACT_CONTENT_UNOBSERVED_
+VERDICT_F`.
+
+Then STOP.
