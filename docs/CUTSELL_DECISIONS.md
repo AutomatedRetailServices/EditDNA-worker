@@ -57836,3 +57836,243 @@ Zero second RAW, zero RunPod, zero provider change. This entry is a
 docs-only decision-log addition, the only change permitted post-result.
 
 Then STOP.
+
+## D-237K — LOST-ATOM IDENTITY CORRELATION EMPTY-ROW FORENSIC (offline only, POST D-237J)
+
+**Correction to D-237J accepted:** the `cutsell-video00-modal-validator-
+reports` artifact for run `34671571718` WAS retrieved externally and DOES
+contain `exact-identity-observability.json`
+with `source_status="PRESENT"`, `lost_atom_identity_observability_row_
+count=0`, `lost_atom_identity_observability=[]`. D-237J's own verdict E
+("artifact still missing/malformed") is therefore SUPERSEDED by this
+correction on the retrieval question specifically -- the extractor and
+artifact preservation worked exactly as designed (D-237I proven live).
+The live diagnostic subtree itself was genuinely empty: `lost_semantic_
+atom_diagnostics` on the SAME run shows `atom_count=5`, `blocking_atom_
+count=1` (the target, `clip_id=clip_eb57e0923467ed28ed7d`, text "oh too
+many people ready set these are the", `REAL_CONTENT_LOSS`, `blocking=
+true`), and `freeze_blocked=true` with `trigger_categories` including
+`COHERENCE_BLOCKING_LOST_SEMANTIC_ATOM`/`REPAIR_LOOP_NEEDS_HUMAN_REVIEW`
+-- so lost atoms genuinely existed while the correlation produced zero
+rows. This gate traces exactly why, code-truth only, no fix.
+
+**ROOT CAUSE, PROVEN IN CODE (not inferred, not hypothesized):**
+
+`shared_attempt_word_identity.py::build_reconstructed_attempt_word_
+membership` (D-235P, line 267) mints the identity-match's own `entity_id`
+with this exact fallback priority:
+
+```
+entity_id = str(candidate.attempt_id or candidate.source_span_id or candidate.clip_id)
+```
+
+`contracts.py`'s `CandidateTake` dataclass documents these as three
+DISTINCT identity namespaces (line ~113-136): `source_span_id` --
+"physical observation identity"; `attempt_id` -- "canonical semantic
+identity for the delivery"; `clip_id` -- the take's own required physical
+clip identity. `attempt_id` is populated for virtually every real,
+AttemptReconstructor-produced take -- so on real media `entity_id` is
+almost always the take's `attempt_id`, NOT its `clip_id`.
+
+This `entity_id` becomes `AttemptLanguageIdentityMatch.reconstructed_
+attempt_id`. Two DIFFERENT pipeline.py maps consume it, with DIFFERENT
+(and inconsistent) keying:
+
+- **D-235X's own AUTHORITY maps** (`all_identity_matches_by_clip_id`,
+  `exact_match_by_clip_id`, pipeline.py lines 2636-2639) are explicitly
+  RE-KEYED by the loop's own `take.clip_id` (`all_identity_matches_by_
+  clip_id[take.clip_id] = match`) -- CORRECT, genuine clip_id namespace,
+  proven unaffected by this bug.
+- **D-237G's own OBSERVABILITY map** (`exact_identity_observability.py::
+  identity_observability_rows_for_source`, pipeline.py lines 2649-2657)
+  is NEVER re-keyed: `rows[match.reconstructed_attempt_id] = identity_
+  match_diagnostic_row(...)` uses the match's own `reconstructed_
+  attempt_id` (= `entity_id` = attempt_id-first) AS THE DICT KEY, despite
+  the caller already having the correct `take.clip_id` available (it is
+  passed in as `takes_by_clip_id={t.clip_id: t for t in source_takes}`
+  for a DIFFERENT, also-broken internal lookup -- see below). The SAME
+  wrong key is also written into the row's own serialized `"clip_id"`
+  field (`identity_match_diagnostic_row`, exact_identity_observability.py
+  line 157: `"clip_id": match.reconstructed_attempt_id`) -- so even a row
+  that DOES get produced self-reports the wrong clip_id.
+
+A SECOND, compounding manifestation of the identical bug: inside the same
+function, `take = takes_by_clip_id.get(match.reconstructed_attempt_id)`
+(exact_identity_observability.py line 201) also looks up the CandidateTake
+using the wrong key -- this lookup fails too (fails open to `None` span
+fields) whenever `attempt_id`/`source_span_id` is set, independent of the
+outer dict-key bug.
+
+`lost_atom_identity_correlation` (exact_identity_observability.py, D-237G)
+joins `lost_semantic_atoms` (keyed by the REAL `clip.clip_id`, from
+`final_story_coherence_validation.py::_lost_semantic_atoms`, which reads
+`draft.discarded`'s own genuine `DraftClip.clip_id`) against `identity_
+rows_by_clip_id` using `identity_rows_by_clip_id.get(clip_id)` -- a bare
+string-equality lookup, the ONLY join condition (no source check, no
+row-status check, no exact-match-presence check, no selected-only
+filter). Since the dict is keyed by attempt_id-first `entity_id` and the
+lookup key is a genuine clip_id, this lookup MISSES for every candidate
+whose `attempt_id` or `source_span_id` is set -- i.e., almost universally
+on real media, producing the observed 0-of-5 correlation.
+
+**Why D-237G's own 31-test offline suite never caught this:** its one
+`CandidateTake` test helper (`test_cutsell_d237g_exact_identity_
+observability.py::_take`) constructs takes with `attempt_id`/`source_
+span_id` left at their dataclass default (`None`), so `entity_id`
+degenerates to `candidate.clip_id` in every offline test -- accidentally
+masking the exact bug that manifests only when a real take carries a
+real `attempt_id`, which AttemptReconstructor virtually always sets.
+
+**STAGE 1 (call order):** identity-observability construction happens
+EARLY, inside `pipeline.py::build_flow_b_draft` (before `apply_clean_
+cut`/selection/composite resolution). `apply_final_story_coherence_
+validation` (universal_clean_cut.py, both the legacy-resolving and
+post-authority call sites) runs LATER, after five selection-authority
+passes (`apply_selection_phase_authority`, `apply_selection_conflicted_
+bridge_guard`, `apply_deterministic_best_take_authority`, `apply_watch_
+listen_besttake_guard_authority`, `apply_claim_coverage_best_take`). The
+lost-semantic-atom ledger (`_lost_semantic_atoms`, final_story_coherence_
+validation.py line 1565/1794) is built BEFORE the correlation call
+(`_identity_observability_for_lost_atoms`, line 1656/1887) in the SAME
+function invocation -- correlation genuinely executes AFTER both real
+inputs exist, on the SAME draft/object version, never a stale/different
+instance. This directly rules out **Verdict D**.
+
+**STAGE 2 (input objects):** both sides are live, freshly-computed, non-
+stale, same-run objects -- neither `None` nor empty by construction;
+`identity_observability_by_clip_id` threads correctly end to end
+(pipeline.py -> `ProcessingResult.lost_atom_exact_identity_context` ->
+universal_clean_cut.py extraction -> kwarg -> final_story_coherence_
+validation.py parameter), confirmed by direct code read at every hop.
+This rules out **Verdict C** ("never reaches final story validation") --
+it DOES reach, correctly, just keyed wrong.
+
+**STAGE 3/8 (clip-id join / correlation contract):** the correlation's
+ONLY join condition is bare `clip_id` string equality (plus provenance-id
+dedup); no other condition can suppress a row -- the failure is a pure
+KEY-NAMESPACE mismatch, proven above.
+
+**STAGE 4 (re-minting):** no dedicated `mint_clip_id`-style function
+exists anywhere in `cutsell_worker/*.py` (confirmed by search) -- `clip_
+id` itself is never re-minted mid-pipeline; `_draft_clip` (pipeline.py
+line 786-818) copies `clip_id=take.clip_id` verbatim, and `CompositeResolver`
+(composite_resolver.py) only ever READS existing `clip_id`s, never mints
+new ones. The mismatch is NOT clip_id re-minting -- it is a NAMESPACE
+substitution (`attempt_id`/`source_span_id` standing in for `clip_id`) at
+one specific, identified function.
+
+**STAGE 5 (source_asset_id):** every identity row DOES carry its own
+correct `source_asset_id` (`match.source_asset_id`, unaffected by this
+bug), but the correlation join never uses it -- clip_id is the sole
+condition, so a stable source-scoped bridge already exists in principle
+but is not consulted by this join.
+
+**STAGE 6 (observability row production):** **A -- non-empty, then
+correlation drops them all.** `identity_observability_by_clip_id` is very
+likely non-empty (one row minted per candidate in the healthy source's
+population, per `identity_observability_rows_for_source`'s own
+unconditional per-match loop with no skip/continue), just keyed under the
+wrong namespace for every entry with a real `attempt_id`/`source_span_
+id` -- which is virtually all of them on real media.
+
+**STAGE 7 (selected vs lost population):** `identity_observability_by_
+clip_id` is built from `take_tuple` (pipeline.py line 1466/1489), the
+COMPLETE pre-`apply_clean_cut` candidate pool ("the COMPLETE candidate
+pool ... before ANY editorial stage ... can keep, discard, or transform a
+candidate" -- pipeline.py's own D-050D1 comment), confirmed never
+reassigned/filtered between that point and the D-237G loop (line 2622).
+**The target is NOT dropped by a selected-only filter** -- this rules
+out the selected-only hypothesis (originally Verdict A's premise) as the
+cause; the real cause is the namespace mismatch above, not population
+scoping.
+
+**STAGE 9 (real target expected path):** CandidateTake ("oh too many
+people ready set these are the") -> `_draft_clip` preserves `clip_id=
+clip_eb57e0923467ed28ed7d` verbatim -> eventually appears in `draft.
+discarded` with that same clip_id -> `_lost_semantic_atoms` emits a
+finding row keyed `"clip_id": "clip_eb57e0923467ed28ed7d"`. Meanwhile its
+OWN identity-observability row was mangled at `identity_observability_
+rows_for_source`'s `rows[match.reconstructed_attempt_id] = ...` line,
+keyed instead by its `attempt_id` (or `source_span_id`). **First
+disappearing seam: `cutsell_worker/exact_identity_observability.py::
+identity_observability_rows_for_source`** (plus the identically-caused
+internal `takes_by_clip_id.get(match.reconstructed_attempt_id)` lookup
+and `identity_match_diagnostic_row`'s own mislabeled `"clip_id"` field).
+
+**STAGE 10 (D-235X context):** **AUTHORITY DATA is NOT missing.**
+`exact_match_by_clip_id` (pipeline.py lines 2636-2639) is correctly
+re-keyed by the loop's own `take.clip_id`, proven independent of this
+bug -- Freeze's own D-235X authority path is unaffected. **Only the
+OBSERVABILITY layer (D-237G) has its own, separate, incorrect keying.**
+This is a pure OBSERVABILITY-ROW-MISSING (mis-keyed) finding, never an
+AUTHORITY-DATA-MISSING one.
+
+**STAGE 11:** no identity-contract or containment-authority conclusion
+is drawn; this gate only establishes that the CORRELATION mechanism
+itself cannot currently produce a joined row, independent of any future
+containment-ownership question.
+
+**ROOT-CAUSE VERDICT: B -- CLIP-ID NAMESPACE / RE-MINTING MISMATCH BREAKS
+CORRELATION** (precisely: a namespace SUBSTITUTION, not literal re-
+minting -- `entity_id`'s attempt_id-first fallback stands in for clip_id
+at exactly one function's own dict-keying, while the sibling D-235X
+authority map at the very same call site already does this correctly).
+
+**No fix implemented, no RAW launched, per this task's own explicit
+instruction.**
+
+**Smallest future observability fix (NAMED, NOT IMPLEMENTED):**
+`identity_observability_rows_for_source` would need to key its output
+dict (and populate `identity_match_diagnostic_row`'s own `"clip_id"`
+field) by the loop's own `take.clip_id` -- exactly mirroring the pattern
+`all_identity_matches_by_clip_id`/`exact_match_by_clip_id` already use at
+the pipeline.py call site two lines above it -- rather than by `match.
+reconstructed_attempt_id`. This is an OBSERVABILITY-ONLY re-keying (the
+authority maps, Freeze, materiality, and every other consumer of `match`
+objects are untouched by construction); it would need its own targeted
+tests (including a fixture where `CandidateTake.attempt_id` is genuinely
+populated, closing the exact gap that let this bug ship through 31
+passing offline tests) before any future gate implements it.
+
+**Files that would need to change (not changed by this gate):**
+`cutsell_worker/exact_identity_observability.py` (`identity_observability_
+rows_for_source`, `identity_match_diagnostic_row`) only -- no other
+production file's own logic is implicated.
+
+**Identity policy change required?** No. **Threshold required?** No.
+**Provider required?** No. **RAW required?** No, not for this forensic;
+a future confirmatory RAW would be needed only after any actual fix is
+implemented and offline-qualified. **Paid compute required?** No, not by
+this task.
+
+**Freeze interpretation (observed, not modified):** `freeze_blocked=true`,
+`trigger_categories` include `COHERENCE_BLOCKING_LOST_SEMANTIC_ATOM` and
+`REPAIR_LOOP_NEEDS_HUMAN_REVIEW`, matching the corrected D-237J facts;
+`first_missing_link=FREEZE_BLOCKED_BEFORE_PACING` is consistent with the
+already-tracked, independent Pacing-V2 serialization gap (D-235Y/D-237/
+D-237H/D-237J) and is unrelated to this correlation bug.
+
+**Language-Spine status:** unaffected, still CLOSED (252/13/3/3/3, 4
+silence intervals, 2 pause boundaries, matching every prior real-media
+run this session).
+
+**Pacing status:** unaffected by this finding; the persistent Pacing-V2
+gap remains a separate, already-tracked issue.
+
+**Canonical status:** `D237K_LOST_ATOM_IDENTITY_CORRELATION_NAMESPACE_
+MISMATCH_ROOT_CAUSED`.
+
+**Exact next gate:** not launched. A future gate (not yet numbered) would
+offline-implement the smallest observability re-keying fix above, add a
+regression test using a real `attempt_id`-populated fixture, and
+qualify offline before any RAW confirms it on real media. **Not
+authorized by this gate.**
+
+**Confirmation:** FORENSIC ONLY. Zero production files changed. No
+identity-authority/`AUTHORITATIVE_RELATIONSHIP_STATUSES`/containment-
+promotion/Language-Spine/Freeze/materiality/repair/P1/P2/Pacing/Audio-
+Join/threshold logic changed. Zero RAW, zero Modal, zero RunPod, zero
+provider calls made. This entry is a docs-only decision-log addition.
+
+Then STOP. Do NOT implement. Do NOT launch RAW. Wait for Product Owner
+coordination.
