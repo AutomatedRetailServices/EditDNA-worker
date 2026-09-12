@@ -140,6 +140,11 @@ from .shared_attempt_word_identity import (
     AUTHORITATIVE_RELATIONSHIP_STATUSES,
     build_attempt_language_identity_matches_for_source,
 )
+# D-237G: bounded, additive, diagnostics-only re-projection of the SAME
+# `matches` this block already computes -- reads already-built
+# AttemptLanguageIdentityMatch/WordMembership objects, recomputes no set
+# arithmetic/relationship of its own. Never consulted by any authority.
+from .exact_identity_observability import identity_observability_rows_for_source
 # D-235X: the SAME default-OFF flag D-235R/W already gate the Freeze-
 # composition seam on -- reused here unchanged, never a new flag.
 from .lost_semantic_atom_freeze_authority import lost_atom_materiality_freeze_authority_enabled
@@ -2604,6 +2609,14 @@ def build_flow_b_draft(
     exact_match_by_clip_id: dict[str, object] = {}
     proposition_candidate_ids_by_attempt_id: dict[str, tuple] = {}
     proposition_slot_evidence_by_id: dict[str, str] = {}
+    # D-237G: the SAME `matches` this loop already computes, kept UNFILTERED
+    # (every relationship_status, not just AUTHORITATIVE ones) so a future
+    # real-media run can observe exactly why a specific clip did or did not
+    # reach authority -- see exact_identity_observability.py's own module
+    # docstring. Purely additive: nothing above reads or is affected by
+    # these two new maps.
+    all_identity_matches_by_clip_id: dict[str, object] = {}
+    identity_observability_by_clip_id: dict[str, dict] = {}
     if lost_atom_materiality_freeze_authority_enabled():
         takes_by_source: dict[str, list] = {}
         for take in take_tuple:
@@ -2621,6 +2634,7 @@ def build_flow_b_draft(
                 phrases=evidence.phrases,
             )
             for take, match in zip(source_takes, matches):
+                all_identity_matches_by_clip_id[take.clip_id] = match
                 if match.relationship_status in AUTHORITATIVE_RELATIONSHIP_STATUSES:
                     exact_match_by_clip_id[take.clip_id] = match
             proposition_candidate_ids_by_attempt_id.update(
@@ -2629,11 +2643,27 @@ def build_flow_b_draft(
             proposition_slot_evidence_by_id.update(
                 proposition_slot_evidence_by_id_for(evidence.proposition_candidates)
             )
+            # D-237G: bounded per-clip observability rows -- scoped to
+            # exactly THIS source's own take/attempt population (never an
+            # all-vs-all corpus matrix), reusing the SAME `matches` above.
+            identity_observability_by_clip_id.update(
+                identity_observability_rows_for_source(
+                    matches=matches,
+                    takes_by_clip_id={t.clip_id: t for t in source_takes},
+                    attempts_by_id={a.attempt_id: a for a in evidence.attempts},
+                    proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
+                    exact_match_by_clip_id=exact_match_by_clip_id,
+                )
+            )
     lost_atom_exact_identity_context = (
         {
             "exact_match_by_clip_id": exact_match_by_clip_id,
             "proposition_candidate_ids_by_attempt_id": proposition_candidate_ids_by_attempt_id,
             "proposition_slot_evidence_by_id": proposition_slot_evidence_by_id,
+            # D-237G: unfiltered match map + bounded observability rows,
+            # additive, diagnostics-only (see module docstring).
+            "all_identity_matches_by_clip_id": all_identity_matches_by_clip_id,
+            "identity_observability_by_clip_id": identity_observability_by_clip_id,
             # D-235X diagnostics (tail-safe counts only, no transcript dump).
             "exact_identity_map_clip_count": len(take_tuple),
             "exact_identity_match_count": len(exact_match_by_clip_id),

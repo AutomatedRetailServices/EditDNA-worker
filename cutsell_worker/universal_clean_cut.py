@@ -182,6 +182,13 @@ def process_universal_clean_cut_sources(
     _proposition_slot_evidence_by_id = (
         _lost_atom_exact_identity_context.get("proposition_slot_evidence_by_id") or {}
     )
+    # D-237G: bounded, additive, diagnostics-only per-clip identity rows
+    # (see exact_identity_observability.py's own module docstring) --
+    # `{}` whenever the context above was never built, same fail-open
+    # posture as the three extractions above.
+    _identity_observability_by_clip_id = (
+        _lost_atom_exact_identity_context.get("identity_observability_by_clip_id") or {}
+    )
 
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
@@ -244,6 +251,7 @@ def process_universal_clean_cut_sources(
                     exact_match_by_clip_id=_exact_match_by_clip_id,
                     proposition_candidate_ids_by_attempt_id=_proposition_candidate_ids_by_attempt_id,
                     proposition_slot_evidence_by_id=_proposition_slot_evidence_by_id,
+                    identity_observability_by_clip_id=_identity_observability_by_clip_id,
                 ),
             )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
@@ -564,6 +572,7 @@ def process_universal_clean_cut_sources(
                 exact_match_by_clip_id=_exact_match_by_clip_id,
                 proposition_candidate_ids_by_attempt_id=_proposition_candidate_ids_by_attempt_id,
                 proposition_slot_evidence_by_id=_proposition_slot_evidence_by_id,
+                identity_observability_by_clip_id=_identity_observability_by_clip_id,
             )
             signature_after_validation = semantic_selection_signature(
                 authoritative_draft, authority_identity=source_identity,

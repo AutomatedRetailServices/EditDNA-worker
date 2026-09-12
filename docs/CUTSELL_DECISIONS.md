@@ -57264,3 +57264,136 @@ decision entry.
 
 Then STOP. Do not implement. Do not launch RAW. Wait for Product Owner
 coordination.
+
+## D-237G — EXACT IDENTITY REAL-MEDIA OBSERVABILITY FOUNDATION (offline only, POST D-237F)
+
+**Scope:** implement bounded, additive, diagnostics-only observability
+proving on real media exactly why a clip does or does not reach an
+`AUTHORITATIVE_RELATIONSHIP_STATUSES` verdict -- per D-237F's own
+confirmed finding that `live_language_spine_diagnostics()` only ever
+serializes counts, never per-object data. No identity-rule change, no
+containment promotion, no Language-Spine/Freeze/materiality/repair/
+P1/P2/Pacing/Audio-Join/threshold change.
+
+**New file:** `cutsell_worker/exact_identity_observability.py` -- pure,
+additive re-projection layer. Every function reuses an already-built
+`shared_attempt_word_identity.py` (D-235P) object verbatim: `WordMembership`,
+`AttemptLanguageIdentityMatch`, `AUTHORITATIVE_RELATIONSHIP_STATUSES`
+(imported, never redefined), `exact_proposition_candidate_ids_for_match`.
+Recomputes zero set arithmetic beyond a bare frozenset difference/
+intersection over already-computed index sets (never a new relationship
+classification). Key functions:
+- `candidate_take_identity_diagnostic_row` / `language_attempt_identity_
+  diagnostic_row`: bounded per-object rows (clip_id/attempt_id, source_
+  asset_id, source_start/end, word_index_count/min/max, word_indices,
+  identity_status; the attempt row also carries proposition_candidate_ids
+  and attempt_state). No ASR text, no transcript, no audio -- word
+  indices are the one exception this task's own directive authorizes.
+- `identity_match_diagnostic_row`: THE per-clip row -- relationship_
+  status, relationship_is_authoritative (bare re-projection of the
+  canonical set, never promoting containment), reconstructed_only/
+  language_only word-index sets+counts, intersection_count,
+  exact_match_by_clip_id_present/attempt_ids/proposition_candidate_ids.
+- `identity_observability_rows_for_source`: batch builder, bounded to
+  exactly the (candidate, attempt-set) pairs a caller already compared
+  (iterates nothing of its own) -- fails open (`None` spans, never
+  raises) when a take/attempt lookup misses.
+- `lost_atom_identity_correlation`: pure join of `lost_semantic_atoms`
+  rows (by `clip_id`) with already-built identity rows -- omits, never
+  guesses, an unmatched row.
+- `exact_identity_observability_diagnostics`: compact counts-only summary.
+
+**Wiring (all additive, zero behavior change when unused):**
+- `pipeline.py`: the SAME `matches` loop that already builds
+  `exact_match_by_clip_id` (D-235X) now also captures the UNFILTERED
+  `all_identity_matches_by_clip_id` (every relationship_status, not
+  just authoritative ones -- zero extra compute, the data already
+  existed and was previously discarded after the authoritative filter)
+  and calls `identity_observability_rows_for_source` per source, adding
+  both into `lost_atom_exact_identity_context`.
+- `universal_clean_cut.py`: extracts `identity_observability_by_clip_id`
+  (mirroring the three existing D-235X extractions) and threads it as
+  one new kwarg into both existing `apply_final_story_coherence_
+  validation`/`apply_post_authority_story_validation` call sites.
+- `final_story_coherence_validation.py`: `identity_observability_by_
+  clip_id` added as one new optional kwarg to `apply_final_story_
+  coherence_validation`, `_apply_post_authority_validation_only`,
+  `apply_post_authority_story_validation` (delegated through exactly
+  like `exact_match_by_clip_id` already is); a new `_identity_
+  observability_for_lost_atoms` helper correlates `lost_semantic_atoms`
+  rows with the bounded rows and stores the result under
+  `diagnostics["final_story_coherence_validation"]["lost_atom_identity_
+  observability"]` at both existing computation sites.
+
+**No workflow change needed.** The existing "Print full canonical
+diagnostics" step already does `jq '.diagnostics.final_story_coherence_
+validation // {status:"absent"}'` -- a whole-object dump -- so the new
+key automatically surfaces in a future RAW's own log with zero
+`.github/workflows/cutsell-video00-modal-raw.yml` edit.
+
+**Source scoping:** every row carries its own `source_asset_id`; rows
+are built strictly per-source (the caller's own per-source loop), never
+an all-vs-all corpus matrix. Cross-source isolation proven directly.
+
+**Tests:** new `tests/test_cutsell_d237g_exact_identity_observability.py`
+(31 tests): all 5 real relationship shapes (EXACT_SAME_MEMBERSHIP,
+LANGUAGE_CONTAINS_RECONSTRUCTED, RECONSTRUCTED_CONTAINS_LANGUAGE,
+PARTIAL_OVERLAP, DISJOINT) serialized correctly against REAL Language
+Spine objects (not synthetic matches) where feasible; cross-source
+isolation; the authoritative boolean proven to mirror the canonical,
+untouched frozenset; a `git diff --stat` proof `shared_attempt_word_
+identity.py` itself has zero diff; exact_match-map and proposition-id
+reporting; lost-atom correlation (present + omitted-when-unmatched);
+multiple attempts/propositions same source; fail-open on empty word
+indices and missing attempt/take data; determinism; boundedness (no
+transcript-word leakage into the serialized JSON); explicit no-provider/
+no-RAW/no-new-threshold/no-identity-policy-mutation/no-Freeze-
+materiality-repair/no-P1-P2/no-Pacing-Audio-Join proofs (import-line-
+scoped, per the established D-235P/D-236 precedent, to avoid false
+positives on this module's own docstring prose); and wiring-presence
+checks across all three touched production files. All pass.
+
+`python3 -m compileall cutsell_worker tests` -- clean. D-235P/D-235X/
+D-236 + universal_clean_cut + repair_loop suites -- 134 passed.
+`final_story_coherence_validation`/D-090/D-199 suites -- 114 passed.
+CleanCutBench -- 55/55. Full suite (`pytest tests/ --ignore=tests/
+test_semantic_stitch.py`): **6417 passed**, 6 failed -- the SAME 5
+pre-existing unrelated failures this session has tracked throughout
+(`test_video00_modal_hybrid_semantic_parity.py` x4, `test_hybrid_story_
+guard_incomplete_retry.py` x1) plus ONE self-resolving `git diff
+--stat HEAD`-based test (`test_cutsell_d169_language_proposition_
+relation.py::test_30_old_serialized_ids_unaffected`) that only fails
+while changes are uncommitted, matching the exact precedent this
+session already established for D-235W/D-235X. Zero new genuine
+failures.
+
+**Verdict: A -- EXACT IDENTITY REAL-MEDIA OBSERVABILITY OFFLINE
+PROVEN, READY FOR ONE REAL-MEDIA IDENTITY TRACE.**
+
+**Canonical status:** `EXACT_IDENTITY_REAL_MEDIA_OBSERVABILITY_OFFLINE_
+PROVEN`.
+
+**Exact next gate:** D-237H -- ONE real-media exact-identity trace.
+Same sibling RAW, exactly ONE maximum, same required flags as D-235Y/
+D-237, no behavioral change. D-237H must determine the ACTUAL
+relationship for the historical target atom (and any other blocking
+lost atom) from this run's own now-serialized `lost_atom_identity_
+observability` rows before any identity-contract extension (per
+D-237F's own Stage 9 audit) is authorized. **Not launched automatically**
+-- Product Owner coordination required first.
+
+**Engine patch required after this?** No -- observability only, nothing
+to patch. **Paid compute required?** No, not by this task. **RAW
+required?** Yes, for D-237H specifically (not this task).
+
+**Confirmation:** OFFLINE ONLY. Three production files changed
+(`pipeline.py`, `universal_clean_cut.py`, `final_story_coherence_
+validation.py`, all additive -- every new parameter defaults to `None`/
+`{}` and every new diagnostics key is additive, never replacing an
+existing one), one new production file (`exact_identity_observability.py`).
+Zero RAW, zero Modal, zero RunPod, zero provider calls made. No
+identity-rule/AUTHORITATIVE_RELATIONSHIP_STATUSES/containment-promotion/
+Language-Spine/Freeze/materiality/repair/P1/P2/Pacing/Audio-Join/
+threshold logic changed.
+
+Then STOP. Do NOT launch D-237H. Wait for Product Owner coordination.

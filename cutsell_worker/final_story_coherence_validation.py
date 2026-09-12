@@ -137,6 +137,11 @@ from .lost_semantic_atom_freeze_authority import (
 # AttemptLanguageIdentityMatch, never touches P1/P2 architecture. See
 # `_complete_lost_semantic_atom_materiality_by_clip_id`'s own docstring.
 from .shared_attempt_word_identity import AttemptLanguageIdentityMatch
+# D-237G: bounded, additive, diagnostics-only re-projection -- see
+# exact_identity_observability.py's own module docstring. Never an
+# authority; correlated here only because this is where lost_semantic_
+# atoms rows (their own lost_atom_provenance_id) already exist.
+from .exact_identity_observability import lost_atom_identity_correlation
 from .semantic_atom_importance import (
     CONTEXTUAL as ATOM_CONTEXTUAL,
     SemanticAtomImportanceArbiter,
@@ -1401,6 +1406,23 @@ def _materiality_by_provenance_id(
     return result
 
 
+def _identity_observability_for_lost_atoms(
+    lost_semantic_atoms: Sequence[Mapping],
+    identity_observability_by_clip_id: Optional[Mapping[str, dict]],
+) -> list[dict]:
+    """D-237G: pure lookup/join of already-built, bounded identity-
+    observability rows (`pipeline.py`'s own `identity_observability_by_
+    clip_id`, D-235P's exact word-membership relationship re-projected,
+    never recomputed) against this pass's own `lost_semantic_atoms` rows,
+    by `clip_id`. `[]` whenever no rows were built (flag off, or no live
+    Language Spine evidence) -- same fail-open posture as `_materiality_
+    by_provenance_id` above. Diagnostics only: never read by Freeze/
+    materiality/repair authority."""
+    if not identity_observability_by_clip_id:
+        return []
+    return lost_atom_identity_correlation(lost_semantic_atoms, identity_observability_by_clip_id)
+
+
 def apply_final_story_coherence_validation(
     draft,
     *,
@@ -1439,6 +1461,14 @@ def apply_final_story_coherence_validation(
     exact_match_by_clip_id: Mapping[str, AttemptLanguageIdentityMatch] | None = None,
     proposition_candidate_ids_by_attempt_id: Mapping[str, Tuple[str, ...]] | None = None,
     proposition_slot_evidence_by_id: Mapping[str, str] | None = None,
+    # D-237G: an optional, pre-built clip_id -> bounded identity-
+    # observability-row map (`exact_identity_observability.py`'s own
+    # `identity_observability_rows_for_source`, built by `pipeline.py`
+    # from the SAME `exact_match_by_clip_id`-producing computation, kept
+    # UNFILTERED so a row exists even when the relationship is not
+    # authoritative). None everywhere the flag is off -- diagnostics only,
+    # never consulted by freeze_blocked/materiality itself.
+    identity_observability_by_clip_id: Mapping[str, dict] | None = None,
 ):
     """Legacy resolving pass -- see the module docstring's authority
     boundary. For the post-authority validation-only pass use
@@ -1459,6 +1489,7 @@ def apply_final_story_coherence_validation(
             exact_match_by_clip_id=exact_match_by_clip_id,
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+            identity_observability_by_clip_id=identity_observability_by_clip_id,
         )
     draft = _fold_alternates_into_discarded(draft)
 
@@ -1619,6 +1650,12 @@ def apply_final_story_coherence_validation(
         "lost_atom_materiality_orchestration": _lost_atom_materiality_orchestration_diagnostics(
             materiality_by_clip_id, lost_semantic_atoms, critical_claim_conflict_by_clip_id,
         ),
+        # D-237G: bounded, correlated identity-observability rows -- see
+        # _identity_observability_for_lost_atoms's own docstring. [] when
+        # the flag is off or no rows were built.
+        "lost_atom_identity_observability": _identity_observability_for_lost_atoms(
+            lost_semantic_atoms, identity_observability_by_clip_id,
+        ),
         "validation_mode": LEGACY_RESOLVING_MODE,
         "not_implemented": [
             "general_non_numeric_non_negation_contradiction_detection",
@@ -1679,6 +1716,9 @@ def _apply_post_authority_validation_only(
     exact_match_by_clip_id: Mapping[str, AttemptLanguageIdentityMatch] | None = None,
     proposition_candidate_ids_by_attempt_id: Mapping[str, Tuple[str, ...]] | None = None,
     proposition_slot_evidence_by_id: Mapping[str, str] | None = None,
+    # D-237G: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring.
+    identity_observability_by_clip_id: Mapping[str, dict] | None = None,
 ):
     """StoryValidator after the one semantic authority has ruled: validate
     and report on the resolver's applied selection, never edit it.
@@ -1842,6 +1882,10 @@ def _apply_post_authority_validation_only(
         # D-235W: see the legacy-resolving pass's own identically-named field.
         "lost_atom_materiality_orchestration": _lost_atom_materiality_orchestration_diagnostics(
             materiality_by_clip_id, lost_semantic_atoms, critical_claim_conflict_by_clip_id,
+        ),
+        # D-237G: see the legacy-resolving pass's own identically-named field.
+        "lost_atom_identity_observability": _identity_observability_for_lost_atoms(
+            lost_semantic_atoms, identity_observability_by_clip_id,
         ),
         "selection_mutation_self_check": mutation_report_to_diagnostics(self_check),
         "not_implemented": [
@@ -2047,6 +2091,9 @@ def apply_post_authority_story_validation(
     exact_match_by_clip_id: Mapping[str, AttemptLanguageIdentityMatch] | None = None,
     proposition_candidate_ids_by_attempt_id: Mapping[str, Tuple[str, ...]] | None = None,
     proposition_slot_evidence_by_id: Mapping[str, str] | None = None,
+    # D-237G: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring.
+    identity_observability_by_clip_id: Mapping[str, dict] | None = None,
 ):
     """The ONE entry point for the AUTHORITATIVE second pass. Requires the
     typed `context`; a missing context (or a caller-reported
@@ -2077,6 +2124,7 @@ def apply_post_authority_story_validation(
             "lost_semantic_atoms": [],
             "lost_critical_claims": [],
             "claim_coverage_confirmations": [],
+            "lost_atom_identity_observability": [],
             "freeze_blocked": True,
             "not_implemented": [],
         }
@@ -2094,4 +2142,5 @@ def apply_post_authority_story_validation(
         exact_match_by_clip_id=exact_match_by_clip_id,
         proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
         proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+        identity_observability_by_clip_id=identity_observability_by_clip_id,
     )
