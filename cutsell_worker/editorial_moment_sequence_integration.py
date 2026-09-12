@@ -81,6 +81,7 @@ from typing import Iterable, Mapping, Sequence, Tuple
 
 from .contracts import CandidateTake
 from .editorial_moment_sequence import (
+    AUDIENCE_DELIVERY_UNCERTAIN,
     EditorialMoment,
     EditorialSequenceHypothesis,
     MOMENT_ROLE_UNCERTAIN,
@@ -1116,6 +1117,197 @@ def p1_moment_role_and_audience_status_by_clip_id_for(
             role_by_clip_id[moment.source_span_id] = moment.moment_role
             audience_status_by_clip_id[moment.source_span_id] = moment.audience_delivery_status
     return role_by_clip_id, audience_status_by_clip_id
+
+
+# ---------------------------------------------------------------------------
+# D-239O: EXACT LOST-ATOM TARGET -> P1 MOMENT OBSERVABILITY.
+#
+# D-239N's own forensic (docs/CUTSELL_DECISIONS.md D-239N) ruled out
+# clip-id namespace mismatch, attempt-id substitution, and one-to-many
+# moment construction as causes of an unresolved Seam C lookup, and
+# narrowed the remaining gap to exactly two live, undistinguished
+# mechanisms: (B) the target's own `CandidateTake` never received a
+# matching `UnderstandingSpan` (so `build_editorial_moments_for_source`
+# skipped it, and no `EditorialMoment` was ever minted), or (F) a moment
+# WAS minted but its own `confidence`/`moment_role`/`audience_delivery_
+# status` fails `p1_moment_role_and_audience_status_by_clip_id_for`'s own
+# three-condition gate (see that function's own docstring). This section
+# adds BEHAVIOR-NEUTRAL observability distinguishing exactly those two
+# cases -- and the finer sub-cases within (B) -- for a BOUNDED set of
+# caller-supplied target clip_ids (never a full P1 dump). It calls NO
+# new classifier, recomputes NO role/confidence/audience value, and
+# reuses the SAME already-computed `EditorialMomentUnderstanding`/
+# `WatchListenUnderstanding` objects and the SAME already-computed
+# `p1_moment_role_by_clip_id`/`p1_audience_delivery_status_by_clip_id`
+# maps `p1_moment_role_and_audience_status_by_clip_id_for` already
+# produces -- this function's own body contains zero classification
+# logic of its own; it only READS already-classified fields and reports,
+# per target, WHICH of the (mutually exclusive, ordered) reasons applies.
+# ---------------------------------------------------------------------------
+P1_TARGET_STATUS_MOMENT_FOUND_RESOLVED = "MOMENT_FOUND_RESOLVED"
+P1_TARGET_STATUS_MOMENT_FOUND_LOW_CONFIDENCE = "MOMENT_FOUND_LOW_CONFIDENCE"
+P1_TARGET_STATUS_MOMENT_FOUND_ROLE_UNCERTAIN = "MOMENT_FOUND_ROLE_UNCERTAIN"
+P1_TARGET_STATUS_MOMENT_FOUND_AUDIENCE_UNCERTAIN = "MOMENT_FOUND_AUDIENCE_UNCERTAIN"
+P1_TARGET_STATUS_NO_EDITORIAL_MOMENT = "NO_EDITORIAL_MOMENT"
+P1_TARGET_STATUS_NO_UNDERSTANDING_SPAN = "NO_UNDERSTANDING_SPAN"
+P1_TARGET_STATUS_AMBIGUOUS = "AMBIGUOUS"
+ALLOWED_P1_TARGET_LOOKUP_STATUSES: frozenset[str] = frozenset({
+    P1_TARGET_STATUS_MOMENT_FOUND_RESOLVED, P1_TARGET_STATUS_MOMENT_FOUND_LOW_CONFIDENCE,
+    P1_TARGET_STATUS_MOMENT_FOUND_ROLE_UNCERTAIN, P1_TARGET_STATUS_MOMENT_FOUND_AUDIENCE_UNCERTAIN,
+    P1_TARGET_STATUS_NO_EDITORIAL_MOMENT, P1_TARGET_STATUS_NO_UNDERSTANDING_SPAN,
+    P1_TARGET_STATUS_AMBIGUOUS,
+})
+
+_EXACT_P1_TARGET_EVIDENCE_SCHEMA_VERSION = "cutsell.exact_p1_target_evidence.v1"
+
+
+def exact_p1_target_evidence_for(
+    target_source_asset_id_by_clip_id: Mapping[str, str],
+    *,
+    editorial_moment_understandings: Iterable[EditorialMomentUnderstanding],
+    watch_listen_understandings: Iterable[WatchListenUnderstanding],
+    p1_moment_role_by_clip_id: Mapping[str, str],
+    p1_audience_delivery_status_by_clip_id: Mapping[str, str],
+) -> dict:
+    """D-239O: exact, per-target-clip_id P1 lookup observability. Pure;
+    reads only already-computed objects, mints nothing, calls no
+    classifier. `target_source_asset_id_by_clip_id` is the BOUNDED set of
+    lost-atom-correlated clip_ids to report on (never every clip in the
+    run) -- the caller (`pipeline.py`, the SAME `lost_atom_ownership_by_
+    clip_id` population D-238/D-239F already build) decides scope; this
+    function never discovers targets on its own.
+
+    Correlates by exact, unmodified identity only: `target_source_asset_
+    id_by_clip_id`'s own keys ARE `CandidateTake.clip_id`/`DraftClip.
+    clip_id` (D-239N's own Stage 2 proof -- one unbroken identity chain),
+    matched against `UnderstandingSpan.span_id` and `EditorialMoment.
+    source_span_id` -- both, by construction, the SAME clip_id value
+    space (D-239N's own Stage 5 proof). No alternate namespace (attempt_
+    id, source_span_id-as-a-different-field, timestamp/overlap) is ever
+    consulted for this correlation.
+
+    `p1_target_lookup_status` is derived, per target, from an ordered
+    sequence of already-computed facts (never re-derived, never a new
+    threshold): ambiguous multi-moment match (defensive; D-239N's own
+    Stage 1 proof says this should never occur) > no matching
+    `UnderstandingSpan` at all (D-239N's own live candidate B) > a
+    span existed but no `EditorialMoment` was built for it (a DIFFERENT,
+    narrower shape than "no span at all" -- reported honestly, distinct
+    from B, per this task's own "another exact structural reason" case)
+    > a moment exists but its own `confidence != CONFIDENCE_SUPPORTED`
+    (D-239N's own live candidate F) > a moment exists, confidence
+    supported, but `moment_role == MOMENT_ROLE_UNCERTAIN` (also
+    candidate F) > a moment exists, confidence supported, role resolved,
+    but `audience_delivery_status` is `UNCERTAIN`/absent (a finer
+    distinction than Seam C's own binary resolved/not-resolved -- Seam C
+    itself does not gate on audience status, so `helper_lookup_resolved`
+    can be `True` even when this exact status fires; D-239L's own
+    corroboration check separately requires a resolved audience status,
+    so this distinction explains a DIFFERENT downstream gate, never
+    changes Seam C's own contract) > fully resolved.
+
+    `helper_lookup_resolved`/`helper_lookup_role`/`helper_lookup_
+    audience_delivery_status` are read DIRECTLY off the SAME `p1_moment_
+    role_by_clip_id`/`p1_audience_delivery_status_by_clip_id` maps `p1_
+    moment_role_and_audience_status_by_clip_id_for` already produced --
+    never recomputed, so this diagnostic's own `helper_lookup_resolved`
+    is provably consistent with that function's own real behavior (see
+    this task's own consistency tests)."""
+    understandings_by_source: dict[str, EditorialMomentUnderstanding] = {
+        u.source_asset_id: u for u in editorial_moment_understandings
+    }
+    spans_by_source: dict[str, dict[str, UnderstandingSpan]] = {}
+    for wlu in watch_listen_understandings:
+        span_map = spans_by_source.setdefault(wlu.source_asset_id, {})
+        for span in wlu.understanding_spans:
+            span_map[span.span_id] = span
+
+    rows: list[dict] = []
+    for clip_id in sorted(target_source_asset_id_by_clip_id):
+        source_asset_id = target_source_asset_id_by_clip_id[clip_id]
+        span_map = spans_by_source.get(source_asset_id, {})
+        understanding_span_present = clip_id in span_map
+        understanding_span_id = span_map[clip_id].span_id if understanding_span_present else None
+
+        understanding = understandings_by_source.get(source_asset_id)
+        matching_moments = tuple(
+            m for m in (understanding.moments if understanding is not None else ())
+            if m.source_span_id == clip_id
+        )
+        editorial_moment_present = bool(matching_moments)
+        ambiguous = len(matching_moments) > 1
+
+        moment_id = source_span_id_out = local_group_id = None
+        role = role_confidence = audience_status = recording_process_status = None
+        proposition_ids: Tuple[str, ...] = ()
+        if matching_moments:
+            moment = matching_moments[0]
+            moment_id = moment.editorial_moment_id
+            source_span_id_out = moment.source_span_id
+            role = moment.moment_role
+            role_confidence = moment.confidence
+            audience_status = moment.audience_delivery_status
+            recording_process_status = moment.recording_process_status
+            proposition_ids = tuple(moment.proposition_candidate_ids)
+            if understanding is not None:
+                for group in understanding.local_groups:
+                    if moment_id in group.moment_ids:
+                        local_group_id = group.group_id
+                        break
+
+        helper_lookup_resolved = clip_id in p1_moment_role_by_clip_id
+        helper_lookup_role = p1_moment_role_by_clip_id.get(clip_id)
+        helper_lookup_audience_delivery_status = p1_audience_delivery_status_by_clip_id.get(clip_id)
+
+        if ambiguous:
+            status = P1_TARGET_STATUS_AMBIGUOUS
+            reason = "multiple_editorial_moments_share_this_exact_source_span_id"
+        elif not understanding_span_present:
+            status = P1_TARGET_STATUS_NO_UNDERSTANDING_SPAN
+            reason = "no_understanding_span_matches_this_exact_clip_id"
+        elif not editorial_moment_present:
+            status = P1_TARGET_STATUS_NO_EDITORIAL_MOMENT
+            reason = "understanding_span_present_but_no_editorial_moment_was_built_for_it"
+        elif role_confidence != CONFIDENCE_SUPPORTED:
+            status = P1_TARGET_STATUS_MOMENT_FOUND_LOW_CONFIDENCE
+            reason = "editorial_moment_present_but_confidence_is_not_CONFIDENCE_SUPPORTED"
+        elif role == MOMENT_ROLE_UNCERTAIN:
+            status = P1_TARGET_STATUS_MOMENT_FOUND_ROLE_UNCERTAIN
+            reason = "editorial_moment_present_and_confidence_supported_but_role_is_UNCERTAIN"
+        elif audience_status is None or audience_status == AUDIENCE_DELIVERY_UNCERTAIN:
+            status = P1_TARGET_STATUS_MOMENT_FOUND_AUDIENCE_UNCERTAIN
+            reason = "role_resolved_but_audience_delivery_status_uncertain_or_absent"
+        else:
+            status = P1_TARGET_STATUS_MOMENT_FOUND_RESOLVED
+            reason = "exact_editorial_moment_resolved_for_this_clip_id"
+
+        rows.append({
+            "clip_id": clip_id,
+            "source_asset_id": source_asset_id,
+            "understanding_span_present": understanding_span_present,
+            "understanding_span_id": understanding_span_id,
+            "editorial_moment_present": editorial_moment_present,
+            "moment_id": moment_id,
+            "source_span_id": source_span_id_out,
+            "local_group_id": local_group_id,
+            "role": role,
+            "role_confidence": role_confidence,
+            "audience_delivery_status": audience_status,
+            "recording_process_status": recording_process_status,
+            "proposition_candidate_ids": list(proposition_ids),
+            "helper_lookup_resolved": helper_lookup_resolved,
+            "helper_lookup_role": helper_lookup_role,
+            "helper_lookup_audience_delivery_status": helper_lookup_audience_delivery_status,
+            "helper_lookup_reason": reason,
+            "p1_target_lookup_status": status,
+        })
+
+    return {
+        "schema_version": _EXACT_P1_TARGET_EVIDENCE_SCHEMA_VERSION,
+        "target_count": len(rows),
+        "targets": rows,
+        "provenance": (_EXACT_P1_TARGET_EVIDENCE_SCHEMA_VERSION, "exact_p1_target_evidence_for"),
+    }
 
 
 # ---------------------------------------------------------------------------

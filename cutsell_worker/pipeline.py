@@ -122,6 +122,10 @@ from .editorial_moment_sequence_integration import (
     # EditorialMoment objects P1 already builds above -- see that
     # function's own docstring.
     p1_moment_role_and_audience_status_by_clip_id_for,
+    # D-239O: bounded, per-lost-atom-clip_id observability distinguishing
+    # WHY Seam C's own lookup does or does not resolve for a specific
+    # target -- see that function's own docstring.
+    exact_p1_target_evidence_for,
 )
 # D-199 (docs/CUTSELL_DECISIONS.md D-199): live Language-Spine construction
 # from already-computed ASR word timings -- DIAGNOSTICS ONLY, default OFF,
@@ -2764,6 +2768,30 @@ def build_flow_b_draft(
             "lost_atom_exact_singleton_ownership_count": sum(
                 1 for o in lost_atom_ownership_by_clip_id.values() if o.is_exact_singleton
             ),
+            # D-239O: bounded, per-lost-atom-clip_id P1 lookup observability
+            # distinguishing WHY Seam C's own lookup does or does not
+            # resolve for a specific target -- see exact_p1_target_evidence_
+            # for's own docstring. Only a projection of already-computed
+            # objects; scoped to the SAME `lost_atom_ownership_by_clip_id`
+            # population D-238/D-239F already build (never every clip in
+            # the run). Keyed by clip_id (same shape as `identity_
+            # observability_by_clip_id` above) so `final_story_coherence_
+            # validation.py` can correlate it against its own
+            # `lost_semantic_atoms` rows the SAME way it already does for
+            # D-237G, without this module recomputing anything.
+            "p1_target_lookup_evidence_by_clip_id": {
+                row["clip_id"]: row
+                for row in exact_p1_target_evidence_for(
+                    {
+                        clip_id: ownership.source_asset_id
+                        for clip_id, ownership in lost_atom_ownership_by_clip_id.items()
+                    },
+                    editorial_moment_understandings=editorial_moment_understandings,
+                    watch_listen_understandings=tuple(watch_listen_understandings),
+                    p1_moment_role_by_clip_id=p1_moment_role_by_clip_id,
+                    p1_audience_delivery_status_by_clip_id=p1_audience_delivery_status_by_clip_id,
+                )["targets"]
+            },
         }
         if lost_atom_materiality_freeze_authority_enabled() else None
     )

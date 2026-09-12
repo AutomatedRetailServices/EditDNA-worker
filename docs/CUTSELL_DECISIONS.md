@@ -60917,3 +60917,223 @@ here.
 code-only forensic. **Paid compute needed?** No, not by this task.
 
 Then STOP. Do NOT implement. Do NOT launch RAW.
+
+## D-239O — EXACT LOST-ATOM TARGET → P1 MOMENT OBSERVABILITY, OFFLINE ONLY, POST D-239N (Verdict A: EXACT TARGET P1 OBSERVABILITY OFFLINE-PROVEN, ready for D-239P real-media trace)
+
+**Status: CANONICAL**
+
+Branch `feature/runpod-pod-on-demand`, HEAD `036d4dd` verified exact match
+(clean tree) before any edit. Read `docs/CUTSELL_DECISIONS.md` through
+D-239N and `CLAUDE.md`.
+
+### Purpose
+
+D-239N proved (code proof, not inference) that the target lost atom's P1
+lookup failure is NOT namespace mismatch, reminting, attempt-id
+substitution, or one-to-many moment construction — but left candidates
+**B** (target never received an `EditorialMoment` because no matching
+`UnderstandingSpan` exists) and **F** (a moment exists but fails Seam C's
+own `CONFIDENCE_SUPPORTED`/non-`UNCERTAIN` gate) live and undistinguished
+without real per-moment data. D-239O adds behavior-neutral observability
+that can distinguish these exact cases on a future real-media run, without
+touching P1/retry-process/materiality/Freeze/repair/ownership/Language-
+Spine policy.
+
+### What was built
+
+**`cutsell_worker/editorial_moment_sequence_integration.py`** — a new
+pure function `exact_p1_target_evidence_for(target_source_asset_id_by_
+clip_id, *, editorial_moment_understandings, watch_listen_understandings,
+p1_moment_role_by_clip_id, p1_audience_delivery_status_by_clip_id) -> dict`,
+seven new status constants (`P1_TARGET_STATUS_MOMENT_FOUND_RESOLVED`,
+`_LOW_CONFIDENCE`, `_ROLE_UNCERTAIN`, `_AUDIENCE_UNCERTAIN`,
+`P1_TARGET_STATUS_NO_EDITORIAL_MOMENT`, `_NO_UNDERSTANDING_SPAN`,
+`_AMBIGUOUS`), a closed `ALLOWED_P1_TARGET_LOOKUP_STATUSES` frozenset, and
+a schema-version constant. For each target clip_id (the caller's own
+bounded set — never discovered by this function): reads whether a matching
+`UnderstandingSpan` exists (by exact `span_id == clip_id`, scoped to the
+target's own `source_asset_id`), whether a matching `EditorialMoment`
+exists (by exact `source_span_id == clip_id`), extracts the moment's own
+`editorial_moment_id`/`moment_role`/`confidence`/`audience_delivery_
+status`/`recording_process_status`/`proposition_candidate_ids`, resolves
+`local_group_id` by scanning the source's own `local_groups` for the
+moment's id, and reads `helper_lookup_resolved`/`helper_lookup_role`/
+`helper_lookup_audience_delivery_status` DIRECTLY off the already-computed
+Seam C maps (`p1_moment_role_by_clip_id`/`p1_audience_delivery_status_by_
+clip_id` — never recomputed). `p1_target_lookup_status` is derived by a
+strict ordered if/elif chain over these already-known facts (ambiguous >
+no span > no moment > low confidence > role uncertain > audience uncertain
+> resolved) — zero new classification, zero threshold, zero heuristic.
+
+**`cutsell_worker/pipeline.py`** — inside the existing `CUTSELL_LOST_ATOM_
+MATERIALITY_FREEZE_AUTHORITY_ENABLED`-gated block (the SAME gate D-238/
+D-239/D-239I already use), after `lost_atom_ownership_by_clip_id` is fully
+populated: calls `exact_p1_target_evidence_for` bounded to exactly that
+map's own clip_id population (never every clip in the run), re-keys its
+`targets` list by `clip_id`, and stores the result as a new
+`"p1_target_lookup_evidence_by_clip_id"` key inside the existing
+`lost_atom_exact_identity_context` dict — the SAME fail-open `{}`-under-
+flag-off posture every sibling map in that dict already uses.
+
+**`cutsell_worker/universal_clean_cut.py`** — extracts the new map (same
+pattern as `_identity_observability_by_clip_id`/D-237G) and threads it as
+`exact_p1_target_evidence_by_clip_id` into BOTH `apply_final_story_
+coherence_validation` call sites (the legacy-resolving pass and the
+AUTHORITATIVE second pass) — purely so `final_story_coherence_
+validation.py`'s own diagnostics-building code can re-project it verbatim;
+never consulted for any decision.
+
+**`cutsell_worker/final_story_coherence_validation.py`** — a new optional
+`exact_p1_target_evidence_by_clip_id` parameter threaded through
+`apply_final_story_coherence_validation`, `_apply_post_authority_
+validation_only`, and `apply_post_authority_story_validation` (the SAME
+three-function thread `identity_observability_by_clip_id` already uses),
+plus a new helper `_exact_p1_target_evidence_for_lost_atoms` (the SAME
+`lost_atom_identity_correlation` pure join `_identity_observability_for_
+lost_atoms` already uses) that correlates the caller's per-clip_id map
+against THIS pass's own `lost_semantic_atoms` rows by `clip_id` — so the
+final diagnostics carry only lost-atom/target-correlated rows, never a
+full P1 dump. The result is stored as a new sibling diagnostics key,
+`diagnostics["final_story_coherence_validation"]["exact_p1_target_
+evidence"]`, next to the existing `"lost_atom_identity_observability"` key,
+in both the legacy pass's and the authoritative pass's own diagnostics
+dict construction, and as `[]` in the post-authority integrity-failure
+early-return shape. Nothing in this file's own P1/materiality/Freeze/
+repair decision logic reads this new key.
+
+**`.github/workflows/cutsell-video00-modal-raw.yml`** — a new step,
+"D-239O Exact Lost-Atom Target → P1 Moment observability → dedicated
+extraction", modeled exactly on the existing D-239F step: reads `artifact/
+video00-modal.json`, pure-re-projects `diagnostics['final_story_
+coherence_validation']['exact_p1_target_evidence']` verbatim into a new
+dedicated `artifact/exact-p1-target-evidence.json` file (never fails the
+workflow — an absent/malformed subtree is reported observationally, exit
+0). The new artifact path was added to the `cutsell-video00-modal-
+validator-reports` upload list, alongside `lost-atom-ownership-
+materiality-diagnostics.json`.
+
+### Offline fixtures (15 required scenarios + 4 structural guarantees)
+
+New file `tests/test_cutsell_d239o_exact_p1_target_observability.py`, 19
+tests, all green: (1) matching span+moment+confident process role; (2)
+matching span+moment+audience role; (3) moment exists, confidence low
+(`CONFIDENCE_MIXED`); (4) moment exists, role uncertain; (5) moment
+exists, audience uncertain; (6) no `UnderstandingSpan`; (7)
+`UnderstandingSpan` exists but no `EditorialMoment`; (8) a dropped
+candidate still represented; (9) a selected candidate also represented;
+(10) cross-source isolation (a same-named clip_id in a different source
+never leaks across the source boundary); (11) exact clip_id/`source_
+span_id` equality (a strict-prefix clip_id never fuzzy-matches); (12) no
+attempt_id substitution (a moment's own `attempt_ids` never gets
+substituted for the target clip_id); (13) no aggregate fallback (9
+unrelated moments sharing one role/status never leak onto a target with
+zero real evidence); (14) deterministic output (identical inputs produce
+identical, clip_id-sorted results); (15) no transcript leakage (no
+`text`/`transcript`/`excerpt`/`words` key ever appears in a row, and no
+string value exceeds 200 chars). Plus: ambiguous multi-moment match
+reported honestly, `local_group_id` resolution when a moment belongs to a
+group, every reported status is in the closed `ALLOWED_P1_TARGET_LOOKUP_
+STATUSES` set, and an empty target set returns bounded-empty output. Every
+test builds the SAME Seam C maps via the UNCHANGED `p1_moment_role_and_
+audience_status_by_clip_id_for` before calling the new function — this
+suite never bypasses or recomputes Seam C's own gate.
+
+### Qualification
+
+- `python3 -m compileall -q cutsell_worker tests` — clean.
+- `python3 -c "import cutsell_worker.pipeline"` /
+  `cutsell_worker.universal_clean_cut` /
+  `cutsell_worker.final_story_coherence_validation` — clean imports.
+- New suite: 19/19 passed.
+- Targeted D-235/D-238/D-239-series suites (`test_cutsell_d239_live_lost_
+  atom_ownership_wiring.py`, `test_cutsell_d239i_exact_ownership_
+  materiality_completion.py`, `test_cutsell_d090_post_authority_
+  validation_immutability.py`, `test_cutsell_d235x_production_lost_atom_
+  authority_wiring.py`, `test_cutsell_d235w_live_lost_atom_materiality_
+  orchestration.py`, `test_cutsell_d235r_lost_semantic_atom_freeze_
+  authority.py`): 199/199 passed.
+- `CleanCutBench` parity (`test_cutsell_d050c1_5_full_cleancutbench_
+  parity.py`): 1/1 passed.
+- Full suite (`tests/`, excluding the pre-existing, unrelated `test_
+  semantic_stitch.py` collection error): **6705 passed, 10 failed, 13
+  subtests passed.** All 10 failures are accounted for, none is a genuine
+  regression:
+  - **5 are the anticipated "zero diff from HEAD" guard tests** written by
+    EARLIER gates (D-169's own guard on `pipeline.py`; D-239L's own four
+    guards on `editorial_moment_sequence_integration.py`, `final_story_
+    coherence_validation.py`, `pipeline.py`, `universal_clean_cut.py`).
+    Each guard's own docstring names this exact situation as legitimate:
+    "non-empty ONLY while a LATER, separately-authorized task's own
+    uncommitted change to that exact file sits in the working tree." D-239O
+    IS that later, separately-authorized task for precisely these four
+    files (named in its own directive's "Inspect" list) — the guards fire
+    because D-239O's own diff exists, not because of any unintended
+    drift.
+  - **5 are pre-existing baseline failures, confirmed via `git stash`**
+    (`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_
+    failed_retry_is_covered_when_prior_delivery_preserves_numbers_and_
+    negation` and four `test_video00_modal_hybrid_semantic_parity.py`
+    cases) — all fail identically with D-239O's changes stashed out,
+    unrelated to this gate, not investigated further here (out of scope).
+
+### Zero-diff proof (the 9 named modules/policies)
+
+No line of `p1_moment_role_and_audience_status_by_clip_id_for` itself, D-
+235Q (`complete_lost_semantic_atom_materiality.py`), D-235R (Freeze
+authority decision), D-235T (repair suppression decision), `RepairLoop`'s
+own suppression logic, `SelectionFreeze`, the live Language Spine
+construction, or P2's own whole-video reasoning was touched. The new
+parameter threaded through `final_story_coherence_validation.py` is
+read-only for diagnostics re-projection; no existing decision branch in
+that file references it. `git diff --stat` confirms only the five files
+named above (plus the new test file and the workflow YAML) changed.
+
+### Bounded output / no aggregate promotion
+
+`exact_p1_target_evidence_for` never discovers its own target set (the
+caller supplies it, bounded to `lost_atom_ownership_by_clip_id`'s own
+clip_id population — the SAME D-238/D-239F population, never every clip
+in the run); never dumps `editorial_moment_sequence.moments`/transcript
+text; never uses the 13/13 `POST_TAKE_RESET` or 9/9 `RECORDING_PROCESS_
+REGION` aggregate counts as evidence for any specific target row (test
+13, no-aggregate-fallback, proves this directly: 9 unrelated moments
+sharing one role never leak onto a target with zero real evidence of its
+own).
+
+### Correlation
+
+Exact identity only: `target_source_asset_id_by_clip_id`'s own keys ARE
+`CandidateTake.clip_id`/`DraftClip.clip_id` (D-239N's own Stage 2 proof),
+matched against `UnderstandingSpan.span_id` and `EditorialMoment.source_
+span_id` — the SAME clip_id value space (D-239N's own Stage 5 proof). No
+alternate namespace (attempt_id, timestamp overlap) is ever consulted
+(test 12 proves this directly).
+
+### Verdict
+
+**A — exact target P1 observability offline-proven, ready for D-239P
+real-media trace.** The new `p1_target_lookup_status` field can now
+distinguish, on a real run, whether the target clip_20779d173699a1a26add
+(or any future lost-atom target) hits `NO_UNDERSTANDING_SPAN` (candidate
+B) versus `MOMENT_FOUND_LOW_CONFIDENCE`/`MOMENT_FOUND_ROLE_UNCERTAIN`
+(candidate F) — the exact disambiguation D-239N could not make offline.
+
+**Exact next gate:** D-239P — ONE REAL-MEDIA TARGET P1 EVIDENCE TRACE, on
+the same sibling media, exactly one RAW maximum, primary artifact `exact-
+p1-target-evidence.json`. Not launched automatically per this gate's own
+scope — Product Owner authorization required (RAW/paid compute).
+
+**New classifier needed?** No. **New threshold needed?** No. **Provider
+needed?** No. **RAW needed?** Not by this gate — D-239P, when authorized,
+needs exactly one. **Paid compute needed?** No, not by this task.
+
+### Confirmation
+
+Observability only. No P1/retry-process/materiality/Freeze/repair/
+ownership/Language-Spine authority change. No threshold, no heuristic, no
+aggregate→target promotion. No RAW, no Modal, no RunPod, no provider call.
+
+**Canonical status:** `D239O_EXACT_P1_TARGET_OBSERVABILITY_IMPLEMENTED_
+OFFLINE_PROVEN_VERDICT_A_READY_FOR_D239P`.
+
+Then STOP.

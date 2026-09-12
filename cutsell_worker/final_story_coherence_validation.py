@@ -1633,6 +1633,24 @@ def _identity_observability_for_lost_atoms(
     return lost_atom_identity_correlation(lost_semantic_atoms, identity_observability_by_clip_id)
 
 
+def _exact_p1_target_evidence_for_lost_atoms(
+    lost_semantic_atoms: Sequence[Mapping],
+    exact_p1_target_evidence_by_clip_id: Optional[Mapping[str, dict]],
+) -> list[dict]:
+    """D-239O: pure lookup/join of `pipeline.py`'s own already-built,
+    bounded `p1_target_lookup_evidence_by_clip_id` rows (`editorial_moment_
+    sequence_integration.exact_p1_target_evidence_for`'s own output,
+    never recomputed here) against this pass's own `lost_semantic_atoms`
+    rows, by `clip_id` -- the SAME correlation pattern as D-237G's own
+    `_identity_observability_for_lost_atoms` immediately above. `[]`
+    whenever no rows were built (flag off, or no live P1/materiality
+    evidence). Diagnostics only: never read by Freeze/materiality/repair
+    authority anywhere in this module."""
+    if not exact_p1_target_evidence_by_clip_id:
+        return []
+    return lost_atom_identity_correlation(lost_semantic_atoms, exact_p1_target_evidence_by_clip_id)
+
+
 def apply_final_story_coherence_validation(
     draft,
     *,
@@ -1689,6 +1707,16 @@ def apply_final_story_coherence_validation(
     # everywhere the flag is off or no caller supplies them.
     p1_moment_role_by_clip_id: Mapping[str, str] | None = None,
     p1_audience_delivery_status_by_clip_id: Mapping[str, str] | None = None,
+    # D-239O: an optional, pre-built clip_id -> exact P1 target lookup
+    # evidence row map (`pipeline.py`'s own `p1_target_lookup_evidence_by_
+    # clip_id`, `editorial_moment_sequence_integration.exact_p1_target_
+    # evidence_for`'s own output re-keyed by clip_id). `None` everywhere
+    # the flag is off or no caller supplies it. DIAGNOSTICS ONLY -- same
+    # posture as `identity_observability_by_clip_id` (D-237G) above: this
+    # function only re-projects it verbatim into `diagnostics["exact_p1_
+    # target_evidence"]`; it is never read by any Freeze/materiality/
+    # repair decision in this module.
+    exact_p1_target_evidence_by_clip_id: Mapping[str, dict] | None = None,
 ):
     """Legacy resolving pass -- see the module docstring's authority
     boundary. For the post-authority validation-only pass use
@@ -1713,6 +1741,7 @@ def apply_final_story_coherence_validation(
             lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
             p1_moment_role_by_clip_id=p1_moment_role_by_clip_id,
             p1_audience_delivery_status_by_clip_id=p1_audience_delivery_status_by_clip_id,
+            exact_p1_target_evidence_by_clip_id=exact_p1_target_evidence_by_clip_id,
         )
     draft = _fold_alternates_into_discarded(draft)
 
@@ -1883,6 +1912,14 @@ def apply_final_story_coherence_validation(
         "lost_atom_identity_observability": _identity_observability_for_lost_atoms(
             lost_semantic_atoms, identity_observability_by_clip_id,
         ),
+        # D-239O: bounded, correlated exact P1 target lookup evidence rows
+        # -- see _exact_p1_target_evidence_for_lost_atoms's own docstring.
+        # [] when the flag is off or no rows were built. Pure re-projection
+        # of `pipeline.py`'s own already-computed per-clip evidence, never
+        # a new P1 lookup/classification.
+        "exact_p1_target_evidence": _exact_p1_target_evidence_for_lost_atoms(
+            lost_semantic_atoms, exact_p1_target_evidence_by_clip_id,
+        ),
         # D-239F: bounded ownership(D-238)+materiality(D-235Q)+Freeze-
         # authority(D-235R) per-atom projection -- see lost_atom_ownership_
         # materiality_diagnostics.py's own module docstring. Reads the SAME
@@ -1972,6 +2009,9 @@ def _apply_post_authority_validation_only(
     # identically-named parameter docstrings.
     p1_moment_role_by_clip_id: Mapping[str, str] | None = None,
     p1_audience_delivery_status_by_clip_id: Mapping[str, str] | None = None,
+    # D-239O: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring. DIAGNOSTICS ONLY.
+    exact_p1_target_evidence_by_clip_id: Mapping[str, dict] | None = None,
 ):
     """StoryValidator after the one semantic authority has ruled: validate
     and report on the resolver's applied selection, never edit it.
@@ -2373,6 +2413,9 @@ def apply_post_authority_story_validation(
     # identically-named parameter docstrings.
     p1_moment_role_by_clip_id: Mapping[str, str] | None = None,
     p1_audience_delivery_status_by_clip_id: Mapping[str, str] | None = None,
+    # D-239O: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring. DIAGNOSTICS ONLY.
+    exact_p1_target_evidence_by_clip_id: Mapping[str, dict] | None = None,
 ):
     """The ONE entry point for the AUTHORITATIVE second pass. Requires the
     typed `context`; a missing context (or a caller-reported
@@ -2404,6 +2447,7 @@ def apply_post_authority_story_validation(
             "lost_critical_claims": [],
             "claim_coverage_confirmations": [],
             "lost_atom_identity_observability": [],
+            "exact_p1_target_evidence": [],
             "freeze_blocked": True,
             "not_implemented": [],
         }
@@ -2425,4 +2469,5 @@ def apply_post_authority_story_validation(
         lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
         p1_moment_role_by_clip_id=p1_moment_role_by_clip_id,
         p1_audience_delivery_status_by_clip_id=p1_audience_delivery_status_by_clip_id,
+        exact_p1_target_evidence_by_clip_id=exact_p1_target_evidence_by_clip_id,
     )

@@ -1700,6 +1700,97 @@ jobs:
           write(summary)
           PY
 
+      - name: D-239O Exact Lost-Atom Target -> P1 Moment observability -> dedicated extraction
+        # D-239O (docs/CUTSELL_DECISIONS.md D-239O): D-239N proved the P1
+        # lookup problem for a specific target clip_id is NOT namespace
+        # mismatch, reminting, attempt-id substitution, or one-to-many
+        # moment construction -- but could not distinguish (B) the target
+        # never received an EditorialMoment (no matching UnderstandingSpan)
+        # from (F) a moment exists but fails Seam C's own confidence/role
+        # gate, without live data. This step PURE-PROJECTS the ALREADY-
+        # SERIALIZED, already-computed
+        #   diagnostics['final_story_coherence_validation']
+        #     ['exact_p1_target_evidence'] (D-239O,
+        #     cutsell_worker/editorial_moment_sequence_integration.py
+        #     ::exact_p1_target_evidence_for, pipeline.py's own bounded
+        #     per-lost-atom-clip_id evidence built for exactly the SAME
+        #     population D-238/D-239F already build, correlated against
+        #     this pass's own lost_semantic_atoms rows by clip_id)
+        # verbatim into its own dedicated artifact file -- zero new P1/
+        # retry-process/materiality/Freeze/repair/ownership/Language-Spine
+        # computation, zero threshold, zero heuristic, zero aggregate-to-
+        # target promotion. Bounded to exactly the lost-atom/target-
+        # correlated rows (never a full P1 dump). Never fails the workflow
+        # (always exits 0) -- an absent subtree (flag off, or no lost
+        # atoms this run) is a legitimate, expected, non-error outcome.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          SCHEMA_VERSION = "cutsell.video00.d239o_exact_p1_target_evidence_extraction.v1"
+          out_path = "artifact/exact-p1-target-evidence.json"
+
+          def write(summary):
+              os.makedirs("artifact", exist_ok=True)
+              with open(out_path, "w") as f:
+                  json.dump(summary, f, indent=2, sort_keys=True, default=str)
+              size = os.path.getsize(out_path)
+              print("--- D-239O Exact Lost-Atom Target -> P1 Moment Observability (pure re-projection of already-computed, already-correlated diagnostics -- recomputes NO P1/retry-process/materiality/Freeze/repair/ownership/Language-Spine policy; bounded to lost-atom/target-correlated rows only; observational only -- never fails this workflow) ---")
+              print(f"summary file: {out_path} ({size} bytes)")
+              print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+
+          engine = load("artifact/video00-modal.json")
+
+          if not isinstance(engine, dict):
+              print("WARNING: artifact/video00-modal.json missing or unparseable -- cannot extract D-239O observability this run.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MISSING", "reason": "engine_json_missing_or_unparseable"})
+              sys.exit(0)
+
+          diag = engine.get("diagnostics") if isinstance(engine.get("diagnostics"), dict) else {}
+          fscv = diag.get("final_story_coherence_validation")
+          fscv = fscv if isinstance(fscv, dict) else {}
+
+          targets = fscv.get("exact_p1_target_evidence")
+
+          if targets is None:
+              print("diagnostics['final_story_coherence_validation']['exact_p1_target_evidence'] key is absent this run (D-239O flag off, or no live P1/materiality evidence) -- reporting MISSING observationally.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MISSING", "reason": "exact_p1_target_evidence_key_absent"})
+              sys.exit(0)
+
+          if not isinstance(targets, list):
+              print(f"diagnostics[...]['exact_p1_target_evidence'] is present but not a list (got {type(targets).__name__}) -- malformed. Reporting MALFORMED observationally, not failing the workflow.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MALFORMED", "reason": "exact_p1_target_evidence_not_a_list"})
+              sys.exit(0)
+
+          # --- Pure re-projection: every row is copied verbatim from the
+          # already-computed, already-correlated D-239O list -- no P1/
+          # retry-process/materiality/ownership/Language-Spine decision is
+          # recomputed here. ---
+          summary = {
+              "schema_version": SCHEMA_VERSION,
+              "source_status": "PRESENT",
+              "exact_p1_target_evidence_row_count": len(targets),
+              "exact_p1_target_evidence": targets,
+          }
+          write(summary)
+          PY
+
       - name: Verify frozen Selection lock
         shell: bash
         run: |
@@ -6551,6 +6642,7 @@ jobs:
             artifact/lost-semantic-atom-diagnostics.json
             artifact/exact-identity-observability.json
             artifact/lost-atom-ownership-materiality-diagnostics.json
+            artifact/exact-p1-target-evidence.json
           retention-days: 14
           if-no-files-found: warn
 

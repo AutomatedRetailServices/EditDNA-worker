@@ -209,6 +209,16 @@ def process_universal_clean_cut_sources(
     _p1_audience_delivery_status_by_clip_id = (
         _lost_atom_exact_identity_context.get("p1_audience_delivery_status_by_clip_id") or {}
     )
+    # D-239O: the live, bounded, per-lost-atom-clip_id P1 lookup
+    # observability map -- `{}` under the SAME fail-open posture as the
+    # extractions above. Diagnostics only: threaded into `final_story_
+    # coherence_validation.py` purely so it can re-project this verbatim
+    # into its own `diagnostics["exact_p1_target_evidence"]` key (the SAME
+    # pattern as `_identity_observability_by_clip_id`/D-237G above) --
+    # never read for any Freeze/materiality/repair decision there.
+    _p1_target_lookup_evidence_by_clip_id = (
+        _lost_atom_exact_identity_context.get("p1_target_lookup_evidence_by_clip_id") or {}
+    )
 
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
@@ -277,6 +287,8 @@ def process_universal_clean_cut_sources(
                     # D-239I: see this function's own extraction comment above.
                     p1_moment_role_by_clip_id=_p1_moment_role_by_clip_id,
                     p1_audience_delivery_status_by_clip_id=_p1_audience_delivery_status_by_clip_id,
+                    # D-239O: see this function's own extraction comment above.
+                    exact_p1_target_evidence_by_clip_id=_p1_target_lookup_evidence_by_clip_id,
                 ),
             )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
@@ -612,6 +624,8 @@ def process_universal_clean_cut_sources(
                 # D-239I: SAME context as the legacy-resolving pass above.
                 p1_moment_role_by_clip_id=_p1_moment_role_by_clip_id,
                 p1_audience_delivery_status_by_clip_id=_p1_audience_delivery_status_by_clip_id,
+                # D-239O: SAME context as the legacy-resolving pass above.
+                exact_p1_target_evidence_by_clip_id=_p1_target_lookup_evidence_by_clip_id,
             )
             signature_after_validation = semantic_selection_signature(
                 authoritative_draft, authority_identity=source_identity,
