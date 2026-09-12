@@ -128,6 +128,60 @@ heuristic or text fuzzy matching to upgrade evidence to authoritative"
 instruction, structurally enforced (grep-verified: `editorial_slot_
 evidence=` is only ever assigned inside the `if exact_identity_available:`
 branch).
+
+## D-238: bounded lost-atom ownership as a SECOND, narrower identity-
+## sufficiency source (offline, additive, docs/CUTSELL_DECISIONS.md D-238)
+
+D-237M recovered a real target relationship that is genuinely, provably
+owned by exactly one canonical proposition context (`exact_lost_atom_
+ownership.py`'s own `EXACT_SINGLETON_OWNERSHIP`) but whose D-235P
+`relationship_status` is `RELATIONSHIP_EXACT_LANGUAGE_CONTAINS_
+RECONSTRUCTED` -- correctly NON-authoritative for FULL ATTEMPT IDENTITY
+(a 9-word fragment is not "the same delivery" as a 221-word attempt).
+Before D-238, such a row's `exact_identity_available` was `False`, so
+step 6's identity-sufficiency gate could never fire even when D-235L
+independently found `NON_MATERIAL_REAL_CONTENT` -- the row abstained
+(`INSUFFICIENT_EVIDENCE`) purely for lack of a full-attempt-identity
+proof it structurally could never have (see D-237K's own forensic).
+
+`lost_atom_ownership` (new, optional parameter below) supplies a SECOND,
+narrower and DISJOINT identity-sufficiency source: a real `exact_lost_
+atom_ownership.ExactLostAtomOwnership` for this row's own `clip_id`. Its
+own boolean, `exact_ownership_available` (new field on `Complete
+LostSemanticAtomMateriality`, computed as `lost_atom_ownership is not
+None and lost_atom_ownership.is_exact_singleton`), extends ONLY the
+step-6 identity-sufficiency gate's own `OR` condition (`exact_identity_
+available OR exact_ownership_available`) -- it participates in NOTHING
+else. In particular:
+
+  - it NEVER feeds `editorial_slot_evidence` into `assess_editorial_
+    requirement_evidence` (unlike a genuine `exact_match`) -- ownership
+    is consulted ONLY at the one existing sufficiency gate, never as a
+    second route into D-235M's own slot-evidence path;
+  - it NEVER changes step order. Meaning-critical (step 1), editorial-
+    required (step 2), conflicted/unresolved (step 3), retry/process
+    (step 4), and redundant (step 5) are all evaluated FIRST, using
+    D-235L/D-235M's own completely independent evidence -- a lost atom
+    with `EXACT_SINGLETON_OWNERSHIP` but `MEANING_CRITICAL`/`REQUIRED`/
+    `CONFLICTED` evidence elsewhere is BLOCKed/ABSTAINed exactly as it
+    would be with no ownership at all (this module's own counterexample
+    tests 1-6 prove this directly);
+  - the size of the containing `LanguageAttempt` (9 of 221 words, or 221
+    of 252 source words, in the real D-237M shape) is NEVER read here --
+    `exact_ownership_available` is a bare boolean off `is_exact_
+    singleton`, structurally blind to word counts;
+  - `exact_identity_available` itself (D-235P's own full-attempt-
+    identity flag) is completely UNCHANGED by this addition -- it is
+    still computed exactly as before, from `exact_match` alone, and
+    `lost_atom_ownership` never substitutes for it anywhere else in this
+    module (`exact_language_attempt_ids`/`exact_proposition_candidate_
+    ids`, the multi-proposition ambiguity check, and `identity_mapping_
+    status` all still read `exact_match`/`exact_identity_available`
+    only).
+
+`lost_atom_ownership_status` (new field) reports the raw ownership
+status for diagnostics (`None` when no ownership object was supplied),
+independent of whether it was ever consulted by the gate.
 """
 from __future__ import annotations
 
@@ -167,6 +221,7 @@ from .shared_attempt_word_identity import (
     AttemptLanguageIdentityMatch,
     exact_proposition_candidate_ids_for_match,
 )
+from .exact_lost_atom_ownership import ExactLostAtomOwnership
 
 SCHEMA_VERSION = "cutsell.complete_lost_semantic_atom_materiality.v1"
 
@@ -204,6 +259,11 @@ class CompleteLostSemanticAtomMateriality:
     blocking_recommendation: str
     reason_codes: Tuple[str, ...]
     provenance: Tuple[str, ...]
+    # D-238: the bounded lost-atom ownership seam's own verdict for this
+    # row, disjoint from and never overloading `exact_identity_available`
+    # above -- see module docstring's "D-238" section.
+    exact_ownership_available: bool = False
+    lost_atom_ownership_status: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.final_materiality_status not in FINAL_MATERIALITY_VOCABULARY:
@@ -226,6 +286,8 @@ class CompleteLostSemanticAtomMateriality:
             "blocking_recommendation": self.blocking_recommendation,
             "reason_codes": list(self.reason_codes),
             "provenance": list(self.provenance),
+            "exact_ownership_available": self.exact_ownership_available,
+            "lost_atom_ownership_status": self.lost_atom_ownership_status,
         }
 
 
@@ -261,6 +323,7 @@ def assess_complete_lost_semantic_atom_materiality(
     idea_coverage_status: Optional[bool] = None,
     replacement_function_preserved: Optional[bool] = None,
     downstream_dependency_present: Optional[bool] = None,
+    lost_atom_ownership: Optional[ExactLostAtomOwnership] = None,
 ) -> CompleteLostSemanticAtomMateriality:
     """The one D-235Q entry point. Pure function of one already-computed
     `_lost_semantic_atoms()` row, D-235L's own two context flags, D-235P's
@@ -281,6 +344,15 @@ def assess_complete_lost_semantic_atom_materiality(
     `heuristic_identity_available`: `True` only when the caller
     positively confirms a HEURISTIC_OVERLAP bridge existed for this
     clip_id (diagnostic labelling only -- never upgrades anything).
+
+    `lost_atom_ownership` (D-238): an optional, already-computed
+    `exact_lost_atom_ownership.ExactLostAtomOwnership` for this row's own
+    `clip_id`. Consulted ONLY at the step-6 identity-sufficiency gate
+    (see module docstring's "D-238" section) -- never feeds slot
+    evidence, never changes step order, never substitutes for
+    `exact_match`/`exact_identity_available` anywhere else in this
+    function. `None` (the default, every pre-D-238 caller) reproduces
+    byte-identical pre-D-238 behavior.
     """
     clip_id = str(row.get("clip_id") or "")
     reason_codes: list = []
@@ -336,10 +408,27 @@ def assess_complete_lost_semantic_atom_materiality(
         or replacement_function_preserved is True
     )
 
+    # D-238: the bounded lost-atom ownership seam's own verdict -- a
+    # bare boolean off `is_exact_singleton`, structurally blind to the
+    # containing LanguageAttempt's own size (see module docstring's
+    # "D-238" section). Never feeds `editorial_slot_evidence`, never
+    # touches `exact_identity_available`/`exact_language_attempt_ids`/
+    # `exact_proposition_candidate_ids` above -- consulted ONLY at the
+    # identity-sufficiency gate directly below.
+    exact_ownership_available = bool(
+        lost_atom_ownership is not None and lost_atom_ownership.is_exact_singleton
+    )
+
     # Step 6's own identity-sufficiency gate -- see module docstring.
+    # D-238 extends this gate's own OR-condition with a SECOND, disjoint
+    # sufficiency source (`exact_ownership_available`) -- never replacing
+    # `exact_identity_available`, never widening any OTHER step.
     requirement_genuinely_clear = (
         requirement.editorial_requirement_status == REQUIREMENT_NOT_REQUIRED
-        or (requirement.editorial_requirement_status == REQUIREMENT_INSUFFICIENT_EVIDENCE and exact_identity_available)
+        or (
+            requirement.editorial_requirement_status == REQUIREMENT_INSUFFICIENT_EVIDENCE
+            and (exact_identity_available or exact_ownership_available)
+        )
     )
 
     # ================= PRECEDENCE (order matters; first match wins) =================
@@ -390,6 +479,10 @@ def assess_complete_lost_semantic_atom_materiality(
         blocking_recommendation=blocking,
         reason_codes=tuple(reason_codes),
         provenance=(SCHEMA_VERSION, "assess_complete_lost_semantic_atom_materiality"),
+        exact_ownership_available=exact_ownership_available,
+        lost_atom_ownership_status=(
+            lost_atom_ownership.ownership_status if lost_atom_ownership is not None else None
+        ),
     )
 
 
@@ -401,13 +494,19 @@ def assess_many(
     exact_match_by_clip_id: Optional[Mapping[str, AttemptLanguageIdentityMatch]] = None,
     proposition_candidate_ids_by_attempt_id: Optional[Mapping[str, Tuple[str, ...]]] = None,
     proposition_slot_evidence_by_id: Optional[Mapping[str, str]] = None,
+    lost_atom_ownership_by_clip_id: Optional[Mapping[str, ExactLostAtomOwnership]] = None,
 ) -> tuple:
     """Batch convenience wrapper -- assesses each row independently, never
     letting one row's evidence leak into another's classification (same
-    isolation discipline as D-235L's own `assess_many`)."""
+    isolation discipline as D-235L's own `assess_many`).
+
+    `lost_atom_ownership_by_clip_id` (D-238): optional, mirrors `exact_
+    match_by_clip_id`'s own per-clip lookup shape. `None`/absent-entry
+    reproduces byte-identical pre-D-238 behavior for that row."""
     critical_claim_conflict_by_clip_id = critical_claim_conflict_by_clip_id or {}
     recording_process_evidence_by_clip_id = recording_process_evidence_by_clip_id or {}
     exact_match_by_clip_id = exact_match_by_clip_id or {}
+    lost_atom_ownership_by_clip_id = lost_atom_ownership_by_clip_id or {}
     results = []
     for row in rows:
         if not isinstance(row, Mapping):
@@ -420,6 +519,7 @@ def assess_many(
             exact_match=exact_match_by_clip_id.get(clip_id),
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+            lost_atom_ownership=lost_atom_ownership_by_clip_id.get(clip_id),
         ))
     return tuple(results)
 
@@ -442,6 +542,8 @@ def complete_lost_semantic_atom_materiality_diagnostics(
         "blocking_recommendation": result.blocking_recommendation,
         "reason_codes": list(result.reason_codes),
         "provenance": list(result.provenance),
+        "exact_ownership_available": result.exact_ownership_available,
+        "lost_atom_ownership_status": result.lost_atom_ownership_status,
     }
 
 

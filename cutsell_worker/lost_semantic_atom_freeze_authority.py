@@ -58,11 +58,19 @@ instruction):
       already enforces is independently RE-VERIFIED here: if
       `editorial_requirement_status == INSUFFICIENT_EVIDENCE` (D-235M's
       own generic "nothing found" default) `exact_identity_available`
-      MUST be `True` -- a heuristic-only or missing identity paired with
-      an `INSUFFICIENT_EVIDENCE` editorial-requirement verdict must never
-      reach suppression even if some upstream caller's own composition
-      bug let a `NON_MATERIAL_REAL_CONTENT`/`DO_NOT_BLOCK` result through
-      without satisfying this.
+      OR `exact_ownership_available` (D-238, docs/CUTSELL_DECISIONS.md
+      D-238 -- the bounded lost-atom ownership seam, a second, DISJOINT
+      sufficiency source that never overloads `exact_identity_available`
+      itself; see `exact_lost_atom_ownership.py`'s own module docstring)
+      MUST be `True` -- a heuristic-only or missing identity AND missing
+      ownership paired with an `INSUFFICIENT_EVIDENCE` editorial-
+      requirement verdict must never reach suppression even if some
+      upstream caller's own composition bug let a `NON_MATERIAL_REAL_
+      CONTENT`/`DO_NOT_BLOCK` result through without satisfying this.
+      This re-check reads ONE MORE already-computed field off the SAME
+      D-235Q result object -- no independent containment recomputation,
+      no second policy, `exact_lost_atom_ownership.py` is never imported
+      here.
 
 Any single failure -> `PRESERVE_BLOCK` (or `ABSTAIN_PRESERVE_BLOCK` when
 the underlying verdict was itself an abstention) -- see "Fail-closed
@@ -345,19 +353,22 @@ def decide_lost_semantic_atom_freeze_authority(
     # depth), scoped exactly to the ONE combination where it matters --
     # NON_MATERIAL_REAL_CONTENT reached with an INSUFFICIENT_EVIDENCE
     # editorial-requirement verdict must never suppress unless exact
-    # identity was genuinely available (D-235Q's own step 6 gate already
-    # enforces this; re-checked independently here, never trusting a
-    # single layer). RETRY_OR_RECORDING_RESIDUE/REDUNDANT_EQUIVALENT
-    # legitimately reach DO_NOT_BLOCK with `editorial_requirement_status
-    # == INSUFFICIENT_EVIDENCE` on every ordinary row (D-235M has nothing
-    # to say when no story-function signal was supplied at all) -- that
-    # combination is NOT a violation and must not be preserved here.
+    # identity OR exact ownership (D-238) was genuinely available
+    # (D-235Q's own step 6 gate already enforces this; re-checked
+    # independently here, never trusting a single layer -- reading ONE
+    # MORE already-computed field off the SAME D-235Q result, never a
+    # new containment recomputation). RETRY_OR_RECORDING_RESIDUE/
+    # REDUNDANT_EQUIVALENT legitimately reach DO_NOT_BLOCK with
+    # `editorial_requirement_status == INSUFFICIENT_EVIDENCE` on every
+    # ordinary row (D-235M has nothing to say when no story-function
+    # signal was supplied at all) -- that combination is NOT a violation
+    # and must not be preserved here.
     if (
         m_status == MATERIALITY_NON_MATERIAL_REAL_CONTENT
         and requirement_status == REQUIREMENT_INSUFFICIENT_EVIDENCE
-        and not materiality.exact_identity_available
+        and not (materiality.exact_identity_available or materiality.exact_ownership_available)
     ):
-        return _preserve(clip_id, materiality, "identity_insufficient_for_suppression")
+        return _preserve(clip_id, materiality, "identity_and_ownership_insufficient_for_suppression")
 
     # All 10 conditions satisfied -- the ONLY path to suppression.
     return LostSemanticAtomFreezeAuthorityDecision(

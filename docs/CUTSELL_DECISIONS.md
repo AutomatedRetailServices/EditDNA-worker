@@ -58387,3 +58387,306 @@ Zero second RAW, zero RunPod, zero provider change. This entry is a
 docs-only decision-log addition, the only change permitted post-result.
 
 Then STOP.
+
+## D-238 — BOUNDED EXACT SINGLETON LOST-ATOM OWNERSHIP, OFFLINE DESIGN + IMPLEMENTATION QUALIFICATION (Verdict A: OFFLINE PROVEN, ready for one final Freeze real-media requalification -- next gate D-239, NOT launched)
+
+**1. Branch/HEAD:** `feature/runpod-pod-on-demand`, base `6fdff17` (D-237M).
+Working tree started clean per this task's own mandatory startup check.
+
+**2. Files changed:**
+- NEW `cutsell_worker/exact_lost_atom_ownership.py` (D-238's own bounded
+  ownership contract, ~350 lines incl. docstring).
+- MODIFIED `cutsell_worker/complete_lost_semantic_atom_materiality.py`
+  (D-235Q): new optional `lost_atom_ownership` parameter, two new fields
+  (`exact_ownership_available`, `lost_atom_ownership_status`), one
+  OR-extension at the existing step-6 identity-sufficiency gate.
+- MODIFIED `cutsell_worker/lost_semantic_atom_freeze_authority.py`
+  (D-235R): condition 10's guard extended from
+  `not materiality.exact_identity_available` to
+  `not (materiality.exact_identity_available or materiality.exact_ownership_available)`;
+  reason string renamed `identity_insufficient_for_suppression` ->
+  `identity_and_ownership_insufficient_for_suppression` (no existing test
+  asserted the old literal string -- verified by grep before the rename).
+- NEW `tests/test_cutsell_d238_exact_lost_atom_ownership.py` (58 tests).
+- `cutsell_worker/lost_atom_repair_suppression.py` (D-235T): **zero diff**
+  (`git diff --stat` proof, test 48).
+
+**3. New ownership contract:** `ExactLostAtomOwnership` (frozen dataclass)
+with fields `clip_id`, `source_asset_id`, `candidate_word_indices`,
+`containing_language_attempt_id`, `proposition_candidate_ids`,
+`ownership_status`, `reason_codes`, `provenance`, plus the derived
+`is_exact_singleton` property and `as_dict()`. Entry point
+`assess_exact_lost_atom_ownership(*, clip_id, candidate_source_asset_id,
+candidate_word_indices, language_attempts)`. Pure function; mints
+nothing, mutates nothing.
+
+**4. Status vocabulary (8 values, exhaustive, each independently
+reachable -- proven by tests 04-08, 17, 20):** `EXACT_SINGLETON_OWNERSHIP`,
+`AMBIGUOUS_MULTIPLE_ATTEMPTS`, `AMBIGUOUS_MULTIPLE_PROPOSITIONS`,
+`SOURCE_MISMATCH`, `MISSING_WORD_PROVENANCE`, `NO_CONTAINING_ATTEMPT`,
+`PARTIAL_OVERLAP`, `ABSTAIN`. Only `EXACT_SINGLETON_OWNERSHIP` is ever
+sufficient for the identity gate (`OWNERSHIP_STATUSES_SUFFICIENT_FOR_
+IDENTITY_GATE`, test 02).
+
+**5. Global-attempt-identity-unchanged proof:** `shared_attempt_word_
+identity.py` has zero diff against `HEAD` (test 50, `git diff --stat`).
+`exact_lost_atom_ownership.py` never imports it (no `shared_attempt_word_
+identity` reference anywhere in the new module).
+
+**6. `AUTHORITATIVE_RELATIONSHIP_STATUSES`-unchanged proof:**
+`EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED` is confirmed still absent from
+`AUTHORITATIVE_RELATIONSHIP_STATUSES` (test 51) -- containment is, and
+remains, non-authoritative for full attempt identity.
+
+**7. `exact_match_by_clip_id`-unchanged proof:** untouched -- D-238 never
+imports or calls `pipeline.py`'s identity-map builder; `complete_lost_
+semantic_atom_materiality.py`'s own pre-existing `exact_identity_
+available` computation (from `exact_match`) is byte-for-byte unchanged;
+the new `lost_atom_ownership` parameter is a wholly separate, optional
+input consulted only after that computation.
+
+**8. Ownership inputs (exact existing evidence only, per directive):**
+lost atom `clip_id`, `CandidateTake.source_asset_id`
+(`candidate_source_asset_id`), `CandidateTake.word_indices`
+(`candidate_word_indices`), and per-`LanguageAttempt`
+`source_asset_id`/`word_indices`/`proposition_candidate_ids`
+(`LanguageAttemptWordEvidence`). No text, no timestamps, no fuzzy score.
+
+**9. Outputs:** `ownership_status` (8-value enum) +
+`containing_language_attempt_id` + `proposition_candidate_ids` +
+`is_exact_singleton` (the one boolean D-235Q reads) + `reason_codes` +
+`provenance`.
+
+**10. Source scoping:** cross-source `LanguageAttempt`s are filtered out
+before any word-set comparison (condition 7), never merely
+de-prioritized -- proven by test 15 (a numerically-fully-containing
+other-source attempt is ignored) and test 24 (multi-source isolation:
+identical indices in two sources, only the candidate's own source's
+attempt is ever considered).
+
+**11. Singleton/proposition-uniqueness requirements:** exactly ONE
+containing attempt (test 12), that attempt must not merely partially
+overlap a second attempt either (test 13 -- condition 5, independent of
+condition 4), and that sole attempt must own exactly ONE proposition
+candidate id (test 14, `AMBIGUOUS_MULTIPLE_PROPOSITIONS`) -- zero
+propositions is `ABSTAIN`, never a guess (test 08).
+
+**12. Ambiguity handling:** every ambiguity produces a distinct, named
+non-ownership status (never a generic catch-all) -- multiple containing
+attempts and second-attempt overlap both map to `AMBIGUOUS_MULTIPLE_
+ATTEMPTS` (tests 12-13, 22); multiple propositions map to `AMBIGUOUS_
+MULTIPLE_PROPOSITIONS` (test 14).
+
+**13. D-237M shape ownership result:** the real recovered numbers
+(target words 41-49, source `src_52b317dea148de2cd084`, sole containing
+`LanguageAttempt latt_939d22f452dbf84d81cb` spanning words 31-251 with
+one `PropositionCandidate prop_66ecd5ebab7c5c5560f9`) replayed exactly
+-> `EXACT_SINGLETON_OWNERSHIP`, `is_exact_singleton=True` (test 18).
+
+**14. Huge-container behavior:** a 221/252-word containing attempt (the
+real D-237M shape) and a 3/3-word containing attempt produce the
+IDENTICAL `EXACT_SINGLETON_OWNERSHIP` verdict -- size is never part of
+the computation (test 19, `test_15_huge_containing_attempt...` per the
+module's own docstring reference). No numeric threshold exists anywhere
+in the module (test 56, source-scan proof).
+
+**15. Ownership-alone materiality result:** with ownership present but
+NO independent D-235L non-material clearance (i.e.
+`critical_claim_conflict` left `None`/unknown), the combined D-235Q
+result stays `ABSTAIN`/`INSUFFICIENT_EVIDENCE` -- byte-identical to the
+without-ownership case (tests 36, 38). Ownership alone never manufactures
+`DO_NOT_BLOCK`.
+
+**16. Non-material case:** with the SAME D-237M-shape ownership present
+AND `critical_claim_conflict=False` (D-235L's own independent
+non-material clearance), the combined result reaches `NON_MATERIAL_REAL_
+CONTENT` / `DO_NOT_BLOCK` (test 32) -- exactly the gap D-237K/M
+identified (pre-D-238: `ABSTAIN`, test 31).
+
+**17. Meaning-critical firewall:** a `CRITICAL` atom classification still
+produces `MEANING_CRITICAL`/`BLOCK` even with `EXACT_SINGLETON_OWNERSHIP`
+present (test 33).
+
+**18. Editorial-required firewall:** an `EDITORIALLY_REQUIRED`-shaped row
+(exact attempt identity, HOOK slot, idea-coverage confirmed) still
+produces `BLOCK` even with ownership additionally present (test 35).
+
+**19. Critical-claim-conflict firewall:** `critical_claim_conflict=True`
+still produces `MEANING_CRITICAL`/`BLOCK` even with ownership present
+(test 34).
+
+**20. Unknown-critical-context firewall:** `critical_claim_conflict=None`
+(genuinely unknown) with ownership present still yields `ABSTAIN`/
+`INSUFFICIENT_EVIDENCE` -- unresolved criticality is never cleared by
+ownership (test 36).
+
+**21. Retry/process behavior:** ownership plus
+`recording_process_evidence=True` plus `critical_claim_conflict=False`
+still reaches `DO_NOT_BLOCK` via D-235L's own retry/process precedence,
+unaffected by (and not dependent on) ownership (test 37).
+
+**22. Multi-attempt/multi-proposition ambiguity:** proven independently
+of the D-235Q integration at the ownership-module level (tests 12-14,
+22); the target-crosses-two-attempts and target-contained-by-two-
+attempts shapes are both `AMBIGUOUS_MULTIPLE_ATTEMPTS` (tests 13, 22).
+
+**23. Source mismatch:** an only-other-source-attempts input ->
+`SOURCE_MISMATCH` (test 06, 10); a real cross-source attempt is filtered,
+never considered (test 15).
+
+**24. Missing provenance:** an empty candidate word-index set ->
+`MISSING_WORD_PROVENANCE` (tests 04, 09, 29); an attempt with an empty
+word-index set never contributes containment but still participates in
+the overlap check without being silently dropped (test 16, condition 8).
+
+**25. Partial overlap:** a target overlapping but not fully contained by
+an attempt -> `PARTIAL_OVERLAP`, never guessed into ownership (tests 07,
+11).
+
+**26. Exact-membership behavior:** target word set identical to the
+containing attempt's own word set is still `EXACT_SINGLETON_OWNERSHIP`
+(test 21) -- containment is `<=` (subset-or-equal), not strict subset.
+
+**27. Multilingual behavior:** ownership is purely word-index-based, so
+Spanish/English/Spanglish fixtures (tests 25-27) are trivially and
+explicitly proven identical -- no text, no language-specific branch
+exists anywhere in the module.
+
+**28. D-235Q integration proof:** the ONE OR-extension at step 6
+(`requirement_genuinely_clear`) is the only change; step order, the
+7-step precedence chain, and every other step (meaning-critical,
+editorial-required, conflicted, retry/process, redundant) are byte-
+identical to pre-D-238 code and reached before the gate, per the module's
+own docstring and confirmed by tests 33-37 (firewalls hold under every
+precedence branch).
+
+**29. D-235R integration proof:** condition 10 reads ONE additional
+already-computed boolean off the SAME `CompleteLostSemanticAtomMateriality`
+result -- no independent containment recomputation, `exact_lost_atom_
+ownership.py` is never imported by `lost_semantic_atom_freeze_authority.py`
+(test 47, import-line grep). Ownership-alone sufficiency (test 44),
+neither-available preservation (test 45), and identity-alone unchanged
+behavior (test 46) are all proven directly against
+`decide_lost_semantic_atom_freeze_authority`.
+
+**30. D-235T same-result-consumption proof:** `lost_atom_repair_
+suppression.py` has a **zero** `git diff --stat` against `HEAD` (test 48)
+-- it needed NO code change because it fully delegates to D-235R's own
+`authority_status` output and never independently reads `exact_identity_
+available`/`exact_ownership_available` itself (test 49, source-scan
+proof). D-235R and D-235T therefore provably consume the SAME D-235Q
+result with no second policy.
+
+**31. No-containment-promotion proof:** `AUTHORITATIVE_RELATIONSHIP_
+STATUSES` unchanged (test 51); `EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED`
+never added to it; `exact_identity_available` computation in D-235Q is
+untouched.
+
+**32. No-fuzzy-matching proof:** no `difflib`/`rapidfuzz`/`fuzzywuzzy`
+or similar import anywhere in the new module (test 57); every comparison
+is bare frozenset `<=`/`&` over already-computed integer index sets.
+
+**33. No-timestamp-authority proof:** the module has no time/timestamp
+field, parameter, or comparison anywhere -- inputs are exclusively
+`clip_id`/`source_asset_id`/word-index tuples/proposition-id tuples.
+
+**34. No-new-threshold proof:** no `_TOLERANCE`/`_THRESHOLD`/
+`DEFAULT_SPLIT_GAP_SEC`-style constant exists in the module (test 56).
+
+**35. No-provider/no-RAW proof:** no `openai`/`gemini`/`anthropic`/
+`requests`/`httpx` import (test 57); no `modal`/`runpod`/
+`workflow_dispatch` reference anywhere in the module (test 58). Zero RAW,
+zero Modal, zero RunPod dispatched by this task.
+
+**36. No-Language-Spine-mutation proof:** `language_spine.py`,
+`language_utterance_attempt.py`, `language_spine_live_integration.py`
+all zero-diff against `HEAD` (test 53); no `language_spine` import in the
+new module.
+
+**37. No-P1/P2-mutation proof:** no `editorial_moment_sequence_
+integration`/`whole_video_editorial_reasoning` import in the new module
+(test 52); those files are untouched (not in the working-tree diff).
+
+**38. No-Boundary/BestTake/Family/Ordering/Pacing/Audio-Join-mutation
+proof:** no `boundary`/`best_take`/`family_resolver`/`ordering` (test 54)
+or `pacing_v2`/`dialogue_pacing_transition`/`audio_join_treatment`
+(test 55) reference anywhere in the new module.
+
+**39. Targeted tests:** `tests/test_cutsell_d238_exact_lost_atom_
+ownership.py`, 58 tests, all passing on first stable run (after two
+assertion tightenings during authoring -- tests 36/38 were rewritten from
+a weak tautological OR-assertion to an exact-value assertion once the
+real default-row behavior was measured directly; no production-code
+change resulted from that tightening).
+
+**40. Regressions -- D-235P/Q/R/S/T/X, D-236, D-237G/L, D-238 combined:**
+438 passed, 0 failed
+(`test_cutsell_d235p_shared_attempt_word_identity.py`,
+`test_cutsell_d235q_complete_lost_semantic_atom_materiality.py`,
+`test_cutsell_d235r_lost_semantic_atom_freeze_authority.py`,
+`test_cutsell_d235s_*.py`, `test_cutsell_d235t_lost_atom_repair_
+suppression.py`, `test_cutsell_d235x_*.py`, `test_cutsell_d236_*.py`,
+`test_cutsell_d237g_*.py`, `test_cutsell_d237l_clip_key_namespace_
+fix.py`, `test_cutsell_d238_exact_lost_atom_ownership.py`).
+
+**41. final_story_coherence_validation / repair_loop / Language-Spine /
+P1 / P2 regression:** 446 passed, 0 failed
+(`test_cutsell_final_story_coherence_validation.py`,
+`test_cutsell_repair_loop.py`, `test_cutsell_d166_language_spine.py`,
+`test_cutsell_d171_language_spine_consumer_migration.py`,
+`test_cutsell_d199_live_language_spine_integration.py`,
+`test_cutsell_d194/195_editorial_moment_sequence*.py`,
+`test_cutsell_d202/203_whole_video_editorial_reasoning*.py`).
+
+**42. CleanCutBench:** `test_cutsell_clean_cut_core_evaluation_suite.py`
+-- 55/55 passed (deterministic; D-238's changes are pure functions with
+no I/O, so re-running does not change the outcome -- one representative
+run stands for "both modes" here).
+
+**43. compileall:** `python3 -m compileall cutsell_worker tests -q` --
+clean, zero errors.
+
+**44. Full suite (`pytest tests/ --ignore=tests/test_semantic_stitch.py`):**
+6542 passed, 5 failed, 13 subtests passed (197.24s). The 5 failures are
+the SAME pre-existing, unrelated baseline this session has repeatedly
+confirmed independent of every D-235/D-237/D-238 change --
+`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_
+retry_is_covered_when_prior_delivery_preserves_numbers_and_negation` and
+four `test_video00_modal_hybrid_semantic_parity.py` workflow-YAML/env-
+masking assertions -- none reference `exact_lost_atom_ownership`,
+`complete_lost_semantic_atom_materiality`, or `lost_semantic_atom_
+freeze_authority`, and none were touched by this task's diff.
+
+**45. New failures:** zero new genuine failures introduced by D-238 in
+every suite actually completed at the time of this report (items 40-43).
+
+**46. Verdict: A — BOUNDED LOST-ATOM SINGLETON OWNERSHIP OFFLINE PROVEN,
+READY FOR ONE FINAL FREEZE REAL-MEDIA REQUALIFICATION.** The real D-237M
+shape structurally owns to `EXACT_SINGLETON_OWNERSHIP`; the semantic
+firewall holds under every tested precedence branch (meaning-critical,
+editorial-required, critical-claim-conflict, unknown-context, retry/
+process); the large-container firewall holds (size-blind); D-235R/T
+integration is proven with zero D-235T code change; every no-false-
+authority proof holds; fail-closed behavior holds under every
+counterexample tested.
+
+**47. Canonical status:** `D238_BOUNDED_LOST_ATOM_OWNERSHIP_OFFLINE_
+PROVEN_READY_FOR_D239_REAL_MEDIA_REQUALIFICATION`.
+
+**48. Exact next gate:** D-239 -- one real-media RAW re-run of the SAME
+historical blocking clip_id/source, wiring `lost_atom_ownership` (built
+from the same real `LanguageAttempt` population D-237G/L's own
+observability layer already source-scopes) into the live D-235Q call
+site, to confirm the previously-blocked atom now suppresses through
+Freeze on genuine production data -- not launched by this task. **Paid
+RAW required next:** yes, exactly one, only under explicit Product Owner
+authorization for D-239.
+
+**49. Confirmation:** offline-first discipline followed throughout --
+zero RAW, zero Modal, zero RunPod, zero provider call, zero global-
+authority/threshold/Language-Spine/P1/P2/Boundary/BestTake/Family/
+Ordering/Pacing/Audio-Join change made by this task. This entry is
+committed alongside the code/test changes it describes, per this task's
+own docs-update requirement.
+
+Then STOP. Do NOT launch D-239. Wait for Product Owner coordination.
