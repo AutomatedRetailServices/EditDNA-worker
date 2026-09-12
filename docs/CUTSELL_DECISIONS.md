@@ -57043,3 +57043,224 @@ patch, no code changes of any kind. Docs-only decision entry, per this
 task's own explicit "docs-only decision entry allowed" exception.
 
 Then STOP.
+
+## D-237F — POST-D236 REAL-MEDIA EXACT-IDENTITY FAILURE FORENSIC (forensic only, no fix)
+
+**Correction to D-237 accepted:** the recovered validator artifact from
+run `34662805134` proves `freeze_blocked=true`,
+`selected_count_before_freeze=3`, `lost_semantic_atom_status=FOUND`,
+`repair_loop_status=NEEDS_HUMAN_REVIEW`, `pacing_seam_reached=false`,
+`first_missing_link=FREEZE_BLOCKED_BEFORE_PACING`, trigger categories
+`COHERENCE_BLOCKING_LOST_SEMANTIC_ATOM` + `REPAIR_LOOP_NEEDS_HUMAN_
+REVIEW`. D-237's verdict B is **not supported** -- D-209 Ordering is
+upstream of Freeze in this pipeline's real order, and a rendered
+human-review MP4 does not by itself prove Freeze cleared (the renderer
+can run on the pre-Freeze-block deliverable path this codebase already
+has for a `NEEDS_HUMAN_REVIEW` outcome). D-237's OTHER finding --
+Language-Spine collapse resolved on real media, 1/1/1 -> 3/3/3, 4 real
+audio-silence intervals consumed, 2 producing real PAUSE boundaries --
+stands, is unaffected by this correction, and remains
+`LIVE_AUDIO_SILENCE_LANGUAGE_SPINE_REAL_MEDIA_PROVEN`.
+
+**Target after re-segmentation:** `clip_800d8d16b6b9e88325b7` /
+"oh too many people ready set these are the" / `REAL_CONTENT_LOSS` /
+`blocking=true` -- semantically the SAME historical blocker text,
+now carried by a re-minted clip id (expected: re-segmentation changes
+physical clip boundaries/ids even when the underlying lost content is
+the same).
+
+**Primary question:** with 3 real, bounded LanguageAttempts/
+PropositionCandidates now available (up from 1), why does this exact
+same target still fail to reach `AUTHORITATIVE_RELATIONSHIP_STATUSES`?
+
+**Stages 1-3/6 (literal per-object word-index trace): confirmed
+NOT RETRIEVABLE from ANY available data -- a different, more
+fundamental reason than the D-235Y/Z-era log-window/artifact-egress
+limits.** Directly read from the retrievable D-237 log window itself,
+in the D-200 compact-diagnostics script's own explanatory string:
+*"LanguageAttempt.attempt_state distribution ... is not exposed by
+D-199's live_language_spine_diagnostics serialization -- only aggregate
+language_attempt_count is available this run."* This is a STRUCTURAL,
+by-design property of `live_language_spine_diagnostics()`
+(`language_spine_live_integration.py`) -- it returns COUNTS only
+(`language_attempt_count`, `proposition_candidate_count`, etc.), never
+per-object ids/spans/word-index sets, matching this codebase's own
+universal "no transcript dump, counts/statuses only" diagnostic
+convention. No RAW's own printed diagnostics have EVER exposed this
+level of detail for any D-19x/D-235x live-spine construction, for any
+run. The raw engine `video00-modal.json` result (which WOULD contain
+the real objects) is not accessible from this sandbox (S3-blocked,
+confirmed prior forensic). Stages 1-3/6's literal values are therefore
+reported as NOT RETRIEVABLE, not fabricated.
+
+**Stages 4-11 (mechanism/contract analysis): fully answerable from code
+truth alone, independent of this run's specific literal numbers --
+same rigor as D-235Z's own successful forensic.**
+
+- **Stage 4 (why no authoritative match):** by construction. A "lost
+  semantic atom" is, by the pre-existing coverage-ledger's own
+  definition, a FRAGMENT of content that did not survive into the final
+  story -- structurally a SUB-SPAN of whatever larger delivery
+  attempt/context it originated from, not a delivery that itself became
+  a whole, separate, surviving `LanguageAttempt`. `shared_attempt_word_
+  identity.match_reconstructed_attempt_against_language_attempts`'s own
+  set-arithmetic rules mean such a fragment's `CandidateTake.word_
+  indices` will, in the overwhelmingly common real case, form a PROPER
+  SUBSET of one real `LanguageAttempt`'s own word-index range --
+  `RELATIONSHIP_EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED` -- which
+  `AUTHORITATIVE_RELATIONSHIP_STATUSES` (`{EXACT_SAME_MEMBERSHIP,
+  ONE_RECONSTRUCTED_TO_MULTIPLE_LANGUAGE_ATTEMPTS_EXACT_PARTITION}`)
+  deliberately excludes -- containment is reported as evidence, never
+  auto-promoted, per D-235P's own explicit "Correspondence Authority"
+  design decision (unchanged, correct for its ORIGINAL purpose).
+- **Stage 5 (boundary-alignment classification): most likely (A) --
+  target is a proper subset of one LanguageAttempt**, given the target's
+  own classification (`REAL_CONTENT_LOSS`/`UNIQUE_FACT_LOST`,
+  `missing_content_token_count=5` of `own_content_token_count=6` --
+  i.e. nearly ALL its own content is uniquely absent elsewhere, the
+  classic shape of a short aborted/interrupted delivery fragment
+  swallowed into a larger real attempt's own boundaries via `build_
+  language_attempts`'s existing CONTINUATION/ABANDONED-utterance merge
+  rules, unchanged by D-236). (B) (crossing two attempts) cannot be
+  ruled out with the SAME confidence without the literal word-index
+  data -- reported honestly as the less-likely but not excluded
+  alternative. (C)/(D)/(E)/(F) are not code-truth-supported by anything
+  observed and are not selected.
+- **Stage 6 (proposition availability):** D-169's own V1 design mints
+  exactly ONE `PropositionCandidate` per `LanguageAttempt` (module
+  docstring, unchanged) -- so whichever real `LanguageAttempt` overlaps
+  the target necessarily has exactly one, already-computed,
+  unambiguous `PropositionCandidate`. Proposition evidence for the
+  target's own overlapping attempt DOES exist; it is inaccessible to
+  the lost-atom consumer ONLY because D-235P's identity contract
+  (Stage 7) does not expose containment as authoritative -- this
+  distinction is confirmed, not assumed.
+- **Stage 7 (D-235P contract fitness): YES, intentionally designed only
+  for full reconstructed-attempt <-> full LanguageAttempt identity**
+  (module docstring: proving a whole delivery attempt maps onto whole
+  canonical evidence). **YES, a contract mismatch exists**: the
+  lost-atom consumer (D-235Q via D-235X's wiring) is asking this SAME
+  identity contract to answer a DIFFERENT, narrower question -- "which
+  one canonical proposition owns this small lost fragment's words" --
+  not "does this whole reconstructed attempt equal this whole canonical
+  attempt". Confirmed by direct code read, not guessed.
+- **Stage 8 (materiality requirement): D-235Q does NOT actually require
+  whole-attempt identity.** Read directly from `complete_lost_semantic_
+  atom_materiality.assess_complete_lost_semantic_atom_materiality`: it
+  only ever consumes `exact_match.relationship_status in AUTHORITATIVE_
+  RELATIONSHIP_STATUSES` to derive `exact_proposition_ids`, then calls
+  `_exact_slot_for_proposition_set` to obtain ONE unambiguous editorial
+  slot. The real, narrower requirement is: exact, non-heuristic
+  ownership of the lost atom's own words by ONE canonical proposition/
+  editorial slot -- D-235P's current full-attempt-equality mechanism is
+  simply the (currently only) way that requirement is fed, and it is
+  stricter than the requirement itself needs.
+- **Stage 9 (safe exact ownership evidence already available, audit
+  only, NOT authorized for use):** (a) canonical word-index containment
+  is ALREADY exact set arithmetic, zero fuzziness --
+  `RELATIONSHIP_EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED` is already
+  computed today, just not promoted; (b) when exactly ONE
+  `LanguageAttempt` contains the target (`match.language_attempt_ids`
+  has length 1, i.e. `_is_partition`'s own `overlapping` tuple is a
+  singleton), that is an already-computed, unambiguous "unique
+  containing attempt" fact; (c) D-169's own one-proposition-per-attempt
+  V1 design makes "which proposition owns that attempt" trivially
+  unique once (b) holds -- no new lookup needed, `proposition_candidate_
+  ids_by_attempt_id` already provides it; (d) source-scoped exact word
+  membership is already enforced throughout. All four are EXISTING,
+  already-computed evidence -- nothing new would need to be built to
+  read them; only a POLICY decision (out of scope here) about whether to
+  promote them would be new.
+- **Stage 10 (ambiguity firewall -- cases a future ownership seam must
+  abstain in, audit only):** target words overlapping MULTIPLE real
+  `LanguageAttempt`s (the existing `EXACT_PARTIAL_WORD_MEMBERSHIP_
+  OVERLAP`/multi-attempt-overlap shapes); multiple `PropositionCandidate`s
+  claiming the same words (D-235Q's OWN existing `ownership_ambiguous`/
+  `multi_proposition_exact_set_unresolved_atom_ownership` check already
+  handles this case correctly today, confirmed by direct code read);
+  `RELATIONSHIP_SOURCE_MISMATCH`; the containing attempt itself carrying
+  unresolved `restart_evidence`/`correction_evidence` (contested
+  identity); and D-235Q's own pre-existing editorial-required/meaning-
+  critical classifications, which must always take precedence over any
+  identity-derived signal, never be overridden by one. No implementation
+  performed; this is an audit of what a future, separately-authorized
+  seam would need to respect.
+- **Stage 11 (Q/R/S/T): exonerated again.** Given the current, correctly
+  conservative identity contract, `exact_identity_available` correctly
+  evaluates `False` for this target, D-235Q correctly falls back to its
+  pre-existing content-based classification (`REAL_CONTENT_LOSS`/
+  `blocking=true`), and D-235R/D-235T correctly preserve blocking / never
+  suppress. No behavior in Q/R/S/T is incorrect given their actual
+  inputs -- confirmed, not touched.
+
+**Stage 12 (P2 `unique_information_uncovered_count`: 0 -> 11):
+P2_FINDING_RELATED, confirmed by direct code read, not merely
+plausible.** D-204's own real-media script computes `uncovered_total =
+sum(len(h.get("uncovered_earlier_proposition_candidate_ids") or [])
+for h in hyps)` across all supersession hypotheses -- a value that
+mechanically scales with how many DISTINCT `PropositionCandidate`s
+exist for the pairwise supersession comparisons to reference. With only
+1 real `PropositionCandidate` (pre-D-236), there was structurally almost
+nothing distinct for any hypothesis to mark "uncovered" no matter the
+true editorial reality; with 3 real, distinct `PropositionCandidate`s
+now available, the SAME pre-existing, unmodified supersession-hypothesis
+logic naturally has more surface area to flag. `unique_information_
+firewall_violation_count` is 0 in both runs (HELD both times) -- this is
+a visibility/granularity change, not a new firewall violation or a
+separate P2 regression. Not fixed here, per this task's own instruction.
+
+**Root-cause verdict: A -- TARGET IS EXACT SUBSET OF ONE LANGUAGEATTEMPT
+-- FULL-ATTEMPT IDENTITY CONTRACT IS TOO STRICT FOR LOST-ATOM
+OWNERSHIP.** Caveat, stated plainly: the LITERAL per-object word-index
+trace that would make this a byte-for-byte-verified fact (rather than
+the most code-truth-consistent explanation given the target's own
+classification and this pipeline's own unchanged merge rules) is not
+retrievable from any available data source -- this is reported
+honestly as this task's own required distinction, not smoothed over.
+
+**First actual failing seam:** none of Q/R/S/T; the seam is the
+correspondence boundary between `shared_attempt_word_identity.py`'s
+existing `AUTHORITATIVE_RELATIONSHIP_STATUSES` (full-attempt-identity
+scope) and what the lost-atom-materiality consumer (D-235Q/X) actually
+needs (atom-level ownership, a narrower question).
+
+**Smallest future fix shape (NOT implemented, audit only):** a future,
+separately-authorized seam could recognize containment as authoritative
+ONLY when the containing `LanguageAttempt` set is a unique singleton
+(no ambiguity) AND the resulting proposition-slot ownership is itself
+unambiguous (reusing D-235Q's own existing `ownership_ambiguous` check)
+-- reusing all four Stage-9 evidence sources verbatim, inventing no new
+computation. New threshold needed: **no**. Fuzzy matching needed: **no**.
+Timestamp authority needed: **no** (word-index set arithmetic only, same
+posture as today). Schema migration needed: **no**. Provider needed:
+**no**. RAW needed to design it: **no**; a RAW would be needed to
+REQUALIFY it once implemented (not performed here).
+
+**Freeze track status:** REMAINS OPEN -- D-237's own verdict B is
+withdrawn/corrected here; the target atom is confirmed still blocking
+(per the recovered validator data this task accepted as corrected
+fact), root-caused above to the identity-contract mismatch, not to any
+defect in Q/R/S/T or in D-236's own Language-Spine fix (which is
+independently proven working). **Pacing track status:** unchanged --
+blocked behind Freeze (per the corrected `first_missing_link=FREEZE_
+BLOCKED_BEFORE_PACING`), not an independent gap as D-237 had
+mis-attributed; the Pacing V2 serialization-gap investigation named in
+D-237's own "exact next gate" is deprioritized behind this Freeze-track
+finding, since Freeze blocking now explains `pacing_seam_reached=false`
+directly and sufficiently.
+
+**Exact next gate:** a separately-authorized identity-contract
+extension task (per the Stage 9/10 audit above) to let unambiguous
+containment feed atom-level ownership WITHOUT weakening D-235P's
+existing full-attempt-identity contract for its original purpose --
+Product Owner decision required first (this touches identity-rule
+design, explicitly out of this task's own scope). No RAW until that
+design decision is made and implemented.
+
+**Confirmation:** forensic only. Zero production code changes. Zero
+RAW/Modal/RunPod/provider calls. No identity-rule/Language-Spine/
+Freeze/materiality/repair/Pacing/Audio-Join logic touched. Docs-only
+decision entry.
+
+Then STOP. Do not implement. Do not launch RAW. Wait for Product Owner
+coordination.
