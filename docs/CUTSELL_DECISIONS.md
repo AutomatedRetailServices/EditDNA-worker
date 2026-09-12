@@ -60023,3 +60023,300 @@ available for Product Owner Watch+Listen review pending a successful
 future retrieval of the target diagnostic content.
 
 Then STOP.
+
+## D-239K — LOST-ATOM EDITORIAL-REQUIREMENT GRANULARITY FORENSIC, OFFLINE ONLY, POST D-239J (Verdict B: REQUIRED IS ONLY PROPOSITION-LEVEL — D-239I's ownership bridge over-inherits requiredness onto a small lost atom with zero exact atom-level corroboration; no fix implemented, forensic only)
+
+**Trigger:** the corrected D-239J real-media result (recovered externally
+from run `34689674854`) showed the target lost atom
+(`clip_2089a0a7f701d18f2aa4`, excerpt "too many people ready set these
+are the", words 41–48, 8 words) resolving to `EXACT_SINGLETON_OWNERSHIP`
+under a `LanguageAttempt` (`latt_f811b1c572da97b6fe21`) spanning words
+31–252 (222 words) that owns exactly one `PropositionCandidate`
+(`prop_41af4a64034a4211782a`), with D-235Q reaching
+`editorial_requirement_state = REQUIRED` /
+`final_materiality_status = EDITORIALLY_REQUIRED` /
+`blocking_recommendation = BLOCK` via
+`editorial_requirement_evidence_source = EXACT_OWNERSHIP` (D-239I Seam
+A) — while every OTHER seam D-239I built for the exact same row
+(`critical_claim_conflict_state`, `retry_process_state`,
+`redundancy_state`) came back `null`/`UNKNOWN`. This gate traces,
+offline and from code only, whether that REQUIRED verdict is actually
+atom-granular (proven true of the 8 target words themselves) or
+proposition/attempt-granular (true only of the 222-word delivery as a
+whole, inherited onto the fragment without independent proof).
+
+## Stage 1 — slot evidence origin
+
+`proposition_slot_evidence_by_id` is populated entirely by
+`language_proposition_relation.py::build_proposition_candidates`, which
+builds **exactly ONE `PropositionCandidate` per `LanguageAttempt`**
+(module docstring, D-169 V1 scope: "built ONE PER LanguageAttempt").
+For `prop_41af4a64034a4211782a` this means the slot value is a property
+of the WHOLE 222-word attempt, computed by `_slot_evidence(index,
+count, meaning_completion, claim_type)`:
+
+- `index`/`count`: this attempt's own ordinal position among ALL
+  sibling `LanguageAttempt`s in the same source (`by_source` grouping,
+  sorted by `(source_start, source_end, attempt_id)`) — a PER-SOURCE
+  POSITIONAL fact about the attempt, nothing about any word range
+  inside it.
+- `claim_type`/`meaning_completion`: derived from
+  `build_claim_signature(source_asset_id, attempt.text_normalized)` —
+  `attempt.text_normalized` is the FULL attempt text (all 222 words),
+  never a sub-span.
+- Result: `SLOT_HOOK` if `index == 0` (first attempt in the source);
+  `SLOT_CTA`/`SLOT_CONCLUSION` if it is the LAST attempt AND
+  `meaning_completion == MEANING_COMPLETE`; `SLOT_OTHER` otherwise.
+
+No P1 `EditorialMoment`, no local group, no realization, and no
+source-span/word-membership evidence feeds this value at all — it is
+pure position-among-siblings plus one whole-attempt claim signature.
+Story-function slots (`_STORY_FUNCTION_SLOTS = {HOOK, CTA, CONCLUSION}`)
+are exactly the two structural extremes (first / last-and-complete) of
+this per-source list.
+
+## Stage 2 — granularity
+
+**B — one `PropositionCandidate`, which is minted 1:1 with one whole
+`LanguageAttempt`.** Not a P1 moment, not a local group, not a
+realization, not an exact sub-span. No code path anywhere in this
+codebase computes a slot/story-function label narrower than "one
+entire `LanguageAttempt`" — `_slot_evidence` has no word-index
+parameter and could not consult one if it did (its only inputs are the
+attempt's ordinal position and its own full-text claim signature).
+**No existing evidence proves words 41–48 themselves carry the required
+editorial function** — the REQUIRED label was proven only of the
+attempt's own two positional extremes, inherited onto this fragment
+solely because the fragment happens to fall inside that attempt's word
+range.
+
+## Stage 3 — target coverage
+
+**PROPOSITION_ONLY_COVERAGE.** Words 41–48 are a strict subset of the
+222-word attempt (31–252) that owns the proposition (D-238's own
+ownership gate proves exactly this containment — that is what
+`EXACT_SINGLETON_OWNERSHIP` means). No slot/story-function evidence
+exists at any finer grain than the whole proposition, so there is
+nothing narrower to check the target against. The ownership proof
+establishes WORD-SET CONTAINMENT, never FUNCTION-SET CONTAINMENT — D-238's
+own docstring is explicit about this distinction ("EXACT_SINGLETON_
+OWNERSHIP alone means NOTHING about whether the atom is safe to drop").
+
+## Stage 4 — proposition breadth
+
+`prop_41af4a64034a4211782a` owns a 222-word attempt and (per the
+corrected D-204 evidence) appears across `moment_count = 8`,
+`realization_count = 8`, `region_count = 4`,
+`relationship_status = MULTIPLE_DISTANT_REALIZATIONS`, with
+`multi_realization_proposition_count = 1` (this is that one
+proposition) and its P2 regions reported as recording-process shaped.
+A single `PropositionCandidate` spanning 8 moments across 4 regions is
+definitionally NOT one atomic editorial unit — `build_proposition_
+candidates`'s own V1 scope (one candidate per attempt) was never
+designed to represent a claim this structurally diffuse. Proposition-
+level REQUIRED is not semantically valid for every contained fragment
+here; at most it can be valid for whichever realization(s) actually
+carry the hook/CTA/conclusion function the position-based heuristic
+detected — never asserted for all 8 moments/222 words uniformly. No
+redesign is proposed; this is an audit finding only.
+
+## Stage 5 — P1 evidence
+
+D-239I's own Seam C (`_complete_lost_semantic_atom_materiality_by_
+clip_id`, `final_story_coherence_validation.py`) looks up P1 role/
+audience-delivery evidence by the row's OWN exact `clip_id`
+(`clip_2089a0a7f701d18f2aa4`) — never the containing attempt's id —
+exactly the atom-granular lookup this stage asks about. The corrected
+D-239J result reports `retry_process_state = UNKNOWN` for this row,
+which is the LIVE, code-verified output of that exact lookup: no P1
+`EditorialMoment` for this specific clip_id reached `CONFIDENCE_
+SUPPORTED` with a non-`UNCERTAIN` role (`p1_moment_role_and_audience_
+status_by_clip_id_for` omits both), so `p1_role`/`p1_audience_status`
+stayed `None` for this row. Per-moment ids/roles/relations/confidence
+values for the target are **not available from any data this gate
+has** (the live artifact JSON itself remains unretrieved — D-239J
+Verdict F — and the corrected summary supplied only the D-235Q/R/S/T/
+Freeze fields, not a per-moment listing). The whole-region aggregate
+figures named in this gate's own directive (`P1 moments = 10`,
+`moment_role_distribution: POST_TAKE_RESET = 10`,
+`BLOOPER_SERIES_OBSERVED = true`) describe the SOURCE region
+surrounding this proposition, not a confirmed exact classification of
+`clip_2089a0a7f701d18f2aa4` itself — Seam C's own exact, per-clip-id
+result (`UNKNOWN`) is the only claim this gate can make about the
+target's own P1 status with code-level confidence. Both readings are
+consistent with each other (a target inside an all-`POST_TAKE_RESET`
+region simply may not itself have separately survived as its own
+confidently-classified P1 moment), but this gate does not assert
+process/reset for the target as PROVEN — only as unresolved, which
+`assess_editorial_requirement_evidence`'s own retry/process firewall
+(step 2) correctly treats as "cannot fire" rather than "safe," since a
+`None` role never satisfies `recording_process_status in
+_PROCESS_SHAPED_ROLES`.
+
+## Stage 6 — P2 evidence
+
+`WholeVideoEditorialRegion.dominant_process_status`/`audience_delivery_
+status` (`whole_video_editorial_reasoning.py`) are built from the SAME
+exact, clip_id-keyed P1 moments (`_dominant_process_status`/
+`_audience_delivery_status_for_region` aggregate `EditorialLocalGroup`
+membership) — exact at the moment level, but a region's OWN
+`proposition_candidate_ids` linkage is populated through the SAME
+non-exact overlap bridge D-235M's own identity audit already named
+(module docstring item 2). The corrected D-204 evidence names multiple
+`RECORDING_PROCESS_REGION`s with `PARTIAL_SUPERSESSION`/`FULL_
+COVERAGE`/`NO_CONFLICT` and `recording_process_support = SUPPORTED` in
+aggregate, and states "P2 regions for this proposition are recording-
+process shaped" — but this gate cannot independently confirm, from
+data available to it, that the EXACT region containing words 41–48
+(rather than one of the proposition's other 7 moments/3 other regions)
+is among those specific supersession rows, for the same reason as
+Stage 5: the live per-region JSON was never retrieved. This is
+corroborating regional context, not exact target-level proof.
+
+## Stage 7 — requiredness contract
+
+Read literally (`lost_atom_editorial_requirement_evidence.py`'s own
+module docstring and `assess_editorial_requirement_evidence`'s own
+required-signal computation, `slot_is_exact and editorial_slot_
+evidence in _STORY_FUNCTION_SLOTS`): REQUIRED was designed to mean
+**"this exact realization/clip IS (or exactly equals) the proposition
+that carries the required story function."** This is provable ONLY
+because, before D-238/D-239I, the ONE identity source that could ever
+make `slot_is_exact` true was `exact_identity_available`
+(`shared_attempt_word_identity.py`'s own `AUTHORITATIVE_RELATIONSHIP_
+STATUSES`) — a FULL-ATTEMPT identity match, meaning the clip being
+evaluated effectively WAS the whole attempt (or an exact 1-to-N
+partition of it), never a strict word-subset fragment. Under that
+original contract, "the proposition is required" and "this exact
+realization must survive" were the same claim by construction, because
+the realization AND the proposition were the same-sized object. The
+contract was never designed to mean "any fragment contained somewhere
+inside a required attempt is itself required."
+
+## Stage 8 — safety question
+
+**YES — this is a CONTRACT GRANULARITY MISMATCH.** D-239I Seam A
+(`complete_lost_semantic_atom_materiality.py`, the `elif exact_
+ownership_available:` branch) feeds the SAME `_exact_slot_for_
+proposition_set`/`slot_is_exact` mechanism through D-238's ownership
+identity instead of D-235P's full-attempt identity. D-238's own
+ownership proof is deliberately narrower and WEAKER on this exact
+dimension: it proves only "these N words belong, unambiguously, to one
+attempt that owns one proposition" (word-SET containment), never "this
+attempt's realization IS this N-word span" (function/realization
+equivalence) — D-238's own module docstring says this explicitly
+("EXACT_SINGLETON_OWNERSHIP alone means NOTHING about whether the atom
+is safe to drop... never computes materiality [or] editorial
+requirement... itself"). Seam A's own code comment already flags the
+mechanism ("this describes the QUALITY of the identity mapping, never
+whether a slot value was actually found for it") but the "quality of
+the identity mapping" question it actually answers is "is `slot_is_
+exact` allowed to be True," not "is this specific span what the slot
+label was actually observed on" — for `exact_identity_available` those
+were the same question (attempt == realization); for `exact_ownership_
+available` they are NOT (attempt ⊋ realization, here by a 27:1 ratio,
+222 vs 8 words). Pre-D-239I, the contract's assumption held exactly
+because the identity source that unlocked it always meant whole-attempt
+exactness; D-239I extended the SAME unlock condition to a narrower,
+disjoint identity source whose own proof is insufficient for that
+assumption. This is the exact mechanism this stage asks about.
+
+## Stage 9 — possible existing exact evidence
+
+Partially available, not fully sufficient: P1 moment source span/role/
+audience-delivery status ARE exact and clip_id-keyed (Seam C already
+consults them for the target's own clip_id), and local-group/P2-region
+membership is exact at the moment level (Stage 6). None of these,
+however, answer the one question the contract actually needs at this
+granularity — "does this specific word-span carry the attempt's hook/
+CTA/conclusion FUNCTION" — because no code in this repository has ever
+computed a slot/story-function label at any grain narrower than "one
+whole `LanguageAttempt`" (Stage 1/2). Word-index/source-span/
+realization-membership evidence exists (used by D-238's own containment
+proof) but has never been connected to slot/function computation. So
+existing evidence can at best REFINE the firewall (require the target's
+OWN exact P1 role be confirmed, not merely absent, before letting
+ownership-inherited REQUIRED stand) — it cannot, by itself and without
+new intelligence, PROVE the positive claim ("this fragment itself is
+the hook/CTA/conclusion"). No implementation follows from this finding
+in this gate.
+
+## Stage 10 — firewall
+
+The editorial-required firewall itself is not challenged. On the
+evidence actually available for this row (proposition-level REQUIRED
+proven; atom-level coverage of that REQUIRED claim NOT proven; the
+retry/process firewall unable to fire because the target's own exact
+P1 role is unresolved, not confirmed either way), the fail-closed state
+this stage names as correct is **INSUFFICIENT_EVIDENCE**, never a
+silent `UNKNOWN -> NOT_REQUIRED` conversion. No fix is implemented in
+this gate — this is the state a FUTURE, separately-authorized fix
+would need to reach, not a change made here.
+
+## Root-cause verdict
+
+**B — REQUIRED IS ONLY PROPOSITION-LEVEL; D-239I's ownership bridge
+over-inherits requiredness onto a small lost atom.** Every field this
+gate could independently verify from code supports this: the slot
+value is minted once per whole `LanguageAttempt` from purely positional
++ whole-text evidence (Stage 1/2); the target's own 8 words carry no
+independent slot/function proof of any kind (Stage 3); the proposition
+itself spans 8 moments/4 regions, making a single uniform REQUIRED
+verdict already dubious even before considering fragment-level
+containment (Stage 4); and — decisively — every OTHER D-239I seam that
+DOES look up exact, atom-granular evidence for this same row (critical-
+claim conflict, retry/process, redundancy) came back `null`/`UNKNOWN`,
+not confirmed-safe and not confirmed-required, leaving Seam A's
+proposition-level inheritance as the ONLY reason this row blocks. The
+regional recording-process/blooper context named in this gate's own
+directive is real and corroborating, but not proven to be an EXACT
+match for the target's own clip_id (Stage 5/6) — this gate therefore
+does not select verdict C (which would require the target itself, not
+merely its region, to carry confirmed process/reset evidence) or D
+(which would require verdict C's own exact proof alongside B's). B is
+the verdict fully supported by code-level, non-speculative evidence.
+
+## No fix
+
+Per this gate's own directive: no implementation. `REQUIRED` is not
+weakened, converted to optional, or otherwise changed anywhere in this
+gate. The current `BLOCK` on `clip_2089a0a7f701d18f2aa4` remains in
+force exactly as D-239J's corrected real-media result reported it.
+
+## Confirmation
+
+Forensic only. Zero files changed except this docs-only entry. No
+`complete_lost_semantic_atom_materiality.py`, `exact_lost_atom_
+ownership.py`, `language_proposition_relation.py`, `final_story_
+coherence_validation.py`, or `editorial_moment_sequence_integration.py`
+edit of any kind. No materiality/editorial-required-firewall/ownership/
+Freeze/repair/P1/P2/Language-Spine authority change. No threshold, no
+heuristic, no classifier. No RAW, no Modal, no RunPod, no provider
+call.
+
+**Canonical status:** `D239K_EDITORIAL_REQUIREMENT_GRANULARITY_
+MISMATCH_IDENTIFIED_NO_FIX`.
+
+**Freeze track status:** unchanged — `BLOCK` on the target atom stands;
+this gate neither confirms nor overturns it, it only names the
+evidentiary gap underneath it.
+
+**Pacing status:** not reached; unaffected by this gate.
+
+**Exact next gate:** a Product Owner decision on whether to author a
+bounded, atom-granular refinement to Seam A (e.g. requiring the
+target's own exact P1 role be confirmed non-process before an
+ownership-inherited slot value may promote to REQUIRED, with the
+fail-closed outcome on continued ambiguity being `INSUFFICIENT_
+EVIDENCE`, never `NOT_REQUIRED`) — not started, not scoped, not
+implemented here.
+
+**New classifier needed?** No — Stage 9 found no new intelligence
+required, only a possible reordering/gating of EXISTING exact
+evidence, and even that is not implemented here. **New threshold
+needed?** No. **Provider needed?** No. **RAW needed?** No — this is an
+offline, code-only forensic. **Paid compute needed?** No, not by this
+task.
+
+Then STOP. Do NOT implement. Do NOT launch RAW. Wait for Product Owner
+coordination.
