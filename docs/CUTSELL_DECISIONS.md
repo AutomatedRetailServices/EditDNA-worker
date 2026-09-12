@@ -59579,3 +59579,250 @@ RunPod dispatch. This entry is the only change made in this gate
 
 Then STOP. Do NOT implement. Do NOT launch RAW. Wait for Product Owner
 coordination.
+
+## D-239I — EXACT-OWNERSHIP MATERIALITY EVIDENCE COMPLETION, OFFLINE IMPLEMENTATION ONLY, POST D-239H (Verdict A: EXISTING MATERIALITY EVIDENCE COMPLETION OFFLINE PROVEN — READY FOR ONE REAL-MEDIA FREEZE REQUALIFICATION, next gate D-239J, NOT launched)
+
+**Trigger:** D-239H's own forensic (Verdict D — MULTIPLE EXISTING
+EVIDENCE SEAMS ARE MISSING) traced, per field, exactly why D-235Q still
+lands on `INSUFFICIENT_EVIDENCE`/`ABSTAIN` for the real target atom
+(`clip_6fb9e51df885391ac25d`) even after D-238's own exact singleton
+ownership (`latt_97f99a710a88e74edc26` / `prop_124bd1b931ba3cb81abb`) is
+real-media proven: four distinct, already-computed evidence sources were
+never threaded to the dimensions ownership makes addressable. D-239I
+closes exactly those four seams — no new classifier, no new threshold,
+no fuzzy matching, no timestamp-overlap authority, no `None`→safe
+conversion, no precedence change, no provider, no RAW.
+
+## What was built (all additive, gated on `exact_ownership_available`, zero behavior change when unused)
+
+**Seam A — editorial requirement**
+(`complete_lost_semantic_atom_materiality.py`): D-239H proved
+`proposition_slot_evidence_by_id` already contains the owned
+`PropositionCandidate`'s own slot value and already reaches this exact
+function — the gap was that `_exact_slot_for_proposition_set` was only
+ever called inside `if exact_identity_available:`. A new `elif
+exact_ownership_available:` branch calls the SAME unmodified function
+against D-238's own singleton `proposition_candidate_ids` (by
+construction of `is_exact_singleton`, always exactly one id — the
+multi-id ambiguity branch inside `_exact_slot_for_proposition_set` is
+structurally unreachable through this path). `identity_mapping_status`
+is upgraded to `IDENTITY_MAPPING_EXACT` whenever either source is exact
+— describing the quality of the identity mapping, never whether a slot
+value was actually found (an owned proposition with no story-function
+slot still correctly reports `NOT_FOUND`, never a fabricated one).
+
+**Seam B — critical-claim conflict**
+(`final_story_coherence_validation.py`): new `_representative_clip_id_
+by_attempt_id` reverse-indexes D-235P's own already-computed `exact_
+match_by_clip_id` — `attempt_id -> the ONE clip whose own full-attempt
+identity IS that attempt`, gated by the SAME `AUTHORITATIVE_
+RELATIONSHIP_STATUSES` set D-235P already enforces (never containment/
+heuristic/partial-overlap); an ambiguous reverse identity (two clips
+claiming the same attempt) is removed entirely, never resolved to one
+candidate. `_critical_claim_conflict_by_clip_id` now falls back, for a
+row its own bare-clip_id lookup leaves at `None` (the exact D-239H
+Stage-3 finding: a genuinely standalone-discarded lost atom can never
+appear in `clip_id_to_group` under its OWN clip_id), to the SAME two
+existing checks (`conflict_clip_ids` membership, `clip_id_to_group`
+membership) run against D-238's owning attempt's own representative
+(kept) clip instead — reusing THAT clip's own already-evaluated
+True/False context. Never a new conflict rule, never `None -> False`,
+never "absence of evidence = no conflict": when no representative clip
+exists, or that clip's own context is itself unresolved, the row's own
+result stays `None`.
+
+**Seam C — retry/process** (`editorial_moment_sequence_integration.py`
++ `pipeline.py` + `final_story_coherence_validation.py`): D-239H proved
+P1 `EditorialMoment` role/audience-delivery evidence is already computed
+live (exact `clip_id` keying, per D-235M's own item-1 finding) but was
+trapped in a diagnostics-only side channel, never threaded to D-235L/
+D-235M's own EXISTING `recording_process_evidence`/`recording_process_
+status`/`audience_delivery_status` parameters (both already present on
+`assess_complete_lost_semantic_atom_materiality`'s own signature,
+simply never populated by any live caller). New `p1_moment_role_and_
+audience_status_by_clip_id_for` trivially projects each moment's own
+`moment_role`/`audience_delivery_status`, keyed by `source_span_id`
+(== `take.clip_id`), INCLUDING a moment only when its own `confidence`
+is `CONFIDENCE_SUPPORTED` (never `MIXED`) and its own `moment_role` is
+not `MOMENT_ROLE_UNCERTAIN` — an ambiguous moment is simply omitted, so
+a plain lookup naturally yields `UNKNOWN`. `pipeline.py` builds this map
+alongside the existing D-238 ownership map (same flag gate, same
+fail-open `{}` default); `final_story_coherence_validation.py` threads
+it, gated to rows whose own D-238 ownership is exact singleton, into a
+new `_recording_process_evidence_from_p1_role` (derives D-235L's
+boolean: `True` for a process-shaped role, `False` for any other exact
+non-`UNCERTAIN` role — a legitimate positive "not process-shaped"
+confirmation, never a guess — mirroring `_PROCESS_SHAPED_MOMENT_ROLES`
+verbatim from the public `MOMENT_ROLE_*` constants D-235M's own private
+set already uses) and passes the raw role/status straight to D-235M's
+existing parameters.
+
+**Seam D — redundancy** (`final_story_coherence_validation.py`): a new,
+exact, non-fuzzy preserved-equivalent proof — `replacement_function_
+preserved` is `True` only when D-238's owning `LanguageAttempt` IS, via
+the SAME `_representative_clip_id_by_attempt_id` reverse-index Seam B
+built, a clip genuinely present in the CURRENT pass's own selected/kept
+set (`{c.clip_id for c in draft.selected}`/`working.selected` — both
+already in scope at each call site, no new parameter threading needed).
+Never `False` (one-directional-affirmative, matching this parameter's
+own pre-existing semantics elsewhere in the codebase); absence of proof
+stays `None` (UNKNOWN), never inferred as `NOT_REDUNDANT`.
+
+**Meaning criticality:** no separate seam built — D-239H's own forensic
+established this dimension has no ownership-addressable evidence source
+of its own beyond `atom_classifications` (row-native, unrelated to
+ownership) and `critical_claim_conflict` (Seam B's own gap). No new
+classifier was created; when existing evidence remains insufficient
+after the four seams above, the row correctly stays
+`INSUFFICIENT_EVIDENCE` — proven acceptable by this gate's own test
+suite (`TestRealShapeOfflineReplay::test_57`).
+
+**Diagnostics** (`lost_atom_ownership_materiality_diagnostics.py`):
+extended with four honest evidence-source fields —
+`editorial_requirement_evidence_source` (`EXACT_IDENTITY` /
+`EXACT_OWNERSHIP` / `NONE`), `critical_context_ownership_bridge_
+eligible`, `retry_process_ownership_bridge_eligible`, `redundancy_
+ownership_bridge_eligible` (all three labelled "eligible", never
+"used" — this module sits strictly after the three seams' own
+intermediate lookups and honestly reports only whether D-238 ownership
+was exact enough to make each bridge possible, not whether it actually
+fired for a given row). Pure re-projection of already-computed booleans
+on `materiality`/`ownership`; zero new computation.
+
+**Precedence (binding, unchanged):** meaning-critical → editorial-
+required → conflict/unknown → retry/process → redundant →
+non-material → abstain — structurally unchanged and verified
+byte-identical by a dedicated ordering-index test
+(`TestNoGlobalAuthorityChange::test_51`).
+
+## Firewall + positive-case proof (directive's own 10 firewall + 6 positive cases)
+
+All ten firewall cases proven: ownership + editorial `REQUIRED` → BLOCK;
+ownership + meaning `CRITICAL` → BLOCK; ownership + critical conflict
+`TRUE` → BLOCK; ownership + critical context `UNKNOWN` → ABSTAIN;
+ownership + ambiguous P1 role → UNKNOWN; ownership + ambiguous
+redundancy → UNKNOWN; ownership + source mismatch → ABSTAIN; ownership
++ multiple propositions → ABSTAIN; ownership alone → never
+`DO_NOT_BLOCK`; explicit no-conflict resolved only when
+`clip_id_to_group`-style evaluated-context evidence genuinely exists.
+All six positive cases proven: ownership unlocks existing slot evidence
+(A); ownership unlocks existing explicit critical-context evidence (B);
+ownership unlocks existing P1 role evidence (C); ownership unlocks exact
+preserved-equivalent redundancy evidence (D); when existing evidence
+genuinely establishes `NON_MATERIAL_REAL_CONTENT`, D-235Q reaches
+`DO_NOT_BLOCK` (E); D-235R and D-235T consume the SAME D-235Q result (F,
+via `decide_lost_semantic_atom_freeze_authority` and
+`all_blocking_findings_safely_suppressed` called directly on this
+gate's own produced `CompleteLostSemanticAtomMateriality` object).
+
+## Real D-239G/H shape offline replay
+
+`TestRealShapeOfflineReplay` reconstructs the exact recovered shape
+(`EXACT_SINGLETON_OWNERSHIP`, one owned `PropositionCandidate`) and
+proves each seam resolves INDEPENDENTLY without touching another:
+Seam A alone → `EDITORIALLY_REQUIRED`/BLOCK; Seam B alone (critical
+context resolved `False`) → `NON_MATERIAL_REAL_CONTENT`/`DO_NOT_BLOCK`;
+Seam C alone (exact `FALSE_START` role) →
+`RETRY_OR_RECORDING_RESIDUE`/`DO_NOT_BLOCK`; Seam D alone (owning
+attempt's representative clip selected) →
+`REDUNDANT_EQUIVALENT`/`DO_NOT_BLOCK`; with NO evidence beyond ownership
+itself, the row correctly stays `INSUFFICIENT_EVIDENCE`/`ABSTAIN` —
+never forced to `DO_NOT_BLOCK` unless existing evidence actually
+supports it, exactly as this gate's own directive required.
+
+## No-policy-change proofs (all pass, zero diff / structural)
+
+`shared_attempt_word_identity.py`, `lost_semantic_atom_materiality.py`,
+`lost_atom_editorial_requirement_evidence.py`, `lost_semantic_atom_
+freeze_authority.py`, and `repair_loop.py` are all zero-diff (`git diff
+--stat HEAD`) — none of these five files were touched by this task.
+`AUTHORITATIVE_RELATIONSHIP_STATUSES` is never reassigned in either
+modified module (source-scan proven). No `difflib`/`SequenceMatcher`
+import anywhere in `complete_lost_semantic_atom_materiality.py` (AST-
+level import proof). No `.source_start`/`.source_end` attribute access
+or `_overlap_duration(...)` call anywhere inside the four new/modified
+seam functions (AST-level proof, immune to the word "overlap" appearing
+freely in this task's own binding prose). No new `CUTSELL_*` env flag —
+every seam reuses the SAME existing `lost_atom_materiality_freeze_
+authority_enabled()` gate.
+
+## Tests
+
+`tests/test_cutsell_d239i_exact_ownership_materiality_completion.py`
+(62 tests): Seam A (slot-evidence success/no-function-slot/multi-
+proposition-never-reached/identity-upgrade/exact-identity-precedence,
+5 tests), Seam B (direct True/False, ownership-bridge True/False,
+no-representative/representative-unresolved stay `None`, flag-off
+default, heuristic-match-never-used, ambiguous-reverse-map-never-
+resolved, 9 tests), Seam C (role-derivation True/False/None, P1-helper
+UNCERTAIN/MIXED-confidence omission, exact-role inclusion, full-pipeline
+gating on/off, missing-role-stays-UNKNOWN, 9 tests), Seam D (success/
+not-selected/no-representative, 3 tests), source-mismatch/multi-
+proposition firewalls (2 tests), the directive's own 10 firewall cases
++ positive cases E/F (10 tests), multi-source/multi-atom isolation
+(2 tests), English/Spanish/Spanglish language-neutrality (1 parametrized
+test), no-fuzzy/no-timestamp AST proofs (2 tests), no-new-authority
+proofs (2 tests), zero-diff/precedence-order proofs (7 tests), the real
+D-239G/H shape structural replay (6 tests), and end-to-end proofs
+through `apply_final_story_coherence_validation` itself — flag off with
+malformed new-param values never crashing, flag on with no new params
+byte-identical, flag on with full params threading through without
+error (3 tests). Two pre-existing tests updated as an honest,
+mechanical consequence: `test_cutsell_d235o`'s own closed-inventory
+snapshot (adds `lost_atom_ownership_materiality_diagnostics.py`, a
+D-239F file this gate did not introduce but whose absence from that
+snapshot pre-dated this gate — confirmed pre-existing via `git stash`);
+`test_cutsell_d235q`'s own structural slot-evidence-gate proof (now
+asserts both the exact-identity AND exact-ownership branches call the
+SAME unmodified `_exact_slot_for_proposition_set`, matching the now-
+correct two-source invariant — neither test's own actual intent was
+weakened).
+
+## Qualification
+
+`python3 -m compileall cutsell_worker tests -q` clean. Targeted
+regression sweep across all D-235/D-236/D-237/D-238/D-239-series,
+CleanCutBench, `final_story_coherence_validation`/`pipeline`/`universal_
+clean_cut`/`repair_loop` suites: **1116 passed, 0 failed.** Full suite
+(`tests/`, excluding `test_semantic_stitch.py`): **6650 passed, 6
+failed, 13 subtests passed.** All 6 failures independently confirmed
+non-genuine: 5 confirmed pre-existing on baseline `ad47b83` via `git
+stash` (the same `test_video00_modal_hybrid_semantic_parity.py` ×4 /
+`test_hybrid_story_guard_incomplete_retry.py` ×1 this session has
+repeatedly tracked, unrelated to any file this gate touched); 1 a
+self-resolving `git diff HEAD` snapshot test
+(`test_cutsell_d169_language_proposition_relation.py::test_30_old_
+serialized_ids_unaffected`, which asserts a zero diff on `pipeline.py`
+— confirmed via `git stash` to pass on baseline and fail only while
+this task's own legitimate `pipeline.py` change sat uncommitted;
+re-confirmed PASSING immediately after this gate's own commit, same
+established precedent as this session's prior D-235W/D-235X/D-237G/
+D-237L flips). **Zero genuine new failures.**
+
+**Verdict: A — EXISTING MATERIALITY EVIDENCE COMPLETION OFFLINE
+PROVEN, READY FOR ONE REAL-MEDIA FREEZE REQUALIFICATION.** All four
+seams resolve independently and correctly on the real recovered shape;
+all ten firewalls and six positive cases proven; precedence unchanged;
+zero policy/threshold/classifier/fuzzy-matching/provider change; zero
+new genuine test failures.
+
+**Canonical status:**
+`D239I_EXACT_OWNERSHIP_MATERIALITY_EVIDENCE_COMPLETION_OFFLINE_PROVEN`.
+
+**Exact next gate:** **D-239J — ONE REAL-MEDIA MATERIALITY/FREEZE
+REQUALIFICATION**, same sibling
+(`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`),
+exactly one RAW maximum, primary artifact `lost-atom-ownership-
+materiality-diagnostics.json`. Per this gate's own directive: **NOT
+launched automatically.**
+
+**RAW required next?** Yes, exactly one — only under explicit Product
+Owner authorization. **Paid compute required next?** No, not by this
+task.
+
+**Confirmation offline first:** confirmed. No RAW, Modal, or RunPod
+dispatch of any kind in this gate; this is an offline implementation
+gate only, with its own future real-media requalification named but not
+launched.
+
+Then STOP. Do NOT launch D-239J. Wait for Product Owner coordination.
