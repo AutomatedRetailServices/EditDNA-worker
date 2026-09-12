@@ -62893,3 +62893,115 @@ DO NOT LAUNCH RAW. Wait for Product Owner coordination.
 **Confirmation:** exactly one RAW dispatched (`34719014347`), no second RAW, no RunPod, no provider change, no post-result code/workflow/threshold/tuning patch. `docs/CUTSELL_DECISIONS.md` is the only file changed.
 
 Then STOP.
+
+## D-244 — RICH PACING RAW SELECTION, OFFLINE / READ-ONLY, POST D-243 (Verdict A: RICH PACING RAW SELECTED — READY FOR ONE REAL-MEDIA PACING/AUDIO-JOIN QUALIFICATION, next gate D-245, NOT launched)
+
+**Branch/new HEAD:** `feature/runpod-pod-on-demand`, HEAD `ef65dd7ee28724e45619d66739801b7aae353b49` (exact match to expected — this gate is docs-only, no code commit). Clean tree confirmed.
+
+**Files changed:** `docs/CUTSELL_DECISIONS.md` only. No canonical architecture rewrite (not strictly needed — this is a read-only corpus-selection update, same shape as D-240 Part B).
+
+**Inventory method:** read-only S3/corpus listing attempted first, per this gate's own instruction, and found unavailable in this session for the identical, already-documented reason D-240 Part B recorded: `benchmark_s3.py`'s own `list_objects_inventory(s3, prefix, extensions)` (a pure `list_objects_v2` call, zero GPU/provider cost) requires `S3_BUCKET` (env, a GitHub Actions secret) and an allow-listed prefix, neither present in this authoring session (confirmed again: `env | grep -i S3` shows no `S3_BUCKET`; only `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_CA_BUNDLE` are present). No live listing attempted with a guessed bucket name. Falling back, per this gate's own explicit fallback instruction, to repository/decision-log historical run evidence only — no ASR, no ffmpeg, no GPU, no Modal, no provider call made.
+
+**S3 listing available?** No.
+
+**Total candidates evaluated:** 4 (the same four named in this gate's own "KNOWN CANDIDATES" list). No additional RAW under the same prefix was discoverable without a live listing.
+
+---
+
+### Candidate 1 — `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4` (Video00, the canonical source)
+
+- A. known selected clip count: **KNOWN** — 24-27 across multiple real, already-completed Modal runs (D-097 series through D-239 series; e.g. "24 clips, 23 transitions" and later "`selected_clip_count: 27`, `transition_count: 26`"). **POSITIVE**, richest of any candidate by a wide margin.
+- B. known transition count: **KNOWN** — 23-26. **POSITIVE**, richest of any candidate.
+- C. known pause diversity: **KNOWN** — documented real dead-air reconciliation and pause-handling fixes across the entire D-097 series (source-vs-render measurement reconciliation, interior dead-air split, measured-pause boundary fixes). **POSITIVE**.
+- D. known retake/retry diversity: **KNOWN** — real, documented retry families (gynecologist retry, stomach family), multiple corrections, resolved across D-097.2 through D-097.11. **POSITIVE**.
+- E. known Boundary slack opportunity (post-D-242): **UNKNOWN.** Every prior Pacing V2/handle diagnosis of Video00 (D-218R/D-220/D-221/D-225/D-226) ran **before** D-242 existed — i.e. before the post-Freeze Boundary path emitted a row for every clip edge unconditionally. D-241's own forensic proved the pre-D-242 code collapsed "evaluated, nothing to trim" and "never evaluated" into the identical generic `NO_BOUNDARY_PROVENANCE_RECORDED` value; Video00's own historical zero-handle result cannot, from that evidence alone, be attributed to genuine no-safe-slack fact rather than incomplete pre-D-242 provenance. This is precisely the ambiguity this gate's own "VIDEO00 HANDLING" section names.
+- F. prior Pacing richness: **KNOWN** (pre-D-242) — already diagnosed to `HARD_CUT`/`TIGHT_CUT` only, zero J/L-eligible handles at the time.
+- G. prior handle result: **KNOWN** (pre-D-242) — zero safe handles. **Post-D-242 handle result: UNKNOWN** — never retested since D-242 landed.
+- H. already exhausted?: **NO**, for the specific post-D-242 question this track now needs answered. The pre-D-242 diagnosis is stale/ambiguous per the reasoning in E above — **REQUALIFICATION_WORTHY**, per this gate's own explicit instruction, since the historical zero-handle result predates D-242 and cannot distinguish "old incomplete provenance" from "actual no-safe-slack evidence."
+- I. observability quality: **KNOWN** — extensively characterized, lowest execution risk of any candidate (most real successful full runs of any source in this corpus), dedicated D-218R/D-221/D-225 compact-summary extraction steps already proven to work on it.
+- J. likely value for J/L/Audio Join qualification: **POSITIVE** — 23-26 real transitions is roughly 12x D-243's own 2-transition surface; even if most remain `HARD_CUT`, the sheer number of real edges maximizes the statistical opportunity for at least one genuine safe PRE/POST slack, a richer Audio Join candidate (room-tone/amplitude/background continuity, `KEEP_PAUSE` decisions), or a J/L-eligible pair to appear under the new, precise D-242 provenance regime — an opportunity D-243's own 2-transition RAW structurally could not offer at scale.
+
+### Candidate 2 — `Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4` (D-227/D-228 sibling)
+
+- A. **KNOWN** — 3.
+- B. **KNOWN** — 2. **NEGATIVE** — the thinnest known transition surface of any candidate with real pipeline evidence, tied with D-243's own now-exhausted RAW.
+- C. **UNKNOWN** — not separately documented at pause-diversity granularity.
+- D. **UNKNOWN** — not separately documented at retry-diversity granularity.
+- E. **UNKNOWN** (pre-D-242 diagnosis only, same ambiguity as Video00 in principle, but combined with its already-thin 2-transition ceiling this offers far less upside even if requalified).
+- F. **KNOWN** — D-228 already diagnosed: zero J/L candidates unlocked, live executed transitions 100% `HARD_CUT`, classified `GENERALIZES_WITH_NON_BLOCKING_DIFFERENCES`.
+- G. **KNOWN** — zero safe handles (pre-D-242).
+- H. **YES** — already exhausted for handle-availability generalization purposes; per this gate's own "10-22-46 HANDLING," penalized accordingly for its low known transition count.
+- I. **KNOWN** — well-characterized, but the ceiling itself is low.
+- J. **NEGATIVE** — lowest priority of the four named candidates.
+
+### Candidate 3 — `Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4` (D-227's alternate, never pipeline-qualified)
+
+- A. **UNKNOWN** — never run through the full CutSell pipeline at all.
+- B. **UNKNOWN** — same reason.
+- C. **UNKNOWN**.
+- D. **UNKNOWN**.
+- E. **UNKNOWN**.
+- F. **UNKNOWN** — zero Pacing V2/handle-availability evidence exists anywhere in this repository for this file.
+- G. **UNKNOWN**.
+- H. **NO** — never run, therefore not exhausted; per this gate's own "09-24-13 HANDLING," this absence of data is explicitly NOT to be treated as a penalty.
+- I. **KNOWN (partial)** — the underlying media itself is proven processable (ASR + vision completed with zero execution/provider failures in the same D-227 zero-failure run that produced Candidate 2's own results), but pipeline-level (Ordering/Freeze/Pacing) observability is entirely unknown.
+- J. **UNKNOWN** — genuinely unexplored; selecting it as PRIMARY would be a bet, not an evidence-based choice, exactly as D-240 Part B already concluded when it last considered this same candidate.
+
+### Candidate 4 — `Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4` (D-243's own RAW)
+
+- A. **KNOWN** — 3 (D-243, post-D-242, directly measured).
+- B. **KNOWN** — 2 (D-243, post-D-242, directly measured).
+- C. **KNOWN** — thin; D-243's own retrievable evidence showed no pause-diversity richness beyond the 2 transitions themselves.
+- D. **KNOWN** (historical, pre-Freeze) — multiple distinct `EditorialMoment`s with `JOIN`/`SPLIT` grouping actions and `CORRECTION`/`RETRY` relations were documented pre-D-239V, but the post-Freeze-clear transition count these collapsed to (2) is now definitively known and thin.
+- E. **KNOWN, NEGATIVE** — D-243 directly measured all 6 handles (3 PRE + 3 POST) landing in the generic `HANDLE_STATUS_UNAVAILABLE` bucket; D-244's own directive text states these were explicitly `BOUNDARY_EVALUATED_NO_SAFE_WIDENING` — evaluated, not blocked, not unknown, genuinely no safe room found at this evaluated edge.
+- F. **KNOWN** — D-243's own direct verdict: `pacing_v2_usefulness_classification: SAFE_BUT_NOT_YET_USEFUL`.
+- G. **KNOWN** — zero safe handles, this is the ONLY candidate whose zero-handle result is confirmed **post-D-242**, making it the most authoritative negative result of the four, but also the most exhausted for this specific purpose.
+- H. **YES, explicitly** — exhausted for this qualification purpose per D-243's own result and this gate's own explicit "DO NOT RE-SELECT D-243 RAW" instruction.
+- I. **KNOWN** — the highest-confidence real-media evidence of any candidate (directly measured post-D-242 in the immediately preceding gate).
+- J. **NEGATIVE** — already known thin and handle-less; re-running it would very likely reproduce the identical known result.
+
+**Any extra candidates?** None discoverable without a live S3 listing (unavailable this session, see above).
+
+**Video00 requalification worthy?** **Yes** — its historical zero-handle result predates D-242 and cannot, from existing evidence, distinguish "old incomplete provenance" (the exact D-241-diagnosed collapse) from "actual no-safe-slack evidence." Combined with by far the richest known transition surface of any candidate (23-26 real transitions), this makes it the single highest-information-value next RAW for the post-D-242 Pacing/Handle-Aware/Audio-Join qualification question this track now needs answered.
+
+**09-24-13 uncertainty status:** genuinely unknown across every dimension (selected-clip count, transition count, pause/retry diversity, handle availability) — never penalized for this absence of data per this gate's own explicit instruction; held as BACKUP precisely because it carries zero regression risk (never previously run, so no known-thin ceiling to reproduce) even though its upside is unproven.
+
+**10-22-46 value:** low — known, thin (2 transitions), already exhausted pre-D-242 with a definitive `HARD_CUT`-only, zero-J/L-unlock result; penalized per this gate's own explicit "10-22-46 HANDLING" instruction.
+
+**D-243 RAW exhausted?** **Yes**, explicitly, per D-243's own direct real-media result (3 selected clips, 2 transitions, 0 of 6 safe handles, `SAFE_BUT_NOT_YET_USEFUL`) and this gate's own instruction not to re-select it unless every alternative has strictly weaker evidence — it does not; Video00 has strictly stronger evidence (far richer known transition surface, genuinely untested under the post-D-242 mechanism).
+
+**PRIMARY_RICH_PACING_RAW:** `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4` (Video00).
+
+**BACKUP_RICH_PACING_RAW:** `Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4` (Candidate 3, the never-pipeline-qualified alternate).
+
+**Primary reason:** Video00 is REQUALIFICATION_WORTHY (its own zero-handle result predates D-242 and the two cannot currently be distinguished) and offers, by a wide margin, the richest known transition surface of any candidate in this corpus (23-26 real transitions vs. 2 for both D-243's own RAW and Candidate 2) — maximizing the statistical opportunity for D-242's new precise provenance to surface a genuine safe handle, a richer Audio Join candidate, or a J/L-eligible pair that a 2-transition RAW structurally cannot offer at scale. This is not "merely familiar" reuse: the specific mechanism this track needs re-examined (post-D-242 Boundary-to-Handle-Aware provenance threading) has never been exercised against Video00's own transition surface — only against D-243's own thin sibling. Selecting Video00 answers the highest-information-value open question in this track.
+
+**Expected richness:** high — 23-26 known real transitions, multiple documented retry families, corrections, and pause-handling events; the richest transition surface of any candidate by a wide margin.
+
+**J-cut opportunity likelihood:** **POSITIVE** (relative to the other three candidates) — not certain (Video00's own pre-D-242 diagnosis showed zero J/L-eligible handles), but the sheer volume of real transitions gives this the best realistic odds of any candidate in the corpus.
+
+**L-cut opportunity likelihood:** **POSITIVE**, same reasoning as J-cut above.
+
+**TIGHT_CUT opportunity likelihood:** **POSITIVE** — Video00's own pre-D-242 diagnosis already showed some `TIGHT_CUT` activity (per D-240's own citation, "`HARD_CUT`/`TIGHT_CUT` only"), so this is the one mode already partially confirmed, not merely hoped for.
+
+**KEEP_PAUSE opportunity likelihood:** **POSITIVE** — Video00's own documented dead-air/pause-reconciliation history across the D-097 series directly evidences real pause activity on this source.
+
+**Audio Join qualification value:** **POSITIVE, highest of any candidate** — D-240 Part B's own prior analysis already identified Video00 as "the single richest source for exercising Audio Join Treatment's other axes (room-tone, amplitude/background continuity, `KEEP_PAUSE` decisions) across many real transitions," a conclusion this gate's own new evidence (D-243's confirmed thin/handle-less sibling, D-242's requalification-worthy status for Video00) only strengthens.
+
+**Additional RAW recording needed?** No — the existing four-candidate corpus, re-evaluated under D-242's own new evidence, is sufficient to make a defensible selection.
+
+**GPU/provider used? Paid compute used?** No to both. No RAW executed. No Modal, no RunPod, no provider call.
+
+**Verdict: A — RICH PACING RAW SELECTED — READY FOR ONE REAL-MEDIA PACING/AUDIO-JOIN QUALIFICATION.**
+
+**Canonical status:** `D244_RICH_PACING_RAW_SELECTED_PRIMARY_VIDEO00_REQUALIFICATION_WORTHY_BACKUP_09_24_13_D243_RAW_EXHAUSTED_10_22_46_LOW_VALUE_VERDICT_A_READY_FOR_D245_NOT_LAUNCHED`.
+
+**Exact next gate:** D-245 — ONE REAL-MEDIA RICH PACING V2 / HANDLE-AWARE / AUDIO-JOIN QUALIFICATION, exactly one RAW (`PRIMARY_RICH_PACING_RAW` = Video00). **Not launched by this gate.**
+
+**D-245 authorized?** Named only, per this gate's own explicit "Do NOT launch D-245" instruction — not authorized to execute here.
+
+**Confirmation:** offline/read-only only. No RAW executed, no Modal, no RunPod, no provider call, no engine/Boundary/Pacing/Audio-Join/threshold/heuristic change. `docs/CUTSELL_DECISIONS.md` is the only file changed. No prior decision entry rewritten or deleted.
+
+Then STOP.
+
+DO NOT LAUNCH D-245.
