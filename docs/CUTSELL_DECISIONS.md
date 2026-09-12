@@ -58918,3 +58918,273 @@ log addition, the only change permitted post-result.
 
 Then STOP. Do NOT launch a further RAW. Wait for Product Owner
 coordination.
+
+## D-239F — LIVE LOST-ATOM OWNERSHIP → MATERIALITY → FREEZE → REPAIR OBSERVABILITY, OFFLINE ONLY, POST D-239 (Verdict A: OFFLINE PROVEN — ready for one final real-media ownership/Freeze trace, next gate D-239G, NOT launched)
+
+**Trigger:** D-239's own real-media RAW proved the live-wiring mechanism
+built for D-238's exact-singleton ownership contract executes correctly
+on real media — the user separately recovered, directly from the
+GitHub Actions UI (bypassing this session's own blocked artifact/
+job-log retrieval), the actual structural facts for the historical
+lost atom `clip_1d9d2cebaf8ed3004836` (CandidateTake word_indices
+41..48, 8 words; the containing Unique LanguageAttempt
+`latt_be3141887f7b37d1bb3a`, word_indices 31..258, 228 words;
+Proposition `prop_475b7c5a7d7ebc6e6e8c`; relationship
+`EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED`, not authoritative for identity
+purposes; `reconstructed_only_word_indices=[]`;
+`exact_match_by_clip_id_present=false`), plus the fuller
+selection-freeze / lost-semantic-atom / exact-identity diagnostics
+already known from D-239 itself (`freeze_blocked=true`,
+`lost_semantic_atom_status=FOUND`,
+`repair_loop_status=NEEDS_HUMAN_REVIEW`, blocking atom classified
+`REAL_CONTENT_LOSS`, `missing_content_token_count=5`, reviewer
+`UNIQUE_FACT_LOST`, repair
+`no_repair_strategy_exists_for_this_finding_kind`). This structural
+input is exactly what D-238's ownership gate is designed to consume —
+but D-239's own artifact never serialized the ACTUAL
+`ExactLostAtomOwnership` result, the D-235Q materiality result, the
+D-235R suppression-authority result, or the D-235T repair-suppression
+result for this atom, so Freeze's real block reason remained
+unexplained from retrievable data. This gate closes that specific
+observability gap, strictly offline, with an explicit
+**"DO NOT RECOMPUTE POLICY"** constraint: diagnostics must read the
+SAME already-computed production objects/results, never independently
+rerun ownership/materiality/freeze/repair policy.
+
+**What was built (all additive, zero behavior change when unused):**
+
+1. **New module `cutsell_worker/lost_atom_ownership_materiality_diagnostics.py`**
+   with two pure-projection functions:
+   - `build_lost_atom_ownership_materiality_diagnostics(...)` — per lost
+     atom, projects ownership (`ownership_input_present`,
+     `ownership_status`, `containing_language_attempt_id`,
+     `proposition_candidate_ids`, `ownership_ambiguity_reason`) and
+     D-235Q/D-235R fields (`exact_ownership_available`,
+     `editorial_requirement_state`, `meaning_critical_state`,
+     `retry_process_state`, `redundancy_state`,
+     `final_materiality_status`, `blocking_recommendation`,
+     `freeze_materiality_received`, `freeze_authority_status`,
+     `freeze_effective_blocking`, `freeze_reason`). The one permitted
+     reuse, matching this codebase's own established D-235G/D-235J/
+     D-237I precedent exactly: re-calls the pure, deterministic,
+     side-effect-free `decide_lost_semantic_atom_freeze_authority(row,
+     materiality)` on the SAME already-computed `materiality` object a
+     second time, purely for diagnostics — byte-identical output from
+     byte-identical input, not a policy recomputation.
+   - `lost_atom_repair_suppression_by_provenance_diagnostics(...)` —
+     projects D-235S (`d235s_reviewer_finding_kind`,
+     `d235s_repair_attempt_provenance_confirmed`,
+     `d235s_repair_attempt_reason`, `d235s_exact_link_status`) and
+     D-235T (`d235t_precomputed_materiality_received`,
+     `d235t_suppression_status`, `d235t_suppress_repair_escalation`,
+     `d235t_reason`) fields, keyed by `lost_atom_provenance_id`.
+   - Bounded excerpt reused verbatim from the existing lost-atom row
+     (`_bounded_text`, 160-char ceiling) — no new transcript surface.
+
+2. **Two-part construction, joined only at the workflow layer** (the
+   objects this gate needed to expose are only in scope at two
+   different points in the live pipeline; the fix never bridges that
+   gap by recomputing anything):
+   - `final_story_coherence_validation.py` — builds the
+     ownership/D-235Q/D-235R half where the ownership map and
+     materiality objects already live, at both call sites of
+     `_lost_atom_materiality_orchestration_diagnostics`. Explicitly
+     gated behind the same `lost_atom_materiality_freeze_authority_
+     enabled()` flag as the underlying materiality computation itself
+     (`lost_atom_ownership_by_clip_id=(lost_atom_ownership_by_clip_id
+     if _materiality_authority_enabled else None)`) — a caller-supplied
+     value is never dereferenced when the flag is off, preserving this
+     session's own established fail-open posture for
+     flag-gated caller-supplied maps.
+   - `repair_loop.py` — `run_repair_loop` already computed the exact
+     per-finding `LostAtomRepairSuppressionDecision` tuple via its own
+     call to `all_blocking_findings_safely_suppressed(...)`, but only
+     ever kept the aggregate boolean and discarded the individual
+     decisions. Fixed by CAPTURING (never recomputing) this
+     already-computed data as a new `RepairLoopResult.suppression_
+     decisions: tuple[..., ...] = ()` field, retained in both the
+     all-suppressed and the preserved branch.
+   - `universal_clean_cut.py` — builds the D-235S/D-235T half from
+     `repair_result.suppression_decisions`/`repair_result.attempts`
+     once `repair_result` is available (strictly after
+     `run_repair_loop` executes), at both `diagnostics["repair_loop"]`
+     construction sites.
+   - `.github/workflows/cutsell-video00-modal-raw.yml` — new step
+     **"D-239F Lost-Atom Ownership → Materiality → Freeze → Repair
+     observability → sibling-safe extraction"**, positioned after
+     "D-237I Exact Identity Observability → sibling-safe extraction"
+     and before "Verify frozen Selection lock". Its embedded Python
+     performs the ONE pure `lost_atom_provenance_id` JOIN between the
+     two halves (never a policy recomputation) and writes a dedicated,
+     bounded `artifact/lost-atom-ownership-materiality-diagnostics.json`
+     (schema `cutsell.video00.d239f_lost_atom_ownership_materiality_
+     freeze_repair_extraction.v1`), added to the "Upload validator
+     reports" step's path list so it lands inside the
+     `cutsell-video00-modal-validator-reports` artifact. `if:
+     always()`; never fails the workflow; reports `source_status:
+     MISSING` when either subtree is absent or the engine JSON itself
+     is missing.
+
+**Distinguishability matrix (proven by
+`TestDistinguishabilityMatrix`):**
+- **Case A** (ownership not a singleton) — `ownership_status` is one
+  of the non-`EXACT_SINGLETON_OWNERSHIP` values,
+  `exact_ownership_available=False`, and `ownership_ambiguity_reason`
+  carries the actual reason codes.
+- **Case B** (ownership exact but D-235Q abstained) —
+  `exact_ownership_available=True` yet `final_materiality_status`
+  reads `INSUFFICIENT_EVIDENCE`/abstain, visible directly against the
+  exact ownership fields for comparison.
+- **Case C** (ownership exact, D-235Q reaches
+  `NON_MATERIAL_REAL_CONTENT`, but D-235R fails to suppress) —
+  `blocking_recommendation=DO_NOT_BLOCK` yet
+  `freeze_effective_blocking` still reads `True`, with
+  `freeze_reason` naming why R's 10-condition gate did not fire.
+- **Case D** (R suppressed but D-235T still escalated) — visible via
+  `freeze_effective_blocking=False` alongside
+  `d235t_suppress_repair_escalation=False` /
+  `d235t_suppression_status` naming the repair-tier disagreement.
+- **Case E** (everything worked but another blocker remains) —
+  `freeze_effective_blocking=False` for this atom while
+  `selected_count_before_freeze`/other atoms (already surfaced by
+  D-239's own artifacts) show a separate cause; this gate does not
+  need to model Case E itself, only avoid hiding it.
+
+**Offline replay proof:**
+- **The real D-239 structural shape**, reconstructed exactly
+  (candidate word_indices 41..48/8 words; containing LanguageAttempt
+  `latt_be3141887f7b37d1bb3a` word_indices 31..258/228 words;
+  Proposition `prop_475b7c5a7d7ebc6e6e8c`; source
+  `src_8f6265cea717b4ac1467`), reproduces
+  `EXACT_SINGLETON_OWNERSHIP` end to end through
+  `assess_exact_lost_atom_ownership` and all downstream projected
+  fields (`TestD239ShapeOfflineReplay`, 3 tests).
+- **7 additional fixture scenarios** — meaning-critical,
+  editorially-required, critical-claim-conflict, unknown-context,
+  retry/recording-residue, non-material-real-content (ownership
+  present, correctly does not block), and ambiguous-multiple-attempts
+  — each asserted against the correct precedence-chain outcome
+  (`TestSevenFixtureScenarios`, 7 tests).
+- **D-235S/D-235T capture-not-recompute proof** — asserts
+  `RepairLoopResult.suppression_decisions` is populated with the exact
+  objects `all_blocking_findings_safely_suppressed` already produced
+  (identity/equality checked, not a fresh call), in both the
+  all-suppressed and preserved branches (`TestD235SD235TCapture`,
+  4 tests).
+- **Bounded-output proof** — no field exceeds the existing 160-char
+  bounded-excerpt ceiling; no full transcript or whole-engine-JSON
+  leakage (`TestBoundedOutput`, 1 test).
+
+**No-policy-change proofs (all pass, zero diff):**
+`AUTHORITATIVE_RELATIONSHIP_STATUSES` untouched;
+`shared_attempt_word_identity.py` untouched;
+`exact_lost_atom_ownership.py` policy untouched; D-235Q precedence
+chain untouched; D-235R's 10-condition gate untouched; D-235T's
+re-derivation/precomputed-preference design untouched — all six
+verified via `git diff --stat HEAD -- <file>` returning empty plus
+import-line scans of the new diagnostics module confirming it never
+imports `AUTHORITATIVE_RELATIONSHIP_STATUSES` (`TestNoPolicyChange`,
+7 tests).
+
+**Tests:**
+- `tests/test_cutsell_d239f_lost_atom_ownership_materiality_observability.py`
+  — 25 tests (D-239-shape replay ×3, 7 fixture scenarios, D-235S/D-235T
+  capture ×4, distinguishability matrix ×3, no-policy-change ×7,
+  bounded output ×1). Two bugs in this new test file itself were
+  found and fixed during development: (a) an
+  `AttributeError: 'str' object has no attribute 'ownership_status'`
+  when a malformed ownership value was deliberately supplied with the
+  materiality-authority flag OFF — fixed at the SOURCE by gating the
+  new diagnostics call behind the same flag as the underlying
+  computation (not by weakening the test); (b) an incorrect assumption
+  that `retry_process_state` holds the materiality-status enum value
+  rather than a `FOUND`/`STATE_UNKNOWN`-style confidence marker
+  (matching D-235L's own established pattern) — fixed by asserting the
+  correct field/value pairing.
+- `tests/test_cutsell_d239f_workflow_extraction.py` — 11 tests,
+  mirroring D-237I's own workflow-extraction pattern exactly: extracts
+  the step's REAL embedded Python via `yaml.safe_load` and executes it
+  via `subprocess.run(["bash", "-c", script], ...)` against synthetic
+  `artifact/video00-modal.json` fixtures, proving the provenance-id
+  join, mismatched-provenance non-cross-join, both-subtrees-absent and
+  engine-json-missing MISSING reporting, `always()` execution,
+  step ordering (after D-237I, before Selection-lock verification),
+  Python-compiles-cleanly, validator-reports upload-list inclusion,
+  and deterministic output.
+- 3 pre-existing tests required updates as a direct, honest consequence
+  of this gate's additions (none had their actual intent weakened):
+  `test_cutsell_d235p_shared_attempt_word_identity.py::test_44_
+  d235o_test_file_untouched` and `test_cutsell_d235t_lost_atom_repair_
+  suppression.py::test_52_new_file_matches_established_naming_
+  convention` — both closed-inventory tests enumerating the
+  `lost_atom_*`/`shared_attempt_*` file family; updated to include the
+  new `lost_atom_ownership_materiality_diagnostics.py` module.
+  `test_cutsell_d235r_lost_semantic_atom_freeze_authority.py::
+  test_coherence_module_calls_adapter_at_both_sites` — a whole-file
+  substring-count assertion coincidentally doubled (2→4) because the
+  new function happens to reuse the same `materiality_by_clip_id=
+  materiality_by_clip_id,` kwarg spelling at its own 2 call sites;
+  fixed by precisely scoping the check to only the line immediately
+  following each `lost_semantic_atom_freeze_trigger_present(` call,
+  preserving the test's actual intent (both real adapter call sites
+  are still proven correct) without being fooled by an unrelated
+  second consumer of the same parameter name.
+
+**Qualification:** `python3 -m compileall cutsell_worker tests -q`
+clean. Targeted regression sweep across all D-235-series/D-236/D-237-
+series/D-238/D-239/D-239F/`final_story_coherence_validation`/
+`repair_loop`/`universal_clean_cut`/CleanCutBench test files: 619
+passed, 0 failed (after the 3 fixes above). Full suite
+(`tests/`, excluding `test_semantic_stitch.py`): **6588 passed, 6
+failed, 13 subtests passed.** All 6 failures independently confirmed
+**pre-existing on baseline `eb7061c`** via `git stash` (identical
+failure set with and without this gate's diff run back-to-back):
+`test_cutsell_d235o_shared_attempt_proposition_identity_design.py::
+TestDesignOnlyNoImplementation::test_17_no_new_canonical_id_minted_
+by_this_gate`, `test_hybrid_story_guard_incomplete_retry.py::
+test_incomplete_failed_retry_is_covered_when_prior_delivery_preserves_
+numbers_and_negation`, and 4 in
+`test_video00_modal_hybrid_semantic_parity.py` (D-044's own hybrid-LLM
+env-overlay tests, unrelated to any file this gate touched — confirmed
+by `git diff --stat` showing this gate's only workflow-file changes are
+a new step insertion at line ~1582 and one upload-path-list addition at
+line ~6550, nowhere near the D-044 masked-env-secret step). **Zero new
+failures.**
+
+**Verdict: A — OWNERSHIP/MATERIALITY/FREEZE/REPAIR OBSERVABILITY
+OFFLINE PROVEN — READY FOR ONE FINAL REAL-MEDIA TRACE.** All offline
+replay evidence (D-239-shape reproduction, 7 fixture scenarios,
+capture-not-recompute proofs, distinguishability matrix, no-policy-
+change proofs, workflow-extraction proofs) passes; zero regressions.
+
+**Recomputation performed?** No, except the one explicitly permitted
+reuse (`decide_lost_semantic_atom_freeze_authority` called a second
+time on the SAME already-computed `materiality` object, purely for
+diagnostics — pure/deterministic/side-effect-free, matching this
+codebase's own established D-235G/D-235J/D-237I precedent).
+
+**Transcript leakage:** none — only the existing 160-char bounded
+excerpt is reused; no whole-engine-JSON dump.
+
+**Dedicated artifact:** `lost-atom-ownership-materiality-diagnostics.json`,
+included in the `cutsell-video00-modal-validator-reports` upload.
+
+**Missing/malformed-result behavior:** `source_status: MISSING`,
+`if: always()`, exit 0 — never fails the workflow.
+
+**Exact next gate:** **D-239G — ONE FINAL REAL-MEDIA OWNERSHIP/FREEZE
+TRACE**, same sibling branch, primary artifact
+`lost-atom-ownership-materiality-diagnostics.json`, exactly one RAW
+maximum. **Per this gate's own directive: NOT launched automatically.**
+
+**RAW required next?** Yes, exactly one — only under explicit Product
+Owner authorization (D-239G). **Paid compute required next?** No, not
+by this task. **Additional RAW under this gate?** None — zero paid
+compute was used or required to reach Verdict A.
+
+**Confirmation:** Observability-only. No ownership/identity/
+materiality/Freeze/repair POLICY change; no threshold change; no
+Language-Spine change; no P1/P2 change; no Pacing/Audio-Join change; no
+RAW, Modal, or RunPod dispatch of any kind in this gate.
+
+Then STOP. Do NOT launch RAW.
