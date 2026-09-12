@@ -63395,3 +63395,132 @@ Not B: there is no loudness/gain-matching/limiting foundation at all today — o
 Then STOP.
 
 DO NOT IMPLEMENT. DO NOT LAUNCH RAW. Wait for Product Owner coordination.
+
+
+---
+
+## D-247 — Audio Finishing foundation: real MEASUREMENT-ONLY / DIAGNOSTICS-ONLY module (offline implementation)
+
+**Objective.** D-246 (offline audit) found zero loudness/true-peak/sample-peak/
+clipping observability anywhere in the codebase and named a minimal, safe
+implementation order. D-247 is the first CODE-writing gate in that order:
+a deterministic, ffmpeg/ffprobe-backed MEASUREMENT layer, strictly excluding
+POLICY (no target LUFS/peak-ceiling/acceptable-delta invented) and
+CORRECTION (zero gain/limiter/compressor/denoise applied to any file).
+
+**What was built — `cutsell_worker/audio_finishing_measurement.py` (new).**
+
+- `AudioFinishingMeasurement` (frozen dataclass): `media_path`,
+  `window_start_sec`/`window_end_sec` (both `None` for whole-file), real
+  `duration_sec`/`sample_rate_hz`/`channel_count`/`channel_layout`, real
+  `integrated_loudness_lufs`/`loudness_range_lu`/`true_peak_dbfs`/
+  `sample_peak_dbfs`, a `clipping_status`, a reused (not reimplemented)
+  `silence_result: PostRenderQCResult | None`, `measurement_status`,
+  `measurement_errors: tuple[str, ...]`, `provenance: dict`. No field is a
+  target, threshold, or verdict — every value is either a real measured
+  number or an explicit `None`/`UNKNOWN`, never a fabricated default.
+- `MEASUREMENT_STATUS_{COMPLETE,PARTIAL,UNAVAILABLE,MEASUREMENT_ERROR}` and
+  `CLIPPING_STATUS_{CLIPPING_DETECTED,NO_CLIPPING_DETECTED,UNKNOWN}`
+  vocabularies.
+- `measure_audio(media_path, *, start_sec=None, end_sec=None,
+  include_silence=True, protected_pause_windows=())` — the top-level entry
+  point; the `start_sec`/`end_sec` window (via ffmpeg `-ss`/`-t`) is the
+  data-contract foundation a future gain-continuity/join-compatibility
+  check would need, without this module trying to be that check itself.
+  Never raises (matches `post_render_media_qc._run`'s convention);
+  unexpected exceptions are caught and reported as
+  `MEASUREMENT_STATUS_MEASUREMENT_ERROR`.
+- `attach_audio_finishing_diagnostics(qc_result, media_path, **kwargs) ->
+  dict` — the additive integration point (Stage 10): packages a real
+  measurement alongside an existing `PostRenderQCResult` without ever
+  reading or mutating `qc_result.status`. `post_render_media_qc.py` and
+  `run_post_render_media_qc`'s own PASS/FAIL logic are untouched.
+
+**Empirically verified, not assumed, real tool output shapes (ffmpeg
+6.1.1-3ubuntu5, this sandbox):**
+- `ebur128=peak=true`'s stderr prints per-frame streaming lines throughout
+  and exactly one terminal "Summary:" block with `Integrated loudness: I:
+  <val> LUFS`, `Loudness range: LRA: <val> LU`, `True peak: Peak: <val>
+  dBFS`. The parser locates the literal "Summary:" marker first and only
+  regex-searches text after it, so the per-frame lines' own differently-
+  scoped "I:"/"LRA:" tokens can never be misread as the summary values
+  (verified with an adversarial test that prepends streaming noise).
+- `astats` (default flags) prints one block per channel followed by a
+  single terminal "Overall" block; only the "Peak level dB" line after the
+  LAST "Overall" marker is the whole-file sample peak (verified with an
+  adversarial test that tampers the per-channel value and confirms the
+  Overall value still wins).
+- `astats -h filter=astats` was inspected directly: **this ffmpeg build's
+  `astats` filter has no "number of clipped samples" metric at all** —
+  none of its `measure_perchannel`/`measure_overall` flag values name one.
+  No code here pretends to parse a field that does not exist. Clipping is
+  instead reported from `Peak level dB` reaching/exceeding
+  `_CLIPPING_PEAK_THRESHOLD_DB = -0.1` (a float-rounding epsilon, not an
+  invented loudness target) — a conservative, honestly-documented
+  full-scale-peak proxy, not a certified flat-topped-waveform detector.
+  Verified against both a clean tone (`Peak level dB` ≈ −21 dB → not
+  flagged) and a deliberately over-driven tone (`volume=20` on the same
+  source, verified to land samples at the exact int16 ceiling, −32768/
+  32767 → `Peak level dB` ≈ 0.0003 dB → flagged).
+- `ffprobe -show_entries stream=sample_rate,channels,channel_layout` on
+  `-select_streams a:0` was probed directly and returns the expected flat
+  JSON shape; used for the one narrow addition this module makes, since
+  `media_probe.probe_media` (the existing, reused, single project-native
+  ffprobe-duration owner — `flow_b.py`/`validation.py`/`retry_scan.py`
+  already call it) is video-oriented and does not expose sample_rate/
+  channels/channel_layout.
+- `check_accidental_silence` (`post_render_media_qc.py`, D-028) is
+  imported and reused verbatim for the silence observation — no second
+  silence-detection implementation was written.
+
+**Tests — `tests/test_cutsell_d247_audio_finishing_measurement.py` (new,
+24 cases, all passing).** Parser-only cases pin the exact real ebur128/
+astats text shapes above (including two adversarial cases proving the
+per-frame/per-channel noise is never misread) with no subprocess
+dependency; fixture-backed cases (10 synthetic ffmpeg-generated WAVs —
+clean tone, quiet, loud-but-unclipped, digitally clipped, silence, mono,
+non-48kHz sample rate, a very short file, and a concatenated two-level
+file for windowed measurement) exercise `measure_audio` end to end and
+prove: correct duration/sample_rate/channel_count/channel_layout;
+quiet-vs-loud loudness ordering; clipping correctly flagged only on the
+over-driven fixture; the reused silence check fires on the silence
+fixture; a nonexistent path reports an error status and never raises; the
+measured file's own bytes are provably unmodified (sha256 before/after);
+the result dataclass carries no `status`/`verdict`/`applied_gain_db`/
+`target_loudness_lufs`/`corrected_path` field (a structural guard against
+this module drifting into POLICY/CORRECTION); and
+`attach_audio_finishing_diagnostics` never changes
+`run_post_render_media_qc`'s own verdict on the same file.
+
+**Offline qualification.**
+`python3 -m compileall cutsell_worker tests` — clean. Targeted:
+`test_cutsell_post_render_media_qc.py` (existing D-028 suite, unmodified,
+still 27/27) + the new 24-case D-247 suite together — 51/51 passed, zero
+regression. Full `tests/` run (excluding the three pre-existing baseline
+exceptions already established across D-241–D-246: `test_semantic_stitch.py`'s
+pre-existing collection error, `test_video00_modal_hybrid_semantic_parity.py`,
+`test_hybrid_story_guard_incomplete_retry.py`) — **6833 passed, 12 deselected,
+13 subtests passed, 0 failed** (222.73s). Zero new failures; the pre-existing
+baseline exceptions are unchanged and are the only exclusions.
+
+**Confirmation.** One new module, one new test file. No existing production
+file's behavior changed — `post_render_media_qc.py`, `post_render_watch_listen_qc.py`,
+`finishing_contract.py`, and `render.py` are all read-only this gate; the
+new module imports from the first two and stays structurally and
+architecturally distinct from the dormant `FinishingProvider` Protocol
+(measurement is a strictly earlier, narrower concern). No gain/limiter/
+compressor/denoise/EQ applied anywhere. No LUFS/true-peak/loudness-range
+target invented. No new provider dependency (ffmpeg/ffprobe only, both
+already required by this codebase). No RAW launched — offline only, as
+directed.
+
+**Verdict: A — measurement foundation built, empirically verified against
+real ffmpeg output, tested against 10 synthetic fixture categories, zero
+regression, ready for a future gate to consume these real numbers (a) as
+`Finishing`'s own eventual POLICY layer, and/or (b) as an additive
+diagnostics key on a real rendered Video00 MP4, once the Product Owner
+authorizes either.**
+
+Then STOP.
+
+DO NOT IMPLEMENT D-248. DO NOT LAUNCH RAW.
