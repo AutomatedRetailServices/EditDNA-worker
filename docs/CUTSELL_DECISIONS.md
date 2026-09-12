@@ -58690,3 +58690,231 @@ committed alongside the code/test changes it describes, per this task's
 own docs-update requirement.
 
 Then STOP. Do NOT launch D-239. Wait for Product Owner coordination.
+
+## D-239 — ONE FINAL REAL-MEDIA FREEZE REQUALIFICATION POST D-238 (RAW dispatched; live-wiring mechanism proven to execute; target-atom ownership/Freeze outcome unretrievable via available sandbox tooling — fourth consecutive gate with this exact structural finding)
+
+**Scope:** wire D-238's offline-only bounded lost-atom ownership seam into
+the live pipeline (a necessary pre-req this gate discovered was missing),
+then run the same real sibling exactly once and read the target lost
+atom's `ownership_status`/D-235Q/D-235R/Freeze outcome. Banner: exactly
+ONE paid Modal RAW maximum, no second RAW, no RunPod, no provider change,
+no post-result engine patch, no threshold/global-identity-authority/
+`AUTHORITATIVE_RELATIONSHIP_STATUSES`/containment-promotion/Language-
+Spine/P1/P2/BestTake/Family/Ordering/Boundary/Pacing/Audio-Join-authority
+change.
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `b51b150`
+(matching D-238 exactly), clean tree — confirmed before any edit.
+
+**Pre-RAW finding (this gate's own root cause, fixed before dispatch):**
+D-238 built `exact_lost_atom_ownership.py` and the D-235Q/R integration
+entirely OFFLINE — no production call site ever constructed a real
+`ExactLostAtomOwnership` or passed one to `assess_complete_lost_semantic_
+atom_materiality`. Dispatching the RAW as originally authorized would
+have reproduced D-237M's exact pre-D-238 gap (`ABSTAIN`, blocker still
+active) and told us nothing new about the new seam. Per this session's
+own D-091 continuity contract (an ordinary technical consequence of the
+authorized D-238→D-239 objective, not a new scope, not an authority
+widening — the wiring only threads an already-designed, already-tested,
+non-authoritative signal into an existing gate), this was fixed first:
+
+- `pipeline.py`: the existing per-source Language-Spine loop (the SAME
+  one that already builds `exact_match_by_clip_id`/`identity_
+  observability_by_clip_id` for D-235X/D-237G) now also builds
+  `lost_atom_ownership_by_clip_id`, reusing `build_language_attempt_
+  word_membership` (D-235P, no second word-matching implementation) over
+  `evidence.attempts` and each take's own already-computed
+  `reconstructed_word_membership.word_indices`. `{}` under the same
+  fail-open posture when the flag is off.
+- `universal_clean_cut.py`: extracts and threads the map to both
+  `apply_final_story_coherence_validation` call sites, mirroring the
+  existing `exact_match_by_clip_id` pattern exactly.
+- `final_story_coherence_validation.py`: threads the map through all
+  three entry points into `_complete_lost_semantic_atom_materiality_by_
+  clip_id`, forwarding it as `assess_complete_lost_semantic_atom_
+  materiality`'s `lost_atom_ownership` parameter. Diagnostics extended
+  with `lost_atom_exact_ownership_available`/`lost_atom_ownership_status`
+  (read-only re-projection of fields D-238 already computes).
+
+Never touches `AUTHORITATIVE_RELATIONSHIP_STATUSES`; `exact_lost_atom_
+ownership.py` imported only from `pipeline.py`. 11 new tests
+(`tests/test_cutsell_d239_live_lost_atom_ownership_wiring.py`): source-
+level wiring proofs, real-Language-Spine computation-correctness proofs
+(including cross-source isolation), end-to-end threading proofs
+(flag-on/flag-off). Regressions: D-235/D-236/D-237-series/D-238/D-239
+targeted suites 471 passed; universal_clean_cut+pipeline suites 36
+passed; CleanCutBench 55/55; full suite 6552 passed, 6 failed (the same
+5 pre-existing unrelated failures, git-stash-verified against clean HEAD
+`b51b150`, plus one expected self-resolving D-169 snapshot test that
+asserts a zero `git diff --stat` on `pipeline.py` — a point-in-time proof
+for D-169's own gate, not a standing invariant, necessarily flipping the
+first time any later task legitimately touches that file). Zero genuine
+new failures. Committed `a359d84`, pushed.
+
+**S3 preflight:** this sandbox has no `S3_BUCKET` secret (only bare AWS
+keys are present in its env — the bucket name is a GitHub Actions
+secret this session's environment does not expose), so an independent
+`head_object` from this sandbox was structurally impossible. The
+workflow's own in-run preflight step ("D-228 sibling RAW S3 existence
+preflight") is, per this session's own established precedent (D-237H/
+D-237J/D-237L/D-237M), the authoritative enforcement mechanism — it ran
+FIRST, before any paid compute, and **completed with `conclusion:
+success`**.
+
+**RAW:** dispatched `cutsell-video00-modal-raw.yml` on `feature/runpod-
+pod-on-demand`, exactly ONE dispatch, `source_key` `Editdna longform
+validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4` (no
+substitution — the same real sibling D-237M used), with
+`lost_atom_materiality_freeze_authority_enabled=1`,
+`editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`,
+`whole_video_editorial_reasoning_diagnostics_enabled=1` (P2),
+`ordering_diagnostics_enabled=1`, `pacing_v2_diagnostics_enabled=1`
+(covers Handle-Aware Pacing — no separate input exists for it),
+`audio_join_treatment_diagnostics_enabled=1`. Run id `34676546250`
+(run_number 106), job id `103507308588`, head_sha confirmed matching
+`a359d84`. Started 05:49:02Z, completed 05:51:21Z (~2m19s), overall
+`conclusion=failure`.
+
+**Step-level outcome (identical shape to D-237M):** S3 preflight (step
+8) `success`; the paid Modal benchmark itself (step 13, 05:49:24–
+05:51:04Z, ~1m40s) `success`, producing a rendered deliverable MP4
+(`cutsell-video00-modal-human-review`, 68,745,592 bytes — within 6.6KB
+of D-237M's own 68,752,176-byte MP4, circumstantial-only evidence of a
+near-identical rendered timeline, not confirmatory of any specific
+selection/Freeze outcome); "Verify active-path identity" (step 18)
+`success` — confirming the code that actually ran on Modal was this
+exact `a359d84` checkout, i.e. the D-239 live wiring genuinely executed,
+not stale pre-wiring code; D-235G/D-235J/D-237I sibling-safe extractions
+(steps 21/22/23) all `success`. Steps 24/25/26 (frozen-Selection-lock/
+Video00-architecture/Human-Gold-manifest validators) failed as
+`VIDEO00_SPECIFIC_ORACLE_NOISE` for this sibling (same already-classified
+pattern as every prior sibling RAW — these validators assert Video00's
+own golden-file expectations, structurally inapplicable to a different
+source file). Steps 46/47/48 (D-218R/D-221/D-225 Pacing-V2 family)
+failed again on the SAME persistent, still-unroot-caused missing-
+serialization gap tracked since D-235Y — unrelated to this gate's own
+question. Both failure clusters are the exact, already-documented,
+non-target-specific pattern this session has repeatedly confirmed.
+
+**Primary ownership audit, D-235Q/R/S/T audits, Freeze audit, Safety
+firewall, Pacing/Audio-Join observation:** **UNDETERMINED** — genuinely
+unretrievable via any tooling available in this sandbox for this run,
+exactly as in D-237H, D-237J, and D-237M. Two independent retrieval
+paths were attempted and both failed for the SAME, already-documented,
+purely structural reasons:
+
+1. **Artifact download.** `download_workflow_run_artifact` for the
+   `cutsell-video00-modal-validator-reports` artifact (32,046 bytes —
+   `exact-identity-observability.json`/`lost-semantic-atom-diagnostics.
+   json`/`selection-freeze-diagnostics.json`) returned a valid, time-
+   limited signed URL on `productionresultssa15.blob.core.windows.net`.
+   A direct fetch of that URL from this sandbox's own egress proxy
+   returned `CONNECT tunnel failed, response 403` — `connect_rejected
+   (the egress proxy denied the CONNECT (organization policy))`. This is
+   the exact Azure Blob Storage egress block named in D-237H/D-237J/
+   D-237M's own findings, now reconfirmed directly by hostname and error
+   code rather than inferred.
+2. **Job log tail.** `get_job_logs` for job `103507308588` at
+   `tail_lines=3000` (269,187 chars) and again at `tail_lines=50000`
+   (429,467 chars — the practical ceiling; a further increase did not
+   change the reachable window) both returned content starting no
+   earlier than roughly step 37-40's own embedded diagnostic-print
+   scripts (their SOURCE TEXT, not computed output, since GitHub Actions
+   echoes each step's own inline script before executing it) — never
+   reaching back to step 19 ("Print full canonical diagnostics", the
+   ONLY place this run's `lost_atom_materiality_orchestration` diagnostics
+   subtree — carrying the new `lost_atom_exact_ownership_available`/
+   `lost_atom_ownership_status` fields — is printed in full) or step 8
+   (the preflight's own printed key/bucket). Grepped for
+   `lost_atom_ownership_status`, `lost_atom_exact_ownership_available`,
+   `lost_atom_materiality_orchestration`, `final_story_coherence_
+   validation`, `exact_identity_available`, `freeze_blocked`,
+   `D-235G`/`D-235J`/`D-237I` (their own step names) — zero matches in
+   either retrieved window. Neither the D-235J nor D-237I sibling-safe
+   extraction artifacts (`lost-semantic-atom-diagnostics.json`/`exact-
+   identity-observability.json`) carry the NEW D-238/D-239 ownership
+   fields either — both extraction scripts pre-date D-238 and pure-
+   project only their own, older, narrower diagnostics subtrees
+   (`selection_freeze_diagnostics.py::build_lost_semantic_atom_
+   diagnostics` and the D-235P/D-237G identity-match rows respectively),
+   neither of which reads `exact_ownership_available`/`lost_atom_
+   ownership_status`. There is no THIRD extraction step yet for `final_
+   story_coherence_validation`'s own `lost_atom_materiality_
+   orchestration` diagnostics subtree specifically (unlike identity
+   observability, which D-237I already gave its own dedicated,
+   artifact-preserved extraction) — this is a genuine, newly-identified
+   gap, not a defect in D-239's own live wiring.
+
+**This is now the FOURTH consecutive real-media requalification gate**
+(D-237H, D-237J, D-237M, D-239) where the target-atom-specific content
+needed to certify a verdict could not be read from this sandbox, despite
+the underlying mechanism being repeatedly proven to execute correctly
+(preflight, Modal benchmark, active-path identity check, and all three
+existing sibling-safe extraction steps all succeeded on this exact
+commit). This is a standing, structural limitation of THIS session's own
+execution environment (egress-proxy-blocked Azure Blob Storage artifact
+downloads, and a job-log tail-retrieval ceiling that this run's own
+volume of embedded diagnostic-print step source code pushes the needed
+early-step content well beyond), not a defect in D-238's or D-239's own
+code. **This limitation is now recorded as a durable, cross-gate
+finding, further sharpened by this gate**: resolving it would require
+either a different execution environment with broader egress, or (newly
+identified this gate) a dedicated D-237I-style sibling-safe extraction
+step for `final_story_coherence_validation`'s own `lost_atom_materiality_
+orchestration` diagnostics subtree specifically — itself a docs-only-
+scoped, out-of-band decision for a future, separately-authorized gate,
+never a workflow change smuggled into this task's own "no post-result
+patch" boundary.
+
+**`REAL_SINGLETON_CONTAINMENT_OWNERSHIP_PROVEN`:** **false** — none of
+the required evidence points could be checked against actual retrieved
+data this gate. `TARGET_LOST_ATOM_BLOCKER_CLEARED`: **UNDETERMINED**
+(not set to `true` — the directive's own instruction is to set it `true`
+ONLY if the historical atom no longer contributes a Freeze blocker, and
+that cannot be confirmed).
+
+**Global identity firewall:** structurally unaffected regardless of this
+gate's own retrieval outcome — `AUTHORITATIVE_RELATIONSHIP_STATUSES` was
+not touched by any code in this task (diff-proven at commit time, tests
+50-51 of `test_cutsell_d238_exact_lost_atom_ownership.py`); `exact_
+lost_atom_ownership.py` is a wholly separate, disjoint contract from
+D-235P's own authority; no code anywhere in this task promotes
+containment to attempt identity. This holds independent of what the RAW
+did or did not produce.
+
+**Verdict: E — REGRESSION / OBSERVABILITY FAILURE** (an observability/
+retrieval failure specifically, not an engine regression — precisely as
+D-237H/J/M's own "F" verdicts under the prior menu: the mechanism is
+proven to execute successfully on real media with the exact authorized
+code, but this gate cannot certify the target atom's actual ownership/
+Freeze outcome from data this sandbox can retrieve). Per the task's own
+verdict-menu instruction for D/E: **no fix, no second RAW.**
+
+**Canonical status:** `D239_LIVE_WIRING_PROVEN_TARGET_OUTCOME_STILL_
+UNRETRIEVABLE_VIA_AVAILABLE_TOOLING_FOURTH_CONSECUTIVE_GATE`.
+
+**Engine patch required after this?** No — the live wiring itself is
+sound (proven by 11 targeted tests plus the step-18 active-path-identity
+confirmation that this exact code ran on real media without crashing or
+producing an integrity failure). **Additional RAW required?** No further
+RAW under any circumstance from this gate — a repeat run would face the
+identical retrieval wall. **Paid compute required next?** No, not by
+this task. A future retrieval attempt should first resolve either the
+sandbox egress-proxy policy (a Product Owner/infrastructure decision,
+not an engine change) or add the missing D-237I-style dedicated
+extraction step for `lost_atom_materiality_orchestration` (a separately-
+authorized, docs-only-scoped workflow change) — either path, or a
+human directly opening the run's own Actions UI log (outside this
+session, where the full untruncated log and artifact ZIP are both
+trivially available), resolves this without further paid compute.
+
+**Confirmation:** NO code, workflow, threshold, or authority change made
+after the RAW result. Zero second RAW, zero RunPod, zero provider
+change. The one pre-RAW code change (the live wiring) was made BEFORE
+dispatch, fully tested offline, and is this entry's own documented
+subject — not a post-result patch. This entry is a docs-only decision-
+log addition, the only change permitted post-result.
+
+Then STOP. Do NOT launch a further RAW. Wait for Product Owner
+coordination.
