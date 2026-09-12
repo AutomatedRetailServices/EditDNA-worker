@@ -158,10 +158,19 @@ def _understanding(*moments) -> EditorialMomentUnderstanding:
 # ---------------------------------------------------------------------------
 class TestSeamAEditorialSlotEvidence:
     def test_01_ownership_slot_evidence_success(self):
+        # D-239L (docs/CUTSELL_DECISIONS.md D-239K/D-239L): proposition-
+        # level slot evidence alone is no longer sufficient for REQUIRED
+        # via the ownership-only path -- exact target-level P1 corroboration
+        # (the SAME clip_id-keyed evidence Seam C already threads) is now
+        # also required. Supplying it here preserves this test's own
+        # original intent (Seam A's slot lookup resolves to REQUIRED/BLOCK)
+        # under the corrected, atom-granular contract.
         own = _exact_singleton()
         res = assess_complete_lost_semantic_atom_materiality(
             _row(), lost_atom_ownership=own,
             proposition_slot_evidence_by_id={_TARGET_PROPOSITION_ID: SLOT_CTA},
+            recording_process_status=MOMENT_ROLE_CLEAN_AUDIENCE_DELIVERY,
+            audience_delivery_status=AUDIENCE_DELIVERY_SUPPORTED,
         )
         assert res.editorial_requirement_status == "REQUIRED"
         assert res.final_materiality_status == MATERIALITY_EDITORIALLY_REQUIRED
@@ -439,10 +448,14 @@ class TestFirewallSourceMismatchAndMultiProposition:
 # ---------------------------------------------------------------------------
 class TestDirectiveFirewallCases:
     def test_29_case1_ownership_plus_editorial_required_blocks(self):
+        # D-239L: exact target-level P1 corroboration required alongside
+        # ownership-inherited slot evidence -- see test_01's own comment.
         own = _exact_singleton()
         res = assess_complete_lost_semantic_atom_materiality(
             _row(), lost_atom_ownership=own,
             proposition_slot_evidence_by_id={_TARGET_PROPOSITION_ID: SLOT_HOOK},
+            recording_process_status=MOMENT_ROLE_CLEAN_AUDIENCE_DELIVERY,
+            audience_delivery_status=AUDIENCE_DELIVERY_SUPPORTED,
         )
         assert res.final_materiality_status == MATERIALITY_EDITORIALLY_REQUIRED
         assert res.blocking_recommendation == RECOMMEND_BLOCK
@@ -557,12 +570,17 @@ class TestPositiveCaseNonMaterialAndDownstreamConsumption:
 # ---------------------------------------------------------------------------
 class TestIsolation:
     def test_38_multi_source_isolation(self):
+        # D-239L: "c_a" needs exact target-level P1 corroboration (its own
+        # clip_id) for its ownership-inherited SLOT_CTA to reach REQUIRED;
+        # "c_b" (SLOT_OTHER, no story-function slot at all) is unaffected.
         own_a = _exact_singleton(clip_id="c_a", source_asset_id="src_a")
         own_b = _exact_singleton(clip_id="c_b", source_asset_id="src_b", containing_language_attempt_id="latt_b", proposition_candidate_ids=("prop_b",))
         result = _complete_lost_semantic_atom_materiality_by_clip_id(
             [_row(clip_id="c_a"), _row(clip_id="c_b")], [], [], {},
             lost_atom_ownership_by_clip_id={"c_a": own_a, "c_b": own_b},
             proposition_slot_evidence_by_id={_TARGET_PROPOSITION_ID: SLOT_CTA, "prop_b": SLOT_OTHER},
+            p1_moment_role_by_clip_id={"c_a": MOMENT_ROLE_CLEAN_AUDIENCE_DELIVERY},
+            p1_audience_delivery_status_by_clip_id={"c_a": AUDIENCE_DELIVERY_SUPPORTED},
         )
         assert result["c_a"].editorial_requirement_status == "REQUIRED"
         assert result["c_b"].editorial_requirement_status == "INSUFFICIENT_EVIDENCE"
@@ -593,10 +611,14 @@ class TestLanguageCoverage:
         "oh too many personas listas set estas son las",
     ])
     def test_40_language_neutral_seam_a(self, text):
+        # D-239L: exact target-level P1 corroboration required alongside
+        # ownership-inherited slot evidence -- see test_01's own comment.
         own = _exact_singleton()
         res = assess_complete_lost_semantic_atom_materiality(
             _row(text=text), lost_atom_ownership=own,
             proposition_slot_evidence_by_id={_TARGET_PROPOSITION_ID: SLOT_CTA},
+            recording_process_status=MOMENT_ROLE_CLEAN_AUDIENCE_DELIVERY,
+            audience_delivery_status=AUDIENCE_DELIVERY_SUPPORTED,
         )
         assert res.final_materiality_status == MATERIALITY_EDITORIALLY_REQUIRED
 
@@ -773,8 +795,25 @@ class TestRealShapeOfflineReplay:
         assert own.proposition_candidate_ids == (_TARGET_PROPOSITION_ID,)
 
     def test_53_seam_a_resolves_independently_of_b_c_d(self):
+        # D-239L (docs/CUTSELL_DECISIONS.md D-239K/D-239L): Seam A's own
+        # proposition-level slot evidence, with NO exact target-level P1
+        # corroboration and none of B/C/D's own contexts present, now
+        # correctly resolves to INSUFFICIENT_EVIDENCE, never REQUIRED --
+        # this IS "resolving independently of B/C/D": Seam A alone was
+        # never atom-granular proof, and the fix makes that honest.
         m = self._base_materiality(slot=SLOT_CTA)
+        assert m.editorial_requirement_status == "INSUFFICIENT_EVIDENCE"
+
+    def test_53b_seam_a_plus_seam_c_atom_corroboration_resolves_required(self):
+        # D-239L positive case: Seam A's slot evidence PLUS Seam C's own
+        # exact target-level P1 corroboration (both reused, unmodified
+        # evidence channels) together resolve to REQUIRED/BLOCK.
+        m = self._base_materiality(
+            slot=SLOT_CTA, p1_role=MOMENT_ROLE_CLEAN_AUDIENCE_DELIVERY, p1_audience=AUDIENCE_DELIVERY_SUPPORTED,
+        )
         assert m.editorial_requirement_status == "REQUIRED"
+        assert m.final_materiality_status == MATERIALITY_EDITORIALLY_REQUIRED
+        assert m.blocking_recommendation == RECOMMEND_BLOCK
 
     def test_54_seam_b_resolves_independently_of_a_c_d(self):
         m = self._base_materiality(critical_conflict_context="false")

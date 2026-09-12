@@ -60320,3 +60320,178 @@ task.
 
 Then STOP. Do NOT implement. Do NOT launch RAW. Wait for Product Owner
 coordination.
+
+## D-239L — ATOM-GRANULAR EDITORIAL REQUIREMENT REFINEMENT, OFFLINE IMPLEMENTATION ONLY, POST D-239K (Verdict A: ATOM-GRANULAR EDITORIAL REQUIREMENT REFINEMENT OFFLINE PROVEN — READY FOR ONE REAL-MEDIA FREEZE REQUALIFICATION, next gate D-239M, NOT launched)
+
+**Trigger:** D-239K's own forensic (Verdict B) proved D-239I's own
+ownership-only Seam A promotes a lost atom to `REQUIRED` using ONLY its
+owning `PropositionCandidate`'s whole-`LanguageAttempt`-level `editorial_
+slot_evidence` (`language_proposition_relation.py::_slot_evidence` --
+minted once per attempt, from that attempt's own ordinal position among
+source siblings plus its own whole-text claim signature) — never proof
+that the lost atom's own specific word span carries that function. This
+task refines exactly that ONE bridge.
+
+## The fix (`complete_lost_semantic_atom_materiality.py` only)
+
+Gated STRICTLY on the ownership-only identity path (`not exact_identity_
+available and exact_ownership_available`) so `exact_identity_available`
+(D-235P full-attempt identity) rows are **byte-identical** regardless of
+whether ownership ALSO happens to resolve exactly for the same clip
+(`TestFullIdentityUnchanged`, 2 tests, prove this directly, including a
+row where BOTH resolve exact for the same clip).
+
+When, on the ownership-only path, `assess_editorial_requirement_
+evidence` reached `REQUIRED` for the SOLE reason of the inherited
+proposition-level slot evidence (detected via the SAME `"exact_story_
+function_slot:..."` reason code that function already emits, with
+neither `idea_coverage_status is True` nor `downstream_dependency_
+present is True` also contributing -- both already atom/idea-scoped,
+untouched), the verdict is trusted ONLY when the SAME exact, already-
+computed, target-clip_id-keyed atom-level evidence D-239I's own Seam C
+already threads (`recording_process_status`/`audience_delivery_status`,
+sourced from `editorial_moment_sequence_integration.p1_moment_role_and_
+audience_status_by_clip_id_for`) actually confirms it: `recording_
+process_status` resolved (a process-shaped role would already have
+returned `NOT_REQUIRED` via the PRE-EXISTING, unchanged retry/process
+firewall before `REQUIRED` could ever be reached) AND `audience_
+delivery_status` resolved to `AUDIENCE_DELIVERY_SUPPORTED`/`AUDIENCE_
+DELIVERY_PARTIAL` (never `UNCERTAIN`, never absent). Absent that
+corroboration, the row is downgraded to `REQUIREMENT_INSUFFICIENT_
+EVIDENCE` -- an EXISTING vocabulary value, never `REQUIREMENT_NOT_
+REQUIRED` (this task's own explicit instruction). The original slot
+reason code is preserved on the intermediate `requirement` object, and
+a new, honestly-named code (`ownership_only_slot_evidence_lacks_atom_
+level_target_corroboration`) is appended to both it and the outer
+`CompleteLostSemanticAtomMateriality.reason_codes`, for audit.
+
+Two new diagnostics-only fields on `CompleteLostSemanticAtomMateriality`
+(`editorial_requirement_granularity`: `FULL_IDENTITY_PROPOSITION` /
+`ATOM_EXACT_P1` / `PROPOSITION_ONLY_INSUFFICIENT` / `AMBIGUOUS` /
+`MISSING` / `None`; `editorial_requirement_target_evidence_source`:
+`FULL_ATTEMPT_IDENTITY` / `EXACT_P1_MOMENT` / `NONE` / `None`) -- pure
+labels over already-computed values, never consulted by the precedence
+chain, exposed in `as_dict()`, `complete_lost_semantic_atom_materiality_
+diagnostics()`, and (D-239J's own primary artifact module) `lost_atom_
+ownership_materiality_diagnostics.py`'s per-atom row.
+
+## Safe result states (all proven, `TestRealD239JShapeReplay`)
+
+- **Case 1** (no exact target role): `INSUFFICIENT_EVIDENCE` -- never
+  `REQUIRED`, never `NOT_REQUIRED`.
+- **Case 2** (exact target moment proves audience delivery):
+  `REQUIRED`/`BLOCK` -- the target's own evidence, not the proposition's,
+  now corroborates it.
+- **Case 3** (exact target moment is `POST_TAKE_RESET`/process-shaped):
+  `NOT_REQUIRED` via the PRE-EXISTING, unchanged firewall; materiality
+  continues through the existing, untouched retry/process precedence --
+  never forced to `DO_NOT_BLOCK` by this refinement.
+
+## Firewall / precedence proofs (`TestOwnershipOnlyPath`,
+## `TestPrecedenceUnchanged`, `TestIndependentAtomScopedSignalsUnaffected`)
+
+All 15 of this task's own conflict-matrix items proven: full identity
+unaffected; broad-slot-only now `INSUFFICIENT_EVIDENCE`; exact atom
+evidence (including a `PARTIAL` audience-delivery reading) restores
+`REQUIRED`/`BLOCK`; a confirmed process role blocks inherited `REQUIRED`
+via the pre-existing firewall; an ambiguous (`UNCERTAIN` audience-
+delivery) or missing role stays `INSUFFICIENT_EVIDENCE`; a conflicting
+shape (non-process role + `NOT_SUPPORTED` delivery) resolves
+`NOT_REQUIRED` via the SAME pre-existing, unrelated firewall; multi-
+proposition ambiguity and source mismatch never even reach `exact_
+ownership_available`; meaning-critical and critical-claim-conflict block
+regardless of any ownership-inherited `REQUIRED`; retry/process and
+redundancy still proceed only after the safety steps; ownership alone
+never manufactures `DO_NOT_BLOCK`; proposition-level `REQUIRED` alone
+never becomes atom-level `REQUIRED` under the ownership path.
+`idea_coverage_status`/`downstream_dependency_present`-driven `REQUIRED`
+is completely unaffected by this refinement (both already atom/idea-
+scoped, independent evidence).
+
+## No-policy-change proofs (all pass, zero diff / structural)
+
+`shared_attempt_word_identity.py`, `exact_lost_atom_ownership.py`,
+`language_proposition_relation.py`, `editorial_moment_sequence.py`,
+`editorial_moment_sequence_integration.py`, `final_story_coherence_
+validation.py`, `pipeline.py`, `universal_clean_cut.py`, and `repair_
+loop.py` are all zero-diff (`git diff --stat HEAD`) -- none of these
+nine files were touched by this task (only `complete_lost_semantic_atom_
+materiality.py` and, for the two new diagnostics fields, `lost_atom_
+ownership_materiality_diagnostics.py` were modified). `AUTHORITATIVE_
+RELATIONSHIP_STATUSES` is never reassigned. No `difflib`/`SequenceMatcher`/
+`fuzz` import, no new `os.environ`/`CUTSELL_*` env flag anywhere in the
+modified module (AST-docstring-stripped source-scan proofs, immune to
+prose mentioning these words). `editorial_requirement_status` still only
+ever takes D-235M's own pre-existing 5-value vocabulary -- zero new
+status values introduced.
+
+## Tests
+
+`tests/test_cutsell_d239l_atom_granular_editorial_requirement_
+refinement.py` (39 tests): full-identity-unchanged (2), ownership-only
+path items 2-7/14/15 (9, including a raw ambiguous/missing-label
+isolation test), precedence/firewall items 8-13 (6), the real D-239J
+shape's own three named cases (3), diagnostics-field proofs (3),
+independent atom/idea-scoped-signal proofs (2), zero-diff/no-new-
+authority/no-new-classifier-threshold-heuristic proofs (10, AST-based).
+Six pre-existing D-239I tests updated as an honest, direct consequence
+of the fix (`test_01_ownership_slot_evidence_success`, `test_29_case1_
+ownership_plus_editorial_required_blocks`, `test_38_multi_source_
+isolation`, the 3-way parametrized `test_40_language_neutral_seam_a`,
+and `test_53_seam_a_resolves_independently_of_b_c_d` split into a
+corrected negative assertion plus a new `test_53b` positive case) --
+each now supplies the SAME atom-level P1 corroboration this task's own
+fix requires, preserving each test's original intent (proving Seam A's
+mechanism resolves to `REQUIRED`/`BLOCK`) under the corrected, atom-
+granular contract; none weakened. One genuine, unrelated pre-existing
+test bug found and fixed during development: `test_cutsell_d235q`'s own
+`test_41_no_timestamp_authority` false-positive-matched the substring
+`.start` inside the new code's own `str(code).startswith(...)` call
+(the string method, not a timestamp attribute) -- fixed by using
+`.partition(":")[0] ==` instead, with zero change to the check's own
+actual intent or coverage.
+
+## Qualification
+
+`python3 -m compileall cutsell_worker tests -q` clean. Targeted
+regression sweep across all D-195/D-196/D-197/D-198/D-199/D-200/D-204/
+D-235/D-236/D-237/D-238/D-239-series suites: **1431 passed, 0 failed.**
+`final_story_coherence_validation`/`repair_loop`/`universal_clean_cut`
+suites: **41 passed, 0 failed.** CleanCutBench: **55/55.** Full suite
+(`tests/`, excluding `test_semantic_stitch.py`): **6691 passed, 5
+failed, 13 subtests passed.** All 5 failures independently confirmed
+pre-existing on baseline `08469e4` via `git stash` -- the SAME
+`test_video00_modal_hybrid_semantic_parity.py` ×4 /
+`test_hybrid_story_guard_incomplete_retry.py` ×1 this session has
+repeatedly tracked across many prior gates, unrelated to any file this
+gate touched. **Zero genuine new failures.**
+
+**Verdict: A — ATOM-GRANULAR EDITORIAL REQUIREMENT REFINEMENT OFFLINE
+PROVEN, READY FOR ONE REAL-MEDIA FREEZE REQUALIFICATION.** The ownership-
+only bridge's own contract-granularity mismatch (D-239K) is closed using
+ONLY already-existing, already-computed exact evidence (D-239I's own
+Seam C); the editorial-required firewall itself is unweakened; no
+`UNKNOWN -> safe` conversion; no materiality-precedence/ownership/
+global-identity/Freeze/repair/Language-Spine/P1/P2/Pacing/Audio-Join
+authority change; no new classifier/threshold/text heuristic; zero
+genuine new test failures.
+
+**Canonical status:**
+`D239L_ATOM_GRANULAR_EDITORIAL_REQUIREMENT_REFINEMENT_OFFLINE_PROVEN`.
+
+**Exact next gate:** **D-239M — ONE REAL-MEDIA FREEZE REQUALIFICATION**,
+same sibling
+(`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`),
+exactly one RAW maximum, primary question: does the historical target
+atom now resolve to `INSUFFICIENT_EVIDENCE`, `RETRY/PROCESS`,
+`REDUNDANT`, or still `REQUIRED`, based on real atom-level evidence. Per
+this gate's own directive: **NOT launched automatically.**
+
+**RAW required next?** Yes, exactly one -- only under explicit Product
+Owner authorization. **Paid compute required next?** No, not by this
+task.
+
+**Confirmation:** offline only. No RAW, Modal, or RunPod dispatch of any
+kind in this gate.
+
+Then STOP. Do NOT launch D-239M. Wait for Product Owner coordination.

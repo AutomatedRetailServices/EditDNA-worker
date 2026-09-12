@@ -181,6 +181,17 @@ def build_lost_atom_ownership_materiality_diagnostics(
             "redundancy_ownership_bridge_eligible": (
                 bool(ownership is not None and ownership.is_exact_singleton)
             ),
+            # -- D-239L: atom-granular refinement of the ownership-only
+            # REQUIRED bridge -- pure re-projection of already-computed
+            # fields on `materiality` (see complete_lost_semantic_atom_
+            # materiality.py's own "D-239L" docstring section), never a
+            # new computation.
+            "editorial_requirement_granularity": (
+                materiality.editorial_requirement_granularity if materiality is not None else None
+            ),
+            "editorial_requirement_target_evidence_source": (
+                materiality.editorial_requirement_target_evidence_source if materiality is not None else None
+            ),
             "final_materiality_status": (
                 materiality.final_materiality_status if materiality is not None else None
             ),

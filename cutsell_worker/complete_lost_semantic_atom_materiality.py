@@ -209,12 +209,110 @@ step order or to any OTHER evidence dimension (meaning-critical,
 critical-claim-conflict, retry/process, and redundancy are all seams
 D-239I addresses separately, in `final_story_coherence_validation.py`'s
 own orchestration layer -- see D-239I's own decision-log entry).
+
+## D-239L: atom-granular refinement of the ownership-only REQUIRED bridge
+## (offline, additive, docs/CUTSELL_DECISIONS.md D-239K/D-239L)
+
+D-239K's own forensic proved that Seam A's `slot_is_exact` promotion,
+when reached through `exact_ownership_available` alone (never through
+`exact_identity_available`), rests on evidence that is PROPOSITION-level
+(a `PropositionCandidate`'s own `editorial_slot_evidence` is minted once
+per whole `LanguageAttempt`, from that attempt's own ordinal position
+among source siblings and its own whole-text claim signature -- see
+`language_proposition_relation.py::_slot_evidence`) and NEVER proves
+that the lost atom's own specific word span carries the required
+function. Before D-239I this never mattered: the only identity source
+that could ever make `slot_is_exact` true was `exact_identity_
+available` (D-235P's own full-attempt identity), under which the clip
+being evaluated effectively WAS the whole attempt -- "the proposition is
+required" and "this exact realization must survive" were the same
+claim by construction. D-238/D-239I's ownership bridge introduced a
+narrower, disjoint identity source (`exact_ownership_available`) whose
+own proof is WEAKER on this exact dimension: it proves only "these N
+words belong, unambiguously, to one attempt that owns one proposition"
+(word-SET containment, D-238's own scope), never "this attempt's
+required realization IS this N-word span" (function/realization
+equivalence) -- D-238's own module docstring says this explicitly.
+
+This section closes exactly that gap, for the ownership-only path only:
+
+  - `exact_identity_available` is TRUE (D-235P full-attempt identity):
+    **completely unchanged.** Every branch below is gated on `not
+    exact_identity_available` -- a row with full-attempt identity never
+    reaches this refinement, regardless of whether ownership ALSO
+    happens to resolve exactly for the same clip. This is the literal
+    "D-235P full-attempt exact identity behavior must remain unchanged"
+    requirement.
+  - `exact_identity_available` is FALSE and `exact_ownership_available`
+    is TRUE, and the ONLY reason `assess_editorial_requirement_evidence`
+    reached `REQUIRED` was the inherited proposition-level slot evidence
+    (detected the same way this function already reports it: a
+    `"exact_story_function_slot:..."` reason code in `requirement.
+    reason_codes`, with NEITHER `idea_coverage_status is True` NOR
+    `downstream_dependency_present is True` -- both already-atom/idea-
+    scoped, independent signals this refinement never touches): the
+    verdict is trusted ONLY when the SAME exact, already-computed,
+    target-clip_id-keyed atom-level evidence D-239I's own Seam C
+    already threads into this same call
+    (`recording_process_status`/`audience_delivery_status`, sourced
+    from `editorial_moment_sequence_integration.p1_moment_role_and_
+    audience_status_by_clip_id_for`, itself gated to `CONFIDENCE_
+    SUPPORTED` and non-`UNCERTAIN` roles -- never a new lookup, never a
+    new classifier) actually CONFIRMS it: `recording_process_status`
+    resolved (a confirmed, non-process-shaped role for the TARGET's own
+    clip_id -- a process-shaped role would already have been caught by
+    `assess_editorial_requirement_evidence`'s own PRE-EXISTING retry/
+    process firewall, unchanged) AND `audience_delivery_status` resolved
+    to `AUDIENCE_DELIVERY_SUPPORTED`/`AUDIENCE_DELIVERY_PARTIAL` (never
+    `UNCERTAIN`, never absent -- "proves required audience-delivery
+    function", not merely "not disproven"). When BOTH hold, `REQUIRED`
+    stands untouched -- the target's own exact evidence, not the
+    proposition's, now corroborates it.
+  - When that exact target-level corroboration is absent (the target's
+    own P1 role never resolved at all, or resolved but its own
+    audience-delivery status is `UNCERTAIN`/absent): the row is
+    downgraded from `REQUIREMENT_REQUIRED` to `REQUIREMENT_INSUFFICIENT_
+    EVIDENCE` -- an EXISTING vocabulary value, never a new one, and
+    never `REQUIREMENT_NOT_REQUIRED` (this task's own explicit "NOT:
+    NOT_REQUIRED" instruction). `reason_codes` gains one new, honestly-
+    named code (`ownership_only_slot_evidence_lacks_atom_level_target_
+    corroboration`) rather than silently losing the original slot
+    reason code, which is kept for audit.
+  - This NEVER fires when `idea_coverage_status is True` or
+    `downstream_dependency_present is True` also contributed to
+    `REQUIRED` -- those are already atom/idea-scoped, independent
+    evidence classes this refinement has no reason to distrust; only
+    the SLOT-EVIDENCE-ONLY case is in scope, per this task's own "refine
+    ONLY... ownership-based editorial-requirement bridge" instruction.
+  - Meaning-critical (step 1) and the conflicted/CONFLICTED branch
+    (step 3) of `assess_complete_lost_semantic_atom_materiality`'s own
+    precedence chain are evaluated on the (possibly downgraded)
+    `requirement` object exactly as before -- this section changes
+    WHICH value `requirement.editorial_requirement_status` holds when
+    the ownership-only slot path was the sole reason it became
+    `REQUIRED`, never the precedence chain itself, never any other
+    evidence dimension, never `assess_editorial_requirement_evidence`'s
+    own general contract (called with the SAME arguments as before;
+    its return value is post-processed here, in the ONE caller,
+    never inside that function itself).
+  - Diagnostics-only additions: `editorial_requirement_granularity`
+    (`FULL_IDENTITY_PROPOSITION` / `ATOM_EXACT_P1` / `PROPOSITION_ONLY_
+    INSUFFICIENT` / `AMBIGUOUS` / `MISSING` / `None`) and `editorial_
+    requirement_target_evidence_source` (`FULL_ATTEMPT_IDENTITY` /
+    `EXACT_P1_MOMENT` / `NONE` / `None`) -- both pure labels over
+    already-computed booleans/values, never consulted by the precedence
+    chain itself, added purely so a caller (D-239J/D-239M's own
+    real-media reporting) can see WHY a row landed where it did.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Optional, Sequence, Tuple
 
+from .editorial_moment_sequence import (
+    AUDIENCE_DELIVERY_PARTIAL,
+    AUDIENCE_DELIVERY_SUPPORTED,
+)
 from .language_proposition_relation import SLOT_CONCLUSION, SLOT_CTA, SLOT_HOOK
 from .lost_atom_editorial_requirement_evidence import (
     IDENTITY_MAPPING_EXACT,
@@ -291,6 +389,11 @@ class CompleteLostSemanticAtomMateriality:
     # above -- see module docstring's "D-238" section.
     exact_ownership_available: bool = False
     lost_atom_ownership_status: Optional[str] = None
+    # D-239L: diagnostics-only labels over already-computed values -- see
+    # module docstring's own "D-239L" section. Never consulted by the
+    # precedence chain; `None` whenever neither identity path applies.
+    editorial_requirement_granularity: Optional[str] = None
+    editorial_requirement_target_evidence_source: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.final_materiality_status not in FINAL_MATERIALITY_VOCABULARY:
@@ -315,6 +418,8 @@ class CompleteLostSemanticAtomMateriality:
             "provenance": list(self.provenance),
             "exact_ownership_available": self.exact_ownership_available,
             "lost_atom_ownership_status": self.lost_atom_ownership_status,
+            "editorial_requirement_granularity": self.editorial_requirement_granularity,
+            "editorial_requirement_target_evidence_source": self.editorial_requirement_target_evidence_source,
         }
 
 
@@ -468,6 +573,74 @@ def assess_complete_lost_semantic_atom_materiality(
         downstream_dependency_present=downstream_dependency_present,
     )
 
+    # D-239L: refine the ownership-only REQUIRED bridge -- see module
+    # docstring's own "D-239L" section. Gated STRICTLY on `not exact_
+    # identity_available` so a row with full-attempt D-235P identity is
+    # byte-identical regardless of what ownership independently resolves
+    # to for the same clip (this task's own "D-235P full-attempt exact
+    # identity behavior must remain unchanged" requirement).
+    ownership_only_identity_path = bool((not exact_identity_available) and exact_ownership_available)
+    slot_was_sole_required_reason = bool(
+        requirement.editorial_requirement_status == REQUIREMENT_REQUIRED
+        and any(str(code).partition(":")[0] == "exact_story_function_slot" for code in requirement.reason_codes)
+        and idea_coverage_status is not True
+        and downstream_dependency_present is not True
+    )
+    # Exact, already-computed, target-clip_id-keyed atom-level evidence
+    # (D-239I Seam C's own `recording_process_status`/`audience_delivery_
+    # status` for THIS row's own clip_id -- never re-derived, never a new
+    # lookup). A resolved (non-`None`) `recording_process_status` at this
+    # point already means "confirmed, non-process-shaped" -- a process-
+    # shaped role would have already returned `NOT_REQUIRED` via `assess_
+    # editorial_requirement_evidence`'s own PRE-EXISTING retry/process
+    # firewall, unchanged by this task, before `requirement.editorial_
+    # requirement_status` could ever be `REQUIRED` here.
+    atom_level_role_resolved = recording_process_status is not None
+    atom_level_audience_delivery_proven = audience_delivery_status in (
+        AUDIENCE_DELIVERY_SUPPORTED, AUDIENCE_DELIVERY_PARTIAL,
+    )
+    atom_level_corroborated = bool(atom_level_role_resolved and atom_level_audience_delivery_proven)
+
+    if ownership_only_identity_path and slot_was_sole_required_reason and not atom_level_corroborated:
+        # Proposition-level slot evidence + EXACT_SINGLETON_OWNERSHIP is
+        # NOT sufficient by itself for REQUIRED (this task's own "CRITICAL
+        # RULE"). Fail closed to INSUFFICIENT_EVIDENCE -- an EXISTING
+        # vocabulary value -- never NOT_REQUIRED (this task's own explicit
+        # "NOT: NOT_REQUIRED" instruction). The original slot reason code
+        # is kept (never dropped) alongside the new one, for audit.
+        requirement = replace(
+            requirement,
+            editorial_requirement_status=REQUIREMENT_INSUFFICIENT_EVIDENCE,
+            reason_codes=requirement.reason_codes + (
+                "ownership_only_slot_evidence_lacks_atom_level_target_corroboration",
+            ),
+        )
+        # This module's own `reason_codes` list (distinct from `requirement.
+        # reason_codes` above) is what `CompleteLostSemanticAtomMateriality.
+        # reason_codes` is actually built from below -- surface the SAME
+        # honest code there too, so a caller reading the final result object
+        # (rather than the intermediate `requirement`) still sees WHY.
+        reason_codes.append("ownership_only_slot_evidence_lacks_atom_level_target_corroboration")
+
+    # D-239L diagnostics-only labels (never consulted by the precedence
+    # chain below) -- see module docstring's own "D-239L" section.
+    if exact_identity_available:
+        editorial_requirement_granularity = "FULL_IDENTITY_PROPOSITION"
+        editorial_requirement_target_evidence_source = "FULL_ATTEMPT_IDENTITY"
+    elif exact_ownership_available:
+        editorial_requirement_target_evidence_source = "EXACT_P1_MOMENT" if atom_level_role_resolved else "NONE"
+        if slot_was_sole_required_reason and not atom_level_corroborated:
+            editorial_requirement_granularity = "PROPOSITION_ONLY_INSUFFICIENT"
+        elif not atom_level_role_resolved:
+            editorial_requirement_granularity = "MISSING"
+        elif not atom_level_corroborated:
+            editorial_requirement_granularity = "AMBIGUOUS"
+        else:
+            editorial_requirement_granularity = "ATOM_EXACT_P1"
+    else:
+        editorial_requirement_granularity = None
+        editorial_requirement_target_evidence_source = None
+
     redundancy_proven = bool(
         materiality.materiality_status == MATERIALITY_REDUNDANT_EQUIVALENT
         or requirement.editorial_requirement_status == REQUIREMENT_REDUNDANT_REQUIRED_FUNCTION_PRESERVED
@@ -546,6 +719,8 @@ def assess_complete_lost_semantic_atom_materiality(
         lost_atom_ownership_status=(
             lost_atom_ownership.ownership_status if lost_atom_ownership is not None else None
         ),
+        editorial_requirement_granularity=editorial_requirement_granularity,
+        editorial_requirement_target_evidence_source=editorial_requirement_target_evidence_source,
     )
 
 
@@ -607,6 +782,8 @@ def complete_lost_semantic_atom_materiality_diagnostics(
         "provenance": list(result.provenance),
         "exact_ownership_available": result.exact_ownership_available,
         "lost_atom_ownership_status": result.lost_atom_ownership_status,
+        "editorial_requirement_granularity": result.editorial_requirement_granularity,
+        "editorial_requirement_target_evidence_source": result.editorial_requirement_target_evidence_source,
     }
 
 
