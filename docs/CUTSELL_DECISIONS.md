@@ -56867,3 +56867,179 @@ Freeze/materiality/repair/P1/P2 authority/BestTake/Family/Ordering/
 Boundary/Pacing/Audio-Join logic changed.
 
 Then STOP. Do NOT launch D-237. Wait for Product Owner coordination.
+
+## D-237 — ONE REAL-MEDIA LANGUAGE-SPINE / FREEZE REQUALIFICATION POST D-236
+
+**Scope:** exactly ONE authorized paid Modal RAW on the required sibling
+source, same flags as D-235Y plus D-236's own fix already live in the
+code. No second RAW, no provider change, no post-result patch.
+
+**RAW dispatched:** `cutsell-video00-modal-raw.yml`, run `34662805134`,
+job `103468636309`, head `eb37d66` (matches). S3 preflight step (the
+workflow's own built-in `head-object` check) passed before the paid
+step ran; independently corroborated by this exact key having already
+been successfully processed end-to-end in D-235Y's own run
+`34656261730`. The paid Modal benchmark step (step 13) **succeeded**
+again; overall job conclusion `failure` from the same class of
+downstream validator steps as D-235Y (23-25 oracle noise, 45-47 Pacing
+V2 family).
+
+**PRIMARY RESULT -- Language-Spine collapse CONFIRMED RESOLVED on real
+media, with hard, direct data (not inferred):**
+
+| metric | pre-D-236 (historical) | D-237 (real, this run) |
+|---|---|---|
+| LanguageWord | 252 | 252 (unchanged, expected) |
+| LanguagePhrase | 12 | 13 |
+| LanguageUtterance | **1** | **3** |
+| LanguageAttempt | **1** | **3** |
+| PropositionCandidate | **1** | **3** |
+| `language_spine_audio_silence_evidence_status` | (field did not exist) | `SUPPLIED` |
+| `audio_silence_interval_count` | 0 (not supplied) | **4** |
+| `pause_boundary_count` | 0 | **2** |
+| `restart_marker_evidence_status` | (field did not exist) | `NOT_AVAILABLE` (honest, as D-236 documented -- no detector built) |
+| `restart_boundary_count` | 0 | 0 |
+
+D-236's fix consumed 4 real audio-silence intervals, 2 of which produced
+real `PAUSE` strong-boundary splits, taking the historical 1/1/1 collapse
+to 3/3/3 -- a real, evidence-justified reduction, not a hardcoded target
+(none was asserted, per this task's own instruction).
+
+**Freeze evidence (same evidentiary pattern as D-235Y, direct, not
+inferential):** D-209 Ordering's own real-media summary shows
+`input_unit_count: 3`, `output_unit_count: 3`, `dropped_count: 0`,
+`membership_invariant_result: HELD` -- real, non-empty selection data
+reached Ordering (downstream of Freeze in this pipeline's real order:
+P2 -> Ordering -> Freeze -> Boundary -> Pacing, per D-235Z's own
+correction). A `cutsell-video00-modal-human-review` artifact was
+produced (68,745,378 bytes, artifact id `10287768166`... [run id
+`10287189282`]), essentially the same size as D-235Y's own render
+(68,744,431 bytes) -- confirming the full pipeline (Selection -> Freeze
+-> Boundary -> Render -> QC) completed to a deliverable MP4 again.
+Together this is strong, direct evidence Freeze did **not** block this
+run's output overall.
+
+**Target-atom-SPECIFIC trace: NOT RETRIEVABLE, same two confirmed
+tooling limitations as D-235Y/D-235Z, re-confirmed identically on this
+run:**
+- `get_job_logs` (job `103468636309`) again returned a hard, fixed
+  ~418,703-character tail that reaches back only to `2026-09-12T00:50:
+  15.39` -- covering steps ~41-49 (D-200 through Modal teardown) but
+  NOT steps 19-22 ("Print full canonical diagnostics", D-235G Selection
+  Freeze diagnostics extraction, D-235J Lost Semantic Atom diagnostics
+  extraction) where the exact per-atom `freeze_blocked` value,
+  `lost_atom_provenance_id`, exact-identity relationship, and D-235Q/R/
+  S/T per-atom results are printed. This window is BETTER than D-235Y's
+  own (it happens to include the full D-200 Live-Language-Spine block,
+  which is why the collapse-resolution numbers above ARE confirmed),
+  but the specific atom trace still falls just outside it.
+- The `cutsell-video00-modal-validator-reports` artifact (this run:
+  31,072 bytes, id `10287768166`) is on the same blocked blob-storage
+  host pattern (`productionresultssa*.blob.core.windows.net`) confirmed
+  egress-blocked from this sandbox in both D-235Y and D-235Z's own
+  forensics -- not re-attempted here (established, not re-tested, per
+  the tool's own "stop retrying" guidance once a host-pattern block is
+  confirmed).
+
+**New, honestly-flagged, unexplained signal (not asserted as a defect,
+not smoothed over):** D-204 P2's own summary shows
+`unique_information_uncovered_count: 11` this run, versus `0` in
+D-235Y's own run on the SAME source. The most plausible, non-alarming
+explanation is a measurement-GRANULARITY artifact of the collapse fix
+itself: with only 1 giant PropositionCandidate before, P2's own per-unit
+coverage-gap measure had no real granularity to detect anything at that
+coarseness; with 3 real, distinct PropositionCandidates now, P2 can
+measure finer-grained coverage gaps it was structurally blind to before.
+This is NOT independently confirmed from available data and is reported
+exactly as an open question, not resolved here -- a candidate item for
+the Language-Spine/P2 real-media qualification this task's own "Exact
+next gate" names below, not something this task investigates further
+(NO POST-RESULT PATCH).
+
+**Pacing V2 family (steps 45-47): identical gap to D-235Y, now proven
+INDEPENDENT of the Language-Spine collapse.** `diagnostics['pacing_v2']`
+and `['pacing_v2_handle_aware']` are STILL entirely absent from
+serialization, byte-for-byte the same failure mode as D-235Y
+(`pacing_v2_block_status: MISSING_FROM_SERIALIZATION`). Because the
+Language-Spine collapse this gap was previously hypothesized to
+possibly relate to is now CONFIRMED RESOLVED (3/3/3, real evidence
+consumed) while the Pacing V2 gap is UNCHANGED, this run rules out
+"Language-Spine collapse causes the Pacing V2 gap" definitively, leaving
+only the two remaining D-235Y-named candidates (the
+`pacing_v2_diagnostics_enabled`-family flag not actually reaching this
+run, or a real regression in Pacing V2's own diagnostics serialization)
+-- still not distinguishable from available data (the flag-confirmation
+print lives in the same excluded early window).
+
+**Video00-specific oracle noise:** steps 23/24/25 (frozen Selection
+lock / Video00 architecture / Human Gold 18-check manifest) failed
+exactly as expected for this non-Video00 sibling -- classified
+`VIDEO00_SPECIFIC_ORACLE_NOISE`, not used as D-237 evidence.
+
+**Safety:** the explicit zero-count Safety Audit fields (meaning-
+critical / editorially-required / conflicted / lost-critical-claim /
+contradiction / integrity suppression counts) are **NOT RETRIEVABLE**
+from available data for the same reason as the atom-specific trace --
+not asserted as zero, not asserted as nonzero.
+
+**Verdict: B -- LANGUAGE-SPINE COLLAPSE RESOLVED; general Freeze-
+clearance strongly evidenced (direct, non-inferential Ordering +
+rendered-MP4 evidence); FREEZE CLEARED BUT THE DOWNSTREAM PACING/AUDIO-
+JOIN DIAGNOSTIC SEAM WAS NOT REACHED, for an identified, now-isolated,
+NON-Freeze, NON-Language-Spine reason (the persistent Pacing V2
+serialization gap).** This verdict carries the same explicit, load-
+bearing caveat as D-235Y's own report: the SPECIFIC target atom's own
+per-atom trace (exact identity relationship, D-235Q/R/S/T results,
+`TARGET_LOST_ATOM_BLOCKER_CLEARED`) could NOT be confirmed from
+retrievable data -- reported as a genuine gap, not smoothed into a
+false confident claim at the atom level, per this task's own "Do NOT
+FORCE EXPECTED RESULT" instruction and CLAUDE.md's never-fabricate rule.
+The PRIMARY, hard-evidenced achievement of this task -- real audio-
+silence evidence consumed, real bounded LanguageUtterances/Attempts/
+PropositionCandidates produced on the actual target sibling -- IS fully
+confirmed and is not in question.
+
+**Canonical status:** `LIVE_AUDIO_SILENCE_LANGUAGE_SPINE_REAL_MEDIA_
+PROVEN` (Language-Spine collapse resolution: fully confirmed, direct
+evidence). `LOST_ATOM_FREEZE_AUTHORITY_REAL_MEDIA_PARTIAL` (general
+Freeze-clearance: strong indirect evidence; atom-specific trace: not
+retrievable).
+
+**FREEZE TRACK:** given the strength of the general Freeze-clearance
+evidence (unchanged from D-235Y's own basis) and the now-CONFIRMED,
+isolated, non-Freeze nature of the remaining Pacing V2 gap, the Freeze
+track's OWN status is unchanged from D-235Y's assessment -- it is not
+reopened by this run's findings, but the atom-specific confirmation gap
+means it is not declared fully, unconditionally CLOSED either pending
+that trace becoming retrievable by some future means (e.g. direct S3
+result-JSON access, or an artifact-retrieval path this sandbox does not
+currently have).
+
+**Exact next gate:** Pacing V2 / Audio Join real-media qualification --
+specifically, root-causing the persistent `diagnostics['pacing_v2']`
+serialization gap (now proven independent of Language-Spine and, by
+strong indirect evidence, independent of Freeze blocking too), starting
+with confirming whether `pacing_v2_diagnostics_enabled` actually reached
+this run (a flag-propagation check, not a RAW). Separately: the new
+`unique_information_uncovered_count: 11` finding deserves a bounded,
+offline look before or alongside that gate. Do NOT open another Freeze
+gate absent a genuinely new material blocker.
+
+**Engine patch required after this?** Not yet determined for the Pacing
+V2 gap -- root-cause first (flag-propagation check, offline). **Additional
+RAW required?** No -- none launched or recommended by this task.
+**Paid compute required after this?** No, not by this task.
+
+**Pacing track status:** blocked on the same unresolved serialization
+gap D-235Y first found, now proven independent of both Language-Spine
+and (by strong indirect evidence) Freeze. **Audio Join status:** same --
+`diagnostics['pacing_v2_handle_aware']` gap, unresolved. **Calibration
+Corpus status:** not started (unchanged; this task's own scope excluded
+it). **App-roadmap status:** unchanged, downstream of the above gates.
+
+**Confirmation:** exactly ONE RAW dispatched (run `34662805134`), no
+second RAW, no provider change, no post-result engine/workflow/threshold
+patch, no code changes of any kind. Docs-only decision entry, per this
+task's own explicit "docs-only decision entry allowed" exception.
+
+Then STOP.
