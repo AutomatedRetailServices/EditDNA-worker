@@ -156,6 +156,31 @@ def build_lost_atom_ownership_materiality_diagnostics(
             "redundancy_state": (
                 materiality.redundancy_status if materiality is not None else None
             ),
+            # -- D-239I: which evidence source actually reached each
+            # dimension's own gate -- pure re-projection of already-
+            # computed booleans on `materiality`/`ownership`, never a new
+            # computation. "Eligible" (not "used") for the critical-
+            # context/redundancy bridges: those two seams resolve at
+            # `final_story_coherence_validation.py`'s own orchestration
+            # layer, strictly before this row's own `materiality` object
+            # exists, so this module (which never sees that layer's own
+            # intermediate lookups) can only honestly report whether
+            # D-238 ownership was exact enough to make the bridge
+            # possible, not whether it actually fired for this row.
+            "editorial_requirement_evidence_source": (
+                "EXACT_IDENTITY" if materiality is not None and materiality.exact_identity_available
+                else "EXACT_OWNERSHIP" if materiality is not None and materiality.exact_ownership_available
+                else "NONE" if materiality is not None else None
+            ),
+            "critical_context_ownership_bridge_eligible": (
+                bool(ownership is not None and ownership.is_exact_singleton)
+            ),
+            "retry_process_ownership_bridge_eligible": (
+                bool(ownership is not None and ownership.is_exact_singleton)
+            ),
+            "redundancy_ownership_bridge_eligible": (
+                bool(ownership is not None and ownership.is_exact_singleton)
+            ),
             "final_materiality_status": (
                 materiality.final_materiality_status if materiality is not None else None
             ),

@@ -548,15 +548,24 @@ class TestSiblingModuleZeroDiff:
         content = _read(P_PATH)
         assert "complete_lost_semantic_atom_materiality" not in content
 
-    def test_53_slot_evidence_only_assigned_under_exact_identity_branch(self):
+    def test_53_slot_evidence_only_assigned_under_exact_identity_or_exact_ownership_branch(self):
         # Structural proof that editorial_slot_evidence is only ever set
-        # from D-235P's own AUTHORITATIVE match -- never a heuristic one.
+        # from D-235P's own AUTHORITATIVE match OR (D-239I Seam A) D-238's
+        # own exact singleton ownership -- never a heuristic one, never an
+        # unconditional default. The two `_exact_slot_for_proposition_set`
+        # calls live inside the `if exact_identity_available: ... elif
+        # exact_ownership_available: ...` chain, strictly BEFORE the
+        # `if exact_identity_available or exact_ownership_available:`
+        # identity_mapping_status line that follows it -- isolate exactly
+        # that span and confirm both calls (and no bare `else:` call) sit
+        # inside it.
         import inspect
         source = inspect.getsource(clsam.assess_complete_lost_semantic_atom_materiality)
-        idx = source.index("if exact_identity_available:")
-        # exact_slot_evidence is only mutated inside the branch that starts here.
-        branch = source[idx:source.index("if exact_identity_available:\n        identity_mapping_status")]
-        assert "exact_slot_evidence, ownership_ambiguous = _exact_slot_for_proposition_set" in branch
+        start = source.index("if exact_identity_available:")
+        end = source.index("if exact_identity_available or exact_ownership_available:")
+        branch = source[start:end]
+        assert branch.count("exact_slot_evidence, ownership_ambiguous = _exact_slot_for_proposition_set") == 2
+        assert "else:\n        exact_slot_evidence" not in branch
 
 
 # ---------------------------------------------------------------------------

@@ -118,6 +118,10 @@ from .editorial_moment_sequence_integration import (
     editorial_moment_understanding_diagnostics,
     editorial_moment_understanding_run_summary,
     live_language_spine_source_diagnostics_for_p1,
+    # D-239I Seam C: trivial passthrough projection of the SAME per-source
+    # EditorialMoment objects P1 already builds above -- see that
+    # function's own docstring.
+    p1_moment_role_and_audience_status_by_clip_id_for,
 )
 # D-199 (docs/CUTSELL_DECISIONS.md D-199): live Language-Spine construction
 # from already-computed ASR word timings -- DIAGNOSTICS ONLY, default OFF,
@@ -2636,7 +2640,17 @@ def build_flow_b_draft(
     # `{}` whenever the flag is off, same fail-open posture as every map
     # above -- zero extra work in that case, not just an unused result.
     lost_atom_ownership_by_clip_id: dict[str, object] = {}
+    # D-239I Seam C: trivial passthrough projection of the SAME per-source
+    # EditorialMoment objects `editorial_moment_understandings` already
+    # holds (built above, whenever the P1 flag is on) -- `{}` when P1 is
+    # off (that tuple is then `()`) or the materiality-authority flag is
+    # off, same fail-open posture as every map in this block.
+    p1_moment_role_by_clip_id: dict[str, str] = {}
+    p1_audience_delivery_status_by_clip_id: dict[str, str] = {}
     if lost_atom_materiality_freeze_authority_enabled():
+        p1_moment_role_by_clip_id, p1_audience_delivery_status_by_clip_id = (
+            p1_moment_role_and_audience_status_by_clip_id_for(editorial_moment_understandings)
+        )
         takes_by_source: dict[str, list] = {}
         for take in take_tuple:
             takes_by_source.setdefault(take.source_asset_id, []).append(take)
@@ -2729,6 +2743,13 @@ def build_flow_b_draft(
             # `lost_atom_ownership` parameter -- `{}` under the same
             # fail-open posture as every map above.
             "lost_atom_ownership_by_clip_id": lost_atom_ownership_by_clip_id,
+            # D-239I Seam C: the SAME per-clip P1 role/audience-delivery
+            # maps threaded to D-235L/D-235M's optional `recording_
+            # process_evidence`/`recording_process_status`/`audience_
+            # delivery_status` parameters, consumed ONLY for ownership-
+            # exact rows -- `{}` under the same fail-open posture.
+            "p1_moment_role_by_clip_id": p1_moment_role_by_clip_id,
+            "p1_audience_delivery_status_by_clip_id": p1_audience_delivery_status_by_clip_id,
             # D-235X diagnostics (tail-safe counts only, no transcript dump).
             "exact_identity_map_clip_count": len(take_tuple),
             "exact_identity_match_count": len(exact_match_by_clip_id),

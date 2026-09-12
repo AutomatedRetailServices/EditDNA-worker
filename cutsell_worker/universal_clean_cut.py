@@ -201,6 +201,14 @@ def process_universal_clean_cut_sources(
     _lost_atom_ownership_by_clip_id = (
         _lost_atom_exact_identity_context.get("lost_atom_ownership_by_clip_id") or {}
     )
+    # D-239I: the live P1 role/audience-delivery maps -- `{}` under the
+    # SAME fail-open posture as the extractions above.
+    _p1_moment_role_by_clip_id = (
+        _lost_atom_exact_identity_context.get("p1_moment_role_by_clip_id") or {}
+    )
+    _p1_audience_delivery_status_by_clip_id = (
+        _lost_atom_exact_identity_context.get("p1_audience_delivery_status_by_clip_id") or {}
+    )
 
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
@@ -266,6 +274,9 @@ def process_universal_clean_cut_sources(
                     identity_observability_by_clip_id=_identity_observability_by_clip_id,
                     # D-239: see this function's own extraction comment above.
                     lost_atom_ownership_by_clip_id=_lost_atom_ownership_by_clip_id,
+                    # D-239I: see this function's own extraction comment above.
+                    p1_moment_role_by_clip_id=_p1_moment_role_by_clip_id,
+                    p1_audience_delivery_status_by_clip_id=_p1_audience_delivery_status_by_clip_id,
                 ),
             )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
@@ -598,6 +609,9 @@ def process_universal_clean_cut_sources(
                 identity_observability_by_clip_id=_identity_observability_by_clip_id,
                 # D-239: SAME context as the legacy-resolving pass above.
                 lost_atom_ownership_by_clip_id=_lost_atom_ownership_by_clip_id,
+                # D-239I: SAME context as the legacy-resolving pass above.
+                p1_moment_role_by_clip_id=_p1_moment_role_by_clip_id,
+                p1_audience_delivery_status_by_clip_id=_p1_audience_delivery_status_by_clip_id,
             )
             signature_after_validation = semantic_selection_signature(
                 authoritative_draft, authority_identity=source_identity,

@@ -148,7 +148,27 @@ from .lost_semantic_atom_freeze_authority import (
 # language_proposition_relation itself, never constructs an
 # AttemptLanguageIdentityMatch, never touches P1/P2 architecture. See
 # `_complete_lost_semantic_atom_materiality_by_clip_id`'s own docstring.
-from .shared_attempt_word_identity import AttemptLanguageIdentityMatch
+from .shared_attempt_word_identity import (
+    AUTHORITATIVE_RELATIONSHIP_STATUSES,
+    AttemptLanguageIdentityMatch,
+)
+# D-239I Seam C: the SAME public MOMENT_ROLE_* vocabulary D-235M's own
+# `_PROCESS_SHAPED_ROLES` already mirrors verbatim -- reused here for the
+# SAME purpose (deriving D-235L's own `recording_process_evidence`
+# boolean from a caller-supplied exact P1 role), never a new role
+# invented, never importing a private cross-module name. This module
+# still never imports editorial_moment_sequence_integration.py/P1
+# construction itself -- only these bounded public role constants.
+from .editorial_moment_sequence import (
+    MOMENT_ROLE_ABANDONED_ATTEMPT,
+    MOMENT_ROLE_BREAKING_CHARACTER,
+    MOMENT_ROLE_CORRECTION,
+    MOMENT_ROLE_FALSE_START,
+    MOMENT_ROLE_POST_TAKE_RESET,
+    MOMENT_ROLE_PRE_TAKE_SETUP,
+    MOMENT_ROLE_RECORDING_PROCESS,
+    MOMENT_ROLE_RETRY,
+)
 # D-237G: bounded, additive, diagnostics-only re-projection -- see
 # exact_identity_observability.py's own module docstring. Never an
 # authority; correlated here only because this is where lost_semantic_
@@ -1209,11 +1229,48 @@ def _lost_critical_claims(
 # NON_MATERIAL_REAL_CONTENT branch (which requires an EXPLICIT `False`,
 # never inferred from absence) was structurally unreachable live.
 # ---------------------------------------------------------------------------
+def _representative_clip_id_by_attempt_id(
+    exact_match_by_clip_id: Mapping[str, AttemptLanguageIdentityMatch],
+) -> dict[str, str]:
+    """D-239I Seams B/D: reverse index of D-235P's own already-computed
+    `exact_match_by_clip_id` -- `attempt_id -> the ONE clip whose OWN
+    full-attempt identity IS that attempt` (`relationship_status` gated
+    by the SAME `AUTHORITATIVE_RELATIONSHIP_STATUSES` set D-235P already
+    enforces, never containment/heuristic/partial-overlap). Exact,
+    non-fuzzy, zero new identity rule -- reuses the identical authority
+    contract `exact_match_by_clip_id` was already built under.
+
+    A genuine 1-to-1 partition maps each attempt to at most one clip, but
+    this is defended against malformed input regardless: when more than
+    one clip's own exact match names the SAME attempt id, that id is
+    REMOVED entirely from the result -- an ambiguous reverse identity is
+    never silently resolved to one candidate."""
+    result: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for clip_id, match in exact_match_by_clip_id.items():
+        if match is None or match.relationship_status not in AUTHORITATIVE_RELATIONSHIP_STATUSES:
+            continue
+        for attempt_id in match.language_attempt_ids:
+            if attempt_id in result and result[attempt_id] != clip_id:
+                ambiguous.add(attempt_id)
+            else:
+                result[attempt_id] = clip_id
+    for attempt_id in ambiguous:
+        result.pop(attempt_id, None)
+    return result
+
+
 def _critical_claim_conflict_by_clip_id(
     lost_semantic_atoms: Sequence[Mapping],
     contradiction_findings: Sequence[Mapping],
     lost_critical_claims: Sequence[Mapping],
     clip_id_to_group: Mapping[str, tuple],
+    *,
+    # D-239I Seam B: both optional, both `None`/`{}` reproduces byte-
+    # identical pre-D-239I behavior. See this function's own "D-239I"
+    # paragraph below.
+    lost_atom_ownership_by_clip_id: Optional[Mapping[str, ExactLostAtomOwnership]] = None,
+    exact_match_by_clip_id: Optional[Mapping[str, AttemptLanguageIdentityMatch]] = None,
 ) -> dict[str, Optional[bool]]:
     """Tri-state per clip_id (never a default `False` from a merely-empty
     global list -- see module's own "Do not over-correlate" contract):
@@ -1233,6 +1290,21 @@ def _critical_claim_conflict_by_clip_id(
     None  -- this clip was never part of any evaluated family (a pre-
              group discard, or a family this pass never reached) --
              insufficient evidence, never guessed.
+
+    D-239I Seam B (docs/CUTSELL_DECISIONS.md D-239H's own Stage 3
+    forensic): a genuinely standalone-discarded lost atom can NEVER
+    appear in `clip_id_to_group` under its OWN clip_id (it was never
+    itself a contested family member), so the two checks above alone
+    permanently return `None` for it. When D-238 exact singleton
+    ownership names a containing LanguageAttempt that is ITSELF (via
+    `_representative_clip_id_by_attempt_id` above -- the SAME
+    AUTHORITATIVE identity D-235P already enforces, never a new rule) a
+    clip with its own already-evaluated conflict/family context, THAT
+    clip's own already-computed `True`/`False` result is reused for this
+    row -- never a new conflict detector, never `None -> False`, never
+    "absence of evidence = no conflict": when no representative clip
+    exists, or that clip's own context is itself unresolved (`None`),
+    this row's own result stays `None` too.
     """
     conflict_clip_ids: set[str] = set()
     for finding in contradiction_findings:
@@ -1249,6 +1321,20 @@ def _critical_claim_conflict_by_clip_id(
         if cid:
             conflict_clip_ids.add(str(cid))
 
+    lost_atom_ownership_by_clip_id = lost_atom_ownership_by_clip_id or {}
+    representative_clip_id_by_attempt_id = (
+        _representative_clip_id_by_attempt_id(exact_match_by_clip_id)
+        if exact_match_by_clip_id else {}
+    )
+
+    def _direct_result(clip_id: str) -> Optional[bool]:
+        if clip_id in conflict_clip_ids:
+            return True
+        # `clip_id_to_group` (built by `_clip_id_to_group_members`) already
+        # filters to genuine 2+-member contests only -- membership here IS
+        # the "this family was evaluated" proof, never re-derived.
+        return False if clip_id in clip_id_to_group else None
+
     result: dict[str, Optional[bool]] = {}
     for row in lost_semantic_atoms:
         if not isinstance(row, Mapping):
@@ -1256,14 +1342,42 @@ def _critical_claim_conflict_by_clip_id(
         clip_id = str(row.get("clip_id") or "")
         if not clip_id or clip_id in result:
             continue
-        if clip_id in conflict_clip_ids:
-            result[clip_id] = True
+        direct = _direct_result(clip_id)
+        if direct is not None:
+            result[clip_id] = direct
             continue
-        # `clip_id_to_group` (built by `_clip_id_to_group_members`) already
-        # filters to genuine 2+-member contests only -- membership here IS
-        # the "this family was evaluated" proof, never re-derived.
-        result[clip_id] = False if clip_id in clip_id_to_group else None
+        ownership = lost_atom_ownership_by_clip_id.get(clip_id)
+        representative_clip_id = (
+            representative_clip_id_by_attempt_id.get(ownership.containing_language_attempt_id)
+            if ownership is not None and ownership.is_exact_singleton
+            and ownership.containing_language_attempt_id is not None
+            else None
+        )
+        result[clip_id] = (
+            _direct_result(representative_clip_id) if representative_clip_id is not None else None
+        )
     return result
+
+
+_PROCESS_SHAPED_MOMENT_ROLES = frozenset({
+    MOMENT_ROLE_RECORDING_PROCESS, MOMENT_ROLE_FALSE_START, MOMENT_ROLE_ABANDONED_ATTEMPT,
+    MOMENT_ROLE_RETRY, MOMENT_ROLE_CORRECTION, MOMENT_ROLE_POST_TAKE_RESET,
+    MOMENT_ROLE_BREAKING_CHARACTER, MOMENT_ROLE_PRE_TAKE_SETUP,
+})
+
+
+def _recording_process_evidence_from_p1_role(role: Optional[str]) -> Optional[bool]:
+    """D-239I Seam C: derives D-235L's own `recording_process_evidence`
+    boolean from an exact, already-resolved P1 `moment_role` (never text,
+    never a new classifier) -- `True` for a process-shaped role, `False`
+    for any OTHER exact, non-`UNCERTAIN` role (the caller already omits
+    `UNCERTAIN`/`MIXED`-confidence moments from the map this reads, so a
+    non-`None` role here is always a confirmed, unambiguous classification
+    -- positively confirming "not process-shaped" is legitimate, never a
+    guess), `None` when no exact role is available at all."""
+    if role is None:
+        return None
+    return role in _PROCESS_SHAPED_MOMENT_ROLES
 
 
 def _complete_lost_semantic_atom_materiality_by_clip_id(
@@ -1282,6 +1396,23 @@ def _complete_lost_semantic_atom_materiality_by_clip_id(
     # off or no caller supplies it -- `exact_ownership_available` then
     # stays `False` exactly as before D-239, byte-identical.
     lost_atom_ownership_by_clip_id: Optional[Mapping[str, ExactLostAtomOwnership]] = None,
+    # D-239I Seam C: optional, pre-built clip_id -> exact P1 EditorialMoment
+    # role/audience-delivery-status maps (`pipeline.py`'s own
+    # `p1_moment_role_and_audience_status_by_clip_id_for`, built from the
+    # SAME `editorial_moment_understandings` P1 already computes -- never
+    # a re-derivation). `{}` everywhere the flag is off or no caller
+    # supplies them. Consulted ONLY for a row this pass's own D-238
+    # ownership already resolved to `EXACT_SINGLETON_OWNERSHIP` (see this
+    # function's own body below) -- never for any other row, matching this
+    # task's own "for owned lost atoms" scope.
+    p1_moment_role_by_clip_id: Optional[Mapping[str, str]] = None,
+    p1_audience_delivery_status_by_clip_id: Optional[Mapping[str, str]] = None,
+    # D-239I Seam D: optional, the CURRENT pass's own final kept/selected
+    # clip_id set (`{c.clip_id for c in draft.selected}` at each call
+    # site -- already in scope there, no new plumbing). `None`/empty
+    # reproduces byte-identical pre-D-239I behavior (`replacement_
+    # function_preserved` then never gets a value from this seam).
+    selected_clip_ids: Optional[frozenset] = None,
 ) -> dict[str, CompleteLostSemanticAtomMateriality]:
     """D-235W orchestration seam (Parts A + C combined): builds the one
     `materiality_by_clip_id` map `lost_semantic_atom_freeze_trigger_
@@ -1289,16 +1420,31 @@ def _complete_lost_semantic_atom_materiality_by_clip_id(
     D-235T's own row-only internal calls already use -- but now WITH the
     live `critical_claim_conflict` context Part A derives, WITH
     `exact_match`/proposition context Part C accepts from a caller that
-    has it, and (D-239) WITH the live `lost_atom_ownership` context a
-    caller that has it can also supply. Only ever called behind the SAME
-    default-OFF flag this whole seam already used (see the two live call
-    sites below) -- never computed when the flag is off, so the flag-off
-    path stays byte-identical with zero extra work, not just an unused
-    result."""
+    has it, (D-239) WITH the live `lost_atom_ownership` context a caller
+    that has it can also supply, and (D-239I) WITH exact P1 role/
+    audience-delivery evidence (Seam C) and an exact preserved-equivalent
+    redundancy proof (Seam D) for rows D-238 ownership already resolved
+    exactly. Only ever called behind the SAME default-OFF flag this whole
+    seam already used (see the two live call sites below) -- never
+    computed when the flag is off, so the flag-off path stays byte-
+    identical with zero extra work, not just an unused result."""
     exact_match_by_clip_id = exact_match_by_clip_id or {}
     lost_atom_ownership_by_clip_id = lost_atom_ownership_by_clip_id or {}
+    p1_moment_role_by_clip_id = p1_moment_role_by_clip_id or {}
+    p1_audience_delivery_status_by_clip_id = p1_audience_delivery_status_by_clip_id or {}
+    selected_clip_ids = selected_clip_ids or frozenset()
     critical_claim_conflict_by_clip_id = _critical_claim_conflict_by_clip_id(
         lost_semantic_atoms, contradiction_findings, lost_critical_claims, clip_id_to_group,
+        lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
+        exact_match_by_clip_id=exact_match_by_clip_id,
+    )
+    # D-239I Seam D: built ONCE, reused per row below -- the SAME reverse
+    # index Seam B already builds inside `_critical_claim_conflict_by_
+    # clip_id` above, recomputed here (cheap, pure) because this function
+    # does not itself receive that call's own internal map.
+    representative_clip_id_by_attempt_id = (
+        _representative_clip_id_by_attempt_id(exact_match_by_clip_id)
+        if exact_match_by_clip_id else {}
     )
     result: dict[str, CompleteLostSemanticAtomMateriality] = {}
     for row in lost_semantic_atoms:
@@ -1307,13 +1453,46 @@ def _complete_lost_semantic_atom_materiality_by_clip_id(
         clip_id = str(row.get("clip_id") or "")
         if not clip_id or clip_id in result:
             continue
+        ownership = lost_atom_ownership_by_clip_id.get(clip_id)
+        ownership_exact = bool(ownership is not None and ownership.is_exact_singleton)
+        # D-239I Seam C: exact P1 role/audience-delivery evidence, gated to
+        # rows D-238 ownership already resolved exactly -- see this task's
+        # own "for owned lost atoms" scope. A row's own clip_id is used
+        # for the lookup (P1 moments are built over the FULL per-source
+        # candidate pool, D-235M's own item-1 finding: "a discarded clip
+        # genuinely has its own EditorialMoment") -- never the containing
+        # attempt's id, which is a different identity space.
+        p1_role = p1_moment_role_by_clip_id.get(clip_id) if ownership_exact else None
+        p1_audience_status = (
+            p1_audience_delivery_status_by_clip_id.get(clip_id) if ownership_exact else None
+        )
+        # D-239I Seam D: exact preserved-equivalent proof -- True ONLY when
+        # the owned containing LanguageAttempt IS (via the SAME
+        # AUTHORITATIVE identity Seam B reuses) a clip genuinely present in
+        # THIS pass's own current selected/kept set. Never False (one-
+        # directional-affirmative, matching `replacement_function_
+        # preserved`'s own existing semantics) -- absence of proof is
+        # always None (UNKNOWN), never inferred as NOT_REDUNDANT.
+        representative_clip_id = (
+            representative_clip_id_by_attempt_id.get(ownership.containing_language_attempt_id)
+            if ownership_exact and ownership.containing_language_attempt_id is not None
+            else None
+        )
+        replacement_function_preserved = (
+            True if representative_clip_id is not None and representative_clip_id in selected_clip_ids
+            else None
+        )
         result[clip_id] = assess_complete_lost_semantic_atom_materiality(
             row,
             critical_claim_conflict=critical_claim_conflict_by_clip_id.get(clip_id),
+            recording_process_evidence=_recording_process_evidence_from_p1_role(p1_role),
             exact_match=exact_match_by_clip_id.get(clip_id),
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
-            lost_atom_ownership=lost_atom_ownership_by_clip_id.get(clip_id),
+            recording_process_status=p1_role,
+            audience_delivery_status=p1_audience_status,
+            replacement_function_preserved=replacement_function_preserved,
+            lost_atom_ownership=ownership,
         )
     return result
 
@@ -1505,6 +1684,11 @@ def apply_final_story_coherence_validation(
     # identically-named parameter docstring). `None` everywhere the flag
     # is off or no caller supplies it.
     lost_atom_ownership_by_clip_id: Mapping[str, ExactLostAtomOwnership] | None = None,
+    # D-239I: see `_complete_lost_semantic_atom_materiality_by_clip_id`'s
+    # own identically-named parameter docstrings (Seams C/D). `None`
+    # everywhere the flag is off or no caller supplies them.
+    p1_moment_role_by_clip_id: Mapping[str, str] | None = None,
+    p1_audience_delivery_status_by_clip_id: Mapping[str, str] | None = None,
 ):
     """Legacy resolving pass -- see the module docstring's authority
     boundary. For the post-authority validation-only pass use
@@ -1527,6 +1711,8 @@ def apply_final_story_coherence_validation(
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
             identity_observability_by_clip_id=identity_observability_by_clip_id,
             lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
+            p1_moment_role_by_clip_id=p1_moment_role_by_clip_id,
+            p1_audience_delivery_status_by_clip_id=p1_audience_delivery_status_by_clip_id,
         )
     draft = _fold_alternates_into_discarded(draft)
 
@@ -1637,6 +1823,9 @@ def apply_final_story_coherence_validation(
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
             lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
+            p1_moment_role_by_clip_id=p1_moment_role_by_clip_id,
+            p1_audience_delivery_status_by_clip_id=p1_audience_delivery_status_by_clip_id,
+            selected_clip_ids=frozenset(clip.clip_id for clip in draft.selected),
         )
         if _materiality_authority_enabled else None
     )
@@ -1779,6 +1968,10 @@ def _apply_post_authority_validation_only(
     # D-239: see `apply_final_story_coherence_validation`'s own
     # identically-named parameter docstring.
     lost_atom_ownership_by_clip_id: Mapping[str, ExactLostAtomOwnership] | None = None,
+    # D-239I: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstrings.
+    p1_moment_role_by_clip_id: Mapping[str, str] | None = None,
+    p1_audience_delivery_status_by_clip_id: Mapping[str, str] | None = None,
 ):
     """StoryValidator after the one semantic authority has ruled: validate
     and report on the resolver's applied selection, never edit it.
@@ -1889,6 +2082,9 @@ def _apply_post_authority_validation_only(
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
             lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
+            p1_moment_role_by_clip_id=p1_moment_role_by_clip_id,
+            p1_audience_delivery_status_by_clip_id=p1_audience_delivery_status_by_clip_id,
+            selected_clip_ids=frozenset(clip.clip_id for clip in working.selected),
         )
         if _materiality_authority_enabled else None
     )
@@ -2173,6 +2369,10 @@ def apply_post_authority_story_validation(
     # D-239: see `apply_final_story_coherence_validation`'s own
     # identically-named parameter docstring.
     lost_atom_ownership_by_clip_id: Mapping[str, ExactLostAtomOwnership] | None = None,
+    # D-239I: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstrings.
+    p1_moment_role_by_clip_id: Mapping[str, str] | None = None,
+    p1_audience_delivery_status_by_clip_id: Mapping[str, str] | None = None,
 ):
     """The ONE entry point for the AUTHORITATIVE second pass. Requires the
     typed `context`; a missing context (or a caller-reported
@@ -2223,4 +2423,6 @@ def apply_post_authority_story_validation(
         proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
         identity_observability_by_clip_id=identity_observability_by_clip_id,
         lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
+        p1_moment_role_by_clip_id=p1_moment_role_by_clip_id,
+        p1_audience_delivery_status_by_clip_id=p1_audience_delivery_status_by_clip_id,
     )

@@ -149,15 +149,12 @@ narrower and DISJOINT identity-sufficiency source: a real `exact_lost_
 atom_ownership.ExactLostAtomOwnership` for this row's own `clip_id`. Its
 own boolean, `exact_ownership_available` (new field on `Complete
 LostSemanticAtomMateriality`, computed as `lost_atom_ownership is not
-None and lost_atom_ownership.is_exact_singleton`), extends ONLY the
-step-6 identity-sufficiency gate's own `OR` condition (`exact_identity_
-available OR exact_ownership_available`) -- it participates in NOTHING
-else. In particular:
+None and lost_atom_ownership.is_exact_singleton`), extends the step-6
+identity-sufficiency gate's own `OR` condition (`exact_identity_available
+OR exact_ownership_available`) AND (D-239I Seam A, below) the slot-
+evidence lookup `identity_mapping_status` feeds `assess_editorial_
+requirement_evidence` -- it participates in NOTHING else. In particular:
 
-  - it NEVER feeds `editorial_slot_evidence` into `assess_editorial_
-    requirement_evidence` (unlike a genuine `exact_match`) -- ownership
-    is consulted ONLY at the one existing sufficiency gate, never as a
-    second route into D-235M's own slot-evidence path;
   - it NEVER changes step order. Meaning-critical (step 1), editorial-
     required (step 2), conflicted/unresolved (step 3), retry/process
     (step 4), and redundant (step 5) are all evaluated FIRST, using
@@ -175,13 +172,43 @@ else. In particular:
     still computed exactly as before, from `exact_match` alone, and
     `lost_atom_ownership` never substitutes for it anywhere else in this
     module (`exact_language_attempt_ids`/`exact_proposition_candidate_
-    ids`, the multi-proposition ambiguity check, and `identity_mapping_
-    status` all still read `exact_match`/`exact_identity_available`
-    only).
+    ids` and the multi-proposition ambiguity check still read `exact_
+    match`/`exact_identity_available` only).
 
 `lost_atom_ownership_status` (new field) reports the raw ownership
 status for diagnostics (`None` when no ownership object was supplied),
 independent of whether it was ever consulted by the gate.
+
+## D-239I Seam A: ownership unlocks the SAME existing slot-evidence lookup
+## (offline, additive, docs/CUTSELL_DECISIONS.md D-239I)
+
+D-239H's own forensic (docs/CUTSELL_DECISIONS.md D-239H) proved
+`proposition_slot_evidence_by_id` already contains the owned
+`PropositionCandidate`'s own slot value and already reaches this exact
+function -- the ONLY gap was that `_exact_slot_for_proposition_set` was
+called exclusively inside `if exact_identity_available:`, never for the
+ownership-only case. Seam A closes exactly that gap and NOTHING more:
+when `exact_identity_available` is `False` but `exact_ownership_
+available` is `True`, this function now ALSO calls `_exact_slot_for_
+proposition_set` -- the SAME unmodified function, doing the SAME lookup
+against the SAME `proposition_slot_evidence_by_id` map -- using D-238's
+own `lost_atom_ownership.proposition_candidate_ids` (by construction of
+`is_exact_singleton`, always exactly one id) in place of D-235P's
+`exact_proposition_ids`. `identity_mapping_status` is correspondingly
+upgraded to `IDENTITY_MAPPING_EXACT` whenever EITHER source is exact
+(describing the QUALITY of the identity mapping, never whether a slot
+value was actually found for it -- an owned proposition carrying no
+story-function slot still correctly reports `slot_evidence_status:
+NOT_FOUND` downstream in D-235M, never a fabricated one). Never a new
+slot interpretation (`_STORY_FUNCTION_SLOTS`/`_exact_slot_for_
+proposition_set` are byte-for-byte unmodified), never a guess (a
+singleton-owned set has exactly one id by D-238's own 9-condition gate,
+so the multi-id ambiguity branch inside `_exact_slot_for_proposition_
+set` is structurally unreachable through this path), never a change to
+step order or to any OTHER evidence dimension (meaning-critical,
+critical-claim-conflict, retry/process, and redundancy are all seams
+D-239I addresses separately, in `final_story_coherence_validation.py`'s
+own orchestration layer -- see D-239I's own decision-log entry).
 """
 from __future__ import annotations
 
@@ -347,10 +374,12 @@ def assess_complete_lost_semantic_atom_materiality(
 
     `lost_atom_ownership` (D-238): an optional, already-computed
     `exact_lost_atom_ownership.ExactLostAtomOwnership` for this row's own
-    `clip_id`. Consulted ONLY at the step-6 identity-sufficiency gate
-    (see module docstring's "D-238" section) -- never feeds slot
-    evidence, never changes step order, never substitutes for
-    `exact_match`/`exact_identity_available` anywhere else in this
+    `clip_id`. Consulted at the step-6 identity-sufficiency gate (see
+    module docstring's "D-238" section) AND, as of D-239I, at the SAME
+    slot-evidence lookup `exact_identity_available` already feeds when
+    `exact_identity_available` is `False` (see module docstring's "D-239I
+    Seam A" section) -- never changes step order, never substitutes for
+    `exact_match`/`exact_identity_available` anywhere ELSE in this
     function. `None` (the default, every pre-D-238 caller) reproduces
     byte-identical pre-D-238 behavior.
     """
@@ -374,6 +403,14 @@ def assess_complete_lost_semantic_atom_materiality(
         if exact_identity_available else ()
     )
 
+    # D-238's own bare boolean, needed here (ahead of its own "D-238"
+    # section below) so Seam A can consult it for the SAME slot-evidence
+    # lookup exact_identity_available already uses -- structurally blind
+    # to the containing LanguageAttempt's own size, exactly as elsewhere.
+    exact_ownership_available = bool(
+        lost_atom_ownership is not None and lost_atom_ownership.is_exact_singleton
+    )
+
     ownership_ambiguous = False
     exact_slot_evidence: Optional[str] = None
     if exact_identity_available:
@@ -382,8 +419,37 @@ def assess_complete_lost_semantic_atom_materiality(
         )
         if ownership_ambiguous:
             reason_codes.append("multi_proposition_exact_set_unresolved_atom_ownership")
+    elif exact_ownership_available:
+        # D-239I Seam A: D-238's own exact singleton ownership names EXACTLY
+        # one proposition id (by construction of `is_exact_singleton` --
+        # see exact_lost_atom_ownership.py's own condition 6). Feed that
+        # SAME id, through the SAME existing, unmodified `_exact_slot_for_
+        # proposition_set` lookup, into the SAME already-populated, already-
+        # threaded `proposition_slot_evidence_by_id` map D-235X already
+        # builds -- never a new slot interpretation, never a guess: this is
+        # the identical function call `exact_identity_available` already
+        # makes, reached through D-238's own narrower, disjoint identity
+        # source instead of D-235P's full-attempt one. `ownership_ambiguous`
+        # can never be set True by this branch (a singleton-owned set has
+        # exactly one id, so `_exact_slot_for_proposition_set`'s own multi-
+        # id ambiguity branch is structurally unreachable here) -- included
+        # only for defensive symmetry with the `exact_identity_available`
+        # branch above, never expected to fire.
+        exact_slot_evidence, ownership_ambiguous = _exact_slot_for_proposition_set(
+            lost_atom_ownership.proposition_candidate_ids, proposition_slot_evidence_by_id,
+        )
+        if ownership_ambiguous:
+            reason_codes.append("multi_proposition_exact_set_unresolved_atom_ownership")
 
-    if exact_identity_available:
+    if exact_identity_available or exact_ownership_available:
+        # D-239I: ownership's own identity mapping is exact (a narrower,
+        # disjoint, but equally fail-closed structural proof -- see
+        # exact_lost_atom_ownership.py's own 9-condition gate), so it earns
+        # the SAME `IDENTITY_MAPPING_EXACT` label D-235P's full-attempt
+        # match already does. This describes the QUALITY of the identity
+        # mapping, never whether a slot value was actually found for it --
+        # `exact_slot_evidence` above independently stays `None` when the
+        # owned proposition simply carries no story-function slot.
         identity_mapping_status = IDENTITY_MAPPING_EXACT
     elif heuristic_identity_available:
         identity_mapping_status = IDENTITY_MAPPING_HEURISTIC_OVERLAP
@@ -408,16 +474,13 @@ def assess_complete_lost_semantic_atom_materiality(
         or replacement_function_preserved is True
     )
 
-    # D-238: the bounded lost-atom ownership seam's own verdict -- a
-    # bare boolean off `is_exact_singleton`, structurally blind to the
-    # containing LanguageAttempt's own size (see module docstring's
-    # "D-238" section). Never feeds `editorial_slot_evidence`, never
-    # touches `exact_identity_available`/`exact_language_attempt_ids`/
-    # `exact_proposition_candidate_ids` above -- consulted ONLY at the
-    # identity-sufficiency gate directly below.
-    exact_ownership_available = bool(
-        lost_atom_ownership is not None and lost_atom_ownership.is_exact_singleton
-    )
+    # D-238/D-239I: `exact_ownership_available` was already computed above
+    # (needed there for Seam A's own slot-evidence lookup) -- never touches
+    # `exact_identity_available`/`exact_language_attempt_ids`/`exact_
+    # proposition_candidate_ids` above regardless. As of D-239I Seam A it
+    # DOES feed `editorial_slot_evidence` (see that section above), but
+    # ONLY through the SAME existing lookup `exact_identity_available`
+    # already used -- never a new interpretation.
 
     # Step 6's own identity-sufficiency gate -- see module docstring.
     # D-238 extends this gate's own OR-condition with a SECOND, disjoint

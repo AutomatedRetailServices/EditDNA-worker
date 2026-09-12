@@ -83,12 +83,14 @@ from .contracts import CandidateTake
 from .editorial_moment_sequence import (
     EditorialMoment,
     EditorialSequenceHypothesis,
+    MOMENT_ROLE_UNCERTAIN,
     classify_editorial_moment,
     classify_editorial_sequence,
     editorial_moment_diagnostics,
     editorial_moment_sequence_run_summary,
     editorial_sequence_diagnostics,
 )
+from .language_utterance_attempt import CONFIDENCE_SUPPORTED
 from .language_proposition_relation import PropositionCandidate, RelationEvidence
 from .language_spine_live_integration import (
     LANGUAGE_EVIDENCE_CANONICAL,
@@ -1080,6 +1082,40 @@ def build_editorial_moment_understanding_for_sources(
             **kwargs,
         ))
     return tuple(out)
+
+
+def p1_moment_role_and_audience_status_by_clip_id_for(
+    editorial_moment_understandings: Iterable[EditorialMomentUnderstanding],
+) -> Tuple[dict[str, str], dict[str, str]]:
+    """D-239I Seam C: trivial passthrough projection of each already-built
+    ``EditorialMoment``'s own ``moment_role``/``audience_delivery_status``
+    fields, keyed by ``source_span_id`` (== ``take.clip_id`` verbatim, per
+    ``build_editorial_moments_for_source``'s own "reuse the REAL existing
+    canonical clip identity" comment) -- never a re-derivation, never a
+    new role/delivery classifier. Mirrors ``proposition_slot_evidence_by_
+    id_for``'s own "trivial passthrough projection" pattern exactly.
+
+    A moment is included ONLY when its own ``confidence`` is
+    ``CONFIDENCE_SUPPORTED`` (never ``CONFIDENCE_MIXED`` -- a genuine
+    conflict between evidence sources) AND its own ``moment_role`` is not
+    ``MOMENT_ROLE_UNCERTAIN`` -- an ambiguous/conflicted moment is simply
+    OMITTED from both maps, so a caller's plain ``.get(clip_id)`` lookup
+    naturally yields ``None`` (UNKNOWN) for it, never a guessed role.
+    ``source_span_id is None`` (no matching ``UnderstandingSpan`` for this
+    take) is likewise omitted -- never falls back to any other id."""
+    role_by_clip_id: dict[str, str] = {}
+    audience_status_by_clip_id: dict[str, str] = {}
+    for understanding in editorial_moment_understandings:
+        for moment in understanding.moments:
+            if moment.source_span_id is None:
+                continue
+            if moment.confidence != CONFIDENCE_SUPPORTED:
+                continue
+            if moment.moment_role == MOMENT_ROLE_UNCERTAIN:
+                continue
+            role_by_clip_id[moment.source_span_id] = moment.moment_role
+            audience_status_by_clip_id[moment.source_span_id] = moment.audience_delivery_status
+    return role_by_clip_id, audience_status_by_clip_id
 
 
 # ---------------------------------------------------------------------------

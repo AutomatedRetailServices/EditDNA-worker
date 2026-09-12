@@ -171,6 +171,7 @@ class TestDesignOnlyNoImplementation:
             "lost_atom_proposition_identity_forensic.py",
             "lost_atom_reviewer_finding_provenance.py",
             "lost_atom_repair_suppression.py",
+            "lost_atom_ownership_materiality_diagnostics.py",
             "shared_attempt_word_identity.py",
         }
         assert set(new_files) == expected_after_d235o_and_authorized_successors
