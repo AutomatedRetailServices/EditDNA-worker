@@ -57661,3 +57661,178 @@ Spine, Freeze, materiality, repair, P1/P2, Pacing/Audio-Join, or threshold
 logic changed. Zero RAW, zero Modal, zero RunPod, zero provider calls made.
 
 Then STOP. Do NOT launch D-237J. Wait for Product Owner coordination.
+
+## D-237J — ONE FINAL REAL-MEDIA EXACT-IDENTITY TRACE (RAW dispatched, D-237I mechanism proven to execute; artifact CONTENT still unreadable via available tooling)
+
+**Scope:** run the same sibling RAW exactly once and retrieve `artifact/
+exact-identity-observability.json` (D-237I) from the validator-reports
+artifact as the PRIMARY source of truth for the exact-identity audit,
+never depending on the large "Print full canonical diagnostics" log for
+the primary decision. Banner: exactly ONE Modal RAW maximum, no second
+RAW, no RunPod, no provider change, no post-result engine patch, no
+identity-authority/`AUTHORITATIVE_RELATIONSHIP_STATUSES`/containment-
+promotion/Language-Spine/Freeze/materiality/repair/P1/P2/Pacing/Audio-
+Join/threshold change.
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `ea7ee03`
+(matching D-237I exactly), clean tree -- confirmed.
+
+**RAW:** dispatched `cutsell-video00-modal-raw.yml` on
+`feature/runpod-pod-on-demand`, exactly ONE dispatch, source_key
+`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`
+(no substitution), with `lost_atom_materiality_freeze_authority_enabled=1`,
+`editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`, plus the existing P2/
+Ordering/Pacing-V2/Audio-Join diagnostic flags. Run id `34671571718`
+(run_number 104), job id `103493775774`, head_sha confirmed matching
+`ea7ee03`. **S3 preflight PASSED authoritatively**: step 8 "D-228 sibling
+RAW S3 existence preflight" (the workflow's own dedicated HEAD-object
+check using the real GitHub Actions S3 credentials) completed with
+`conclusion: success`, before any paid compute ran -- a sandbox-side
+`head_object` attempt against the fallback default bucket name also
+returned an inconclusive 403 (Forbidden without list permission, not
+distinguishable from not-found), so the workflow's own authoritative
+in-run preflight is the evidence used here, per the same posture already
+established in D-237H/D-237I.
+
+Completed 03:53:32-03:56:08 UTC (~2.5 min), overall `conclusion=failure`
+-- but the PAID MODAL BENCHMARK STEP ITSELF (step 13) SUCCEEDED
+(03:53:53-03:55:54Z) and produced a rendered MP4 (`cutsell-video00-modal-
+human-review`, 68,745,420 bytes). The failure shape is the SAME two
+already-classified, unrelated patterns seen on every prior sibling RAW:
+steps 24/25/26 (frozen-Selection-lock / Video00-architecture / Human-Gold-
+manifest validators) failed as VIDEO00_SPECIFIC_ORACLE_NOISE; steps
+46/47/48 (D-218R/D-221/D-225 Pacing-V2 family) failed again on the SAME
+persistent, still-unroot-caused missing-serialization gap tracked since
+D-235Y. **Critically, step 23 "D-237I Exact Identity Observability ->
+sibling-safe extraction" completed with `conclusion: success`** -- D-237I's
+new extraction step ran cleanly on this real-media run without crashing,
+alongside its siblings step 21 (D-235G) and step 22 (D-235J), also both
+successful. All other steps succeeded, including step 42 (D-200), step 43
+(D-200.4), step 44 (D-204 P2), step 45 (D-209 Ordering).
+
+**What WAS retrieved and confirmed (real data, not inferred):** the D-200
+block's real stdout output (captured inside the retrievable log-tail
+window this run -- a materially different, richer window than D-237H's,
+spanning 03:56:03.76-03:56:05.44Z and this time landing on step 42's own
+output) reconfirms the same real-media Language-Spine baseline yet again
+on a FRESH run: `language_word_count=252`, `language_attempt_count=3`,
+`proposition_candidate_count=3`, `audio_silence_interval_count=4`,
+`pause_boundary_count=2`. The Language-Spine collapse remains CLOSED.
+**Note:** this run's `source_asset_id` (`src_af0d7569899dd02ef91b`)
+differs from D-237H's (`src_c18babee4a999e7a0b0f`) -- confirming the
+task's own explicit warning that identifiers are re-minted run to run and
+must never be assumed stable; this affects `source_asset_id` in addition
+to the already-known `clip_id` volatility.
+
+**What could NOT be retrieved, and exactly why (three genuinely distinct
+retrieval techniques attempted this gate, all confirmed exhausted):**
+1. `get_job_logs` (`return_content=true`): the same hard ~418,695-
+   character/5,000-line ceiling (ignores `tail_lines`, no offset/
+   pagination) captured a window that, this run, happened to include
+   step 42's (D-200) own real output -- but NOT step 19's ("Print full
+   canonical diagnostics", 03:55:58Z) or step 23's own printed JSON
+   (D-237I, 03:56:01-02Z), both of which ran before the window's start
+   (03:56:03.76Z).
+2. `GET /repos/.../actions/artifacts/10290548250/zip` (the
+   `cutsell-video00-modal-validator-reports` artifact, 31,350 bytes):
+   direct authenticated download attempted; GitHub 302-redirected to
+   `productionresultssa6.blob.core.windows.net`; the sandbox egress
+   proxy rejected the CONNECT with a confirmed policy-denial 403
+   (`recentRelayFailures` on the proxy's own status endpoint).
+3. `GET /repos/.../actions/jobs/103493775774/logs` (the direct REST
+   job-logs endpoint, a genuinely different technique from #1's MCP
+   tool): ALSO 302-redirected to the SAME blocked Azure Blob Storage
+   host class (`productionresultssa6.blob.core.windows.net` -- the
+   identical host as #2, since both point at the same run's storage
+   container), confirmed rejected with the same policy-denial 403.
+
+All three of these blob-storage-backed retrieval paths are consistently
+blocked by this sandbox's own network egress policy, not by anything
+D-237I did or did not do. **This is a materially different, and more
+precise, finding than D-237H's**: D-237H could not tell whether the
+engine even computed the data (it did, D-237G proved that offline, and
+D-237H's own log fragments hinted at it existing without proof). D-237I
+then built a dedicated, small extraction step and file specifically to
+route around the retrieval problem. **D-237J now proves the extraction
+mechanism itself executes successfully on real media** (step 23:
+`success`) -- but the actual bytes of `exact-identity-observability.json`
+remain genuinely unreadable from this specific sandbox environment,
+because every download path for a GitHub Actions artifact or job log
+ultimately redirects through Azure Blob Storage, and that storage class
+is blocked by this session's own egress policy regardless of which
+GitHub REST endpoint or MCP tool is used to reach it. The step's job-step
+`success` conclusion only proves the extractor script executed without
+raising an exception (by design it always exits 0 and writes SOME JSON,
+whether `source_status` ends up `PRESENT`, `MISSING`, or `MALFORMED`) --
+it does NOT by itself prove which of those three the content contains,
+and the "Upload validator reports" step's own `path:` list appearing in
+the log is the step's CONFIGURED path list (echoed as part of the
+`upload-artifact@v4` action's own `with:` block), not confirmation the
+file was actually found and included (`if-no-files-found: warn` would
+silently skip a genuinely absent file without failing the step). None of
+the target-atom-specific fields this gate requires (provenance id,
+clip_id, source span, word indices, the 3-attempt matrix, relationship
+matrix, exact-match map, D-235Q/R/S/T, freeze_blocked/trigger_categories)
+could therefore be honestly reported this gate.
+
+**Primary exact-identity audit / relationship matrix / exact-match map /
+proposition ownership shape:** UNDETERMINED -- content genuinely
+unretrievable via any tooling available in this sandbox for this run.
+
+**`REAL_SINGLETON_CONTAINMENT_OWNERSHIP_PROVEN`:** **false** -- none of
+the 8 required evidence points could be checked against actual retrieved
+data this gate; defaults false per the contract's own "all required or
+false" framing.
+
+**Safety/ambiguity checklist:** UNDETERMINED for every item (cross-source
+conflict, multiple-containing-attempt conflict, partial-overlap conflict,
+missing-word provenance, multiple proposition owners, retry/correction
+ambiguity, editorially-required, meaning-critical, critical-claim
+conflict) -- never inferred "safe" from containment, per the directive's
+own instruction, and never inferred "unsafe" either without evidence.
+
+**D-235Q/R/S/T:** UNDETERMINED (observe-only requirement; not retrievable
+this gate).
+
+**Freeze:** UNDETERMINED. The persistent Pacing-V2 failure text (steps
+46-48) offers an undifferentiated three-way hypothesis (diagnostics flag
+unset / Freeze blocked before the Pacing seam / a real regression) that,
+per D-235Y/D-237/D-237H precedent, is already tracked as an independent,
+still-unroot-caused serialization gap and is NOT used here as evidence
+for or against `freeze_blocked` on the target atom.
+
+**Pacing:** same persistent downstream-blocked failure signature observed
+again (steps 46/47/48); not attributable to this specific target atom.
+Observe-only, no tuning performed.
+
+**Verdict: E -- DEDICATED ARTIFACT STILL MISSING/MALFORMED** (more
+precisely: the dedicated artifact's CONTENT is unreadable from this
+session's own retrieval tooling for this run, across three independently
+attempted techniques, all confirmed blocked by the same sandbox egress
+policy against Azure Blob Storage; D-237I's extraction MECHANISM is
+proven to execute successfully on real media -- job step 23 succeeded --
+and is not itself contradicted or shown deficient by anything found this
+gate). Per the task's own verdict-menu instruction for E (mapped from
+B/C/D/E's shared instruction): **STOP. Do not weaken identity authority.**
+No identity-contract extension, no D-238 design work, and no second RAW
+follow from this gate.
+
+**Canonical status:** `D237J_ARTIFACT_MECHANISM_PROVEN_CONTENT_STILL_
+UNRETRIEVABLE_VIA_AVAILABLE_TOOLING`. Language-Spine baseline (3/3/3,
+closed per D-236) independently reconfirmed a third time on a fresh run
+of the same real sibling; `source_asset_id` re-minting across runs
+independently confirmed (a new, generalizable finding beyond the
+already-known `clip_id` volatility).
+
+**Engine patch required after this?** No. **Paid compute required?** No,
+not by this task (verdict E authorizes no further RAW; any future
+resolution of the retrieval gap is a sandbox/tooling matter, not an
+engine or workflow one). **RAW required?** No further RAW under any
+circumstance from this gate.
+
+**Confirmation:** NO code, workflow, threshold, or authority change made.
+Zero second RAW, zero RunPod, zero provider change. This entry is a
+docs-only decision-log addition, the only change permitted post-result.
+
+Then STOP.
