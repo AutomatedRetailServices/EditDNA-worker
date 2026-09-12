@@ -59367,3 +59367,215 @@ available for Product Owner Watch+Listen review pending a successful
 future retrieval of the target diagnostic content.
 
 Then STOP. Do NOT launch RAW.
+
+## D-239H — EXACT-OWNERSHIP MATERIALITY EVIDENCE COMPLETENESS FORENSIC, OFFLINE ONLY, POST D-239G (Verdict D: MULTIPLE EXISTING EVIDENCE SEAMS ARE MISSING — no fix implemented, forensic only)
+
+**Trigger:** the user separately recovered a corrected, complete real-media
+result for D-239G's own run (`34683585097`) from the validator artifact
+directly via the Actions UI (this sandbox's own retrieval remained
+blocked, per D-239G's Verdict F): the target blocking atom (`clip_id
+clip_6fb9e51df885391ac25d`, excerpt "oh too many people ready set these
+are the") now shows `ownership_status = EXACT_SINGLETON_OWNERSHIP`
+(`containing_language_attempt_id = latt_97f99a710a88e74edc26`,
+`proposition_candidate_ids = [prop_124bd1b931ba3cb81abb]`) — D-238's own
+ownership seam **is real-media proven** on this run, and D-235Q/R/S/T do
+propagate its result end to end (`exact_ownership_available=true` reaches
+D-235R, D-235S's exact-link status is `EXACT_MATCH`, D-235T receives
+precomputed materiality). But the actual materiality classification D-235Q
+independently reaches is `INSUFFICIENT_EVIDENCE` / `ABSTAIN`
+(`editorial_requirement_state=INSUFFICIENT_EVIDENCE`,
+`meaning_critical_state=INSUFFICIENT_EVIDENCE`,
+`critical_claim_conflict_state=null`, `retry_process_state=UNKNOWN`,
+`redundancy_state=UNKNOWN`), so D-235R correctly preserves the block
+(`ABSTAIN_PRESERVE_BLOCK`) and Freeze remains blocked
+(`repair_loop_status=NEEDS_HUMAN_REVIEW`,
+`first_missing_link=FREEZE_BLOCKED_BEFORE_PACING`). D-239H's sole purpose
+was to trace, per field, WHY — with the propagation chain now proven
+sound — the underlying evidence itself never resolves the row past
+`INSUFFICIENT_EVIDENCE`, using ONLY existing, already-read code (no fix).
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `81bfcd4`, clean
+tree — confirmed exactly as expected.
+
+## Stage-by-stage trace
+
+**Stage 1 — Editorial requirement.** `assess_editorial_requirement_
+evidence`'s own branch 0 (`lost_atom_editorial_requirement_evidence.py`)
+fires because `identity_mapping_status == IDENTITY_MAPPING_NONE` and
+every other signal (`recording_process_status`, `audience_delivery_
+status`, `idea_coverage_status`, `editorial_slot_evidence`,
+`replacement_function_preserved`, `downstream_dependency_present`) is
+`None` for this row — the honest "caller supplied nothing" default. Traced
+the actual proposition-slot evidence chain: `pipeline.py` already builds
+`proposition_slot_evidence_by_id` (source-wide, from `evidence.
+proposition_candidates` via `proposition_slot_evidence_by_id_for`) and
+threads it, byte-identically, through `universal_clean_cut.py` into
+`complete_lost_semantic_atom_materiality.py`'s own
+`assess_complete_lost_semantic_atom_materiality` call — this map, at the
+moment it reaches that function, **already contains** whatever slot value
+exists for `prop_124bd1b931ba3cb81abb` (the exact proposition D-238's
+ownership now identifies). But `complete_lost_semantic_atom_materiality.
+py`'s own `_exact_slot_for_proposition_set(...)` — the ONLY code path that
+ever reads `proposition_slot_evidence_by_id` and turns it into
+`editorial_slot_evidence` — is called exclusively inside `if
+exact_identity_available:` (D-235P's own full-attempt AUTHORITATIVE
+relationship), by explicit, documented design (module docstring's own
+D-238 section: "it NEVER feeds `editorial_slot_evidence`... ownership is
+consulted ONLY at the one existing sufficiency gate"). Since this row's
+real relationship (`EXACT_LANGUAGE_CONTAINS_RECONSTRUCTED`) is correctly
+non-authoritative for full-attempt identity, `exact_identity_available`
+is `False`, so the already-threaded, already-populated slot-evidence map
+is never consulted for this row at all. **Exact cause: the evidence
+already exists and is already threaded all the way to the decision
+function's own parameter list — the function's own internal consumption
+gate simply never extends to the ownership-only case.**
+
+**Stage 2 — Meaning criticality.** `meaning_critical_state` (=
+`CompleteLostSemanticAtomMateriality.meaning_materiality_status`, a
+verbatim copy of D-235L's own `materiality_status`) reaches
+`INSUFFICIENT_EVIDENCE` because `assess_lost_semantic_atom_materiality`
+falls through every one of its own branches to its final, honest default
+(no `CRITICAL`/`UNCERTAIN` atom classification present on the row, no
+`critical_claim_conflict=True`). This dimension has NO separate ownership-
+related seam of its own — `atom_classifications` (D-031) is read directly
+off the row regardless of any caller-supplied identity, and the only other
+input, `critical_claim_conflict`, is the exact same evidence gap Stage 3
+below identifies. **No new classifier is implicated; this stage's own
+addressable seam is Stage 3's.**
+
+**Stage 3 — Critical-claim conflict.** Traced `_critical_claim_conflict_
+by_clip_id` (`final_story_coherence_validation.py`, D-235W Part A) in
+full: it resolves `True` only when the row's own bare `clip_id` is named
+by a real `contradiction_findings`/`lost_critical_claims` entry, and
+`False` only when that SAME bare `clip_id` is a member of `clip_id_to
+_group` (a real, >=2-member evaluated retry family) — by the function's
+own docstring, `None` is returned for "a pre-group discard, or a family
+this pass never reached." A genuinely-lost, standalone discarded fragment
+structurally can never appear in `clip_id_to_group` under its OWN
+clip_id (it was never itself a contested family member), so its conflict
+state is permanently stuck at `None` under the CURRENT lookup shape —
+never a case of "no explicit false can safely be established" in the
+abstract, but of the lookup being scoped to the row's own bare clip_id
+and never extended to the OWNING attempt/proposition's own evaluated
+context (`lost_atom_ownership.containing_language_attempt_id`/
+`proposition_candidate_ids`, D-238) — which, if that owning attempt/
+proposition itself belongs to an evaluated family or was itself scanned
+by contradiction detection under ITS OWN representative clip_id, would
+supply the missing positive evidence. **Exact cause: the atom is dropped
+and the CURRENT clip-keyed lookup structurally misses it — a real,
+existing evaluated-context signal likely exists for the OWNING context
+but is never joined via ownership.**
+
+**Stage 4 — Retry/process.** Traced the full P1 chain: `pipeline.py`
+already calls `build_editorial_moment_understanding_for_sources`
+(gated by `editorial_moment_sequence_diagnostics_enabled`, ON in the
+D-239G RAW), producing `EditorialMomentUnderstanding` objects whose own
+`EditorialMoment.source_span_id`/`attempt_id` equal `take.clip_id`
+VERBATIM (D-235M's own docstring item 1: "EXACT... reuse the REAL
+existing canonical clip identity"). But `editorial_moment_understandings`
+is passed ONLY to the P2 (`build_whole_video_editorial_reasoning`) and
+Ordering (`build_ordering_live_diagnostics`) diagnostic side-channels —
+both explicitly documented "Diagnostics only: no authority, never read by
+Family/BestTake/D-191/Boundary/Pacing/Renderer." Grep-confirmed zero
+occurrences of `recording_process_evidence`/`recording_process_status`/
+`audience_delivery_status` anywhere in `final_story_coherence_
+validation.py`, `pipeline.py`, or `universal_clean_cut.py` — this P1
+role data has NEVER been converted into a `clip_id -> role` lookup map
+nor threaded to D-235L's own `recording_process_evidence` parameter or
+D-235M's own `recording_process_status`/`audience_delivery_status`
+parameters, for ANY row, at any point since D-235L/D-235M were built.
+**This gap is entirely independent of D-238 ownership** — it would exist
+identically for a row with no ownership evidence at all. Given the
+source is described as blooper/retake-style, this is the single
+highest-leverage candidate: if this SPECIFIC clip's own P1 role resolves
+to a process-shaped moment (`FALSE_START`/`RECORDING_PROCESS`/etc — the
+excerpt's own leading "oh" is at least suggestive, though not
+determinative without reading the actual moment classification), D-235L's
+branch 3 would fire directly (`RETRY_OR_RECORDING_RESIDUE` ->
+`DO_NOT_BLOCK`), independent of any redundancy/criticality question.
+
+**Stage 5 — Redundancy.** The row's own `content_loss_suppressed_by`/
+`preserving_realization_id` fields ARE already read directly by both
+D-235L and D-235M (row-native, no threading needed, unaffected by
+ownership) — confirmed empty for this row (else `redundancy_state` would
+read `FOUND`, not `UNKNOWN`). Beyond that, no EXISTING signal in the live
+pipeline currently answers "is the SAME canonical information already
+preserved by the kept/winning delivery" for a row scoped through
+ownership's own `containing_language_attempt_id`/`proposition_candidate_
+ids`. Such a check is buildable entirely from already-computed objects
+(the pipeline's own final `selected` realization-id set, cross-referenced
+against the owning attempt/proposition ids D-238 already resolves) — a
+pure membership join, **not new semantic inference** — but that join does
+not exist today. **Exact cause: the raw ingredients exist, but the join
+itself has never been built — genuinely `NOT_AVAILABLE` as a signal
+today, not merely unthreaded, though buildable without new intelligence.**
+
+**Stage 6 — Precedence.** Confirmed unchanged and correct: `complete_
+lost_semantic_atom_materiality.py`'s own ordered if/elif chain (meaning-
+critical -> editorially-required -> conflicted/unresolved -> retry/
+process -> redundant -> non-material -> abstain, lines 435-465) is
+exactly the required order; `None` is never reinterpreted as `False`
+anywhere in this trace (`critical_claim_conflict is False` / `is True`
+are both used as exact identity checks throughout, never truthiness). No
+change proposed or needed.
+
+**Stage 7 — Real target evidence inventory** (`prop_124bd1b931ba3cb81abb`
+/ `latt_97f99a710a88e74edc26`):
+
+| Dimension | Classification | Note |
+|---|---|---|
+| Editorial requirement (slot evidence) | **AVAILABLE_AND_THREADED to the function, NOT CONSUMED for ownership-only rows** | `proposition_slot_evidence_by_id` already contains this proposition's value and already reaches `assess_complete_lost_semantic_atom_materiality`; `_exact_slot_for_proposition_set` is gated to `exact_identity_available` only |
+| Meaning criticality (atom_classifications) | UNKNOWN / NOT_APPLICABLE pending row data | reachable path (D-031) is row-native and unrelated to ownership; cannot confirm presence/absence from the recovered fields alone |
+| Critical-claim conflict | **AVAILABLE_NOT_THREADED** | owning attempt/proposition's own evaluated-family/contradiction-scan status is plausibly available under its OWN clip_id but never joined via `lost_atom_ownership` |
+| Retry/process (P1 role) | **AVAILABLE_NOT_THREADED** | `editorial_moment_understandings` computed live, EXACT clip_id keying, but restricted to the P2/Ordering diagnostic side-channels only — never reaches D-235L/D-235M at all, for any row |
+| Redundancy (preserved-equivalent via kept delivery) | **NOT_AVAILABLE (buildable, no new inference)** | requires a new id-membership join between ownership's attempt/proposition ids and the pipeline's own final `selected` realization set; does not exist today |
+
+**Stage 8 — Minimum next-fix candidates (NOT implemented):**
+1. (Editorial requirement) Extend `complete_lost_semantic_atom_
+   materiality.py`'s own slot-evidence gate to also fire `_exact_slot_
+   for_proposition_set` off `lost_atom_ownership.proposition_candidate_
+   ids` when `exact_ownership_available` and `exact_identity_available`
+   is False — the already-populated, already-threaded map needs no new
+   plumbing; single-file change.
+2. (Critical-claim conflict) Extend `_critical_claim_conflict_by_clip_id`
+   (`final_story_coherence_validation.py`) with an optional `lost_atom_
+   ownership_by_clip_id` parameter (already in scope at its call site) to
+   also resolve `False`/`True` via the owning attempt/proposition's own
+   representative clip_id membership in `conflict_clip_ids`/`clip_id_to_
+   group`; single-file change.
+3. (Retry/process) Build a `clip_id -> recording_process_status` map from
+   `editorial_moment_understandings` in `pipeline.py`, thread it through
+   `universal_clean_cut.py` into `final_story_coherence_validation.py`'s
+   own materiality construction call, mirroring the existing `lost_atom_
+   ownership_by_clip_id` threading pattern exactly; three-file change,
+   independent of ownership.
+4. (Redundancy) Build a new id-membership join between ownership's
+   attempt/proposition ids and the pipeline's own final `selected`
+   realization set; scope/file count not yet determined without further
+   design.
+
+None of these were implemented in this gate. **No fix. No reinterpretation
+of `None`/`UNKNOWN` as safe. No new heuristic.**
+
+**Root-cause verdict: D — MULTIPLE EXISTING EVIDENCE SEAMS ARE MISSING.**
+Every identified gap is a plumbing/consumption-gate seam over
+ALREADY-COMPUTED, already-existing evidence (P1 moment roles, proposition
+slot evidence, family-membership context, final selection membership) —
+never a case of genuinely absent evidence requiring new materiality
+intelligence (Verdict E does not apply). `complete_lost_semantic_atom_
+materiality.py`/`lost_semantic_atom_materiality.py`/`lost_atom_editorial_
+requirement_evidence.py`/`exact_lost_atom_ownership.py` themselves need
+ZERO signature changes — every parameter these seams would use already
+exists on `assess_complete_lost_semantic_atom_materiality`/`assess_lost_
+semantic_atom_materiality`/`assess_editorial_requirement_evidence`; the
+gap is entirely in the ORCHESTRATION layer's own call-site wiring
+(`pipeline.py`/`universal_clean_cut.py`/`final_story_coherence_
+validation.py`).
+
+**Confirmation:** forensic only. No production code, test, workflow,
+threshold, precedence, or authority change of any kind. No RAW, Modal, or
+RunPod dispatch. This entry is the only change made in this gate
+(docs-only, permitted).
+
+Then STOP. Do NOT implement. Do NOT launch RAW. Wait for Product Owner
+coordination.
