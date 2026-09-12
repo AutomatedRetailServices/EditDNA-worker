@@ -60495,3 +60495,182 @@ task.
 kind in this gate.
 
 Then STOP. Do NOT launch D-239M. Wait for Product Owner coordination.
+
+## D-239M — ONE REAL-MEDIA FREEZE REQUALIFICATION, POST D-239L (Verdict F: OBSERVABILITY/RETRIEVAL FAILURE — mechanism proven to execute and upload successfully; target diagnostic content unretrievable from this sandbox — SEVENTH consecutive gate with this exact structural finding)
+
+**Trigger:** D-239L offline-proved (Verdict A) an atom-granular
+refinement of D-239I's own ownership-only editorial-requirement bridge:
+proposition-level slot evidence + `EXACT_SINGLETON_OWNERSHIP` alone is
+no longer sufficient for `REQUIRED`; exact, already-computed, target-
+clip_id-keyed P1 evidence must corroborate it, or the row fails closed
+to `INSUFFICIENT_EVIDENCE`. D-239M's sole purpose was to dispatch
+exactly ONE authorized Modal RAW on the same real sibling
+(`Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4`)
+and read `lost-atom-ownership-materiality-diagnostics.json` (corroborated
+by `selection-freeze-diagnostics.json`, `lost-semantic-atom-
+diagnostics.json`, `exact-identity-observability.json`) to determine
+what the historical target lost atom actually becomes under the
+D-239L-refined contract on real media.
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `1724e96`,
+clean tree — confirmed exactly as expected before dispatch.
+
+**RAW dispatched:** `cutsell-video00-modal-raw.yml`, Modal backend, run
+id `34694890313` (run_number 109, job id `103556562113`), on head
+`1724e9681645d2ff7ddebab6f2f79e7b002cec38`. Inputs set exactly per the
+directive's own workflow input names: `source_key` (the exact sibling
+key, no substitution), `lost_atom_materiality_freeze_authority_enabled=1`,
+`editorial_moment_sequence_diagnostics_enabled=1`,
+`live_language_spine_diagnostics_enabled=1`,
+`whole_video_editorial_reasoning_diagnostics_enabled=1`,
+`ordering_diagnostics_enabled=1`, `pacing_v2_diagnostics_enabled=1`,
+`audio_join_treatment_diagnostics_enabled=1`. No new authority flag
+introduced; no threshold changed. **Exactly one dispatch — no second
+RAW at any point in this gate.**
+
+**Execution result:** the job completed (`conclusion: failure` at the
+job level, driven entirely by pre-classified Video00-specific oracle
+checks and the pre-existing Pacing-V2 gap — see below), but every step
+germane to this gate's own purpose **succeeded**:
+- **S3 preflight** (step 8): PASSED.
+- **Paid Modal benchmark** (step 13, the one authorized L4 run):
+  SUCCESS.
+- **D-235G/D-235J/D-237I/D-239F sibling-safe extraction steps**
+  (steps 21–24): all SUCCESS.
+- **Video00 quality ladder** (step 28): SUCCESS.
+- **Watch+Listen / BestTake / P1 / P2 / Ordering compact-diagnostics
+  summaries** (steps 29–46, one skip at step 37 — an existing,
+  unrelated gate): all SUCCESS.
+- **Validator-reports artifact upload** (step 50): SUCCESS — 36,387
+  bytes.
+- **Modal teardown confirmation** (step 51): SUCCESS.
+- **Human-review MP4**: produced (`cutsell-video00-modal-human-review`
+  artifact, 68,754,528 bytes), available for Product Owner Watch+Listen
+  — its production is itself evidence the pipeline reached render/QC.
+
+The only step-level failures were, exactly as pre-classified by this
+gate's own directive:
+- **Steps 25–27** (`Verify frozen Selection lock`, `Verify Video00
+  architecture`, `Verify Human Gold regression QA`): FAILED —
+  **VIDEO00_SPECIFIC_ORACLE_NOISE**, expected on a sibling RAW, excluded
+  from this gate's verdict per the directive's own instruction.
+- **Steps 47–49** (Pacing V2 / J-L timing / Handle-Aware real-media
+  diagnostics): FAILED — the same pre-existing, separately-tracked
+  Pacing-V2 gap this session has repeatedly observed on prior sibling
+  RAWs, out of this gate's scope.
+
+**Retrieval attempted, both channels confirmed structurally blocked —
+SEVENTH consecutive gate with this exact finding:**
+1. **Validator-reports artifact ZIP download** — `download_workflow_run_
+   artifact` returned a valid signed URL on
+   `productionresultssa14.blob.core.windows.net` (a **fourth** distinct
+   Azure Blob subdomain now confirmed blocked, after `sa15`/`sa1`/`sa9`
+   at prior gates); a direct fetch through this sandbox's own egress
+   proxy failed with `CONNECT tunnel failed, response 403`, confirmed
+   again via the proxy's own `/__agentproxy/status` endpoint (`kind:
+   connect_rejected`, host `productionresultssa14.blob.core.windows.net
+   :443`).
+2. **Job-log tail retrieval** (`get_job_logs`, `return_content=true`) —
+   attempted at `tail_lines=200000` (416,710 chars, essentially the
+   SAME ~416–427KB ceiling D-239J's own gate already pinned down
+   precisely, reconfirmed here independent of the requested tail size).
+   The entire retrievable window fell within the job's own final ~2
+   seconds (12:55:31–12:55:33), dominated by the D-186A–D-225 compact-
+   diagnostics print steps' own verbose output, and never reached back
+   to 12:55:27–12:55:30 — the window in which step 19 ("Print full
+   canonical diagnostics") through step 24 (the D-239F extraction step
+   that builds the target diagnostics) ran. Confirmed by exhaustive
+   string search: zero occurrences of `ownership_status`, `lost_atom_
+   provenance_id`, `EXACT_SINGLETON_OWNERSHIP`, `freeze_blocked`,
+   `ownership_input_present`, `editorial_requirement_granularity`,
+   `editorial_requirement_target_evidence_source`, or any target
+   clip_id fragment anywhere in the retrieved window.
+
+This is now the **SEVENTH** consecutive real-media requalification gate
+(D-237H, D-237J, D-237M, D-239, D-239G, D-239J, D-239M) hitting this
+exact structural sandbox-egress limitation, now against a fourth
+distinct Blob Storage subdomain, with the job-log ceiling reconfirmed
+at essentially the same byte count D-239J's own gate measured. The
+underlying mechanism (S3 preflight, paid Modal benchmark, all four
+sibling-safe extraction steps, validator-reports upload, Modal
+teardown) is proven to execute correctly end to end on this exact
+authorized code and real media, including the D-239L fix itself running
+live in this pipeline for the first time — this remains an
+observability/retrieval failure specific to this session's own
+execution environment, never an engine, ownership, materiality,
+editorial-requirement, Freeze, or repair defect.
+
+**Primary question ("what does the target atom become now?"):**
+**UNDETERMINED** — no field of the target atom's actual D-239L-refined
+editorial-requirement/D-235Q/D-235R/D-235S/D-235T/Freeze result could be
+read from data this sandbox can retrieve this gate. Per this gate's own
+directive, no clearance outcome is forced from unretrieved data. The one
+indirect, honestly-labeled signal available is that a human-review MP4
+was produced (68,754,528 bytes), which structurally requires the
+pipeline to have reached render/QC — consistent with, but not proof of,
+Freeze having cleared for this atom specifically, since a `NEEDS_HUMAN_
+REVIEW`/QC-flagged deliverable also produces this same artifact and
+Freeze could have cleared for reasons unrelated to this one atom.
+
+**`TARGET_LOST_ATOM_BLOCKER_CLEARED`:** **UNDETERMINED** — not set true
+or false.
+
+**Global identity firewall:** structurally unaffected regardless of
+this gate's own retrieval outcome — no code in this task (a RAW
+dispatch plus this docs-only entry) touched `AUTHORITATIVE_
+RELATIONSHIP_STATUSES` or any ownership/materiality/editorial-
+requirement/Freeze/repair policy; D-239L's own zero-diff proofs
+(committed prior to this gate) remain the standing evidence.
+
+**Verdict: F — OBSERVABILITY / EXECUTION-RETRIEVAL FAILURE** (not an
+engine or code regression: every step this gate's own purpose depends
+on — S3 preflight, paid Modal run, all four extraction steps, validator
+upload, teardown — succeeded, and the D-239L fix itself ran live for
+the first time without incident; only the CONTENT of the successfully-
+uploaded artifact could not be read back into this sandbox). Per the
+directive's own IF-F instruction: **name the exact failure only, no
+second RAW.**
+
+**Canonical status:** `D239M_MECHANISM_PROVEN_TARGET_CONTENT_
+UNRETRIEVABLE_VIA_AVAILABLE_TOOLING_SEVENTH_CONSECUTIVE_GATE`.
+
+**Freeze track status:** unchanged/undetermined this gate — neither
+closed nor reopened; D-239L's own offline-proven refinement stands as
+the current code, awaiting a real-media read that this sandbox cannot
+yet perform.
+
+**Pacing track status:** not reached (Freeze clearance itself
+unconfirmed this gate). **Audio Join status:** not reached.
+
+**Engine patch required after this?** No — nothing in the engine,
+ownership, materiality, editorial-requirement, Freeze, or repair path
+is implicated; the gap is entirely this sandbox's own egress policy
+plus the already-measured job-log response ceiling. **Additional RAW
+required?** No further RAW under any circumstance from this gate — a
+repeat run would face the identical retrieval wall (now confirmed
+against a fourth distinct Blob Storage subdomain). **Paid compute
+required next?** No, not by this task. The only paths that resolve this
+without further paid compute: (a) a human or differently-provisioned
+session opening the run's own Actions UI directly
+(https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34694890313)
+and downloading the 36,387-byte `cutsell-video00-modal-validator-
+reports` artifact or viewing the full job log there — both trivially
+available outside this sandbox's egress policy; or (b) a Product Owner/
+infrastructure decision to widen this sandbox's egress allowlist, or to
+add a durable S3-persisted copy of this artifact's content (the same
+pattern D-056.1 already applies to the main `result.json` — named as a
+possible future direction in D-239J's own entry, still not implemented,
+out of scope for this offline gate). Neither is an engine change.
+
+**Calibration Corpus status:** unchanged, not touched by this gate.
+**App-roadmap status:** unchanged, not touched by this gate.
+
+**Confirmation:** NO second RAW, NO RunPod, NO provider change. NO
+post-result production code, workflow, threshold, or authority change —
+the only change in this gate is this docs-only decision-log entry (the
+one action explicitly permitted post-result). Modal teardown
+independently confirmed successful; the human-review MP4 remains
+available for Product Owner Watch+Listen review pending a successful
+future retrieval of the target diagnostic content.
+
+Then STOP.
