@@ -114,7 +114,7 @@ def test_01_exact_same_membership_serialized_correctly():
     matches = _build_matches((take1,), lwords, attempts, utterances_by_id, phrases)
     prop_ids = proposition_candidate_ids_by_attempt_id_for(props)
     rows = identity_observability_rows_for_source(
-        matches=matches, takes_by_clip_id={"clipA": take1}, attempts_by_id={a.attempt_id: a for a in attempts},
+        matches=matches, takes=(take1,), attempts_by_id={a.attempt_id: a for a in attempts},
         proposition_candidate_ids_by_attempt_id=prop_ids,
     )
     row = rows["clipA"]
@@ -138,7 +138,7 @@ def test_02_language_contains_reconstructed_serialized_correctly():
     matches = _build_matches((small_take,), lwords, attempts, utterances_by_id, phrases)
     prop_ids = proposition_candidate_ids_by_attempt_id_for(props)
     rows = identity_observability_rows_for_source(
-        matches=matches, takes_by_clip_id={"clipFragment": small_take},
+        matches=matches, takes=(small_take,),
         attempts_by_id={a.attempt_id: a for a in attempts}, proposition_candidate_ids_by_attempt_id=prop_ids,
     )
     row = rows["clipFragment"]
@@ -222,7 +222,7 @@ def test_06_cross_source_isolation():
     # Rows built per-source stay scoped -- never mixing srcA attempts
     # into srcB's own row.
     rows_a = identity_observability_rows_for_source(
-        matches=matches_a, takes_by_clip_id={"clipA": take1}, attempts_by_id={a.attempt_id: a for a in attempts_a},
+        matches=matches_a, takes=(take1,), attempts_by_id={a.attempt_id: a for a in attempts_a},
     )
     assert rows_a["clipA"]["source_asset_id"] == "srcA"
     for lang_row in rows_a["clipA"]["language_attempts"]:
@@ -266,7 +266,7 @@ def test_09_exact_match_map_presence_serialized_correctly():
         if m.relationship_status in AUTHORITATIVE_RELATIONSHIP_STATUSES
     }
     rows = identity_observability_rows_for_source(
-        matches=matches, takes_by_clip_id={"clipA": take1, "clipB": take2},
+        matches=matches, takes=(take1, take2),
         attempts_by_id={a.attempt_id: a for a in attempts},
         proposition_candidate_ids_by_attempt_id=prop_ids, exact_match_by_clip_id=exact_match_by_clip_id,
     )
@@ -295,7 +295,7 @@ def test_11_lost_atom_provenance_correlation():
     lwords, phrases, utterances_by_id, attempts, props, take1, take2 = _two_clip_fixture()
     matches = _build_matches((take1,), lwords, attempts, utterances_by_id, phrases)
     rows = identity_observability_rows_for_source(
-        matches=matches, takes_by_clip_id={"clipA": take1}, attempts_by_id={a.attempt_id: a for a in attempts},
+        matches=matches, takes=(take1,), attempts_by_id={a.attempt_id: a for a in attempts},
     )
     lost_rows = [{"lost_atom_provenance_id": "prov_1", "clip_id": "clipA", "text": "unused"}]
     correlated = lost_atom_identity_correlation(lost_rows, rows)
@@ -319,7 +319,7 @@ def test_12_multiple_attempts_same_source():
     assert len(attempts) == 2
     matches = _build_matches((take1, take2), lwords, attempts, utterances_by_id, phrases)
     rows = identity_observability_rows_for_source(
-        matches=matches, takes_by_clip_id={"clipA": take1, "clipB": take2},
+        matches=matches, takes=(take1, take2),
         attempts_by_id={a.attempt_id: a for a in attempts},
     )
     assert len(rows) == 2
@@ -351,13 +351,28 @@ def test_14_empty_word_indices_fail_closed():
 def test_15_missing_attempt_data_fail_closed():
     lwords, phrases, utterances_by_id, attempts, props, take1, _ = _two_clip_fixture()
     matches = _build_matches((take1,), lwords, attempts, utterances_by_id, phrases)
-    # Deliberately supply an EMPTY attempts_by_id/takes_by_clip_id map --
-    # the row must still be produced (fail-open, honest None spans),
-    # never raise.
-    rows = identity_observability_rows_for_source(matches=matches, takes_by_clip_id={}, attempts_by_id={})
+    # D-237L: `takes` is now REQUIRED to be the real, positionally-aligned
+    # sequence (the function no longer does a broken clip_id lookup) --
+    # the take itself is always available at the real call site. This
+    # test now targets the REMAINING fail-open surface: an EMPTY
+    # attempts_by_id map -- the row must still be produced, with the
+    # candidate side correctly populated from the real `take1` and only
+    # the LANGUAGE-attempt side failing open to None, never raising.
+    rows = identity_observability_rows_for_source(matches=matches, takes=(take1,), attempts_by_id={})
     assert "clipA" in rows
-    assert rows["clipA"]["candidate_take"]["source_start"] is None
+    assert rows["clipA"]["candidate_take"]["source_start"] == take1.start
     assert rows["clipA"]["language_attempts"][0]["source_start"] is None
+
+
+def test_15b_no_row_when_takes_sequence_shorter_than_matches():
+    # D-237L: `takes` must be positionally aligned with `matches` -- an
+    # empty/short `takes` sequence simply yields FEWER rows (zip's own
+    # truncation), never a crash and never a row keyed by anything other
+    # than a real `take.clip_id`.
+    lwords, phrases, utterances_by_id, attempts, props, take1, _ = _two_clip_fixture()
+    matches = _build_matches((take1,), lwords, attempts, utterances_by_id, phrases)
+    rows = identity_observability_rows_for_source(matches=matches, takes=(), attempts_by_id={})
+    assert rows == {}
 
 
 # ===========================================================================
@@ -368,11 +383,11 @@ def test_16_deterministic_diagnostics():
     matches1 = _build_matches((take1, take2), lwords, attempts, utterances_by_id, phrases)
     matches2 = _build_matches((take1, take2), lwords, attempts, utterances_by_id, phrases)
     rows1 = identity_observability_rows_for_source(
-        matches=matches1, takes_by_clip_id={"clipA": take1, "clipB": take2},
+        matches=matches1, takes=(take1, take2),
         attempts_by_id={a.attempt_id: a for a in attempts},
     )
     rows2 = identity_observability_rows_for_source(
-        matches=matches2, takes_by_clip_id={"clipA": take1, "clipB": take2},
+        matches=matches2, takes=(take1, take2),
         attempts_by_id={a.attempt_id: a for a in attempts},
     )
     assert rows1 == rows2
@@ -385,7 +400,7 @@ def test_17_bounded_diagnostics_summary():
     lwords, phrases, utterances_by_id, attempts, props, take1, take2 = _two_clip_fixture()
     matches = _build_matches((take1, take2), lwords, attempts, utterances_by_id, phrases)
     rows = identity_observability_rows_for_source(
-        matches=matches, takes_by_clip_id={"clipA": take1, "clipB": take2},
+        matches=matches, takes=(take1, take2),
         attempts_by_id={a.attempt_id: a for a in attempts},
     )
     summary = exact_identity_observability_diagnostics(rows.values())
@@ -398,7 +413,7 @@ def test_18_no_transcript_dump():
     lwords, phrases, utterances_by_id, attempts, props, take1, take2 = _two_clip_fixture()
     matches = _build_matches((take1, take2), lwords, attempts, utterances_by_id, phrases)
     rows = identity_observability_rows_for_source(
-        matches=matches, takes_by_clip_id={"clipA": take1, "clipB": take2},
+        matches=matches, takes=(take1, take2),
         attempts_by_id={a.attempt_id: a for a in attempts},
     )
     import json

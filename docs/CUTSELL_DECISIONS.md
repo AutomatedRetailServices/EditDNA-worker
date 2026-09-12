@@ -58076,3 +58076,153 @@ provider calls made. This entry is a docs-only decision-log addition.
 
 Then STOP. Do NOT implement. Do NOT launch RAW. Wait for Product Owner
 coordination.
+
+## D-237L — FIX EXACT-IDENTITY OBSERVABILITY CLIP-KEY NAMESPACE (offline only, POST D-237K)
+
+**Scope:** fix D-237K's own proven root cause -- `identity_observability_
+rows_for_source` keyed its output dict (and an internal `CandidateTake`
+lookup, and the `exact_match_by_clip_id` read inside `identity_match_
+diagnostic_row`) by `match.reconstructed_attempt_id` (D-235P's own
+`entity_id`, which prioritizes `candidate.attempt_id`/`candidate.source_
+span_id` over `candidate.clip_id`), while `lost_atom_identity_
+correlation`'s ONLY join condition is a genuine `clip_id`. Observability
+only -- no identity-authority, `AUTHORITATIVE_RELATIONSHIP_STATUSES`,
+containment-promotion, Language-Spine, Freeze, materiality, repair, P1/
+P2, Pacing/Audio-Join, or threshold change.
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `febc27d`
+(matching D-237K exactly), clean tree -- confirmed.
+
+**Fix, precisely:**
+- `cutsell_worker/exact_identity_observability.py::identity_match_
+  diagnostic_row` gained a required `clip_id: str` keyword parameter.
+  Its `"clip_id"` output field now reports this value (the caller's own
+  genuine `CandidateTake.clip_id`) instead of `match.reconstructed_
+  attempt_id`; its `exact_match_by_clip_id.get(...)` lookup (a SECOND,
+  previously-unreported manifestation of the same bug, found while
+  implementing this fix) is now keyed by `clip_id` too, matching how
+  `pipeline.py` genuinely builds that map. `match.reconstructed_
+  attempt_id` is preserved, unchanged, under its OWN new `"reconstructed_
+  attempt_id"` field -- never overloaded onto `clip_id`, per this task's
+  own explicit instruction.
+- `identity_observability_rows_for_source`'s `takes_by_clip_id: Mapping[
+  str, object]` parameter is replaced with `takes: Sequence[object]`,
+  positionally aligned with `matches` (the SAME contract `build_attempt_
+  language_identity_matches_for_source` already guarantees: "one
+  `AttemptLanguageIdentityMatch` per `reconstructed_attempts` entry, in
+  input order"). The function now derives `clip_id = take.clip_id`
+  directly from the paired `take` via `zip(takes, matches)`, eliminating
+  the broken lookup entirely rather than patching it -- mirroring
+  `pipeline.py`'s own D-235X authority-map pattern (`all_identity_
+  matches_by_clip_id[take.clip_id] = match`), which was never affected
+  by this bug.
+- `cutsell_worker/pipeline.py`'s one call site now passes `takes=source_
+  takes` (the SAME sequence, in the SAME order, already used to build
+  `matches` two lines above) instead of `takes_by_clip_id={t.clip_id: t
+  for t in source_takes}`. **No other line in `pipeline.py` changed** --
+  `exact_match_by_clip_id`/`all_identity_matches_by_clip_id`'s own
+  construction (lines 2636-2639) is byte-for-byte untouched, confirmed
+  by `git diff`.
+- `cutsell_worker/shared_attempt_word_identity.py` -- **zero diff**,
+  confirmed by a dedicated test (`git diff --stat` assertion, same
+  precedent as D-237G's own `test_08`). `match.reconstructed_attempt_id`'s
+  own computation (`entity_id = attempt_id or source_span_id or clip_id`)
+  is completely unchanged -- this fix routes AROUND the namespace
+  mismatch at the observability layer, never touches the D-235P module
+  that produces the value.
+- `cutsell_worker/final_story_coherence_validation.py` -- **zero diff**;
+  it only ever threads `identity_observability_by_clip_id` through as an
+  opaque kwarg and never inspects its keys itself, so no change was
+  needed there for the fix to take effect.
+
+**Correlation proof (offline, synthetic real-shaped fixture):** a
+`CandidateTake` constructed with `clip_id="clip_real_123"`, `attempt_id=
+"attempt_real_456"`, `source_span_id="span_real_789"` (all three
+DISTINCT -- the exact real-media shape D-237G's own original test suite
+never exercised, which is precisely why it never caught this bug) now
+produces an observability row keyed `"clip_real_123"` (never `"attempt_
+real_456"`), whose own `"clip_id"` field reads `"clip_real_123"` and
+whose new `"reconstructed_attempt_id"` field separately reads `"attempt_
+real_456"`. A `lost_semantic_atoms`-shaped row keyed `"clip_real_123"`
+now correlates successfully via `lost_atom_identity_correlation`
+(previously: zero rows, D-237K's own proven finding). Proven for: a
+dropped candidate (present-before/absent-after-selection, the exact
+D-237K target shape), multiple lost atoms correlating independently,
+provenance-id dedup preserved, cross-source isolation preserved (a lost
+atom naming a different source's `clip_id` never correlates; the SAME
+`clip_id` string reused across two different sources never cross-
+contaminates `source_asset_id`), relationship_status/authoritative-
+boolean/exact-match-map/proposition-ids/word-indices all unchanged in
+VALUE (only the KEY changed).
+
+**Tests:** new `tests/test_cutsell_d237l_clip_key_namespace_fix.py` (33
+tests) covering the full directive test matrix: real-id fixture
+construction (attempt_id/source_span_id genuinely differ from clip_id),
+the exact D-237K root-cause shape reproduced directly (`match.
+reconstructed_attempt_id == take.attempt_id != take.clip_id`), row-key/
+row-field correctness, `reconstructed_attempt_id` preserved separately,
+lost-atom correlation success (dropped candidate, selected candidate,
+multiple atoms, provenance dedup), cross-source isolation (mismatch
+blocked, no key collision across sources reusing the same clip_id
+string), relationship/authoritative/exact-match/proposition/word-index
+values unchanged, determinism, no-transcript-leakage, and the full
+no-authority/no-Freeze/no-materiality/no-repair/no-Language-Spine/no-P1-
+P2/no-Pacing-Audio-Join/no-threshold/no-provider/no-RAW proof set (same
+style as D-237G's own suite). Existing `tests/test_cutsell_d237g_exact_
+identity_observability.py` updated (11 call sites migrated from `takes_
+by_clip_id={...}` to the new `takes=(...)` parameter; `test_15` re-scoped
+to the fail-open surface that still exists under the new contract --
+missing `attempts_by_id` on the language-attempt side, with the real
+`take` now always supplied -- plus one new `test_15b` proving a short/
+empty `takes` sequence simply yields fewer rows, never a crash and never
+a row keyed by anything but a real `clip_id`); all 32 pass, unchanged
+test count plus the one addition. Combined new+updated D-237G/D-237L
+suites: **65 passed**. Combined with D-237I/D-235G/D-235J extraction
+suites and CleanCutBench/final_story_coherence_validation regressions:
+**196 passed**. Broader `pipeline`/`universal_clean_cut` sweep: **178
+passed**. D-235P/D-235W/D-235X/`shared_attempt_word_identity`/`final_
+story_coherence` sweep: **127 passed**.
+
+`python3 -m compileall cutsell_worker tests` -- clean. Full suite
+(`pytest tests/ --ignore=tests/test_semantic_stitch.py`): **6483
+passed**, 6 failed -- the SAME 5 pre-existing unrelated failures this
+session has tracked throughout every prior gate (`test_video00_modal_
+hybrid_semantic_parity.py` x4, `test_hybrid_story_guard_incomplete_
+retry.py` x1) plus ONE self-resolving `git diff --stat HEAD`-based test
+(`test_cutsell_d169_language_proposition_relation.py::test_30_old_
+serialized_ids_unaffected`) that only fails while changes are
+uncommitted, the exact same precedent already established for D-235W/
+D-235X/D-237G. **Zero new genuine failures.** `git diff --stat` confirms
+exactly two production files changed (`exact_identity_observability.py`
++83/-? lines, `pipeline.py` one kwarg rename, +10/-2 lines) plus one
+updated and one new test file -- no other production file touched.
+
+**Verdict: A -- CLIP-ID OBSERVABILITY NAMESPACE FIX OFFLINE PROVEN, READY
+FOR ONE REAL-MEDIA IDENTITY TRACE.**
+
+**Canonical status:** `D237L_CLIP_KEY_NAMESPACE_FIX_OFFLINE_PROVEN`.
+
+**Exact next gate:** D-237M -- ONE real-media exact-identity trace. Same
+sibling RAW, exactly ONE maximum. Primary artifact: `exact-identity-
+observability.json` (D-237I's own dedicated extraction). D-237M must
+finally determine the actual target relationship using this fix's
+now-correct `clip_id`-keyed rows. **Not launched automatically** --
+Product Owner coordination required first.
+
+**Engine patch required after this?** No -- this task already implements
+the fix; nothing further to patch. **Paid compute required?** No, not by
+this task. **RAW required?** Yes, for D-237M specifically (not this
+task).
+
+**Confirmation:** OFFLINE ONLY. Two production files changed (`exact_
+identity_observability.py`, `pipeline.py`), both purely within the
+observability layer this task's own directive scoped. Zero identity-
+authority/`AUTHORITATIVE_RELATIONSHIP_STATUSES`/containment-promotion/
+Language-Spine/Freeze/materiality/repair/P1/P2/Pacing/Audio-Join/
+threshold logic changed -- `shared_attempt_word_identity.py` has zero
+diff (test-proven), `exact_match_by_clip_id`/`all_identity_matches_by_
+clip_id` construction in `pipeline.py` is byte-for-byte unchanged
+(diff-proven). Zero RAW, zero Modal, zero RunPod, zero provider calls
+made.
+
+Then STOP. Do NOT launch D-237M. Wait for Product Owner coordination.

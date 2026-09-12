@@ -2649,7 +2649,15 @@ def build_flow_b_draft(
             identity_observability_by_clip_id.update(
                 identity_observability_rows_for_source(
                     matches=matches,
-                    takes_by_clip_id={t.clip_id: t for t in source_takes},
+                    # D-237L: pass the SAME `source_takes` sequence, in the
+                    # SAME order, already used to build `matches` above
+                    # (`reconstructed_attempts=tuple(source_takes)`) -- the
+                    # function now keys its own rows by each take's own
+                    # `clip_id` directly, never by `match.reconstructed_
+                    # attempt_id` (see docs/CUTSELL_DECISIONS.md D-237K/
+                    # D-237L: that value is attempt_id/source_span_id-first
+                    # and a different namespace than clip_id on real media).
+                    takes=source_takes,
                     attempts_by_id={a.attempt_id: a for a in evidence.attempts},
                     proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
                     exact_match_by_clip_id=exact_match_by_clip_id,

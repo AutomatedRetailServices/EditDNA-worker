@@ -122,6 +122,7 @@ def language_attempt_identity_diagnostic_row(
 def identity_match_diagnostic_row(
     match: AttemptLanguageIdentityMatch,
     *,
+    clip_id: str,
     candidate_take_row: dict,
     language_attempt_rows: Sequence[dict],
     exact_match_by_clip_id: Optional[Mapping[str, AttemptLanguageIdentityMatch]] = None,
@@ -135,7 +136,21 @@ def identity_match_diagnostic_row(
     the derived set-arithmetic quantities already available on `match`
     itself -- recomputes no set operation of its own beyond a bare
     frozenset difference/intersection over ALREADY-COMPUTED index sets
-    (never a new relationship classification)."""
+    (never a new relationship classification).
+
+    D-237L (docs/CUTSELL_DECISIONS.md D-237K's own forensic finding):
+    `clip_id` is the caller's own genuine `CandidateTake.clip_id` -- the
+    SAME identifier `pipeline.py`'s own D-235X authority maps
+    (`exact_match_by_clip_id`, `all_identity_matches_by_clip_id`) are
+    keyed by. It is NEVER derived from `match.reconstructed_attempt_id`
+    (D-235P's own `entity_id`, which prioritizes `candidate.attempt_id`/
+    `candidate.source_span_id` over `candidate.clip_id` -- a real take's
+    `attempt_id` is populated almost universally on real media, so that
+    value is a DIFFERENT namespace than `clip_id` in practice). The
+    match's own `reconstructed_attempt_id` is preserved separately below,
+    under its own field, for diagnostics only -- never overloaded onto
+    `clip_id`, and never used as a lookup key into `exact_match_by_
+    clip_id` (which is itself genuinely `clip_id`-keyed)."""
     exact_match_by_clip_id = exact_match_by_clip_id or {}
     proposition_candidate_ids_by_attempt_id = proposition_candidate_ids_by_attempt_id or {}
 
@@ -145,7 +160,10 @@ def identity_match_diagnostic_row(
     ) if match.language_word_memberships else frozenset()
 
     is_authoritative = match.relationship_status in AUTHORITATIVE_RELATIONSHIP_STATUSES
-    exact_entry = exact_match_by_clip_id.get(match.reconstructed_attempt_id)
+    # D-237L: look up by the genuine clip_id -- exact_match_by_clip_id
+    # (pipeline.py, D-235X) is keyed by take.clip_id, never by
+    # match.reconstructed_attempt_id.
+    exact_entry = exact_match_by_clip_id.get(clip_id)
     exact_present = exact_entry is not None
     exact_proposition_ids = (
         exact_proposition_candidate_ids_for_match(exact_entry, proposition_candidate_ids_by_attempt_id)
@@ -154,7 +172,12 @@ def identity_match_diagnostic_row(
 
     return {
         "schema_version": SCHEMA_VERSION,
-        "clip_id": match.reconstructed_attempt_id,
+        "clip_id": clip_id,
+        # D-237L: the match's own D-235P identity handle, preserved
+        # separately -- diagnostics only. `lost_atom_identity_correlation`
+        # joins on "clip_id" alone; this field is never consulted by that
+        # join or by any authority.
+        "reconstructed_attempt_id": match.reconstructed_attempt_id,
         "source_asset_id": match.source_asset_id,
         "candidate_take": candidate_take_row,
         "language_attempts": list(language_attempt_rows),
@@ -180,30 +203,53 @@ def identity_match_diagnostic_row(
 def identity_observability_rows_for_source(
     *,
     matches: Sequence[AttemptLanguageIdentityMatch],
-    takes_by_clip_id: Mapping[str, object],
+    takes: Sequence[object],
     attempts_by_id: Mapping[str, object],
     proposition_candidate_ids_by_attempt_id: Optional[Mapping[str, Tuple[str, ...]]] = None,
     exact_match_by_clip_id: Optional[Mapping[str, AttemptLanguageIdentityMatch]] = None,
 ) -> dict[str, dict]:
     """Batch form: one bounded row per already-computed `match`, keyed by
-    `clip_id`. `takes_by_clip_id`/`attempts_by_id` supply the source_
-    asset_id/source_start/source_end/attempt_state fields the `match`
-    object itself does not carry (it only carries word-index sets) --
-    read-only lookups, never a new comparison. A `match` whose own
-    `reconstructed_attempt_id` is missing from `takes_by_clip_id`, or
-    whose language attempt ids are missing from `attempts_by_id`, still
-    produces a row (fail-open, honest) with `None` span fields rather
-    than raising or silently dropping the row."""
+    the caller's OWN `take.clip_id` (D-237L). `takes` MUST be the SAME
+    sequence, in the SAME order, the caller used to build `matches` in
+    the first place (`build_attempt_language_identity_matches_for_source`'s
+    own contract: "one `AttemptLanguageIdentityMatch` per `reconstructed_
+    attempts` entry, in input order") -- `pipeline.py`'s own call site
+    already guarantees this (`zip(source_takes, matches)`, the SAME
+    `source_takes` passed as `reconstructed_attempts` when `matches` was
+    built). `attempts_by_id` supplies the language-attempt-side source_
+    start/source_end/attempt_state fields the `match` object itself does
+    not carry -- a read-only lookup, never a new comparison. A `match`
+    whose language attempt ids are missing from `attempts_by_id` still
+    produces a row (fail-open, honest) with `None` span fields on that
+    side, rather than raising or silently dropping the row.
+
+    D-237L (docs/CUTSELL_DECISIONS.md D-237K/D-237L): this function used
+    to key its own output dict -- and look up the originating `Candidate
+    Take` -- by `match.reconstructed_attempt_id` (D-235P's own `entity_
+    id`, which prioritizes `candidate.attempt_id`/`candidate.source_
+    span_id` over `candidate.clip_id`), while `lost_atom_identity_
+    correlation`'s ONLY join condition is a genuine `clip_id`. Since real
+    media populates `attempt_id` on virtually every take, that mismatch
+    made every real-media correlation silently return zero rows (D-237K's
+    own forensic proof, RAW 34671571718: 5 real lost atoms, 0 correlated
+    rows). Fixed by keying on the caller's OWN `take.clip_id` directly --
+    exactly mirroring `pipeline.py`'s own D-235X authority maps
+    (`all_identity_matches_by_clip_id`/`exact_match_by_clip_id`), which
+    were never affected by this bug (they were already `take.clip_id`-
+    keyed). `match.reconstructed_attempt_id` itself is untouched -- still
+    computed by `shared_attempt_word_identity.py` exactly as before,
+    still available on every row under its own `reconstructed_attempt_id`
+    field -- only this module's OWN dict-keying/lookups change."""
     proposition_candidate_ids_by_attempt_id = proposition_candidate_ids_by_attempt_id or {}
     exact_match_by_clip_id = exact_match_by_clip_id or {}
     rows: dict[str, dict] = {}
-    for match in matches:
-        take = takes_by_clip_id.get(match.reconstructed_attempt_id)
+    for take, match in zip(takes, matches):
+        clip_id = take.clip_id
         candidate_row = candidate_take_identity_diagnostic_row(
-            clip_id=match.reconstructed_attempt_id,
+            clip_id=clip_id,
             source_asset_id=match.source_asset_id,
-            source_start=getattr(take, "start", None) if take is not None else None,
-            source_end=getattr(take, "end", None) if take is not None else None,
+            source_start=getattr(take, "start", None),
+            source_end=getattr(take, "end", None),
             membership=match.reconstructed_word_membership,
         )
         language_rows: list[dict] = []
@@ -218,8 +264,9 @@ def identity_observability_rows_for_source(
                 proposition_candidate_ids=proposition_candidate_ids_by_attempt_id.get(attempt_id, ()),
                 attempt_state=getattr(attempt, "attempt_state", None) if attempt is not None else None,
             ))
-        rows[match.reconstructed_attempt_id] = identity_match_diagnostic_row(
+        rows[clip_id] = identity_match_diagnostic_row(
             match,
+            clip_id=clip_id,
             candidate_take_row=candidate_row,
             language_attempt_rows=language_rows,
             exact_match_by_clip_id=exact_match_by_clip_id,
