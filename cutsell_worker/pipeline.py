@@ -139,12 +139,26 @@ from .language_spine_live_integration import (
 from .shared_attempt_word_identity import (
     AUTHORITATIVE_RELATIONSHIP_STATUSES,
     build_attempt_language_identity_matches_for_source,
+    build_language_attempt_word_membership,
 )
 # D-237G: bounded, additive, diagnostics-only re-projection of the SAME
 # `matches` this block already computes -- reads already-built
 # AttemptLanguageIdentityMatch/WordMembership objects, recomputes no set
 # arithmetic/relationship of its own. Never consulted by any authority.
 from .exact_identity_observability import identity_observability_rows_for_source
+# D-239: live wiring of D-238's bounded lost-atom ownership seam -- reuses
+# the SAME `evidence.attempts`/`utterances_by_id`/`phrases` population and
+# the SAME `build_language_attempt_word_membership` builder this block
+# already imports/uses (never a second word-matching implementation), and
+# each take's own `match.reconstructed_word_membership.word_indices`
+# (already computed by `build_attempt_language_identity_matches_for_source`
+# above, never re-derived). Never imports or touches
+# `AUTHORITATIVE_RELATIONSHIP_STATUSES` -- see exact_lost_atom_ownership.py's
+# own module docstring ("Two separate contracts").
+from .exact_lost_atom_ownership import (
+    LanguageAttemptWordEvidence,
+    assess_exact_lost_atom_ownership,
+)
 # D-235X: the SAME default-OFF flag D-235R/W already gate the Freeze-
 # composition seam on -- reused here unchanged, never a new flag.
 from .lost_semantic_atom_freeze_authority import lost_atom_materiality_freeze_authority_enabled
@@ -2617,6 +2631,11 @@ def build_flow_b_draft(
     # these two new maps.
     all_identity_matches_by_clip_id: dict[str, object] = {}
     identity_observability_by_clip_id: dict[str, dict] = {}
+    # D-239: live wiring of D-238's bounded lost-atom ownership seam (offline-
+    # designed, offline-tested in D-238; this is the FIRST live call site).
+    # `{}` whenever the flag is off, same fail-open posture as every map
+    # above -- zero extra work in that case, not just an unused result.
+    lost_atom_ownership_by_clip_id: dict[str, object] = {}
     if lost_atom_materiality_freeze_authority_enabled():
         takes_by_source: dict[str, list] = {}
         for take in take_tuple:
@@ -2643,6 +2662,40 @@ def build_flow_b_draft(
             proposition_slot_evidence_by_id.update(
                 proposition_slot_evidence_by_id_for(evidence.proposition_candidates)
             )
+            # D-239: live wiring of D-238's bounded lost-atom ownership seam --
+            # `language_attempts_for_ownership` is the SAME source-scoped
+            # `evidence.attempts` population, projected through the SAME
+            # `build_language_attempt_word_membership` builder already
+            # imported above (never a second word-matching implementation),
+            # keyed by the SAME `proposition_candidate_ids_by_attempt_id`
+            # just updated. `assess_exact_lost_atom_ownership` never reads
+            # `AUTHORITATIVE_RELATIONSHIP_STATUSES` and never promotes
+            # containment to attempt identity (see exact_lost_atom_
+            # ownership.py's own module docstring) -- it answers only the
+            # narrower "do THESE lost words belong to one canonical
+            # ownership context" question, consumed exclusively by D-235Q's
+            # own identity-sufficiency gate downstream.
+            language_attempts_for_ownership = tuple(
+                LanguageAttemptWordEvidence(
+                    attempt_id=membership.entity_id,
+                    source_asset_id=membership.source_asset_id,
+                    word_indices=membership.word_indices,
+                    proposition_candidate_ids=proposition_candidate_ids_by_attempt_id.get(
+                        membership.entity_id, (),
+                    ),
+                )
+                for membership in (
+                    build_language_attempt_word_membership(a, utterances_by_id, evidence.phrases)
+                    for a in evidence.attempts
+                )
+            )
+            for take, match in zip(source_takes, matches):
+                lost_atom_ownership_by_clip_id[take.clip_id] = assess_exact_lost_atom_ownership(
+                    clip_id=take.clip_id,
+                    candidate_source_asset_id=take.source_asset_id,
+                    candidate_word_indices=match.reconstructed_word_membership.word_indices,
+                    language_attempts=language_attempts_for_ownership,
+                )
             # D-237G: bounded per-clip observability rows -- scoped to
             # exactly THIS source's own take/attempt population (never an
             # all-vs-all corpus matrix), reusing the SAME `matches` above.
@@ -2672,10 +2725,24 @@ def build_flow_b_draft(
             # additive, diagnostics-only (see module docstring).
             "all_identity_matches_by_clip_id": all_identity_matches_by_clip_id,
             "identity_observability_by_clip_id": identity_observability_by_clip_id,
+            # D-239: the SAME per-clip map threaded to D-235Q's optional
+            # `lost_atom_ownership` parameter -- `{}` under the same
+            # fail-open posture as every map above.
+            "lost_atom_ownership_by_clip_id": lost_atom_ownership_by_clip_id,
             # D-235X diagnostics (tail-safe counts only, no transcript dump).
             "exact_identity_map_clip_count": len(take_tuple),
             "exact_identity_match_count": len(exact_match_by_clip_id),
             "exact_identity_missing_count": len(take_tuple) - len(exact_match_by_clip_id),
+            # D-239 diagnostics: bounded status counts only, never a
+            # transcript dump -- mirrors exact_lost_atom_ownership_
+            # diagnostics()'s own tail-safe shape.
+            "lost_atom_ownership_status_counts": {
+                status: sum(1 for o in lost_atom_ownership_by_clip_id.values() if o.ownership_status == status)
+                for status in sorted({o.ownership_status for o in lost_atom_ownership_by_clip_id.values()})
+            },
+            "lost_atom_exact_singleton_ownership_count": sum(
+                1 for o in lost_atom_ownership_by_clip_id.values() if o.is_exact_singleton
+            ),
         }
         if lost_atom_materiality_freeze_authority_enabled() else None
     )

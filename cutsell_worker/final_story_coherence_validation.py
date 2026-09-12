@@ -119,6 +119,11 @@ from .complete_lost_semantic_atom_materiality import (
     assess_complete_lost_semantic_atom_materiality,
 )
 from .contracts import effective_parent_semantic_clip_id
+# D-239: an optional, caller-supplied input type only -- this module never
+# imports pipeline.py, never constructs an ExactLostAtomOwnership itself,
+# never touches AUTHORITATIVE_RELATIONSHIP_STATUSES. See
+# `_complete_lost_semantic_atom_materiality_by_clip_id`'s own docstring.
+from .exact_lost_atom_ownership import ExactLostAtomOwnership
 from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 from .final_sibling_grouping import _content, _negations, _numbers
 # D-235R: the ONE Freeze-composition seam this task's own directive
@@ -1263,22 +1268,28 @@ def _complete_lost_semantic_atom_materiality_by_clip_id(
     exact_match_by_clip_id: Optional[Mapping[str, AttemptLanguageIdentityMatch]] = None,
     proposition_candidate_ids_by_attempt_id: Optional[Mapping[str, Tuple[str, ...]]] = None,
     proposition_slot_evidence_by_id: Optional[Mapping[str, str]] = None,
+    # D-239: an optional, pre-built clip_id -> ExactLostAtomOwnership map
+    # (`exact_lost_atom_ownership.py`'s own D-238 bounded seam, built by
+    # `pipeline.py` from the SAME source-scoped LanguageAttempt population
+    # `exact_match_by_clip_id` is built from). `{}` everywhere the flag is
+    # off or no caller supplies it -- `exact_ownership_available` then
+    # stays `False` exactly as before D-239, byte-identical.
+    lost_atom_ownership_by_clip_id: Optional[Mapping[str, ExactLostAtomOwnership]] = None,
 ) -> dict[str, CompleteLostSemanticAtomMateriality]:
     """D-235W orchestration seam (Parts A + C combined): builds the one
     `materiality_by_clip_id` map `lost_semantic_atom_freeze_trigger_
     present()` accepts, calling the SAME D-235Q pure function D-235R/
     D-235T's own row-only internal calls already use -- but now WITH the
-    live `critical_claim_conflict` context Part A derives, and WITH
+    live `critical_claim_conflict` context Part A derives, WITH
     `exact_match`/proposition context Part C accepts from a caller that
-    has it (none does yet -- see docs/CUTSELL_DECISIONS.md D-235W's own
-    "what remains unconnected" section; `exact_match_by_clip_id` defaults
-    to `None` everywhere today, so `exact_identity_available` stays
-    `False` exactly as before this task unless a FUTURE caller supplies
-    it). Only ever called behind the SAME default-OFF flag this whole
-    seam already used (see the two live call sites below) -- never
-    computed when the flag is off, so the flag-off path stays byte-
-    identical with zero extra work, not just an unused result."""
+    has it, and (D-239) WITH the live `lost_atom_ownership` context a
+    caller that has it can also supply. Only ever called behind the SAME
+    default-OFF flag this whole seam already used (see the two live call
+    sites below) -- never computed when the flag is off, so the flag-off
+    path stays byte-identical with zero extra work, not just an unused
+    result."""
     exact_match_by_clip_id = exact_match_by_clip_id or {}
+    lost_atom_ownership_by_clip_id = lost_atom_ownership_by_clip_id or {}
     critical_claim_conflict_by_clip_id = _critical_claim_conflict_by_clip_id(
         lost_semantic_atoms, contradiction_findings, lost_critical_claims, clip_id_to_group,
     )
@@ -1295,6 +1306,7 @@ def _complete_lost_semantic_atom_materiality_by_clip_id(
             exact_match=exact_match_by_clip_id.get(clip_id),
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+            lost_atom_ownership=lost_atom_ownership_by_clip_id.get(clip_id),
         )
     return result
 
@@ -1338,6 +1350,18 @@ def _lost_atom_materiality_orchestration_diagnostics(
         },
         "lost_atom_proposition_candidate_ids": {
             cid: list(materiality_by_clip_id[cid].exact_proposition_candidate_ids)
+            for cid in clip_ids if cid in materiality_by_clip_id
+        },
+        # D-239: the SAME bounded D-238 ownership fields already present on
+        # `CompleteLostSemanticAtomMateriality` (`exact_ownership_available`,
+        # `lost_atom_ownership_status`) -- read-only re-projection, never a
+        # second computation.
+        "lost_atom_exact_ownership_available": {
+            cid: bool(materiality_by_clip_id[cid].exact_ownership_available)
+            for cid in clip_ids if cid in materiality_by_clip_id
+        },
+        "lost_atom_ownership_status": {
+            cid: materiality_by_clip_id[cid].lost_atom_ownership_status
             for cid in clip_ids if cid in materiality_by_clip_id
         },
         "lost_atom_critical_claim_conflict_status": {
@@ -1469,6 +1493,11 @@ def apply_final_story_coherence_validation(
     # authoritative). None everywhere the flag is off -- diagnostics only,
     # never consulted by freeze_blocked/materiality itself.
     identity_observability_by_clip_id: Mapping[str, dict] | None = None,
+    # D-239: an optional, pre-built clip_id -> ExactLostAtomOwnership map
+    # (see `_complete_lost_semantic_atom_materiality_by_clip_id`'s own
+    # identically-named parameter docstring). `None` everywhere the flag
+    # is off or no caller supplies it.
+    lost_atom_ownership_by_clip_id: Mapping[str, ExactLostAtomOwnership] | None = None,
 ):
     """Legacy resolving pass -- see the module docstring's authority
     boundary. For the post-authority validation-only pass use
@@ -1490,6 +1519,7 @@ def apply_final_story_coherence_validation(
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
             identity_observability_by_clip_id=identity_observability_by_clip_id,
+            lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
         )
     draft = _fold_alternates_into_discarded(draft)
 
@@ -1599,6 +1629,7 @@ def apply_final_story_coherence_validation(
             exact_match_by_clip_id=exact_match_by_clip_id,
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+            lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
         )
         if _materiality_authority_enabled else None
     )
@@ -1719,6 +1750,9 @@ def _apply_post_authority_validation_only(
     # D-237G: see `apply_final_story_coherence_validation`'s own
     # identically-named parameter docstring.
     identity_observability_by_clip_id: Mapping[str, dict] | None = None,
+    # D-239: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring.
+    lost_atom_ownership_by_clip_id: Mapping[str, ExactLostAtomOwnership] | None = None,
 ):
     """StoryValidator after the one semantic authority has ruled: validate
     and report on the resolver's applied selection, never edit it.
@@ -1828,6 +1862,7 @@ def _apply_post_authority_validation_only(
             exact_match_by_clip_id=exact_match_by_clip_id,
             proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
             proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
+            lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
         )
         if _materiality_authority_enabled else None
     )
@@ -2094,6 +2129,9 @@ def apply_post_authority_story_validation(
     # D-237G: see `apply_final_story_coherence_validation`'s own
     # identically-named parameter docstring.
     identity_observability_by_clip_id: Mapping[str, dict] | None = None,
+    # D-239: see `apply_final_story_coherence_validation`'s own
+    # identically-named parameter docstring.
+    lost_atom_ownership_by_clip_id: Mapping[str, ExactLostAtomOwnership] | None = None,
 ):
     """The ONE entry point for the AUTHORITATIVE second pass. Requires the
     typed `context`; a missing context (or a caller-reported
@@ -2143,4 +2181,5 @@ def apply_post_authority_story_validation(
         proposition_candidate_ids_by_attempt_id=proposition_candidate_ids_by_attempt_id,
         proposition_slot_evidence_by_id=proposition_slot_evidence_by_id,
         identity_observability_by_clip_id=identity_observability_by_clip_id,
+        lost_atom_ownership_by_clip_id=lost_atom_ownership_by_clip_id,
     )
