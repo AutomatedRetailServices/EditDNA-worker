@@ -63524,3 +63524,269 @@ authorizes either.**
 Then STOP.
 
 DO NOT IMPLEMENT D-248. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-248 — Audio Finishing loudness/gain-continuity/peak POLICY design (offline forensic + design only)
+
+**Objective.** Post D-247 (real MEASUREMENT foundation, verdict A). Design the
+smallest safe P0 Audio Finishing POLICY layer — whole-video loudness,
+adjacent-take gain continuity, peak/clipping safety, final audio QC — without
+implementing any DSP, without canonizing any numeric target, and without
+touching Renderer/Boundary/Pacing/Audio-Join/Freeze/QC pass-fail behavior.
+Docs-only. No `.py` changed this gate.
+
+### STAGE 1 — Measurement contract review (D-247 audit)
+
+| Metric | Reliability | Limitations | Missing-value behavior | Short-window behavior | Silence behavior | Policy-authority suitable? |
+|---|---|---|---|---|---|---|
+| `integrated_loudness_lufs` | High on ≥ a few seconds of real signal (BS.1770 via `ebur128`) | Needs enough samples for a stable integrated gate; on a near-instant clip the "Threshold" gating step barely engages | `None` + entry in `measurement_errors`, never fabricated | Degrades gracefully but is the single most short-window-sensitive metric (D-247's own short-file test only asserts `COMPLETE`-or-`PARTIAL`, never a specific number) | Reports real `-inf` for true digital silence (verified) — never silently reads as "quiet but fine" | YES, for whole-clip/whole-video windows meeting a minimum duration; NOT YET for sub-second windows without a minimum-duration floor (Stage 21) |
+| `loudness_range_lu` | Meaningful only over enough dynamic variation | A single flat tone reports `0.0` correctly, not an error — that is real, not a limitation | `None` on parse failure | Same short-window caveat as integrated loudness, compounded (LRA needs more history than the integrated gate) | `0.0` on silence (real, not fabricated) | DIAGNOSTIC-ONLY for V1 — informative, not a gating input (no adjacent-continuity or whole-video decision in this design uses LRA as a blocking signal) |
+| `true_peak_dbfs` | High — BS.1770 oversampled true-peak estimate from `ebur128` | Requires the same minimum-signal window as loudness; on an all-silent file reports real `-inf` | `None` + error | Usable even on short signal (peak detection needs far less history than integrated loudness) | `-inf` (correct) | YES — the single most policy-authoritative metric for peak/clipping decisions (Stage 7) |
+| `sample_peak_dbfs` | High, deterministic (`astats` "Overall" "Peak level dB") | Measures only the DISCRETE stored samples — cannot see inter-sample analog overs a reconstruction filter would reveal; NOT interchangeable with true peak | `None` + error | Usable on very short signal | Real, very negative value on silence | YES, but only as a FALLBACK when true peak is unavailable (Stage 7) — never presented as true peak |
+| `clipping_status` | A conservative, honestly-documented **proxy** (Stage 13), not a certified flat-top detector; this ffmpeg build has no dedicated clipped-sample counter (`astats` filter option list confirmed empirically, D-247) | Cannot distinguish "one legitimate full-scale peak sample" from "many consecutive clipped samples" | `UNKNOWN` when peak unavailable, never guessed | Still computable on very short signal (only needs the peak) | `NO_CLIPPING_DETECTED` correctly on silence | DIAGNOSTIC + gating for "never increase gain," NOT sufficient alone to declare a file categorically defective (Stage 13) |
+| `duration_sec` | High (ffprobe/format duration, or exact `end-start` on a caller-supplied window) | None material | `None` + error on probe failure | N/A | N/A | YES |
+| `sample_rate_hz` / `channel_count` / `channel_layout` | High (ffprobe stream fields) | `channel_layout` can be `None` on a stream that never tagged one (observed on some synthetic WAVs) even though `channel_count` is present — do not treat a missing layout string as "no audio" | `None` + error | N/A | N/A | YES for the technical/routing decisions in Stage 16, not itself a loudness decision |
+| `silence_result` (reused `check_accidental_silence`) | High — real `silencedetect` intervals | Tuned by its own `noise_floor_db`/`max_allowed_silence_sec` defaults (D-028), not audio-finishing-specific; a caller must pass its own `protected_pause_windows` for editorially intentional pauses, or a real dramatic pause will read as an anomaly | `None` only if `include_silence=False`; otherwise always a real `PostRenderQCResult` | Short windows can still register short silence intervals correctly | This IS the silence check | YES, as an input to the silence/near-silence policy (Stage 14) |
+| segment/window measurement (`start_sec`/`end_sec`) | High for the parts it measures — window args are real `-ss`/`-t` on the real subprocess (D-247 windowed test proves two different real levels are actually distinguished) | The caller must choose a window wide enough for a stable loudness read (Stage 21's minimum-window-duration decision); an arbitrarily short window inherits every short-window caveat above | Same as whole-file | This is the mechanism a short-window policy will need to bound | N/A | YES, this is the exact mechanism Stage 4/18's per-segment plan needs |
+
+**Conclusion:** not every metric is equally policy-authoritative. `true_peak_dbfs` is the peak-safety authority; `sample_peak_dbfs` is its fallback only; `integrated_loudness_lufs` is the loudness authority for windows above a to-be-set minimum duration; `loudness_range_lu` stays diagnostic; `clipping_status` gates "never raise gain further," not "reject the file."
+
+### STAGE 2 — Whole-video loudness policy (design)
+
+1. **Canonical target?** Searched the full repository and `docs/CUTSELL_DECISIONS.md` through D-247 for any adopted LUFS/true-peak/tolerance/delta value. **Confirmed NONE** — `finishing_contract.py`'s `target_loudness_lufs`/`true_peak_ceiling_dbtp` are both `None`, never populated (this was already independently confirmed in D-246 line 63191 and D-247's own module docstring); no other module defines one. Per this gate's own instruction: **`PRODUCT_OWNER_NUMERIC_DECISION_REQUIRED`** (Stage 3/21).
+2. **Point or range?** PROPOSED POLICY OPTION (not canonical): a range (target ± tolerance), not a single point. Speech loudness measured over real, varied UGC talking-head material will legitimately land inside a band even when the take is fine; treating any measured value that misses an exact point as "needs correction" would trigger correction on already-acceptable material — the opposite of "smallest safe" policy.
+3. **Skip normalization when already acceptable?** PROPOSED: yes — a whole-video integrated loudness inside the (still Product-Owner-set) tolerance band should resolve to a `NO_CHANGE` policy state (Stage 5), never a forced normalization pass. This directly serves "no audible normalization artifacts" from the Product Context.
+4. **Very large required gain moves?** PROPOSED: abstain/escalate, never silently apply. A large required move usually means the source recording itself has a problem (bad mic gain-staging, wrong room) that a blind loudness-matching gain would only mask, often audibly (raised noise floor, pumping risk). See Stage 6 (`ABSTAIN_INSUFFICIENT_EVIDENCE`).
+5. **Very short videos?** PROPOSED: apply the same minimum-window-duration floor as any other measurement (Stage 21); below that floor, `measurement_status` is honestly `PARTIAL`/`UNAVAILABLE` and the policy must resolve to `ABSTAIN_INSUFFICIENT_EVIDENCE`, never guess a gain from an unstable integrated read.
+6. **Near-silent/silent whole video?** PROPOSED: never chase a target on silence/near-silence — see Stage 14 (a dedicated abstention state, not a gain move).
+7. **Clipping risk vs. positive gain?** PROPOSED: any required positive gain move is constrained by peak headroom — see Stage 7/8. A loudness policy that ignores peak risk in isolation is exactly the "two separate concerns pretending to be one" failure D-098's target architecture (Section 4) already warns against for upstream-vs-downstream perceptual concerns; the same separation-of-concerns discipline applies here between loudness and peak.
+
+### STAGE 3 — Numeric policy options (bounded, non-canonical)
+
+No canonical value exists (confirmed above). Options table for **target integrated loudness** (the recurring reference points in short-form speech/UGC mastering practice; presented for Product Owner comparison only — **none of these is adopted by this gate**):
+
+| Option | Target integrated LUFS | Tolerance | Advantages | Risk | Headroom implication | Limiter/true-peak compatibility |
+|---|---|---|---|---|---|---|
+| A — Conservative social speech | ≈ −16 LUFS | ± 1–1.5 LU | Matches common platform loudness-normalization reference points; safest against perceived-loud complaints; most headroom | May read as noticeably quieter than louder competing creator content played back-to-back with autoplay | Most headroom below any true-peak ceiling — lowest limiter engagement risk | Easiest to pair with a conservative true-peak ceiling |
+| B — Moderately present creator speech | ≈ −14 LUFS | ± 1 LU | A common "present but not hot" creator-speech reference point; still leaves real headroom | Slightly less margin than Option A | Comfortable headroom under a typical true-peak ceiling | Compatible with a moderate limiter ceiling |
+| C — Hotter creator speech | ≈ −11 to −12 LUFS | ± 1 LU | Competes loudness-wise with aggressively mastered short-form content | Materially higher clipping/limiting engagement risk; more audible-limiter-artifact risk on natural speech dynamics; conflicts with the Product Context's explicit "no aggressive over-processing" goal | Least headroom — limiter becomes load-bearing rather than a safety net (violates Stage 8's own "limiter is safety, not primary mechanism" design) | Requires the most careful, most frequently engaged limiter — the option most in tension with "natural dynamics" |
+
+**EXISTING PROJECT FACT vs PROPOSED POLICY OPTION, explicitly separated:** the fact is "no target exists, `finishing_contract.py`'s fields are dormant `None`s." The table above is 100% PROPOSED POLICY OPTION content for Product Owner comparison — no option is marked canonical, no option is encoded into any `.py` file this gate.
+
+### STAGE 4 — Adjacent-take gain-continuity policy (design)
+
+**Which measurement to compare:** PROPOSED — a **bounded speech window near the join**, not the full selected clip's integrated loudness. Rationale: a take can legitimately vary in energy across its own length (a rhetorical build, a quieter aside) while still joining cleanly if the levels right at the cut point are close; comparing whole-clip integrated loudness would flag that natural variation as a false "mismatch," and would miss a real discontinuity that happens to average out across a longer clip. D-247's windowed `measure_audio(start_sec=, end_sec=)` is exactly the mechanism this needs — no new measurement primitive required, only a policy that chooses a window width (Stage 21: this is itself a Product-Owner-relevant minimum-window-duration decision, since too short a window inherits Stage 1's short-window instability).
+
+**Natural expressive variation vs. recording-level discontinuity — NOT a classifier, a bounded evidence rule:** PROPOSED design contract (no implementation): compare the two adjacent bounded windows' `integrated_loudness_lufs` (and secondarily `sample_peak_dbfs`, never as the primary signal) computed the same way on both sides of the cut. A delta above a to-be-set maximum-adjacent-delta (Stage 21) is treated as evidence of a recording-level discontinuity ONLY when both windows individually meet the minimum-duration/measurement-`COMPLETE`-or-`PARTIAL`-with-a-valid-number floor from Stage 1 — an `UNAVAILABLE`/`MEASUREMENT_ERROR` window on either side means `ABSTAIN_INSUFFICIENT_EVIDENCE`, never a guessed correction. This is a bounded threshold rule, explicitly NOT a learned/heuristic classifier — consistent with D-098 Section 10's binding "anti-rule-proliferation" discipline (classify before adding a new special-case rule) and with this gate's own "do not implement a classifier" instruction.
+
+### STAGE 5 — Gain-correction authority states (design)
+
+Project-native vocabulary, matching the existing `*_STATUS_*`/`EDGE_STATUS_*`-style enums already established (`audio_finishing_measurement.MEASUREMENT_STATUS_*`/`CLIPPING_STATUS_*`, D-242's `EDGE_STATUS_*`):
+
+- `GAIN_STATE_NO_CHANGE_NEEDED` — measured level already inside the accepted band/delta.
+- `GAIN_STATE_CORRECTION_ALLOWED` — evidence sufficient, required move inside the authorized envelope (Stage 6).
+- `GAIN_STATE_CORRECTION_LIMITED` — evidence sufficient but the ideal move exceeds the authorized envelope; a bounded partial move up to the envelope's edge is permitted, never the full move.
+- `GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE` — measurement `PARTIAL`/`UNAVAILABLE`/`MEASUREMENT_ERROR`, window too short, or contradictory metrics (Stage 19).
+- `GAIN_STATE_BLOCKED_PEAK_RISK` — the required positive move would put true peak (or, absent true peak, sample peak) at/above the peak ceiling.
+- `GAIN_STATE_BLOCKED_SILENCE` — material is silent/near-silent (Stage 14); never chase a target on it.
+- `GAIN_STATE_BLOCKED_CLIPPING` — `clipping_status == CLIPPING_DETECTED`; never raise gain on already-clipped material (Stage 13).
+- `GAIN_STATE_UNKNOWN` — a state genuinely not yet covered; must never be silently treated as `NO_CHANGE_NEEDED`.
+
+### STAGE 6 — Maximum automatic gain move
+
+No canonical value exists (confirmed in Stage 2/3's search). **`PRODUCT_OWNER_NUMERIC_DECISION_REQUIRED`.** Rationale for why a ceiling belongs in policy at all (not a recommendation of its value): an unbounded automatic gain chasing a fixed target will, on a badly gain-staged source recording, raise the noise floor and any room tone/hum right along with the voice — audibly worse than leaving the take at its native level. A maximum-move envelope is what makes `GAIN_STATE_CORRECTION_LIMITED` (Stage 5) meaningful instead of vacuous.
+
+### STAGE 7 — Peak safety policy (design)
+
+- **When is positive gain prohibited?** PROPOSED: whenever applying the full candidate gain move would bring `true_peak_dbfs` (preferred) or, if unavailable, `sample_peak_dbfs` (fallback) at/above the true-peak ceiling (Stage 21 — no canonical value yet) minus any limiter margin.
+- **When is the limiter required?** PROPOSED: whenever a correction is applied at all and the resulting estimated peak is within some safety margin of the ceiling — i.e., the limiter is the backstop for the LAST bit of headroom, not the primary mechanism (Stage 8).
+- **When must the system abstain instead of limiting harder?** PROPOSED: when even the maximum authorized gain move (Stage 6) plus limiting would still not reliably keep the file under the ceiling with real margin, or when peak evidence itself is `UNKNOWN`.
+- **True peak unavailable — can sample peak act as fallback?** YES, explicitly, but the correction plan (Stage 18) must record which one it used (`provenance`) and must never present a sample-peak-based decision as if it had true-peak evidence — this is a direct extension of D-247's own "never mislabel sample peak as true peak" discipline.
+- **What evidence is insufficient?** A `clipping_status` of `UNKNOWN` combined with no usable `true_peak_dbfs` AND no usable `sample_peak_dbfs` — in that state, ANY positive gain move is prohibited outright (`GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE`), regardless of how attractive the loudness case for raising gain looks.
+
+### STAGE 8 — Limiter role (design)
+
+The limiter is **SAFETY / FINAL PEAK CONTROL**, never the primary mechanism for fixing take-to-take level mismatch — mismatch is Stage 4/5's bounded gain-continuity correction's job; the limiter's only job is to guarantee the final delivered file never exceeds the (still Product-Owner-set) true-peak ceiling regardless of what gain moves happened upstream.
+- **When may it execute?** Only after a gain-correction plan (Stage 18) has already been computed and applied (in the plan, not yet on media) — the limiter operates on the POST-correction estimated signal, as the last stage before final delivery, per Stage 11's order.
+- **What evidence does it consume?** The post-correction estimated/measured true peak (or sample-peak fallback) only — it is not itself a loudness-matching tool and must not consume loudness measurements to decide how hard to limit.
+- **When must it abstain?** When peak evidence is `UNKNOWN` even after correction — abstaining here means routing to `GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE`/human review, never silently shipping an unverified-peak file.
+- **Before or after whole-video normalization?** AFTER — normalization (Stage 2) sets the loudness target; the limiter's whole reason to exist is to catch whatever peak consequence that move has, so it must run downstream of it (Stage 11 makes this explicit in the operation order).
+- **Numeric ceiling:** none chosen here (Stage 21) — this stage designs the ROLE, not the value.
+
+### STAGE 9 — Compression (dynamic-range) classification
+
+**P2 (later), NOT P0/P1 for this V1 gate.** Rationale: the Product Context explicitly asks for "natural dynamics," "no pumping," and "no aggressive over-processing" — general dynamic-range compression is the processing category most likely to violate all three if applied broadly, and none of D-246's identified P0 gaps (loudness measurement/normalization, gain continuity, peak safety) require it: a correctly leveled, peak-safe, continuity-matched take of natural spoken UGC does not need its dynamics reshaped to sound "professionally edited" in the sense the Product Context describes. Reserve real compression for a later gate, only with concrete real-media evidence of a need (e.g., a specific speaker/room combination whose natural dynamic range is too wide for consistent perceived loudness even after correct leveling) — matching D-246's own P2 gap-matrix entry for this capability, unchanged by this gate.
+
+### STAGE 10 — Two-level finishing architecture
+
+**RECOMMENDED (design-level, not a numeric canonization) over independently normalizing every clip:**
+
+- **LEVEL 1 — bounded adjacent-take continuity correction:** narrow, evidence-gated gain nudges only at join boundaries where a real discontinuity is measured (Stage 4/5), applied per-segment before/at render composition (Stage 11).
+- **LEVEL 2 — whole-video final loudness normalization / peak safety:** one whole-delivery-file loudness+peak pass after render, informed by measuring the ACTUAL rendered output (Stage 11), never re-deriving from pre-render segment measurements alone (the render's own click-fades/resampling/duration-locking already change the signal slightly from the raw source).
+
+**Explicit risk audit of "normalize every clip independently" instead:**
+- **Pumping:** independently normalizing many short clips to the same integrated target, then concatenating, can produce audible level "pumping" at every join even when no single clip is individually wrong — the very artifact Level 1's narrower, evidence-gated approach is designed to avoid (it only acts where a real discontinuity is measured, not everywhere).
+- **Over-normalization:** a short clip's own integrated loudness is the least reliable measurement in Stage 1's own table (short-window instability) — normalizing per-clip means every clip inherits that instability as its own gain decision, whereas Level 2's whole-video measurement is taken over enough material to be reliable.
+- **Destroying intentional emphasis:** per-clip normalization by construction erases exactly the kind of real vocal emphasis/energy variation across takes the Product Context's "story/personality" and CLAUDE.md's editorial doctrine both protect; a two-level design that only intervenes at measured DISCONTINUITIES (not at every natural variation) is the one that can honor "natural dynamics."
+- **Accumulating gain differences:** per-clip independent normalization has no mechanism to prevent drift where each clip's own small measurement noise compounds into an audibly uneven final video; a single whole-video Level 2 pass is the natural place to correct for accumulated drift once, deterministically.
+
+### STAGE 11 — Order of operations (design)
+
+Extends the existing architecture (`Boundary → Pacing → Audio Join → Render → Audio Finishing → QC`, per D-098/D-246) with the internal Audio Finishing sequence:
+
+```
+1. Source/per-clip measurement (D-247, pre-render, on real selected-clip source windows)
+2. Adjacent-take (join-boundary) measurement + Level-1 continuity analysis   [Stage 4]
+3. Bounded Level-1 gain-correction PLAN for flagged joins only                [Stage 5/18]
+4. Audio Join treatment (existing D-224/D-233 architecture, UNCHANGED)        [Stage 12]
+5. Render (existing render.py concat/mux, UNCHANGED this gate)
+6. Whole-rendered-file measurement (D-247, post-render, on the actual delivered signal)
+7. Level-2 whole-video loudness/peak PLAN (normalization + limiter)          [Stage 2/7/8/18]
+8. (Future) correction EXECUTION -- applying the plan's structured intent -- explicitly NOT built by this gate or by D-247
+9. Final post-render measurement + verification                              [Stage 17]
+```
+
+Structural editing decisions (which clip is selected, where a cut lands, join treatment choice) stay exactly where they are today — Selection/BestTake/Boundary/Pacing/AudioJoin — and are never moved into Finishing; Finishing only ever proposes a gain/loudness/limiter PLAN on already-decided audio, consistent with the canonical quality ladder's own routing rule ("a QA/reviewer authority routes failures to the owning authority... never edits membership").
+
+### STAGE 12 — Audio Join interaction (design)
+
+Audio Join remains `SAFE_BUT_NOT_RICH_ENOUGH` (D-245) with no identified defect — this gate changes nothing about it. Gain correction must happen in **two stages relative to join composition**, matching Stage 11's order:
+- Level-1 (join-boundary continuity) gain evidence is gathered and planned **before** join composition (it is, definitionally, about the state of the two takes AT the join before any join treatment smooths across it) — but even once implemented, any actual gain nudge this produces must be expressed as an ordinary per-segment `volume=` adjustment (the existing, already-present hook in `render.py`'s segment filter chain — see D-246's own audit of `_segment_command`) applied ALONGSIDE whichever join treatment (`CLICK_FADE`/`SHORT_CROSSFADE`/`AMBIENCE_CARRY_*`/`AMBIENCE_BRIDGE`) is already authorized for that join, never instead of it and never by altering the join's own timing.
+- Level-2 (whole-video loudness/peak) correction happens strictly **after** join composition and render, on the real muxed output — it cannot invalidate join timing because it is a gain-only operation on already-finalized audio, not a re-cut.
+- **CLICK_FADE**: unaffected — it is a fixed 12ms fade already unconditionally present (D-246); a whole-video gain scalar or per-segment gain nudge composes with a fade trivially (a fade is relative, not absolute).
+- **SHORT_CROSSFADE / J_CUT / L_CUT / ambience carry/bridge**: all currently diagnostic-only or renderer-extension-required (D-246) — this gate makes no claim about their interaction beyond design intent: whichever renderer extension eventually implements them must apply any authorized gain nudge to the same segment audio the join filter consumes, not as a separate, order-ambiguous pass.
+
+### STAGE 13 — Clipping-proxy authority (classification)
+
+**DIAGNOSTIC + narrow gating authority — NOT strong enough to declare media categorically "clipped" as a quality verdict, and NOT an exact clipped-sample detector.** Precise classification:
+- **Strong enough to block positive gain?** YES — a peak already at/near full scale is real, deterministic evidence that ANY further positive gain risks exceeding it; blocking further gain does not require certainty about HOW MANY samples clipped, only that headroom is already exhausted.
+- **Strong enough to call media "clipped" as a defect verdict?** NO — a legitimate signal can, rarely, peak exactly at full scale without audible distortion, and this ffmpeg build's `astats` (confirmed empirically, D-247) offers no sample-count corroboration to disambiguate that from real flat-topping. Presenting `CLIPPING_DETECTED` as a certified defect finding would overclaim precision the tool does not provide.
+- **Diagnostic-only?** Also yes, in the sense that it belongs in `measurement_errors`/diagnostics output for a human to review, not as an unattended auto-reject trigger.
+- **Other exact conclusion:** the correct authority level is exactly `GAIN_STATE_BLOCKED_CLIPPING` (Stage 5) for the narrow "don't add gain" decision, combined with a diagnostic flag for human/QC visibility — never a standalone technical-failure verdict.
+
+### STAGE 14 — Silence / near-silence policy (design)
+
+- **Silent files / long silent regions:** PROPOSED — resolve directly to `GAIN_STATE_BLOCKED_SILENCE`; never compute or apply a gain move on `-inf`/near-`-inf` integrated loudness. A gain system that tried to "fix" silence toward a target would be raising noise floor/room tone/hum toward an arbitrary level — audible, and pointless (there is no voice there to make louder).
+- **Near-silent clips:** PROPOSED — the reused `silence_result` (Stage 1) is the trigger; a clip/window whose measured content sits inside a real, non-protected silence interval inherits the same `BLOCKED_SILENCE` state, never a "very quiet, needs +N dB" reading.
+- **Unstable/unavailable loudness on a speech window:** falls under `GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE` (Stage 5/19), distinct from `BLOCKED_SILENCE` (silence is a known, confirmed condition; instability is an unknown one) — the two must not be conflated in diagnostics.
+
+### STAGE 15 — Short-form edge cases (design)
+
+Very short selected clips, single-word inserts, and micro-reactions all inherit Stage 1's short-window instability for `integrated_loudness_lufs`/`loudness_range_lu` specifically (peak measurements remain usable even very short). **Fail-closed behavior (design):** below the to-be-set minimum-window-duration (Stage 21), any loudness-based gain decision resolves to `GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE` — never a gain move computed from an admittedly unstable number, and never silently promoted to `NO_CHANGE_NEEDED` either (that would hide a real "we don't know" behind a false-clean state). Peak-safety decisions (Stage 7) remain available on short material since peak detection does not share the same instability.
+
+### STAGE 16 — Stereo / mono policy (design)
+
+`render.py`'s existing segment filter chain applies `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo` per segment BEFORE the single concat/mux pass (confirmed in D-246's full trace of `_segment_command`) — i.e., standardization to 48k/stereo already happens pre-render, per segment, today, for reasons unrelated to Finishing (deterministic joinability). Consequences for gain/loudness policy:
+- **Source/per-clip measurement (Stage 11 step 1)** must run on the ORIGINAL source file (pre-standardization), matching D-247's `measure_audio`'s current behavior of measuring whatever path it is given — never on an intermediate re-encoded artifact, so a mono source's real, native level is what gets measured, not a level implicitly altered by an up-mix.
+- **Whole-rendered-file measurement (Stage 11 step 6)** necessarily runs POST-standardization, since by definition it measures the actual delivered file — this is correct and intentional for Level 2 (Stage 10), since Level 2's job is to finish the ACTUAL delivered signal.
+- **Explicit guard:** ffmpeg's default mono→stereo `aformat` channel-layout conversion duplicates the mono channel into both stereo channels rather than mixing/summing (verified against this codebase's own convention of never silently altering perceived level for an unrelated technical reason) — so mono sources should not receive an unintended perceived-loudness change purely from the existing stereo standardization step; this gate makes no code change here, only records the invariant a future correction-execution gate must preserve (never let stereo standardization itself count as, or be confused with, a policy-authorized gain change).
+
+### STAGE 17 — Post-render verification design (state machine, design only)
+
+Two explicitly separated failure classes, matching Stage 1's authority findings and this gate's own instruction not to modify current QC yet:
+
+**TECHNICAL FAILURE** (would belong with existing `post_render_media_qc.py`/`PostRenderQCResult` physical-finding-kind authority, unchanged this gate):
+- audio stream absent when one was expected
+- decode/measurement totally `UNAVAILABLE` (not merely `PARTIAL`)
+- duration/sample-rate/channel-count inconsistent with the render plan
+- true peak AND sample peak both unavailable (a genuine measurement gap, not a policy verdict)
+
+**FINISHING POLICY OUT-OF-RANGE** (a new, distinct verdict category a future gate would add — NOT implemented, NOT merged into existing PASS/FAIL this gate):
+- measured whole-video loudness still outside the (Product-Owner-set) tolerance band after the Level-2 plan was supposed to correct it
+- measured true peak still above ceiling after limiting
+- a join-boundary gain-continuity delta still exceeds the maximum after Level-1
+- clipping still detected post-correction
+
+The state machine's factual checks (design only): `measurement_complete? / loudness_measurable? / true_peak_measurable? / clipping_risk? / audio_stream_present? / silence_or_dropout? / duration_valid? / sample_rate_ok? / channel_count_ok?` — each answerable directly from an `AudioFinishingMeasurement` (Stage 1), feeding into the TECHNICAL/POLICY split above. No code changes this gate.
+
+### STAGE 18 — `AudioFinishingPlan` contract (design only, not implemented)
+
+Proposed future structured object (name follows the existing `*Plan`/`*Spec` convention — `CanonicalEditPlan`, `FinishingSpec`, `render_plan.RenderSegment`):
+
+```
+AudioFinishingPlan:
+  measurement_reference          # which AudioFinishingMeasurement(s) (pre- and/or
+                                  # post-render) this plan was computed from -- provenance,
+                                  # never a bare number with no traceable source
+  per_segment_gain_adjustments   # [{segment_id, gain_db, reason, gain_state, evidence_ref}, ...]
+                                  # -- Level 1, join-boundary-scoped only
+  whole_video_gain_adjustment    # {gain_db, reason, gain_state, evidence_ref} or None -- Level 2
+  normalization_strategy         # a named policy option reference (Stage 3), never a bare
+                                  # unlabeled float -- traces back to which PO-approved option applied
+  limiter_authorization          # {authorized: bool, ceiling_dbtp_ref, reason}
+  peak_constraint                # {ceiling_source: "true_peak"|"sample_peak_fallback", value_ref}
+  abstentions                    # [{scope: segment_id|"whole_video", gain_state, reason}, ...]
+  reasons                        # human-readable trace for every non-NO_CHANGE decision
+  provenance                     # tool versions, measurement timestamps, code/commit fingerprint
+                                  # (matching D-095's "CODE EXISTS != VIDEO USED IT" traceability
+                                  # discipline already binding for the render pipeline)
+```
+
+No raw ffmpeg filter strings appear anywhere in this contract — a future renderer/executor consumes structured intent (`gain_db`, `limiter_authorization`, etc.) and is itself responsible for turning that into whatever ffmpeg filter graph implements it, exactly mirroring how `render_plan.RenderSegment` already separates "what to render" from "the ffmpeg command that renders it." This plan is inert data — nothing in this gate constructs, returns, or consumes one.
+
+### STAGE 19 — Fail-closed contract (design)
+
+Automatic finishing must resolve to an abstention state (Stage 5) — never fabricate acceptable audio — whenever:
+- measurement is `UNAVAILABLE`/`MEASUREMENT_ERROR` for the metric a decision depends on
+- audio is missing entirely
+- material is substantially silent (Stage 14)
+- peak safety is `UNKNOWN` where a positive gain move is being considered (Stage 7)
+- the required gain move exceeds the authorized envelope even after `CORRECTION_LIMITED`'s partial move (Stage 5/6)
+- metrics contradict each other (e.g., `sample_peak_dbfs` reports headroom while `clipping_status` reports `CLIPPING_DETECTED` for the same window — a real possibility if they were measured over different windows/precision; the more conservative reading always wins)
+- any other condition this design has not enumerated — the default state is always `GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE`/`GAIN_STATE_UNKNOWN`, never a silent `NO_CHANGE_NEEDED` or a guessed correction.
+
+### STAGE 20 — Policy matrix (design)
+
+| Condition | Measurement evidence | Policy state | Future action | Fail-closed action |
+|---|---|---|---|---|
+| Already acceptable | Whole-video/window loudness inside tolerance band, peak under ceiling | `GAIN_STATE_NO_CHANGE_NEEDED` | none | n/a |
+| Too quiet | Loudness below tolerance band, `COMPLETE`/reliable measurement, headroom available | `GAIN_STATE_CORRECTION_ALLOWED` (or `_LIMITED` if move exceeds envelope) | apply bounded positive gain per Stage 18 plan | if envelope exceeded, `CORRECTION_LIMITED`, not silently the full move |
+| Too loud | Loudness above tolerance band | `GAIN_STATE_CORRECTION_ALLOWED`/`_LIMITED` (negative gain has no peak-risk direction, so envelope is the only bound) | apply bounded negative gain | same envelope logic |
+| Adjacent-clip mismatch | Two bounded join-window measurements both reliable, delta exceeds max-adjacent-delta (Stage 21) | `GAIN_STATE_CORRECTION_ALLOWED`/`_LIMITED` at the join only | Level-1 per-segment nudge (Stage 18) | if either window unreliable, `ABSTAIN_INSUFFICIENT_EVIDENCE` |
+| Peak risk | Positive gain candidate would put true/sample peak at/above ceiling minus limiter margin | `GAIN_STATE_BLOCKED_PEAK_RISK` | none automatic; limiter may still apply to an already-planned move within margin | never widen the move to compensate |
+| Clipping risk | `clipping_status == CLIPPING_DETECTED` | `GAIN_STATE_BLOCKED_CLIPPING` | none — no further positive gain | flag diagnostically (Stage 13), never auto-reject the whole delivery on this alone |
+| Silence | `silence_result` flags the region / integrated loudness `-inf` | `GAIN_STATE_BLOCKED_SILENCE` | none | never chase target on silence |
+| Measurement unavailable | `MEASUREMENT_STATUS_UNAVAILABLE`/`MEASUREMENT_ERROR` | `GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE` | none automatic; route to human review if delivery-blocking | never guess |
+| Short clip (below min window) | `PARTIAL` loudness on an otherwise-present signal | `GAIN_STATE_ABSTAIN_INSUFFICIENT_EVIDENCE` for loudness; peak decisions still usable | peak-only evaluation may still proceed | never treat partial loudness as reliable |
+| Mono source | `channel_count == 1`, otherwise normal measurement | Same as stereo — channel count does not itself change the gain state | measure/plan on the native mono signal (Stage 16) | n/a |
+| True peak unavailable | `true_peak_dbfs is None`, `sample_peak_dbfs` present | Peak decisions fall back to sample peak (Stage 7), tagged in provenance | proceed with fallback, tagged | if sample peak ALSO unavailable, `ABSTAIN_INSUFFICIENT_EVIDENCE` for any positive gain |
+
+### STAGE 21 — Product Owner numeric decisions required
+
+| Decision | Status |
+|---|---|
+| Target integrated LUFS (whole-video) | **PRODUCT_OWNER_DECISION_REQUIRED** |
+| Acceptable loudness tolerance/range | **PRODUCT_OWNER_DECISION_REQUIRED** |
+| Maximum adjacent-take loudness delta | **PRODUCT_OWNER_DECISION_REQUIRED** |
+| Maximum automatic gain correction (envelope) | **PRODUCT_OWNER_DECISION_REQUIRED** |
+| True-peak ceiling (dBTP) | **PRODUCT_OWNER_DECISION_REQUIRED** |
+| Minimum window duration for a reliable loudness read | **PRODUCT_OWNER_DECISION_REQUIRED** (a technical-feeling number, but it directly gates when the system is allowed to act vs. must abstain — a product-risk decision, not a pure engineering constant) |
+
+None of these is `ALREADY_CANONICAL`; none is `NOT_REQUIRED` — every one gates a real future automatic action.
+
+### STAGE 22 — RECOMMENDATION ONLY (not canonical)
+
+- **Target LUFS: RECOMMENDATION ONLY — Option B (≈ −14 LUFS)** from Stage 3. Reasoning: sits between the safest (Option A) and the riskiest-for-naturalness (Option C); "moderately present" matches the Product Context's "clear spoken voice... not broadcast mastering" framing better than either extreme. Trade-off: slightly hotter than the most conservative option, so slightly less headroom. Risk: still requires a real true-peak ceiling (Stage 22 below) to stay safe.
+- **Tolerance: RECOMMENDATION ONLY — ± 1 LU.** Reasoning: tight enough to keep perceived loudness consistent across a creator's video library, loose enough that ordinary take-to-take variance inside a single acceptable delivery does not trigger unnecessary correction (serves "skip normalization when already acceptable," Stage 2). Trade-off: a wider tolerance would trigger fewer corrections (safer, less processing) but allow more perceptible loudness drift between videos.
+- **Adjacent-take delta: RECOMMENDATION ONLY — 2 LU.** Reasoning: roughly the point at which a level difference between two spliced takes becomes a noticeable "jump" rather than natural delivery variation, based on the same order-of-magnitude reasoning as the tolerance above (a jump bigger than the whole-video tolerance itself is a reasonable floor for "this looks like a discontinuity, not variance"). Trade-off: too tight risks flagging ordinary vocal emphasis as a defect (violates "avoid natural expressive variation" from Stage 4); too loose risks leaving an audible jump uncorrected.
+- **Max automatic gain: RECOMMENDATION ONLY — ±6 dB envelope.** Reasoning: large enough to fix a genuinely too-quiet/too-loud take without materially raising a bad recording's noise floor into audibility; small enough that hitting the envelope's edge is a real, informative signal ("this source has a bigger problem than loudness policy can safely fix") rather than routine. Trade-off: a source needing more than 6 dB of correction will resolve to `CORRECTION_LIMITED`, correctly surfacing that as a recording-quality issue rather than silently over-correcting.
+- **True-peak ceiling: RECOMMENDATION ONLY — −1.0 dBTP.** Reasoning: a widely used consumer-delivery safety margin below 0 dBFS that leaves room for lossy re-encoding (the delivery pipeline already re-encodes to AAC, D-246) to introduce small inter-sample overs without exceeding true 0 dBFS on playback. Trade-off: tighter than −1.0 dBTP would be more conservative but reduces achievable loudness under Option B; looser risks audible clipping after re-encode.
+- **Minimum window duration: RECOMMENDATION ONLY — 1.5 seconds.** Reasoning: short enough to usefully bound a real spoken clause/micro-reaction, long enough to give `ebur128`'s integrated-loudness gate real material to work with (Stage 1's own short-window caveat). Trade-off: a shorter floor would let more short clips participate in gain-continuity policy but with proportionally less reliable numbers; the fail-closed default (Stage 19) means anything below this floor simply abstains rather than acting on a shaky number, so this value primarily trades "how often the system can act" against "how confident it is when it does."
+
+**None of the above is canonized. `finishing_contract.py` is untouched. No `.py` file encodes any of these numbers.**
+
+### STAGE 23 — Next implementation gate (design only, not authorized)
+
+**D-249 — Audio Finishing POLICY CONTRACT + loudness/gain PLAN GENERATION, offline only** (not implemented by this gate): once the Product Owner approves Stage 21's numeric decisions (or provides different ones), the smallest safe next gate is to implement the `AudioFinishingPlan` dataclass (Stage 18) and a pure, deterministic `generate_audio_finishing_plan(...)` function that consumes real `AudioFinishingMeasurement`s (pre- and post-render) and the approved policy constants, and PRODUCES a plan object — still zero media mutation, zero DSP, zero renderer wiring. A distinct, later gate (D-250 or beyond) would then wire plan EXECUTION into the renderer.
+
+### VERDICT
+
+**A. SAFE AUDIO FINISHING POLICY ARCHITECTURE DEFINED — PRODUCT OWNER NUMERIC DECISIONS IDENTIFIED — READY FOR PO APPROVAL THEN PLAN-GENERATION IMPLEMENTATION.**
+
+**Confirmation:** design/forensic only. No `.py` production file changed. No media mutated. No RAW launched. No provider introduced. No numeric recommendation canonized — every Stage 22 number is explicitly labeled RECOMMENDATION ONLY, and `finishing_contract.py`'s `target_loudness_lufs`/`true_peak_ceiling_dbtp` remain `None`. `docs/CUTSELL_DECISIONS.md` is the only file changed this gate.
+
+Then STOP.
+
+DO NOT IMPLEMENT D-249. WAIT FOR PRODUCT OWNER APPROVAL OF NUMERIC POLICY.
