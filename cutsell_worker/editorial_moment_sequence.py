@@ -153,6 +153,9 @@ from .raw_understanding_map import (
     BEHAVIOR_BREAKING_CHARACTER,
     BEHAVIOR_POST_TAKE_RESET,
     BEHAVIOR_PRE_TAKE_SETUP,
+    PROVENANCE_DETERMINISTIC_RULE,
+    PROVENANCE_MULTIMODAL_FUSION,
+    PROVENANCE_VISUAL_SIGNAL,
     BehaviorHypothesis,
 )
 
@@ -294,6 +297,64 @@ _RETRY_FAMILY_ROLES: frozenset[str] = frozenset({
     MOMENT_ROLE_RETRY, MOMENT_ROLE_ABANDONED_ATTEMPT, MOMENT_ROLE_FALSE_START, MOMENT_ROLE_CORRECTION,
 })
 
+# ---------------------------------------------------------------------------
+# D-239U: ROLE-SOURCE-ALIGNED EVIDENCE CONFIDENCE (see the decision log's
+# D-239T/D-239U entries). ADDITIVE ONLY -- see module docstring's own "Confidence
+# and provenance" section, unchanged, and ``EditorialMoment.confidence``
+# itself, unchanged. `role_evidence_source`/`role_evidence_confidence`
+# answer a DIFFERENT, narrower question than `confidence`: "how strong is
+# the evidence that established THIS moment's OWN role", read from
+# whichever evidence channel actually decided that role (D-239T's own
+# forensic finding: `moment_role` and `confidence` can come from different
+# channels -- `attempt_state`/`behavior_hypotheses`/`relation_to_
+# predecessor` decide role; `attempt.confidence` alone decides `confidence`,
+# regardless of which channel decided role). Never invented: every value
+# below is copied/derived from an evidence object this module (or its one
+# real caller) already computed -- see `classify_editorial_moment`'s own
+# body for the exact per-branch mapping.
+# ---------------------------------------------------------------------------
+ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE = "ATTEMPT_STATE"
+ROLE_EVIDENCE_SOURCE_BEHAVIOR_HYPOTHESIS = "BEHAVIOR_HYPOTHESIS"
+ROLE_EVIDENCE_SOURCE_RELATION_EVIDENCE = "RELATION_EVIDENCE"
+ROLE_EVIDENCE_SOURCE_UNRESOLVED = "UNRESOLVED"
+ALLOWED_ROLE_EVIDENCE_SOURCES: frozenset[str] = frozenset({
+    ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE, ROLE_EVIDENCE_SOURCE_BEHAVIOR_HYPOTHESIS,
+    ROLE_EVIDENCE_SOURCE_RELATION_EVIDENCE, ROLE_EVIDENCE_SOURCE_UNRESOLVED,
+})
+
+# Inverse of `_BEHAVIOR_LABEL_TO_MOMENT_ROLE` -- lets the role-evidence
+# lookup find the SPECIFIC `BehaviorHypothesis` label that established a
+# given behavior-derived role, never a re-scan of every label.
+_MOMENT_ROLE_TO_BEHAVIOR_LABEL: dict[str, str] = {
+    v: k for k, v in _BEHAVIOR_LABEL_TO_MOMENT_ROLE.items()
+}
+
+
+def _behavior_hypothesis_confidence_for_label(
+    behavior_hypotheses: Tuple[BehaviorHypothesis, ...], label: str | None,
+) -> str:
+    """Categorical confidence for the SPECIFIC behavior label that
+    established a role -- reuses `watch_listen_understanding._behavior_
+    confidence`'s own provenance-bucket rule verbatim (VISUAL_SIGNAL/
+    DETERMINISTIC_RULE -> SUPPORTED; MULTIMODAL_FUSION -> WEAK; otherwise
+    UNKNOWN), but scoped to the hypotheses that actually carry THIS label
+    -- never the whole span's hypothesis set (that span-wide rollup is a
+    DIFFERENT, coarser value `_derive_language_attempt`'s fallback path
+    already uses for `attempt.confidence`; this is deliberately a
+    narrower, role-specific read of the SAME already-computed provenance
+    tags, not a new computation)."""
+    if not label:
+        return CONFIDENCE_UNKNOWN
+    matching = tuple(h for h in behavior_hypotheses if h.label == label)
+    if not matching:
+        return CONFIDENCE_UNKNOWN
+    provenances = {h.provenance for h in matching}
+    if provenances & {PROVENANCE_VISUAL_SIGNAL, PROVENANCE_DETERMINISTIC_RULE}:
+        return CONFIDENCE_SUPPORTED
+    if provenances & {PROVENANCE_MULTIMODAL_FUSION}:
+        return CONFIDENCE_WEAK
+    return CONFIDENCE_UNKNOWN
+
 
 def _editorial_moment_id(
     source_asset_id: str, source_start: float, source_end: float, source_span_id: str | None,
@@ -363,6 +424,27 @@ class EditorialMoment:
     confidence: str
     conflict_flags: Tuple[str, ...]
     provenance: Tuple[str, ...]
+    # D-239U (see the decision log's D-239T/D-239U entries): ADDITIVE ONLY --
+    # `confidence` above keeps its exact existing semantics (attempt/
+    # conflict confidence, byte-identical). These two answer the narrower
+    # "how strong is the evidence that established THIS role" question,
+    # sourced from whichever channel actually decided `moment_role` (see
+    # `classify_editorial_moment`, which always sets both explicitly, to
+    # a real computed value, never leaving either at its default).
+    # `role_evidence_source` defaults to the module's most common channel
+    # (informational only -- nothing gates on it). `role_evidence_
+    # confidence` defaults to ``None`` and is backfilled in
+    # ``__post_init__`` to mirror ``confidence`` verbatim when a caller
+    # constructs an ``EditorialMoment`` directly without knowing about
+    # this D-239U concept (every pre-D-239U direct construction, this
+    # module's own historical tests included) -- preserving EXACTLY the
+    # pre-D-239U assumption that there was only one confidence concept.
+    role_evidence_source: str = ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE
+    role_evidence_confidence: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.role_evidence_confidence is None:
+            object.__setattr__(self, "role_evidence_confidence", self.confidence)
 
     @property
     def duration_sec(self) -> float:
@@ -391,6 +473,7 @@ def classify_editorial_moment(
     related_span_ids: Tuple[str, ...] = (),
     behavior_hypotheses: Tuple[BehaviorHypothesis, ...] = (),
     relation_to_predecessor: str | None = None,
+    relation_confidence: str | None = None,
     local_sequence_position: int | None = None,
     prosodic_evidence: object | None = None,
     visual_reset_present: bool | None = None,
@@ -402,7 +485,18 @@ def classify_editorial_moment(
     attempt_state`` + optional behavior/relation evidence ONLY;
     ``prosodic_evidence``/``visual_reset_present`` are consulted strictly
     afterward, and can only add provenance or an explicit conflict flag --
-    never establish or upgrade a role by themselves."""
+    never establish or upgrade a role by themselves.
+
+    D-239U (see the decision log's D-239T/D-239U entries): ``relation_confidence``
+    is the OPTIONAL, ALREADY-COMPUTED categorical confidence of whichever
+    relation evidence produced ``relation_to_predecessor`` (the caller's own
+    already-computed value -- this function never derives it). It is READ
+    ONLY to populate ``role_evidence_confidence`` when a role is actually
+    established from relation evidence (RETRY/NEW_AUDIENCE_BEAT below); it
+    is never consulted by the existing role-dispatch tree, and
+    ``EditorialMoment.confidence`` itself never reads it -- both keep their
+    exact pre-D-239U behavior byte-identically when omitted (``None``,
+    the default every existing caller/test gets)."""
     conflict_flags: list[str] = []
     provenance: list[str] = ["LANGUAGE_ATTEMPT_STATE"]
 
@@ -413,37 +507,67 @@ def classify_editorial_moment(
     if relation_to_predecessor is not None:
         provenance.append("RELATION_EVIDENCE")
 
+    # D-239U: `role_evidence_source`/`role_evidence_confidence` are decided
+    # IN LOCKSTEP with `role` itself, branch by branch, below -- never
+    # re-derived independently afterward, so they can never drift from
+    # which evidence channel actually produced this exact role.
     if attempt_state == ATTEMPT_RECORDING_PROCESS:
         role = MOMENT_ROLE_RECORDING_PROCESS
+        role_evidence_source = ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE
+        role_evidence_confidence = attempt.confidence
     elif attempt_state == ATTEMPT_FALSE_START:
         role = MOMENT_ROLE_FALSE_START
+        role_evidence_source = ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE
+        role_evidence_confidence = attempt.confidence
     elif attempt_state == ATTEMPT_ABANDONED:
         role = MOMENT_ROLE_ABANDONED_ATTEMPT
+        role_evidence_source = ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE
+        role_evidence_confidence = attempt.confidence
     elif attempt_state == ATTEMPT_CORRECTION:
         role = MOMENT_ROLE_CORRECTION
+        role_evidence_source = ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE
+        role_evidence_confidence = attempt.confidence
     elif attempt_state == ATTEMPT_CONTINUATION:
         role = MOMENT_ROLE_CONTINUATION
+        role_evidence_source = ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE
+        role_evidence_confidence = attempt.confidence
     elif attempt_state == ATTEMPT_UNCERTAIN:
         role = MOMENT_ROLE_UNCERTAIN
+        role_evidence_source = ROLE_EVIDENCE_SOURCE_UNRESOLVED
+        role_evidence_confidence = CONFIDENCE_UNKNOWN
     elif attempt_state == ATTEMPT_CLEAN:
         if behavior_role is not None:
             role = behavior_role
+            role_evidence_source = ROLE_EVIDENCE_SOURCE_BEHAVIOR_HYPOTHESIS
+            role_evidence_confidence = _behavior_hypothesis_confidence_for_label(
+                behavior_hypotheses, _MOMENT_ROLE_TO_BEHAVIOR_LABEL.get(role),
+            )
         elif relation_to_predecessor == RELATION_RETRY:
             role = MOMENT_ROLE_RETRY
+            role_evidence_source = ROLE_EVIDENCE_SOURCE_RELATION_EVIDENCE
+            role_evidence_confidence = relation_confidence if relation_confidence is not None else CONFIDENCE_UNKNOWN
         elif attempt.meaning_completion != MEANING_COMPLETE:
             # A structurally "clean" attempt whose meaning is not COMPLETE
             # has no basis to assert CLEAN_AUDIENCE_DELIVERY -- fail toward
             # UNCERTAIN rather than guess (CLAUDE.md's "WHEN UNCERTAIN, KEEP"
             # restated here as "when uncertain, do not assert a role").
             role = MOMENT_ROLE_UNCERTAIN
+            role_evidence_source = ROLE_EVIDENCE_SOURCE_UNRESOLVED
+            role_evidence_confidence = CONFIDENCE_UNKNOWN
         elif relation_to_predecessor == RELATION_NEW_AUDIENCE_BEAT:
             role = MOMENT_ROLE_NEW_AUDIENCE_BEAT
+            role_evidence_source = ROLE_EVIDENCE_SOURCE_RELATION_EVIDENCE
+            role_evidence_confidence = relation_confidence if relation_confidence is not None else CONFIDENCE_UNKNOWN
         else:
             role = MOMENT_ROLE_CLEAN_AUDIENCE_DELIVERY
+            role_evidence_source = ROLE_EVIDENCE_SOURCE_ATTEMPT_STATE
+            role_evidence_confidence = attempt.confidence
     else:
         # An attempt_state value outside this module's known set (future
         # vocabulary growth in D-168) -- never guess a role from it.
         role = MOMENT_ROLE_UNCERTAIN
+        role_evidence_source = ROLE_EVIDENCE_SOURCE_UNRESOLVED
+        role_evidence_confidence = CONFIDENCE_UNKNOWN
 
     # --- CONFLICT contract: structural state vs. corroborating behavior
     # evidence disagreement is recorded, never silently resolved. ---
@@ -473,6 +597,11 @@ def classify_editorial_moment(
 
     base_confidence = attempt.confidence
     confidence = CONFIDENCE_MIXED if conflict_flags else base_confidence
+    # D-239U CONFLICT HANDLING: role-specific confidence preserves the SAME
+    # fail-closed conflict behavior as `confidence` above -- a detected
+    # structural/behavior disagreement forces MIXED for both, never a
+    # silent promotion of one evidence channel over the other.
+    role_evidence_confidence = CONFIDENCE_MIXED if conflict_flags else role_evidence_confidence
 
     editorial_moment_id = _editorial_moment_id(
         attempt.source_asset_id, attempt.source_start, attempt.source_end, source_span_id, role, (attempt.attempt_id,),
@@ -495,6 +624,8 @@ def classify_editorial_moment(
         confidence=confidence,
         conflict_flags=tuple(conflict_flags),
         provenance=tuple(provenance),
+        role_evidence_source=role_evidence_source,
+        role_evidence_confidence=role_evidence_confidence,
     )
 
 

@@ -62160,3 +62160,163 @@ CANONICAL_ATTEMPT_PATH_PROVEN_BY_ELIMINATION_VERDICT_A_EXISTING_
 BEHAVIOR_EVIDENCE_NOT_CONSUMED_NO_FIX`.
 
 Then STOP.
+
+## D-239U — SOURCE-ALIGNED P1 ROLE EVIDENCE CONFIDENCE, OFFLINE IMPLEMENTATION ONLY, POST D-239T (Verdict A: SOURCE-ALIGNED P1 ROLE CONFIDENCE OFFLINE PROVEN — READY FOR ONE REAL-MEDIA MATERIALITY/FREEZE REQUALIFICATION, next gate D-239V, NOT launched)
+
+Read order and Git-state preconditions verified before any edit: branch
+`feature/runpod-pod-on-demand`, HEAD `ae710a028cd46a5fee2573b7b367fab01c30cca19`
+(exact match to this gate's own expected `ae710a0`), clean tree.
+
+**Established root cause (D-239T, unchanged, restated as this gate's own
+starting point):** Verdict A — a `BEHAVIOR_POST_TAKE_RESET` hypothesis
+(hard-coded `PROVENANCE_VISUAL_SIGNAL` at its one mint site) is real,
+existing evidence for a role, but `classify_editorial_moment`'s
+`confidence` field only ever reads `attempt.confidence` (D-168 linguistic-
+boundary evidence) — a channel structurally disconnected from the
+behavior evidence that established the role. `attempt.confidence` itself
+is NOT changed by this gate.
+
+**Primary objective, implemented exactly as scoped.** Two ADDITIVE fields
+on `EditorialMoment`: `role_evidence_source` (`ATTEMPT_STATE` /
+`BEHAVIOR_HYPOTHESIS` / `RELATION_EVIDENCE` / `UNRESOLVED`) and
+`role_evidence_confidence` (the existing `SUPPORTED`/`WEAK`/`MIXED`/
+`UNKNOWN` vocabulary, never redefined). `EditorialMoment.confidence`
+keeps its exact pre-D-239U formula and semantics — verified byte-
+identical across a broad parametrized sweep (attempt_state × attempt
+confidence × conflict presence).
+
+**Role source contract, implemented per the directive's own three
+examples, decided IN LOCKSTEP with `moment_role` itself (never re-derived
+afterward, so it can never drift from which evidence channel actually
+produced that exact role):**
+1. `attempt_state`-derived roles (`RECORDING_PROCESS`/`FALSE_START`/
+   `ABANDONED_ATTEMPT`/`CORRECTION`/`CONTINUATION`/`CLEAN_AUDIENCE_
+   DELIVERY`) → `role_evidence_source=ATTEMPT_STATE`, `role_evidence_
+   confidence=attempt.confidence` (reused verbatim, never re-derived).
+2. Behavior-derived roles (`POST_TAKE_RESET`/`BREAKING_CHARACTER`/
+   `PRE_TAKE_SETUP`, only reachable when `attempt_state==ATTEMPT_CLEAN`)
+   → `role_evidence_source=BEHAVIOR_HYPOTHESIS`, `role_evidence_
+   confidence` computed by a new `_behavior_hypothesis_confidence_for_
+   label` helper that reuses `watch_listen_understanding._behavior_
+   confidence`'s own provenance-bucket rule (`VISUAL_SIGNAL`/
+   `DETERMINISTIC_RULE` → `SUPPORTED`; `MULTIMODAL_FUSION` → `WEAK`;
+   otherwise `UNKNOWN`) but SCOPED to only the hypotheses carrying the
+   SPECIFIC label that established this role — never the whole span's
+   hypothesis set (closing D-239T's own "different signal" gap exactly).
+3. Relation-derived roles (`RETRY`/`NEW_AUDIENCE_BEAT`) →
+   `role_evidence_source=RELATION_EVIDENCE`, `role_evidence_confidence`
+   sourced from a new optional `relation_confidence` parameter on
+   `classify_editorial_moment` (defaults to `UNKNOWN` when omitted,
+   preserving every existing caller unmodified) — threaded by the one
+   real caller (`editorial_moment_sequence_integration.py`) via a new
+   `_relation_evidence_confidence_for` helper that selects among the
+   ALREADY-COMPUTED D-157 (`_dominant_relation`'s own discarded second
+   return value, no longer discarded) and D-169 (`RelationEvidence.
+   confidence`) values per the SAME `RELATION_SOURCE_*` fusion outcome
+   `fuse_relation_evidence` already produced for that edge — never a new
+   relation-confidence computation.
+4. Unresolved/`UNCERTAIN` → `role_evidence_source=UNRESOLVED`,
+   `role_evidence_confidence=UNKNOWN`, always.
+
+**POST_TAKE_RESET case, all three replay scenarios proven exactly per
+the directive's own "D-239S SHAPE OFFLINE REPLAY":**
+- Case A (`attempt.confidence=UNKNOWN`, behavior evidence `SUPPORTED`) →
+  `moment_role=POST_TAKE_RESET`; `confidence` stays `UNKNOWN` (unchanged);
+  `role_evidence_confidence=SUPPORTED`; Seam C now resolves this exact
+  target shape.
+- Case B (behavior evidence itself `UNKNOWN`) → `role_evidence_
+  confidence=UNKNOWN`; Seam C refuses; no shortcut invented.
+- Case C (behavior evidence conflicts with attempt structural state) →
+  `CONTINUATION_STATE_VS_RESET_OR_BREAK_BEHAVIOR_EVIDENCE` conflict flag;
+  both `confidence` and `role_evidence_confidence` forced `MIXED`; Seam C
+  refuses. No `POST_TAKE_RESET` → `SUPPORTED` shortcut exists anywhere in
+  the implementation.
+
+**Seam C consumption, refined exactly as scoped, nothing else.**
+`p1_moment_role_and_audience_status_by_clip_id_for` (D-239I Seam C) now
+gates on `moment.role_evidence_confidence == CONFIDENCE_SUPPORTED`
+(previously `moment.confidence`) AND `moment.moment_role !=
+MOMENT_ROLE_UNCERTAIN` (unchanged) before including a clip_id in either
+output map. This is the exact D-239T target shape now resolving:
+`confidence=UNKNOWN`, `role_evidence_confidence=SUPPORTED` →
+`helper_lookup_resolved=True`. Nothing else about Seam C's contract
+changed; `role_evidence_confidence` is used NOWHERE else in the codebase
+(grep-verified) — never for materiality, ownership, Freeze, RepairLoop,
+or any P2 decision. `exact_p1_target_evidence_for`'s own diagnostic
+mirrors this refinement (its `p1_target_lookup_status` elif chain now
+checks `role_evidence_confidence` instead of the unrelated `EditorialMoment.
+confidence`, keeping `helper_lookup_resolved` provably consistent with
+Seam C's real behavior, per that function's own pre-existing docstring
+guarantee) and exposes both `role_evidence_source`/`role_evidence_
+confidence` as new fields alongside the UNCHANGED `role_confidence`
+(still `EditorialMoment.confidence` verbatim, honestly labelled, never
+silently repurposed) in `exact-p1-target-evidence.json`.
+
+**Backward compatibility.** `EditorialMoment.role_evidence_confidence`
+defaults to `None` and is backfilled in `__post_init__` to mirror
+`confidence` verbatim when a caller constructs an `EditorialMoment`
+directly without knowing about this D-239U concept — every pre-D-239U
+direct construction (this module's own D-194/D-239O test fixtures
+included) keeps its exact pre-D-239U behavior with zero test-file edits
+required; only the two intentionally-refined Seam C paths (real UNKNOWN-
+vs-SUPPORTED-role-evidence scenarios) needed dedicated D-239U fixtures.
+
+**Materiality safety, unchanged.** `complete_lost_semantic_atom_
+materiality.py` (D-235Q) and `final_story_coherence_validation.py` still
+consume Seam C's own output maps exactly as before (`p1_role`/
+`p1_audience_delivery_status`, gated by `ownership_exact` — "ownership-
+only never enough" remains true); only WHICH clip_ids make it into those
+maps changed (more inclusive, never less — a strict widening), never
+what happens once a clip_id is in them. D-235Q's own meaning-critical/
+editorial-required/critical-claim firewalls, `DO_NOT_BLOCK` precedence,
+and Freeze/RepairLoop are untouched code, confirmed by the full D-235x
+suite passing unmodified.
+
+**Test matrix:** `tests/test_cutsell_d239u_role_source_aligned_
+confidence.py`, 59 tests — all 10 attempt_state roles' confidence
+reuse, all 3 behavior-derived roles' scoped-label confidence (including
+a same-span-different-label leakage guard), both relation-derived roles'
+exact relation-confidence sourcing (plus the omitted-parameter default),
+the 3-case POST_TAKE_RESET replay, `UNCERTAIN`'s fail-closed defaults,
+`EditorialMoment.confidence` byte-identical parity across a 4×4
+parametrized sweep, the backward-compatible direct-construction default,
+Seam C accept/reject (`SUPPORTED`/`UNKNOWN`/`MIXED`/still-`UNCERTAIN`),
+`exact_p1_target_evidence_for`'s exposed fields and refined status on
+both the resolving and still-low-confidence shapes, English/Spanish/
+Spanglish transcript-content independence, no-aggregate/no-heuristic/
+no-new-provider structural checks on `classify_editorial_moment`'s own
+isolated source, and an `ALLOWED_ROLE_EVIDENCE_SOURCES` vocabulary
+sanity sweep.
+
+**Offline qualification:** `compileall` clean; the full D-194/D-195/
+D-197/D-198/D-199/D-200.x/D-239 series/D-235x targeted sweep (1180 tests
+plus this gate's own 59) passes with exactly the two EXPECTED,
+previously-established D-239L "zero-diff" guard failures on
+`editorial_moment_sequence.py`/`editorial_moment_sequence_integration.py`
+(that guard exists specifically to force a reviewed explanation whenever
+either file changes; this gate's own directive explicitly authorizes
+editing both, so these two failures are the correct, accounted-for
+consequence of an authorized change, not a regression — consistent with
+this same guard's own established behavior across every prior gate that
+legitimately touched these two files); CleanCutBench (`tests/
+test_cutsell_clean_cut_core_evaluation_suite.py`) 55/55; the full `tests/`
+suite passes with zero new genuine failures (the one pre-existing
+`test_semantic_stitch.py` collection error is confirmed, via `git stash`,
+to predate this gate's own changes entirely — a stale module-level
+script, not a regression).
+
+**No RAW. No provider. No new threshold. No confidence-threshold change.
+No role-classification change. No materiality-precedence change. No
+Freeze/RepairLoop/ownership/P2-authority change. No aggregate P1/P2
+count consulted anywhere in this implementation.**
+
+**Verdict: A — SOURCE-ALIGNED P1 ROLE CONFIDENCE OFFLINE PROVEN, READY
+FOR ONE REAL-MEDIA MATERIALITY/FREEZE REQUALIFICATION.** Per this gate's
+own "IF A" instruction, the next gate is D-239V (one real-media target
+role/materiality/Freeze requalification, exactly one RAW maximum) — NOT
+launched by this gate; awaiting Product Owner coordination.
+
+**Canonical status:** `D239U_SOURCE_ALIGNED_P1_ROLE_EVIDENCE_CONFIDENCE_
+OFFLINE_PROVEN_VERDICT_A_READY_FOR_D239V_REAL_MEDIA_REQUALIFICATION`.
+
+Then STOP.

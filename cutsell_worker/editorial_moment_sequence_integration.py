@@ -99,6 +99,7 @@ from .language_spine_live_integration import (
     RELATION_SOURCE_AGREEMENT,
     RELATION_SOURCE_CANONICAL_ONLY,
     RELATION_SOURCE_CONFLICT_ABSTAINED,
+    RELATION_SOURCE_D157_ONLY,
     RELATION_SOURCE_MISSING,
     LiveLanguageSpineEvidence,
     fuse_relation_evidence,
@@ -238,6 +239,33 @@ def _dominant_relation(hypotheses: Tuple[AttemptRelationHypothesis, ...]) -> Tup
     if best.relation == RELATION_UNCERTAIN and best.confidence == CONFIDENCE_UNKNOWN:
         return None, CONFIDENCE_UNKNOWN
     return best.relation, best.confidence
+
+
+def _relation_evidence_confidence_for(
+    relation_evidence_source: str, d157_confidence: str, canonical_confidence: str | None,
+) -> str:
+    """D-239U (docs/CUTSELL_DECISIONS.md D-239T/D-239U): the ALREADY-
+    COMPUTED categorical confidence of whichever relation evidence
+    ``fuse_relation_evidence`` actually used to decide ``relation_to_
+    predecessor`` for this edge -- never a new relation-confidence
+    computation, only a selection among values D-157 (``_dominant_
+    relation``'s own second return value)/D-169 (``RelationEvidence.
+    confidence``) already produced, mirroring ``_dominant_relation``'s own
+    "selection among already-computed evidence" contract. Threaded into
+    ``classify_editorial_moment``'s ``relation_confidence`` parameter so a
+    RETRY/NEW_AUDIENCE_BEAT role's own ``role_evidence_confidence`` is
+    sourced from the SAME relation evidence that established the role,
+    never from the unrelated ``LanguageAttempt.confidence``."""
+    if relation_evidence_source == RELATION_SOURCE_D157_ONLY:
+        return d157_confidence
+    if relation_evidence_source == RELATION_SOURCE_CANONICAL_ONLY:
+        return canonical_confidence if canonical_confidence is not None else CONFIDENCE_UNKNOWN
+    if relation_evidence_source == RELATION_SOURCE_AGREEMENT:
+        candidates = [d157_confidence] + ([canonical_confidence] if canonical_confidence is not None else [])
+        return max(candidates, key=lambda c: _CONFIDENCE_RANK.get(c, 0))
+    if relation_evidence_source == RELATION_SOURCE_CONFLICT_ABSTAINED:
+        return CONFIDENCE_MIXED
+    return CONFIDENCE_UNKNOWN  # RELATION_SOURCE_MISSING, or any future value
 
 
 def _behavior_state_from_labels(labels: frozenset[str]) -> str | None:
@@ -448,7 +476,7 @@ def build_editorial_moments_for_source(
             unresolved_count += 1
             continue
 
-        d157_relation, _relation_confidence = (
+        d157_relation, d157_relation_confidence = (
             _dominant_relation(span.attempt_relation_hypotheses) if previous_relation_lookup_span is not None
             else (None, CONFIDENCE_UNKNOWN)
         )
@@ -484,6 +512,16 @@ def build_editorial_moments_for_source(
         else:
             relation_to_predecessor, relation_evidence_source = None, RELATION_SOURCE_MISSING
         relation_evidence_source_by_position[position] = relation_evidence_source
+        # D-239U (docs/CUTSELL_DECISIONS.md D-239T/D-239U): the already-
+        # computed confidence of whichever relation evidence just decided
+        # `relation_to_predecessor` above -- fed to `classify_editorial_
+        # moment`'s `relation_confidence` parameter ONLY, so a RETRY/
+        # NEW_AUDIENCE_BEAT role's `role_evidence_confidence` is sourced
+        # from the SAME relation evidence, never a new computation.
+        relation_role_evidence_confidence = _relation_evidence_confidence_for(
+            relation_evidence_source, d157_relation_confidence,
+            canonical_relation_evidence_obj.confidence if canonical_relation_evidence_obj is not None else None,
+        )
 
         # D-200.3: dimension-aware structured evidence for this predecessor
         # edge -- pure, no re-derivation of any D-157/D-169-internal
@@ -516,6 +554,7 @@ def build_editorial_moments_for_source(
             related_span_ids=(previous_relation_lookup_span.span_id,) if previous_relation_lookup_span is not None else (),
             behavior_hypotheses=span.behavior_state_hypotheses,
             relation_to_predecessor=relation_to_predecessor,
+            relation_confidence=relation_role_evidence_confidence,
             local_sequence_position=position,
             prosodic_evidence=prosodic_evidence_by_span_id.get(take.clip_id),
             visual_reset_present=visual_reset_present,
@@ -1096,12 +1135,24 @@ def p1_moment_role_and_audience_status_by_clip_id_for(
     new role/delivery classifier. Mirrors ``proposition_slot_evidence_by_
     id_for``'s own "trivial passthrough projection" pattern exactly.
 
-    A moment is included ONLY when its own ``confidence`` is
-    ``CONFIDENCE_SUPPORTED`` (never ``CONFIDENCE_MIXED`` -- a genuine
-    conflict between evidence sources) AND its own ``moment_role`` is not
-    ``MOMENT_ROLE_UNCERTAIN`` -- an ambiguous/conflicted moment is simply
-    OMITTED from both maps, so a caller's plain ``.get(clip_id)`` lookup
-    naturally yields ``None`` (UNKNOWN) for it, never a guessed role.
+    D-239U (docs/CUTSELL_DECISIONS.md D-239T/D-239U): a moment is included
+    ONLY when its own ``role_evidence_confidence`` -- the confidence of
+    the SPECIFIC evidence channel that established THIS moment's role,
+    never the unrelated ``EditorialMoment.confidence`` -- is
+    ``CONFIDENCE_SUPPORTED`` (never ``CONFIDENCE_MIXED``, a genuine
+    conflict) AND its own ``moment_role`` is not ``MOMENT_ROLE_UNCERTAIN``.
+    This is a REFINEMENT of this seam's own consumption, not a new gate:
+    it still requires the ROLE itself to be sufficiently supported before
+    Seam C hands it to any downstream authority; it changes only WHICH
+    already-computed confidence answers that question (D-239T's own
+    forensic finding: ``EditorialMoment.confidence`` can be UNKNOWN from
+    an unrelated linguistic-boundary gap even when the role's OWN
+    establishing evidence is strong). ``EditorialMoment.confidence``
+    itself, every other seam, and every downstream consumer of these two
+    maps (ownership/materiality/Freeze/RepairLoop) are unchanged -- an
+    ambiguous/conflicted/role-unsupported moment is simply OMITTED from
+    both maps, so a caller's plain ``.get(clip_id)`` lookup naturally
+    yields ``None`` (UNKNOWN) for it, never a guessed role.
     ``source_span_id is None`` (no matching ``UnderstandingSpan`` for this
     take) is likewise omitted -- never falls back to any other id."""
     role_by_clip_id: dict[str, str] = {}
@@ -1110,7 +1161,7 @@ def p1_moment_role_and_audience_status_by_clip_id_for(
         for moment in understanding.moments:
             if moment.source_span_id is None:
                 continue
-            if moment.confidence != CONFIDENCE_SUPPORTED:
+            if moment.role_evidence_confidence != CONFIDENCE_SUPPORTED:
                 continue
             if moment.moment_role == MOMENT_ROLE_UNCERTAIN:
                 continue
@@ -1239,13 +1290,23 @@ def exact_p1_target_evidence_for(
 
         moment_id = source_span_id_out = local_group_id = None
         role = role_confidence = audience_status = recording_process_status = None
+        role_evidence_source = role_evidence_confidence = None
         proposition_ids: Tuple[str, ...] = ()
         if matching_moments:
             moment = matching_moments[0]
             moment_id = moment.editorial_moment_id
             source_span_id_out = moment.source_span_id
             role = moment.moment_role
+            # D-239U: `role_confidence` keeps its EXISTING meaning verbatim
+            # -- `EditorialMoment.confidence` (the attempt/conflict
+            # confidence, unchanged) -- honestly labelled, never silently
+            # repurposed. `role_evidence_source`/`role_evidence_confidence`
+            # are the NEW, additive, role-source-aligned fields (D-239T/
+            # D-239U) answering the narrower "how strong is the evidence
+            # that established THIS role" question.
             role_confidence = moment.confidence
+            role_evidence_source = moment.role_evidence_source
+            role_evidence_confidence = moment.role_evidence_confidence
             audience_status = moment.audience_delivery_status
             recording_process_status = moment.recording_process_status
             proposition_ids = tuple(moment.proposition_candidate_ids)
@@ -1268,12 +1329,17 @@ def exact_p1_target_evidence_for(
         elif not editorial_moment_present:
             status = P1_TARGET_STATUS_NO_EDITORIAL_MOMENT
             reason = "understanding_span_present_but_no_editorial_moment_was_built_for_it"
-        elif role_confidence != CONFIDENCE_SUPPORTED:
+        elif role_evidence_confidence != CONFIDENCE_SUPPORTED:
+            # D-239U: mirrors Seam C's OWN refined gate (`role_evidence_
+            # confidence`, not the unrelated `EditorialMoment.confidence`)
+            # so this diagnostic's `helper_lookup_resolved` stays provably
+            # consistent with the real seam's behavior -- see this
+            # function's own docstring.
             status = P1_TARGET_STATUS_MOMENT_FOUND_LOW_CONFIDENCE
-            reason = "editorial_moment_present_but_confidence_is_not_CONFIDENCE_SUPPORTED"
+            reason = "editorial_moment_present_but_role_evidence_confidence_is_not_CONFIDENCE_SUPPORTED"
         elif role == MOMENT_ROLE_UNCERTAIN:
             status = P1_TARGET_STATUS_MOMENT_FOUND_ROLE_UNCERTAIN
-            reason = "editorial_moment_present_and_confidence_supported_but_role_is_UNCERTAIN"
+            reason = "editorial_moment_present_and_role_evidence_confidence_supported_but_role_is_UNCERTAIN"
         elif audience_status is None or audience_status == AUDIENCE_DELIVERY_UNCERTAIN:
             status = P1_TARGET_STATUS_MOMENT_FOUND_AUDIENCE_UNCERTAIN
             reason = "role_resolved_but_audience_delivery_status_uncertain_or_absent"
@@ -1292,6 +1358,8 @@ def exact_p1_target_evidence_for(
             "local_group_id": local_group_id,
             "role": role,
             "role_confidence": role_confidence,
+            "role_evidence_source": role_evidence_source,
+            "role_evidence_confidence": role_evidence_confidence,
             "audience_delivery_status": audience_status,
             "recording_process_status": recording_process_status,
             "proposition_candidate_ids": list(proposition_ids),
