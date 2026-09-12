@@ -61529,3 +61529,161 @@ dispatch shape.
 ROOT_CAUSE_ISOLATED_AUTHORITATIVE_PASS_NEVER_WRITES_KEY_VERDICT_E_NO_FIX`.
 
 Then STOP.
+
+## D-239R — AUTHORITATIVE P1 TARGET DIAGNOSTICS PARITY FIX, OFFLINE ONLY, POST D-239Q (Verdict A: authoritative P1 target diagnostics parity offline-proven, ready for one confirmatory real-media target trace)
+
+**Status: CANONICAL**
+
+Branch `feature/runpod-pod-on-demand`, HEAD `873212d` verified exact match
+(clean tree) before any edit. Read `docs/CUTSELL_DECISIONS.md` through
+D-239Q and `CLAUDE.md`.
+
+### Fix applied
+
+`cutsell_worker/final_story_coherence_validation.py`, inside `_apply_
+post_authority_validation_only`'s own `diagnostics["final_story_
+coherence_validation"]` dict construction, immediately after `"lost_
+atom_identity_observability"` (the SAME relative position the legacy
+pass already uses for its own identically-named field):
+
+```python
+"exact_p1_target_evidence": _exact_p1_target_evidence_for_lost_atoms(
+    lost_semantic_atoms, exact_p1_target_evidence_by_clip_id,
+),
+```
+
+Exactly the 3-line body the legacy pass already had — no new function,
+no new import, no recomputation. `_exact_p1_target_evidence_for_lost_
+atoms` is the SAME pure correlation helper both paths now call, over
+the SAME `exact_p1_target_evidence_by_clip_id` parameter that was
+already correctly threaded into this function (D-239O) but never
+consumed until now. The integrity-failure early-return dict (`apply_
+post_authority_story_validation`'s own `context is None` branch,
+already carrying `"exact_p1_target_evidence": []` since D-239O) is
+untouched — it continues to fail closed with `[]`, never inventing rows.
+
+### Parity proof
+
+New file `tests/test_cutsell_d239r_authoritative_p1_target_diagnostics_
+parity.py`, 15 tests, all green, covering the full 20-item matrix (5
+items were structural/process items — compileall, existing-suite
+regressions, full-suite — verified separately, not as individual test
+functions):
+1. legacy path writes `exact_p1_target_evidence`;
+2. authoritative path writes `exact_p1_target_evidence` (the one this
+   gate fixes);
+3. same inputs (`lost_semantic_atoms` + `exact_p1_target_evidence_by_
+   clip_id`) → byte-equal rows on both paths;
+4. one lost atom correlates;
+5. multiple lost atoms correlate independently (no cross-matching);
+6. no map → `[]`;
+7. empty map → `[]`;
+8. unmatched clip ids → `[]`;
+9. integrity-failure path (`context=None`) → `[]`, `status ==
+   "integrity_failure"` unchanged;
+10. no transcript leakage (row keys are exactly `{lost_atom_provenance_
+    id, clip_id, identity}`, no `text`/`transcript` key anywhere);
+11. deterministic output (two independent runs produce identical
+    lists);
+12. no P1 policy mutation (the caller's own `p1_moment_role_by_clip_id`/
+    `p1_audience_delivery_status_by_clip_id` dicts are unchanged after
+    the call; selection membership — `selected`/`discarded` — untouched,
+    the SAME D-090 invariant this whole module enforces);
+13. no materiality mutation (`lost_atom_materiality_orchestration` key
+    present, unaffected);
+14. no Freeze mutation (`freeze_blocked` reflects only the row's own
+    `blocking` flag, exactly as before this fix, on both paths);
+15. no RepairLoop mutation (`"repair_loop"` key is not introduced by
+    either validation pass — that key is set later, separately, in
+    `universal_clean_cut.py`, and this fix never touches it).
+
+Every test builds its authoritative-path context from a minimal,
+directly-constructed `PostAuthorityValidationContext`/`AuthoritativePlan
+Source` (bypassing `build_post_authority_validation_context`'s own
+real-resolver plumbing, which D-090's own test suite already covers) and
+monkeypatches `_lost_semantic_atoms` to return controlled, already-known
+rows (the SAME established D-235X precedent —
+`test_cutsell_d235x_production_lost_atom_authority_wiring.py`'s own
+`monkeypatch.setattr(fscv, "_lost_semantic_atoms", ...)` pattern) — this
+suite proves ONLY the new re-projection seam, never re-derives content-
+loss detection.
+
+### No authority effect (proven, not merely asserted)
+
+- `freeze_blocked` unchanged (test 14) — driven only by the row's own
+  `blocking` flag, identical before/after this fix.
+- `lost_semantic_atoms` unchanged — untouched, still monkeypatched
+  verbatim into the diagnostics dict on both paths.
+- Materiality unchanged (test 13) — `lost_atom_materiality_
+  orchestration`'s own computation is untouched by this fix.
+- `selected`/`discarded` unchanged (test 12) — the authoritative pass's
+  own D-090 selection-signature self-check still applies; this fix adds
+  a diagnostics-only dict entry, never a `replace(draft, selected=...)`.
+- Repair behavior unchanged (test 15) — `run_repair_loop` is a separate
+  stage this fix never touches or is touched by.
+- P1 maps unchanged (test 12) — the caller's own role/audience-delivery
+  maps are read, never mutated.
+
+### Qualification
+
+- `python3 -m compileall -q cutsell_worker tests` — clean.
+- `python3 -c "import cutsell_worker.final_story_coherence_validation"`
+  — clean import.
+- New suite: 15/15 passed.
+- Targeted regressions (`test_cutsell_d239o_exact_p1_target_
+  observability.py`, this new D-239R suite, `test_cutsell_d090_post_
+  authority_validation_immutability.py`, `test_cutsell_d239_live_lost_
+  atom_ownership_wiring.py`, `test_cutsell_d239i_exact_ownership_
+  materiality_completion.py`, `test_cutsell_d235x_production_lost_atom_
+  authority_wiring.py`, `test_cutsell_d235w_live_lost_atom_materiality_
+  orchestration.py`, `test_cutsell_d235r_lost_semantic_atom_freeze_
+  authority.py`, `test_cutsell_d093_incidental_omission_permit.py`):
+  256/256 passed.
+- Full suite (`tests/`, excluding the pre-existing, unrelated `test_
+  semantic_stitch.py` collection error): **6724 passed, 6 failed, 13
+  subtests passed.** All 6 accounted for, zero new genuine regressions:
+  - **1 is the anticipated "zero diff from HEAD" guard** written by
+    D-239L on `final_story_coherence_validation.py` specifically —
+    D-239R is the later, separately-authorized task for exactly this
+    file (named in its own directive's "Inspect" list), so this guard's
+    own documented "legitimately non-empty" case applies verbatim. The
+    SAME D-239L guard's other three files (`editorial_moment_sequence_
+    integration.py`, `pipeline.py`, `universal_clean_cut.py`) and D-169's
+    own `pipeline.py` guard are all UNCHANGED this gate and correctly
+    did NOT fail — confirming this fix's diff is scoped to exactly the
+    one file the directive named.
+  - **5 are the same pre-existing baseline failures** already confirmed
+    via `git stash` in D-239O's own qualification (`test_hybrid_story_
+    guard_incomplete_retry.py` + four `test_video00_modal_hybrid_
+    semantic_parity.py` cases) — unrelated to this change, not
+    reinvestigated here (out of scope).
+
+### Verdict
+
+**A — authoritative P1 target diagnostics parity offline-proven, ready
+for one confirmatory real-media target trace.** The gap D-239Q isolated
+is closed: both the legacy pass and the authoritative pass (the one
+every real RAW dispatch actually serializes) now write the same-shaped
+`exact_p1_target_evidence` diagnostics key from the same input maps.
+
+**Exact next gate:** D-239S — ONE REAL-MEDIA TARGET P1 EVIDENCE TRACE, on
+the same sibling media, exactly one RAW maximum, primary artifact
+`exact-p1-target-evidence.json`. Not launched automatically per this
+gate's own scope — Product Owner authorization required (RAW/paid
+compute).
+
+**New classifier needed?** No. **New threshold needed?** No. **Provider
+needed?** No. **RAW needed?** Not by this gate — D-239S, when
+authorized, needs exactly one. **Paid compute needed?** No, not by this
+task.
+
+### Confirmation
+
+Offline only. No P1/retry-process/materiality/Freeze/repair/ownership/
+Language-Spine authority change. No threshold, no heuristic. No RAW, no
+Modal, no RunPod, no provider call.
+
+**Canonical status:** `D239R_AUTHORITATIVE_P1_TARGET_DIAGNOSTICS_PARITY_
+FIXED_OFFLINE_PROVEN_VERDICT_A_READY_FOR_D239S`.
+
+Then STOP.

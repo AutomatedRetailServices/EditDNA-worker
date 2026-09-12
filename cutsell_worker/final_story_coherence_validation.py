@@ -2184,6 +2184,19 @@ def _apply_post_authority_validation_only(
         "lost_atom_identity_observability": _identity_observability_for_lost_atoms(
             lost_semantic_atoms, identity_observability_by_clip_id,
         ),
+        # D-239R (docs/CUTSELL_DECISIONS.md D-239Q/D-239R): see the legacy-
+        # resolving pass's own identically-named field
+        # (`apply_final_story_coherence_validation`'s own dict, above in
+        # this file) -- D-239Q proved this authoritative pass accepted
+        # `exact_p1_target_evidence_by_clip_id` as a parameter but never
+        # wrote this key, so the real-RAW (AUTHORITATIVE resolver mode)
+        # path serialized no `exact_p1_target_evidence` at all. Pure re-
+        # projection of the SAME already-built map via the SAME pure join
+        # helper the legacy pass uses -- never a second `exact_p1_target_
+        # evidence_for` call, never a new P1 lookup/classification.
+        "exact_p1_target_evidence": _exact_p1_target_evidence_for_lost_atoms(
+            lost_semantic_atoms, exact_p1_target_evidence_by_clip_id,
+        ),
         # D-239F: see the legacy-resolving pass's own identically-named field.
         "lost_atom_ownership_materiality_diagnostics": build_lost_atom_ownership_materiality_diagnostics(
             lost_semantic_atoms,
