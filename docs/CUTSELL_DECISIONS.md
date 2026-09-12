@@ -61899,3 +61899,264 @@ touched.
 D239R_FIX_CONFIRMED_WORKING_MOMENT_FOUND_LOW_CONFIDENCE_VERDICT_C`.
 
 Then STOP.
+
+## D-239T — EXACT TARGET P1 ROLE-CONFIDENCE EVIDENCE FORENSIC, OFFLINE ONLY, POST D-239S CORRECTION (Verdict A: STRONG EXISTING BEHAVIOR EVIDENCE EXISTS FOR THE TARGET BUT `classify_editorial_moment`'S CONFIDENCE FIELD NEVER CONSUMES IT — a real, existing architectural gap between the ROLE-establishing evidence channel and the CONFIDENCE-establishing evidence channel, not a runtime bug and not evidence of a wiring regression introduced by D-239O/Q/R; no fix implemented, forensic only)
+
+Read order and Git-state preconditions verified before any file inspection:
+branch `feature/runpod-pod-on-demand`, HEAD `3e75b028cd46a5fee2573b7b367fab01c30cca19`
+(exact match to this gate's own expected `3e75b02`), clean tree. No files
+touched this gate — pure read/trace, per this gate's own "NO FIX"/"DO NOT
+IMPLEMENT" requirement.
+
+**Target (from D-239S's corrected row, unchanged, re-stated verbatim as
+this gate's own fixed input):** `clip_id=clip_03d793467f17a52642c7`,
+`source_span_id=clip_03d793467f17a52642c7` (exact match to `clip_id`),
+`moment_id=emom_101ae8ab2e0129bf1139`, `role=POST_TAKE_RESET`,
+`role_confidence=UNKNOWN`, `audience_delivery_status=AUDIENCE_DELIVERY_
+NOT_SUPPORTED`, `recording_process_status=RECORDING_PROCESS_ABSENT`,
+`p1_target_lookup_status=MOMENT_FOUND_LOW_CONFIDENCE`.
+
+**Stage 1 — UnderstandingSpan evidence available to this task.** No new
+extraction/RAW was authorized this gate (`NO RAW`), so the target's own
+LITERAL captured `behavior_state_hypotheses`/`attempt_relation_
+hypotheses`/`meaning_completion_hypothesis` field VALUES are not directly
+observed here (honestly reported as unavailable, not guessed). What this
+gate DOES establish, from code alone, is which values are STRUCTURALLY
+POSSIBLE given the target's own already-observed outputs (role, role_
+confidence, audience/process status) — see Stages 2-7, which derive the
+target's evidence shape by elimination from the deterministic code paths
+that produced those outputs, not from a fresh instrumented read.
+
+**Stage 2 — role classification (`classify_editorial_moment`,
+`cutsell_worker/editorial_moment_sequence.py:386-498`).** Read in full
+this gate. The function computes `moment_role` from `attempt.attempt_
+state` FIRST; only when `attempt_state == ATTEMPT_CLEAN` does it consult
+`behavior_role = _role_from_behavior(behavior_hypotheses)` (line 410,
+evaluated unconditionally before the state dispatch, but only USED inside
+the `ATTEMPT_CLEAN` branch, line 429). `_role_from_behavior` (lines
+372-383) reads ONLY `{h.label for h in behavior_hypotheses}` — a
+categorical membership test, never `h.confidence` — and returns
+`MOMENT_ROLE_POST_TAKE_RESET` when `BEHAVIOR_POST_TAKE_RESET` is present
+(precedence: BREAKING_CHARACTER > POST_TAKE_RESET > PRE_TAKE_SETUP,
+mirroring `raw_understanding_map.py`'s own precedence). So: **`role =
+POST_TAKE_RESET` for this target requires `attempt.attempt_state ==
+ATTEMPT_CLEAN` AND a `BEHAVIOR_POST_TAKE_RESET`-labelled hypothesis in
+`behavior_hypotheses` — nothing else.** Confidence is computed
+SEPARATELY, two lines later (line 474-475): `base_confidence = attempt.
+confidence; confidence = CONFIDENCE_MIXED if conflict_flags else base_
+confidence`. **Role and confidence are NOT derived from the same
+source**: role reads `behavior_hypotheses[*].label` (categorical
+presence/absence); confidence reads `attempt.confidence` (a single
+pre-computed scalar on the `LanguageAttempt`) and, independently, this
+function's own internally-computed `conflict_flags` (structural-state
+vs. behavior-role disagreement, or prosodic/visual corroboration
+conflict — see lines 448-463). **POST_TAKE_RESET + UNKNOWN confidence is
+therefore intentionally POSSIBLE by this function's own contract** — the
+module docstring's "quality-vs-structure firewall" (D-194) explicitly
+requires behavior/prosodic/visual evidence to never establish OR upgrade
+confidence, only role and conflict-flagging.
+
+**Stage 3 — canonical vs. fallback attempt source.** Two code paths ever
+produce the `attempt` argument `classify_editorial_moment` receives,
+selected per-span in `editorial_moment_sequence_integration.
+build_editorial_moments_for_source` (lines 456-463): a real canonical
+`LanguageAttempt` (`language_attempts_by_span_id.get(take.clip_id)`,
+sourced from `language_spine_live_integration.build_live_language_spine_
+for_source`'s D-166/D-168 builders, tagged `LANGUAGE_EVIDENCE_CANONICAL`)
+when one overlaps the span, else `_derive_language_attempt` (the D-157
+FALLBACK adapter, tagged `LANGUAGE_EVIDENCE_D157_FALLBACK`). Critically,
+**`behavior_hypotheses=span.behavior_state_hypotheses` is passed into
+`classify_editorial_moment` UNCONDITIONALLY at the one real call site**
+(`editorial_moment_sequence_integration.py:517`) — regardless of which
+attempt source fed the SAME call. Role selection therefore always reads
+the SAME Watch+Listen behavior evidence; only `attempt.confidence`
+differs by source:
+  - CANONICAL (`language_utterance_attempt.py:391-409,
+    `_finalize_attempt`): `confidence = _weakest_confidence([u.confidence
+    for u in members])` — the MINIMUM-ranked confidence across the
+    attempt's member `LanguageUtterance`s, each independently computed by
+    `_utterance_confidence` (lines 252-259) purely from ASR/boundary-kind
+    evidence: `MEANING_UNCERTAIN` -> `UNKNOWN`; a strong boundary kind
+    (`RESTART_BOUNDARY`/`PAUSE`/`END_OF_UTTERANCE`) -> `SUPPORTED`; a weak
+    boundary kind (`PUNCTUATION`/`SPEECH_BOUNDARY`) -> `WEAK`; anything
+    else (including the honest default `BOUNDARY_UNKNOWN`, and the
+    forced structural cut on the source's LAST phrase run regardless of
+    its own boundary strength, `_pass1_raw_utterances` lines 276-277) ->
+    `UNKNOWN`. This path has **NO read of `span.behavior_confidence` or
+    any `BehaviorHypothesis` field at all** — it is entirely linguistic/
+    ASR-structural.
+  - FALLBACK (`editorial_moment_sequence_integration.py:268-313,
+    `_derive_language_attempt`): `confidence=span.behavior_confidence`
+    verbatim (line 311) — the SAME `UnderstandingSpan` field the role
+    check's `behavior_hypotheses` came from, rolled up to one categorical
+    value by `watch_listen_understanding._behavior_confidence` (lines
+    307-315): `conflicts` non-empty -> `MIXED`; hypothesis provenances
+    include `VISUAL_SIGNAL` or `DETERMINISTIC_RULE` -> `SUPPORTED`;
+    provenances include only `MULTIMODAL_FUSION` -> `WEAK`; otherwise
+    (empty hypothesis set) -> `UNKNOWN`.
+
+  `raw_understanding_map.py` line 274 shows `BEHAVIOR_POST_TAKE_RESET`
+  hypotheses are ALWAYS minted with `provenance=PROVENANCE_VISUAL_
+  SIGNAL` — hard-coded at the one mint site, not conditional on the
+  hypothesis's own float confidence. Consequently, **under the FALLBACK
+  path, any span carrying a `BEHAVIOR_POST_TAKE_RESET` hypothesis
+  necessarily computes `span.behavior_confidence` as `SUPPORTED` (or
+  `MIXED` only if `_conflict_flags` also fired) — `UNKNOWN` is
+  architecturally UNREACHABLE for such a span under fallback.** Since
+  this target's own observed `role_confidence` IS `UNKNOWN`, this
+  positively proves BY ELIMINATION that **the CANONICAL attempt path was
+  used for this target**, and its `attempt.confidence` — sourced purely
+  from D-168 boundary-kind/meaning evidence on the attempt's own member
+  utterance(s), structurally unconnected to Watch+Listen behavior
+  evidence — is what produced `UNKNOWN`.
+
+**Stage 4 — behavior confidence trace, exact cause.** Matching this
+gate's own candidate list: not "no behavior hypotheses" (a `BEHAVIOR_
+POST_TAKE_RESET` hypothesis must exist to have produced the role at
+all); not "conflicting hypotheses" alone (conflict forces `MIXED`, not
+`UNKNOWN`, and the observed value is `UNKNOWN`); not "fallback adapter
+drops confidence" (Stage 3 rules fallback out entirely for this target);
+not "role chosen from relation evidence while confidence comes from
+behavior evidence" (role here is chosen from BEHAVIOR evidence, not
+relation evidence, and confidence comes from neither — it comes from
+CANONICAL LINGUISTIC/attempt evidence). The exact cause is the last,
+"another exact cause" bucket: **the canonical `LanguageAttempt.
+confidence` computation (D-168) and the Watch+Listen behavior-confidence
+computation (D-157, `_behavior_confidence`) are two structurally
+DISCONNECTED pipelines that never read each other's output — by design
+(D-194's quality-vs-structure firewall), NOT by accident of this gate's
+recent D-239 wiring work. When a role is behavior-derived (POST_TAKE_
+RESET/BREAKING_CHARACTER/PRE_TAKE_SETUP) AND the canonical attempt path
+applies to that span, the moment's `confidence` field NEVER reads the
+(here, provably `VISUAL_SIGNAL`-provenance, categorically strong)
+behavior evidence that justified the role at all — it reads only the
+attempt's own independent linguistic-boundary confidence, which for this
+target's member utterance(s) is `UNKNOWN`.**
+
+**Stage 5 — role/confidence decoupling, both channels identified
+precisely.** Yes, confirmed directly from the code (not hypothetically):
+role-selection channel = `span.behavior_state_hypotheses[*].label`
+(categorical, read by `_role_from_behavior`, threaded in unconditionally
+at the one call site regardless of attempt source); confidence channel =
+`attempt.confidence` (canonical: D-168 `_weakest_confidence` over
+boundary-kind/meaning evidence; fallback: `span.behavior_confidence` —
+had fallback applied here, confidence would NOT be sourced from "behavior
+confidence and thus UNKNOWN" as this gate's own directive hypothesized,
+it would be `SUPPORTED`/`MIXED`; Stage 3 shows canonical applied instead,
+so the actual confidence channel for this target is D-168 linguistic-
+boundary evidence, not behavior confidence at all).
+
+**Stage 6 — audience/process axis co-occurrence.** Deterministic
+FUNCTION OF ROLE, not an independently-evidenced axis
+(`editorial_moment_sequence.py:465-472`): `audience_delivery_status =
+SUPPORTED` only if `role == CLEAN_AUDIENCE_DELIVERY`, `UNCERTAIN` only if
+`role == UNCERTAIN`, else `NOT_SUPPORTED` (unconditional default for
+every other role, POST_TAKE_RESET included); `recording_process_status =
+PRESENT` only if `role == RECORDING_PROCESS`, else `ABSENT`. **Valid
+independent-axis-by-construction behavior — role=POST_TAKE_RESET
+mechanically implies both defaults; this is not missing evidence and not
+a confidence-propagation mismatch, it is the intended one-to-many role ->
+status mapping.**
+
+**Stage 7 — existing stronger evidence inventory.**
+  - `BEHAVIOR_POST_TAKE_RESET` hypothesis: AVAILABLE_AND_CONSUMED for
+    ROLE (drives `moment_role`); AVAILABLE_NOT_CONSUMED for CONFIDENCE
+    (its `PROVENANCE_VISUAL_SIGNAL` tag, and the `span.behavior_
+    confidence` rollup it would produce under `_behavior_confidence`, are
+    both real, already-computed, and never read by the canonical-attempt
+    confidence path).
+  - `BEHAVIOR_RECORDING_PROCESS`/`BEHAVIOR_FALSE_START`/`BEHAVIOR_
+    ABANDONED_ATTEMPT`: NOT_APPLICABLE — none of these labels can
+    co-occur with `role=POST_TAKE_RESET` under `_role_from_behavior`'s
+    precedence and `classify_editorial_moment`'s `ATTEMPT_CLEAN`
+    gate (a different label would either force a different `attempt_
+    state` upstream or be out-ranked).
+  - Retry/correction/restart-evidence, continuation evidence: AMBIGUOUS
+    without a fresh instrumented read — theoretically available on
+    `attempt.restart_evidence`/`correction_evidence`/`continuation_
+    evidence`/`recording_process_evidence` (all real `LanguageAttempt`
+    fields), but not directly observed for this target this gate (NO RAW
+    authorized); structurally, `restart_evidence and continuation_
+    evidence` together would force `MIXED` not `UNKNOWN`, so at most one
+    can be true here.
+  - Local-group relation, Watch+Listen relation confidence: NOT_
+    CONSUMED by `classify_editorial_moment`'s confidence computation at
+    all (only `relation_to_predecessor`'s categorical VALUE feeds role
+    selection for RETRY/NEW_AUDIENCE_BEAT under the `ATTEMPT_CLEAN`
+    branch; no relation confidence ever reaches `EditorialMoment.
+    confidence`).
+  - Canonical `LanguageAttempt` state/confidence: AVAILABLE_AND_CONSUMED
+    — this IS the exact field driving the observed `UNKNOWN` (Stage 3/4).
+  - Canonical `RelationEvidence` (D-169): NOT_APPLICABLE to confidence
+    (see local-group bullet above; it can only ever affect role/grouping,
+    never `EditorialMoment.confidence`).
+  - P2 region evidence: NOT_APPLICABLE — P1's `classify_editorial_moment`
+    is bounded, local, per-span; it has no P2/whole-video parameter of
+    any kind to be AVAILABLE or NOT_AVAILABLE.
+
+**Stage 8 — confidence contract, why the target fails it.**
+`CONFIDENCE_SUPPORTED` for a `POST_TAKE_RESET` moment requires the
+underlying `LanguageAttempt`'s OWN linguistic/structural confidence to be
+`SUPPORTED` — concretely, EVERY member `LanguageUtterance` of that
+attempt must have `boundary_end_kind` in the STRONG set (`RESTART_
+BOUNDARY`/`PAUSE`/`END_OF_UTTERANCE`) AND `meaning_completion !=
+MEANING_UNCERTAIN` (`_utterance_confidence`, `_weakest_confidence` taking
+the attempt-wide minimum). This target's attempt fails that bar — at
+least one member utterance's `boundary_end_kind` is either outside the
+strong/weak sets (the honest `BOUNDARY_UNKNOWN` default, or the forced
+cut on the source's final phrase run) or its `meaning_completion` is
+`MEANING_UNCERTAIN`. **This requirement is NOT lowered, NOT reinterpreted,
+and NOT bypassed by this gate** — per this gate's own explicit
+instruction, and because doing so would let a purely behavioral/visual
+signal (which the D-194 firewall deliberately keeps out of the
+confidence computation) silently upgrade a linguistically-unsupported
+attempt to `SUPPORTED`.
+
+**Stage 9 — materiality consequence, D-239I Seam C confirmed correct.**
+Seam C (`p1_moment_role_and_audience_status_by_clip_id_for`,
+`editorial_moment_sequence_integration.py`) requires `moment.confidence
+== CONFIDENCE_SUPPORTED AND moment.moment_role != MOMENT_ROLE_UNCERTAIN`
+before including a clip_id. This target has a real, non-`UNCERTAIN` role
+but `confidence != SUPPORTED` — Seam C correctly excludes it. **Confirmed
+behaving exactly as designed: a resolved role alone is intentionally
+insufficient; the existing confidence contract (Stage 8) is not
+weakened, no aggregate P1/P2 count is substituted for this target's own
+evidence, and no policy change is made or proposed.**
+
+**Root-cause verdict: A — STRONG EXISTING TARGET EVIDENCE EXISTS
+(the `BEHAVIOR_POST_TAKE_RESET` hypothesis's own `PROVENANCE_VISUAL_
+SIGNAL` tag, and the `SUPPORTED`-shaped `span.behavior_confidence` roll-
+up it would independently produce) BUT `classify_editorial_moment`'S
+CONFIDENCE FIELD DOES NOT CONSUME IT WHEN THE CANONICAL ATTEMPT PATH
+APPLIES** — by architecture (D-194's quality-vs-structure firewall
+deliberately keeps behavior/prosodic/visual evidence role-only, never
+confidence-establishing), not by a D-239-series wiring accident. This is
+also consistent with, and more precisely explains, this gate's candidate
+B framing ("role from one signal, confidence from a different signal")
+— the "different signal" here is proven (Stage 3, by elimination) to be
+the canonical attempt's own D-168 linguistic-boundary confidence, not
+"behavior confidence" itself as this gate's own Stage 5 had hypothesized
+before the trace. D (genuinely insufficient evidence, UNKNOWN correct)
+is REJECTED as the sole characterization: the target's LINGUISTIC
+evidence is genuinely weak (Stage 8 stands, unmodified), but real,
+already-computed, categorically-strong BEHAVIORAL evidence for the same
+span also exists and is never given a chance to inform confidence in the
+canonical-attempt path — a genuine existing-evidence/consumption gap,
+not merely "no evidence anywhere."
+
+**NO FIX applied.** POST_TAKE_RESET is not mapped to SUPPORTED. No
+confidence threshold is lowered. No aggregate P1/P2 count is used. The
+smallest FUTURE safe fix (documented, NOT authorized, NOT scheduled) would
+be a bounded, opt-in corroboration path letting a `SUPPORTED`-shaped
+`span.behavior_confidence` (categorical, provenance-gated, never a raw
+float) act as an ADDITIONAL, EXPLICIT input alongside — never a
+replacement for — the canonical attempt's own linguistic confidence, at
+the same `classify_editorial_moment` seam, gated behind its own new flag
+and confidence-contract decision (Product Owner: PRODUCT/SAFETY
+category A/B escalation, not authorized by this forensic gate).
+
+**Corrected canonical status:** `D239T_ROLE_CONFIDENCE_LINEAGE_FORENSIC_
+CANONICAL_ATTEMPT_PATH_PROVEN_BY_ELIMINATION_VERDICT_A_EXISTING_
+BEHAVIOR_EVIDENCE_NOT_CONSUMED_NO_FIX`.
+
+Then STOP.
