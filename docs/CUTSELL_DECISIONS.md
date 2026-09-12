@@ -57533,3 +57533,131 @@ Zero second RAW, zero RunPod, zero provider change. This entry is a
 docs-only decision-log addition, the only change permitted post-result.
 
 Then STOP.
+
+## D-237I — EXACT IDENTITY DIAGNOSTIC ARTIFACT EXTRACTION (offline / workflow observability only, POST D-237H)
+
+**Scope:** D-237H proved D-237G's production code DID run on real media, but
+the validator-report ZIP carried no dedicated file exposing
+`diagnostics["final_story_coherence_validation"]["lost_atom_identity_
+observability"]` -- the only copy sat inside the "Print full canonical
+diagnostics" step's own huge whole-object log dump, outside every
+retrievable log window this session has ever confirmed. D-237H therefore
+failed at ARTIFACT EXTRACTION/PRESERVATION, not because the engine lacked
+the observability. This gate preserves that already-computed diagnostic
+into a small, dedicated JSON file uploaded alongside `selection-freeze-
+diagnostics.json`/`lost-semantic-atom-diagnostics.json` in the existing
+`cutsell-video00-modal-validator-reports` artifact. No engine semantics
+change; no RAW; no Modal/RunPod/provider call.
+
+**Preflight:** branch `feature/runpod-pod-on-demand`, HEAD `18d8398`
+(matching D-237H exactly), clean tree -- confirmed.
+
+**New workflow step:** "D-237I Exact Identity Observability -> sibling-safe
+extraction" in `.github/workflows/cutsell-video00-modal-raw.yml`, inserted
+immediately after the existing D-235J step and before "Verify frozen
+Selection lock" (same location/ordering convention as D-235G/D-235J).
+Reads the SAME `artifact/video00-modal.json` those two steps read and
+PURE-PROJECTS the already-serialized `diagnostics["final_story_coherence_
+validation"]["lost_atom_identity_observability"]` list verbatim into
+`artifact/exact-identity-observability.json`. Source ONLY that one
+subtree -- no relationship recomputation, no ownership inference, no
+identity-logic rerun; every field (candidate_take word indices,
+LanguageAttempt rows with their own word indices/proposition_candidate_ids/
+attempt_state, relationship_status, relationship_is_authoritative,
+reconstructed_only/language_only word indices, exact_match_by_clip_id
+presence/attempt ids/proposition ids, lost_atom_provenance_id, clip_id) is
+copied, never re-derived. No transcript/ASR text is added; word indices
+are the one bounded exception D-237G's own directive already authorized.
+
+**Deliberately DIFFERENT posture from D-235G/D-235J:** those two steps FAIL
+LOUDLY (`sys.exit(1)`) when their own top-level diagnostics key is absent,
+because that key is expected on every run once a draft contract exists.
+This step, per its own directive's explicit instruction ("Do NOT fail the
+whole workflow merely because this diagnostic is absent"), NEVER fails the
+workflow -- it always exits 0. An absent `final_story_coherence_validation`
+block, an absent `lost_atom_identity_observability` key, or the key present
+but not a list, are all reported as bounded, observational `source_status`
+values (`MISSING` / `MISSING` / `MALFORMED` respectively) rather than
+workflow failures -- this mirrors D-237G's own `_identity_observability_
+for_lost_atoms` docstring, which documents `[]` as its own legitimate
+fail-open return whenever no rows were built (flag off, or no live
+Language Spine evidence). A present-but-empty list is reported as
+`source_status: "PRESENT"` with `lost_atom_identity_observability_row_
+count: 0` -- never conflated with the key being entirely absent.
+
+**Validator artifact:** `artifact/exact-identity-observability.json` added
+to the "Upload validator reports" step's `path:` list, alongside the
+existing `selection-freeze-diagnostics.json`/`lost-semantic-atom-
+diagnostics.json` entries (both left untouched).
+
+**Local/synthetic qualification (no RAW):** the step's own embedded Python
+was extracted via `yaml.safe_load` (the identical dedent GitHub Actions
+itself performs on the `run: |` block scalar) and executed directly
+against representative engine-JSON fixtures shaped exactly like D-237G's
+own `exact_identity_observability.py` output (multi-atom, multi-attempt,
+proposition ids, both an authoritative `RELATIONSHIP_EXACT_SAME_MEMBERSHIP`
+row and a non-authoritative `RELATIONSHIP_EXACT_LANGUAGE_CONTAINS_
+RECONSTRUCTED` row). Confirmed: (1) the dedicated JSON contains every row
+unchanged (candidate_take/language_attempts/relationship/proposition/
+exact-match/provenance fields all preserved byte-for-byte, including a
+deliberately "wrong-looking" value proving no recomputation); (2) an
+absent parent block, absent key, absent engine JSON, and unparseable
+engine JSON all produce `source_status: "MISSING"` at exit 0; (3) a
+non-list value produces `source_status: "MALFORMED"` at exit 0 (fails
+observationally, never behaviorally); (4) no transcript-shaped field names
+appear anywhere in the output and an injected unrelated top-level engine
+key never leaks through; (5) deterministic output across repeated runs on
+identical input.
+
+**Tests:** new `tests/test_cutsell_d237i_workflow_extraction.py` (32
+tests, mirroring D-235G/D-235J's own workflow-extraction test pattern
+exactly): diagnostic subtree extraction, CandidateTake/LanguageAttempt
+word-index preservation, proposition-id preservation, relationship-status/
+authoritative-boolean/reconstructed-only/language-only/exact-match-status/
+provenance-id preservation, multiple atoms and multiple attempts per atom,
+pure-reprojection-no-recompute (a deliberately wrong value passes through
+unchanged), empty-list-is-PRESENT-not-MISSING, no-transcript-leakage
+(three variants), missing/malformed-is-observational-not-fatal (six
+variants covering key-absent/block-absent/no-diagnostics-key/engine-
+missing/engine-unparseable/malformed-not-a-list/malformed-string), no-set-
+arithmetic-in-extractor and no-provider/RAW-terms-in-extractor (proving the
+step is pure serialization, never a relationship classifier or a live
+call), validator-ZIP-path-registration, `if: always()`, step-ordering
+(after D-235J, before Selection-lock), deterministic-output-across-runs,
+workflow-YAML-validity, and step-script-Python-AST-validity. All 32 pass;
+combined with the existing D-235G (12)/D-235J (12)/D-237G (31) suites,
+**85 passed**.
+
+`python3 -m compileall cutsell_worker tests` -- clean. Full suite
+(`pytest tests/ --ignore=tests/test_semantic_stitch.py`): **6450 passed**,
+5 failed -- the SAME 5 pre-existing unrelated failures this session has
+tracked throughout every prior gate (`test_video00_modal_hybrid_semantic_
+parity.py` x4, `test_hybrid_story_guard_incomplete_retry.py` x1). Zero new
+genuine failures. `git diff --stat` confirms exactly ONE file modified
+(`.github/workflows/cutsell-video00-modal-raw.yml`, +103 lines) plus one
+new test file -- **zero `cutsell_worker/*.py` files touched**, proving no
+engine module behavior was mutated.
+
+**Verdict: A -- DEDICATED EXACT-IDENTITY ARTIFACT EXTRACTION OFFLINE
+PROVEN, READY FOR ONE FINAL REAL-MEDIA IDENTITY TRACE.**
+
+**Canonical status:** `D237I_DEDICATED_IDENTITY_ARTIFACT_EXTRACTION_
+OFFLINE_PROVEN`.
+
+**Exact next gate:** D-237J -- ONE final real-media exact-identity trace.
+Same sibling RAW, exactly ONE maximum, must retrieve `exact-identity-
+observability.json` from the validator artifact rather than depending on
+the large "Print full canonical diagnostics" log. **Not launched
+automatically** -- Product Owner coordination required first.
+
+**Engine patch required after this?** No -- extraction/serialization only,
+nothing to patch. **Paid compute required?** No, not by this task. **RAW
+required?** Yes, for D-237J specifically (not this task).
+
+**Confirmation:** OFFLINE / WORKFLOW-OBSERVABILITY ONLY. Zero
+`cutsell_worker/*.py` production files changed. No identity-authority,
+`AUTHORITATIVE_RELATIONSHIP_STATUSES`, containment-promotion, Language-
+Spine, Freeze, materiality, repair, P1/P2, Pacing/Audio-Join, or threshold
+logic changed. Zero RAW, zero Modal, zero RunPod, zero provider calls made.
+
+Then STOP. Do NOT launch D-237J. Wait for Product Owner coordination.

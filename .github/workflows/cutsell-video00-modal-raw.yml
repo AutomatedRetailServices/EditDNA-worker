@@ -1480,6 +1480,108 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True, default=str))
           PY
 
+      - name: D-237I Exact Identity Observability -> sibling-safe extraction
+        # D-237I (docs/CUTSELL_DECISIONS.md D-237G/D-237H/D-237I): D-237H
+        # proved the D-237G production code DID run on real media (the
+        # engine JSON's own diagnostics['final_story_coherence_validation']
+        # ['lost_atom_identity_observability'] list was populated), but no
+        # dedicated artifact file ever preserved it -- the only copy sat
+        # inside the "Print full canonical diagnostics" step's own huge
+        # whole-object log dump, outside this session's retrievable log
+        # window, and the validator-report ZIP this step feeds carried no
+        # file exposing it. This step is the fix, mirroring D-235G/D-235J's
+        # own pattern: read the SAME `artifact/video00-modal.json`, PURE-
+        # PROJECT the already-serialized diagnostics['final_story_
+        # coherence_validation']['lost_atom_identity_observability'] list
+        # (D-237G, `cutsell_worker/exact_identity_observability.py` +
+        # `final_story_coherence_validation.py::_identity_observability_
+        # for_lost_atoms`) verbatim into a small, bounded, SIBLING-SAFE
+        # file -- no Video00 golden-file content, no transcript dump (word
+        # indices only, the one exception D-237G's own directive already
+        # authorized). Recomputes NO relationship/ownership/identity
+        # decision -- every field is copied, never re-derived.
+        #
+        # UNLIKE D-235G/D-235J, this step never fails the workflow (always
+        # exits 0): per this task's own directive, an ABSENT diagnostic
+        # subtree (flag off, no live Language Spine evidence, or the
+        # parent `final_story_coherence_validation` block itself missing)
+        # is a legitimate, expected, non-error outcome -- D-237G's own
+        # `_identity_observability_for_lost_atoms` docstring documents `[]`
+        # as its own fail-open return whenever no rows were built. This
+        # step reports that as `source_status: "MISSING"` (or `MALFORMED`
+        # if the key is present but not a list) rather than treating
+        # absence as a workflow failure; it remains purely observational.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          SCHEMA_VERSION = "cutsell.video00.d237i_exact_identity_observability_extraction.v1"
+          out_path = "artifact/exact-identity-observability.json"
+
+          def write(summary):
+              os.makedirs("artifact", exist_ok=True)
+              with open(out_path, "w") as f:
+                  json.dump(summary, f, indent=2, sort_keys=True, default=str)
+              size = os.path.getsize(out_path)
+              print("--- D-237I Exact Identity Observability -> Sibling-Safe Extraction (pure re-projection of already-computed diagnostics['final_story_coherence_validation']['lost_atom_identity_observability'] -- recomputes NO relationship/ownership/identity decision; sibling-safe, bounded word-index rows only, no transcript dump; observational only -- never fails this workflow) ---")
+              print(f"summary file: {out_path} ({size} bytes)")
+              print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+
+          engine = load("artifact/video00-modal.json")
+
+          if not isinstance(engine, dict):
+              print("WARNING: artifact/video00-modal.json missing or unparseable -- cannot extract Exact Identity Observability this run. Extractor remains observational and does not fail the workflow.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MISSING", "reason": "engine_json_missing_or_unparseable"})
+              sys.exit(0)
+
+          diag = engine.get("diagnostics") if isinstance(engine.get("diagnostics"), dict) else {}
+          fscv = diag.get("final_story_coherence_validation")
+
+          if not isinstance(fscv, dict):
+              print("diagnostics['final_story_coherence_validation'] is absent or not a dict this run -- reporting MISSING observationally (this extractor never fails the workflow).", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MISSING", "reason": "final_story_coherence_validation_block_absent"})
+              sys.exit(0)
+
+          rows = fscv.get("lost_atom_identity_observability")
+
+          if rows is None:
+              print("diagnostics['final_story_coherence_validation']['lost_atom_identity_observability'] key is absent this run (D-237G flag off, or no live Language Spine evidence) -- reporting MISSING observationally.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MISSING", "reason": "lost_atom_identity_observability_key_absent"})
+              sys.exit(0)
+
+          if not isinstance(rows, list):
+              print(f"diagnostics[...]['lost_atom_identity_observability'] is present but not a list (got {type(rows).__name__}) -- malformed. Reporting MALFORMED observationally, not failing the workflow.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MALFORMED", "reason": "lost_atom_identity_observability_not_a_list"})
+              sys.exit(0)
+
+          # --- Pure re-projection: every row is copied verbatim from the
+          # already-computed D-237G list -- no relationship/ownership/
+          # identity decision is recomputed here. ---
+          summary = {
+              "schema_version": SCHEMA_VERSION,
+              "source_status": "PRESENT",
+              "lost_atom_identity_observability_row_count": len(rows),
+              "lost_atom_identity_observability": rows,
+          }
+          write(summary)
+          PY
+
       - name: Verify frozen Selection lock
         shell: bash
         run: |
@@ -6329,6 +6431,7 @@ jobs:
             artifact/d225_pacing_v2_handle_aware_real_media_qualification.json
             artifact/selection-freeze-diagnostics.json
             artifact/lost-semantic-atom-diagnostics.json
+            artifact/exact-identity-observability.json
           retention-days: 14
           if-no-files-found: warn
 
