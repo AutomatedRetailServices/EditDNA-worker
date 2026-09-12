@@ -63790,3 +63790,151 @@ None of these is `ALREADY_CANONICAL`; none is `NOT_REQUIRED` — every one gates
 Then STOP.
 
 DO NOT IMPLEMENT D-249. WAIT FOR PRODUCT OWNER APPROVAL OF NUMERIC POLICY.
+
+
+---
+
+## D-249 — Audio Finishing POLICY CONTRACT + PLAN GENERATION (offline implementation, no media mutation)
+
+**Objective.** Post D-248 (policy design, verdict A) with Product-Owner-approved
+V1 numeric policy. Implement the POLICY + PLAN-GENERATION layer: real
+`AudioFinishingMeasurement`s in, a structured, deterministic
+`AudioFinishingPlan` out. The plan may AUTHORIZE a future correction; it
+never executes one.
+
+### What was built
+
+**`cutsell_worker/audio_finishing_policy.py` (new).**
+
+- **STAGE 1 — canonical policy owner.** The six Product-Owner-approved V1
+  constants live here, centrally, not in the renderer:
+  `TARGET_INTEGRATED_LOUDNESS_LUFS = -14.0`, `LOUDNESS_TOLERANCE_LU = 1.0`,
+  `ADJACENT_TAKE_MISMATCH_THRESHOLD_LU = 2.0`,
+  `MAX_AUTOMATIC_GAIN_CORRECTION_DB = 6.0`, `TRUE_PEAK_CEILING_DBTP = -1.0`,
+  `MINIMUM_RELIABLE_LOUDNESS_WINDOW_SEC = 1.5`, plus the derived
+  `ACCEPTABLE_LOUDNESS_LOWER_BOUND_LUFS = -15.0` /
+  `ACCEPTABLE_LOUDNESS_UPPER_BOUND_LUFS = -13.0`. No numeric value beyond
+  these six (and their direct arithmetic derivations) appears anywhere in
+  the module.
+- **STAGE 2 — policy-state vocabulary.** `GAIN_STATE_{NO_CHANGE_NEEDED,
+  CORRECTION_ALLOWED, CORRECTION_LIMITED, ABSTAIN_INSUFFICIENT_EVIDENCE,
+  BLOCKED_PEAK_RISK, BLOCKED_SILENCE, BLOCKED_CLIPPING, UNKNOWN}`;
+  `PEAK_EVIDENCE_{TRUE_PEAK, FALLBACK_SAMPLE_PEAK, UNAVAILABLE}`.
+- **STAGE 3/18 — `AudioFinishingPlan`** (frozen dataclass): `policy_version`,
+  `measurement_reference` (the real `AudioFinishingMeasurement` itself, for
+  full traceability), `whole_video_state`,
+  `whole_video_integrated_loudness_lufs`, `target_loudness_lufs`,
+  `loudness_tolerance_lu`, `requested_whole_video_gain_db` (kept separate
+  from) `authorized_whole_video_gain_db`, `adjacent_take_adjustments`
+  (tuple of `AdjacentTakeAdjustment`), `limiter_authorized`,
+  `true_peak_ceiling_dbtp`, `peak_evidence_source`, `abstentions`,
+  `reasons`, `provenance`, `plan_status`. No raw ffmpeg strings anywhere.
+- **STAGE 4/5/6/7 — `evaluate_whole_video_loudness`**: silence firewall
+  first (wins over every other rule); fail-closed abstention below the
+  1.5s minimum window or on missing loudness; already-acceptable ->
+  `NO_CHANGE_NEEDED` with `0.0` gain; outside the band -> `requested =
+  target - measured` computed and preserved separately from `authorized`
+  (never silently clamped and presented as if the target were reached);
+  `|requested| <= 6dB` -> `CORRECTION_ALLOWED`; else `CORRECTION_LIMITED`
+  at exactly ±6dB. Clipping proxy blocks further POSITIVE gain only
+  (negative gain stays plan-able). Peak safety (via
+  `evaluate_peak_safety`) only evaluated for a positive move.
+- **STAGE 6/7/12/13 — `evaluate_peak_safety`**: true peak preferred,
+  sample peak an explicitly-tagged fallback (`PEAK_EVIDENCE_*`), never one
+  silently presented as the other; non-positive gain never blocked
+  (cannot increase peak risk); missing peak evidence on a positive move ->
+  `blocked=True` (fails closed, never assumes safety); existing peak
+  already at/above the -1.0 dBTP ceiling -> blocked outright; a predicted
+  post-gain peak reaching the ceiling -> `limiter_needed=True` (the
+  limiter is authorized as final safety, never as the mechanism computing
+  the gain itself).
+- **STAGE 8/9/10/11 — `evaluate_adjacent_take_continuity`**: bounded,
+  evidence-gated join-boundary comparison using ONLY the two constants
+  (`ADJACENT_TAKE_MISMATCH_THRESHOLD_LU`, `MAX_AUTOMATIC_GAIN_CORRECTION_DB`)
+  — never a learned/heuristic classifier, never inferring same-speaker/
+  take-family/recording-intent (the natural-dynamics firewall is enforced
+  structurally: the function signature has no such parameter to even
+  accidentally use). Delta `<= 2 LU` -> `NO_CHANGE_NEEDED`; `> 2 LU` ->
+  a bounded RELATIVE correction proposal that raises only the quieter
+  side toward the other (never independent per-side normalization),
+  bounded at ±6dB; either window below 1.5s -> abstain. The raised side's
+  own clipping/peak evidence still gates the proposal (`BLOCKED_CLIPPING`/
+  `BLOCKED_PEAK_RISK`).
+- **STAGE 14 — plan-level status**: `PLAN_STATUS_{READY_NO_CHANGE,
+  READY_FOR_CORRECTION, READY_WITH_LIMITER, PARTIAL, ABSTAIN, BLOCKED,
+  UNKNOWN}`, derived by `_derive_plan_status` from the whole-video state
+  and every adjacent adjustment's state — a block anywhere wins, never
+  hidden behind a rolled-up `READY`.
+- **STAGE 15 — no execution, structurally.** The module imports no
+  `subprocess`, references no `ffmpeg`/`ffprobe`, and contains no
+  `volume=`/`loudnorm`/`alimiter`/`acompressor`/`afftdn`/`highpass`/
+  `lowpass`/`amix` filter invocation anywhere — verified both by direct
+  inspection and by a structural test that AST-parses the module's own
+  imports and scans its real code lines (excluding docstring prose) for
+  any such token.
+
+**Tests — `tests/test_cutsell_d249_audio_finishing_policy.py` (new, 45
+cases, all passing).** Pure-Python, no ffmpeg, no real media — the policy
+layer consumes already-computed `AudioFinishingMeasurement`s, so its
+tests construct that dataclass directly with deterministic numeric
+fields. Covers: exact canonical constants and derived bounds; target-exact
+and within-tolerance no-change; too-quiet/too-loud requested-vs-authorized
+gain (including a case where they diverge, proving the target is never
+silently reached by clamping); over-6dB limiting in both directions;
+silence (both `-inf` loudness and a reused-silence-check `FAIL`) blocking
+all positive gain; missing loudness and short (<1.5s) windows abstaining;
+clipping blocking only positive gain (with a structural check that no
+bare "is_clipped" verdict field exists anywhere); true-peak preference,
+sample-peak fallback tagging, and fail-closed behavior on missing peak
+evidence; limiter authorization exactly at the ceiling-crossing case and
+never for a negative/no-change move; the full adjacent-take ladder
+(within threshold, at exact threshold, over threshold, over the ±6dB
+envelope, either window too short, clipping on the raised side, and mono/
+stereo metadata alone never changing the outcome); structural guards that
+per-clip independent normalization is impossible by construction (the
+module exposes exactly four functions) and that plan generation accepts
+no speaker/take-family/recording-intent parameter; and full plan-status
+derivation across `READY_NO_CHANGE`/`READY_FOR_CORRECTION`/
+`READY_WITH_LIMITER`/`ABSTAIN`/`BLOCKED`, plus a frozen-dataclass
+immutability check on `AdjacentTakeAdjustment`.
+
+**Canonical documentation.** `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`
+Section 18 (new) records the six approved V1 values, explicitly labeled
+V1 product policy (not universal audio-engineering truth), the
+EXISTING/MISSING-FUTURE classification (plan generation exists; execution
+does not), and the plan's place in the architecture. No prior section was
+rewritten.
+
+**Offline qualification.** `python3 -m compileall cutsell_worker tests` —
+clean. Targeted: the new 45-case suite + D-247's 24-case suite +
+D-028's 27-case `post_render_media_qc` suite together — 96/96 passed, zero
+regression. `CleanCutBench` (`test_cutsell_clean_cut_core_evaluation_suite.py`)
+55/55 in both `CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1` modes. Full `tests/`
+run (excluding the three pre-existing baseline exceptions already
+established across D-241–D-247): **6878 passed, 12 deselected, 13
+subtests passed, 0 failed** (207.75s) — the delta from D-247's own
+6833-passed baseline is exactly the 45 new D-249 tests; zero new
+failures.
+
+**Confirmation.** Two new files (`cutsell_worker/audio_finishing_policy.py`,
+its test file) plus the Section 18 documentation addition and this entry
+— no existing production file's behavior changed.
+`cutsell_worker/render.py`, `post_render_media_qc.py`, `finishing_contract.py`,
+Pacing, Audio Join, and Freeze are all untouched and read-only this gate.
+No media mutated. No gain/limiter/normalization/compression/denoise/hum
+filter executed anywhere — the module cannot execute one, structurally
+(no subprocess/ffmpeg reference exists in it). No threshold beyond the
+six Product-Owner-approved values was introduced. No provider. No RAW.
+
+**Verdict: A — AUDIO FINISHING POLICY CONTRACT + PLAN GENERATION OFFLINE
+PROVEN — APPROVED V1 NUMERIC POLICY ENCODED — READY FOR
+CORRECTION-EXECUTION DESIGN.**
+
+**Next gate:** D-250 — Audio Finishing correction execution design,
+offline / no media mutation (not authorized or implemented by this gate)
+— designing how an `AudioFinishingPlan` becomes deterministic ffmpeg
+execution.
+
+Then STOP.
+
+DO NOT IMPLEMENT D-250. DO NOT LAUNCH RAW.

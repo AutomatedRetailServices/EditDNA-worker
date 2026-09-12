@@ -3200,3 +3200,70 @@ and states the base/premium product framing explicitly; it does not
 implement, schedule, or authorize either. See `docs/CUTSELL_DECISIONS.md`
 D-240 for the decision-log entry recording this section's doctrine and
 Part B's read-only Pacing RAW selection.
+
+## 18. Audio Finishing V1 Canonical Policy (D-249)
+
+D-247 built real MEASUREMENT (`cutsell_worker/audio_finishing_measurement.py`).
+D-248 designed POLICY without canonizing any number. D-249 is the first
+gate to actually encode Product-Owner-approved V1 numeric policy and
+generate a structured, non-executing `AudioFinishingPlan`
+(`cutsell_worker/audio_finishing_policy.py`). This section records that
+policy in the canonical architecture, per D-098's own discipline of
+classifying every capability rather than leaving it undocumented.
+
+### 18.1 The six canonical V1 values
+
+```
+TARGET_INTEGRATED_LOUDNESS_LUFS      = -14.0
+LOUDNESS_TOLERANCE_LU                =   1.0   (acceptable range: -15.0 to -13.0 LUFS)
+ADJACENT_TAKE_MISMATCH_THRESHOLD_LU  =   2.0
+MAX_AUTOMATIC_GAIN_CORRECTION_DB     =   6.0
+TRUE_PEAK_CEILING_DBTP               =  -1.0
+MINIMUM_RELIABLE_LOUDNESS_WINDOW_SEC =   1.5
+```
+
+**These are V1 PRODUCT POLICY for professional Talking Head UGC / TikTok
+Shop / creator video — explicitly NOT universal audio-engineering truths,
+and NOT broadcast-mastering practice.** A future product decision may
+revise any of them; nothing in this section should be read as an
+audio-engineering constant independent of that product context. They
+supersede D-248's Stage 22 RECOMMENDATION-ONLY values of the same shape
+(which were explicitly non-canonical) — the numbers are unchanged from
+those recommendations, but their status is not: they are now
+Product-Owner-approved canon, not a recommendation.
+
+### 18.2 Classification (per D-098's EXISTING/PARTIAL/MISSING convention)
+
+- **EXISTING**: real measurement (D-247), the six canonical values above,
+  and structured plan GENERATION (D-249) — `generate_audio_finishing_plan`
+  deterministically turns a real `AudioFinishingMeasurement` (plus,
+  optionally, caller-supplied adjacent-take measurement pairs) into an
+  `AudioFinishingPlan` that AUTHORIZES a future correction.
+- **MISSING-FUTURE**: correction EXECUTION. No code anywhere applies a
+  gain, runs a limiter, or normalizes a rendered file. `AudioFinishingPlan`
+  is inert data; `finishing_contract.py` (D-024)'s `FinishingProvider`
+  Protocol remains the unimplemented future executor that would eventually
+  consume a plan. D-250 (not authorized by this gate) is the smallest
+  next step toward that executor.
+
+### 18.3 Where this sits in the architecture
+
+```
+MEASUREMENT (D-247)
+    -> POLICY + PLAN (D-249, this section)
+        -> FUTURE EXECUTOR (MISSING -- D-250+)
+            -> POST-RENDER VERIFICATION (unchanged; a plan may be exposed
+               additively in diagnostics, never as a new PASS/FAIL input)
+```
+
+Audio Finishing's policy/plan layer sits strictly after Render in the
+existing `Boundary -> Pacing -> Audio Join -> Render -> Audio Finishing ->
+QC` architecture (D-246/D-248) and never moves a structural editing
+decision (Selection/BestTake/Boundary/join-treatment choice) into itself.
+
+### 18.4 Confirmation
+
+No renderer behavior changed. No media mutated. No QC PASS/FAIL authority
+changed. No threshold beyond the six values above was introduced. See
+`docs/CUTSELL_DECISIONS.md` D-249 for the full policy-state vocabulary,
+plan contract, and test evidence.
