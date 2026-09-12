@@ -62320,3 +62320,132 @@ launched by this gate; awaiting Product Owner coordination.
 OFFLINE_PROVEN_VERDICT_A_READY_FOR_D239V_REAL_MEDIA_REQUALIFICATION`.
 
 Then STOP.
+
+## D-239V — ONE REAL-MEDIA TARGET ROLE/MATERIALITY/FREEZE REQUALIFICATION, POST D-239U (Verdict F: OBSERVABILITY LIMITATION — the D-239U fix's own extraction step executed and uploaded successfully on real media; this sandbox cannot retrieve the exact target's own row from the uploaded reports — ELEVENTH consecutive gate with this exact structural finding, not a code defect, not an execution regression)
+
+Read order and Git-state preconditions verified before dispatch: branch
+`feature/runpod-pod-on-demand`, HEAD `8057e2e7af962b1c92487e344a35681f5bfc030d`
+(exact match to this gate's own expected `8057e2e`), clean tree.
+
+**RAW dispatched, exactly one, as authorized.** `cutsell-video00-modal-raw.yml`
+run 34712458420, `source_key = Editdna longform validation/copy_9E4975E5-
+79EF-43EF-9440-5F06AC0A5581.MP4` (no substitution), flags enabled per this
+gate's own "FLAGS" list using the workflow's exact current input names --
+`editorial_moment_sequence_diagnostics_enabled`, `live_language_spine_
+diagnostics_enabled`, `whole_video_editorial_reasoning_diagnostics_enabled`,
+`ordering_diagnostics_enabled`, `pacing_v2_diagnostics_enabled`, `audio_
+join_treatment_diagnostics_enabled`, `lost_atom_materiality_freeze_
+authority_enabled` -- all `"1"`; everything else left at its empty/OFF
+default (no new authority). The workflow's own built-in D-228 S3 existence
+preflight step ran and PASSED before any paid compute (job step 8,
+`conclusion: success`); had it failed the job would have stopped there --
+it did not.
+
+**Execution result: the job itself ran end-to-end and completed all its
+steps.** Modal L4 benchmark step (13) SUCCESS; artifact download/upload
+steps (14-20) SUCCESS; all five sibling-safe diagnostic extraction steps
+(21-25, D-235G/D-235J/D-237I/D-239F/**D-239O -- the exact P1 target
+extraction this gate needs**) SUCCESS; the P1/P2/Ordering/Pacing-V2/
+Audio-Join compact-diagnostics print steps (30-50) SUCCESS; `Upload
+validator reports` (51) SUCCESS; `Modal teardown confirmation` (52)
+SUCCESS -- no GPU left running. Three, and only three, steps FAILED:
+`Verify frozen Selection lock` (26), `Verify Video00 architecture` (27),
+`Verify Human Gold regression QA (18-check manifest)` (28). Per this
+gate's own "VIDEO00 ORACLE NOISE" instruction, all three are
+**VIDEO00_SPECIFIC_ORACLE_NOISE**: they compare the run against
+Video00-specific fixed expectations (the frozen Video00 selection lock,
+Video00's own architecture fingerprint, the Video00 Human Gold 18-check
+manifest) that structurally cannot apply to this different, non-Video00
+sibling source -- excluded from this gate's own verdict, exactly as
+instructed. The job's overall `conclusion: failure` is a direct,
+expected consequence of those three oracle checks alone, not of the
+D-239O extraction, the Modal benchmark, or teardown.
+
+**Retrieval attempted, real progress made, exact target row still
+unretrievable.** The `cutsell-video00-modal-validator-reports` and
+`cutsell-video00-modal-run-log` artifact ZIPs were requested via
+`download_workflow_run_artifact`; both resolved to a
+`productionresultssa10.blob.core.windows.net` SAS URL, and both `curl`
+attempts against those URLs failed identically (`CONNECT tunnel failed,
+response 403`) -- the same Azure Blob egress-proxy block established
+across ten prior gates, now confirmed an ELEVENTH time, uniformly
+regardless of artifact size (42 KB and 2 KB alike). Unlike the ten prior
+gates, `get_job_logs` this time returned SUBSTANTIAL real content (up to
+~418,000 characters at `tail_lines=15000`, saved to a local file and
+searched directly) -- the run's short wall-clock duration (~3 minutes,
+not the multi-hour jobs of prior gates) meant the retrievable tail window
+reached backward into the `Print full canonical diagnostics` step's own
+per-moment JSON dump. This dump PROVED, on this exact real source, the
+same D-239T/D-239U mechanism holds live: multiple real moments carry
+`"moment_role": "POST_TAKE_RESET"`, `"confidence": "UNKNOWN"`,
+`"language_evidence_source": "CANONICAL_LANGUAGE_SPINE"` -- the identical
+shape D-239T's forensic proved by elimination and D-239U's offline tests
+covered. This is real, corroborating evidence that the D-239T/U mechanism
+is live and not merely an offline artifact. It is NOT, however, the
+SPECIFIC bounded target this gate names (the "too many people ready set
+these are the" excerpt's own `lost_atom_provenance_id`/`clip_id`): the
+per-moment diagnostics dump this module already emits (`editorial_moment_
+diagnostics`, D-198, unchanged by D-239U) never carries transcript text,
+`role_evidence_source`/`role_evidence_confidence` (D-239U's own NEW
+fields, only present in `exact_p1_target_evidence_for`'s own dedicated
+row), or a `lost_atom_provenance_id` cross-reference -- so this window
+cannot itself identify WHICH of the many `POST_TAKE_RESET`/`UNKNOWN`
+moments in this dump is the D-239S target, and the dedicated D-239O
+extraction step's own output (which DOES carry `role_evidence_source`/
+`role_evidence_confidence`/`p1_target_lookup_status` per clip_id) never
+appeared inside any retrievable window at any `tail_lines` value tried
+(3000, then 15000) -- it is bounded out by the sheer size of the
+preceding full-diagnostics dump, exactly as the CLAUDE.md-documented
+sandbox limitation predicts.
+
+**Fields this gate cannot report (target-specific, genuinely
+unretrievable this gate, not fabricated):** target `provenance_id`,
+target `clip_id`/`moment_id` (D-239V's own instruction is explicit: do
+not assume prior-gate identity is stable, and no cross-reference exists
+in the retrievable window to re-derive them), `role_evidence_source`/
+`role_evidence_confidence` for that specific target, `p1_target_lookup_
+status`, Seam C map membership for that target, the full D-235Q/R/S/T
+chain (`editorial_requirement_*`, `retry_process_state`, `final_
+materiality_status`, `blocking_recommendation`, D-235R `effective_
+blocking`, D-235S provenance link, D-235T suppression fields), the
+`selection-freeze-diagnostics.json` fields (`freeze_blocked`, trigger
+counts/categories, `first_missing_link`), `TARGET_LOST_ATOM_BLOCKER_
+CLEARED`, the unsafe-suppression counts, the Language-Spine counts, and
+every Pacing V2/Audio Join field (gated on "ONLY if actual Freeze
+clears", itself unknown). Reporting any of these as a real value would
+be fabrication; this gate reports them as UNRETRIEVABLE instead.
+
+**No post-result patch.** No production code changed after the RAW. No
+workflow behavioral change. No threshold/authority change. No second
+RAW.
+
+**Verdict: F — OBSERVABILITY LIMITATION**, precisely the observability
+half of this gate's own F option, not the execution-regression half: the
+pipeline itself, the D-239U fix, and the D-239O extraction step all
+executed and completed successfully on real media (this run's own
+`conclusion: failure` is fully accounted for by VIDEO00_SPECIFIC_ORACLE_
+NOISE per this gate's own explicit exclusion) -- this sandbox's Azure
+Blob artifact-download block and `get_job_logs`' own size-bounded
+retrieval window are what prevent observing the exact target's own row,
+an ELEVENTH consecutive occurrence of the identical structural finding
+documented across D-237H, D-237J, D-237M, D-239, D-239G, D-239J, D-239M,
+D-239P, D-239S, and now D-239V.
+
+**Freeze track status: NOT CLOSED (unresolved, pending retrieval, not
+reopened negatively).** This gate neither proves nor disproves Freeze
+clearance for the target -- it establishes only that the D-239U mechanism
+is confirmed live on real media in general, and that the specific
+target's own resolution remains exactly as unknown as before this gate,
+for a retrieval reason external to the fix itself. Per D-091's own
+Continuity Contract, this is exactly the F/E "same structural finding"
+case reflected in every prior real-media gate's own precedent: the
+Product Owner has previously supplied the real target row through an
+out-of-band channel when needed (D-239Q, D-239S); the same path remains
+available here without spending a second RAW.
+
+**Canonical status:**
+`D239V_ROLE_SOURCE_CONFIDENCE_REAL_MEDIA_MECHANISM_CONFIRMED_LIVE_
+EXACT_TARGET_ROW_UNRETRIEVABLE_VERDICT_F_OBSERVABILITY_LIMITATION_
+ELEVENTH_CONSECUTIVE_OCCURRENCE_NO_SECOND_RAW`.
+
+Then STOP.
