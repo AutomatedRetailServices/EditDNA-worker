@@ -61821,4 +61821,81 @@ aggregate→target promotion.
 D239R_FIX_EXTRACTION_STEP_PROVEN_SUCCESSFUL_ARTIFACT_CONTENT_UNOBSERVED_
 VERDICT_F`.
 
+### CORRECTED D-239S REAL RESULT (Product-Owner-recovered, post-STOP)
+
+The Product Owner recovered `exact-p1-target-evidence.json`'s real
+target row from run `34706918928` outside this session's own blocked
+retrieval path (same "externally recovered artifact" pattern D-239/
+D-239Q's own corrections used). D-239R's fix is confirmed WORKING on
+real media: `source_status` is no longer `MISSING` -- the authoritative
+path now serializes a real, populated target row.
+
+**Exact target row:**
+- `clip_id`: `clip_03d793467f17a52642c7`
+- `understanding_span_present`: `true`
+- `editorial_moment_present`: `true`
+- `moment_id`: `emom_101ae8ab2e0129bf1139`
+- `source_span_id`: `clip_03d793467f17a52642c7` -- EXACT match to
+  `clip_id` (D-239N's own Stage 5 identity-chain proof holds again, on
+  a different run's own re-minted ids -- confirms "no clip_id/source_
+  asset_id stability across runs" was correctly heeded: this is NOT the
+  historical `clip_20779d173699a1a26add`).
+- `role`: `POST_TAKE_RESET`
+- `role_confidence`: `UNKNOWN` (a real, distinct value from `CONFIDENCE_
+  SUPPORTED`/`CONFIDENCE_MIXED` -- `language_spine.py`'s own
+  `CONFIDENCE_UNKNOWN` constant, confirmed by direct code read)
+- `audience_delivery_status`: `AUDIENCE_DELIVERY_NOT_SUPPORTED`
+- `recording_process_status`: `RECORDING_PROCESS_ABSENT`
+- `helper_lookup_resolved`: `false`
+- `helper_lookup_reason`: `editorial_moment_present_but_confidence_is_
+  not_CONFIDENCE_SUPPORTED`
+- `p1_target_lookup_status`: `MOMENT_FOUND_LOW_CONFIDENCE`
+
+**Internal consistency check (this row is genuine, not corrupted):**
+`p1_moment_role_and_audience_status_by_clip_id_for`'s own gate (D-239I
+Seam C, unchanged) requires `moment.confidence == CONFIDENCE_SUPPORTED
+AND moment.moment_role != MOMENT_ROLE_UNCERTAIN` to resolve a clip_id.
+`role_confidence = UNKNOWN != CONFIDENCE_SUPPORTED` -> the gate
+correctly refuses -> `helper_lookup_resolved = false` -> `exact_p1_
+target_evidence_for`'s own ordered if/elif chain (D-239O) correctly
+lands on `MOMENT_FOUND_LOW_CONFIDENCE` (role IS resolved to `POST_TAKE_
+RESET`, so it is NOT `NO_EDITORIAL_MOMENT`; the failure is specifically
+the confidence check, checked before the role-uncertain check). Every
+field is exactly what the code would produce for this input -- no
+inconsistency.
+
+**D-239N's own two live candidates, now resolved:**
+- **B** (dropped candidate, no `UnderstandingSpan`) -- RULED OUT.
+  `understanding_span_present = true`.
+- **F** (moment exists but fails Seam C's confidence/role gate) --
+  **CONFIRMED, and narrowed further**: the failure is specifically the
+  CONFIDENCE check (`role_confidence = UNKNOWN`), not the role check
+  (`role = POST_TAKE_RESET`, a real, non-`UNCERTAIN` value). The
+  target's editorial moment has the CORRECT identity and the CORRECT
+  role -- its own `confidence` field alone never reached `CONFIDENCE_
+  SUPPORTED`.
+
+**Live shape classification: C — `MOMENT_FOUND_LOW_CONFIDENCE`** (exact
+match to the row's own `p1_target_lookup_status`). Not A (span exists),
+not B (moment exists), not D/E (role and audience fields are both
+present, just not corroborating), not F/G (never reached `MOMENT_FOUND_
+RESOLVED_*`).
+
+**Verdict: C — TARGET HAS P1 MOMENT BUT CONFIDENCE/ROLE/AUDIENCE
+EVIDENCE IS INSUFFICIENT.** Per this gate's own "IF C" instruction: do
+NOT lower confidence thresholds; the exact next gate must determine
+OFFLINE whether this moment's own low confidence is genuinely warranted
+by its underlying evidence (behavior_confidence/relation_confidence
+sources `editorial_moment_sequence.py`'s own moment-confidence
+derivation combines) or whether real, already-computed evidence exists
+somewhere in the pipeline that was simply never threaded into this
+specific moment's own confidence computation. Not started, not scoped,
+not implemented here -- this correction is a documentation update only,
+per this gate's own "no post-result patch" rule; the actual investigation
+requires its own directive (a D-239T-shaped gate) before any code is
+touched.
+
+**Corrected canonical status:** `D239S_CORRECTED_TARGET_ROW_RECOVERED_
+D239R_FIX_CONFIRMED_WORKING_MOMENT_FOUND_LOW_CONFIDENCE_VERDICT_C`.
+
 Then STOP.
