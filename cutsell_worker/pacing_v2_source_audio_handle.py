@@ -132,8 +132,34 @@ DIRECTION_POST_ROLL = "POST_ROLL"
 # accepted audit sources this module reads -- it recomputes none of them) ---
 PROVENANCE_BOUNDARY_ENGINE_PASS_AUDIO_EDGE = "boundary_engine_pass.tighten_selected_audio_edges"
 PROVENANCE_POST_SELECTION_EDGE_ONLY_BOUNDARY = "post_selection_edge_only_boundary.trim_locked_selection_edges"
+# D-242: PROVENANCE_NO_TRIM_RECORDED is now the EXCEPTIONAL case -- both
+# owning authorities emit a row for every selected clip's edge, always (see
+# their own D-242 docstrings), so this literal fires only when a caller
+# supplies no audit rows for the clip at all (e.g. Boundary never ran).
+# When a row DOES exist but recorded no widening, one of the four specific
+# values below is used instead -- see `_widen_bound`'s own fallback ladder.
 PROVENANCE_NO_TRIM_RECORDED = "NO_BOUNDARY_PROVENANCE_RECORDED"
+PROVENANCE_EVALUATED_NO_SAFE_WIDENING = "BOUNDARY_EVALUATED_NO_SAFE_WIDENING"
+PROVENANCE_NO_ELIGIBLE_EVIDENCE_AT_EDGE = "BOUNDARY_NO_ELIGIBLE_EVIDENCE_AT_EDGE"
+PROVENANCE_SOURCE_ROOM_UNKNOWN = "BOUNDARY_SOURCE_ROOM_UNKNOWN"
+PROVENANCE_BLOCKED_BY_SAFETY_FLOOR = "BOUNDARY_TRIM_BLOCKED_BY_SAFETY_FLOOR"
 PROVENANCE_STALE_MISMATCH = "BOUNDARY_PROVENANCE_STALE_RESULT_MISMATCH"
+
+# D-242: priority order (most to least informative) used when no row shows
+# real widening but at least one row's own edge-status field is present --
+# picks the single most useful fact to surface as this handle's provenance.
+_EDGE_STATUS_FALLBACK_PRIORITY = {
+    "BLOCKED_BY_SAFETY": 0,
+    "EVALUATED_NO_TRIM": 1,
+    "NO_ELIGIBLE_EVIDENCE": 2,
+    "NO_SOURCE_ROOM_DETERMINABLE": 3,
+}
+_EDGE_STATUS_TO_PROVENANCE = {
+    "BLOCKED_BY_SAFETY": PROVENANCE_BLOCKED_BY_SAFETY_FLOOR,
+    "EVALUATED_NO_TRIM": PROVENANCE_EVALUATED_NO_SAFE_WIDENING,
+    "NO_ELIGIBLE_EVIDENCE": PROVENANCE_NO_ELIGIBLE_EVIDENCE_AT_EDGE,
+    "NO_SOURCE_ROOM_DETERMINABLE": PROVENANCE_SOURCE_ROOM_UNKNOWN,
+}
 
 # --- speech-presence vocabulary (minimum 3-value, per this task's own rule --
 # no new acoustic speech detector is invented; NO_WORDS_PRESENT here is a
@@ -199,6 +225,21 @@ CONFLICT_MEANING_CRITICAL = "meaning_critical_content_present"
 CONFLICT_WORD_COVERAGE_UNKNOWN = "word_coverage_unknown"
 CONFLICT_NO_PROVENANCE = "no_boundary_provenance_recorded"
 CONFLICT_STALE_PROVENANCE = "boundary_provenance_stale_result_mismatch"
+# D-242: precise, non-exceptional reasons for "no safe widening" -- see the
+# PROVENANCE_* constants above for the corresponding provenance value each
+# one is paired with.
+CONFLICT_EVALUATED_NO_SAFE_WIDENING = "boundary_evaluated_no_safe_widening"
+CONFLICT_NO_ELIGIBLE_EVIDENCE_AT_EDGE = "no_eligible_evidence_at_edge"
+CONFLICT_SOURCE_ROOM_UNKNOWN = "source_room_unknown"
+CONFLICT_BLOCKED_BY_SAFETY_FLOOR = "boundary_trim_blocked_by_safety_floor"
+
+_PROVENANCE_TO_CONFLICT_FLAG = {
+    PROVENANCE_NO_TRIM_RECORDED: CONFLICT_NO_PROVENANCE,
+    PROVENANCE_EVALUATED_NO_SAFE_WIDENING: CONFLICT_EVALUATED_NO_SAFE_WIDENING,
+    PROVENANCE_NO_ELIGIBLE_EVIDENCE_AT_EDGE: CONFLICT_NO_ELIGIBLE_EVIDENCE_AT_EDGE,
+    PROVENANCE_SOURCE_ROOM_UNKNOWN: CONFLICT_SOURCE_ROOM_UNKNOWN,
+    PROVENANCE_BLOCKED_BY_SAFETY_FLOOR: CONFLICT_BLOCKED_BY_SAFETY_FLOOR,
+}
 
 _RESULT_MATCH_EPSILON_SEC = 1e-3
 _EMPTY_MAPPING: Mapping = MappingProxyType({})
@@ -260,6 +301,26 @@ def _evidence_kinds_from_actions(actions: Sequence[Mapping]) -> Tuple[str, ...]:
     return tuple(kinds)
 
 
+def _edge_status_and_reason_from_row(
+    row: Mapping, direction: str, *, kind_gated: bool,
+) -> Tuple[Optional[str], Optional[str]]:
+    """D-242: reads whichever of the two owning authorities' own explicit
+    per-edge status/reason fields this row carries. `kind_gated` distin-
+    guishes `post_selection_edge_only_boundary`'s `leading_edge_status`/
+    `trailing_edge_status` naming from `boundary_engine_pass`'s own
+    `entry_edge_status`/`exit_edge_status` naming -- both vocabularies are
+    the same five `EDGE_STATUS_*` values, only the field names differ.
+    Returns `(None, None)` for a pre-D-242 row that never carried these
+    fields (still handled safely by `_widen_bound`'s fallback)."""
+    if kind_gated:
+        if direction == DIRECTION_PRE_ROLL:
+            return row.get("leading_edge_status"), row.get("leading_edge_reason")
+        return row.get("trailing_edge_status"), row.get("trailing_edge_reason")
+    if direction == DIRECTION_PRE_ROLL:
+        return row.get("entry_edge_status"), row.get("entry_edge_reason")
+    return row.get("exit_edge_status"), row.get("exit_edge_reason")
+
+
 def _widen_bound(
     clip: DraftClip,
     direction: str,
@@ -270,11 +331,20 @@ def _widen_bound(
     """Looks up whichever already-computed Boundary-adjacent audit trail
     recorded a trim for this clip, and returns the widened bound it
     already proved safe (or `available=False` when no such record
-    exists -- never a guessed/default window)."""
+    exists -- never a guessed/default window).
+
+    D-242: when no row shows real widening, this no longer defaults straight
+    to the generic `NO_BOUNDARY_PROVENANCE_RECORDED` -- it first checks
+    whether any matching row's own explicit edge-status field (`EDGE_STATUS_
+    *`, emitted unconditionally by both owning authorities as of D-242)
+    explains WHY there was no widening, and reports that specific reason
+    instead. The generic literal is now reserved for the true exceptional
+    case: no row at all was supplied for this clip by either audit source."""
     rows_a = _audit_rows_for_clip(boundary_engine_pass_audit, clip.clip_id)
     rows_b = _audit_rows_for_clip(post_selection_edge_only_boundary_audit, clip.clip_id)
 
     best: Optional[dict] = None
+    fallback_candidates: list = []
     for rows, provenance, is_authoritative_kind_gated in (
         (rows_a, PROVENANCE_BOUNDARY_ENGINE_PASS_AUDIO_EDGE, False),
         (rows_b, PROVENANCE_POST_SELECTION_EDGE_ONLY_BOUNDARY, True),
@@ -297,6 +367,11 @@ def _widen_bound(
                     best = {"available": False, "stale": True, "provenance": provenance}
                 continue
             if not widened:
+                status, reason = _edge_status_and_reason_from_row(
+                    row, direction, kind_gated=is_authoritative_kind_gated,
+                )
+                if status:
+                    fallback_candidates.append({"status": status, "reason": reason})
                 continue
             evidence_kinds = _evidence_kinds_from_actions(row.get("actions") or ())
             candidate = {
@@ -309,9 +384,19 @@ def _widen_bound(
                 > best["handle_source_end"] - best["handle_source_start"]
             ):
                 best = candidate
-    if best is None:
-        return {"available": False, "stale": False, "provenance": PROVENANCE_NO_TRIM_RECORDED}
-    return best
+    if best is not None:
+        return best
+    if fallback_candidates:
+        chosen = min(
+            fallback_candidates,
+            key=lambda c: _EDGE_STATUS_FALLBACK_PRIORITY.get(c["status"], 99),
+        )
+        provenance = _EDGE_STATUS_TO_PROVENANCE.get(chosen["status"], PROVENANCE_NO_TRIM_RECORDED)
+        return {
+            "available": False, "stale": False, "provenance": provenance,
+            "boundary_reason": chosen.get("reason"),
+        }
+    return {"available": False, "stale": False, "provenance": PROVENANCE_NO_TRIM_RECORDED}
 
 
 def _classify_speech_presence(
@@ -419,8 +504,15 @@ def _build_handle(
     if widened.get("stale"):
         conflict_flags.append(CONFLICT_STALE_PROVENANCE)
     if not widened.get("available"):
-        if widened["provenance"] == PROVENANCE_NO_TRIM_RECORDED:
-            conflict_flags.append(CONFLICT_NO_PROVENANCE)
+        # D-242: map whichever specific provenance _widen_bound returned to
+        # its matching conflict flag -- the generic CONFLICT_NO_PROVENANCE
+        # only fires for the true PROVENANCE_NO_TRIM_RECORDED exceptional
+        # case; every other value now gets its own precise flag.
+        flag = _PROVENANCE_TO_CONFLICT_FLAG.get(widened["provenance"])
+        if flag:
+            conflict_flags.append(flag)
+        if widened.get("boundary_reason"):
+            provenance.append(f"boundary_reason:{widened['boundary_reason']}")
         return SourceAudioHandle(
             schema_version=SCHEMA_VERSION,
             handle_id=_handle_id(clip.source_asset_id, clip.clip_id, direction, video_start, video_end),
@@ -647,5 +739,24 @@ def source_audio_handle_run_summary(handles: Sequence[SourceAudioHandle]) -> dic
         "unavailable_count": sum(1 for h in handles if h.handle_status == HANDLE_STATUS_UNAVAILABLE),
         "total_safe_handle_duration": sum(
             h.available_duration for h in handles if h.handle_status == HANDLE_STATUS_SAFE_NON_SPEECH
+        ),
+        # D-242: provenance-completeness breakdown -- additive, counts only.
+        # Distinguishes the now-exceptional "no row supplied at all" case
+        # from the three specific "a row exists, no safe widening" reasons,
+        # so a run can be inspected without re-deriving this from raw rows.
+        "no_provenance_recorded_count": sum(
+            1 for h in handles if CONFLICT_NO_PROVENANCE in h.conflict_flags
+        ),
+        "evaluated_no_safe_widening_count": sum(
+            1 for h in handles if CONFLICT_EVALUATED_NO_SAFE_WIDENING in h.conflict_flags
+        ),
+        "no_eligible_evidence_at_edge_count": sum(
+            1 for h in handles if CONFLICT_NO_ELIGIBLE_EVIDENCE_AT_EDGE in h.conflict_flags
+        ),
+        "source_room_unknown_count": sum(
+            1 for h in handles if CONFLICT_SOURCE_ROOM_UNKNOWN in h.conflict_flags
+        ),
+        "blocked_by_safety_floor_count": sum(
+            1 for h in handles if CONFLICT_BLOCKED_BY_SAFETY_FLOOR in h.conflict_flags
         ),
     }

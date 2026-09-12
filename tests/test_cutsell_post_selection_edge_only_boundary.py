@@ -47,7 +47,18 @@ def test_single_body_motion_does_not_trim():
     events = [{"kind": "body_reset_candidate", "start": 13.25, "end": 13.7, "confidence": 0.97}]
     selected, audit = trim_locked_selection_edges((clip,), _diag(events))
     assert selected == (clip,)
-    assert audit == ()
+    # D-242: a row is now ALWAYS emitted -- one uncorroborated reset event
+    # near the trailing edge is evaluated and explicitly found insufficient
+    # (not "no evidence at all", not "we never looked").
+    assert len(audit) == 1
+    row = audit[0]
+    assert row["actions"] == []
+    assert row["result_start"] == row["original_start"] == clip.start
+    assert row["result_end"] == row["original_end"] == clip.end
+    assert row["trailing_edge_status"] == "EVALUATED_NO_TRIM"
+    assert row["trailing_edge_reason"] == "nearby_evidence_insufficient_to_confirm"
+    # Leading edge: no event at all fell near the leading slack window.
+    assert row["leading_edge_status"] == "NO_ELIGIBLE_EVIDENCE"
 
 
 def test_authoritative_dead_air_can_trim_leading_edge():

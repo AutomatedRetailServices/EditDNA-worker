@@ -102,7 +102,19 @@ def test_trailing_silence_tightens_the_exit_but_never_before_the_last_word():
 def test_edge_tightening_ignores_interior_and_immaterial_silences():
     clip = _clip("c", 10.0, 16.0, "uno dos tres cuatro cinco")
     out, audit = tighten_selected_audio_edges((clip,), _diag([(12.0, 13.5, 1.0), (15.9, 16.4, 1.0)]))
-    assert out == (clip,) and audit == ()
+    assert out == (clip,)
+    # D-242: a row is now ALWAYS emitted (previously silently skipped when
+    # no trim applied) -- neither silence here geometrically touches either
+    # edge, so both edges are explicitly reported as evaluated-with-no-
+    # eligible-evidence rather than collapsing into "no row at all".
+    assert len(audit) == 1
+    row = audit[0]
+    assert row["clip_id"] == "c"
+    assert row["original_start"] == row["result_start"] == 10.0
+    assert row["original_end"] == row["result_end"] == 16.0
+    assert row["actions"] == []
+    assert row["entry_edge_status"] == "NO_ELIGIBLE_EVIDENCE"
+    assert row["exit_edge_status"] == "NO_ELIGIBLE_EVIDENCE"
 
 
 # --- the pass on the frozen keep set ---------------------------------------------

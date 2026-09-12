@@ -103,7 +103,14 @@ from .positioned_performance_evidence import (
     classify_event_zone,
     compute_delivery_span,
 )
-from .post_selection_edge_only_boundary import trim_locked_selection_edges
+from .post_selection_edge_only_boundary import (
+    EDGE_STATUS_BLOCKED_BY_SAFETY,
+    EDGE_STATUS_EVALUATED_NO_TRIM,
+    EDGE_STATUS_NO_ELIGIBLE_EVIDENCE,
+    EDGE_STATUS_NO_SOURCE_ROOM_DETERMINABLE,
+    EDGE_STATUS_TRIM_APPLIED,
+    trim_locked_selection_edges,
+)
 from .post_selection_interior_gap_trim import (
     AUDIO_SILENCE_EVENT_KIND,
     LONG_AUDIO_SILENCE_SEC,
@@ -192,60 +199,119 @@ def tighten_selected_audio_edges(
 ) -> tuple[tuple[DraftClip, ...], tuple[dict, ...]]:
     """Move a clip's leading edge to the end of a source silence that covers
     it, and its trailing edge to the start of one that covers it. Words are
-    the hard floor: an edge never crosses the first/last aligned word."""
+    the hard floor: an edge never crosses the first/last aligned word.
+
+    D-242: an audit row is now emitted for EVERY clip, always -- previously
+    a clip with no qualifying trim was silently skipped, which is exactly
+    what D-241's forensic proved collapses "evaluated, nothing to trim" and
+    "never evaluated" into the same downstream `NO_BOUNDARY_PROVENANCE_
+    RECORDED` value. `entry_edge_status`/`exit_edge_status` (see
+    `EDGE_STATUS_*`, imported from `post_selection_edge_only_boundary.py`
+    so both authorities share one vocabulary) make that distinction
+    explicit. No trim decision, threshold, or constant changes."""
     output: list[DraftClip] = []
     audit: list[dict] = []
     for clip in selected:
         words = tuple(sorted(tuple(clip.words), key=lambda w: (float(w.start), float(w.end))))
-        silences = _silences(_events_for_source(diagnostics, clip.source_asset_id))
+        events_for_source = _events_for_source(diagnostics, clip.source_asset_id)
+        source_has_any_events = bool(events_for_source)
+        silences = _silences(events_for_source)
         start, end = float(clip.start), float(clip.end)
         new_start, new_end = start, end
         actions: list[dict] = []
         first_word_start = float(words[0].start) if words else None
         last_word_end = float(words[-1].end) if words else None
 
+        entry_evidence_seen = False
+        entry_action: dict | None = None
+        exit_evidence_seen = False
+        exit_action: dict | None = None
+
         for s_start, s_end, confidence in silences:
             # Leading edge: the silence begins at/before the clip start and
             # reaches materially into the clip.
             if s_start <= start + overlap_tolerance_sec and s_end > start + minimum_trim_sec:
+                entry_evidence_seen = True
                 candidate = s_end - pad_sec
                 if first_word_start is not None:
                     candidate = min(candidate, first_word_start)
                 if candidate - start >= minimum_trim_sec and candidate > new_start:
                     new_start = candidate
-                    actions.append({
+                    action = {
                         "action": BOUNDARY_REASON_AUDIO_ENTRY, "silence_start": round(s_start, 3),
                         "silence_end": round(s_end, 3), "silence_confidence": round(confidence, 3),
                         "trim_sec": round(candidate - start, 3),
-                    })
+                    }
+                    actions.append(action)
+                    if entry_action is None or action["trim_sec"] > entry_action["trim_sec"]:
+                        entry_action = action
             # Trailing edge: the silence reaches the clip end and starts
             # materially before it.
             if s_end >= end - overlap_tolerance_sec and s_start < end - minimum_trim_sec:
+                exit_evidence_seen = True
                 candidate = s_start + pad_sec
                 if last_word_end is not None:
                     candidate = max(candidate, last_word_end)
                 if end - candidate >= minimum_trim_sec and candidate < new_end:
                     new_end = candidate
-                    actions.append({
+                    action = {
                         "action": BOUNDARY_REASON_AUDIO_EXIT, "silence_start": round(s_start, 3),
                         "silence_end": round(s_end, 3), "silence_confidence": round(confidence, 3),
                         "trim_sec": round(end - candidate, 3),
-                    })
+                    }
+                    actions.append(action)
+                    if exit_action is None or action["trim_sec"] > exit_action["trim_sec"]:
+                        exit_action = action
 
-        if not actions or new_end - new_start < AUDIO_EDGE_MINIMUM_REMAINING_SEC:
+        floor_blocked = bool(actions) and (new_end - new_start < AUDIO_EDGE_MINIMUM_REMAINING_SEC)
+        if floor_blocked or not actions:
+            final_start, final_end, final_actions = start, end, []
+        else:
+            final_start, final_end, final_actions = new_start, new_end, actions
+        applied_entry = entry_action is not None and not floor_blocked
+        applied_exit = exit_action is not None and not floor_blocked
+
+        if applied_entry:
+            entry_status, entry_reason = EDGE_STATUS_TRIM_APPLIED, "audio_silence_entry_trim_applied"
+        elif entry_action is not None and floor_blocked:
+            entry_status, entry_reason = EDGE_STATUS_BLOCKED_BY_SAFETY, "minimum_remaining_duration_floor"
+        elif entry_evidence_seen:
+            entry_status, entry_reason = EDGE_STATUS_EVALUATED_NO_TRIM, "silence_found_insufficient_or_word_clamped"
+        elif source_has_any_events:
+            entry_status, entry_reason = EDGE_STATUS_NO_ELIGIBLE_EVIDENCE, "no_silence_event_at_leading_edge"
+        else:
+            entry_status, entry_reason = EDGE_STATUS_NO_SOURCE_ROOM_DETERMINABLE, "no_recorded_events_for_source"
+
+        if applied_exit:
+            exit_status, exit_reason = EDGE_STATUS_TRIM_APPLIED, "audio_silence_exit_trim_applied"
+        elif exit_action is not None and floor_blocked:
+            exit_status, exit_reason = EDGE_STATUS_BLOCKED_BY_SAFETY, "minimum_remaining_duration_floor"
+        elif exit_evidence_seen:
+            exit_status, exit_reason = EDGE_STATUS_EVALUATED_NO_TRIM, "silence_found_insufficient_or_word_clamped"
+        elif source_has_any_events:
+            exit_status, exit_reason = EDGE_STATUS_NO_ELIGIBLE_EVIDENCE, "no_silence_event_at_trailing_edge"
+        else:
+            exit_status, exit_reason = EDGE_STATUS_NO_SOURCE_ROOM_DETERMINABLE, "no_recorded_events_for_source"
+
+        if final_actions:
+            reason = clip.boundary_reason or (
+                BOUNDARY_REASON_AUDIO_ENTRY if final_actions[0]["action"] == BOUNDARY_REASON_AUDIO_ENTRY else BOUNDARY_REASON_AUDIO_EXIT
+            )
+            output.append(replace(clip, start=final_start, end=final_end, boundary_reason=reason))
+        else:
             output.append(clip)
-            continue
-        reason = clip.boundary_reason or (
-            BOUNDARY_REASON_AUDIO_ENTRY if actions[0]["action"] == BOUNDARY_REASON_AUDIO_ENTRY else BOUNDARY_REASON_AUDIO_EXIT
-        )
-        output.append(replace(clip, start=new_start, end=new_end, boundary_reason=reason))
         audit.append({
             "authority": "boundary_engine_pass",
             "clip_id": clip.clip_id,
             "original_start": round(start, 3), "original_end": round(end, 3),
-            "result_start": round(new_start, 3), "result_end": round(new_end, 3),
-            "actions": actions,
+            "result_start": round(final_start, 3), "result_end": round(final_end, 3),
+            "actions": final_actions,
             "semantic_membership_changed": False,
+            "edge_evaluated": True,
+            "entry_edge_status": entry_status,
+            "entry_edge_reason": entry_reason,
+            "exit_edge_status": exit_status,
+            "exit_edge_reason": exit_reason,
         })
     return tuple(output), tuple(audit)
 
