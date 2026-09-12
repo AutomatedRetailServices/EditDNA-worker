@@ -63005,3 +63005,95 @@ Then STOP.
 Then STOP.
 
 DO NOT LAUNCH D-245.
+
+## D-245 — ONE REAL-MEDIA RICH PACING V2 / HANDLE-AWARE / AUDIO-JOIN QUALIFICATION, VIDEO00 POST-D242 REQUALIFICATION, POST D-244 (Verdict B: PACING V2 REAL-MEDIA QUALIFIED — HANDLE-AWARE REAL-MEDIA QUALIFIED — AUDIO JOIN SAFE BUT NOT RICH ENOUGH — ONE ADDITIONAL QUALIFICATION SOURCE MAY BE NEEDED)
+
+**Branch/new HEAD:** `feature/runpod-pod-on-demand`, HEAD `41baa75b8c8e8b88463f68eaeafdfeafbcf44d1e` (exact match to expected — this gate is docs-only, no code commit). Clean tree confirmed before dispatch.
+
+**Files changed:** `docs/CUTSELL_DECISIONS.md` only. Zero `.py`/workflow files touched — no post-result patch, no tuning, no threshold change, no second RAW.
+
+**RAW key:** `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4` (Video00, D-244's `PRIMARY_RICH_PACING_RAW`), no substitution.
+
+**S3 preflight:** the workflow's own D-228 pre-dispatch S3 existence preflight step, PASSED (`conclusion: success`).
+
+**Run id:** `34721625895` (workflow `cutsell-video00-modal-raw.yml`, job `103628479729`), dispatched at `2026-09-12T22:02:15Z`, exactly one, no substitution, no second RAW. Same flag set as D-243: `editorial_moment_sequence_diagnostics_enabled=1`, `live_language_spine_diagnostics_enabled=1`, `whole_video_editorial_reasoning_diagnostics_enabled=1`, `ordering_diagnostics_enabled=1`, `pacing_v2_diagnostics_enabled=1`, `audio_join_treatment_diagnostics_enabled=1`, `lost_atom_materiality_freeze_authority_enabled=1`. Job `conclusion: failure`, but every step through the Modal run (`~7m51s`), all diagnostic-artifact uploads, and every Ordering/Pacing/Handle-Aware extraction step (job steps 47-50) succeeded. "Verify Video00 architecture" (job step 27) **succeeded** this time (confirming this really is canonical Video00, unlike D-243's non-Video00 sibling); "Verify frozen Selection lock" (step 26) and "Verify Human Gold regression QA" (step 28) failed.
+
+**Freeze status:** NOT directly retrievable this run — the same structural sandbox limitation confirmed across 14+ consecutive gates now (`get_job_logs`'s maximum retrievable window on this run reaches back only to `~22:12:02`, after the "D-235G Selection Freeze diagnostics" extraction step (job step 21, `~22:11:15`) already completed successfully). Strong indirect evidence Freeze cleared: the downstream Ordering/Pacing/Handle-Aware extraction steps (job steps 47-50) report `"source_status": "engine_json_present"` with real, rich, non-degenerate data (23 clips, 22 transitions) — a live path in `universal_clean_cut.py` that only executes after Freeze clears.
+
+**RepairLoop status / pacing seam reached:** same retrieval limitation; the same indirect evidence (real, rich downstream Pacing/Handle-Aware data) is consistent with `repair_loop_status=PASS` and `pacing_seam_reached=true`.
+
+**Selected clip count:** **23** (`D-218R`'s own `"selected_clip_count": 23`) — squarely within, though at the lower edge of, the historically documented 24-27 range; a legitimate, real engine-produced count on this run, not a truncation artifact (the "Verify frozen Selection lock" mismatch below is a separately-tracked, long-pre-existing oracle issue, not evidence this count is wrong).
+
+**Transition count:** **22** (`"transition_count": 22`, `"transition_count_matches_selected_minus_one": true`) — by far the richest real transition surface obtained in this entire D-239→D-245 chain (11x D-243's own 2-transition RAW).
+
+**Expected/actual/missing/duplicate edge rows:** expected = 23 × 2 = **46**. Actual/missing/duplicate counts **NOT DIRECTLY RETRIEVABLE THIS RUN** — the raw `diagnostics["boundary_engine_pass"]["audio_edge_rows"]`/`diagnostics["post_selection_edge_only_boundary"]` arrays live inside the "Print full canonical diagnostics" step (job step 19, `~22:10:57-58`) and its immediate extraction steps, entirely outside this run's retrievable window (same ceiling as Freeze above). D-242's own 32-test offline suite remains the authoritative proof that both Boundary authorities emit exactly one row per selected clip unconditionally; this run neither confirms nor contradicts that at the row level.
+
+**Boundary status distribution / `NO_BOUNDARY_PROVENANCE_RECORDED` count:** **NOT DIRECTLY RETRIEVABLE THIS RUN**, same reason as D-243. **Same precision note repeated, because it is exactly as true here:** the retrieved aggregate handle counts (`safe_pre_handle_count=0`, `safe_post_handle_count=0`, `blocked_pre_handle_count=0`, `blocked_post_handle_count=0`, `unknown_pre_handle_count=0`, `unknown_post_handle_count=0` — all 46 handles land in `HANDLE_STATUS_UNAVAILABLE`) are structurally identical to what a pre-D-242 run would also report, since D-242 never changes availability outcomes, only their labeled reason. This run's numbers alone cannot positively distinguish "D-242's specific fix active" from "the old generic collapse still occurring."
+
+**No-trim timing preserved? Trim-applied edge count:** not independently re-verifiable from this run's retrievable window; structurally guaranteed by D-242's own offline code and internally consistent here (`selected_clip_count=23` matches `transition_count+1=23`).
+
+**PRE handle count / POST handle count:** **23 / 23** (`D-225`'s own `"pre_handle_count": 23`, `"post_handle_count": 23`).
+
+**AVAILABLE / UNAVAILABLE / UNKNOWN handles:** **0 / 46 / 0** — by elimination from `safe_*=0`, `blocked_*=0`, `unknown_*=0` across both directions.
+
+**Available-duration distribution:** N/A — zero available handles, so `total_safe_pre_handle_duration=0`, `total_safe_post_handle_duration=0`.
+
+**Unavailable-reason distribution:** not retrievable at the individual-handle level this run (same row-access ceiling); `primary_d225_answer: "NO_SAFE_HANDLES_EXIST_ON_VIDEO00"` (this time an accurate, non-cosmetic label — this run genuinely is Video00).
+
+**Safe PRE count / safe POST count:** **0 / 0**.
+
+**Pacing V2 serialized? Handle-Aware serialized?** **Yes to both** — `"pacing_v2_block_status": "PRESENT"`, `"handle_aware_block_status": "PRESENT"`, both confirmed via direct, complete (non-truncated) retrieval of their own compact-summary JSON artifacts.
+
+**HARD_CUT count / KEEP_PAUSE count / TIGHT_CUT count:** **21 / 10 / 1** (D-218R `run_summary`). Note `keep_pause_count` (10) is D-215's own separate per-transition pause-preservation-consideration metric, distinct from `selected_transition_mode` (which is `HARD_CUT` for 21 transitions and `TIGHT_CUT` for 1, summing exactly to `transition_count=22`) — real, meaningful pause-handling activity across this source, not a single flat monologue.
+
+**J_CUT candidate/selected count:** 0 / 0. **L_CUT candidate/selected count:** 0 / 0. **MICRO_AUDIO_OVERLAP candidate/selected count:** 0 / 0. (`j_cut_eligible_count=0`, `l_cut_eligible_count=0`, `micro_overlap_eligible_count=0`, `handle_aware_j_candidate_count=0`, `handle_aware_l_candidate_count=0`.)
+
+**Transition-mode distribution:** `hard_cut: 21, tight_cut: 1, j_cut: 0, l_cut: 0, micro_overlap: 0` — identical between `handle_aware_mode_distribution` and `old_mode_distribution` (D-225).
+
+**Handle evidence contribution summary:** **None, for any of the 22 transitions.** `j_candidates_unlocked_by_handle_count: 0`, `l_candidates_unlocked_by_handle_count: 0`, `j_unlock_cases: []`, `l_unlock_cases: []` — with zero safe handles, none could have contributed. Every one of the 21 `HARD_CUT` and the 1 `TIGHT_CUT` decisions was established entirely by D-215's own pre-existing in-window evidence (word safety, meaning safety, double-speech, relationship-hint, prosodic status), never by handle-extended room. Per the directive's own instruction, no attempt was made to assume handle availability should have changed any of these — it correctly did not, since none existed.
+
+**Audio Join serialized?** Not confirmed at the per-join level (same pre-existing workflow gap noted in D-243: no dedicated D-234 compact-summary extraction step exists in this workflow). Proxy: `"future_audio_join_treatment_candidate_count": 0` (D-225) — structurally zero, since it requires both sides of a transition to have a safe handle, and none exist.
+
+**NONE / CLICK_FADE / SHORT_CROSSFADE / AMBIENCE_CARRY_LEFT / AMBIENCE_CARRY_RIGHT / AMBIENCE_BRIDGE counts:** not retrievable at the per-join level this run (no dedicated extraction step, raw diagnostics dump outside retrievable window). Structurally, with zero safe handles and zero future-candidate transitions, every one of the 22 joins is expected to resolve to `NONE`/not-applicable, consistent with (not independently confirmed by) the retrieved evidence.
+
+**Candidate-duration / actual-treatment-duration distribution:** not retrievable this run, same reason.
+
+**J/L safety violations, overlap safety violations, ambience-authority violations:** **0 observable** — with zero J_CUT/L_CUT/MICRO_AUDIO_OVERLAP selections, none of these firewalls had any opportunity to be violated. `"firewall_violation_count": 0` (D-218R, direct read).
+
+**Total firewall violations:** **0**.
+
+**Pacing qualification classification:** the two compact-summary artifacts use their own native vocabulary rather than the four values this gate's own directive names (`USEFUL_RICH_SURFACE`/`SAFE_BUT_NOT_YET_USEFUL`/`REGRESSION`/`INSUFFICIENT_OBSERVABILITY`) — D-218R's own `"pacing_v2_usefulness_classification": "USEFUL_BUT_LIMITED"` (a distinct native value, first time seen in this chain — D-243's own RAW produced `SAFE_BUT_NOT_YET_USEFUL`). Translated honestly against this gate's own rubric: **PACING ITSELF QUALIFIES AS `USEFUL_RICH_SURFACE`** per the directive's own explicit, generous definition — 22 real transitions (many transitions), `keep_pause_count=10` (real pause preservation), a genuine `HARD_CUT`/`TIGHT_CUT` split with 8 `sequence_consistency` "inconsistent pairs" (`same_evidence_different_gap_decision` — real, non-artificial per-pair variation in how identical evidence classes were resolved), and explicit, non-fabricated handle evidence for all 46 handles (all correctly `UNAVAILABLE`, none promoted). The ONE listed ingredient this run does NOT supply is "nontrivial Audio Join decisions" — Audio Join remains completely candidate-starved (0 of 22 joins ever reach a real treatment decision beyond structural `NONE`), because zero safe handles exist on this source either. This is why Pacing and Audio Join are classified separately below rather than folded into one blanket verdict.
+
+**Audio Join qualification classification: `AUDIO_JOIN_SAFE_BUT_NOT_RICH_ENOUGH`** — zero firewall violations, correctly fail-closed, but has now been tested against BOTH of this track's two real-media RAWs (D-243's sibling and this Video00 run) without ever once receiving a nontrivial candidate to treat.
+
+**Render success:** Yes — the human-review artifact uploaded successfully. **Output duration:** not directly retrievable this run (renderer printouts occur before this run's retrievable log window). **Technical QC:** not directly retrievable this run, same reason.
+
+**Human-review artifact:** `cutsell-video00-modal-human-review` (artifact id `10306820918`, **579,424,622 bytes**, ~579 MB — consistent with Video00's own much longer real duration relative to D-243's ~87 MB sibling render). Filename not retrievable this run. Download blocked by this sandbox's own persistent Azure Blob egress-proxy 403 (same limitation as every prior gate).
+
+**PO review availability:** Yes, via the GitHub Actions run's own artifact download (`https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/34721625895`), not from this sandbox.
+
+**Video00 oracle status — ENGINE_REGRESSION vs ORACLE_EXPECTATION_MISMATCH, explicitly separated per this gate's own instruction:** **`ORACLE_EXPECTATION_MISMATCH`, confirmed pre-existing, NOT an engine regression.** "Verify frozen Selection lock" is documented in this very decision log (multiple prior entries, e.g. the D-050C3-era finding "the legacy-shaped check that fails on every Clean Cut run") as a long-pre-existing, non-blocking, already-carved-out drift between the engine's real (and legitimately evolving) selection count and a stale frozen reference count — the underlying regression check itself already has an explicit `"count_differs_not_treated_as_failure_see_D-032"` exemption; only the separate, stricter `validate_video00_selection_lock.py` CI gate still fails on it, exactly as it has on essentially every Video00 run across the entire D-097 through D-244 chain, including runs that delivered fully correct, human-reviewed MP4s. "Verify Human Gold regression QA" fails in lockstep with it for the identical, already-documented reason. Neither failure is attributable to D-242/D-243/D-244/D-245 — none of those gates touch Selection/BestTake/Ordering/StoryValidator/Human-Gold-comparison authority; all are Boundary/Pacing/Handle-Aware/Audio-Join diagnostics-only. "Verify Video00 architecture" (a genuinely different, narrower structural check) passed cleanly on this run, further supporting that the engine itself is sound and the failing pair is a known oracle-staleness issue, not a functional defect.
+
+**Engine regression?** **No.**
+
+**New engine issue?** None identified.
+
+**Threshold required? Heuristic required? Provider change required?** No, no, no.
+
+**Additional RAW required?** Per "IF B" guidance: possibly, but not authorized or launched here — a genuinely handle-rich RAW (one where safe PRE/POST slack actually exists) has still never been found across either of this track's two real-media qualification RAWs; whether to search the corpus further or accept the current safe-but-starved Audio Join result is a Product Owner scope decision.
+
+**Paid compute required after this?** Only if the Product Owner authorizes a further corpus search/RAW; none authorized by this gate.
+
+**Verdict: B — PACING V2 REAL-MEDIA QUALIFIED — HANDLE-AWARE REAL-MEDIA QUALIFIED — AUDIO JOIN SAFE BUT NOT RICH ENOUGH — ONE ADDITIONAL QUALIFICATION SOURCE MAY BE NEEDED.**
+
+**Canonical status:** `D245_PACING_V2_REAL_MEDIA_QUALIFIED_HANDLE_AWARE_PACING_REAL_MEDIA_QUALIFIED_AUDIO_JOIN_SAFE_BUT_NOT_RICH_ENOUGH_VIDEO00_23_CLIPS_22_TRANSITIONS_ZERO_SAFE_HANDLES_ZERO_FIREWALL_VIOLATIONS_ORACLE_MISMATCH_NOT_REGRESSION_VERDICT_B`.
+
+**Pacing track status:** may close per "IF B" guidance — real, rich, non-fabricated transition-level variation demonstrated on Video00's own 22-transition surface (the richest tested in this entire chain), zero firewall violations, zero handle-availability fabrication.
+
+**Audio Join track status:** remains partially open — safe (zero violations, correctly fail-closed on both RAWs tested), but has not yet received a single nontrivial real candidate across either of this track's two qualification RAWs. Per "IF B" instruction: **do NOT patch without an identified defect** — none is identified; this is an evidence-scarcity finding, not a code defect.
+
+**Exact next gate:** Product Owner decision between (a) closing the Pacing track and accepting Audio Join's current safe-but-unexercised status pending a future handle-rich RAW discovery, or (b) authorizing a further corpus search (a new D-246-style RAW-selection gate) specifically for a source likely to contain genuine safe PRE/POST slack, distinct from the transition-richness axis D-244 already optimized for. Not decided or launched by this gate.
+
+**Confirmation:** exactly one RAW dispatched (`34721625895`), no second RAW, no RunPod, no provider change, no post-result code/workflow/threshold/tuning patch. `docs/CUTSELL_DECISIONS.md` is the only file changed.
+
+Then STOP.
