@@ -450,8 +450,16 @@ class TestFreezeSeamWiring:
         # `materiality_by_clip_id=` context Parts A+C compute -- the exact
         # bare-argument literal this test originally checked no longer
         # appears, but the adapter is still called at exactly both sites.
+        # D-239F: `materiality_by_clip_id=materiality_by_clip_id,` now ALSO
+        # appears at both `build_lost_atom_ownership_materiality_
+        # diagnostics(...)` call sites (a coincidental second consumer of
+        # the SAME kwarg name) -- checked precisely here (the two lines
+        # immediately following each `lost_semantic_atom_freeze_trigger_
+        # present(` opening) rather than a whole-file substring count, so
+        # this test stays scoped to the ONE adapter it actually names.
         assert content.count("lost_semantic_atom_freeze_trigger_present(\n") == 2
-        assert content.count("materiality_by_clip_id=materiality_by_clip_id,") == 2
+        for block in content.split("lost_semantic_atom_freeze_trigger_present(\n")[1:]:
+            assert "materiality_by_clip_id=materiality_by_clip_id," in block.splitlines()[0]
         assert "any(row.get(\"blocking\", True) for row in lost_semantic_atoms)" not in content
 
 

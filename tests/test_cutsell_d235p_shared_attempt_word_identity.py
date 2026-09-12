@@ -566,9 +566,10 @@ class TestSiblingRegression:
     def test_44_d235o_test_file_untouched(self):
         # D-235O's own test suite (design-only self-checks) still holds:
         # this gate did not touch its two named pre-existing files. D-235S
-        # added `lost_atom_reviewer_finding_provenance.py` and D-235T (both
-        # SEPARATELY-authorized, later gates) added `lost_atom_repair_
-        # suppression.py` -- widened here for the same reason as D-235O's
+        # added `lost_atom_reviewer_finding_provenance.py`, D-235T added
+        # `lost_atom_repair_suppression.py`, and D-239F (SEPARATELY-
+        # authorized, a later gate) added `lost_atom_ownership_materiality_
+        # diagnostics.py` -- widened here for the same reason as D-235O's
         # own test_17 (see that file's own comment).
         import os
         new_files = [
@@ -580,6 +581,7 @@ class TestSiblingRegression:
             "lost_atom_proposition_identity_forensic.py",
             "lost_atom_reviewer_finding_provenance.py",
             "lost_atom_repair_suppression.py",
+            "lost_atom_ownership_materiality_diagnostics.py",
             "shared_attempt_word_identity.py",
         }
 

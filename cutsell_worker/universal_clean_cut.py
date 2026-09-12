@@ -51,6 +51,13 @@ from .semantic_atom_importance import SemanticAtomImportanceArbiter
 from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
 from .canonical_edit_plan import authoritative_plan_source_to_diagnostics, build_authoritative_plan_source
 from .repair_loop import run_repair_loop
+# D-239F: bounded, additive, read-only D-235S/D-235T projection -- see
+# lost_atom_ownership_materiality_diagnostics.py's own module docstring.
+# Reads ONLY repair_result.suppression_decisions/.attempts, never calls
+# decide_lost_atom_repair_suppression again.
+from .lost_atom_ownership_materiality_diagnostics import (
+    lost_atom_repair_suppression_by_provenance_diagnostics,
+)
 from .flow_b import ProgressCallback, process_local_sources
 from .semantic_ledger import build_ledger_parity_report, build_semantic_ledger_diagnostics, build_semantic_ledger_shadow
 from .realization_resolver import (
@@ -357,6 +364,15 @@ def process_universal_clean_cut_sources(
             "status": repair_result.status,
             "attempt_count": len(repair_result.attempts),
             "attempts": [dataclasses.asdict(a) for a in repair_result.attempts],
+            # D-239F: bounded D-235S/D-235T per-provenance-id projection --
+            # see lost_atom_ownership_materiality_diagnostics.py's own
+            # module docstring. Reads ONLY repair_result.suppression_
+            # decisions/.attempts (already computed above), never calls
+            # decide_lost_atom_repair_suppression again.
+            "lost_atom_repair_suppression_diagnostics": lost_atom_repair_suppression_by_provenance_diagnostics(
+                suppression_decisions=repair_result.suppression_decisions,
+                repair_attempts=repair_result.attempts,
+            ),
         }
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         final_edit_reviewer_status = review_result.status
@@ -677,6 +693,11 @@ def process_universal_clean_cut_sources(
                 "status": repair_result.status,
                 "attempt_count": len(repair_result.attempts),
                 "attempts": [dataclasses.asdict(a) for a in repair_result.attempts],
+                # D-239F: see the legacy-resolving pass's own identically-named field.
+                "lost_atom_repair_suppression_diagnostics": lost_atom_repair_suppression_by_provenance_diagnostics(
+                    suppression_decisions=repair_result.suppression_decisions,
+                    repair_attempts=repair_result.attempts,
+                ),
             }
             authoritative_semantic_state = build_authoritative_semantic_state(authoritative_result, ledger)
             diagnostics["authoritative_semantic_state"] = build_authoritative_semantic_state_diagnostics(

@@ -50,6 +50,7 @@ from .final_edit_reviewer import STORY_ORDER_BREAK, FinalEditReviewResult, revie
 from .lost_atom_repair_suppression import (
     REASON_NO_REPAIR_STRATEGY,
     REASON_SUPPRESSED_SAME_ATOM,
+    LostAtomRepairSuppressionDecision,
     all_blocking_findings_safely_suppressed,
 )
 
@@ -102,6 +103,15 @@ class RepairLoopResult:
     # every pre-existing code path and every flag-off run -- see
     # `lost_atom_repair_suppression.py`'s own module docstring.
     blocking_findings_suppressed: bool = False
+    # D-239F: the SAME per-finding `LostAtomRepairSuppressionDecision`
+    # tuple `all_blocking_findings_safely_suppressed` below already
+    # computes -- previously discarded once its own `all_suppressed`
+    # boolean was consumed. Captured here verbatim (never recomputed) so
+    # a caller can observe D-235S/D-235T's own actual verdict per atom,
+    # not just this loop's own aggregate outcome. `()` whenever that
+    # function was never invoked this pass (e.g. a repairable finding was
+    # handled first, or `result.status` was already "PASS").
+    suppression_decisions: tuple[LostAtomRepairSuppressionDecision, ...] = ()
 
 
 def _repair_story_order_break(draft, finding):
@@ -175,6 +185,11 @@ def run_repair_loop(
     result = review(plan, causal_order_arbiter=causal_order_arbiter)
     attempts: list[RepairAttempt] = []
     blocking_findings_suppressed = False
+    # D-239F: captured from whichever `all_blocking_findings_safely_
+    # suppressed` call below actually runs (at most once, since the loop
+    # `break`s the same iteration it's computed in) -- see this field's
+    # own docstring on `RepairLoopResult`.
+    suppression_decisions: tuple[LostAtomRepairSuppressionDecision, ...] = ()
 
     for _ in range(max_attempts):
         if result.status == "PASS":
@@ -190,9 +205,14 @@ def run_repair_loop(
             # module docstring). Default-OFF and byte-identical to the
             # pre-D-235T behavior below whenever the flag is off or even
             # one finding does not unanimously qualify.
-            all_suppressed, suppression_decisions = all_blocking_findings_safely_suppressed(
+            all_suppressed, this_pass_decisions = all_blocking_findings_safely_suppressed(
                 result.findings, materiality_by_provenance_id=lost_atom_materiality_by_provenance_id,
             )
+            # D-239F: capture regardless of `all_suppressed` -- every branch
+            # below (suppressed and preserved) gets an honest, real D-235S/
+            # D-235T verdict in the returned result, never just the
+            # aggregate boolean.
+            suppression_decisions = this_pass_decisions
             if all_suppressed:
                 for finding, decision in zip(result.findings, suppression_decisions):
                     attempts.append(RepairAttempt(
@@ -304,4 +324,5 @@ def run_repair_loop(
         final_review=result,
         attempts=tuple(attempts),
         blocking_findings_suppressed=blocking_findings_suppressed,
+        suppression_decisions=suppression_decisions,
     )

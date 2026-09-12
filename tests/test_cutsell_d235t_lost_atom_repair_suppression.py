@@ -641,6 +641,9 @@ class TestFileFamilySnapshot:
             "lost_atom_proposition_identity_forensic.py",
             "lost_atom_reviewer_finding_provenance.py",
             "lost_atom_repair_suppression.py",
+            # D-239F (separately-authorized, a later gate) -- widened here
+            # for the same reason as this file's own test_17-style comment.
+            "lost_atom_ownership_materiality_diagnostics.py",
             "shared_attempt_word_identity.py",
         }
         assert set(new_files) == expected

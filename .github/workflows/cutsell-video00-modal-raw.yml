@@ -1582,6 +1582,124 @@ jobs:
           write(summary)
           PY
 
+      - name: D-239F Lost-Atom Ownership -> Materiality -> Freeze -> Repair observability -> sibling-safe extraction
+        # D-239F (docs/CUTSELL_DECISIONS.md D-238/D-239): D-239 proved (via
+        # an externally recovered artifact, not this session's own
+        # retrieval) that the target lost atom's real ownership structure
+        # (clip_1d9d2cebaf8ed3004836: 41-48 uniquely contained by
+        # latt_be3141887f7b37d1bb3a's 31-258, one proposition) genuinely
+        # exists on real media, but NEITHER the D-238 ExactLostAtomOwnership
+        # result NOR the D-235Q CompleteLostSemanticAtomMateriality result
+        # for that atom was ever serialized into any retrievable artifact --
+        # so it was impossible to tell WHERE in ownership -> D-235Q -> D-235R
+        # -> D-235T the atom stopped short of suppression. This step is the
+        # fix: PURE-PROJECTS two ALREADY-SERIALIZED, already-computed
+        # diagnostics subtrees verbatim (never recomputes ownership/
+        # materiality/Freeze/repair policy):
+        #   diagnostics['final_story_coherence_validation']
+        #     ['lost_atom_ownership_materiality_diagnostics'] (D-239F,
+        #     cutsell_worker/lost_atom_ownership_materiality_diagnostics.py
+        #     ::build_lost_atom_ownership_materiality_diagnostics -- D-238
+        #     ownership + D-235Q materiality + a D-235R re-derivation on the
+        #     SAME already-computed materiality, the SAME precedent
+        #     _lost_atom_materiality_orchestration_diagnostics already used)
+        #   diagnostics['repair_loop']['lost_atom_repair_suppression_diagnostics']
+        #     (D-239F, ::lost_atom_repair_suppression_by_provenance_
+        #     diagnostics -- D-235S/D-235T, reading ONLY RepairLoopResult.
+        #     suppression_decisions/.attempts, previously computed then
+        #     discarded, never a second decide_lost_atom_repair_
+        #     suppression() call).
+        # The ONLY computation THIS step performs is a pure dict JOIN of
+        # those two already-serialized lists by their own shared
+        # lost_atom_provenance_id key -- zero policy, zero containment/
+        # materiality/Freeze/repair-suppression logic of its own. Bounded,
+        # sibling-safe (word indices + short bounded excerpts only, no
+        # transcript dump, no Video00 golden-file content). Never fails the
+        # workflow (always exits 0) -- an absent subtree (flag off, or no
+        # lost atoms this run) is a legitimate, expected, non-error outcome.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          SCHEMA_VERSION = "cutsell.video00.d239f_lost_atom_ownership_materiality_freeze_repair_extraction.v1"
+          out_path = "artifact/lost-atom-ownership-materiality-diagnostics.json"
+
+          def write(summary):
+              os.makedirs("artifact", exist_ok=True)
+              with open(out_path, "w") as f:
+                  json.dump(summary, f, indent=2, sort_keys=True, default=str)
+              size = os.path.getsize(out_path)
+              print("--- D-239F Lost-Atom Ownership -> Materiality -> Freeze -> Repair Observability (pure re-projection + one pure provenance-id join of already-computed diagnostics -- recomputes NO ownership/materiality/Freeze/repair-suppression policy; sibling-safe, bounded; observational only -- never fails this workflow) ---")
+              print(f"summary file: {out_path} ({size} bytes)")
+              print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+
+          engine = load("artifact/video00-modal.json")
+
+          if not isinstance(engine, dict):
+              print("WARNING: artifact/video00-modal.json missing or unparseable -- cannot extract D-239F observability this run.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MISSING", "reason": "engine_json_missing_or_unparseable"})
+              sys.exit(0)
+
+          diag = engine.get("diagnostics") if isinstance(engine.get("diagnostics"), dict) else {}
+          fscv = diag.get("final_story_coherence_validation")
+          fscv = fscv if isinstance(fscv, dict) else {}
+          repair = diag.get("repair_loop")
+          repair = repair if isinstance(repair, dict) else {}
+
+          ownership_materiality = fscv.get("lost_atom_ownership_materiality_diagnostics")
+          repair_suppression = repair.get("lost_atom_repair_suppression_diagnostics")
+
+          if not isinstance(ownership_materiality, dict) and not isinstance(repair_suppression, dict):
+              print("Neither lost_atom_ownership_materiality_diagnostics nor lost_atom_repair_suppression_diagnostics is present this run (flag off, or no lost atoms) -- reporting MISSING observationally.", file=sys.stderr)
+              write({"schema_version": SCHEMA_VERSION, "source_status": "MISSING", "reason": "both_source_subtrees_absent"})
+              sys.exit(0)
+
+          atoms = ownership_materiality.get("atoms") if isinstance(ownership_materiality, dict) else None
+          atoms = atoms if isinstance(atoms, list) else []
+          entries = repair_suppression.get("entries") if isinstance(repair_suppression, dict) else None
+          entries = entries if isinstance(entries, list) else []
+
+          # --- The ONE computation this step performs: a pure dict JOIN by
+          # lost_atom_provenance_id -- no policy, just combining two
+          # already-serialized lists into one bounded per-atom record. ---
+          entries_by_provenance = {
+              e.get("lost_atom_provenance_id"): e for e in entries if isinstance(e, dict) and e.get("lost_atom_provenance_id")
+          }
+          combined = []
+          for atom in atoms:
+              if not isinstance(atom, dict):
+                  continue
+              merged = dict(atom)
+              entry = entries_by_provenance.get(atom.get("lost_atom_provenance_id"))
+              if entry:
+                  merged.update({k: v for k, v in entry.items() if k != "lost_atom_provenance_id"})
+              combined.append(merged)
+
+          summary = {
+              "schema_version": SCHEMA_VERSION,
+              "source_status": "PRESENT",
+              "atom_count": len(combined),
+              "atoms": combined,
+          }
+          write(summary)
+          PY
+
       - name: Verify frozen Selection lock
         shell: bash
         run: |
@@ -6432,6 +6550,7 @@ jobs:
             artifact/selection-freeze-diagnostics.json
             artifact/lost-semantic-atom-diagnostics.json
             artifact/exact-identity-observability.json
+            artifact/lost-atom-ownership-materiality-diagnostics.json
           retention-days: 14
           if-no-files-found: warn
 

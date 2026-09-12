@@ -124,6 +124,13 @@ from .contracts import effective_parent_semantic_clip_id
 # never touches AUTHORITATIVE_RELATIONSHIP_STATUSES. See
 # `_complete_lost_semantic_atom_materiality_by_clip_id`'s own docstring.
 from .exact_lost_atom_ownership import ExactLostAtomOwnership
+# D-239F: bounded, additive, read-only projection over objects this module
+# already computes (materiality_by_clip_id, critical_claim_conflict_by_
+# clip_id, and now lost_atom_ownership_by_clip_id) -- see that module's
+# own docstring. Recomputes zero ownership/materiality policy of its own.
+from .lost_atom_ownership_materiality_diagnostics import (
+    build_lost_atom_ownership_materiality_diagnostics,
+)
 from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 from .final_sibling_grouping import _content, _negations, _numbers
 # D-235R: the ONE Freeze-composition seam this task's own directive
@@ -1687,6 +1694,25 @@ def apply_final_story_coherence_validation(
         "lost_atom_identity_observability": _identity_observability_for_lost_atoms(
             lost_semantic_atoms, identity_observability_by_clip_id,
         ),
+        # D-239F: bounded ownership(D-238)+materiality(D-235Q)+Freeze-
+        # authority(D-235R) per-atom projection -- see lost_atom_ownership_
+        # materiality_diagnostics.py's own module docstring. Reads the SAME
+        # already-computed objects this dict's own "lost_atom_materiality_
+        # orchestration" key above reads, never a second policy.
+        "lost_atom_ownership_materiality_diagnostics": build_lost_atom_ownership_materiality_diagnostics(
+            lost_semantic_atoms,
+            # D-239F: gated behind the SAME flag `materiality_by_clip_id`
+            # itself is built behind (see the two lines above) -- an
+            # ownership map supplied while the flag is off is never
+            # consulted, exactly mirroring `exact_match_by_clip_id`'s own
+            # pre-D-239 fail-open posture (never "trust what a caller
+            # passed", only "trust what THIS pass itself computed").
+            lost_atom_ownership_by_clip_id=(
+                lost_atom_ownership_by_clip_id if _materiality_authority_enabled else None
+            ),
+            materiality_by_clip_id=materiality_by_clip_id,
+            critical_claim_conflict_by_clip_id=critical_claim_conflict_by_clip_id,
+        ),
         "validation_mode": LEGACY_RESOLVING_MODE,
         "not_implemented": [
             "general_non_numeric_non_negation_contradiction_detection",
@@ -1921,6 +1947,21 @@ def _apply_post_authority_validation_only(
         # D-237G: see the legacy-resolving pass's own identically-named field.
         "lost_atom_identity_observability": _identity_observability_for_lost_atoms(
             lost_semantic_atoms, identity_observability_by_clip_id,
+        ),
+        # D-239F: see the legacy-resolving pass's own identically-named field.
+        "lost_atom_ownership_materiality_diagnostics": build_lost_atom_ownership_materiality_diagnostics(
+            lost_semantic_atoms,
+            # D-239F: gated behind the SAME flag `materiality_by_clip_id`
+            # itself is built behind (see the two lines above) -- an
+            # ownership map supplied while the flag is off is never
+            # consulted, exactly mirroring `exact_match_by_clip_id`'s own
+            # pre-D-239 fail-open posture (never "trust what a caller
+            # passed", only "trust what THIS pass itself computed").
+            lost_atom_ownership_by_clip_id=(
+                lost_atom_ownership_by_clip_id if _materiality_authority_enabled else None
+            ),
+            materiality_by_clip_id=materiality_by_clip_id,
+            critical_claim_conflict_by_clip_id=critical_claim_conflict_by_clip_id,
         ),
         "selection_mutation_self_check": mutation_report_to_diagnostics(self_check),
         "not_implemented": [
