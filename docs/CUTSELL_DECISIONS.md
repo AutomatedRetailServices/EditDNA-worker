@@ -60674,3 +60674,246 @@ available for Product Owner Watch+Listen review pending a successful
 future retrieval of the target diagnostic content.
 
 Then STOP.
+
+## D-239N — EXACT LOST-ATOM TARGET → P1 MOMENT EVIDENCE FORENSIC, OFFLINE ONLY, POST D-239M (Verdict G: INSUFFICIENT EVIDENCE — two live, code-proven mechanisms remain undistinguished without live per-moment data; three named candidates ruled out by direct code proof; no fix)
+
+**Trigger:** the corrected D-239M real result showed the historical
+target (`clip_20779d173699a1a26add`, words 41–48, `EXACT_SINGLETON_
+OWNERSHIP` under `latt_9aa0ba9c525483abb9d9` / `prop_85504653d9d83eada703`)
+still landing on `editorial_requirement_target_evidence_source=NONE` /
+`retry_process_state=UNKNOWN` / `blocking_recommendation=ABSTAIN` under
+D-239L's own corrected contract — even though the SAME run's own P1
+aggregate reports 13 moments, all `POST_TAKE_RESET`, and P2 reports 9/9
+`RECORDING_PROCESS_REGION`. This gate traces, offline and code-only, WHY
+D-239I Seam C's `p1_moment_role_and_audience_status_by_clip_id_for`
+never resolves exact evidence for this specific clip_id, without
+promoting either aggregate to the target (forbidden by this task's own
+banner and Stage 8).
+
+## Stage 1 — P1 moment identity
+
+Each `EditorialMoment` is minted once per qualifying take inside
+`editorial_moment_sequence_integration.py::build_editorial_moments_for_
+source`, via `classify_editorial_moment(attempt, source_span_id=take.
+clip_id, proposition_candidate_ids=..., ...)`. Its available identity
+fields: `editorial_moment_id` (content-hash mint, `_editorial_moment_
+id`-style), `source_span_id` (== `take.clip_id` **verbatim** — no
+separate "clip_id" field exists on `EditorialMoment`, `source_span_id`
+**is** the clip identity), `source_asset_id`, `source_start`/`source_
+end` (physical timing only — **no word-index field exists anywhere on
+`EditorialMoment`**), `attempt_ids` (from the attempt used to build it —
+a fallback-derived attempt's own id equals `take.clip_id`, a real
+canonical attempt's id is its own `LanguageAttempt.attempt_id`),
+`proposition_candidate_ids` (via `proposition_candidate_ids_by_attempt_
+id.get(attempt.attempt_id, ())`), `moment_role`, `audience_delivery_
+status`, `recording_process_status`, `completion_status`, `local_
+sequence_position`, `confidence`, `conflict_flags`. `local_group_id`
+lives one level up, on `EditorialLocalGroup.group_id` (a separate,
+membership-hashed id referencing moment ids, not stored on the moment
+itself). The canonical key `p1_moment_role_and_audience_status_by_clip_
+id_for` uses is **`moment.source_span_id`** — confirmed by direct read
+of that function's own body.
+
+## Stage 2 — target clip identity
+
+Traced end to end, one unbroken, unmodified identity chain:
+`CandidateTake.clip_id` → `DraftClip.clip_id` (`pipeline.py`'s own
+`DraftClip(clip_id=take.clip_id, ...)` constructor, verbatim, no
+re-minting) → the SAME `clip_id` `_lost_semantic_atoms` reads off
+`draft.discarded` in `final_story_coherence_validation.py` → the SAME
+`clip_id` that row's own `clip_id` key carries into D-238 ownership and
+into Seam C's lookup. `clip_20779d173699a1a26add` (the target) is
+therefore, by construction, the SAME identity value Seam C would need to
+find as some moment's own `source_span_id` for a hit. No re-minting,
+mapping, or transformation step exists anywhere in this chain that could
+alter the value.
+
+## Stage 3 — dropped candidate population
+
+`pipeline.py::build_flow_b_draft` (the top-level entry receiving the
+raw candidate pool) sets `take_tuple = tuple(takes)` as its OWN first
+statement, before any hybrid_session_cleanup/composite-resolution/
+selection processing runs inside this function. P1 construction
+(`build_editorial_moment_understanding_for_sources(sources=...,
+takes=take_tuple, ...)`) reuses this SAME, untouched `take_tuple` —
+the identical population every other stage (selection, Freeze,
+StoryValidator) also starts from. This means the target's own
+`CandidateTake` (`present_before_selection=true`, per this task's own
+given shape) **is present in the population P1 construction iterates**,
+by construction — P1 is built from the full pre-selection pool, never a
+post-selection-filtered subset. The ONLY gate that can still exclude a
+present-before-selection take from ever becoming a P1 moment is
+`build_editorial_moments_for_source`'s own explicit skip: `if span is
+None or not take.clip_id or take.start is None or take.end is None or
+take.end < take.start: unresolved_count += 1; continue` — i.e., a
+missing `UnderstandingSpan` for this exact clip_id (`understanding_
+spans_by_id.get(take.clip_id)` returning `None`). Whether THIS
+target's own take hit that specific skip condition in the real run
+cannot be determined from code alone — it depends on whether D-157's
+own `WatchListenUnderstanding.understanding_spans` (built independently,
+upstream, from perceptual analysis) happens to cover this exact span.
+No code evidence either confirms or rules this out for this specific
+run.
+
+## Stage 4 — P1 lookup helper
+
+`p1_moment_role_and_audience_status_by_clip_id_for` (`editorial_moment_
+sequence_integration.py`) iterates every `understanding.moments` across
+all sources and includes a clip_id in its two output maps **only when
+ALL THREE** hold: (1) `moment.source_span_id is not None`; (2)
+`moment.confidence == CONFIDENCE_SUPPORTED` (any other value —
+`CONFIDENCE_WEAK`/`CONFIDENCE_MIXED`/`CONFIDENCE_UNKNOWN` — is skipped);
+(3) `moment.moment_role != MOMENT_ROLE_UNCERTAIN`. Any single failure
+silently omits the clip_id from both maps — never a fabricated
+`missing`/`UNCERTAIN`/`unsupported` value written INTO the map, just
+absence, which a caller's `.get(clip_id)` then reads back as `None`.
+Every one of the four listed failure conditions this stage asks about
+(`missing`, `UNCERTAIN`, `unsupported`, `ambiguous`) reduces to exactly
+these three code-level gates: no moment at all (Stage 3's own skip);
+moment present but not `CONFIDENCE_SUPPORTED`; or moment present,
+`CONFIDENCE_SUPPORTED`, but role `MOMENT_ROLE_UNCERTAIN`.
+
+## Stage 5 — namespace check
+
+**No substitution found.** Confirmed by direct read:
+`build_editorial_moments_for_source` sets `source_span_id=take.clip_id`
+literally (never `attempt.attempt_id`, never `take.source_span_id`
+D-050A's separate physical-observation field, never any other id).
+`p1_moment_role_and_audience_status_by_clip_id_for` keys its own output
+maps by `moment.source_span_id` — the SAME value. This is the SAME
+clip_id space the lost-atom row, D-238 ownership, and every other
+consumer already use. The historical `attempt_id`-mislabeled-as-`clip_id`
+bug class (D-237L's own fix, in `exact_identity_observability.py`, an
+entirely separate module) is **not present** in this code path —
+verified by direct inspection, not assumed.
+
+## Stage 6 — source-span bridge
+
+`EditorialMoment` carries **no word-index field at all** (Stage 1) — it
+has only physical `source_start`/`source_end` and `proposition_
+candidate_ids`. The ONLY existing exact bridge from a `LanguageAttempt`
+id to a clip is `final_story_coherence_validation.py`'s own
+`_representative_clip_id_by_attempt_id` (Seams B/D's shared reverse
+index: attempt_id → the ONE clip whose OWN exact D-235P identity IS
+that attempt, AUTHORITATIVE-status-gated). This bridge EXISTS and is
+already reused by Seams B and D — but Seam C's own lookup (`p1_moment_
+role_and_audience_status_by_clip_id_for`) does **not** consult it; Seam
+C looks up strictly by the row's own `clip_id`, never via this
+attempt-to-representative-clip indirection. This is an observation of
+an existing mechanism, not a proposed fix (per this stage's own "do NOT
+design or implement" instruction).
+
+## Stage 7 — proposition/moment relation
+
+No exact word-level association is possible with current evidence.
+`EditorialMoment` objects carry `proposition_candidate_ids` (exact) but
+no word-index range, so at most a moment can be said to "belong to the
+SAME proposition" as the target's own 8 words — never "cover words
+41–48 specifically." All 11 of this proposition's P1 moments are
+equally "associated" with the proposition at this coarse grain; none is
+distinguishable from another using only proposition membership. No
+timestamp-overlap authority was consulted or is proposed.
+
+## Stage 8 — aggregate firewall
+
+Confirmed and honored throughout this forensic: `editorial_moment_
+sequence_run_summary`'s own `post_take_reset_count` (the source of the
+"13/13 POST_TAKE_RESET" figure) is a bare per-role tally over **every**
+moment regardless of `confidence` — it has no confidence gate at all,
+structurally different from Seam C's own three-condition gate (Stage
+4). The P2 "9/9 RECORDING_PROCESS_REGION" figure is likewise a `Whole
+VideoEditorialRegion`-level aggregate, built from moment-level
+aggregation, never clip-specific. **Neither aggregate is used anywhere
+in this forensic to classify the target** — every Stage 1–7 finding
+above is drawn from the identity/gating MECHANISM (proven by code),
+never from these counts.
+
+## Stage 9 — retry/process consequence
+
+Both conditional branches genuinely remain open, and this gate cannot
+collapse them to one without live per-moment data (itself unretrieved —
+D-239M Verdict F, the seventh consecutive such failure):
+- **If an exact target P1 moment exists and is `POST_TAKE_RESET`** but
+  Seam C still failed to consume it, the reason is necessarily Stage 4's
+  own confidence or role gate (a real, `POST_TAKE_RESET`-classified
+  moment can still carry `CONFIDENCE_WEAK`/`MIXED`/`UNKNOWN`, or —
+  though role-classification would make this unlikely for
+  `POST_TAKE_RESET` specifically — `MOMENT_ROLE_UNCERTAIN`). Seam C's
+  own contract is doing exactly what it was designed to do here: refuse
+  a not-confidently-resolved moment rather than guess.
+- **If no exact target P1 moment exists at all**, the smallest exact
+  missing identity seam is Stage 3's own `UnderstandingSpan` coverage
+  gap for this specific clip_id — not a Seam C defect, a Stage-3-level
+  population gap upstream of Seam C entirely.
+
+## Root-cause verdict
+
+**G — INSUFFICIENT EVIDENCE.** Three of the seven named candidates are
+**ruled out by direct code proof**, not merely unconfirmed:
+- **A** (clip-id namespace/join wrong): ruled out — Stage 5's own
+  verbatim-assignment proof.
+- **C** (P1 target exists only through a non-clip identity not
+  bridged): ruled out — P1 already keys by the SAME `clip_id` space the
+  lost-atom row uses; no bridging is even structurally needed for THIS
+  identity axis (Stage 2/5).
+- **D** (one-to-many/ambiguous P1 representation): ruled out —
+  `build_editorial_moments_for_source`'s own loop mints at most one
+  moment per take, strictly 1:1 (Stage 1).
+
+Two candidates remain **live and undistinguished**: **B** (dropped
+target never gets a P1 moment — a genuine `UnderstandingSpan` coverage
+gap, Stage 3) and the confidence/role-gate mechanism underlying **F**
+(a real P1 moment exists but fails Seam C's own `CONFIDENCE_SUPPORTED`/
+non-`UNCERTAIN` requirement, Stage 4/9). Both are real, code-proven
+MECHANISMS capable of producing the exact observed symptom
+(`retry_process_state=UNKNOWN`); this forensic has no live per-moment
+JSON (source_span_id + confidence + role, together) for `clip_
+20779d173699a1a26add` to pick between them, and inferring an answer
+from either aggregate would violate this task's own explicit firewall
+(Stage 8). **G**, not **F**, because F asserts "genuinely has no exact
+role evidence" as the settled explanation, foreclosing the live
+possibility (B) that the moment was simply never minted at all — a
+materially different situation this forensic cannot foreclose without
+data it does not have.
+
+## No fix
+
+Per this gate's own directive: no implementation, no inference of
+`POST_TAKE_RESET` from aggregate counts, no classification of the
+target via P2 aggregate region status. Nothing in `editorial_moment_
+sequence_integration.py`, `editorial_moment_sequence.py`, `pipeline.py`,
+`final_story_coherence_validation.py`, or `complete_lost_semantic_atom_
+materiality.py` is modified by this gate.
+
+## Confirmation
+
+Forensic only. Zero files changed except this docs-only entry. No
+P1/P2/materiality/retry-process/Freeze/repair/ownership/Language-Spine
+authority change. No threshold, no heuristic, no aggregate→target
+promotion. No RAW, no Modal, no RunPod, no provider call.
+
+**Canonical status:** `D239N_P1_TARGET_EVIDENCE_GAP_MECHANISM_
+IDENTIFIED_TWO_LIVE_CANDIDATES_INSUFFICIENT_LIVE_DATA_NO_FIX`.
+
+**Freeze track status:** unchanged — the target's `ABSTAIN`/`INSUFFICIENT_
+EVIDENCE` state from D-239M stands; this gate neither confirms nor
+overturns it.
+
+**Pacing track status:** not reached; unaffected by this gate.
+
+**Exact next gate:** a Product Owner decision on whether authorizing a
+live, targeted extraction of the SPECIFIC per-moment record for
+`clip_20779d173699a1a26add` (source_span_id + confidence + role,
+together — not the aggregate counts, not the giant log) is worth one
+more paid RAW, given seven consecutive prior gates have all hit the
+same sandbox-side retrieval wall (D-237H/J/M, D-239, D-239G/J/M) — or
+whether to instead pursue the infra remedy those gates already named
+(widen the egress allowlist, or add a durable S3-persisted copy of the
+validator-reports content). Not started, not scoped, not implemented
+here.
+
+**New classifier needed?** No. **New threshold needed?** No.
+**Provider needed?** No. **RAW needed?** No — this is an offline,
+code-only forensic. **Paid compute needed?** No, not by this task.
+
+Then STOP. Do NOT implement. Do NOT launch RAW.
