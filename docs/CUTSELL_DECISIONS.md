@@ -63097,3 +63097,301 @@ DO NOT LAUNCH D-245.
 **Confirmation:** exactly one RAW dispatched (`34721625895`), no second RAW, no RunPod, no provider change, no post-result code/workflow/threshold/tuning patch. `docs/CUTSELL_DECISIONS.md` is the only file changed.
 
 Then STOP.
+
+## D-246 — AUDIO FINISHING ARCHITECTURE AUDIT, OFFLINE ONLY, POST D-245 (Verdict A: AUDIO FINISHING ARCHITECTURE IS PARTIALLY PRESENT — CLEAR P0/P1 GAPS IDENTIFIED — READY FOR FIRST OFFLINE IMPLEMENTATION GATE)
+
+**Branch/new HEAD:** `feature/runpod-pod-on-demand`, HEAD `d355537fef9f31d7bb7ae86a690fecbe3cf82ed3` (exact match to expected — this gate is docs-only, no code commit). Clean tree confirmed before and after.
+
+**Files changed:** `docs/CUTSELL_DECISIONS.md` only. No `cutsell_worker/*.py` file, no `tests/*.py` file, no `.github/workflows/*.yml` file, no feature flag, no threshold, no heuristic, no DSP implementation touched.
+
+**Method:** direct code audit (`Grep`/`Read` across `cutsell_worker/`) for the full search-term list this gate names (`loudnorm`, `LUFS`, `EBU`/`R128`, `true_peak`, `peak`, `normalize`, `gain`, `limiter`, `compressor`, `denoise`, `noise`, `hum`, `highpass`/`lowpass`, `click`, `pop`, `crossfade`, `afade`/`acrossfade`, `de-ess`/`sibilance`, `plosive`, `breath`, `room tone`/`ambience`, `duck`/`ducking`/`sidechain`, `sample_rate`/`aresample`, `stereo`/`mono`/`channel`, `sync`, `audio_join`, `CLICK_FADE`/`SHORT_CROSSFADE`/`AMBIENCE_CARRY`/`MICRO_AUDIO_OVERLAP`), followed by direct reading of every file the search surfaced. No absence assumed without a direct negative citation (either an explicit self-declared "does not X" docstring, or a confirmed zero-hit search).
+
+---
+
+### STAGE 1 — CURRENT AUDIO PIPELINE (traced from actual code)
+
+```
+RAW source file (on disk / S3)
+  → per-segment decode+seek (ffmpeg -ss/-to -i source_path; render.py::_segment_command / _concat_render_command)
+  → per-segment audio filter chain, ONE ffmpeg filtergraph:
+      volume=<audio_volume>              (manual per-clip gain override, default 1.0, NEVER auto-computed)
+      afade=t=in:d=0.012 / afade=t=out:d=0.012   (always-on 12ms click-safety fade, render.py:_audio_join_fade_filters)
+      aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo   (deterministic resample+channel normalize)
+      apad=whole_dur=... / atrim=duration=...    (frame-exact duration lock, render.py::rendered_segment_duration_sec)
+  → concat filter (concat=n=<N>:v=1:a=1[vout][aout])  -- ONE ffmpeg pass, all segments joined in the filtergraph
+  → mux/export, SAME ffmpeg invocation: -c:v libx264 -c:a aac -b:a 160k -ar 48000 -movflags +faststart
+  → Technical QC: post_render_media_qc.py (probe_decode_integrity, check_accidental_silence,
+      check_frozen_frames, check_dead_black_frames, check_audio_discontinuity_at_boundaries)
+      orchestrated by live_render_qc.py (+ bounded physical repair loop)
+  → Perceptual Watch+Listen (advisory only, perceptual_watch_listen.py)
+  → D-095 Video00 quality ladder (four-way RAW/Cut.ai/Human-Gold/CutSell comparison)
+```
+
+Per-stage detail:
+
+| Stage | Owning module/function | Input | Output | Destructive? | Timing-changing? | Provider-backed? | Renderer-only? |
+|---|---|---|---|---|---|---|---|
+| Decode/seek | `render.py::_segment_command`/`_concat_render_command` (ffmpeg `-ss/-to`) | source file + Boundary-decided `[start,end)` | decoded PCM/frame stream | non-destructive to source | no (executes Boundary's already-frozen window) | no | yes |
+| Per-segment gain | `render.py` (`volume=` filter) | `RenderSegment.audio_volume` (manual field, `contracts.py`/`render_plan.py`, default 1.0) | gain-scaled audio | destructive (baked into render) | no | no | yes |
+| Click-safety fade | `render.py::_audio_join_fade_filters` | segment duration | faded-edge audio | destructive | no | no | yes |
+| Resample/channel normalize | `render.py` (`aformat=...`) | mixed native sample rates/channel layouts | uniform 48kHz/stereo/fltp | destructive | no | no | yes |
+| Duration lock | `render.py::rendered_segment_duration_sec` | Boundary-tightened duration | frame-exact padded/trimmed duration | destructive | yes (rounds up to whole output frames) | no | yes |
+| Join (concat) | `render.py::_concat_render_command` (`concat` filter) | N segment filtergraph outputs | one continuous stream | destructive | no (segment order/timing already frozen) | no | yes |
+| Export/mux | same ffmpeg invocation | joined stream | H.264/AAC MP4 | destructive | no | no | yes |
+| Technical QC | `post_render_media_qc.py`/`live_render_qc.py` | rendered MP4 | pass/fail findings | non-destructive (read-only probes) | no | no | renderer-adjacent, not renderer itself |
+
+---
+
+### STAGE 2 — EXISTING AUDIO JOIN CAPABILITIES
+
+D-234's own closed vocabulary (`pacing_v2_audio_join_treatment_decision.py`): `TREATMENT_NONE`, `TREATMENT_CLICK_FADE`, `TREATMENT_SHORT_CROSSFADE`, `TREATMENT_AMBIENCE_CARRY_LEFT`, `TREATMENT_AMBIENCE_CARRY_RIGHT`, `TREATMENT_AMBIENCE_BRIDGE`, with the module's OWN capability classification constants:
+
+- `RENDERER_CAPABILITY_CLICK_FADE = "EXISTING_LIVE_UNCHANGED"` — **IMPLEMENTED, LIVE, UNCONDITIONAL.** This treatment name maps onto the SAME always-on 12ms fade every segment already gets (Stage 1/3) — it is not a separately-selected treatment, it is the physical safety net every join receives regardless of Audio Join Treatment's own decision.
+- `RENDERER_CAPABILITY_SHORT_CROSSFADE = "EXTENSION_REQUIRED"` — **SERIALIZED + PROVEN-CAPABLE IN ISOLATION, NOT LIVE.** `render.py::render_audio_join_treatment_preview` (D-233) has a real, working `_TREATMENT_SHORT_CROSSFADE` ffmpeg branch — but this function is a standalone executor, never imported or called from `universal_clean_cut.py`, `pipeline.py`, or the live `render_preview()`/`_concat_render_command` path. Confirmed by `pacing_v2_audio_join_treatment_live_diagnostics.py`'s own explicit self-restriction: *"No live audio-treatment execution. `render.py`'s D-233 `render_audio_join_treatment_preview` executor is never imported here."* and its own diagnostics field `advanced_treatment_executed_count` is **structurally always 0**.
+- `RENDERER_CAPABILITY_AMBIENCE_CARRY_LEFT/RIGHT = "SUPPORTED_NOW"`, `RENDERER_CAPABILITY_AMBIENCE_BRIDGE = "SUPPORTED_NOW"` — same status as SHORT_CROSSFADE: real, working branches exist in the SAME standalone `render_audio_join_treatment_preview` executor, proven capable, but **never live-wired**.
+
+**J_CUT/L_CUT/MICRO_AUDIO_OVERLAP execution:** D-142's own live executor (`dialogue_pacing_transition.py`) structurally falls back to a safe non-overlap mode whenever one of these would be selected — `FALLBACK_RENDERER_EXTENSION_REQUIRED` is the module's own explicit, self-documented reason: *"a true overlap needs `acrossfade`/`amix` between two neighboring audio [segments]"* and the live renderer's main concat path has no such capability wired in. This fallback fires **regardless of** whether `dialogue_overlap_enabled=True` (the D-134 permission flag) — the permission exists, the renderer extension to honor it does not.
+
+**Exact duration rules:** click fade = fixed 12ms (`_AUDIO_JOIN_FADE_SEC=0.012`), min-segment floor 0.20s. SHORT_CROSSFADE/AMBIENCE treatments' duration = D-220's own `chosen_duration = min(max_safe_window, anchor_word_duration)` — but `anchor_word_duration` is itself `NOT_COMPUTABLE_WITHOUT_ANCHOR_WORD_DATA` per D-221's own honest, already-documented gap (per-word timestamps are not serialized to `DraftTimeline` today) — so even with a safe handle, this computation has an unfilled dependency today.
+
+**Exact safety constraints:** never exceed the measured safe-handle window (`SourceAudioHandle.available_duration`); never touch a `BLOCKED_*`/`SPEECH_PRESENT_NOT_AUTHORITATIVE`/`UNKNOWN`-status handle; never mutate `DraftClip`/`RenderSegment` video-window boundaries (firewalled at every diagnostic layer, D-215 through D-234).
+
+**Can any currently alter final audio?** Only the always-on 12ms click fade and the manual `audio_volume` override currently touch live-rendered audio. None of the 5 semantic treatment values beyond the coincidental CLICK_FADE-equivalence currently alter it live.
+
+---
+
+### STAGE 3 — CLICK/POP PREVENTION
+
+- **Exact duration:** 12ms (`_AUDIO_JOIN_FADE_SEC = 0.012`).
+- **When applied:** both leading and trailing edge of every rendered segment.
+- **Symmetric:** Yes, identical in/out duration.
+- **Applied at every cut:** Yes, except segments shorter than `_AUDIO_JOIN_FADE_MIN_SEGMENT_SEC = 0.20s` (skipped to avoid covering a material share of a very short segment).
+- **Applied only under certain treatments:** No — unconditional, applied independent of and prior to whatever Audio Join Treatment decision exists (the module's own docstring explicitly discusses avoiding a DOUBLE fade when a semantic treatment's own envelope already reaches silence at the same edge).
+- **Does it change speech audibly:** No — 12ms is well below the threshold of perceptible amplitude-ramp for dialogue; its entire purpose is eliminating a discontinuous waveform STEP, not shaping perceived loudness. Root-cause evidence: D-094.3/F14 found 8 of 22 real joins on a real RAW flagged `ABRUPT_AUDIO_DISCONTINUITY` (measured sample-value jumps 573-3719 vs a typical 41-153) before this fade existed.
+- **Independent from semantic Audio Join Treatment:** Yes, explicitly.
+- **Classification: `IMPLEMENTED`.**
+
+---
+
+### STAGE 4 — LOUDNESS
+
+| Capability | Status |
+|---|---|
+| Integrated LUFS measurement | **NONE** |
+| Short-term LUFS | **NONE** |
+| Momentary LUFS | **NONE** |
+| True peak measurement | **NONE** (live). Named only as an EMPTY future field, see below. |
+| Per-clip RMS/gain matching | **NONE automated** — `audio_volume` exists (`contracts.py`/`render_plan.py`, default 1.0) but is ONLY ever written by a manual editor-layer path (`draft_edits.py:289`), never computed from measured loudness. |
+| Whole-video loudness normalization | **NONE** |
+| Limiter | **NONE** |
+| Compressor | **NONE** |
+| Peak ceiling | **NONE** encoded |
+| Loudness QC | **NONE** in `post_render_media_qc.py`/`live_render_qc.py` |
+
+**Actual target numbers already encoded?** `cutsell_worker/finishing_contract.py` (D-024, dormant interface only, never implemented or invoked anywhere) declares the SHAPE: `FinishingSpec.target_loudness_lufs: float | None = None`, `true_peak_ceiling_dbtp: float | None = None` — both fields exist, **both default to `None` and are never populated anywhere in this codebase.** Per this gate's own explicit instruction: reporting **NONE**, not inventing a number.
+
+---
+
+### STAGE 5 — NOISE / HUM
+
+| Capability | Status |
+|---|---|
+| Broadband denoise | **MISSING** |
+| Stationary noise reduction | **MISSING** |
+| Hum/notch filtering | **MISSING** |
+| High-pass filtering | **MISSING** (zero `highpass`/`lowpass` ffmpeg filter usage anywhere in `cutsell_worker/`) |
+| Noise-floor estimation | **NONE as a DSP concept.** The only "noise" parameter anywhere is `silencedetect=noise=-35dB` inside `post_render_media_qc.py::_detect_silence_intervals` — a THRESHOLD for silence DETECTION (a QC boolean gate), not a measured noise-floor PROFILE used for reduction or ambience matching. |
+| Silence-profile noise estimation | **NONE** |
+
+`pacing_v2_acoustic_edge_evidence.py`'s own module docstring is the authoritative, self-declared negative-space contract: *"does not normalize gain, denoise, de-click, de-breath, de-plosive, EQ, or..."* — direct textual confirmation none of these exist.
+
+**Audio-signal analysis vs ASR silence metadata, explicitly separated (per this gate's own instruction):** the codebase's real audio-silence detection (`AUDIO_SILENCE_EVENT_KIND` events, consumed by `boundary_engine_pass.py`) already comes from a genuine audio-signal analysis pass recorded in `whole_video_context`, never from ASR word-timing gaps — this separation was independently forensically proven real (not merely claimed) by D-222's own prior audit. No room/noise inference from ASR silence exists or is proposed here.
+
+---
+
+### STAGE 6 — BREATH / MOUTH / PLOSIVE / SIBILANCE
+
+| Capability | Classification |
+|---|---|
+| Breath detection/removal/reduction | **MISSING** |
+| Mouth click detection | **MISSING** |
+| Lip smack reduction | **MISSING** |
+| Plosive detection / de-plosive | **MISSING** |
+| De-essing / sibilance detection | **MISSING** |
+
+All five explicitly disclaimed in `pacing_v2_acoustic_edge_evidence.py`'s own docstring ("de-breath", "de-click", "de-plosive").
+
+**Risk classification:** breath/mouth-click/plosive AUTOMATIC REMOVAL is **`RISKY_TO_AUTOMATE`** for V1 — CLAUDE.md's own binding editorial rules ("Human performance errors matter even when transcript is complete," "Preserve story/personality") make blanket automatic removal of natural vocal texture a real risk to authentic UGC delivery; this audit does **not** recommend deleting all breaths, per this gate's own instruction. De-essing (a pure spectral/EQ operation, not a content-removal decision) is mechanically lower-risk but currently **`NOT_NEEDED_FOR_V1`** — no evidence from any qualified RAW (D-243's sibling or D-245's Video00 run) has shown a real sibilance problem.
+
+---
+
+### STAGE 7 — LEVEL CONTINUITY BETWEEN TAKES
+
+**Currently detectable or correctable:** **NONE of it** — one clip louder than the next, a take recorded closer to mic, a different gain setting, an abrupt perceived level jump at a cut, L/R channel mismatch, source-device level mismatch — none are measurable today because no per-clip loudness/RMS measurement layer exists at all (Stage 4).
+
+**Per-clip normalization risk (architecture-only, no implementation):** naively normalizing each clip to an ABSOLUTE fixed LUFS target independently is a well-known cause of audible "pumping" across a multi-take edit (different clips have different noise floors/dynamic ranges even after absolute-level matching) — the architecturally correct approach is a WHOLE-VIDEO-AWARE relative gain-continuity pass (matching level BETWEEN adjacent clips, informed by a whole-video measurement), not blind per-clip absolute normalization. This is consistent with `finishing_contract.py`'s own existing (dormant) design choice to name `target_loudness_lufs` as a single WHOLE-DELIVERY field, not a per-clip one.
+
+---
+
+### STAGE 8 — AMBIENCE CONTINUITY
+
+| Question | Answer |
+|---|---|
+| Room tone preservation implemented as a distinct authority | **NOT IMPLEMENTED** — Boundary's own edge-trim authorities (`tighten_selected_audio_edges`/`trim_locked_selection_edges`) REMOVE non-speech room tone/dead air; their job is subtraction, not preservation/reuse. |
+| Ambience carry / bridge implemented | **SERIALIZED-ONLY, PROVEN-CAPABLE VIA STANDALONE EXECUTOR, NOT LIVE** (Stage 2). |
+| Noise-floor continuity | **NONE**. |
+| Are real ambience samples stored/addressable | **Yes, in principle** — `SourceAudioHandle` (D-223) names an exact `[handle_source_start, handle_source_end)` window in the ORIGINAL source file; the source media itself remains on disk and addressable by timestamp. No sample is ever extracted or cached by this module — it only IDENTIFIES a safe window. |
+| Can Handle-Aware evidence support ambience carry | **Yes, architecturally** — exactly the evidence `render_audio_join_treatment_preview`'s AMBIENCE_CARRY/BRIDGE branches already consume in isolation — but D-243 and D-245 both proved **zero safe handles** exist on either real-media RAW tested, so this path has never been exercised on real content. |
+| Can renderer repeat/stretch ambience | **No** — the existing preview implementation extends/reuses the EXISTING measured window verbatim (bounded by D-220's own `chosen_duration` contract); it never time-stretches or loops. Deliberate, not a missing feature. |
+| Does architecture forbid fabrication | **Yes, explicitly, repeatedly** — D-223's own docstring ("never a new acoustic silence/room-tone detector... zero speculative reach into unprobed source media"), and the D-242 fail-closed rule ("never infer safe handles from silence alone"). |
+| Does absence of safe handles block ambience continuity | **Yes, directly** — AMBIENCE_CARRY/BRIDGE both REQUIRE a `SAFE_NON_SPEECH` handle as their evidentiary basis; zero exist on either RAW tested. |
+
+No room tone is fabricated anywhere in this audit's findings or proposals.
+
+---
+
+### STAGE 9 — MUSIC / DUCKING
+
+**`OUT_OF_SCOPE_FOR_CURRENT_CORE`.** No music layer exists in Clean Cut Core V1. No ducking/sidechain DSP exists anywhere in `cutsell_worker/`. The isolated "music"-adjacent hits this audit's own search surfaced (`canonical_edit_plan.py` and others) are the already-documented dormant Sales/TikTok extension points (named, never implemented, per the earlier D-023/D-034-era work) — not a real audio music layer. This audit does not expand product scope to include one.
+
+---
+
+### STAGE 10 — TECHNICAL AUDIO QC
+
+| Check | Current status |
+|---|---|
+| Clipping | **MISSING** — no `astats`/`volumedetect`/peak-sample check anywhere. |
+| Silence/dropout | **PARTIALLY PRESENT** — `check_accidental_silence` (real `silencedetect`) catches lingering silence; no dedicated "audio stream vanished" assertion beyond general decode-integrity. |
+| Audio stream missing | **PARTIALLY COVERED** by `probe_decode_integrity`'s general `ffmpeg -v error` decode pass. |
+| Duration mismatch | **NOT DIRECTLY CHECKED** post-render — `rendered_segment_duration_sec`'s own frame-exact accounting makes the output duration a deterministic function of the frozen plan, but nothing independently re-verifies it post-hoc. |
+| A/V sync | **PARTIALLY PRESENT** — `check_audio_discontinuity_at_boundaries` checks audio-waveform continuity at join points (a join-quality proxy); no dedicated cross-stream audio-vs-video timestamp-drift check. |
+| Codec | **NOT CHECKED post-render** — structurally fixed at encode (`-c:v libx264 -c:a aac`), so mismatch is architecturally impossible given the single-encode-path design, but nothing asserts it. |
+| Channel count | **NOT CHECKED post-render** — same reasoning, fixed to stereo via `aformat`. |
+| Sample rate | **NOT CHECKED post-render** — same reasoning, fixed to 48000 via `-ar 48000`. |
+| Loudness | **MISSING** (Stage 4). |
+| True peak | **MISSING** (Stage 4). |
+| Render corruption | **PRESENT** — `probe_decode_integrity`. |
+
+---
+
+### STAGE 11 — PROFESSIONAL AUDIO FINISHING GAP MATRIX
+
+| Capability | Current status | Current owner | V1 necessity | Risk | Proposed future owner | Dependencies |
+|---|---|---|---|---|---|---|
+| Click/pop prevention | IMPLEMENTED | `render.py` (12ms afade) | P0 (already met) | none | unchanged | none |
+| Gain continuity between clips | MISSING | none | P0 | pumping if done naively per-clip | new: Audio Finishing Clip-Level Correction stage | whole-video measurement first |
+| Loudness normalization (whole-video) | MISSING | none | P0 | perceived unprofessional inconsistency | new: Audio Finishing Whole-Video stage | measurement stage |
+| Peak limiting | MISSING | none | P0 | clipping on delivery | new: Audio Finishing Limiting stage | after normalization |
+| Denoise (broadband) | MISSING | none | P1 | none proven needed yet; risk of over-processing natural speech | new, deterministic ffmpeg filter (e.g. `afftdn`), only if RAW evidence shows need | none |
+| Hum handling | MISSING | none | P1 (same, evidence-gated) | low if bounded to a notch filter | same as denoise | evidence of real hum on a qualified RAW |
+| Breath handling | MISSING | none | P2 | high — risk of erasing authentic delivery | none proposed yet (editorial, not DSP) | Product Owner policy first |
+| Mouth clicks | MISSING | none | P2 | high — same reasoning | none proposed yet | same |
+| Plosives | MISSING | none | P2 | medium | possible deterministic high-pass-based de-plosive, evidence-gated | evidence of real plosive problem |
+| De-essing | MISSING | none | P2 | low-medium | deterministic dynamic-EQ filter if ever needed | evidence of real sibilance problem |
+| Ambience continuity (CARRY/BRIDGE live-wiring) | SERIALIZED, PROVEN-CAPABLE, NOT LIVE | `render.py::render_audio_join_treatment_preview` (dormant) | P1 | low (already firewalled against fabrication) | live-wire the existing preview executor | a real safe handle must exist first — none found yet |
+| SHORT_CROSSFADE live-wiring | SERIALIZED, PROVEN-CAPABLE, NOT LIVE | same | P1 | low | same | same |
+| J/L/MICRO_AUDIO_OVERLAP execution | SERIALIZED ONLY, RENDERER EXTENSION REQUIRED | `dialogue_pacing_transition.py` (diagnostic) | P2 | low, but real product value unproven | future renderer `acrossfade`/`amix` extension | a handle-rich RAW must exist first — none found yet |
+| Music ducking | OUT_OF_SCOPE | n/a | OUT_OF_SCOPE | n/a | n/a | no music layer exists |
+| Final export loudness/true-peak QC | MISSING | none | P0 | ships an inconsistent/clipped delivery undetected | extend `post_render_media_qc.py` | loudness/peak stage must exist first |
+
+---
+
+### STAGE 12 — V1 PRIORITIZATION
+
+**P0 (required before beta):** whole-video loudness normalization; peak limiting/true-peak safety; gain-continuity between clips; final export loudness/true-peak/clipping QC gate.
+
+**P1 (professional polish, follows P0):** broadband denoise/hum handling (evidence-gated — only if a future RAW proves a real need); SHORT_CROSSFADE and AMBIENCE_CARRY/BRIDGE live-wiring (already proven-capable in isolation, just needs a real safe handle to ever exercise); dedicated A/V sync QC.
+
+**P2 (later enhancement):** mouth-click/plosive detection-and-correction (automate cautiously, only with strong evidence and a human-override path); de-essing; J_CUT/L_CUT/MICRO_AUDIO_OVERLAP live renderer execution (contingent on a handle-rich RAW ever being found, and on the anchor-word-duration gap from D-221 being closed).
+
+**OUT_OF_SCOPE:** music/ducking (no music layer in V1); any cinematic sound design; automatic blanket breath removal.
+
+Not everything is P0 — this reflects a realistic V1, per this gate's own explicit instruction.
+
+---
+
+### STAGE 13 — PROPOSED AUDIO FINISHING PIPELINE (design only, not implemented)
+
+```
+SOURCE ANALYSIS            (per-selected-clip LUFS/true-peak measurement; deterministic ffmpeg
+                             loudnorm-two-pass or ebur128 filter; READ-ONLY, no mutation, diagnostics-only)
+  → CLIP-LEVEL CORRECTION  (relative gain adjustment computed from the measurement above;
+                             deterministic volume/loudnorm filter at render time; never absolute
+                             per-clip normalization alone -- see Stage 7's pumping risk)
+  → JOIN-LEVEL TREATMENT   (existing always-on 12ms click fade, unconditional; the already-built
+                             but dormant semantic Audio Join Treatment layer wired live ONLY once a
+                             real safe handle exists -- never fabricated, never live before then)
+  → WHOLE-VIDEO LOUDNESS FINISH  (one corrective pass toward an explicit, Product-Owner-approved
+                             or platform-standard-cited integrated LUFS target -- NOT invented by
+                             this gate)
+  → LIMITING / PEAK SAFETY (deterministic true-peak ceiling limiter, applied last, purely protective,
+                             never an editorial decision)
+  → RENDER                 (existing `_concat_render_command`, join/timing logic unchanged --
+                             Finishing sits strictly after Selection Freeze/Boundary/Render per
+                             `finishing_contract.py`'s own binding ordering rule)
+  → TECHNICAL QC           (extend `post_render_media_qc.py`: clipping, loudness, true-peak,
+                             codec/channel/sample-rate re-verification)
+```
+
+Per stage: **evidence consumed** = only already-measurable signal (real audio samples, already-frozen Boundary/Pacing output) — never ASR silence metadata, never a fabricated value. **Action allowed** = deterministic gain/level/limiting operations. **Action forbidden** = any mutation of spoken content, clip membership, ordering, or Boundary timing (Finishing is strictly post-semantic). **Renderer responsibility** = execute the already-decided treatment; never decide it. **Fail-closed behavior** = if a measurement is unavailable or ambiguous, apply no correction rather than guess (mirrors the existing D-242/D-223 fail-closed convention).
+
+---
+
+### STAGE 14 — DSP VS INTELLIGENCE
+
+**A. Deterministic DSP** (no provider needed): LUFS/true-peak measurement (ffmpeg `loudnorm`/`ebur128`, both already-available ffmpeg filters, same tool already used for `silencedetect`); gain adjustment computation and application; peak-ceiling limiting (`alimiter`); resampling/channel-layout normalization (already exists); the 12ms click fade (already exists); broadband denoise IF ever pursued (`afftdn` is a deterministic ffmpeg filter, not inherently ML — no new provider required even for P1 denoise); de-essing (achievable via deterministic dynamic EQ, no provider required).
+
+**B. Evidence-based editorial decision** (already-closed authorities, unaffected by this track): which clip is the delivery winner (Selection/BestTake); where the Boundary edge sits; which J/L/overlap mode would be chosen (diagnostic-only, D-215/D-220); whether a breath/pause is expressive vs removable — explicitly flagged **not safely automatable** without human/editorial judgment.
+
+**C. Provider/ML-dependent:** none identified as NECESSARY for the P0/P1 gap set — every P0/P1 capability in this audit's own gap matrix (Stage 11) can be implemented with deterministic ffmpeg filters already precedented in this exact codebase. Per this gate's own instruction ("Do not introduce provider dependence unless necessary"): **not necessary for P0/P1.**
+
+---
+
+### STAGE 15 — MINIMAL SAFE IMPLEMENTATION ORDER
+
+1. **Audio Finishing Foundation** — measurement-only (LUFS/true-peak read, diagnostics-only key, same additive/non-authoritative pattern as D-216/D-217/D-224/D-234's own diagnostic-first precedent).
+2. **Gain Continuity** — relative per-clip correction computed from #1, offline-proven first.
+3. **Whole-Video Normalization** — one corrective pass, live-wired only once #1/#2 are offline-proven.
+4. **Peak Safety / Limiting** — deterministic ceiling, applied last.
+5. **Technical QC extension** — clipping/loudness/true-peak/codec/channel/sample-rate checks added to `post_render_media_qc.py`.
+6. *(P1, later)* SHORT_CROSSFADE/AMBIENCE_CARRY/BRIDGE live-wiring — contingent on a handle-rich RAW ever being found.
+7. *(P2, later)* breath/mouth-click/plosive/de-essing — only with real RAW evidence of need, always human-override-preserving.
+
+---
+
+### STAGE 16 — REAL-MEDIA QUALIFICATION PLAN (design only, nothing launched)
+
+- **Loudness mismatch:** needs a RAW with multiple distinct recording sessions/takes at visibly different mic distance/gain — not yet characterized in the known 4-candidate corpus along this specific axis.
+- **Noise:** needs a RAW with an audibly present room-tone/noise floor — unknown for the current corpus; would require its own future read-only characterization gate.
+- **Hum:** needs a RAW recorded near mains-powered equipment — unknown for the current corpus.
+- **Breath/plosive:** any real UGC talking-head RAW (Video00, the D-239-series sibling) plausibly already has some natural breath/plosive content, but neither has been characterized specifically along this axis.
+- **Clean baseline:** Video00 — the most extensively characterized, lowest-execution-risk RAW in the corpus — is the natural "known good" reference to diff future finishing output against.
+- **Join continuity:** Video00's own now-proven 22-transition surface (D-245) is already the best available real join-continuity qualification surface in hand.
+
+No RAW launched by this gate.
+
+---
+
+### STAGE 17 — DOES AUDIO FINISHING NEED AUDIO JOIN CLOSED FIRST?
+
+**Answer: YES it can begin — NO dependency blocks it.**
+
+Architecture reason: Audio Finishing (loudness/gain-continuity/peak-limiting/denoise) and Audio Join Treatment (join-specific crossfade/ambience/overlap decisions AT cut points) operate on entirely different axes. `finishing_contract.py`'s own binding architecture already states Finishing runs strictly AFTER Boundary/Render and only prepares the ALREADY-FINAL rendered file for delivery — it has no dependency on WHICH join treatment (NONE/CLICK_FADE/SHORT_CROSSFADE/ambience) was used at any given cut. A whole-video loudness/peak pass and per-clip gain-continuity work are correctness concerns about LEVELS, not about HOW a cut was joined. The only real ordering fact — Finishing's own measurement must be taken on the FINAL rendered file, after whatever join treatment applied — is already satisfied by Stage 13's own proposed pipeline shape (Finishing after Render). No dependency requires Audio Join to be richly exercised or fully closed first.
+
+---
+
+### VERDICT
+
+**A — AUDIO FINISHING ARCHITECTURE IS PARTIALLY PRESENT — CLEAR P0/P1 GAPS IDENTIFIED — READY FOR FIRST OFFLINE IMPLEMENTATION GATE.**
+
+Not B: there is no loudness/gain-matching/limiting foundation at all today — only the click-fade layer and a currently-empty `FinishingSpec` interface; "only qualification/hardening needed" would misstate the actual gap. Not C: a safe architectural foundation already exists (`finishing_contract.py`'s own binding post-Freeze/post-Boundary ordering and semantics-preservation rule, plus the deterministic-ffmpeg-filter pattern already proven safe throughout `render.py`) — a from-scratch architectural DESIGN gate is not needed, only an implementation gate following the already-established pattern. Not D: Stage 17 proves no such dependency exists.
+
+**Canonical status:** `D246_AUDIO_FINISHING_ARCHITECTURE_AUDIT_PARTIALLY_PRESENT_CLICK_FADE_IMPLEMENTED_LOUDNESS_GAIN_LIMITING_DENOISE_MISSING_AMBIENCE_CROSSFADE_SERIALIZED_NOT_LIVE_JL_OVERLAP_RENDERER_EXTENSION_REQUIRED_VERDICT_A_READY_FOR_FIRST_IMPLEMENTATION_GATE`.
+
+**Exact next gate:** a bounded, offline, diagnostics-only "Audio Finishing Foundation" implementation gate (measurement-only LUFS/true-peak reading, additive `diagnostics` key, same pattern as D-216/D-217/D-224/D-234's own diagnostic-first precedent) — **not authorized or launched by this gate.**
+
+**Confirmation:** forensic/design only. No production code changed. No RAW launched. No provider introduced. No threshold invented. No heuristic added. No LUFS/true-peak target chosen (reported `NONE`, per this gate's own explicit instruction). `docs/CUTSELL_DECISIONS.md` is the only file changed. No canonical architecture file rewritten (this audit's findings are new information, not a status-consolidation of already-settled canon, so `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` is left untouched per this gate's own "document proposed update but do not silently rewrite" instruction — a future gate may formally fold Audio Finishing into that document once the Product Owner authorizes the implementation track this audit recommends).
+
+Then STOP.
+
+DO NOT IMPLEMENT. DO NOT LAUNCH RAW. Wait for Product Owner coordination.
