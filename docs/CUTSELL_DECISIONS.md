@@ -64593,3 +64593,170 @@ is the only file changed.
 Then STOP.
 
 DO NOT IMPLEMENT D-251. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-251 — Audio Finishing EXECUTOR FOUNDATION, whole-video stage only (offline, synthetic media)
+
+**Objective.** Post D-250 (execution design, verdict A). Implement the
+first real DSP EXECUTOR: consumes an already-decided `AudioFinishingPlan`
+(D-249) and a real rendered media file, applies ONLY the plan's
+whole-video gain/limiter intent via real ffmpeg, writes a SEPARATE output
+file, re-measures it for real (D-247), and returns a structured
+verification result. Standalone, synthetic media only — no live pipeline
+wiring, no adjacent-take execution (scoped to its own later gate per
+D-250 Stage 22).
+
+### What was built
+
+**`cutsell_worker/audio_finishing_executor.py` (new).**
+
+- **STAGE 1 — executor owner.** Standalone module, not inside `render.py`.
+- **STAGE 2/3 — typed records.** `AudioFinishingExecutionRecord` (frozen
+  dataclass: `execution_id`, `policy_version`, `plan_status`,
+  `input_path`, `output_path`, both gain fields, `limiter_authorized`,
+  `true_peak_ceiling_dbtp`, `peak_evidence_source`, `filters_applied`,
+  `execution_status`, `ffmpeg_return_code`, `errors`, `provenance`) and
+  `ExecutionVerificationResult` (frozen dataclass: real post-execution
+  `AudioFinishingMeasurement`-derived fields, `loudness_in_target_range`,
+  `true_peak_within_ceiling`, `verification_status`, `errors`,
+  `provenance`) — no raw ffmpeg command line in either; `provenance`
+  carries the real `ffmpeg_args` list for debugging only.
+- **STAGE 4 — plan executability.** `plan_status in {ABSTAIN, BLOCKED,
+  UNKNOWN}` → `EXECUTION_STATUS_PLAN_NOT_EXECUTABLE`, zero DSP, output
+  file never created. `plan_status == READY_NO_CHANGE`, or an executable
+  status with no whole-video gain and no limiter authorized → `NO_ACTION_NEEDED`,
+  also zero DSP (no needless transcode).
+- **STAGE 5 — whole-video gain.** `volume=<authorized_gain_db>dB` — the
+  EXACT number the plan already computed; the executor never recomputes
+  a gain from measurement. `loudnorm` is never referenced.
+- **STAGE 6 — limiter.** `alimiter=limit=<linear ceiling>:level=0`
+  (`level=0` disables ffmpeg's own auto-level compensation, so the
+  limiter is a fixed ceiling, never a second undocumented gain decision)
+  — appended only when `limiter_authorized`, always after `volume=`. No
+  compressor, no denoise, no hum filter anywhere.
+- **STAGE 7 — video preservation.** `-map 0:v:0 -map 0:a:0 -c:v copy` when
+  the input has a video stream (detected via the existing, reused
+  `media_probe.probe_media`) — zero re-encode, zero frame/timing change
+  to the video track.
+- **STAGE 8 — audio format.** `aformat=sample_fmts=fltp:sample_rates=48000:
+  channel_layouts=stereo` always appended (matching `render.py`'s own
+  per-segment standardization, D-246's trace) so mono/non-48k sources
+  never receive an unintended perceived-level change purely from format
+  standardization; `-c:a aac -b:a 160k` only for an mp4/mov-style output
+  container (the project's real delivery convention), otherwise ffmpeg's
+  own default codec for the container (e.g. `pcm_s16le` for `.wav`) — no
+  new export format invented.
+- **STAGE 9 — timing firewall.** No filter here touches video timing at
+  all (`-c:v copy`); the real output/input duration difference is
+  measured and reported (`duration_delta_sec`), but `duration_preserved`
+  is honestly `None` (observational only) — **no existing project-canonical
+  audio-file duration tolerance was found** (`render.py`'s frame-exact
+  timing contracts govern VIDEO segment timing, not a standalone
+  finished-audio-file delta), so none is invented (Stage 16's own
+  explicit escape hatch).
+- **STAGE 10/11 — idempotence + path safety.** `compute_execution_id`: a
+  pure, deterministic SHA-256 of (input path, policy version, whole-video
+  state, authorized gain, limiter authorization, peak ceiling) — no
+  mutable global state. A caller-supplied `existing_record` whose id
+  matches and whose prior run already succeeded (and whose output file
+  still exists) is honored as a no-op — zero ffmpeg re-invocation
+  (verified by a monkeypatched call-counter test). Every subprocess call
+  is an explicit argument list (never `shell=True`); output paths are
+  always the caller-supplied explicit path.
+- **STAGE 12 — failure vocabulary.** `EXECUTION_STATUS_{SUCCESS,
+  NO_ACTION_NEEDED, PLAN_NOT_EXECUTABLE, MEASUREMENT_REFERENCE_MISSING,
+  INVALID_GAIN, PEAK_SAFETY_UNVERIFIED, FFMPEG_FAILURE,
+  POST_VERIFY_OUT_OF_POLICY, OUTPUT_MISSING, OTHER}` — includes two
+  defense-in-depth checks beyond what a policy-generated plan should ever
+  produce (a gain magnitude beyond the ±6dB envelope; a positive gain
+  with `peak_evidence_source == UNAVAILABLE`), so a tampered/hand-built
+  plan can never silently execute.
+- **STAGE 13/14/15 — post-execution verification.** Reuses D-247's
+  `measure_audio` as the SOLE measurement authority (ffmpeg stderr is
+  never parsed into a policy/verification value); compares the real
+  output against the unchanged canonical loudness band and true-peak
+  ceiling; `VERIFICATION_STATUS_{PASS, POLICY_OUT_OF_RANGE,
+  TECHNICAL_FAILURE, PARTIAL}`. **No automatic retry is implemented this
+  gate** (per this gate's own explicit instruction) — D-250's designed
+  one-retry contract remains a future gate's responsibility, built around
+  this same function.
+- **STAGE 18 — no live integration.** The module is never imported by
+  `render.py`, any pipeline entry point, or any workflow — confirmed by a
+  structural test (`inspect.getsource(render)` contains no reference to
+  it).
+
+**Tests — `tests/test_cutsell_d251_audio_finishing_executor.py` (new, 26
+cases, all passing).** Real ffmpeg fixtures (sine tones at calibrated
+levels, silence, mono, non-48k, a real video+audio mp4) prove: exact
+requested-vs-authorized gain applied with zero recomputation; positive/
+negative gain measurably changes real output loudness in the expected
+direction; an over-envelope request is bounded to exactly ±6dB and still
+executes; `READY_NO_CHANGE`/`BLOCKED`/`ABSTAIN`/a tampered `UNKNOWN`
+status all produce zero file writes and zero DSP; the limiter appears
+only when authorized, always after `volume=`, never a compressor/
+loudnorm/denoise/highpass/lowpass; sample-peak fallback is honestly
+tagged and a true-peak-unavailable positive-gain plan is refused by
+defense-in-depth even before reaching ffmpeg; mono/non-48k sources are
+correctly standardized to 48k/stereo; a video+audio file's video stream
+survives via `-c:v copy` (decode-integrity checked with a real `ffprobe`
+call) while an audio-only file never requests a video map; a malformed
+input path produces a bounded `FFMPEG_FAILURE` (not an unbounded
+exception); a missing `measurement_reference` and an out-of-envelope
+tampered gain are both refused before any subprocess runs; re-executing
+an identical plan via `existing_record` never re-invokes ffmpeg
+(monkeypatched call-count proof) while a different plan/input always gets
+a distinct `execution_id`; and structural AST-based guards confirm the
+module never reads `plan.adjacent_take_adjustments` and is never
+referenced from `render.py`.
+
+**Offline qualification.** `python3 -m compileall cutsell_worker tests` —
+clean. Targeted: the new 26-case suite + D-247's 24 + D-249's 45 + D-028's
+27, together — 122/122 passed, zero regression. `CleanCutBench`
+(`test_cutsell_clean_cut_core_evaluation_suite.py`) 55/55 in default and
+both explicit `CUTSELL_CLEAN_CUT_CORE_V1` modes. Full render-path
+regression battery (`test_cutsell_clean_worker_render*.py`,
+`test_cutsell_d094_3_render_qc_placement_labels.py`,
+`test_cutsell_d097_10_segments_as_rendered_and_physical_ladder.py`,
+`test_cutsell_d097_2_render_timeline_and_evidence_completeness.py`,
+`test_cutsell_d214_pacing_v2_renderer_timeline_contract.py`,
+`test_cutsell_d233_pacing_v2_audio_join_treatment_renderer_timing.py`,
+`test_cutsell_live_render_qc.py`,
+`test_cutsell_post_render_structural_cross_check.py`,
+`test_cutsell_render_boundary_tightening.py`,
+`test_cutsell_universal_clean_cut_validation_live_render_qc.py`,
+`test_cutsell_video00_render_path_regressions.py`,
+`test_multi_file_render_foundation.py`): **197 passed** (115.30s), zero
+failures. Full `tests/` run (excluding the three pre-existing baseline
+exceptions already established across D-241–D-249): **6904 passed, 12
+deselected, 13 subtests passed, 0 failed** (226.82s) — the delta from
+D-249's own 6878-passed baseline is exactly the 26 new D-251 tests; zero
+new failures.
+
+**Confirmation.** One new module, one new test file — no existing
+production file's behavior changed. `render.py`, `post_render_media_qc.py`,
+`finishing_contract.py`, `audio_finishing_measurement.py`, and
+`audio_finishing_policy.py` are all untouched and read-only this gate
+(only imported from, never modified). No media user file mutated —
+every executed test writes only to its own `tmp_path_factory`-scoped
+directory. No live pipeline integration. No adjacent-take execution. No
+denoise/hum/compressor/loudnorm anywhere. No RAW. No provider.
+
+**Verdict: A — WHOLE-VIDEO AUDIO FINISHING EXECUTOR FOUNDATION OFFLINE
+PROVEN — GAIN/LIMITER/VERIFY PIPELINE WORKS ON SYNTHETIC MEDIA — READY
+FOR NEXT AUDIO-FINISHING GATE.**
+
+**Canonical status:** unchanged — the six D-249 values are read and
+applied exactly as-is; none altered.
+
+**Next gate:** D-252 — direction to be chosen by the Product Owner
+between (a) Adjacent-Take Gain Execution Foundation (Level 1, offline/
+synthetic only — the `RenderSegment.audio_volume` integration point
+D-250 Stage 22 deferred) or (b) Real-Media Audio Finishing Qualification
+Design (the offline design step needed before this executor is ever run
+against a real Video00 render). Not implemented by this gate.
+
+Then STOP.
+
+DO NOT IMPLEMENT D-252. DO NOT LAUNCH RAW.
