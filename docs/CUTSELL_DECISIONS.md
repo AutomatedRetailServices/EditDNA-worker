@@ -69791,3 +69791,211 @@ Then STOP.
 
 DO NOT IMPLEMENT D-267.
 DO NOT LAUNCH RAW.
+
+## D-267 — Render Identity + Delivery Contract Foundation (offline implementation)
+
+**Objective.** Post D-266A (all 3 of D-265's P0 render execution findings
+CLOSED). Implement a deterministic render identity and a structured
+DELIVERY contract answering "what exact render is this / did it come from
+the expected plans / did it pass QC / was it hashed / was it delivered /
+is it safe to present" — foundation only, no S3/upload wiring, no RAW.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `158ac99` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Search / existing conventions found (before writing anything)
+
+- `canonical_identity.py` already owns the codebase's one SHA-256-based
+  semantic-identity-minting convention (`hashlib.sha256(...).hexdigest()
+  [:20]`, prefixed strings like `span_`/`att_`/`real_`/`idea_`) — D-267
+  reuses the SHA-256-then-bounded-digest shape but keeps the `[:24]`
+  truncation already established for D-263/D-264's own composition/
+  execution identities (a render is architecturally closer to those than
+  to `canonical_identity.py`'s attempt/idea-level semantic ids), and picks
+  its own `render_` prefix so the two conventions are never confusable.
+- `live_render_qc.LiveRenderQCResult` already owns `.deliverable`/
+  `.delivery_status` — the ONE authoritative technical-QC delivery gate
+  (D-036 item 7). D-267 CONSUMES this via `technical_qc_status_from_
+  live_render_qc` (reads `.deliverable` only, never `.status` string-
+  matching) and never redefines, re-derives, or duplicates that authority.
+  Its own narrow `delivery_status` string ("DELIVERABLE"/"NOT_DELIVERABLE_
+  <qc status>") is a DIFFERENT, narrower concept than this gate's own
+  `RenderDeliveryRecord.delivery_status` (the broader identity+hash+QC+
+  upload commercial vocabulary) — the module docstring names this
+  explicitly so the two same-named fields across two modules are never
+  conflated.
+- `multipart_uploads.py` already owns real S3 multipart upload mechanics
+  (ETag handling). Not modified, not called — D-267 only models the state
+  TRANSITION contract (`with_upload_result`) a future integration would
+  feed a real outcome into.
+- `contracts.DraftTimeline.project_id` is the existing ownership-adjacent
+  field this gate's own `project_id` reuses by name (Stage 21) rather than
+  inventing a new one.
+
+### What was built (new module: `cutsell_worker/render_delivery.py`)
+
+- **`RENDER_CONTRACT_VERSION = 1`** (Stage 11) — this module's own
+  identity-computation contract version, never the product/engine version.
+- **`compute_render_identity(segments, *, width, height, fps, audio_
+  finishing_plan_identity=None, visual_finishing_plan_identity=None,
+  renderer_contract_version=1)`** (Stage 1/2/10/12): a pure function of
+  the render PLAN — every selected segment's identity-relevant fields
+  (clip_id, source_asset_id, start/end, audio mute/volume, caption
+  text/preset, optional audio window divergence, optional
+  `VisualTransformSpec` fields) IN ORDER, output geometry, and the
+  caller-supplied Audio/Visual Finishing plan identities (opaque strings,
+  never inspected). Deliberately EXCLUDES `source_path` (Stage 10) so
+  identity is filename/machine-path independent. `json.dumps(payload,
+  sort_keys=True, default=str)` -> SHA-256 -> `"render_" + [:24]`.
+- **`compute_output_sha256(path)`** (Stage 3/9): the real final-file
+  integrity hash, streamed in 1 MiB chunks, raising `OSError` (never a
+  fabricated hash) on failure. Distinct in purpose and value from
+  `compute_render_identity` (Stage 2/13: two separate re-encodes of the
+  identical plan may legitimately produce different `output_sha256`
+  values under `libx264`'s multi-threaded non-determinism — D-265's own
+  finding — while sharing the same `render_identity`; documented, never
+  treated as a defect).
+- **`technical_qc_status_from_live_render_qc(result)`** (Stage 8): reads
+  ONLY `.deliverable`; `None` (no QC run) maps to `NOT_RUN`, never PASS.
+- **`is_etag_valid_sha256_proxy(etag)`** (Stage 16/19): always returns
+  `False` — an explicit, honest, named stub so a future integration has
+  one real place to encode a genuine remote-hash verification method
+  instead of ever silently assuming ETag == SHA-256.
+- **`RenderDeliveryRecord`** (frozen dataclass, Stage 4/14): `render_
+  identity`, `render_contract_version`, `final_path`, `output_sha256`,
+  `output_size_bytes`, `render_execution_status`, `technical_qc_status`,
+  `upload_status`, `delivery_status`, `created_at`, `errors`, `warnings`,
+  `provenance`, plus Stage 16 remote fields (`remote_reference`,
+  `remote_etag`, `remote_size_bytes`, `remote_sha256_verified` — populated
+  only via a real upload outcome, never fabricated) and Stage 21 ownership
+  fields (`project_id`, `job_id` — exposed, not enforced; no auth system
+  invented). `.ready_for_delivery` is the ONE gate a caller should branch
+  on (`delivery_status == DELIVERY_READY`).
+- **Bounded status vocabularies** (Stage 5): `DELIVERY_STATUS_*`
+  (`NOT_READY` — a caller-tracked pre-render sentinel, never produced by
+  the builder itself; `RENDER_FAILED`, `QC_FAILED`, `HASH_FAILED`,
+  `READY_FOR_UPLOAD`, `UPLOAD_IN_PROGRESS`, `UPLOAD_FAILED`,
+  `DELIVERY_READY`, `DELIVERY_BLOCKED`, `UNKNOWN`), `RENDER_EXECUTION_
+  STATUS_*`, `TECHNICAL_QC_STATUS_*`, `UPLOAD_STATUS_*`.
+- **`build_render_delivery_record(...)`** (Stage 4/5/6/7/9): the single
+  deterministic builder. `DELIVERY_READY` requires ALL of: render
+  execution succeeded, final file exists and is non-empty, `output_sha256`
+  computed successfully, technical QC PASS, and (only when `require_
+  upload=True`) upload succeeded — a local-only render (`require_upload=
+  False`) stops at `READY_FOR_UPLOAD` (Stage 7), never fakes
+  `DELIVERY_READY`. An explicit `blocking_error` parameter forces
+  `DELIVERY_BLOCKED` unconditionally (the named, generic hook a future
+  ownership/tenant-mismatch check would use — Stage 21 — without this
+  gate inventing that enforcement itself).
+- **`with_upload_result(record, *, upload_status, ...)`** (Stage 14/15/
+  17/18): produces a NEW record reflecting a real upload outcome via
+  `dataclasses.replace` — never mutates in place, never uploads anything
+  itself. Fail-closed: a record not already upload-eligible is returned
+  unchanged (still a new object); `UPLOAD_FAILED` can never itself yield
+  `DELIVERY_READY`; a retried success after a prior failure can.
+- **`render_delivery_diagnostics(record)`** (Stage 20): a bounded,
+  structured projection (render/qc/hash/upload/delivery status, output
+  size/hash, errors/warnings, timestamp) — no secrets exist on this
+  record by construction, so none can leak.
+
+No S3 call, no credential construction, no `boto3` reference anywhere in
+this module (verified by source scan) — Stage 15's "do not implement
+upload changes" honored literally.
+
+### Tests
+
+New `tests/test_cutsell_d267_render_delivery_contract.py`: 65 tests (real
+ffmpeg renders + real SHA-256 verification where a render is actually
+needed; deterministic fixtures for every status-vocabulary/failure/
+transition case). Covers: render-identity determinism, filename/path
+independence (Stage 10, proven with two segments on different fabricated
+machine paths), source-asset-id/clip-order/selection/visual-plan/audio-
+plan/renderer-contract-version/`VisualTransformSpec`/output-geometry
+sensitivity (Stage 12); real output SHA-256 computed from actual rendered
+bytes matching an independent `hashlib.sha256` check, determinism on
+identical bytes, `OSError` on a missing file; QC-status mapping reading
+only `.deliverable` (never a `.status` string that says "PASS" while
+`.deliverable` is `False`); full success reaching `READY_FOR_UPLOAD`
+(local-only) and `DELIVERY_READY` (with upload); render-failure/missing-
+output/empty-output/hash-failure/QC-fail/QC-not-run/unrecognized-status
+all correctly blocking delivery with the right category; an explicit
+`blocking_error` forcing `DELIVERY_BLOCKED`; the full upload state
+machine (`READY_FOR_UPLOAD` -> `UPLOAD_IN_PROGRESS` -> `DELIVERY_READY` /
+`UPLOAD_FAILED`, retry-after-failure succeeding, an ineligible record
+returned unchanged, the original record never mutated); frozen-dataclass
+immutability; ETag-never-treated-as-SHA256 (parametrized); ownership
+fields carried and two same-render-identity records with distinct
+`project_id` never colliding; diagnostics payload shape and hash-status
+reporting; Unicode/space/apostrophe output paths hashing correctly (real
+ffmpeg); no `shell=True`, no network/credential-construction vocabulary,
+no actual upload-call vocabulary (via the established AST docstring-
+stripping technique); 14 parametrized `git diff`-vs-HEAD guards
+confirming `render.py`, `render_plan.py`, Audio/Visual Finishing,
+Boundary, Pacing, both technical-QC modules, `live_render_qc.py`,
+`media_probe.py`, `finishing_contract.py`, and `multipart_uploads.py` are
+all untouched; render timeout still `1200.0`; codec/filtergraph constants
+still present verbatim.
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker tests` — clean.
+- New D-267 test file alone: 65 passed.
+- `render`/`D266`/`d266`/`D267`/`d267`-keyword suite: 480 passed (no
+  self-resolving guard failures this time — `render.py` itself was not
+  touched by this gate, only a new sibling module was added).
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0`/`=1`): 55/55,
+  unaffected.
+- Full `tests/` suite (excluding the three documented pre-existing
+  baseline exceptions): **7397 passed, 10 skipped, 12 deselected, 13
+  subtests passed** — zero genuine failures.
+
+### Confirmation
+
+No codec/CRF/preset/fps/resolution/filtergraph change (`render.py`
+untouched — confirmed by `git diff`-vs-HEAD guard and source-scan). No
+retry change. No upload/storage policy change (no S3 call anywhere in the
+new module). No Pacing/Boundary/Freeze/Audio-Join/Audio-Finishing/Visual-
+Finishing/technical-QC-authority change (14 explicit guards + full suite).
+`RENDER_FFMPEG_TIMEOUT_SEC` confirmed still `1200.0`; D-266's atomic
+promotion untouched (this gate only reads the ALREADY-promoted file's
+bytes for hashing, never re-implements or wraps the promotion itself). No
+RAW, no Modal, no RunPod, no provider. No secrets: the delivery record
+carries no credentials by construction, and the module's own source
+contains no S3/URL/credential-construction vocabulary.
+
+**Renderer/Export Hardening P0 foundation now has:** bounded render
+execution (D-266A), atomic local publication (D-266), render identity
+(D-267), output hash (D-267), technical QC gate consumption (D-267,
+consuming D-036's existing authority), and a delivery state contract
+(D-267). Remaining possible hardening (unauthorized by this entry):
+storage/upload integration, rotation/HDR/VFR, load/concurrency testing,
+deeper crash/cancel recovery.
+
+**Canonical status:** `RENDER_IDENTITY_DELIVERY_CONTRACT_FOUNDATION_
+IMPLEMENTED`. Renderer Execution Safety P0 (D-265/D-266/D-266A) remains
+CLOSED, unchanged.
+
+### Verdict
+
+**A — Render identity + output hash + delivery contract offline proven —
+DELIVERY_READY foundation safe — ready for the next export hardening
+gate.** Every `DELIVERY_READY` path in the offline test matrix requires
+render success + real file + real hash + real QC PASS (+ real upload
+success when required); no path fabricates it from file existence alone.
+
+**Exact next gate:** Product Owner choice between D-268 — EXPORT/STORAGE
+DELIVERY INTEGRATION AUDIT (wire `with_upload_result` to a real
+`multipart_uploads.py` outcome, ownership/tenant enforcement using the
+`project_id`/`job_id` fields this gate exposed) or D-268 — RENDERER
+FORMAT/MEDIA-DIVERSITY HARDENING AUDIT (rotation/orientation, color-
+space/HDR, source-format diversity — D-265's own remaining P1/P2 list).
+Not implemented, not decided by this gate.
+
+**Decision entry reference:** this entry (D-267).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-268.
+DO NOT LAUNCH RAW.
