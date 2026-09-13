@@ -65378,3 +65378,132 @@ this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-255. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-254R — Existing Real Render Retrieval Bridge (observability/artifact-recovery only, no RAW, no engine change)
+
+**Objective.** Post D-254 (SOURCE-UNAVAILABLE from this sandbox). Recover the
+already-existing D-245 CutSell `preview.mp4` from S3 via a lightweight
+retrieval-only bridge, using the project's existing authorized AWS
+credentials, without re-running RAW, using GPU, or changing engine
+behavior.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `0ef7e5d` (exact match to
+expected `0ef7e5d`), clean tree — confirmed before this gate began.
+
+### Correction accepted, with a factual clarification
+
+The directive's own diagnosis (a ChatGPT-connector 536,870,912-byte
+artifact-size limit) does not match this sandbox's own observed failure
+mode: this session re-confirmed, a third time, that a genuinely small
+GitHub Actions artifact (38,296,067 bytes — the exact preview.mp4 this
+gate retrieves) is **also** blocked from direct download by this
+sandbox's egress proxy, with the identical `403 connect_rejected
+(organization policy)` on the `*.blob.core.windows.net` host class (this
+run's storage account, `productionresultssa18`, differs from D-254's
+`productionresultssa17` — ruling out a single-account fluke). The
+underlying correction that IS accepted and acted on: the 579MB D-245
+artifact was large because it bundled multiple full-length reference
+files (raw/Human-Gold/Cut.ai), not because the CutSell preview itself is
+large — the preview alone is 38.3 MB. Retrieving only the preview (this
+gate's actual approach) was the right fix regardless of which diagnosis
+of the original 403 is correct.
+
+### Retrieval bridge built
+
+New `.github/workflows/cutsell-d254r-preview-retrieval.yml` —
+workflow_dispatch (for future manual reruns) plus a narrow, self-scoped
+`push` trigger (branches: this feature branch only; paths: this exact
+file only) — the standing bootstrap-push idiom already used elsewhere in
+this repo (e.g. D-139's Gemini eval workflow) to get a new workflow
+runnable without writing to `main`, which CLAUDE.md's repository-
+protection rule bars without explicit Product Owner approval (not given
+this gate). Uses the SAME already-authorized AWS credential source
+`cutsell-video00-modal-raw.yml` already uses (the RunPod
+`EditDNA-Worker-2` template's own env block, fetched via `RUNPOD_API_KEY`
+— no new credential source, nothing ever printed unmasked). Runs nothing
+from the editorial engine.
+
+**Run 1** (`34733717770`): S3 head-object, download (38,296,067 bytes),
+sha256, and artifact upload all succeeded; failed at the ffprobe step —
+`ffprobe: command not found` (this `ubuntu-latest` runner image does not
+preinstall ffmpeg, unlike this repo's GPU-provider runners). One-line fix
+(`apt-get install ffmpeg`) pushed via the same self-scoped bootstrap
+trigger.
+
+**Run 2** (`34733809368`): full success, all 8 steps green.
+
+### Result
+
+- **S3 object exists:** yes, at the exact key the directive supplied.
+- **preview.mp4 downloaded:** 38,296,067 bytes, byte-exact (no transcode
+  — `aws s3 cp` only).
+- **SHA-256:**
+  `293fff98ffc716460dcaa6a89c4f6375e9ff95ce52ecee4115546eb1dfe27c24`.
+- **ffprobe (real, direct, non-fabricated):** duration `144.854362`s
+  (matches the directive's own quoted run-log duration, `144.855`s, to
+  within rounding); container `mov,mp4,m4a,3gp,3g2,mj2`; video codec
+  `h264`; audio codec `aac`; sample rate `48000` Hz; channels `2`.
+- **result.json retrieved:** yes. **compact-result.json retrieved:** yes.
+  Neither modified.
+- **Under the 536,870,912-byte single-artifact transport limit:** yes (by
+  a wide margin) — no chunking needed.
+- **Artifact uploaded:** `cutsell-d254-video00-preview-only`, artifact id
+  `10309774548`, 5 files (preview.mp4, preview.mp4.sha256,
+  preview_ffprobe.json, result.json, compact-result.json), 38,275,387
+  bytes (zip), retention 14 days.
+
+### What remains unresolved (honest, not glossed over)
+
+This sandbox's own direct byte-download of the artifact **still fails**
+with the same `403 connect_rejected` on the blob-storage host class,
+confirmed a third time on this run's own artifact
+(`productionresultssa18.blob.core.windows.net`). The retrieval bridge
+gets the byte-identical file to a GitHub Actions artifact — a durable,
+sha256-verified, human-downloadable location — but does not get the bytes
+into this sandbox's own filesystem. D-254's own audio-finishing
+qualification chain (measurement, plan, execution, verification) needs
+the actual file bytes in a process that can run ffmpeg on them; from
+*this* sandbox, that still requires either a human relay (download via
+the GitHub Actions UI at the run URL below and hand the file back), or
+running D-254's remaining measurement/execution steps as additional
+steps inside a GitHub Actions job (the same retrieval-only runner
+already has the file locally, before upload) rather than in this
+conversation's own sandbox.
+
+### Confirmation
+
+No RAW executed. No GPU used (no RunPod pod, no Modal). No editorial
+engine code executed (`process_universal_clean_cut_sources`, ASR,
+Watch+Listen, P1/P2, Ordering, Freeze, Boundary, Pacing, Audio Join,
+renderer — none referenced or run). No media transcoded (`aws s3 cp` byte
+copy only; ffprobe is read-only). No production `.py` file touched. No
+AWS/RunPod credential ever printed (all masked via the same
+`::add-mask::` pattern `cutsell-video00-modal-raw.yml` already uses). No
+write to `main`.
+
+**Verdict: A — EXISTING D-245 CUTSELL RENDER RECOVERED (as a GitHub
+Actions artifact) — EXACT MEDIA READY FOR D-254 AUDIO FINISHING
+QUALIFICATION**, with the qualification noted above: "ready" means
+byte-identical and technically probed, not yet present inside this
+sandbox's own filesystem.
+
+**Canonical status:** unchanged.
+
+**Exact next gate:** D-254C — Continue the original one-real-media Audio
+Finishing qualification using the recovered `preview.mp4`, either (a) via
+a human relay of the artifact into this sandbox, or (b) by extending this
+same retrieval-only runner with the D-254 measurement/plan/execution/
+verification steps so they run against the file where it already sits
+before upload — a Product Owner choice, not decided by this gate. No RAW
+required either way.
+
+**Decision entry reference:** this entry (D-254R).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-255. DO NOT LAUNCH RAW.
