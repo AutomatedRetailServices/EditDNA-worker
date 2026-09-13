@@ -714,7 +714,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 /tmp/d254c_run.py
+          # /tmp/d254c_run.py is not IN the repo checkout, so Python's
+          # default sys.path[0] (the script's own directory, /tmp) does not
+          # include the repo root -- `import cutsell_worker` fails with
+          # ModuleNotFoundError unless the repo root (this step's cwd,
+          # $GITHUB_WORKSPACE) is added explicitly. The earlier preflight
+          # step used `python3 -c "..."`, which implicitly adds cwd to
+          # sys.path[0] -- this is a real script file, so it does not.
+          PYTHONPATH="$(pwd)" python3 /tmp/d254c_run.py
 
       - name: Report D-254C review artifact bundle size before upload
         shell: bash
