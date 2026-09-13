@@ -68869,3 +68869,210 @@ Then STOP.
 
 DO NOT IMPLEMENT D-264.
 DO NOT LAUNCH RAW.
+
+## D-264 — One Real-Media Visual Finishing Qualification (existing render reused, no second source, no post-result patch)
+
+**Objective.** Post D-263 (full synthetic composition proven). Qualify the
+same measurement -> policy -> plan -> executor -> renderer -> post-
+measurement -> verification chain on exactly ONE real media source: the
+already-recovered D-245 `preview.mp4` (byte-identical to D-254R/D-254C's
+own copy, sha256 `293fff98ffc716460dcaa6a89c4f6375e9ff95ce52ecee4115546eb
+1dfe27c24`). No new RAW, no second source, no RunPod/Modal/provider
+change, no post-result numeric/policy/threshold change.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `50d202c` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Execution location
+
+Extended `.github/workflows/cutsell-d254r-preview-retrieval.yml` (the
+same self-scoped bootstrap-push idiom D-254R/D-254C already established)
+with new steps running on the SAME runner, immediately after D-254C's
+own steps, against the SAME already-downloaded `preview.mp4` -- no
+re-download, no second source. `preview.mp4` itself is treated as the
+one real media source each real segment's own as-rendered window is
+re-cut from (a Visual Finishing finishing pass over the already-
+delivered renderer output, never a new Selection-level render) --
+consistent with D-254C's own precedent of operating directly on the
+recovered file without raw per-clip source assets. Installed
+`mediapipe==0.10.21` (the exact version already pinned in
+`requirements.cutsell.worker.txt`; brings its own compatible cv2).
+
+Only file changed: the workflow YAML (574 insertions). No production
+`.py` file touched, before or after the run.
+
+### Run 34764839281 — full success, real Video00 media, real mediapipe
+
+All 20 steps green, job completed in 11m6s (D-264's own step: 4m51s).
+Confirmed via the step log's own `inference_feedback_manager` lines
+that real MediaPipe FaceMesh/Pose inference actually ran (not skipped,
+not stubbed).
+
+**Source:** `preview.mp4`, sha256 matches D-245/D-254R exactly (byte-
+identical, confirmed -- the SAME real render, never a second source),
+duration 144.854362 s, resolution 1080x1920, h264/aac.
+
+**Clip identity:** `CLIP_IDENTITY_AVAILABLE` -- 23 real selected
+segments (matches D-245's/D-254C's own reported clip count exactly),
+extracted via the SAME `result.json` `live_render_qc.attempts[-1]`
+logic D-254C already proved. Sum of as-rendered segment durations
+145.880 s vs. measured 144.854 s -- a 1.026 s reconciliation delta,
+identical to D-254C's own finding on the same file (normal join/
+measurement variance across 22 real joins, not a defect).
+
+**Part 1 — real pre-measurement (D-258, real cv2/mediapipe, not a
+stub):** 22/23 clips `COMPLETE`, 1 `PARTIAL`. Face-detection rate
+1.0/1.0/1.0 (min/max/mean) across all 23 real clips -- perfect face
+evidence on this real source. Zero multi-face clips. 22 real join
+measurements computed.
+
+**Part 2 — real policy generation (D-260, unchanged, product bbox
+never fabricated):** `plan_status=BLOCKED`. All 22 joins:
+`BLOCKED_PRODUCT_SAFETY_UNKNOWN` (0 NO_CHANGE, 0 PUNCH_IN, 0 STATIC_
+REFRAME, 0 POSITION_MATCH, 0 SCALE_MATCH, 0 SCALE_AND_POSITION_MATCH,
+0 ABSTAIN, 0 BLOCKED_FACE, 0 BLOCKED_MULTI_FACE). This is the fail-
+closed default working exactly as designed on real data with perfect
+face-detection evidence: `product_safety_established` was never set
+for any real clip (D-257's own finding -- no product detector exists
+in this codebase -- honored, never bypassed), so every one of the 23
+clips' own `evaluate_clip_policy` call reaches the product-safety
+check and blocks there, and every join inherits that block from
+either side, per D-260's own priority ladder. **This is the exact,
+valid, expected real-media outcome the directive's own Part 14
+explicitly anticipated: "If policy blocks risky reframe because
+product safety is unknown: that is a valid real-media result. Do not
+bypass just to create a correction example."**
+
+**Part 3 — safety audit:** `pre_execution_safety_findings=[]`,
+`safe_to_execute=true` -- no ceiling ever approached (nothing was
+authorized to check against a ceiling).
+
+**Part 4 — real execution (D-263 composition, unchanged):**
+`executed_correction_count=0`, `face_safety_violation_count=0`,
+`crop_limit_violation_count=0`, `overall_status=BLOCKED`. The renderer
+still ran (one real encode, `render.render_preview` unchanged), the
+file was still re-cut and re-encoded from the real segments, but with
+ZERO `visual_transform` ever attached -- exactly the fail-closed,
+non-mutating contract D-263's own tests already proved synthetically,
+now confirmed on the real file.
+
+**Part 5 — post-measurement (D-258, real, second cv2/mediapipe pass
+on the finished output):** pre/post face-center (x: 0.49914->0.49950,
+y: 0.49046->0.49049), face-scale (area ratio 0.05382->0.05390),
+headroom (0.39495->0.39517) -- all effectively unchanged, exactly as
+expected when zero corrections were applied (the tiny deltas are
+measurement noise from independently sampling two different encodes
+of the same content, not a mutation).
+
+**Part 6/7 — timing/audio/output geometry:** `nine_sixteen_preserved=
+true` (1080x1920 in, 1080x1920 out), `audio_preserved=true` (aac in,
+aac out), `duration_delta_sec=0.5456` (small, expected: the renderer's
+own per-segment frame-alignment rounding — `rendered_segment_duration_
+sec` rounds each of the 23 segments UP to the nearest output frame
+boundary, D-097.2's own established, unchanged contract — accumulating
+across 23 segments; not a defect, not a Visual Finishing behavior).
+Video codec h264->h264, audio codec aac->aac. Captions: `N/A` (source
+carries none).
+
+**Part 10 — idempotence:** `visual_finishing_identity_reproducible=
+true` (same source + same policy version + same measurements -> same
+plan identity, recomputed and confirmed equal), `composition_id_
+reproducible=true`, `second_visual_execution_performed=false` (a
+second composition call with the first run's own execution ids as
+`previous_execution_ids` re-confirmed zero transform re-application --
+trivially satisfied here since zero corrections existed to begin with,
+but the mechanism itself was exercised end to end on the real file).
+
+**Part 13 — existing technical QC:** `run_post_render_media_qc`
+(unchanged authority) on the finished file: **PASS**.
+
+**Part 11/12 — review package + compact summary:** `before_visual_
+finishing.mp4` + `after_visual_finishing.mp4` + all 10 structured JSON
+reports bundled as `cutsell-d264-visual-finishing-review` (artifact id
+`10320215962`, 74,616,326 bytes / ~73 MiB, well under the 512 MiB
+firewall — bundle size printed to the log before upload). Full
+`d264-summary.json` printed to the step log in its entirety.
+
+### Confirmation
+
+Exactly ONE real media source (byte-identical to D-245/D-254R,
+confirmed by sha256). No second RAW, no second render source, no
+RunPod pod/GPU created, no provider change (same AWS-credential-via-
+RunPod-template source D-254R already established, read-only). No
+post-result engine patch: this entry is documentation only, written
+AFTER the run completed, with zero code changes following it (git tree
+confirmed clean at HEAD `82f364a` throughout). No numeric/threshold/
+policy change -- the ten D-260 values were read verbatim (never
+referenced as literals in the driver script; only the imported named
+constants) and none were approached, let alone exceeded, by this run's
+own real data. No Pacing/Boundary/Freeze/Audio-Join/Audio-Finishing/
+existing-QC-authority change (only Visual Finishing's own new modules
+were exercised; the existing QC ran unmodified and independently).
+Security/job isolation: job-local paths (`artifact/`, `/tmp/d264_run.
+py`), no `shell=True` anywhere in the driver script, no cross-user
+state, bounded decode/sampling (8 timestamps per clip, exactly D-258's
+own existing default), malformed-media handling unexercised this run
+(the source decoded cleanly) but unchanged from D-258's own bounded
+contract, no untrusted path interpolation (all paths are job-local
+constants), no shared transform registry (each composition call is a
+pure function of its own explicit input).
+
+**Real-media classification: `REAL_MEDIA_QUALIFIED_WITH_SAFETY_BLOCK`.**
+
+**Verdict: C — VISUAL FINISHING REAL-MEDIA QUALIFIED — SAFETY FIREWALL
+VALIDLY BLOCKED RISKY CORRECTION — P0 TRACK MAY CLOSE WITH CORRECTION
+REAL-MEDIA PROOF DEFERRED.** Measurement, policy, safety audit,
+execution containment, renderer non-mutation, post-measurement,
+idempotence, and existing technical QC are all proven on real Video00
+media with perfect real face-detection evidence (rate 1.0 across all
+23 clips); the one gap -- a real-media proof of an ACTUALLY EXECUTED
+correction (PUNCH_IN/STATIC_REFRAME/POSITION_MATCH/SCALE_MATCH/SCALE_
+AND_POSITION_MATCH applied and verified on real footage) -- is
+correctly and honestly deferred, not fabricated, because this specific
+real source's own 22 real joins never individually clear the product-
+safety gate D-257 already established has no real detector behind it.
+This is the safety firewall working as designed, not a capability gap
+in the chain itself (D-263 already proved every correction action
+executes correctly end to end on synthetic media with product safety
+established=True).
+
+**Canonical status:** `VISUAL_FINISHING_P0_REAL_MEDIA_QUALIFIED`
+(safety-block path; correction-path real-media proof deferred per
+Verdict C, not required for this classification).
+
+**Visual Finishing P0 track status:** may close on the strength of
+(a) D-263's full synthetic proof of every correction action executing
+correctly, and (b) this gate's real-media proof that the surrounding
+measurement/policy/safety/renderer/QC chain behaves correctly and
+non-destructively on real footage -- OR remain open pending a second,
+DIFFERENT real source that happens to clear product safety (which
+would require either a real product-bbox authority, out of scope, or
+a source where `product_safety_established` can be legitimately set
+some other way) to additionally prove one real EXECUTED correction.
+This is a Product Owner call, not decided by this gate.
+
+**Exact next gate:** Product Owner decision between: (a) close the
+Visual Finishing P0 track on the combined synthetic+real-media
+evidence above, or (b) authorize RENDERER / EXPORT HARDENING as the
+next major track, or (c) seek one additional real source specifically
+chosen to exercise an executed correction (would require solving the
+product-safety-evidence gap first, since that is the one condition
+blocking every join on this source). Not implemented, not decided by
+this gate.
+
+**Additional real source required?** Only if the Product Owner elects
+option (c) above -- not required for the P0 track's own closure
+decision.
+
+**Paid compute required after this?** No, for either (a) or (b); only
+if (c) requires a fresh RAW to obtain a source with usable product-
+safety evidence.
+
+**Decision entry reference:** this entry (D-264).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT TRACK.
+DO NOT LAUNCH SECOND RAW.
