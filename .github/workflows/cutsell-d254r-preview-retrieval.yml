@@ -88,6 +88,14 @@ jobs:
           jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
           test "$(cat /tmp/base-template.json)" != "null"
 
+      - name: Install ffprobe (ffmpeg not preinstalled on this runner image)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffprobe -version | head -1
+
       - name: D-254R retrieve existing preview.mp4 + result.json + compact-result.json
         id: retrieve
         shell: bash
