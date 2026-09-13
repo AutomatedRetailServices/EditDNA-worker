@@ -1,0 +1,205 @@
+name: CutSell D-254R Existing Preview Retrieval (S3, retrieval-only)
+
+# D-254R: EXISTING REAL RENDER RETRIEVAL BRIDGE. Observability/artifact-
+# recovery only -- never a RAW, never GPU compute, never an engine change.
+# Downloads exactly one already-existing rendered file (plus its two small
+# JSON provenance siblings) from S3, using the SAME already-authorized
+# GitHub Actions AWS credentials source cutsell-video00-modal-raw.yml
+# already uses (the RunPod template's own env values, fetched via
+# RUNPOD_API_KEY -- no new credential source, nothing ever printed
+# unmasked). Uploads only the small preview.mp4 (plus provenance JSON) as
+# a dedicated, minimal-size artifact -- never the multi-file 500+MB bundle
+# D-254 found undownloadable from the sandbox.
+#
+# Runs NOTHING from this repository's editorial engine: no
+# process_universal_clean_cut_sources, no ASR, no Watch+Listen, no P1/P2,
+# no Ordering, no Freeze, no Boundary, no Pacing, no Audio Join, no
+# renderer, no Modal, no RunPod. Read-only S3 GET/HEAD + ffprobe + sha256
+# on an already-existing file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_key:
+        description: "S3 key of the already-existing preview.mp4 to retrieve"
+        required: false
+        default: "cutsell/serverless/video00-modal-34721625895-1/preview.mp4"
+      result_key:
+        description: "S3 key of the already-existing result.json (same run)"
+        required: false
+        default: "cutsell/serverless/video00-modal-34721625895-1/result.json"
+      compact_result_key:
+        description: "S3 key of the already-existing compact-result.json (same run)"
+        required: false
+        default: "cutsell/benchmark-results/video00-modal-34721625895-1/compact-result.json"
+      artifact_name:
+        description: "Name for the uploaded retrieval-only artifact"
+        required: false
+        default: "cutsell-d254-video00-preview-only"
+
+env:
+  # 512 MiB -- the directive's own stated single-artifact transport limit.
+  SINGLE_ARTIFACT_LIMIT_BYTES: 536870912
+
+jobs:
+  retrieve-existing-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: mkdir -p artifact
+
+      - name: Load base RunPod template (env source of truth only)
+        # Identical to cutsell-video00-modal-raw.yml's own step of the same
+        # name -- the only source of the already-authorized AWS credentials
+        # this retrieval bridge uses. No RunPod pod/GPU is created here;
+        # the template is read only for its env block.
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: D-254R retrieve existing preview.mp4 + result.json + compact-result.json
+        id: retrieve
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+
+          PREVIEW_KEY="${{ inputs.preview_key }}"
+          RESULT_KEY="${{ inputs.result_key }}"
+          COMPACT_KEY="${{ inputs.compact_result_key }}"
+
+          echo "Bucket (masked above if secret-derived): retrieving from configured S3_BUCKET"
+          echo "Preview key: $PREVIEW_KEY"
+
+          # --- 1. verify the object exists, no bytes read yet ---
+          if aws s3api head-object --bucket "$S3_BUCKET" --key "$PREVIEW_KEY" \
+              > /tmp/preview-head.json 2> /tmp/preview-head-error.txt; then
+            PREVIEW_SIZE=$(jq -r '.ContentLength // 0' /tmp/preview-head.json)
+            echo "PREVIEW_OBJECT_FOUND size_bytes=$PREVIEW_SIZE"
+            echo "object_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "PREVIEW_OBJECT_NOT_FOUND"
+            cat /tmp/preview-head-error.txt || true
+            echo "object_exists=false" >> "$GITHUB_OUTPUT"
+            exit 3
+          fi
+
+          # --- 2. download the exact existing bytes (no transcode) ---
+          aws s3 cp "s3://$S3_BUCKET/$PREVIEW_KEY" artifact/preview.mp4
+          test -s artifact/preview.mp4
+          ACTUAL_SIZE=$(stat -c%s artifact/preview.mp4)
+          echo "Downloaded artifact/preview.mp4, actual size_bytes=$ACTUAL_SIZE"
+          echo "preview_size_bytes=$ACTUAL_SIZE" >> "$GITHUB_OUTPUT"
+
+          # --- 3. byte-identity fingerprint ---
+          sha256sum artifact/preview.mp4 | tee artifact/preview.mp4.sha256
+          PREVIEW_SHA256=$(cut -d ' ' -f1 artifact/preview.mp4.sha256)
+          echo "preview_sha256=$PREVIEW_SHA256" >> "$GITHUB_OUTPUT"
+
+          # --- 4. technical probe, no transcode, no re-encode ---
+          ffprobe -v error -print_format json \
+            -show_format -show_streams artifact/preview.mp4 > artifact/preview_ffprobe.json
+          cat artifact/preview_ffprobe.json
+          DURATION=$(jq -r '.format.duration // "unknown"' artifact/preview_ffprobe.json)
+          CONTAINER=$(jq -r '.format.format_name // "unknown"' artifact/preview_ffprobe.json)
+          VIDEO_CODEC=$(jq -r '[.streams[] | select(.codec_type=="video")][0].codec_name // "none"' artifact/preview_ffprobe.json)
+          AUDIO_CODEC=$(jq -r '[.streams[] | select(.codec_type=="audio")][0].codec_name // "none"' artifact/preview_ffprobe.json)
+          SAMPLE_RATE=$(jq -r '[.streams[] | select(.codec_type=="audio")][0].sample_rate // "unknown"' artifact/preview_ffprobe.json)
+          CHANNELS=$(jq -r '[.streams[] | select(.codec_type=="audio")][0].channels // "unknown"' artifact/preview_ffprobe.json)
+          echo "duration_sec=$DURATION" >> "$GITHUB_OUTPUT"
+          echo "container=$CONTAINER" >> "$GITHUB_OUTPUT"
+          echo "video_codec=$VIDEO_CODEC" >> "$GITHUB_OUTPUT"
+          echo "audio_codec=$AUDIO_CODEC" >> "$GITHUB_OUTPUT"
+          echo "sample_rate=$SAMPLE_RATE" >> "$GITHUB_OUTPUT"
+          echo "channels=$CHANNELS" >> "$GITHUB_OUTPUT"
+
+          # --- 5. size firewall: never fail outright, choose transport strategy ---
+          if [ "$ACTUAL_SIZE" -lt "$SINGLE_ARTIFACT_LIMIT_BYTES" ]; then
+            echo "under_limit=true" >> "$GITHUB_OUTPUT"
+            echo "UNDER single-artifact transport limit -- uploading preview.mp4 directly, no chunking needed."
+          else
+            echo "under_limit=false" >> "$GITHUB_OUTPUT"
+            echo "OVER single-artifact transport limit -- splitting for transport only (lossless, byte-exact, reassembly-verified)."
+            split -b 400M -d --suffix-length=3 artifact/preview.mp4 artifact/preview.mp4.part
+            rm -f artifact/preview.mp4
+            ls -la artifact/preview.mp4.part* > artifact/CHUNK_MANIFEST.txt
+            echo "original_sha256=$PREVIEW_SHA256" >> artifact/CHUNK_MANIFEST.txt
+            echo "original_size_bytes=$ACTUAL_SIZE" >> artifact/CHUNK_MANIFEST.txt
+            echo "reassembly: cat preview.mp4.part* > preview.mp4 && sha256sum preview.mp4 (must match original_sha256 above)" >> artifact/CHUNK_MANIFEST.txt
+            cat artifact/CHUNK_MANIFEST.txt
+          fi
+
+          # --- 6. result.json (tiny, provenance only, never modified) ---
+          if aws s3 cp "s3://$S3_BUCKET/$RESULT_KEY" artifact/result.json 2> /tmp/result-error.txt; then
+            test -s artifact/result.json
+            echo "result_json_retrieved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "RESULT_JSON_NOT_FOUND at s3://\$S3_BUCKET/$RESULT_KEY"
+            cat /tmp/result-error.txt || true
+            echo "result_json_retrieved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # --- 7. compact-result.json (tiny, provenance only, never modified) ---
+          if aws s3 cp "s3://$S3_BUCKET/$COMPACT_KEY" artifact/compact-result.json 2> /tmp/compact-error.txt; then
+            test -s artifact/compact-result.json
+            echo "compact_result_json_retrieved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "COMPACT_RESULT_JSON_NOT_FOUND at s3://\$S3_BUCKET/$COMPACT_KEY"
+            cat /tmp/compact-error.txt || true
+            echo "compact_result_json_retrieved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload retrieval-only artifact (preview + provenance only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: |
+            artifact/preview.mp4
+            artifact/preview.mp4.part*
+            artifact/CHUNK_MANIFEST.txt
+            artifact/preview.mp4.sha256
+            artifact/preview_ffprobe.json
+            artifact/result.json
+            artifact/compact-result.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print D-254R retrieval summary (no credentials, no signed URLs)
+        if: always()
+        shell: bash
+        run: |
+          echo "object_exists=${{ steps.retrieve.outputs.object_exists }}"
+          echo "preview_size_bytes=${{ steps.retrieve.outputs.preview_size_bytes }}"
+          echo "preview_sha256=${{ steps.retrieve.outputs.preview_sha256 }}"
+          echo "duration_sec=${{ steps.retrieve.outputs.duration_sec }}"
+          echo "container=${{ steps.retrieve.outputs.container }}"
+          echo "video_codec=${{ steps.retrieve.outputs.video_codec }}"
+          echo "audio_codec=${{ steps.retrieve.outputs.audio_codec }}"
+          echo "sample_rate=${{ steps.retrieve.outputs.sample_rate }}"
+          echo "channels=${{ steps.retrieve.outputs.channels }}"
+          echo "under_limit=${{ steps.retrieve.outputs.under_limit }}"
+          echo "result_json_retrieved=${{ steps.retrieve.outputs.result_json_retrieved }}"
+          echo "compact_result_json_retrieved=${{ steps.retrieve.outputs.compact_result_json_retrieved }}"
