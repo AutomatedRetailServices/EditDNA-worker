@@ -65034,3 +65034,203 @@ implemented by this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-253. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-253 — End-to-End Audio Finishing Composition (offline, synthetic media, no live integration)
+
+**Objective.** Post D-252 (adjacent-take execution foundation, verdict A). Prove
+the COMPLETE synthetic composition — Level 1 (adjacent) → render → Level 2
+(whole-video) → limiter if authorized → post-measurement → verification —
+as one deterministic chain, for the first time. No new policy, no new
+numeric threshold, no live pipeline integration.
+
+### STAGE 1 — composition owner
+
+New module `cutsell_worker/audio_finishing_composition.py` — a bounded,
+offline orchestration layer. Never wired into `process_universal_clean_cut_sources`,
+`pipeline.py`, `flow_b.py`, or any workflow/provider entry point (confirmed
+by a structural test scanning `render.py`/`pipeline.py`'s own source for
+any reference to it). It adds no policy to `render.py` and contains zero
+new DSP itself — every real ffmpeg invocation happens inside the already-
+existing D-247/D-249/D-251/D-252 authorities it only calls, in order.
+
+### STAGE 2 — input contract
+
+`CompositionInput` (frozen dataclass): `segments: tuple[RenderSegment, ...]`,
+`plan: AudioFinishingPlan`, `output_dir: str`, `render_kwargs: dict`. No
+hidden global state — every dependency is passed explicitly.
+
+### STAGE 3-8 — the proven chain
+
+`run_audio_finishing_composition` calls, strictly in order:
+1. `apply_adjacent_take_adjustments` (D-252) — before any ffmpeg runs.
+2. `render.render_preview` (the existing, unmodified live renderer) —
+   real segment order/timing/click-fade/`audio_volume`/concat semantics,
+   no parallel fake renderer.
+3. `execute_audio_finishing_plan` (D-251) — whole-video gain + limiter
+   if authorized, on the real rendered file.
+4. Post-measurement + verification — D-251's own `_verify_execution`
+   (reused verbatim, package-internal), which itself uses D-247's
+   `measure_audio` as the sole measurement authority; ffmpeg stderr is
+   never parsed as the final contract.
+
+No stage recomputes another's decision: the composition module contains
+zero references to `evaluate_whole_video_loudness`/
+`evaluate_adjacent_take_continuity` (verified structurally) — every gain
+value applied anywhere in the chain comes from the caller-supplied `plan`,
+already computed before this function is ever called.
+
+**Honest finding recorded, not fixed (no new policy this gate):**
+`evaluate_adjacent_take_continuity` (D-249, unchanged) has no dedicated
+silence firewall of its own — feeding a real `-inf`-loudness measurement
+into one side of an adjacent pair does not resolve to `BLOCKED_SILENCE`;
+the (effectively infinite) delta resolves straight into
+`CORRECTION_LIMITED` at the `+6dB` envelope instead, since only the
+WHOLE-VIDEO path (`evaluate_whole_video_loudness`) has the silence check.
+This is a genuine gap for a future policy gate to close — D-253 does not
+touch policy, so it is recorded here rather than silently worked around.
+
+### STAGE 9 — provenance
+
+`CompositionRecord` (frozen dataclass): `composition_id`,
+`input_segment_ids`, `policy_version`, `plan_status`, `level1_results`
+(the real tuple of D-252 `SegmentGainAdjustmentResult`s),
+`render_output_path`, `whole_video_execution_record` (the real D-251
+`AudioFinishingExecutionRecord`), `post_measurement`/`verification` (the
+real D-251 `ExecutionVerificationResult`), `composition_status`, `errors`,
+`provenance`. Every sub-stage's own real result object is embedded
+verbatim — no raw ffmpeg stderr is ever the canonical contract at this
+level either (each embedded record already carries its own `provenance`
+for that).
+
+### STAGE 10/14 — idempotence
+
+`compute_composition_id`: a pure SHA-256 of the plan's identity (including
+`whole_video_integrated_loudness_lufs`/`requested_whole_video_gain_db`, not
+just the already-clamped `authorized_whole_video_gain_db` — needed so two
+different starting measurements that happen to clamp to the same
+authorized value still produce distinct ids) and the exact segment states
+being composed — matching D-251/D-252's own pattern, no mutable global
+state. `already_applied_level1_ids`/`existing_level2_record` thread
+straight through to D-252/D-251's own idempotence mechanisms. **A found-
+and-fixed integration seam:** D-251's own idempotence shortcut returns
+`(existing_record, None)` (no re-verification) when a matching
+`existing_record` already succeeded — the composition module's first
+draft assumed `level2_verification` was always populated on `SUCCESS`
+and crashed on replay; fixed by falling back to a real re-measurement of
+the already-existing final file whenever `level2_verification` comes back
+`None`, so a composition replay never skips verification, and never
+double-applies gain.
+
+### STAGE 11 — bounded status vocabulary + error propagation
+
+`COMPOSITION_STATUS_{SUCCESS, NO_CHANGE, LEVEL1_BLOCKED, RENDER_FAILED,
+LEVEL2_FAILED, VERIFY_FAILED, PARTIAL, OTHER}`. Real propagation, proven
+by three failure-injection tests: a render exception stops the chain
+before Level 2 is ever called (`RENDER_FAILED`, `whole_video_execution_record`
+and `verification` both `None`); a Level-2 DSP failure never claims
+verification success (`LEVEL2_FAILED`, `verification=None`); a
+verification-layer technical failure reports `VERIFY_FAILED`, never a
+fabricated pass. `LEVEL1_BLOCKED` is reserved for a genuine precondition
+failure (no segments supplied) or an unexpected exception from
+`apply_adjacent_take_adjustments` (which, per D-252, is not expected to
+raise in normal operation) — every one of D-252's own bounded,
+non-exceptional outcomes (`PLAN_NOT_AUTHORIZED`, `SEGMENT_NOT_FOUND`,
+`DUPLICATE_TARGET_CONFLICT`, `IDENTITY_MISMATCH`, `INVALID_GAIN`) is
+allowed to flow through as informational per-adjustment results without
+halting the composition, since Level 1 and Level 2 remain architecturally
+independent (D-252's own established design).
+
+### STAGE 12/13/17 — synthetic fixture matrix + real before/after proof
+
+All required Stage 12 categories covered (real ffmpeg fixtures for the
+core positive paths — no-change, adjacent-only, whole-video-only positive/
+negative, combined Level1+Level2, limiter-authorized/not-authorized; a mix
+of real and directly-constructed measurements for edge cases —
+blocked Level 1/Level 2, short-window abstain, three-segment dual-
+adjacency conflict, pre-existing `audio_volume`, mono/stereo/non-48k
+sources, video+audio vs. malformed source; monkeypatch-based injection for
+render/Level-2/verification failures which cannot be produced by a
+working ffmpeg pass). Real before/after measurement (Stage 13/17) proves,
+on actual rendered/finished files: the adjacent-corrected side moves >1 LU
+toward the other take while the untouched side stays within 0.5 LU
+(directional/structural proof, no new numeric tolerance); whole-video
+positive/negative gain measurably moves the final loudness in the
+authorized direction; the limiter, when authorized, appears strictly
+after `volume=` in the applied filter list; final format is always 48k/
+stereo regardless of source; the video stream survives via `-c:v copy`
+(ffprobe-verified).
+
+### STAGE 14/15/16/18/19/20
+
+**Natural-dynamics/Audio-Join/video-preservation/peak-safety/no-retry/
+scale firewalls** are all inherited, unchanged, from D-249/D-251/D-252 —
+this gate adds no new correction logic of its own, so none of these
+invariants needed new code, only end-to-end proof that composing the
+existing authorities together does not violate them (proven by the tests
+above: click fade/join treatment/segment timing are never referenced by
+this module at all; the limiter never appears before `volume=`; the
+composition runs its DSP exactly once, no retry loop exists anywhere in
+this module; the module is stateless, job-local, and safe for concurrent
+composition calls — no shared mutable path or registry is used anywhere).
+
+### Tests
+
+`tests/test_cutsell_d253_audio_finishing_composition.py` (new, 26 cases,
+all passing) — covers the full Stage 21 contract: ordering (Level 1
+before render, Level 2 after, limiter after Level-2 gain); no policy
+recomputation (structural); authorized-only gain application inherited
+and re-proven through the real chain; targeted-segment movement and
+untouched-segment stability on real rendered/finished media; blocked
+Level 1/Level 2 correctly proceed/halt as designed; short-window abstain
+safe; three-segment dual-adjacency conflict fails closed; pre-existing
+`audio_volume` composes once; Level-1/Level-2/whole-composition
+idempotence (including the found-and-fixed replay bug above); distinct
+composition ids for distinct plans; click fade/timing/ordering/video
+stream all unchanged; final 48k/stereo format; positive/negative
+whole-video gain direction; limiter-only-when-authorized; final
+measurement/verification always used, never fabricated; no loudnorm/
+compressor/denoise anywhere; and structural non-integration proofs.
+
+### Offline qualification
+
+`python3 -m compileall cutsell_worker tests` — clean. Targeted: the new
+26-case suite + D-247's 24 + D-249's 45 + D-251's 26 + D-252's 25 +
+D-028's 27, together — 173/173 passed, zero regression. `CleanCutBench`
+55/55 in default and both explicit `CUTSELL_CLEAN_CUT_CORE_V1` modes.
+Full render-path regression battery (same 14 files as D-251/D-252):
+**197 passed** (117.90s), zero failures. Full `tests/` run (excluding the
+three pre-existing baseline exceptions already established across
+D-241–D-252): **6955 passed, 12 deselected, 13 subtests passed, 0 failed**
+(282.91s) — the delta from D-252's own 6929-passed baseline is exactly
+the 26 new D-253 tests; zero new failures.
+
+### Confirmation
+
+One new module, one new test file — no existing production file's
+behavior changed. `render.py`, `post_render_media_qc.py`,
+`finishing_contract.py`, `audio_finishing_measurement.py`,
+`audio_finishing_policy.py`, and `audio_finishing_executor.py` are all
+untouched and read-only this gate (only imported from). No live pipeline
+integration. No new policy or numeric threshold. No denoise/hum/
+compressor anywhere. No media file mutated outside each test's own
+`tmp_path_factory`-scoped directory. No RAW. No provider.
+
+**Verdict: A — END-TO-END AUDIO FINISHING COMPOSITION OFFLINE PROVEN —
+LEVEL1 + RENDER + LEVEL2 + LIMITER + REMEASUREMENT + VERIFY WORK TOGETHER
+— READY FOR ONE REAL-MEDIA QUALIFICATION.**
+
+**Canonical status:** unchanged — the six D-249 values are read and
+applied exactly as-is throughout; no new threshold introduced.
+
+**Next gate:** D-254 — One Real-Media Audio Finishing Qualification,
+using exactly one existing RAW/final render, to confirm this proven
+synthetic chain behaves the same way against a real Video00-scale file
+(real segment counts, real join density, real source-level variance).
+Not launched or authorized by this gate.
+
+Then STOP.
+
+DO NOT IMPLEMENT D-254. DO NOT LAUNCH RAW.
