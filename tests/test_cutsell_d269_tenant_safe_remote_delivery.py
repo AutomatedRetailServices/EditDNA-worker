@@ -894,8 +894,13 @@ def test_no_actual_upload_or_presign_network_call():
     "cutsell_worker/multipart_uploads.py",
     "cutsell_worker/gpu_execution_provider.py",
     "cutsell_worker/jobs.py",
-    "cutsell_worker/exports.py",
     "cutsell_worker/uploads.py",
+    # D-269A Stage 4/6 explicitly authorizes extending exports.py's
+    # `store_export` interface (tenant-safe key + post-upload HEAD
+    # verification) as part of live-wiring D-269's own foundation -- it is
+    # no longer an "unrelated" authority once that gate exists, and its
+    # own firewall list (tests/test_cutsell_d269a_*) is where its scope is
+    # now pinned instead.
 ])
 def test_unrelated_authorities_unchanged(rel_path):
     assert _run_git_diff(rel_path) == "", f"D-269 must not touch {rel_path}"

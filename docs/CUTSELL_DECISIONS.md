@@ -70648,3 +70648,225 @@ Then STOP.
 
 DO NOT IMPLEMENT D-270.
 DO NOT LAUNCH RAW.
+
+## D-269A — Live Tenant-Safe Delivery Activation (offline implementation + fake-S3 integration, no real S3 mutation)
+
+**Objective.** Close D-269's own remaining gap: the tenant-safe delivery
+foundation was fully proven offline but never called from the real export
+path. Wire it into `cutsell_worker/export_job.py`'s live flow —
+render_identity binding, the D-269 tenant-safe key, real upload through
+the EXISTING `store_export` interface, real post-upload remote
+verification, `DELIVERY_READY` gating, presign authorization, and the
+stale-job guard — against a fully faked S3 client throughout. No real S3
+write, no network, no provider, no RAW, no renderer/codec/filtergraph/
+Pacing/Boundary/Freeze/Audio Join/Audio Finishing/Visual Finishing/QC-
+authority change anywhere in this gate.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `389d551` (exact expected
+match, D-269), clean tree — confirmed before this gate began.
+
+### Stage 1-8 — `export_job._tenant_safe_deliver` (new function, the live seam)
+
+Replaces the direct `store_export(output, project_id=..., user_id=...)`
+call in `run_export_job`'s success path. Computes D-267's own
+`render_identity` from the SAME `plan` (the `RenderSegment` tuple) the
+renderer actually used — never from a filename/path — at the same output
+geometry (`1080x1920`, `RENDER_FPS_DEFAULT`) `render_preview`'s own
+defaults already use. Builds a local `RenderDeliveryRecord` (D-267,
+unmodified authority: a render/hash/QC blocker here is wrapped and
+re-raised, never re-derived). Builds the D-269 tenant-safe key
+(`build_tenant_safe_export_key`) and calls the EXISTING `store_export`
+interface with it plus an object-metadata payload
+(`render_identity`/`sha256`/`job_id` — D-268's own Stage 32 item 2,
+closed narrowly here). Consumes the real post-upload `head_object`
+response through `verify_remote_delivery`, then `evaluate_tenant_safe_
+delivery` with `require_remote=True` — `DELIVERY_READY` is reached only
+when render, QC, hash, ownership, render-identity, remote existence,
+remote size, remote render-identity, remote hash (when available), and
+upload status ALL agree; anything less raises `TenantSafeDeliveryBlocked`
+(a new, narrow exception), which the EXISTING generic `except Exception`
+handler in `run_export_job` already treats exactly like any other export
+failure (`state="failed"`, `render_failed` notification) — no new failure
+bookkeeping was written, all of it is reused.
+
+### Stage 4/6 — `cutsell_worker/exports.py`'s `store_export` (extended, not replaced)
+
+Gained two new optional keyword parameters: `object_key` (the caller's
+own tenant-safe key overrides the legacy `uuid4()`-based one; every other
+existing caller omits it and is byte-for-byte unaffected) and
+`object_metadata` (attached via `ExtraArgs={"Metadata": ...}`, a real,
+already-available boto3 mechanism — D-268 Stage 32 item 2). After
+`upload_file`, this now performs one real `head_object` call and returns
+it as `remote_head` in the result dict (`exists`/`key`/`size_bytes`/
+`metadata`) — Stage 6's own explicit instruction ("the live export path
+must consume remote metadata," never trust `upload_file`'s bare success
+alone). A `head_object` exception is caught and honestly reported as
+`{"exists": False}`, never silently treated as success.
+
+### Stage 9/10/21/22 — real job-start timestamp wired into the stale-job guard
+
+New `_job_started_epoch(job)` reads RQ's OWN existing `Job.started_at`
+(set by the worker before this function runs — never an invented
+sequence number) and converts it to a float epoch, handling a real
+`datetime`, a plain numeric test double, or absence gracefully (`None`,
+which `project_store.update_project`'s D-269-built guard already treats
+as "no ordering evidence, allow through"). `run_export_job` now passes
+`latest_job_started_at=job_started_at` into every `safe_update_project`
+call site (tracking-start, success/"finished", and both failure paths) —
+D-269's own stale-job guard, built but inert since no caller fed it a
+real value, is now genuinely live for the FIRST time.
+
+### Stage 13/26/27 — presign authorization, real seam, no real network
+
+`_tenant_safe_deliver`'s `requesting` parameter defaults to the export's
+own ownership scope (the real RQ flow is always its own job's owner and
+structurally cannot diverge); a caller may pass a different `requesting`
+scope, which the new `authorize_presign_issuance` check (D-269, unchanged)
+uses to decide whether `download_url` is published in the result at all —
+a mismatched principal gets `download_url=None` and a `presign_denied_
+reason`, never the real value, even though `store_export`'s own existing
+upload+presign call already ran as one atomic legacy interface call
+(kept unchanged per Stage 5 — this gate gates PUBLICATION of the result,
+not generation of the URL itself; documented honestly, not overclaimed
+as literally preventing the underlying `generate_presigned_url` call).
+
+### Stage 24/25 — result payload
+
+The job's returned dict now carries `delivery_status`, `render_identity`,
+`output_sha256`, `remote_reference` (the same value as `export_uri`,
+under a name that does not read as a raw internal storage path — Stage
+24) and `download_url`/`presign_denied_reason`. `export_uri` itself is
+KEPT for existing client/API backward compatibility (Stage 25 — no
+security finding requires removing it in this gate).
+
+### Verification run
+
+- `python3 -m py_compile` on every changed file: clean.
+- Existing `tests/test_cutsell_clean_worker_export.py`: updated (its
+  `FakeJob` now carries a real `.id`/`.started_at` — a genuine RQ job
+  always has both; its `build_render_plan` fake now returns a real
+  `RenderSegment` instead of a bare string; its `store_export` fake now
+  echoes back a realistic post-upload `remote_head` matching what the
+  real `store_export` would report) — **2 passed**, confirming the live
+  wiring did not change this test's own observable contract beyond what
+  the tightened binding legitimately requires.
+- New `tests/test_cutsell_d269a_live_tenant_safe_delivery.py`: **55
+  passed** — full live-path fixture+contract matrix against a `FakeS3Client`
+  (real in-memory `upload_file`/`head_object`/`generate_presigned_url`,
+  no network): valid full flow reaches `DELIVERY_READY`; job-id/render-
+  identity/output-sha binding proven distinct across different plans/
+  jobs; tenant-safe key (not the legacy scheme) confirmed byte-identical
+  to `build_tenant_safe_export_key`'s own output; upload-success-alone
+  insufficient (missing remote object via both a hand-built fake and a
+  REAL simulated 404 from `head_object`); remote size mismatch, remote
+  render-identity mismatch, and remote hash mismatch each independently
+  block delivery; remote hash UNAVAILABLE (no metadata) is honestly
+  `DELIVERY_READY` anyway — never fabricated as verified, never
+  penalized for genuine absence; upload failure propagates as a real
+  exception, never `DELIVERY_READY`; QC failure proven to never even
+  reach `_tenant_safe_deliver` (existing D-030 authority, unchanged);
+  wrong requesting principal denied its own presign while delivery itself
+  still succeeds; matching principal and the real flow's own default both
+  receive it; duplicate-equivalent-export determinism (identical bytes,
+  same job → identical key); same-project-two-jobs and two-users-same-
+  textual-ids isolation, both through the live path; `_job_started_epoch`
+  proven against a real `datetime`, a plain float, and absence; the
+  stale-job race (older job completing late cannot overwrite a newer
+  job's already-current pointer) proven through `project_store.
+  update_project` itself; immutability of the blocked record; `export_
+  uri` backward compatibility; diagnostics carry no secrets; no network/
+  credential construction, no `shell=True`, no provider/RunPod/Modal
+  reference in either modified module; and a parametrized git-diff-vs-
+  HEAD guard proving this gate never touched render.py, render_delivery.py,
+  render_plan.py, tenant_safe_delivery.py itself, audio/visual finishing
+  (executor+composition), boundary_engine_pass.py, pacing_transition_
+  decision.py, post_render_media_qc.py, post_render_watch_listen_qc.py,
+  live_render_qc.py, media_probe.py, finishing_contract.py, multipart_
+  uploads.py, gpu_execution_provider.py, jobs.py, uploads.py, project_
+  store.py, auth_middleware.py, or main.py.
+- D-269's own firewall test (`test_cutsell_d269_tenant_safe_remote_
+  delivery.py::test_unrelated_authorities_unchanged`) correctly flagged
+  that this gate touches `cutsell_worker/exports.py` — expected and
+  authorized by THIS gate's own Stage 4/6; that file's parametrize list
+  was updated to remove `exports.py` (no longer "unrelated" once a gate
+  that legitimately evolves it exists) with an explanatory comment,
+  exactly the same self-resolving-guard pattern established by D-171/
+  D-172 and reused at every prior D-266/D-267/D-269 gate.
+- D-266/D-266A/D-267/D-269/D-269A targeted suites together: **292
+  passed, 0 failed.**
+- Broader auth/job/export/project regression set (11 files: auth, api,
+  job_retry, job_progress_cancellation, projects, multipart,
+  playback_urls, rq_contract, export, infra, universal_clean_cut_
+  validation_live_render_qc): **67 passed, 0 failed.**
+- `compileall` over `cutsell_worker/`, `cutsell_app/`, `tests/`: clean.
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`): 1
+  passed each (unaffected — this gate never touches Selection/Boundary/
+  Freeze/editorial authority).
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: **7541 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, 0 failed** (54 net new tests over D-269's own 7487 — the new
+  D-269A file's 55 tests, offset by an existing export-job test not
+  counted twice).
+
+### Stage 31 — commercial multi-user readiness (re-assessed)
+
+Delivery-ownership *security* is now genuinely live, not merely proven in
+isolation: every real export computes and checks render-identity/hash/
+ownership/remote binding before it can be reported `DELIVERY_READY`, a
+late-completing stale job can no longer regress a project's current
+pointer, and a mismatched requesting principal cannot receive a delivery
+reference. **10 users: READY**, same conditional basis as D-268/D-269 (a
+correctly configured `CUTSELL_AUTH_REQUIRED=1` deployment), now backed by
+delivery logic that actually runs in production rather than sitting
+unused. **100 users: FOUNDATION_ONLY→IMPROVING. 1000+ users:
+FOUNDATION_ONLY.** This gate closes the specific "proven but inert" gap
+D-269 itself named; it does not touch, and does not claim to touch, load
+testing, billing/quotas, retention/orphan sweep, remote-SHA strengthening
+beyond what object metadata already carries, download-issuance auditing
+at scale, or format/media diversity (D-268's own Stage 33, still
+deliberately deferred). The platform is measurably closer to commercial
+readiness on the delivery-security axis specifically; it is not being
+declared production-ready at 1000+ users by this entry.
+
+### Canonical status update
+
+RENDERER / EXPORT HARDENING: execution safety = CLOSED (D-265/D-266/
+D-266A); identity/hash foundation = CLOSED (D-267); **REMOTE DELIVERY
+TENANT SAFETY FOUNDATION + LIVE PATH ACTIVATION = CLOSED** (D-269 +
+this entry — the foundation is now both offline-proven AND running on
+the real export path). Remaining, explicitly out of this gate's scope:
+retention/orphan sweep, remote SHA strengthening beyond object metadata,
+download-issuance audit at scale, rate/cost abuse controls beyond the
+existing flow-b duration guard, load/concurrency qualification, and
+format/media-diversity hardening (D-268's own Stage 33, still deferred).
+
+### Verdict
+
+**A — Tenant-safe delivery live path activated offline, ownership/job/
+render/hash/remote-verification/stale-job protection wired into the real
+export flow, ready for media-diversity hardening.** Every stage of D-269's
+own foundation is now genuinely exercised by `run_export_job` itself
+(against a faked S3 client, per this gate's own binding constraint) —
+this is not a design sketch or a parallel path; `export_job.py`'s ONE
+real success branch computes and checks all of it before ever reporting
+`DELIVERY_READY` or updating a project's current pointer.
+
+### Multi-user readiness
+
+10 users: READY (conditional, per Stage 31 above). 100/1000+ users:
+FOUNDATION_ONLY — delivery security is now live and closed as its own
+axis; broader platform readiness at that scale still requires the items
+named in Stage 31/Canonical status above.
+
+**Exact next gate:** D-270 — Renderer Format/Media-Diversity Hardening
+Audit (D-268's own Stage 33 scope) — not implemented, not decided by this
+entry; a Product Owner authorization call.
+
+**Decision entry reference:** this entry (D-269A).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-270.
+DO NOT LAUNCH RAW.

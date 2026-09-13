@@ -4,6 +4,7 @@ import sys
 
 import cutsell_worker.export_job as export_job
 import cutsell_worker.exports as exports
+from cutsell_worker.render_plan import RenderSegment
 
 
 def _draft():
@@ -39,6 +40,12 @@ def _draft():
 
 class FakeJob:
     def __init__(self):
+        self.id = "job-test-1"
+        # D-269A Stage 9/10: a real RQ worker sets `started_at` before
+        # calling the job function -- this fake now carries a plausible
+        # numeric value so the stale-job guard's ordering evidence is
+        # exercised the same way it is in production.
+        self.started_at = 1_700_000_000.0
         self.meta = {}
         self.saved = []
     def save_meta(self):
@@ -62,7 +69,8 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
         "download_source",
         lambda uri, destination: Path(destination).write_bytes(b"source") or destination,
     )
-    monkeypatch.setattr(export_job, "build_render_plan", lambda draft, local_paths: ("plan",))
+    fake_plan = (RenderSegment(clip_id="clip-1", source_asset_id="src-1", source_path="/tmp/x.mp4", start=1.0, end=2.0),)
+    monkeypatch.setattr(export_job, "build_render_plan", lambda draft, local_paths: fake_plan)
 
     rendered = []
     def fake_render_with_qc(draft, plan, output, *, text_overlays=(), media_overlays=(), **kwargs):
@@ -77,16 +85,26 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
             plan_version=1, semantic_hash="hash_test", attempts=(),
         )
     monkeypatch.setattr(export_job, "render_with_post_render_qc", fake_render_with_qc)
-    monkeypatch.setattr(
-        export_job,
-        "store_export",
-        lambda output, **kwargs: {
-            "export_uri": "s3://bucket/cutsell/exports/file.mp4",
+
+    def fake_store_export(output, **kwargs):
+        # D-269A: a realistic fake of the now-real `store_export` --
+        # returns the SAME tenant-safe key/metadata the caller passed in,
+        # as a real post-upload HEAD response would, so `verify_remote_
+        # delivery` sees a genuinely matching remote object rather than
+        # an empty/missing one.
+        size = Path(output).stat().st_size
+        key = kwargs.get("object_key") or "cutsell/exports/file.mp4"
+        metadata = dict(kwargs.get("object_metadata") or {})
+        return {
+            "export_uri": f"s3://bucket/{key}",
             "download_url": "https://download.invalid/file.mp4",
             "expires_in": 3600,
-            "size_bytes": Path(output).stat().st_size,
-        },
-    )
+            "size_bytes": size,
+            "bucket": "bucket",
+            "object_key": key,
+            "remote_head": {"exists": True, "key": key, "size_bytes": size, "metadata": metadata},
+        }
+    monkeypatch.setattr(export_job, "store_export", fake_store_export)
 
     result = export_job.run_export_job({
         "project_id": "project-1",
