@@ -69999,3 +69999,412 @@ Then STOP.
 
 DO NOT IMPLEMENT D-268.
 DO NOT LAUNCH RAW.
+
+## D-268 — Export / Storage Delivery Integration Audit (offline forensic + design only)
+
+**Objective.** Post D-267 (render identity + delivery contract foundation
+implemented, explicitly NOT enforcing tenant ownership/cross-user
+isolation/remote-object ownership). Audit whether CutSell can safely take
+LOCAL VERIFIED OUTPUT -> REMOTE STORAGE -> USER DELIVERY without cross-user
+leakage, wrong-object delivery, key collision, stale-result reuse, partial-
+upload exposure, unauthorized download, secret leakage, delivery-ready
+fabrication, orphaned media, or retention ambiguity. Pure forensic + design:
+no `cutsell_worker/*.py` or `cutsell_app/*.py` file was touched to produce
+this entry, no storage/upload/auth behavior changed, no RAW launched.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `eec61db` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Stage 1 — current local->remote storage flow (as read)
+
+`export_job.run_export_job` -> `render_with_post_render_qc` (D-030's live
+technical QC; raises `PostRenderQCFailure` on anything but PASS, which the
+job's own except-block treats as a hard failure — **upload is already
+gated on technical QC PASS today, independent of D-267**) -> explicit
+`if qc_result.status != "PASS": raise` before `store_export` is ever
+reached -> `exports.store_export(output, project_id, user_id)` (single
+`boto3` `upload_file` call to a scoped key, then one `generate_presigned_
+url`) -> `render_versions.add_render_version` (persists `export_uri`,
+`size_bytes`, counts — an append-only version record, never `output_sha256`
+or a `render_identity`) -> `project_tracking.safe_update_project` (best-
+effort "latest" pointer) -> the job's own result dict, which `**stored`s
+`export_uri`/`download_url`/`expires_in`/`size_bytes` directly into
+`job.result` -> `/v1/jobs/{job_id}` (ownership-gated by `AuthScopeMiddleware`
+before the handler runs) returns that result to the client. Client SOURCE
+uploads run a parallel, separate path (`uploads.py`'s presigned POST ->
+`multipart_uploads.py` for large files) that was not modified by, and does
+not feed into, this delivery flow.
+
+### Stage 2/3 — bucket/key construction and ownership-field classification
+
+Both `exports.store_export` and `uploads.prepare_upload_target`/
+`scoped_upload_prefix` build keys as `<prefix><sha256(user_id)[:16]>/
+<sha256(project_id)[:16]>/<uuid4().hex>[-filename].mp4`. **Collision risk:
+negligible** — `uuid4()` is the actual uniqueness guarantee (not the hash
+prefixes, which exist for SCOPING/deletion, not uniqueness); two renders of
+the identical project always land at different keys. **Classification:**
+
+| Field | Status |
+|---|---|
+| `user_id` | ENFORCED (key-scoped AND cross-checked against the bearer-token-resolved session by `AuthScopeMiddleware`, AND re-validated by `validate_product_source_uri`'s prefix match on read-back) |
+| `project_id` | ENFORCED (same key-scoping + `validate_product_source_uri` prefix match) |
+| `job_id` | PROPAGATED_ONLY — stored in RQ job payload/meta and used for `_assert_job_owner`, but never part of the S3 key or the delivery record; not bound to the delivered object at all |
+| `organization_id`/`tenant_id` | MISSING — no such field exists anywhere searched; `user_id` is the only tenancy boundary this codebase has |
+| `render_identity`/`output_sha256` (D-267) | MISSING from the real path entirely — never computed, stored, or logged in `export_job.py`/`exports.py`/`render_versions.py` |
+
+### Stage 4 — cross-user leakage: code-path proof
+
+No guessable-object-key path found: keys are hash-scoped + uuid4-suffixed,
+never sequential/predictable. No shared-project/job-id leak path found:
+`_assert_job_owner`/`AuthScopeMiddleware` both compare the STORED job
+payload's own `user_id` against the SESSION-RESOLVED (`resolve_session`,
+server-verified from the bearer token) identity, never a client-self-
+asserted value alone — `AuthScopeMiddleware` additionally 403s outright if
+a client-supplied `user_id` (query or JSON body) disagrees with the
+resolved session. **No live cross-user leakage path was found in the code
+as currently wired**, CONDITIONAL on one fact verified only by
+configuration, not code (see Stage 30 P0 below).
+
+### Stage 5/6/7 — remote reference contract, presigned URLs, public exposure
+
+Client-facing responses carry BOTH a presigned `download_url` (GET-only by
+construction of `generate_presigned_url("get_object", ...)`, object-
+specific, bounded expiry) AND the raw `export_uri` (`s3://bucket/key`) —
+the raw URI is not independently actionable without AWS credentials the
+client never receives, but is unnecessary internal-identifier disclosure
+(P2, Stage 5). Presigned GET expiry: enforced range 60-86400s
+(`store_export`), enforced range 60-3600s (`create_presigned_source_
+download`) — never hardcoded, never unbounded (Stage 6 satisfied).
+Presigned mobile-upload POST additionally binds `Content-Type` and a
+`content-length-range` condition at the SIGNATURE level (Stage 25 partially
+satisfied: size/MIME are enforced by the signed policy itself, not merely
+client-declared) — object-specific (one key per POST), auth-before-issuance
+(both `create_presigned_upload` and `create_presigned_source_download`
+require `user_id`/`project_id`, and the scoped key those inputs produce is
+itself the authorization). **Public object/bucket ACL/CDN status: UNKNOWN**
+— cannot be established from repository evidence alone (Stage 7's own
+required honesty); no CloudFront/CDN reference found anywhere searched.
+
+### Stage 8/9 — upload atomicity and verification
+
+No staging-key-then-copy-to-final-key pattern exists; `store_export`/
+`create_presigned_upload` write directly to the final key. **This is not
+the gap D-266 fixed locally**: S3's own PUT/multipart semantics already
+provide the equivalent guarantee for free — an incomplete multipart upload
+is never visible as a GET-able object at the target key until
+`CompleteMultipartUpload` succeeds, and a single-part PUT is atomic by
+construction; there is no code-level "partial object appears at final key"
+risk to fix, only a documentation gap (nothing in this codebase states
+this reasoning, so a future engineer could wrongly assume a staging
+pattern is needed, or wrongly assume the risk is unaddressed). **Upload
+verification is MISSING**: `store_export` never HEAD-checks the uploaded
+object, never compares remote size to local `size_bytes`, never records
+any remote hash — a `boto3` transport-level exception would surface as a
+job failure, but a "succeeded upload, wrong bytes" scenario (vanishingly
+unlikely with S3, but unverified) has no application-level check (Stage 9,
+P1/P2).
+
+### Stage 10 — D-267 integration status: CONFIRMED STANDALONE
+
+Direct inspection of `export_job.py`/`exports.py` confirms **D-267's
+`RenderDeliveryRecord`/`compute_render_identity`/`compute_output_sha256`/
+`technical_qc_status_from_live_render_qc` are never imported or called
+anywhere in the real production path.** The real path already independently
+enforces technical-QC gating (via `PostRenderQCFailure`, D-030/D-036 — NOT
+a D-267 mechanism), but never computes a content hash, never mints a
+render identity, and never constructs a `RenderDeliveryRecord`. **This is
+the exact missing integration seam** this gate's Stage 10 asked to name.
+
+### Stage 11/12/13/14 — wrong-object / stale-result / duplicate-job / partial-upload
+
+**Wrong-object protection bindings that EXIST:** `user_id`/`project_id`
+(via the S3 key prefix + middleware). **Bindings that DO NOT exist:**
+`job_id`, `render_identity`, `output_sha256` are never bound to the
+delivered remote object in any way (not in the key, not in S3 object
+metadata, not in `render_versions.py`'s stored record) — traceability/
+audit gap (Stage 27), not a leakage risk (uuid4 already prevents
+collision). **Stale-result race (Stage 12, CONFIRMED, real):**
+`project_store.update_project`'s `current["latest_job_id"] = str
+(latest_job_id)` / state overwrite has **no ordering or monotonic-
+timestamp guard** — a late-finishing OLDER job (a stale worker, a network-
+delayed completion, a retried duplicate) that completes AFTER a NEWER job
+has already updated the project can silently regress the project's
+"latest" convenience pointer to stale data. The underlying render itself
+is not lost (`add_render_version` is append-only, a new version row per
+successful export), so this is a **staleness/correctness bug in a
+convenience pointer, not a data-loss or cross-user bug** — classified P1.
+**Duplicate job/retry (Stage 13):** `retry_job` always creates a FRESH RQ
+job (never re-runs the same job_id); every successful export always mints
+a brand-new `uuid4()`-keyed object — safe (never overwrites/collides) but
+**not idempotent** (a duplicate dispatch produces a second, redundant
+stored export rather than detecting and reusing the first) — cost/orphan
+hygiene gap, P2. **Partial upload (Stage 14):** per Stage 8's finding, S3's
+own atomicity means a partial object cannot appear at the final key
+regardless of network failure mid-transfer — the current behavior is
+already safe on this specific point, though unverified by the application
+itself (see Stage 9).
+
+### Stage 15/16/17 — remote integrity, download authorization, IDOR
+
+**Remote SHA preservation (Stage 15): MISSING.** No metadata header,
+sidecar manifest, database record, or S3 checksum-API usage carries
+`output_sha256` remotely anywhere found — a genuine, closable gap once
+D-267's `compute_output_sha256` is wired in (the natural fix is an S3
+object metadata header, e.g. `x-amz-meta-cutsell-sha256`, computed once
+locally before upload and set via `ExtraArgs={"Metadata": {...}}` — not
+implemented by this audit). **Download authorization (Stage 16):**
+happens BEFORE any URL/reference issuance for BOTH the export-download path
+(`store_export`'s presign call is reached only inside `run_export_job`,
+itself only reachable by the job's own owning user per Stage 4) and the
+source-download path (`create_presigned_source_download` requires
+`project_id`+`user_id` and validates the requested URI against that exact
+scope before signing) — **satisfied as currently wired**. **IDOR (Stage
+17):** `/v1/jobs/{job_id}` and `/v1/jobs/{job_id}/cancel` pass the raw
+`job_id` from the URL path directly to `fetch_job_snapshot`/`cancel_job`
+**without** `user_id` at the FastAPI route-handler call site — looked at
+in isolation, this is a textbook IDOR shape. **It is NOT currently
+exploitable** because `AuthScopeMiddleware.__call__` already calls
+`fetch_job_snapshot(job_id, user_id=auth_user_id)` itself, BEFORE the ASGI
+app (and therefore the FastAPI route handler) ever runs, and 403s/404s
+before the handler is reached on any ownership mismatch. **This is real
+protection, but it is invisible at the handler's own call site** — no
+test in this codebase currently pins "the route handler itself would be
+unsafe if the middleware were ever removed, reordered, or bypassed for a
+new route." Classified P1: correct today, structurally fragile.
+
+### Stage 18/19 — key injection and content headers
+
+`uploads._safe_name` strips to `[A-Za-z0-9._-]` after taking only
+`Path(original_name).name` (defeats `../`, leading slashes, backslashes)
+and enforces an extension allowlist before any name reaches an S3 key —
+**Stage 18 satisfied for the upload path.** The export path builds its own
+key entirely from server-side values (`uuid4()`, a fixed `.mp4` suffix,
+hashed ids) with **no user-controlled string in the key at all** — no
+injection surface exists there by construction. **Content-Type:** set
+explicitly (`video/mp4` on export, MIME-validated allowlist on upload) —
+**Stage 19 satisfied for sniffing risk.** **Content-Disposition:** never
+set on either path — P2, minor (explicit `Content-Type` already prevents
+the main browser MIME-sniffing risk; an explicit `Content-Disposition`
+would only add predictable inline/attachment behavior, not close a real
+hole).
+
+### Stage 20/21 — secrets and result-metadata leakage
+
+boto3 reads AWS credentials from its own standard env/runtime credential
+chain (`storage.py`'s own docstring states this) — no key/secret is ever
+constructed, embedded, or returned to a client anywhere found in this
+audit's search scope. Presigned URLs carry a signature, never raw
+credentials. **Result-metadata leakage:** the job's `result` payload
+includes the raw `export_uri` (`s3://bucket/key`) alongside the presigned
+`download_url` — internal storage-identifier disclosure to the object's
+own legitimate owner (not another tenant, per Stage 4), low severity, but
+unnecessary (P2, Stage 5/21 overlap). No other tenant's identifiers,
+filesystem paths, or bucket-internal details were found exposed in the
+result payload inspected.
+
+### Stage 22/23/24 — retention, deletion, orphan cleanup
+
+`account_lifecycle.py` implements REAL, working `delete_project_data`/
+`delete_account_data`, including `_delete_s3_prefix` (a real, paginated
+`list_objects_v2`+`delete_objects` sweep under the exact scoped prefix)
+alongside Redis/durable-store cleanup — **Stages 22-24 are meaningfully
+addressed for EXPLICIT deletion**, and the hashed-prefix key scheme is
+exactly what makes complete-prefix deletion possible without enumerating
+every object by hand. **What is NOT evidenced anywhere in this codebase:
+any TIME-based automatic retention/expiry** (no scheduled sweep, no S3
+lifecycle-policy reference, no "delete after N days" logic) — retention is
+therefore **IMPLICIT/INDEFINITE unless a user or account is explicitly
+deleted**, and whether an S3 bucket-level lifecycle policy exists is
+infrastructure-level and UNKNOWN from this repository alone. Orphan
+cleanup for a FAILED/CANCELLED job's own temp LOCAL files is already
+handled (`tempfile.TemporaryDirectory` in `export_job.py`); orphan REMOTE
+objects from a job that fails need not occur given S3's atomicity (Stage 8)
+— there is no failure window in which a partial remote object could exist
+to become orphaned.
+
+### Stage 25/26 — client upload security and rate/cost abuse
+
+Client (mobile) SOURCE uploads are presigned-POST, server-proxied nowhere
+(video bytes never transit the FastAPI service, per `uploads.py`'s own
+docstring), with a real hard cap (`MAX_UPLOAD_BYTES = 2 GiB`), a real
+extension allowlist, a real MIME allowlist, and a real signed
+`content-length-range` condition — **not extension-only trust; the actual
+media probe/decode step happens later in `export_job.py`'s own render
+pipeline** (a malformed file would fail there, not be trusted blindly).
+**Rate/cost abuse:** `usage_limits.check_processing_allowance` is invoked
+by `AuthScopeMiddleware` specifically for `POST /v1/flow-b/jobs` (bounding
+total requested processing duration) — no equivalent guard was found in
+this audit's scope specifically bounding repeated EXPORT submissions,
+repeated presigned-URL issuance, or repeated reruns of the same project;
+this is **not confirmed absent codebase-wide** (usage_limits.py itself was
+not read in full this pass) but no such guard was found on the export/
+job-retry/presign paths inspected — flagged as needing a dedicated check,
+P2.
+
+### Stage 27/28/29 — audit trail, state machine, tenant-safe invariant
+
+**Audit-trail coverage today:** `job.meta`/`job.result` carry `user_id`,
+`project_id`, `job_id` (implicitly, as the RQ job's own id), technical-QC
+fields (`plan_id`, `plan_version`, `semantic_hash`, `post_render_qc_
+status`), and export metadata (`export_uri`, `size_bytes`) — **missing:
+`render_identity`, `output_sha256`, any explicit upload-timestamp/status
+record beyond the job's own RQ lifecycle timestamps, and any download-URL-
+issuance audit event** (presigning is not logged as a distinct event
+anywhere found). **State-machine comparison:** D-267's vocabulary
+(`RENDER_FAILED`/`QC_FAILED`/`HASH_FAILED`/`READY_FOR_UPLOAD`/`UPLOAD_IN_
+PROGRESS`/`UPLOAD_FAILED`/`DELIVERY_READY`/`DELIVERY_BLOCKED`/`UNKNOWN`)
+already covers this gate's desired
+`RENDER_SUCCEEDED->QC_PASS->HASH_VERIFIED->READY_FOR_UPLOAD->UPLOAD_IN_
+PROGRESS->REMOTE_VERIFIED->DELIVERY_READY` chain almost exactly — the one
+addition a future gate should consider is an explicit `REMOTE_VERIFIED`
+sub-state (or a `remote_sha256_verified`/`remote_size_verified` pair of
+booleans, which `RenderDeliveryRecord` already has slots for via
+`remote_sha256_verified`) between `UPLOAD_IN_PROGRESS` and `DELIVERY_
+READY`, populated only once a real post-upload check (Stage 9) exists — no
+new vocabulary is required, only real wiring. **Tenant-safe delivery
+invariant (Stage 29, design only, not implemented):** `DELIVERY_READY`
+should be valid only when `record.job_id`, `record.project_id`, an
+owner/tenant reference, the remote object, `render_identity`, and
+`output_sha256` all correspond to the SAME job/output — today NONE of
+`job_id`/`render_identity`/`output_sha256` are bound to the remote object
+at all, so this invariant cannot currently be checked even in principle;
+it is the central design target for the next gate.
+
+### Stage 30 — security severity classification (actual findings only)
+
+**P0 SECURITY (one, code-level, deployment-mitigated):**
+1. `AuthScopeMiddleware` fails OPEN by default — `CUTSELL_AUTH_REQUIRED`
+   defaults to falsy, silently disabling bearer-token requirement, the
+   client-`user_id`-vs-session cross-check, AND job-ownership enforcement
+   with zero code change and zero visible error in any environment that
+   doesn't explicitly set it. **Confirmed mitigated in the one known
+   deployment blueprint** (`render.cutsell.yaml` hardcodes `CUTSELL_
+   AUTH_REQUIRED: "1"`, pinned by `test_cutsell_render_blueprint_is_api_
+   only_and_isolated_from_legacy_services`), but the underlying code
+   pattern (opt-in security) remains a P0-shaped latent risk for any
+   other environment (a new deploy target, a local/staging run, a future
+   blueprint edit that drops this one line) — reported at full severity
+   per this gate's own "do not answer from optimism" instruction, with
+   the mitigating evidence stated plainly rather than used to downgrade it.
+
+**P1 SECURITY:**
+2. D-267's identity/hash/delivery-record layer is completely unwired from
+   the real export path (Stage 10).
+3. No post-upload remote verification (size/hash/existence) after
+   `client.upload_file` (Stage 9).
+4. Job-route ownership enforcement lives only in ASGI middleware, invisible
+   at the FastAPI handler's own call site — correct today, structurally
+   fragile against a future refactor or a new route added outside the
+   middleware's exact path-matching (Stage 17).
+5. `project_store.update_project`'s "latest job" pointer has no ordering/
+   monotonic guard — a late-finishing older job can regress it after a
+   newer job has already completed (Stage 12).
+
+**P2 HARDENING:**
+6. Raw `s3://bucket/key` unnecessarily included in client-facing job
+   results (Stage 5/21).
+7. Remote object key/metadata does not bind `job_id`/`render_identity`/
+   `output_sha256` — traceability/audit gap, not a leakage risk (Stage 11/27).
+8. No idempotent remote delivery for duplicate job dispatch/retry — safe,
+   but can accumulate redundant storage (Stage 13).
+9. No `Content-Disposition` header on delivered objects (Stage 19).
+10. No time-based automatic retention/lifecycle policy evidenced beyond
+    explicit user/project/account deletion (Stage 22).
+11. No dedicated rate/cost-abuse guard found for repeated export
+    submissions specifically (distinct from the existing flow-b duration
+    guard) — not confirmed absent codebase-wide, flagged for a dedicated
+    look (Stage 26).
+
+### Stage 31 — commercial multi-user readiness
+
+**10 users: READY**, conditional on the one verifiable fact this audit
+could not itself enforce — that `CUTSELL_AUTH_REQUIRED=1` is genuinely set
+in whatever environment is actually serving traffic (confirmed true for
+the one deployment blueprint this repository defines).
+**100 users: FOUNDATION_ONLY.** **1000+ users: FOUNDATION_ONLY.** At both
+larger scales the P0's blast radius (any misconfigured/staging/future
+environment) and the P1 gaps (no render-identity/hash audit trail, no
+remote verification, a real stale-pointer race, IDOR protection with no
+handler-level test) compound with higher job/environment churn — none of
+these require a redesign (the core ownership-binding mechanism —
+resolved-session -> cross-checked user_id -> hashed-prefix S3 keys ->
+prefix-scoped deletion — is real and architecturally sound), but they do
+require the hardening this gate's own Stage 32 next gate names before this
+codebase should be called production-ready at that scale.
+
+### Stage 32 — first implementation gate (design only, not implemented)
+
+Proposed scope for a future D-269 (Product Owner authorization required,
+not granted by this entry): **TENANT-SAFE REMOTE DELIVERY FOUNDATION.**
+1. Wire D-267's `RenderDeliveryRecord`/`compute_render_identity`/
+   `compute_output_sha256` into `export_job.py`'s real path — compute
+   `render_identity` and `output_sha256` for every real export, build a
+   `RenderDeliveryRecord`, and persist it alongside the existing
+   `render_versions.py` record.
+2. Bind `job_id`+`render_identity`+`output_sha256` into the delivered S3
+   object's own metadata (`ExtraArgs={"Metadata": {...}}` — a real,
+   already-available boto3 mechanism, satisfying Stage 15 without new
+   infrastructure) and/or the key itself.
+3. Add a real post-upload verification step (HEAD the object, compare
+   size to local, compare `Metadata` hash if set) before ever reporting
+   `UPLOAD_SUCCEEDED` to `with_upload_result`.
+4. Harden `AuthScopeMiddleware`'s default to fail CLOSED (require an
+   explicit, loud opt-out rather than a silent opt-in) — or, at minimum,
+   assert `CUTSELL_AUTH_REQUIRED` is set at application startup in any
+   environment that also configures a real `S3_BUCKET`.
+5. Add a monotonic guard (job start timestamp, or simply "never let an
+   older job's completion overwrite a newer job's already-recorded
+   `latest_job_id`") to `project_store.update_project`.
+6. Add a real test pinning `/v1/jobs/{job_id}` GET/cancel ownership at the
+   route-handler's OWN call site, not only via the middleware's current
+   behavior, so removing/reordering the middleware would fail a test
+   immediately.
+7. Stop returning raw `export_uri` in client-facing job results; return
+   only the presigned `download_url` (or an opaque `render_identity`) —
+   Stage 5's own "raw bucket URIs should not become user authority"
+   principle applied literally.
+No real S3 mutation/schema change, no auth-model redesign, and no RAW is
+required to START this design work.
+
+### Stage 33 — Renderer Format/Media-Diversity Hardening: explicitly deferred
+
+D-265's own remaining P1/P2 findings (VFR, rotation/orientation, HDR,
+HEVC/codec diversity, color-space) remain open and are **deliberately not
+picked up by this track** — delivery SECURITY was prioritized first, per
+this gate's own explicit instruction. Not reopened, not downgraded, not
+forgotten.
+
+### Canonical status update
+
+RENDERER / EXPORT HARDENING: execution safety = CLOSED (D-265/D-266/
+D-266A); identity/hash foundation = CLOSED (D-267); **remote delivery/
+storage security = CURRENT SUBTRACK, AUDITED, NOT YET IMPLEMENTED**
+(this entry). Security/Privacy/Multi-user track remains ALWAYS ON per
+CLAUDE.md's own binding rule — this entry itself is that track's own
+audit for this cycle, not a deferred item.
+
+### Verdict
+
+**A — Storage/delivery foundation functional — clear tenant/remote P0 gaps
+identified — ready for tenant-safe delivery implementation.** The core
+ownership-binding mechanism (server-resolved session identity, cross-
+checked against any client-supplied `user_id`, hashed-prefix S3 keying,
+prefix-scoped deletion, middleware-enforced job ownership) is real and
+sound as currently wired — no live cross-user leakage path was found. One
+P0 (fails open by default, deployment-mitigated today) and several real
+P1 hardening gaps (D-267 unwired, no remote verification, fragile IDOR
+protection surface, a stale-pointer race) exist and should be closed by a
+bounded next gate, not a redesign.
+
+**Exact next gate:** D-269 — TENANT-SAFE REMOTE DELIVERY FOUNDATION
+(Stage 32 scope above) — not implemented, not decided by this gate; a
+Product Owner authorization call.
+
+**Decision entry reference:** this entry (D-268).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-269.
+DO NOT LAUNCH RAW.
