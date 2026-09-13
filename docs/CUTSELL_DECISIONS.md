@@ -66773,3 +66773,227 @@ designed next step but is explicitly NOT launched by this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-258. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-258 — Visual Finishing Measurement Foundation (offline implementation, diagnostics only, no video mutation)
+
+**Objective.** D-257 audited CutSell's current visual capabilities and
+found real MediaPipe primitives already proven live
+(`local_performance.py`'s Holistic pipeline, `speech_visual_microtrim.py`'s
+FaceMesh/Pose usage) alongside genuine gaps: no face bbox, no
+cross-clip face-position/scale measurement, no brightness/luma, no
+color statistics, no visual-join measurement. This gate builds those
+MEASUREMENTS -- measurements only, per its own explicit scope banner
+(NO CROP / NO REFRAME / NO PUNCH-IN / NO EXPOSURE CORRECTION / NO COLOR
+CORRECTION / NO VISUAL POLICY / NO RENDER POLICY CHANGE / NO NEW VISUAL
+THRESHOLD / NO NEW HEURISTIC).
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `a4f2a4a` (exact expected
+match), clean tree -- confirmed before this gate began.
+
+### What was built
+
+New `cutsell_worker/visual_finishing_measurement.py` -- the new,
+additive, standalone owner module (per Stage 1's binding: this logic
+does not touch `render.py`, `local_performance.py`,
+`speech_visual_microtrim.py`, or `post_render_media_qc.py`):
+
+- **`VisualFrameMeasurement`** -- per-sampled-frame factual state: frame
+  dimensions, `face_detected`/`face_count`/`multiple_faces_detected`,
+  `face_confidence` (always `None` -- audited directly against the real
+  MediaPipe FaceMesh API surface: `multi_face_landmarks` carries no
+  per-face confidence score, `min_detection_confidence` is an INPUT
+  threshold only, never fabricated as a landmark-count proxy), normalized
+  face bbox (`x_min/y_min/x_max/y_max/center_x/center_y/width/height/
+  area_ratio`), `headroom_ratio` (literally `y_min`), four literal
+  edge-clipping booleans (frame-boundary contact only, no invented
+  safe-margin tolerance), `torso_center_x/y` (a DISTINCT concept from
+  face center, from MediaPipe Pose's public shoulder/hip landmark
+  indices, never collapsed into face center), `luma_mean/luma_std`
+  (BT.601-weighted grayscale statistics), `color_mean_r/g/b` (compact
+  per-channel means, no white-balance correction, no "warm/cool is bad"
+  judgment).
+- **`VisualClipMeasurement`** -- clip-level aggregation: frame
+  dimensions/aspect ratio/orientation category (`PORTRAIT`/`LANDSCAPE`/
+  `SQUARE`/`UNKNOWN`)/rotation metadata (read via one bounded ffprobe
+  call, `None` when absent -- most files carry none, an honest fact, not
+  a failure), `requested_frame_count`/`valid_frame_count`/
+  `face_valid_frame_count`/`face_detection_rate`, median face
+  center/area/headroom across face-valid frames, `luma_mean_median`,
+  **two distinct, both-real concepts, never collapsed**:
+  `contrast_median` (the clip-typical INTRA-frame contrast -- median of
+  each sampled frame's own `luma_std`) and `luma_variability` (CROSS-frame
+  brightness drift across the clip's own sampled frames -- a temporal
+  signal, not a per-frame contrast measurement), color medians,
+  `product_bbox_status` (always `"UNAVAILABLE"` -- D-257 confirmed no
+  product detector exists; never fabricated), `caption_safe_status`
+  (always `"NOT_ESTABLISHED"` -- no policy invented per Stage 17),
+  optional `freeze_frame_evidence`/`black_frame_evidence` references to
+  `post_render_media_qc.py`'s existing, UNCHANGED `check_frozen_frames`/
+  `check_dead_black_frames` (referenced additively, computed only when
+  the caller opts in via `compute_frame_quality_evidence=True` or
+  supplies already-computed results -- this module never forces two
+  extra full-file ffmpeg decode passes on every measurement call).
+- **`VisualJoinMeasurement`** -- a pure comparison of two explicit
+  adjacent clips: `face_center_dx/dy`, `face_area_ratio_delta`,
+  `headroom_delta`, `luma_delta`, `contrast_delta` (correctly diffing
+  `contrast_median`, not `luma_variability` -- a design bug caught and
+  fixed during this gate's own smoke-testing before any test was
+  written), `color_delta` (Euclidean distance across mean RGB). No
+  GOOD/BAD field exists anywhere on this type (verified by a dedicated
+  structural test) -- no punch-in decision, no crop decision.
+- **Pure geometry/statistics core** -- `face_bbox_from_landmark_points`,
+  `torso_center_from_landmark_points`, `luma_stats_from_gray_array`,
+  `color_stats_from_bgr_array`, `default_sample_timestamps` (bounded,
+  deterministic, evenly-spaced sampling -- explicitly documented as
+  measurement mechanics, never a product-quality policy),
+  `build_frame_measurement` (the pure builder every integration path
+  funnels through; largest-bbox-area tie-break when multiple faces are
+  supplied), `aggregate_clip_measurement` (a fixed, tested status-ladder
+  precedence: `UNAVAILABLE` -> `DECODE_ERROR` -> `NO_FACE` -> `PARTIAL`
+  -> `COMPLETE`), `compute_visual_join_measurement`. **None of these
+  import `cv2` or `mediapipe`** -- fully unit-testable without either
+  library installed, exactly matching this repo's own established
+  precedent (`test_cutsell_local_performance.py` already tests
+  `detect_candidate_events`/`apply_local_performance_to_takes` via
+  directly-constructed `PerformanceFrame` objects, never by invoking the
+  real cv2/mediapipe decode path).
+- **`measure_visual_clip`** -- the single integration entry point.
+  Opens its OWN bounded `cv2.VideoCapture` + MediaPipe `FaceMesh`
+  (measurement-only, configured `max_num_faces=4` -- a bounded,
+  additive multi-face capability that changes no existing engine
+  authority, since `speech_visual_microtrim.py`'s own `max_num_faces=1`
+  is left untouched) + `Pose` instances, closed in a `finally` block; no
+  shared global state, no cross-job cache. Every failure mode is bounded
+  to an explicit status (`UNAVAILABLE` when cv2/mediapipe cannot import,
+  `DECODE_ERROR` when `probe_media`/`VideoCapture` itself fails or a
+  frame read fails, per-frame exceptions caught and recorded without
+  aborting the clip) -- never an unbounded raised exception for a normal
+  malformed-media case.
+
+### Gaze/head-pose (Stage 3/4 deliverable items 23-24)
+
+Not built by this gate, per D-257's own P1 classification and this
+gate's "no new heuristic" scope: gaze remains a proxy only
+(`local_performance.py`'s existing `eye_contact_proxy`), true gaze/full
+head-pose estimation remains absent, unchanged from D-257's finding.
+
+### Tests
+
+New `tests/test_cutsell_d258_visual_finishing_measurement.py` -- 63
+tests (54 run unconditionally as pure-Python geometry/aggregation/join/
+structural proofs; 9 real end-to-end integration tests against
+synthetic ffmpeg fixtures gated behind `pytest.importorskip("cv2")`/
+`pytest.importorskip("mediapipe")`, which SKIP in this sandbox --
+neither library is installed here, confirmed -- but would run for real
+on a worker image that has them, same convention as D-251's
+`shutil.which("ffmpeg")`-gated tests). Covers: exact face-bbox geometry
+(centered/left/right/high/low/small/large/partially-outside/no-safe-
+margin-invented), torso-vs-face-center distinctness, luma bright>dark,
+contrast high>low, color-shift differentiation, face-confidence always
+`None`, multi-face largest-area tie-break, all four orientation
+categories, deterministic clip-aggregation replay, valid/requested
+frame counts, the full status-ladder precedence, malformed-media and
+missing-file bounded behavior (unconditional -- exercises only
+`probe_media`'s own real failure path, no cv2/mediapipe needed), the
+cv2/mediapipe-`UNAVAILABLE` bounded path (proven via a real dynamic-
+import failure, not a stand-in for detection), structural proofs of no
+crop/punch-in/reframe/exposure/color-correction tokens, no `ffmpeg`
+mutation call, no private-internal imports from
+`local_performance.py`/`speech_visual_microtrim.py`/`render.py`, no
+Pacing/Boundary/Freeze/Audio-Finishing imports, no provider/RAW
+reference tokens, product-bbox-always-unavailable, caption-safe-
+not-established, and (where cv2/mediapipe are available) real
+end-to-end portrait/landscape/square dimension proof, bright-vs-dark
+luma proof, no-face-on-synthetic-media bounded proof (an honest,
+expected MediaPipe limitation on non-human synthetic frames -- proven
+without weakening detector semantics), short-clip handling, identical-
+vs-different adjacent-clip join deltas, and optional frame-quality-
+evidence wiring.
+
+### Offline qualification
+
+- `compileall` on `cutsell_worker/` + `tests/`: clean.
+- New targeted suite: **54 passed, 9 skipped** (skip reason: `cv2`/
+  `mediapipe` not installed in this sandbox -- confirmed, matches this
+  module's own docstring and `post_render_media_qc.py`'s pre-existing
+  disclosure of the same fact).
+- Existing regressions confirmed unchanged: `test_cutsell_local_
+  performance.py` (58 passed together with the new suite, 9 skipped),
+  `test_cutsell_post_render_media_qc.py` +
+  `test_cutsell_post_render_structural_cross_check.py` +
+  `test_cutsell_d097_perceptual_watch_listen_and_clean_raw_gate.py`
+  (44/44 passed).
+- CleanCutBench, both modes: **55/55** (`CUTSELL_CLEAN_CUT_CORE_V1=0`),
+  **55/55** (`=1`) -- unaffected, as expected (this module is not wired
+  into the editorial pipeline).
+- Full `tests/` suite (3 pre-existing, unrelated baseline exceptions
+  excluded): **7070 passed, 9 skipped, 2 deselected, 13 subtests
+  passed** (175.51s), exit 0 -- 54 more passes than D-256's 7016
+  baseline (this gate's own new tests), 9 new skips (this gate's own
+  cv2/mediapipe-gated tests), zero new failures.
+
+### Confirmation
+
+Measurement-only: the module contains no crop/punch-in/reframe/
+exposure-correction/color-correction filter token anywhere (`crop=`,
+`zoompan`, `eq=brightness`, `colorbalance=`, etc. -- proven by a
+structural test scanning its own source, not just asserted) and never
+shells out to `ffmpeg` to mutate a file (only `ffprobe`-equivalent reads
+via `probe_media` and one bounded rotation-tag probe, plus read-only
+delegation to `post_render_media_qc.py`'s existing frozen/black-frame
+checks). No render policy change: `render.py` untouched. No new visual
+threshold or heuristic: every number reported is a fact with no
+attached target/band/verdict. No Pacing/Boundary/Freeze/Audio-Finishing
+change: none of those modules imported or touched. `local_performance.py`
+and `speech_visual_microtrim.py` remain byte-identical (git diff
+confirms only the two new files were added) and their own existing test
+suites pass unmodified. No RAW, no Modal, no RunPod, no provider call.
+
+**Security/scale (Stage 25, recorded, no implementation beyond what
+already exists):** job-local (own `VideoCapture`/`FaceMesh`/`Pose`
+instances per call, closed in `finally`, no shared global state, no
+cross-job cache); no `shell=True` anywhere in the new module (all
+subprocess calls are list-arg); bounded subprocess timeout on the
+rotation-tag probe (30s); bounded frame sampling (a modest default
+count, never full-video extraction, explicit caller-supplied timestamps
+supported); no user-controlled path interpolated into a shell string;
+malformed media bounded to an explicit status, never an unbounded raise.
+Not yet enforced by this module specifically (recorded as a requirement
+for a later dedicated security gate, matching D-257's own Stage 22
+disposition): an explicit decoded-resolution/decompression-bomb ceiling
+before pixel-level processing, and extending `local_performance.py`'s
+own existing 640px-downsample/9000-frame-cap pattern to this module's
+own frame loop for adversarially large inputs. No critical existing
+regression found requiring an exception to the "no security
+implementation unless critical" rule.
+
+**Language independence (Stage 26):** confirmed -- every measurement in
+this module (face geometry, luma, color, orientation) is language-
+independent by construction; no Spanglish-specific logic proposed or
+needed. Canonical scope (English, Spanish; Spanglish/code-switching out
+of scope V1) unchanged, not re-litigated.
+
+**Verdict: A -- VISUAL FINISHING MEASUREMENT FOUNDATION OFFLINE PROVEN
+-- FACE/FRAMING/LUMA/COLOR/JOIN FACTS STRUCTURED -- READY FOR VISUAL
+POLICY DESIGN.**
+
+**Canonical status:** unchanged for all closed tracks (Freeze/Boundary/
+Pacing V2/Handle-Aware Pacing/Audio Finishing P0 remain CLOSED; Audio
+Join remains SAFE/PARTIALLY QUALIFIED). New capability recorded: Visual
+Finishing MEASUREMENT layer now EXISTS (offline-proven); Visual Policy/
+Plan/Renderer-Execution/Post-Render-Visual-QC remain MISSING-FUTURE,
+unchanged.
+
+**Exact next gate:** D-259 -- Visual Finishing Policy + Plan Design.
+Not authorized or launched by this gate.
+
+**Decision entry reference:** this entry (D-258).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-259. DO NOT LAUNCH RAW.
