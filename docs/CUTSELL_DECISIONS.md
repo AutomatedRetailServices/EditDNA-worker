@@ -66076,3 +66076,183 @@ gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-256. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-256 — Audio Finishing Outcome / Product-State Contract (offline implementation, no DSP change)
+
+**Objective.** D-255 designed but did not implement the four-axis
+product-state layer an extreme source (D-254C's real -32.2 LUFS Video00
+result) needs. This gate implements that layer as a new, DSP-free
+module that classifies an already-computed measurement/plan/execution/
+verification chain into a single, typed, deterministic
+`AudioFinishingOutcome`, without ever collapsing execution/policy/
+export/rescue into one boolean, and without letting a future caller
+silently double-apply the ±6dB correction to an already-finished file.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `dee5aa1` (exact match to
+the expected HEAD), clean tree — confirmed before this gate began.
+
+### What was built
+
+New `cutsell_worker/audio_finishing_outcome.py` (D-256's owner module,
+per Stage 1's binding: this logic lives here, not in `render.py`, the
+measurement module, the DSP executor, or any existing QC authority):
+
+- **Source classification** (`classify_source`) — `NORMAL_CORRECTABLE`/
+  `EXTREME_UNDER_LEVEL`/`EXTREME_OVER_LEVEL`/`ABSTAINED`/
+  `BLOCKED_SAFETY`/`UNKNOWN`, derived only from `AudioFinishingPlan.
+  whole_video_state` (the existing ±6dB envelope already decided by
+  D-249) plus the sign of the already-computed requested gain for the
+  `CORRECTION_LIMITED` case — no new threshold introduced.
+- **Execution-state axis** (`classify_execution`) — a coarser,
+  product-facing summary of D-251's own `EXECUTION_STATUS_*`
+  vocabulary: `EXECUTION_SUCCEEDED`/`EXECUTION_NO_ACTION_NEEDED`/
+  `EXECUTION_FAILED`/`EXECUTION_NOT_RUN`. `PLAN_NOT_EXECUTABLE` (an
+  ABSTAIN/BLOCKED plan that never reaches ffmpeg) maps to `NOT_RUN`,
+  never `FAILED` — a deliberate correct non-action is not a defect.
+- **`policy_complete`** (`compute_policy_complete`) — never fabricated:
+  read off a real `ExecutionVerificationResult.verification_status ==
+  PASS` when the DSP ran, or off the plan's own already-real
+  `GAIN_STATE_NO_CHANGE_NEEDED` judgment for the one case where
+  `execute_audio_finishing_plan` correctly returns no verification at
+  all (nothing ran because nothing needed to).
+- **`export_allowed`** (`compute_export_allowed`) — independently true
+  even when `policy_complete` is false (D-254C's real, safe, out-of-
+  policy result stays exportable); false only on a genuine technical
+  defect (failed technical QC, a `TECHNICAL_FAILURE` verification, or
+  the DSP step itself failing).
+- **`source_rescue_required`** — always `False` in V1 (`compute_source_
+  rescue_required`); reserved product-state value `AUDIO_FINISHING_
+  SOURCE_RESCUE_REQUIRED` never assigned (no rescue pipeline exists to
+  route to; proven by an exhaustive test over every input combination).
+- **Six-state `product_state`** (`compute_product_state`) —
+  `AUDIO_FINISHING_COMPLETE`/`_PARTIAL_SOURCE_TOO_QUIET`/
+  `_PARTIAL_SOURCE_TOO_LOUD`/`_ABSTAINED`/`_BLOCKED_SAFETY`/`_UNKNOWN`,
+  with ABSTAINED/BLOCKED_SAFETY checked before the generic FAILED/
+  NOT_RUN guard (their own NOT_RUN state is correct-by-design) and that
+  guard checked before the EXTREME_*/NORMAL_CORRECTABLE branches (so a
+  genuine DSP failure on an extreme source is never mislabeled as a
+  partial correction that actually happened).
+- **Warnings contract** (`compute_warnings`) — stable machine states
+  only, no UI copy: `SOURCE_TOO_QUIET_FOR_FULL_AUTOMATIC_FINISHING`,
+  `SOURCE_TOO_LOUD_FOR_FULL_AUTOMATIC_FINISHING`, `FINISHING_PARTIAL`,
+  `FINISHING_ABSTAINED`, `FINISHING_BLOCKED_SAFETY`,
+  `MEASUREMENT_INCOMPLETE`, `PEAK_SAFETY_UNVERIFIED`, plus the firewall
+  warnings below.
+- **Double-finishing firewall** (`compute_finishing_identity` +
+  `decide_refinishing`) — `finishing_identity` is a deterministic
+  SHA-256 (24-hex-char, matching D-251/D-252/D-253's own `compute_
+  execution_id`/`compute_composition_id` pattern exactly) over the
+  original source's content identity, policy version, the exact
+  authorized plan, the execution's own identity, and the output's
+  content identity — never the filename/path. `decide_refinishing`
+  implements the four-way `REFINISH_DECISION_*` contract (`NEW_SOURCE`/
+  `SAME_SOURCE_SAME_POLICY_ALREADY_FINISHED`/`SAME_SOURCE_NEW_POLICY_
+  VERSION`/`FINISHED_OUTPUT_SUPPLIED_AS_NEW_SOURCE`) purely from content-
+  hash comparisons, fail-closed even when only the output-hash match is
+  available. `build_audio_finishing_outcome` wires this in: an
+  already-finished-same-policy source sets `finishing_already_applied=
+  True` and adds `ALREADY_FINISHED_SAME_POLICY`; a finished output
+  handed back in as a "new" source is caught and flagged
+  `FINISHED_OUTPUT_SUPPLIED_AS_NEW_SOURCE` without ever being treated as
+  already-finished (so it is never silently accepted as safe either).
+- **`AudioFinishingOutcome`** — a frozen dataclass with the full field
+  list from Stage 2 (outcome_version, execution_status, policy_status,
+  product_state, export_allowed, policy_complete, source_rescue_
+  required, technical_qc_status, source_classification, measurement/
+  plan/execution/verification references, before/after loudness,
+  target/ceiling values, requested/authorized gain, reasons, warnings,
+  provenance, finishing_identity, finishing_already_applied).
+- **`build_audio_finishing_outcome`** — the single owner-module
+  constructor tying every helper above together; pure, makes no ffmpeg
+  call, no measurement call, no RAW/provider call.
+
+`cutsell_worker/finishing_contract.py`'s dormant coarse `PASS`/`FAIL`
+`FinishingResult` interface is left untouched — this gate does not wire
+`audio_finishing_outcome` into it (that binary contract remains too
+coarse for the four-axis model; a future gate should either extend it
+or document the two as intentionally parallel — not decided here).
+
+### Tests
+
+New `tests/test_cutsell_d256_audio_finishing_outcome.py` — 61 pure-
+Python tests (no ffmpeg, no real media, matching D-249's own test
+philosophy since this module is a pure derivation layer over already-
+computed records): classification correctness for all 6 source classes
+and all 4 execution states; the `policy_complete`/`export_allowed`
+independence proofs; the exhaustive `SOURCE_RESCUE_REQUIRED`-never-
+assigned sweep; warnings determinism; finishing-identity determinism/
+filename-independence/policy-version-sensitivity; all four re-finishing
+decisions including the fail-closed finished-output-as-new-source case;
+the exact D-254C real-media replay regression fixture (before_lufs=
+-32.2, requested=+18.2, authorized=+6.0, after_lufs=-26.2, final true
+peak=-5.0, technical_qc=PASS → `EXTREME_UNDER_LEVEL` /
+`AUDIO_FINISHING_PARTIAL_SOURCE_TOO_QUIET` / export_allowed=True /
+policy_complete=False, matching Stage 8 exactly); normal-complete,
+extreme-over, abstain, and blocked-safety end-to-end fixtures;
+technical-QC/policy-completeness separation proofs; structural tests
+scanning the module's own source for DSP-invocation tokens (`loudnorm`,
+`alimiter`, `volume=`, `subprocess.run(`) and renderer/QC-authority
+imports, proving none are present; the outcome dataclass's full Stage 2
+field list and frozen-immutability.
+
+### Offline qualification
+
+- `python3 -m compileall` on the new module and test file: clean.
+  (Whole-repo `compileall` also run: the sole failure is the pre-
+  existing, untracked-content `jobs_smoke.py` shell heredoc artifact —
+  unrelated to this gate, present before this session, not a `.py`
+  module this gate touches.)
+- New targeted suite: **61/61 passed**.
+- Full D-247→D-256 Audio Finishing regression
+  (`test_cutsell_d247_audio_finishing_measurement.py` +
+  `test_cutsell_d249_audio_finishing_policy.py` +
+  `test_cutsell_d251_audio_finishing_executor.py` +
+  `test_cutsell_d252_adjacent_take_gain_execution.py` +
+  `test_cutsell_d253_audio_finishing_composition.py` + this gate's own
+  suite): **207/207 passed**.
+- CleanCutBench (`test_cutsell_clean_cut_core_evaluation_suite.py`),
+  both modes: **55/55** with `CUTSELL_CLEAN_CUT_CORE_V1=0`, **55/55**
+  with `=1` — unaffected, as expected (this module is not wired into
+  the editorial pipeline).
+- Full `tests/` suite (excluding the three previously-established
+  baseline exceptions unrelated to this gate — `test_semantic_stitch.py`
+  collection error, `test_video00_modal_hybrid_semantic_parity.py`,
+  `test_hybrid_story_guard_incomplete_retry.py`): **7016 passed, 2
+  deselected, 13 subtests passed** (169.30s), exit code 0.
+
+### Confirmation
+
+No DSP change: the new module contains no `ffmpeg`/`subprocess`
+invocation and no filter-chain string (`loudnorm`, `alimiter`,
+`volume=`) — proven by a structural test scanning its own source, not
+just asserted. No numeric/threshold/policy change: all six canonical
+D-249 values (`POLICY_VERSION`, `TARGET_INTEGRATED_LOUDNESS_LUFS`,
+`LOUDNESS_TOLERANCE_LU`, `ADJACENT_TAKE_MISMATCH_THRESHOLD_LU`,
+`MAX_AUTOMATIC_GAIN_CORRECTION_DB`, `TRUE_PEAK_CEILING_DBTP`) are
+neither re-declared nor re-derived in the new module (proven by a
+`hasattr` sweep) and remain exactly as approved. No RAW, no Modal, no
+RunPod, no provider call. No renderer/QC-authority/Pacing/Audio-Join/
+Freeze import in the new module (proven structurally).
+
+**Verdict: A — OUTCOME CONTRACT OFFLINE PROVEN, DOUBLE-FINISHING
+FIREWALL PROVEN, P0 READY TO CLOSE** on the outcome-contract track;
+Level-1 real-execution proof against Video00 media (deferred per D-255,
+not P0) remains open separately.
+
+**Canonical status:** unchanged numerically. New product-facing
+architecture layer added (this entry).
+
+**Exact next gate:** not authorized by this directive — this gate ends
+before any next-track implementation or RAW per its own explicit
+instruction.
+
+**Decision entry reference:** this entry (D-256).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT TRACK. DO NOT LAUNCH RAW.
