@@ -691,12 +691,22 @@ jobs:
           print("=== D-254C SUMMARY (full content) ===")
           print(json.dumps(summary, indent=2, default=str))
           PYEOF
-          # The heredoc above is written at this step's own YAML indentation
-          # (10 leading spaces on every line, required for a valid `run: |`
-          # block scalar) -- strip that common margin so the file is valid,
-          # correctly-indented Python, then fail loudly here (not inside the
-          # next step) if that ever stops being true.
-          sed -i 's/^          //' /tmp/d254c_run.py
+          # NOTE (fixing run 34745739952's failure): YAML's own `run: |`
+          # block-scalar parsing ALREADY strips this step's common base
+          # indentation before bash ever sees the script -- confirmed by
+          # loading this exact file with PyYAML and inspecting the parsed
+          # step string, whose first line ('cat > ...') and heredoc
+          # terminator ('PYEOF') both land at column 0. A previous version
+          # of this step additionally ran `sed -i 's/^          //'` on top
+          # of that already-dedented content, which blindly stripped 10
+          # more literal leading spaces from every line -- corrupting the
+          # relative indentation of any Python line nested 3+ levels deep
+          # (e.g. inside a for/if/try chain) whose OWN indentation also
+          # happened to be >=10 spaces, while leaving shallower lines
+          # untouched. That produced exactly
+          # "IndentationError: unindent does not match any outer
+          # indentation level". Fix: do not touch the file at all --
+          # write it, then syntax-check it as-is.
           python3 -m py_compile /tmp/d254c_run.py
           echo "Driver script written to /tmp/d254c_run.py and syntax-checked"
 
