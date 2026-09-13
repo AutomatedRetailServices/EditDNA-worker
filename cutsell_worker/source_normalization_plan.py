@@ -262,6 +262,15 @@ class SourceNormalizationPlan:
 
     plan_identity: str
 
+    # D-274B Stage 10: a narrow, additive field this gate's own executor
+    # needs and D-274A's original type did not carry -- the NUMERIC VFR
+    # target rate, derived ONLY from `profile.effective_fps` (D-271),
+    # never a hardcoded 30. `None` whenever `frame_rate_action` is
+    # `ACTION_NO_ACTION` (no VFR normalization requested). Defaulted so
+    # every existing D-274A call site/test that never mentions this field
+    # is unaffected.
+    target_fps: float | None = None
+
     @property
     def is_executable(self) -> bool:
         return self.executability == EXECUTABILITY_EXECUTABLE
@@ -382,9 +391,13 @@ def build_source_normalization_plan(
 
     # Stage 13/26 -- VFR
     frame_rate_action = ACTION_NO_ACTION
+    target_fps: float | None = None
     if sfp.REASON_VFR_NORMALIZATION_REQUIRED in reasons:
         if profile.effective_fps is not None and profile.effective_fps > 0:
             frame_rate_action = ACTION_VFR_TO_CFR
+            # D-274B Stage 10: the numeric target ONLY ever comes from the
+            # source's own measured average rate -- never a hardcoded 30.
+            target_fps = float(profile.effective_fps)
         else:
             # Stage 26: effective fps unavailable -- non-executable / insufficient evidence.
             invalid_state = True
@@ -493,6 +506,7 @@ def build_source_normalization_plan(
         reason_codes=tuple(reasons),
         executability=executability,
         plan_identity=plan_identity,
+        target_fps=target_fps,
     )
 
     return SourceNormalizationPlanResult(

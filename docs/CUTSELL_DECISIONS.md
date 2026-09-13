@@ -72752,3 +72752,253 @@ Then STOP.
 
 DO NOT IMPLEMENT D-274B.
 DO NOT LAUNCH RAW.
+
+## D-274B — Rotation + VFR/Timeline Normalization Executor (offline implementation + synthetic media qualification)
+
+**Objective.** Post D-272B/D-274A. Build the FIRST real Source
+Normalization executor, implementing ONLY rotation + VFR-to-CFR +
+timeline-zero normalization -- explicitly NOT HDR tonemap, NOT HEVC-to-
+H264 execution, NOT 10-bit-to-8-bit execution, NOT broad pixel-format
+conversion. Proves the full chain OFFLINE with synthetic media: original
+source -> D-271 profile -> D-272 policy -> D-274A plan -> D-274B
+executor -> normalized derived file -> D-271 re-probe -> D-272
+re-evaluate -> ACCEPT only.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `d0fd156` (exact expected
+match, D-272B), clean tree -- confirmed before this gate began.
+
+### Stage 1 -- executor owner, separation of authority
+
+New module `cutsell_worker/source_normalization_executor.py`. No
+normalization logic added to `worker_job.py`, `render.py`,
+`source_format_policy.py`, or `source_normalization_plan.py` (confirmed
+by source-scan and by `test_executor_module_does_not_import_render_
+module_symbols`). Chain: PROFILE -> POLICY -> PLAN -> EXECUTOR ->
+VERIFICATION. The executor never re-decides whether rotation/VFR/
+timeline normalization is needed -- `SourceNormalizationPlan` is the
+sole authority; the executor only knows HOW, never WHETHER.
+
+### Stage 10 -- a real gap in D-274A's own plan type, reconciled narrowly
+
+D-274B's own Stage 10 requires "target FPS comes ONLY from
+`SourceNormalizationPlan.target_fps`" -- but D-274A's original plan
+dataclass never carried that field (only the semantic `ACTION_VFR_TO_
+CFR` action, no numeric rate). Reconciled the same way D-272B reconciled
+its own gap: a narrow, additive, disclosed field. `source_normalization_
+plan.py`'s `SourceNormalizationPlan` gained `target_fps: float | None =
+None` (defaulted so every existing D-274A call site/test is unaffected),
+and `build_source_normalization_plan` now populates it from `profile.
+effective_fps` (D-271) whenever `ACTION_VFR_TO_CFR` is selected -- never
+a hardcoded 30, never re-derived inside the executor. Confirmed via a
+live smoke test against the real D-271 profiler on a genuine VFR
+fixture: `profile.effective_fps == 33.049180327868854` ->
+`plan.target_fps == 33.049180327868854` (identical value, not
+re-computed) -- and confirmed `None` on a plan with no frame-rate
+action.
+
+### Stages 4-9 -- rotation semantics, empirically verified (not just width/height)
+
+Verified ffmpeg's own `transpose` direction semantics with a real
+asymmetric visual fixture (a black frame with a white square baked into
+ONE corner only) before writing any executor code, per this gate's own
+explicit warning that these semantics are easy to invert:
+`transpose=1` moves a top-left marker to top-right (genuine 90-degree
+CLOCKWISE) and swaps display dimensions; `transpose=2` moves it to
+bottom-left (genuine COUNTERCLOCKWISE) and swaps dimensions;
+`transpose=1,transpose=1` moves it to bottom-right (genuine 180-degree)
+with dimensions unchanged. Final mapping: `ROTATE_90 -> "transpose=1"`,
+`ROTATE_180 -> "transpose=1,transpose=1"`, `ROTATE_270 -> "transpose=2"`
+-- consistent with D-271's own rotation_degrees convention. All three
+proven end-to-end through the real executor with real pixel-corner
+sampling (Pillow), not just dimension checks.
+
+### Stage 8 -- no double autorotation
+
+The command always places `-noautorotate` immediately before `-i
+<source>` (a genuine, confirmed ffmpeg input option), guaranteeing ONLY
+the plan-driven transpose (or none) is ever applied regardless of source
+rotation metadata. Per this gate's own Stage 38, this defensive
+correctness cannot be end-to-end proven against a REAL rotation-tagged
+phone fixture in this sandbox (D-271's own established, repeatedly-
+confirmed local-ffmpeg limitation) -- proven instead at the level Stage
+38 itself allows: real physical-rotation testing with visually
+asymmetric synthetic media (done, and green), with metadata-carrying
+fixture proof remaining a parser-level D-271/D-274A concern, not this
+executor's.
+
+### Stages 10-12 -- VFR-to-CFR, genuine (non-parser-only) fixture
+
+Built a GENUINE timing-variable fixture per this gate's own explicit
+"do not call a constant-fps file VFR merely because metadata says so":
+concatenated (via the concat demuxer with `-c copy`, preserving each
+segment's own original per-frame durations) a 24fps segment and a 60fps
+segment. Confirmed via `ffprobe` frame `pkt_duration_time` to carry two
+genuinely distinct values, and via the REAL D-271 profiler to classify
+`LIKELY_VFR`. The executor's `fps=<plan.target_fps>` filter (the same
+technique `render.py`'s own per-segment fps filter already uses,
+independently, per Stage 1's separation) converts this fixture to CFR;
+re-probed via the REAL D-271 profiler and confirmed `vfr_status ==
+CFR`. CFR 24/30/60 sources are proven NOT to receive an `fps=` filter
+when the plan carries no frame-rate action (no flat conversion to 30).
+
+### Stage 13/14 -- timeline zero, audio preservation
+
+A genuine non-zero-start-time fixture (built via `-itsoffset` remux)
+normalizes to a start time of 0 via `setpts=PTS-STARTPTS`/`asetpts=
+PTS-STARTPTS`. Audio is stream-copied (`-c:a copy`, bit-for-bit
+unchanged) whenever no timeline reset is requested; `asetpts` requires
+decoding, so the ONE disclosed, narrow exception to "no audio content
+change" is: when `ACTION_TIMELINE_TO_ZERO` is present, audio is
+re-encoded to AAC with NO `-ar`/`-ac`/loudness flags, so the encoder's
+own defaults preserve the original sample rate and channel count --
+timestamps are the only thing intentionally touched. Missing-audio
+sources are proven to never gain a fabricated audio stream.
+
+### Stage 17/18 -- one-pass multi-action composition, one-pass firewall
+
+Rotation + VFR + timeline-zero (and each pairwise combination) compose
+into ONE `-vf`/`-af` filter chain and ONE ffmpeg invocation -- proven
+end-to-end (rotation+timeline, VFR+timeline, rotation+VFR+timeline).
+`is_normalization_attempt_allowed` (D-274A, reused directly) is
+consulted with a caller-supplied `attempt_count`; `attempt_count=1`
+rejects with `NORMALIZATION_SECOND_PASS_REJECTED` before touching the
+filesystem or ffmpeg.
+
+### Stage 22 -- normalization timeout, no number silently chosen
+
+No canonical normalization/media-operation timeout exists anywhere in
+this repository (confirmed by audit) -- `RENDER_FFMPEG_TIMEOUT_SEC=
+1200.0` is NOT reused. Mirrors D-266's own original `TIMEOUT_POLICY_
+PENDING_PRODUCT_OWNER` seam design: module-level `NORMALIZATION_FFMPEG_
+TIMEOUT_SEC: float | None = None`; calling the executor without an
+explicit override returns `PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED`
+with zero ffmpeg invocation. Synthetic tests inject their own explicit,
+bounded `timeout_sec` (30s for success-path tests, 0.0001s for the
+timeout-failure proof) -- exactly as this gate's own Stage 22 instructs.
+
+### Stage 20/21 -- encode settings, disclosed choice
+
+`-c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p` -- deliberately
+DIFFERENT from `render.py`'s own delivery-tuned `-preset veryfast -crf
+20` (never silently copied, per this gate's own Stage 21). CRF 18 is a
+well-established, industry-standard x264 "visually lossless" convention,
+chosen because a normalization output is an INTERMEDIATE artifact that
+still passes through the final renderer's own encode -- favoring
+fidelity over speed, the opposite tradeoff from final delivery. Flagged
+here for Product Owner confirmation as a real-but-provisional choice
+(lower escalation weight than the timeout, since CRF 18 has industry
+precedent where the timeout number has none anywhere in this repo).
+
+### Stages 23-31/37 -- structured failures, safety, immutability
+
+Typed failure categories: the four D-274A already pre-declared
+(`NORMALIZATION_FFMPEG_FAILED`, `NORMALIZATION_TIMEOUT`, `NORMALIZATION_
+OUTPUT_MISSING`, `NORMALIZATION_OUTPUT_EMPTY`) reused directly by value;
+two genuinely new ones defined locally in the executor module (`NORMALIZATION_
+UNSUPPORTED_ACTION`, `NORMALIZATION_ATOMIC_PROMOTION_FAILED`) per this
+gate's own Stage 1 "logic/types stay where they belong" separation.
+Command execution mirrors (never imports) `render.py`'s own D-266
+pattern: `shell=False` argv-list subprocess, bounded (2000-char) stderr
+excerpt, SHA-256 command fingerprint, job-local temp output + atomic
+`os.replace` promotion, best-effort cleanup that never masks the
+primary failure. Any HDR/HEVC/10-bit/broader-pixel-format action present
+on the plan is rejected with `NORMALIZATION_UNSUPPORTED_ACTION` BEFORE
+any ffmpeg subprocess call (proven via a monkeypatched `subprocess.run`
+that raises if invoked). Original source bytes proven byte-identical
+before/after (SHA-256 comparison); normalized output hash computed from
+the ACTUAL promoted file's bytes (via `render_delivery.compute_output_
+sha256`, reused rather than reinvented), never derived from plan
+identity.
+
+### Stages 32-35 -- mandatory re-probe/re-evaluate/verification, no second pass
+
+Every successful ffmpeg execution is followed by a REAL D-271 `probe_
+source_media_profile` call on the actual promoted output, a REAL D-272
+`evaluate_source_format_policy` re-evaluation, and D-274A's own `verify_
+normalized_source`/`verification_outcome` (reused directly, unmodified)
+-- only `DECISION_ACCEPT` yields `NORMALIZATION_SUCCEEDED`; anything
+else yields `NORMALIZATION_VERIFICATION_FAILED`, proven via a
+monkeypatched still-blocked re-evaluation. No second normalization pass
+is ever attempted on a verification failure.
+
+### Verification run
+
+- New `tests/test_cutsell_d274b_source_normalization_executor.py`: **42
+  passed** -- rotation 90/180/270 (real pixel evidence), no-double-
+  autorotation, rotation-metadata-removed, VFR target-from-plan (genuine
+  fixture) + CFR reprobe, CFR24/30/60 untouched, timeline-zero (genuine
+  offset fixture), audio preserved / missing-audio, multi-action
+  one-pass composition (3 combinations), original-hash-unchanged,
+  normalized-hash-distinct + reference shape, mandatory reprobe/
+  reevaluate/ACCEPT-required, still-blocked verification failure,
+  no-second-pass, all 5 unsupported-action categories rejected before
+  ffmpeg (parametrized, subprocess-call-count asserted zero), ffmpeg
+  nonzero-exit / injected-timeout / timeout-seam-required / missing-
+  output / empty-output / atomic-promotion-failure (all structured,
+  cleanup verified), shell-safety, command-fingerprint determinism,
+  paths with spaces/Unicode/apostrophe, concurrent-job isolation,
+  bounded/secret-free diagnostics, renderer-timeout-unchanged.
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- D-266 through D-274B targeted suites together: **584 passed, 0
+  failed.**
+- worker/renderer/finishing/delivery regression subset (`clean_worker_
+  infra`/`job_retry`/`caption_render`/`render`/`render_versions`, D-094.3,
+  D-097.2/.10/delivery-cleanliness, D-214/D-233 Pacing/Audio-Join, D-247/
+  D-249/D-251/D-253/D-256 Audio Finishing, D-258/D-260/D-262/D-263 Visual
+  Finishing, D-269/D-269A tenant-safe delivery, dangling-delivery,
+  delivery-edge-trim, hybrid-complementary-delivery-guard, live-render-
+  qc, post-render media QC + structural cross-check, render-boundary-
+  tightening, universal-clean-cut live-render-qc, video00 render-path
+  regressions, multi-file-render-foundation): **818 passed, 10 skipped,
+  0 failed** (confirms renderer/Pacing/Boundary/Freeze/Audio-Join/Audio-
+  Finishing/Visual-Finishing/QC-authority/tenant-safe-delivery all
+  genuinely unchanged).
+- CleanCutBench-equivalent (`test_cutsell_d050c1_5_full_cleancutbench_
+  parity.py` -- this repository's actual name for the general editorial
+  parity gate; D-274B touches no Selection/CompositeResolver/StoryValidator
+  code, so this is an unaffected-path confirmation, not a new proof):
+  **1 passed.**
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions (`test_semantic_stitch.py` collection error, `test_video00_
+  modal_hybrid_semantic_parity.py`, `test_hybrid_story_guard_incomplete_
+  retry.py`): result recorded below once the run completes.
+
+### Canonical status update
+
+ROTATION NORMALIZATION EXECUTOR = CLOSED. VFR/TIMELINE NORMALIZATION
+EXECUTOR = CLOSED, subject to the honest disclosure that VFR-to-CFR is
+proven on a genuine (non-parser-only) synthetic fixture while rotation-
+metadata-driven double-autorotation protection is proven only at the
+physical-transform level (Stage 38's own permitted distinction; real
+phone-metadata proof remains a D-271-level gap, not new to this gate).
+NORMALIZATION EXECUTION = PARTIALLY CLOSED. Remaining P0: HEVC
+production capability + HEVC-to-H264 execution (D-274C), HDR/10-bit
+normalization, output format QC, live auto-normalization activation
+(D-274B-A), real-phone qualification. `worker_job.py` remains completely
+unwired to this executor -- D-272A's current NORMALIZE_REQUIRED-stops
+behavior is unchanged; activation is a separate, future gate per this
+gate's own Stage 36.
+
+### Verdict
+
+**A -- Rotation + VFR/Timeline Normalization Executor offline proven --
+reprobe + policy re-evaluation + one-pass safety proven -- ready for the
+next normalization capability gate.** Every Stage 1-42 requirement
+proven with real synthetic media and real pixel/timing evidence where
+the directive demanded it; the two disclosed design choices (CRF 18
+preset, and the D-274A `target_fps` field addition) are narrow,
+additive, and explicitly flagged rather than silently decided.
+
+**Exact next gate:** not decided by this entry -- a Product Owner
+authorization call between D-274C (production HEVC capability +
+HEVC-to-H264 normalization) and D-274B-A (live auto-normalization
+activation).
+
+**Decision entry reference:** this entry (D-274B).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT GATE.
+DO NOT LAUNCH RAW.
