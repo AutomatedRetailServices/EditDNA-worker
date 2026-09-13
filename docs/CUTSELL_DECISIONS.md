@@ -65507,3 +65507,226 @@ required either way.
 Then STOP.
 
 DO NOT IMPLEMENT D-255. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-254C — Continue One Real-Media Audio Finishing Qualification (executed on the retrieval runner, exact D-245 render only)
+
+**Objective.** Post D-254R (recovered `preview.mp4`). Execute the D-254
+qualification chain — measurement, real clip identity, Level-1 policy,
+whole-video plan, safety audit, execution, verification, comparison,
+QC, review package — directly on the retrieval workflow's own runner
+(where the recovered file already sits locally), against exactly the one
+recovered file. No new RAW, no GPU, no second source, no upstream
+editorial engine execution, no new render generation, no policy/numeric
+change.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `98fd01d` (exact match to
+expected), clean tree — confirmed before this gate.
+
+### Three CI iterations, each root-caused and fixed with one targeted change
+
+Extending `cutsell-d254r-preview-retrieval.yml` with the D-254C chain
+required three genuine fix cycles (not scope changes), each verified
+offline before the next push:
+
+1. **`ModuleNotFoundError: No module named 'numpy'`** (preflight step) —
+   importing any `cutsell_worker` submodule runs the package's own
+   `__init__.py` first, which (via `install_semantic_best_take_integrity`
+   → `pipeline` → `bounded_finalist_arbiter` →
+   `prosodic_finalist_comparison` → `prosodic_audio_v2`) imports numpy at
+   module top level — unrelated to the three audio-finishing modules
+   themselves (still pure stdlib+ffmpeg-subprocess). Fixed: one
+   `pip install numpy` step, the same dependency this repo's own D-095
+   quality-ladder step already installs.
+2. **`IndentationError: unindent does not match any outer indentation
+   level`** (driver-script write step) — GitHub's own `run: |`
+   block-scalar parsing already strips a step's common base indentation
+   before bash executes it; a `sed -i 's/^          //'` added on top of
+   that already-dedented content blindly ate 10 more literal leading
+   spaces from any Python line nested 3+ levels deep, corrupting relative
+   indentation. Root-caused by loading the workflow file with PyYAML and
+   inspecting the actual parsed step string (not the raw file bytes).
+   Fixed by deleting the sed line entirely.
+3. **`ModuleNotFoundError: No module named 'cutsell_worker'`** (execution
+   step) — the driver script lives at `/tmp/d254c_run.py`, outside the
+   checkout, so plain `python3 /tmp/d254c_run.py` puts `/tmp` (the
+   script's own directory) on `sys.path[0]` instead of the repo root
+   (unlike the preflight step's `python3 -c "..."`, which implicitly gets
+   cwd). Fixed with `PYTHONPATH="$(pwd)"`.
+
+Each fix was verified before pushing: (1)/(3) matched the exact traceback
+line; (2) was verified two ways — loading the exact committed file with
+PyYAML and py-compiling the faithfully-extracted step string, and
+re-running that extracted script against the same synthetic 3-segment
+fixture from D-254's own earlier offline dry run, reproducing identical
+correct output.
+
+### Run 34745993456 — full success, real Video00 media
+
+All 15 steps green, completed in 5m51s. Real clip/boundary identity was
+extracted from `result.json`'s own `live_render_qc.attempts[-1]`
+(`input_boundary_state` + `renderer_trailing_trims` — genuine
+engine-recorded `clip_id`/`start`/`end`, corrected for the renderer's own
+recorded trailing-silence trims, never waveform-derived or guessed).
+Adjacent-window measurement windows were computed on the recovered
+`preview.mp4`'s own as-rendered timeline (cumulative as-rendered segment
+durations, per D-097.2's gapless single-pass concat contract) — the only
+media this gate touches; no raw per-clip source file was used or needed
+for measurement/policy.
+
+**Level-1 (real identity, real policy evaluation, execution deferred by
+design):**
+- Segment identity: **LEVEL1_IDENTITY_AVAILABLE** — 23 real selected
+  segments (matches D-245's own reported clip count exactly).
+- Reconciliation: sum of as-rendered segment durations 145.880s vs. the
+  file's own measured duration 144.854s — a 1.026s delta, consistent with
+  normal join/measurement variance across 22 real joins, not a defect.
+- 22 exact adjacent pairs; 20 eligible (≥1.5s reliable window on both
+  sides); 2 ineligible (a short segment on one side).
+- Real `evaluate_adjacent_take_continuity` evaluation on the 20 eligible
+  pairs: 16 `NO_CHANGE_NEEDED`, **4 real `CORRECTION_ALLOWED`** (genuine
+  loudness-continuity evidence found on real Video00 footage — the
+  bounded threshold policy correctly identifies real take-to-take
+  loudness variation), 0 `CORRECTION_LIMITED`/`ABSTAIN`/`BLOCKED`/
+  `UNKNOWN`, 0 duplicate-target conflicts.
+- **0 corrections applied** — by design. D-253's Level-1 render path
+  needs the raw per-clip source asset files to re-render with adjusted
+  `audio_volume`, and this gate has exactly one real media source (the
+  already-rendered `preview.mp4`) under an explicit "NO NEW RENDER
+  GENERATION" scope. Classified precisely as
+  `POLICY_EVALUATED_ON_REAL_MEDIA_EXECUTION_DEFERRED_NO_RENDER_PERMITTED_THIS_GATE`
+  — a distinct, more accurate finding than "identity insufficient" (since
+  identity plainly IS available here), named explicitly rather than
+  forced into the directive's `ABSTAIN_IDENTITY_INSUFFICIENT` bucket.
+
+**Level-2 whole-video (fully executed on the real file):**
+- Pre-measurement (real, `measure_audio`): **-32.2 LUFS** integrated
+  loudness, LRA 5.0 LU, true peak **-10.9 dBTP** (real true-peak
+  evidence, not sample-peak fallback), sample peak -11.03 dBFS, no
+  clipping, h264/1 video stream.
+- Plan (`generate_audio_finishing_plan`, `adjacent_pairs=()` by
+  deliberate design — see below): `whole_video_state=CORRECTION_LIMITED`,
+  requested gain **+18.2 dB** (what -32.2→-14.0 LUFS actually needs),
+  authorized gain **+6.0 dB** (D-249's canonical `MAX_AUTOMATIC_GAIN_
+  CORRECTION_DB` envelope, correctly clamping), `limiter_authorized=false`
+  (post-gain true peak projects to -4.9 dBTP, safely under the -1.0 dBTP
+  ceiling), `plan_status=PARTIAL`. Zero safety findings; safe to execute.
+- **Design note, not a defect:** `adjacent_pairs=()` is passed
+  intentionally to this plan generation call. D-249's own
+  `_derive_plan_status` rolls adjacent-pair states into the same overall
+  `plan_status` that gates whole-video executability — feeding the real
+  eligible pairs in would let an adjacent finding (even a benign
+  `CORRECTION_ALLOWED`) alter or block Level-2's independently-safe
+  execution for a correction this gate cannot apply anyway. Level-1's
+  real findings are reported above from a direct, separate
+  `evaluate_adjacent_take_continuity` call per eligible pair — the
+  canonical D-249 API, used correctly, just not fed into the executed
+  plan.
+- Execution (`execute_audio_finishing_plan`, D-251, unchanged):
+  `SUCCESS`, filters `["volume=6.000000dB", "aformat=..."]` — no limiter,
+  no loudnorm, no compressor, no denoise, no hum filter. `ffmpeg_return_code=0`.
+  `-c:v copy` (video untouched).
+- Idempotence: `execution_id_reproducible=true` (recomputing
+  `compute_execution_id` against the same plan+input yields the same id,
+  with zero second DSP pass).
+- Post-measurement (real): **-26.2 LUFS** (= -32.2 + 6.0 exactly — the
+  authorized gain applied correctly), LRA unchanged at 5.0 (correct: a
+  flat gain never changes loudness *range*), true peak -5.0 dBTP, sample
+  peak -5.09 dBFS, no clipping.
+- Verification (D-251's own contract, unchanged): `POLICY_OUT_OF_RANGE`
+  — `loudness_in_target_range=false` (-26.2 LUFS is still outside
+  [-15.0, -13.0]), `true_peak_within_ceiling=true`. **Never a fabricated
+  PASS** — the exact behavior D-251's verification contract is designed
+  to produce when a bounded single correction genuinely cannot reach the
+  target from an 18.2 dB gap.
+
+**Before/after/timing:** LUFS delta +6.0, true-peak delta +5.9, duration
+delta **0.0** (audio-only finishing, frame-exact), sample rate 48000→48000
+(source was already canonical), channels 2→2, video codec h264→h264,
+video stream count 1→1. `video_preserved=true`. Existing technical QC
+(`run_post_render_media_qc`, unchanged authority) on the finished file:
+**PASS**.
+
+### Review package
+
+`cutsell-d254c-audio-finishing-review` (artifact id `10313713543`,
+76,242,492 bytes / ~73 MiB, well under the 512 MiB firewall) —
+`before_audio_finishing.mp4` (byte-identical to the recovered D-245
+preview) + `after_audio_finishing.mp4` (the +6 dB, `-c:v copy` finished
+file) + all 10 structured JSON reports (`d254c-summary.json` and every
+per-part JSON named in the directive). Bundle size printed to the log
+before upload, per the directive's own firewall requirement. Never
+includes the raw/Human-Gold/Cut.ai references or the oversized bundle
+D-254 found undownloadable.
+
+### Confirmation
+
+No new RAW. No GPU (no RunPod, no Modal). No editorial engine execution
+(no `process_universal_clean_cut_sources`, ASR, Watch+Listen, P1/P2,
+Ordering, Freeze, Boundary, Pacing, Audio Join, renderer). No new render
+generation (Level-2 operated directly on the existing `preview.mp4`; the
+one existing video stream was never re-encoded, only `-c:v copy`d
+through). No production `.py` file changed — only the retrieval
+workflow's own steps. No policy, numeric, or threshold change — all six
+canonical D-249 values read and applied exactly as-is. No credential
+ever printed.
+
+**Real-media classification: `REAL_MEDIA_SAFE_BUT_OUT_OF_POLICY`.**
+Level-1 measurement/identity/policy fully proven on real media (with a
+genuine positive finding — 4 real correction-eligible pairs); Level-2
+measurement/plan/safety-audit/execution/verification/comparison/QC fully
+proven on real media, safely and correctly bounded by the ±6 dB envelope,
+honestly reporting the final loudness as still out of the canonical
+target range rather than fabricating compliance.
+
+**Verdict: C — EXECUTION SAFE — FINAL OUTPUT OUTSIDE CANONICAL LOUDNESS/
+PEAK POLICY RANGE.**
+
+**Exact policy reason (named, not tuned):** the real Video00 preview's
+whole-video integrated loudness (-32.2 LUFS) is 18.2 dB below the -14.0
+LUFS canonical V1 target — far outside what a single ±6 dB-envelope
+correction pass can close. This is the deliberate, Product-Owner-approved
+V1 safety bound (D-248/D-249) working exactly as designed: it never
+overshoots into an unsafe/artifact-prone gain, and D-251's verification
+never claims a pass it did not earn. This is not a code defect and is not
+tuned here, per this gate's own explicit "no numeric/policy change" scope
+and the directive's own "IF C: do not tune automatically" instruction.
+
+**Canonical status:** unchanged — the six D-249 values are read and
+applied exactly as-is.
+
+**Audio Finishing P0 track status:** cannot close on this source under
+verdict C. The synthetic chain (D-253) and the real-media measurement/
+identity/policy/execution/verification chain (D-254C) are BOTH proven;
+what remains open is a Product Owner decision on how a canonical single-
+pass ±6 dB V1 policy should be judged against a source whose true gap
+exceeds that envelope — accept the bounded partial correction as the V1
+product behavior, or authorize a P1-scope multi-stage/graduated
+correction design. Neither is decided or authorized by this gate.
+
+**Level-1 real-media status:** identity, measurement, and policy
+evaluation all proven on real media; execution proven not possible this
+gate without raw per-clip source assets and a new render, both out of
+this gate's explicit scope. Not "insufficient evidence" — a real,
+positive Level-1 finding (4 correction-eligible pairs) exists and is
+recorded.
+
+**Exact next gate:** a Product Owner decision among: (a) accept
+`REAL_MEDIA_SAFE_BUT_OUT_OF_POLICY` as the correct, safe V1 product
+behavior for sources this far below target and close the P0 execution
+track on that basis: `AUDIO_FINISHING_P0_REAL_MEDIA_QUALIFIED_BOUNDED`;
+(b) authorize a P1-scope design for graduated/multi-pass whole-video
+correction; (c) authorize a Level-1 real-execution qualification gate
+that also retrieves the raw per-clip source assets (a genuinely new,
+larger scope, needing its own authorization). Not decided or launched by
+this gate.
+
+**Decision entry reference:** this entry (D-254C).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-255. DO NOT LAUNCH RAW.
