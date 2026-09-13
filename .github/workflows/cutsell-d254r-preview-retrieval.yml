@@ -238,6 +238,22 @@ jobs:
       # evaluates on real data but does not execute a correction this gate).
       # =====================================================================
 
+      # numpy is the ONE non-stdlib dependency `cutsell_worker`'s own package
+      # `__init__.py` transitively requires at import time (confirmed by run
+      # 34745637386's own traceback: __init__.py -> install_semantic_best_
+      # take_integrity -> pipeline -> bounded_finalist_arbiter ->
+      # prosodic_finalist_comparison -> prosodic_audio_v2 imports numpy at
+      # module top level) -- unrelated to the three audio-finishing modules
+      # themselves (pure stdlib+ffmpeg-subprocess), but unavoidable because
+      # importing ANY cutsell_worker submodule runs the package's own
+      # __init__.py first. Same package this repo's own RAW workflow already
+      # installs for its quality-ladder step (D-095) -- not a new
+      # dependency, not the heavy torch/faster-whisper/sentence-transformers/
+      # CLIP/opencv stack.
+      - name: Install numpy (the one non-stdlib dependency cutsell_worker's own package init requires)
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet 'numpy>=1.26,<3'
+
       # Confirms the three audio-finishing modules import without pulling in
       # the heavy ML stack (torch/faster-whisper/sentence-transformers/CLIP/
       # opencv from requirements.txt are never needed by
