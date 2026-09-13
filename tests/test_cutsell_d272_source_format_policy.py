@@ -556,15 +556,21 @@ def test_hevc_runtime_unknown_not_native_accept(hevc_mp4):
 
 
 @pytestmark_ffmpeg
-def test_hevc_runtime_confirmed_may_accept(hevc_mp4):
+def test_hevc_runtime_confirmed_normalizes_to_h264(hevc_mp4):
+    """D-272B: capability-confirmed HEVC is never ACCEPT-native in the
+    canonical V1 source contract -- it always requires normalization to
+    canonical H.264, even when otherwise clean (reconciles D-272 with
+    D-273/D-274A; supersedes this test's own pre-D-272B expectation)."""
     if hevc_mp4 is None:
         pytest.skip("HEVC encoder not available on this runner")
     profile = smp.probe_source_media_profile(hevc_mp4)
     decision = sfp.evaluate_source_format_policy(
         profile, runtime_capability=sfp.RuntimeCapabilityInput(hevc_decode_confirmed=True),
     )
-    assert decision.decision == sfp.DECISION_ACCEPT
+    assert decision.decision == sfp.DECISION_NORMALIZE_REQUIRED
+    assert sfp.REASON_HEVC_TO_H264_NORMALIZATION_REQUIRED in decision.normalization_reasons
     assert sfp.REASON_HEVC_RUNTIME_UNVERIFIED not in decision.reason_codes
+    assert decision.user_facing_error_code == sfp.USER_FACING_VIDEO_REQUIRES_NORMALIZATION
 
 
 def test_hevc_default_capability_input_never_confirms():

@@ -347,17 +347,22 @@ def test_hevc_capability_unknown_blocked_within_plan():
     assert "hevc_decode_confirmed" in result.blocking_capability_gaps
 
 
-def test_pure_clean_hevc_resolves_accept_no_plan():
-    """Documents the real D-272/D-273 gap this module's own docstring
-    records: a capability-confirmed, otherwise-clean HEVC source is
-    ACCEPT today, never normalized to H.264."""
+def test_pure_clean_hevc_now_normalize_required_via_d272b():
+    """D-272B reconciled the gap this test used to document: a
+    capability-confirmed, otherwise-clean HEVC source now resolves to
+    NORMALIZE_REQUIRED (via D-272's own REASON_HEVC_TO_H264_
+    NORMALIZATION_REQUIRED) and produces an executable HEVC_TO_H264
+    plan, closing the D-272/D-273/D-274A reconciliation gap."""
     profile = _base_profile(video_codec=smp.VIDEO_CODEC_HEVC, raw_video_codec="hevc")
     cap = sfp.RuntimeCapabilityInput(hevc_decode_confirmed=True)
     decision = _decide(profile, runtime_capability=cap)
-    assert decision.decision == sfp.DECISION_ACCEPT
-    result = snp.build_source_normalization_plan("s1", profile, decision)
-    assert result.plan is None
-    assert result.outcome == snp.NORMALIZATION_NOT_REQUIRED
+    assert decision.decision == sfp.DECISION_NORMALIZE_REQUIRED
+    assert sfp.REASON_HEVC_TO_H264_NORMALIZATION_REQUIRED in decision.normalization_reasons
+    result = snp.build_source_normalization_plan("s1", profile, decision, runtime_capability=cap)
+    assert result.plan is not None
+    assert result.plan.codec_action == snp.ACTION_HEVC_TO_H264
+    assert result.plan.executability == snp.EXECUTABILITY_EXECUTABLE
+    assert result.outcome == snp.NORMALIZATION_PLANNED
 
 
 def test_malformed_rotation_no_executable_plan():
@@ -523,7 +528,10 @@ _FIREWALL_FILES = [
     "cutsell_worker/render_plan.py",
     "cutsell_worker/media_probe.py",
     "cutsell_worker/source_media_profile.py",
-    "cutsell_worker/source_format_policy.py",
+    # source_format_policy.py deliberately removed from this list: D-272B
+    # (a narrow, separately-authorized reconciliation gate) legitimately
+    # extends it -- see test_cutsell_d272_source_format_policy.py's own
+    # updated expectations for the current authoritative HEVC behavior.
     "cutsell_worker/post_render_media_qc.py",
     "cutsell_worker/visual_finishing_measurement.py",
     "cutsell_worker/audio_finishing_measurement.py",

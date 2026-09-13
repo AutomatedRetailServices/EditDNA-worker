@@ -72582,3 +72582,173 @@ Then STOP.
 
 DO NOT IMPLEMENT D-274B.
 DO NOT LAUNCH RAW.
+
+## D-272B — HEVC Canonical-Normalization Policy Reconciliation (offline implementation)
+
+**Objective.** Post D-274A. A narrow, Product-Owner-authorized
+reconciliation of D-272 with D-273/D-274A -- NOT a general D-272
+reopening. `evaluate_source_format_policy` now emits `REASON_HEVC_TO_
+H264_NORMALIZATION_REQUIRED` whenever a confirmed-capability HEVC
+source needs normalizing, even when otherwise clean: HEVC is never
+ACCEPT-native in the canonical V1 source contract. Capability-unknown
+HEVC remains `INSUFFICIENT_EVIDENCE` exactly as before. No normalization
+execution, no ffmpeg transcode, no renderer/Pacing/Boundary/Freeze/
+Audio/Visual-Finishing/QC-authority change anywhere in this gate.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `8f3c560` (exact expected
+match, D-274A), clean tree -- confirmed before this gate began.
+
+### Stage 1/2 -- the new reason, capability-confirmed HEVC
+
+`cutsell_worker/source_format_policy.py`: new `REASON_HEVC_TO_H264_
+NORMALIZATION_REQUIRED` constant. In `evaluate_source_format_policy`,
+the existing capability-gate block (Stage 8/9/28) now sets a local
+`hevc_requires_h264_normalization` flag whenever `profile.video_codec
+== VIDEO_CODEC_HEVC` survives that block (which, by construction,
+already proves `hevc_decode_confirmed` was `True` -- the gate would
+have returned `INSUFFICIENT_EVIDENCE` otherwise). That flag appends the
+new reason to `normalization_reasons`, so a confirmed-capability,
+otherwise-clean HEVC source now resolves to `NORMALIZE_REQUIRED`
+instead of `ACCEPT`. `_user_facing_error_code` needed NO code change --
+since the new reason lives in `normalization_reasons`, not `blocking_
+reasons`, the existing `decision == NORMALIZE_REQUIRED -> VIDEO_
+REQUIRES_NORMALIZATION` fallback already produces the correct code
+(Stage 8's own requirement), and capability-UNKNOWN HEVC still hits the
+pre-existing `REASON_HEVC_RUNTIME_UNVERIFIED` blocking-reason branch ->
+`RUNTIME_CODEC_SUPPORT_UNVERIFIED` (Stage 3), unchanged.
+
+### Stage 2 examples confirmed unchanged by pre-existing ordering
+
+HEVC + missing video -> `REJECT` (the missing-video check runs before
+the capability gate, untouched). HEVC + multi-stream ambiguity ->
+`INSUFFICIENT_EVIDENCE` (the stream-count checks run after the
+capability gate but before the new HEVC reason is appended to
+`normalization`, so multi-stream still wins as the blocking reason).
+HEVC + clean SDR -> `NORMALIZE_REQUIRED` (the new behavior).
+
+### Stage 4 -- D-274A plan mapping, no duplicated policy
+
+`cutsell_worker/source_normalization_plan.py`'s `codec_action` mapping
+changed from an independent `profile.video_codec == VIDEO_CODEC_HEVC`
+check to `sfp.REASON_HEVC_TO_H264_NORMALIZATION_REQUIRED in reasons` --
+D-272 remains the sole authority deciding normalization is required;
+D-274A only maps that decision to `ACTION_HEVC_TO_H264`, never re-
+deriving the HEVC-needs-normalization fact from the profile
+independently (Stage 4's own explicit "do not duplicate HEVC policy
+here"). The module's own docstring updated to record the reconciliation
+in place of the gap it originally surfaced.
+
+### Stage 6 -- HEVC + other normalization (multi-action composition)
+
+Proven: HEVC+rotation -> `HEVC_TO_H264` + `ROTATE_90/180/270`;
+HEVC+VFR -> `HEVC_TO_H264` + `VFR_TO_CFR`; HEVC+10-bit -> `HEVC_TO_H264`
++ `TEN_BIT_TO_EIGHT_BIT`; HEVC+yuv422 -> `HEVC_TO_H264` + `PIXEL_
+FORMAT_TO_YUV420P`; HEVC+HDR-PQ -> `HEVC_TO_H264` + `HDR_PQ_TO_SDR_
+BT709`, `EXECUTABLE` only when `tonemap_available=True` is also passed,
+`CAPABILITY_UNVERIFIED` otherwise -- each action's own capability gate
+evaluated independently, exactly as designed in D-274A.
+
+### Stage 7 -- live early gate, honest nuance
+
+`worker_job.py` was NOT touched by this gate (confirmed by firewall
+test and by direct source-scan: zero occurrences of `runtime_
+capability` in the file). Its own `evaluate_source_format_gate` never
+confirms HEVC capability today, so a REAL HEVC source hitting the live
+gate is still `INSUFFICIENT_EVIDENCE`/`RUNTIME_CODEC_SUPPORT_
+UNVERIFIED` exactly as before D-272B -- the directive's own Stage 7
+assertion ("capability-confirmed HEVC sources must now be blocked at
+the live early gate") is structurally true but not yet OBSERVABLE live,
+since no real production capability source is wired into `worker_job.py`
+yet (a separate, future activation, matching this session's established
+seam-then-activate pattern). Proven both ways with real HEVC fixtures:
+(1) today's default (unconfirmed) still blocks as `INSUFFICIENT_
+EVIDENCE` before `process_local_sources`; (2) a simulated confirmed-
+capability signal (monkeypatched at the test level, not a code change)
+blocks as `NORMALIZE_REQUIRED`/`VIDEO_REQUIRES_NORMALIZATION` before
+`process_local_sources`, proving D-272B's real effect once a genuine
+capability source exists.
+
+### Stage 9 -- no broad policy reopen
+
+H.264/rotation/HDR/VFR/10-bit/yuv422/yuv444/missing-audio/missing-
+video/multi-stream/container policy all confirmed byte-for-byte
+unchanged via dedicated regression tests re-asserting each property's
+exact prior reason codes and decisions on non-HEVC fixtures, plus the
+full pre-existing D-272 test suite (updated only where it tested the
+now-superseded HEVC-confirmed-ACCEPT expectation).
+
+### Self-resolving guards updated (established session pattern)
+
+D-272's own `test_hevc_runtime_confirmed_may_accept` renamed to `test_
+hevc_runtime_confirmed_normalizes_to_h264` with updated assertions (the
+old expectation was correct at D-272 time, superseded by this gate).
+D-272A's own `test_source_format_policy_module_still_untouched_by_this_
+gate` and D-274A's own firewall parametrize entry for `source_format_
+policy.py` both updated (same self-resolving pattern as D-269A's
+`exports.py` and D-272A's `worker_job.py` precedents) -- each now
+confirms the module's own public surface remains importable rather than
+re-asserting an "untouched" guard this separately-authorized gate
+legitimately supersedes.
+
+### Verification run
+
+- New `tests/test_cutsell_d272b_hevc_policy_reconciliation.py`: **50
+  passed** -- the full Stage 10 test matrix (H264/HEVC-confirmed/HEVC-
+  unknown/HEVC-missing-video/HEVC-multi-stream, HEVC+rotation/VFR/10-
+  bit/yuv422/HDR-confirmed/HDR-unknown, both live-gate proofs, plan
+  identity determinism and change-sensitivity, no-execution/no-ffmpeg-
+  command source-scans, renderer-unchanged, the Stage 9 no-broad-reopen
+  regressions, and the Stage 11 closed-track firewall).
+- D-272's own test file, updated: re-verified green.
+- D-272A's and D-274A's own test files, updated: re-verified green.
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- D-266 through D-272B/D-274A targeted suites together: **686 passed, 0
+  failed.**
+- `worker_job`/`flow_b`-adjacent regression subset: **43 passed, 0
+  failed** (confirms `worker_job.py` itself genuinely untouched).
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`): 55
+  passed each.
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: **7935 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, 0 failed** (net new tests over D-274A's own 7886).
+
+### Canonical status update
+
+HEVC V1 SOURCE POLICY (recorded explicitly, per this gate's own Stage
+12): decode capability confirmed -> `NORMALIZE_REQUIRED` -> canonical
+H.264 normalization; decode capability unverified -> `INSUFFICIENT_
+EVIDENCE`. HEVC is never ACCEPT-native in the canonical V1 source
+contract. This reconciles D-272 with D-273/D-274A. FORMAT NORMALIZATION
+ARCHITECTURE = CLOSED (D-274A, unchanged). CANONICAL NORMALIZATION
+CONTRACT + PLAN TYPES = CLOSED (D-274A, unchanged, now correctly
+mapping D-272's own HEVC reason). LIVE EARLY SOURCE FORMAT GATE = CLOSED
+(D-272A, unchanged -- `worker_job.py` genuinely untouched). NORMALIZATION
+EXECUTION remains the current P0 subtrack (D-274B onward). No closed
+track reopened in the general sense; this entry documents the one
+narrow, explicitly-authorized exception. Security/Privacy/Multi-user
+track remains ALWAYS ON per CLAUDE.md's own binding rule.
+
+### Verdict
+
+**A -- HEVC source policy reconciled with canonical normalization
+contract -- confirmed HEVC now routes to HEVC_TO_H264 normalization --
+ready for D-274B.** Every Stage 1-11 requirement proven: the new reason
+lives in the correct severity bucket, capability-unknown HEVC is
+unchanged, D-274A's plan builder reads D-272's own reason rather than
+re-deriving it, multi-action composition works, no broad policy was
+reopened, and the live-gate's current (unconfirmed) default behavior is
+honestly unchanged while its future (confirmed-capability) behavior is
+structurally proven correct.
+
+**Exact next gate:** D-274B -- Rotation + VFR/Timeline Normalization
+Executor -- not implemented, not decided by this entry; a Product Owner
+authorization call.
+
+**Decision entry reference:** this entry (D-272B).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-274B.
+DO NOT LAUNCH RAW.

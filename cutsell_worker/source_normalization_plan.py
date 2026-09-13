@@ -20,25 +20,26 @@ verification result. `probe_source_media_profile` and
 policy-decision authority respectively; this module never re-derives or
 duplicates either.
 
-## A real, honest gap this gate surfaces rather than papers over
+## A gap D-274A surfaced, reconciled by D-272B
 
-D-272's own `evaluate_source_format_policy` does NOT today emit a
-normalization reason for "codec is HEVC" on its own -- a capability-
-confirmed HEVC source with no other defect (no rotation/HDR/VFR/bit-
-depth/pixel-format issue) currently resolves to plain `ACCEPT`, not
-`NORMALIZE_REQUIRED`. D-273's own architecture intended HEVC to always
-normalize to canonical H.264 regardless. Rather than silently reopening
-the CLOSED D-272 policy track to add a new reason code (which this
-gate's own scope banners do not authorize and which is a real product/
-policy decision in its own right), this module follows D-272's decision
-literally: `ACCEPT` always means `NORMALIZATION_NOT_REQUIRED`, no plan,
-no exceptions (Stage 12's own explicit instruction) -- so a "pure clean
-HEVC" source is NOT normalized to H.264 under today's live D-272 policy.
-`codec_action`/`timeline_action` are only ever computed INSIDE an
-already-`NORMALIZE_REQUIRED` plan (triggered by some other property),
-where a HEVC codec or a non-zero start time can still ride along as an
-additional planned action. This asymmetry is recorded here, not fixed
-here -- fixing it means changing D-272 itself, out of this gate's scope.
+D-274A's own first version recorded a real gap here: D-272's policy did
+not emit a normalization reason for "codec is HEVC" by itself, so a
+capability-confirmed HEVC source with no other defect resolved to plain
+`ACCEPT`, never reaching this plan builder. D-272B (a narrow, Product-
+Owner-authorized reconciliation, not a general D-272 reopening) closed
+this: `evaluate_source_format_policy` now emits `REASON_HEVC_TO_H264_
+NORMALIZATION_REQUIRED` itself whenever a confirmed-capability HEVC
+source needs normalizing, even when otherwise clean -- HEVC is never
+ACCEPT-native in the canonical V1 source contract. `codec_action` in
+this module reads that reason directly (`sfp.REASON_HEVC_TO_H264_
+NORMALIZATION_REQUIRED in reasons`), never re-deriving the HEVC-needs-
+normalization fact from `profile.video_codec` independently -- D-272
+remains the sole authority deciding normalization is required; this
+module only maps that decision to a plan action (Stage 4's own "do not
+duplicate HEVC policy here"). `timeline_action` still has no
+corresponding D-272 reason code (D-272B's own scope was HEVC only) and
+remains computed only inside an already-`NORMALIZE_REQUIRED` plan,
+exactly as before.
 """
 from __future__ import annotations
 
@@ -413,12 +414,16 @@ def build_source_normalization_plan(
     if sfp.REASON_PIXEL_FORMAT_NORMALIZATION_REQUIRED in reasons:
         pixel_format_action = ACTION_PIXEL_FORMAT_TO_YUV420P
 
-    # Stage 14 -- HEVC, only ever evaluated INSIDE an already-NORMALIZE_
-    # REQUIRED plan (see this module's own docstring for the honest gap:
-    # a capability-confirmed, otherwise-clean HEVC source resolves to
-    # plain ACCEPT under today's live D-272 policy and never reaches here).
+    # Stage 14 -- HEVC. D-272B closed the D-272/D-273 reconciliation gap
+    # this module's own docstring used to record: D-272 now emits
+    # REASON_HEVC_TO_H264_NORMALIZATION_REQUIRED itself whenever a
+    # confirmed-capability HEVC source needs normalizing (even when
+    # otherwise clean) -- D-272 remains the sole authority deciding
+    # normalization is required; this module only maps that decision to
+    # a plan action, never re-deriving it from the profile's own codec
+    # field directly (Stage 4's own "do not duplicate HEVC policy here").
     codec_action = ACTION_NO_ACTION
-    if profile.video_codec == smp.VIDEO_CODEC_HEVC:
+    if sfp.REASON_HEVC_TO_H264_NORMALIZATION_REQUIRED in reasons:
         codec_action = ACTION_HEVC_TO_H264
         if not getattr(capability, "hevc_decode_confirmed", False):
             capability_gaps.append("hevc_decode_confirmed")

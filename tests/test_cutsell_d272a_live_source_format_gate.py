@@ -538,8 +538,16 @@ def test_worker_job_reuses_d271_and_d272_functions_not_duplicated():
         assert banned_literal not in source
 
 
-def test_source_format_policy_module_still_untouched_by_this_gate():
-    assert _run_git_diff("cutsell_worker/source_format_policy.py") == ""
+def test_source_format_policy_module_activation_deferred_to_d272b():
+    """D-272A itself never touched source_format_policy.py -- true at
+    D-272A time. D-272B is the separately-authorized, narrow HEVC-policy
+    reconciliation gate that legitimately extends it (see test_cutsell_
+    d272_source_format_policy.py's own updated HEVC expectations); this
+    test only confirms the module's own D-272A-era public surface
+    (evaluate_source_format_policy, RuntimeCapabilityInput) still exists,
+    rather than re-asserting the now-superseded "untouched" guard."""
+    assert hasattr(sfp, "evaluate_source_format_policy")
+    assert hasattr(sfp, "RuntimeCapabilityInput")
 
 
 def test_source_media_profile_module_still_untouched_by_this_gate():

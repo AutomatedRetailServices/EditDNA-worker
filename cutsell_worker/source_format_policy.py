@@ -86,6 +86,10 @@ REASON_HDR_NORMALIZATION_REQUIRED = "HDR_NORMALIZATION_REQUIRED"
 REASON_VFR_NORMALIZATION_REQUIRED = "VFR_NORMALIZATION_REQUIRED"
 REASON_TEN_BIT_NORMALIZATION_REQUIRED = "TEN_BIT_NORMALIZATION_REQUIRED"
 REASON_PIXEL_FORMAT_NORMALIZATION_REQUIRED = "PIXEL_FORMAT_NORMALIZATION_REQUIRED"
+# D-272B: capability-confirmed HEVC is never ACCEPT-native in the
+# canonical V1 source contract (D-273/D-274A) -- it always requires
+# normalization to canonical H.264, even when otherwise clean.
+REASON_HEVC_TO_H264_NORMALIZATION_REQUIRED = "HEVC_TO_H264_NORMALIZATION_REQUIRED"
 REASON_MULTIPLE_VIDEO_STREAMS = "MULTIPLE_VIDEO_STREAMS"
 REASON_MULTIPLE_AUDIO_STREAMS = "MULTIPLE_AUDIO_STREAMS"
 REASON_AUDIO_MISSING = "AUDIO_MISSING"
@@ -275,6 +279,7 @@ def evaluate_source_format_policy(
     # Stage 8/9/28 -- H.264 has no capability gate (this pipeline's own
     # native format); every other codec is capability-gated, never
     # optimistically accepted from local-sandbox evidence alone.
+    hevc_requires_h264_normalization = False
     if profile.video_codec != smp.VIDEO_CODEC_H264:
         gate = _CAPABILITY_GATED_CODECS.get(profile.video_codec)
         if gate is not None:
@@ -285,6 +290,13 @@ def evaluate_source_format_policy(
             # VP9/ProRes/MPEG4/etc. -- no confirmation mechanism defined
             # at all yet.
             return _decision(DECISION_INSUFFICIENT_EVIDENCE, blocking=(REASON_CODEC_RUNTIME_UNVERIFIED,), profile=profile)
+        # D-272B: reaching this point with HEVC means capability was just
+        # confirmed above (the gate would have returned INSUFFICIENT_
+        # EVIDENCE otherwise) -- canonical V1 source contract (D-273/
+        # D-274A) never treats confirmed-capability HEVC as ACCEPT-native;
+        # it always requires normalization to canonical H.264.
+        if profile.video_codec == smp.VIDEO_CODEC_HEVC:
+            hevc_requires_h264_normalization = True
 
     # Stage 19/20 -- multi-stream: no deterministic selection policy
     # exists yet -- never silently pick "the first one".
@@ -297,6 +309,12 @@ def evaluate_source_format_policy(
     # severity only (Stage 30) -- none of them alone blocks entry.
     normalization: list[str] = []
     warnings: list[str] = []
+
+    # D-272B -- confirmed-capability HEVC always normalizes to H.264,
+    # even when otherwise clean (closes the D-273/D-274A reconciliation
+    # gap; D-274A's own plan builder maps this reason to HEVC_TO_H264).
+    if hevc_requires_h264_normalization:
+        normalization.append(REASON_HEVC_TO_H264_NORMALIZATION_REQUIRED)
 
     # Stage 10 -- rotation (including a malformed-but-present tag,
     # conservatively treated as requiring normalization since we cannot
