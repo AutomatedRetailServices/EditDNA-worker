@@ -65730,3 +65730,349 @@ this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-255. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-255 — Extreme Under-Level Audio Handling / P0 Closure Contract (offline forensic + design only)
+
+**Objective.** Post D-254C (real extreme-under-level case proven safe:
+-32.2 LUFS source, +18.2 dB requested, +6.0 dB authorized/applied,
+-26.2 LUFS result, POLICY_OUT_OF_RANGE, technical QC PASS). Resolve the
+open PRODUCT/P0 question: what should commercial CutSell V1 do when a
+source needs substantially more correction than the canonical ±6 dB
+automatic envelope. Design only — no DSP, no numeric/threshold/policy
+change, no RAW, no provider.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `0b885ed` (exact match),
+clean tree.
+
+### STAGE 1 — CORRECTION_LIMITED semantic (audited, not reinterpreted)
+
+Read directly from `audio_finishing_policy.py::evaluate_whole_video_loudness`:
+when `abs(requested_gain_db) > MAX_AUTOMATIC_GAIN_CORRECTION_DB`, the
+function sets `gain_state=CORRECTION_LIMITED` and
+`authorized_gain_db=±MAX_AUTOMATIC_GAIN_CORRECTION_DB` (sign-preserving),
+with an explicit reason string: "target will NOT be fully reached
+automatically." This authorized gain is NOT blocked — it proceeds through
+`_derive_plan_status` (rolls up to `PLAN_STATUS_PARTIAL` when standalone,
+`READY_WITH_LIMITER` if a limiter is also authorized) and IS executable
+(`PLAN_STATUS_PARTIAL` is not in `_NON_EXECUTABLE_PLAN_STATUSES`).
+D-254C's own real run is the direct proof: `CORRECTION_LIMITED` →
+`plan_status=PARTIAL` → `execution_status=SUCCESS` → real gain applied →
+`verification_status=POLICY_OUT_OF_RANGE` (never a fabricated PASS).
+
+**Exact semantic: A — apply max safe correction and allow export even if
+still outside target** — with the honest caveat that the "still outside
+target" fact is only currently visible in `ExecutionVerificationResult`'s
+raw fields, not as any top-level product/completeness state. There is no
+existing mechanism matching literal option B ("mark finishing
+incomplete" as its own signal) beyond what verification already reports
+as a side effect, and no existing mechanism matching C (abstention) for
+this case — `CORRECTION_LIMITED` is a distinct, already-defined, already-
+correct semantic, not requiring reinterpretation.
+
+### STAGE 2 — P0 success definition
+
+P0 does **not** require every input to reach -14 ±1 LUFS. Correct
+definition: (1) the finishing engine behaves safely on any real input
+(never overshoots the envelope, never boosts silence, never risks
+clipping); (2) ordinary correctable media reaches the canonical range;
+(3) extreme inputs degrade gracefully — bounded, safe, non-destructive —
+rather than either unsafely over-correcting or crashing; (4) an
+out-of-policy result is never misrepresented as fully finished; (5) a
+downstream caller (UI, analytics, support) receives an explicit,
+actionable state rather than having to re-derive completeness from raw
+DSP records. Items (1)-(3) and part of (4)/(9, see Stage 11) are already
+proven (D-253 synthetic + D-254C real). Items (4)'s product-facing half
+and (5) do not exist as a first-class contract yet — that gap is this
+gate's actual finding, addressed in Stages 6-8, 16, 17.
+
+### STAGE 3 — Normal vs. extreme classification (zero new thresholds)
+
+The existing ±6 dB authorized envelope IS sufficient to define the
+boundary, using ONLY already-computed values — no seventh numeric
+threshold:
+
+```
+NORMAL_CORRECTABLE       : gain_state in {NO_CHANGE_NEEDED, CORRECTION_ALLOWED}
+                            (i.e. abs(requested_gain_db) <= MAX_AUTOMATIC_GAIN_CORRECTION_DB)
+EXTREME_UNDER_LEVEL       : gain_state == CORRECTION_LIMITED and requested_gain_db > 0
+EXTREME_OVER_LEVEL        : gain_state == CORRECTION_LIMITED and requested_gain_db < 0
+(separately, unrelated to this axis):
+  ABSTAINED               : gain_state == ABSTAIN_INSUFFICIENT_EVIDENCE
+  BLOCKED_SAFETY          : gain_state in {BLOCKED_PEAK_RISK, BLOCKED_CLIPPING}
+  BLOCKED_SILENCE         : gain_state == BLOCKED_SILENCE
+```
+
+This is a pure relabeling of fields `evaluate_whole_video_loudness`
+already computes and returns today. Sufficient; no design or numeric
+work needed to establish the boundary itself.
+
+### STAGE 4 — Extreme under-level action (D-254C's own case)
+
+Recommendation: **C, building on the already-proven-correct A.** Keep
+applying the already-authorized +6 dB (D-254C proves this is safe: real
+peak stayed at -5.0 dBTP, 4.0 dB under the -1.0 dBTP ceiling, no
+clipping) — this is a genuine, safe, audible improvement toward
+commercial quality and must not be thrown away. Do **not** choose B
+(abstain entirely): abstaining would discard a proven-safe partial
+improvement for zero safety benefit — the source is not made more
+shippable by refusing the +6 dB. Do **not** choose D as the V1 answer:
+routing to a not-yet-designed future rescue stage is a legitimate P1/P2
+direction (Stage 9) but is not required to make the *current* bounded
+behavior product-correct. What IS required, and does not exist yet, is
+the mandatory product-visible state that this source was extreme and the
+finishing result is partial (Stages 6-8, 16).
+
+### STAGE 5 — Extreme over-level action (symmetric case)
+
+Same `CORRECTION_LIMITED` mechanism handles a source that would need a
+reduction beyond 6 dB (`authorized_gain_db = -MAX_AUTOMATIC_GAIN_
+CORRECTION_DB`). `evaluate_peak_safety`'s own rule ("negative or zero
+gain can never increase peak risk") means the *safety* rationale for a
+symmetric cap is weaker in this direction (over-correction risk is
+amplified-noise/clipping on the boost side; there is no equivalent
+amplification risk on the cut side). Nonetheless, per this gate's own
+"do not invent new thresholds" instruction, the recommendation is to
+**keep the same ±6 dB envelope symmetric for V1** and apply the identical
+product-state treatment (`EXTREME_OVER_LEVEL` gets the same explicit
+state as `EXTREME_UNDER_LEVEL`, not a silently different rule). Whether
+the negative-direction envelope should someday be larger, given the
+different risk profile, is a genuine future numeric-policy question —
+explicitly out of this gate's scope, and not recommended now.
+
+### STAGE 6 — User-facing product states (design only)
+
+Recommend six states, layered ABOVE the existing raw DSP/measurement
+records (never replacing them):
+
+- `AUDIO_FINISHING_COMPLETE` — `NORMAL_CORRECTABLE` and
+  `verification_status == PASS`.
+- `AUDIO_FINISHING_PARTIAL_SOURCE_TOO_QUIET` — `EXTREME_UNDER_LEVEL`,
+  executed, `verification_status in {POLICY_OUT_OF_RANGE, PARTIAL}`.
+- `AUDIO_FINISHING_PARTIAL_SOURCE_TOO_LOUD` — `EXTREME_OVER_LEVEL`,
+  symmetric.
+- `AUDIO_FINISHING_ABSTAINED` — `ABSTAIN_INSUFFICIENT_EVIDENCE` or
+  `BLOCKED_SILENCE` (no correction attempted; original file exported
+  unmodified).
+- `AUDIO_FINISHING_BLOCKED_SAFETY` — `BLOCKED_PEAK_RISK`/
+  `BLOCKED_CLIPPING` (an addition beyond the directive's own listed
+  options: a real detected risk is a materially different case from
+  merely-insufficient-evidence and should not collapse into the same
+  label).
+- `AUDIO_FINISHING_SOURCE_RESCUE_REQUIRED` — reserved for a future
+  rescue-pipeline trigger; not populated by anything in the current
+  architecture; a placeholder for D-256+/P1/P2, never activated in V1.
+
+### STAGE 7 — Export behavior (EXPORT_ALLOWED independent of completeness)
+
+`EXPORT_ALLOWED` must be a state independent from
+`AUDIO_FINISHING_COMPLETE`. Recommendation: `EXPORT_ALLOWED = true`
+whenever a valid, decodable file exists and existing technical QC
+(`run_post_render_media_qc`, unchanged) is PASS — regardless of whether
+audio finishing reached `COMPLETE` or landed in a `PARTIAL_*` state. A
+loudness shortfall alone must never block delivery of an otherwise-good
+render (TikTok/UGC users need reliable, non-blocking automation; many
+delivery platforms apply their own loudness normalization on ingest
+regardless). For `ABSTAINED`/`BLOCKED_SAFETY`, export the original,
+unmodified render (Audio Finishing is additive/best-effort and must
+never itself withhold an otherwise-valid deliverable) — matching this
+codebase's own established convention elsewhere (e.g. an invalidated
+render is preserved for diagnosis, never silently discarded).
+
+### STAGE 8 — Technical QC vs. finishing policy (confirmed correct, kept separate)
+
+D-254C's own simultaneous `TECHNICAL_QC_PASS` + `AUDIO_FINISHING_POLICY
+=OUT_OF_RANGE` is the CORRECT architecture, not a defect to reconcile.
+`run_post_render_media_qc` answers "is this file physically/structurally
+sound" (decode integrity, silence/freeze/black-frame/discontinuity
+checks); Audio Finishing policy answers "does the loudness/peak match V1
+commercial product targets." These are orthogonal authorities and must
+stay reported side by side, never collapsed into one boolean or allowed
+to influence each other's verdict.
+
+### STAGE 9 — Source-rescue scope classification (no DSP designed here)
+
+- Larger/graduated or multi-stage gain envelope: **P1** (a genuine
+  numeric-policy redesign, Product Owner decision).
+- Noise-floor analysis: **P1/P2** (new measurement capability).
+- Denoise: **OUT_OF_SCOPE for V1/near-term** — repeatedly and explicitly
+  forbidden by the existing D-249/D-251/D-253 firewall and this
+  directive's own restrictions.
+- Compression (dynamics): **P2** — same firewall.
+- Limiter: **P0/EXISTING** — already implemented (D-251), already used
+  when authorized; not a gap.
+- Dynamic/adaptive (non-flat) loudness normalization: **P1** — a real
+  architecture extension.
+- Source-level repair (re-record, mic technique, EQ at capture time):
+  **OUT_OF_SCOPE** — a human/manual concern, not an automatable V1/beta
+  item.
+
+None of these are P0-required. P0 is fully satisfied by the
+already-proven bounded correction plus the (not-yet-built) outcome/state
+contract this gate designs.
+
+### STAGE 10 — Beta blocker: **NO**
+
+A commercial beta editor may process normal inputs automatically and
+fail safely on extreme inputs, provided it surfaces a clear, honest
+quality/product state rather than silently claiming full success.
+Additional, material fact: **Audio Finishing (the entire D-247-D-254C
+stack) is still not wired into any live/shipped rendering path** —
+`audio_finishing_composition.py`'s own docstring and every gate since
+D-251 confirm it has never been connected to
+`process_universal_clean_cut_sources`/`pipeline.py`/`flow_b.py`/any
+workflow entry point. So today's live product cannot currently mislead
+any real user about audio finishing completeness — there is no live
+exposure yet. Lack of an automatic rescue path does not block beta of
+the *existing* product. It DOES become a genuine prerequisite the moment
+this capability is wired into any live/shipped path — the D-256 outcome
+contract should exist before that wiring happens, not after.
+
+### STAGE 11 — P0 closure criteria (evaluated against the directive's own candidate list)
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | measurement works | **PROVEN** (D-247 synthetic + D-254C real) |
+| 2 | policy works | **PROVEN** (D-249 synthetic + D-254C real, incl. real `CORRECTION_ALLOWED` adjacent pairs) |
+| 3 | normal-correctable audio reaches target safely | **PROVEN SYNTHETICALLY** (D-253); not yet proven on a real normal-range source — see Stage 12 |
+| 4 | limiter/peak safety works | **PROVEN** (D-251/D-253 synthetic + D-254C real peak prediction/verification) |
+| 5 | extreme sources detected | **PROVEN** (D-254C) |
+| 6 | extreme sources never receive unsafe correction | **PROVEN** (D-254C: bounded to +6 dB, real peak stayed 4 dB under ceiling) |
+| 7 | extreme sources return explicit PARTIAL/ABSTAIN state | **DATA PROVEN, PRODUCT STATE NOT YET BUILT** — this gate's own open item, see Stage 6 |
+| 8 | export semantics explicit | **NOT YET DESIGNED AS A FIRST-CLASS CONCEPT** until this gate (Stage 7) |
+| 9 | verification never fabricates pass | **PROVEN** (D-254C: `POLICY_OUT_OF_RANGE` correctly reported) |
+| 10 | real media proves at least one extreme case behaves correctly | **PROVEN** (D-254C itself) |
+
+6 of 10 fully proven; items 7-8 are exactly D-256's scope (designed here,
+not implemented); item 3 is addressed next.
+
+### STAGE 12 — Is another real RAW needed before P0 closure? **NO.**
+
+Synthetic normal-case proof (D-253) plus real extreme-case proof
+(D-254C) is sufficient. The gain-application mechanism
+(`volume=<n>dB` + `aformat=...` via `execute_audio_finishing_plan`) is
+IDENTICAL code regardless of the magnitude of `n`; D-254C already
+exercises that exact mechanism end to end on a real render, at the same
+maximum +6 dB magnitude a normal in-envelope correction would also use,
+against real codec/container/measurement variance a synthetic fixture
+cannot fully replicate. The only untested real-media variable —
+whether `measured + authorized_gain` lands inside [-15.0, -13.0] when
+the pre-loudness is already within the envelope — is pure arithmetic
+already proven correct twice (D-253 synthetic assertions; D-254C's own
+exact -32.2 + 6.0 = -26.2 real result). A second real RAW would exercise
+no code path not already proven. **Do not launch RAW.**
+
+### STAGE 13 — Level-1 real execution: deferred qualification item, not a P0 requirement
+
+Level-1's real, novel risk surface — measurement and policy evaluation
+on real segment structure/timing — is already proven on real media
+(D-254C: 4 genuine `CORRECTION_ALLOWED` pairs correctly identified from
+20 real eligible pairs). What remains unproven is EXECUTION (re-rendering
+with adjusted `audio_volume`), which requires raw per-clip source assets
+— a materially larger, separately-scoped capability (real per-source-
+asset retrieval) that does not exist today and was never part of this
+track's authorization. Level-1 execution itself is already fully proven
+in the synthetic domain (D-252/D-253). Since whole-video Level-2 is the
+dominant, always-active correction path and Level-1 is a supplementary
+refinement, gating P0 on Level-1 real-execution would conflate two
+genuinely separate scopes. **Recommend: deferred qualification item,
+not fabricated, not a P0 blocker.**
+
+### STAGE 14 — Commercial app scale (design only)
+
+The four-axis machine state (Stage 16) plus a per-job classification
+(`NORMAL_CORRECTABLE` / `EXTREME_UNDER_LEVEL` / `EXTREME_OVER_LEVEL` /
+`ABSTAINED` / `BLOCKED_SAFETY`) gives every downstream system one shared,
+deterministic vocabulary: **analytics** (aggregate real-world frequency
+of extreme sources across the user base); **retry/routing** (a future
+rescue service, if ever built, is routed to only by an explicit
+`SOURCE_RESCUE_REQUIRED`-eligible classification, never "everything");
+**support** (a ticket or in-app message can be generated directly from
+the same enum — e.g. "your audio was very quiet; we applied the maximum
+safe boost; consider recording closer to the mic" — without a bespoke
+heuristic); **UI warning** (a lightweight, non-blocking badge keyed off
+the same state, never a separate ad hoc check); **billing/cost control**
+(any future rescue path that costs extra provider/GPU compute must be
+gated behind this same explicit state and an opt-in flag, never silently
+triggered by a hidden threshold).
+
+### STAGE 15 — No silent retry: confirmed explicitly
+
+**No repeated +6 dB passes.** `MAX_AUTOMATIC_GAIN_CORRECTION_DB` is the
+TOTAL automatic authority for one finishing pass, not a per-attempt
+budget to spend multiple times — applying it twice would defeat its own
+safety rationale (amplifying noise floor/artifacts by up to 12+ dB
+cumulatively while never being authorized as such). `execute_audio_
+finishing_plan`'s own idempotence (`compute_execution_id` +
+`existing_record` shortcut) already prevents a duplicate identical call
+from re-applying gain within one execution, but nothing today prevents a
+NEW plan being generated from an ALREADY-FINISHED file's own measurement
+and unknowingly stacking a second +6 dB. **Design requirement flagged
+for D-256** (not fixed here, no code change this gate): any future
+outcome-contract or rescue design must ensure Level-2 plan generation
+always measures the ORIGINAL pre-finishing render, or explicitly detects
+and refuses to re-finish an already-finished file.
+
+### STAGE 16 — Canonical status model: four independent axes
+
+```
+EXECUTION_STATUS        -- EXISTING (D-251 vocabulary): did the DSP run, did ffmpeg succeed
+POLICY_COMPLETE         -- NEW: did the result land inside [-15.0,-13.0] LUFS AND <= -1.0 dBTP
+                           (== verification.loudness_in_target_range and .true_peak_within_ceiling)
+EXPORT_ALLOWED          -- NEW: is this file safe to deliver regardless of policy completeness
+                           (== a valid decodable file exists AND technical QC PASS)
+SOURCE_RESCUE_REQUIRED  -- NEW, always false in V1 (no rescue pipeline exists to route to);
+                           may be populated informationally now for analytics (Stage 14)
+                           even before any pipeline consumes it -- a D-256 design choice
+```
+
+No single boolean may collapse these. D-254C's own real result, expressed
+in this model: `EXECUTION_STATUS=SUCCESS`, `POLICY_COMPLETE=false`,
+`EXPORT_ALLOWED=true`, `SOURCE_RESCUE_REQUIRED=false` (V1 has no rescue
+pipeline to route to).
+
+### STAGE 17 — Next gate
+
+**D-256 — Audio Finishing Outcome / Product-State Contract, offline
+implementation.** Scope: a new, additive structured result type
+deterministically derived from already-existing fields (`whole_video_
+state`, `plan_status`, `ExecutionVerificationResult` fields, technical QC
+status) implementing the Stage 6 states and Stage 16 four-axis model —
+zero new DSP, zero new measurement, zero new numeric/threshold/policy
+value. Must also resolve its relationship to the existing, coarser,
+still-dormant D-024 `finishing_contract.py::FinishingResult` (binary
+`PASS`/`FAIL` only — insufficient for this model as-is): either extend
+that contract or explicitly document why Audio Finishing's outcome
+contract is a parallel, more granular one. Should also encode the Stage
+15 no-double-finishing safeguard as an explicit precondition check (not
+a policy/numeric change — a plan-generation input-provenance guard).
+
+### Confirmation
+
+No production `.py` file changed. No DSP change. No loudness
+normalization, gain-envelope, limiter-policy, compressor, denoise, hum-
+filter, render, or QC-authority change. No numeric or threshold change —
+all six canonical D-249 values remain exactly as approved. No RAW, no
+Modal, no RunPod, no provider.
+
+**Verdict: A — BOUNDED PARTIAL CORRECTION IS VALID V1 FAIL-SAFE
+BEHAVIOR — EXTREME SOURCES NEED EXPLICIT PRODUCT STATE, NOT MORE P0
+DSP — READY FOR OUTCOME-CONTRACT IMPLEMENTATION.**
+
+**Canonical status recommendation:** unchanged numerically; architecture
+recommendation recorded (this entry) pending Product Owner authorization
+of D-256's implementation scope.
+
+**Exact next gate:** D-256 — Audio Finishing Outcome / Product-State
+Contract (offline implementation). Not authorized or launched by this
+gate.
+
+**Decision entry reference:** this entry (D-255).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-256. DO NOT LAUNCH RAW.
