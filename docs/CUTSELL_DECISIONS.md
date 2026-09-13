@@ -66997,3 +66997,538 @@ Not authorized or launched by this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-259. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-259 — Visual Finishing Policy + Plan Design (offline forensic + design only, no video mutation)
+
+**Objective.** D-258 proved the Visual Finishing MEASUREMENT layer. This
+gate designs — does not implement — the V1 Visual Finishing POLICY +
+PLAN layer: what decides NO_CHANGE vs. a correction, the bounded action
+vocabulary, the plan/decision types, the safety firewalls, and every
+numeric value implementation would need, explicitly routed to the
+Product Owner rather than invented.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `8758ee7` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Method
+
+Searched `docs/CUTSELL_DECISIONS.md` and
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` for any existing
+canonical visual numeric value (face-center/scale/headroom thresholds,
+punch-in scale, max translation, crop-loss ceiling) before designing
+anything — **none exist**. Every prior mention of punch-in/reframe/crop
+in the decision log is D-257/D-258's own "MISSING, no numeric zoom
+percentage is canonical" finding, restated, never a canonized value.
+This confirms every numeric item in Stage 23 below is genuinely new
+territory, not an oversight of an existing constant.
+
+### Architecture preserved
+
+```
+VISUAL MEASUREMENT (D-258, EXISTING)
+    -> VISUAL POLICY (this gate's design)
+        -> VISUAL PLAN (this gate's design)
+            -> FUTURE RENDERER EXECUTION (MISSING-FUTURE)
+                -> FUTURE POST-RENDER VISUAL QC (MISSING-FUTURE)
+```
+
+### Policy owner (Stage 1)
+
+New, dedicated module recommended: `cutsell_worker/visual_finishing_
+policy.py` — mirrors `audio_finishing_policy.py`'s naming and placement
+exactly. `render.py` and the existing MediaPipe authorities
+(`local_performance.py`, `speech_visual_microtrim.py`) receive zero
+logic from this design.
+
+### VisualFinishingPlan design (Stage 2)
+
+```
+VisualFinishingPlan (frozen)
+  policy_version: str
+  source_id: str | None
+  clip_ids: tuple[str, ...]
+  clip_measurement_references: tuple[VisualClipMeasurement, ...]
+  join_measurement_references: tuple[VisualJoinMeasurement, ...]
+  clip_decisions: tuple[VisualClipPolicyDecision, ...]
+  join_decisions: tuple[VisualJoinPolicyDecision, ...]
+  abstentions: tuple[str, ...]
+  warnings: tuple[str, ...]
+  reasons: tuple[str, ...]
+  provenance: dict
+  plan_status: str
+```
+
+Per-clip and per-join INTENT (crop/reframe/punch-in/scale-target/
+position-target) lives on the two decision types below, not flattened
+onto the plan itself — mirrors `AudioFinishingPlan.adjacent_take_
+adjustments` holding a tuple of per-pair decisions rather than one
+global set of fields. No raw ffmpeg string anywhere in any of these
+types (verified as a design constraint, to be enforced by a structural
+test at implementation time exactly like D-256/D-258's own).
+
+### Clip decision type (Stage 21)
+
+```
+VisualClipPolicyDecision (frozen)
+  clip_id: str | None
+  clip_measurement_reference: VisualClipMeasurement
+  action: str                      # VISUAL_ACTION_*
+  evidence_state: str              # SUFFICIENT / INSUFFICIENT / AMBIGUOUS
+  reasons: tuple[str, ...]         # closed vocabulary only, see Stage 30
+  safety_blockers: tuple[str, ...]
+  reframe_authorized: bool
+  crop_intent: str | None          # symbolic only, e.g. "CENTER_ON_FACE" -- never raw ffmpeg
+```
+
+Covers: face already clipped in source (flag, no corrective crop can
+safely resolve a pre-existing clip without more evidence -> typically
+`NO_CHANGE`/`ABSTAIN`, never a MORE aggressive crop), subject severely
+off-frame (`STATIC_REFRAME` candidate, gated on Stage 23's numeric
+band), multiple faces (`BLOCKED_MULTI_FACE`), no face
+(`ABSTAIN_INSUFFICIENT_EVIDENCE`, consistent with D-258's
+`MEASUREMENT_STATUS_NO_FACE`), unsupported orientation (`UNKNOWN`,
+deferring to the existing renderer's own letterbox behavior), product-
+safety uncertainty (`BLOCKED_PRODUCT_SAFETY_UNKNOWN`).
+
+### Join decision type (Stage 20)
+
+```
+VisualJoinPolicyDecision (frozen)
+  left_clip_id: str | None
+  right_clip_id: str | None
+  join_measurement_reference: VisualJoinMeasurement
+  action: str
+  evidence_state: str
+  reasons: tuple[str, ...]
+  safety_blockers: tuple[str, ...]
+  scale_target: float | None          # populated only once PO-approved policy authorizes one
+  position_target_x: float | None
+  position_target_y: float | None
+  punch_in_authorized: bool
+```
+
+### Action vocabulary (Stage 3)
+
+```
+VISUAL_ACTION_NO_CHANGE
+VISUAL_ACTION_STATIC_REFRAME
+VISUAL_ACTION_PUNCH_IN
+VISUAL_ACTION_SCALE_MATCH
+VISUAL_ACTION_POSITION_MATCH
+VISUAL_ACTION_SCALE_AND_POSITION_MATCH
+VISUAL_ACTION_ABSTAIN_INSUFFICIENT_EVIDENCE
+VISUAL_ACTION_BLOCKED_FACE_SAFETY
+VISUAL_ACTION_BLOCKED_MULTI_FACE
+VISUAL_ACTION_BLOCKED_PRODUCT_SAFETY_UNKNOWN
+VISUAL_ACTION_UNKNOWN
+```
+
+String-constant vocabulary, mirroring `GAIN_STATE_*`'s exact
+SCREAMING_SNAKE_CASE convention. No action is implemented by this gate.
+
+### Plan-status vocabulary (Stage 22)
+
+```
+PLAN_STATUS_READY_NO_CHANGE
+PLAN_STATUS_READY_FOR_VISUAL_CORRECTION
+PLAN_STATUS_PARTIAL
+PLAN_STATUS_ABSTAIN
+PLAN_STATUS_BLOCKED
+PLAN_STATUS_UNKNOWN
+```
+
+Derivation (design, mirrors `_derive_plan_status`'s ladder pattern): all
+decisions `NO_CHANGE` -> `READY_NO_CHANGE`; any decision authorizes a
+correction and none are `BLOCKED_*` -> `READY_FOR_VISUAL_CORRECTION`; a
+mix of authorized-correction and abstained/no-change decisions ->
+`PARTIAL`; all decisions `ABSTAIN_*` -> `ABSTAIN`; any decision is
+`BLOCKED_*` anywhere in the plan -> `BLOCKED` (a single blocking
+decision makes the whole plan `BLOCKED`, the safety-first posture,
+itself a structural precedence choice this gate makes now, not a number
+requiring Product Owner input).
+
+### P0 / P1 / P2 scope (Stage 4/5)
+
+**P0 (architecture-ready now; execution gated on Stage 23 numbers):**
+avoid clipping the creator's face (safety firewall, ready now — no
+number needed to BLOCK); reduce obvious framing discontinuity between
+adjacent takes (intent is P0, the numeric definition of "obvious" is
+Product-Owner-gated); deterministic static reframe where safe (same
+gating); deterministic punch-in only where safe (same gating); preserve
+timing/order (**already met** — Boundary/Pacing/Freeze untouched, a
+structural firewall, not a new build); visual QC observability
+(partially exists per D-258, extending to plan-level status is P0
+intent). Preserve valid 9:16 framing is **already met structurally**
+by the existing letterbox/pad renderer (D-257) — P0 here means
+verifying it stays true once a crop authority exists, not building a
+new correction.
+
+**Not all P0 candidates are equally "ready": the ARCHITECTURE for all
+seven is P0-appropriate; the EXECUTION of the discontinuity-triggered
+ones (reframe, punch-in, scale/position match) is blocked on Stage 23's
+Product-Owner numeric decisions — this is the central finding of this
+gate.**
+
+**P1:** exposure matching, color matching, advanced gaze continuity
+(unchanged from D-257).
+
+**P2:** cinematic polish, advanced motion matching, advanced subject
+tracking (unchanged from D-257).
+
+**Out of scope (permanent):** Smart Sales Funnel commercial reasoning
+(Stage 30).
+
+### No-change bias (Stage 17)
+
+`NO_CHANGE` is the floor/default. Every other action requires evidence
+to CROSS a Product-Owner-approved threshold — "evidence required to
+deviate," never "deviate unless evidence against" — mirroring Audio
+Finishing's own `GAIN_STATE_NO_CHANGE_NEEDED` floor exactly. Core
+Talking Head UGC editing is not an auto-effects engine; small,
+ambiguous deltas always resolve to `NO_CHANGE`.
+
+### Face safety (Stage 6)
+
+Literal frame-boundary safety only, no invented margin: a policy action
+may never be authorized if the eventual crop/reframe/punch-in window
+would (a) fail to fully contain the measured face bbox, (b) move the
+face bbox partly or fully outside the frame, or (c) create a headroom
+value that is geometrically invalid (negative, or the face bbox
+touching/exceeding the top edge as a DIRECT RESULT of the correction —
+distinct from a pre-existing source-clip clip, which is a different,
+flagged condition). This is a plan-time INVARIANT recorded now for a
+future execution gate to enforce against its own concrete crop-window
+math — it cannot be checked against nothing today since no crop
+geometry exists yet, so it is documented as a binding constraint on
+D-260+, not a runnable check in this gate.
+
+### Multi-face policy (Stage 7)
+
+**V1 exact state: `BLOCKED_MULTI_FACE`** (the directive's own listed
+vocabulary item, chosen over a generic `ABSTAIN` because it is more
+diagnostically specific for analytics/support routing — matches D-256's
+own philosophy of specific machine-readable states over generic ones).
+Any clip/join with `multiple_faces_detected = True` never receives a
+correction action other than `NO_CHANGE`; no tracking/assignment logic
+is designed or implied.
+
+### Product safety (Stage 8)
+
+**Recommend option B** (defer all crop/reframe/punch-in execution until
+a real product bbox exists), not C, for V1: the only currently-real
+product signal (`MediaSignals.product_visibility`, an LLM-scored 0-1
+scalar) defaults to `0.0` under `NoopVisualProvider` — **that default is
+evidence of "never measured," not evidence of "no product present."**
+Treating it as a safe negative control (option C's mechanism) would
+silently authorize crops on unmeasured footage, which is exactly the
+unsafe path CLAUDE.md's "when uncertain, KEEP" doctrine forbids applied
+to the visual domain. **V1 posture: any action classified as a crop/
+reframe/punch-in is `BLOCKED_PRODUCT_SAFETY_UNKNOWN` whenever no real
+(non-Noop), reliable product-bbox evidence exists — which is always,
+today.** Option C's scalar-firewall mechanism is recorded as a *possible
+future refinement* once a real, validated (non-Noop) product-visibility
+signal's reliability as a genuine negative control is separately
+established — not adopted, not authorized, not scheduled by this gate.
+Smart Sales Funnel product-emphasis logic remains entirely separate
+(Stage 30).
+
+### Caption-safe area (Stage 9)
+
+P0 policy **preserves the current center-biased letterbox assumption**
+and **defers caption-aware repositioning** entirely — no numeric
+safe-region policy invented. A future hook is exposed structurally, not
+numerically: the plan's `warnings` vocabulary carries a
+`CAPTION_SAFE_REGION_NOT_ESTABLISHED` code (Stage 30's closed
+vocabulary) so a later gate can wire real caption-aware logic without a
+plan-schema break; no geometry is guessed today.
+
+### Framing-continuity policy (Stage 10)
+
+Built entirely on D-258's real deltas (`face_center_dx/dy`,
+`face_area_ratio_delta`, `headroom_delta`). **No numeric threshold
+exists anywhere in this repository or its docs for what constitutes an
+"obvious discontinuity"** (confirmed by direct search, restated above).
+**PRODUCT_OWNER_NUMERIC_DECISION_REQUIRED** for all four — bounded
+option ranges provided in Stage 24 below.
+
+### Punch-in policy (Stage 11)
+
+Legitimate core-V1 uses: conceal a jump cut, alternate visual scale
+across adjacent talking-head clips, stabilize perceived framing.
+**Never** allowed, structurally (Stage 30's closed reasons vocabulary
+makes this a hard firewall, not a style guideline): sales-beat
+emphasis, CTA emphasis, product-selling intelligence — all Smart Sales
+Funnel, out of scope permanently.
+
+### Punch-in numeric decisions (Stage 12)
+
+Punch-in scale %, max punch-in scale, minimum clip duration for
+applicability: all **PRODUCT_OWNER_DECISION_REQUIRED** (Stage 23).
+Consecutive-punch-in alternation behavior is a QUALITATIVE policy rule,
+not itself a number (e.g. "never punch in on two consecutive joins") —
+also **PRODUCT_OWNER_DECISION_REQUIRED**, recorded as a rule-shape
+decision distinct from the four numeric ones.
+
+### Static-reframe policy (Stage 13)
+
+Six states, all already enumerated in the action/blocker vocabulary:
+already acceptable -> `NO_CHANGE`; reframe allowed -> `STATIC_REFRAME`
+(pending Stage 23 numeric authorization); blocked by face safety ->
+`BLOCKED_FACE_SAFETY`; blocked by multi-face -> `BLOCKED_MULTI_FACE`;
+blocked by product-safety uncertainty -> `BLOCKED_PRODUCT_SAFETY_
+UNKNOWN`; insufficient evidence -> `ABSTAIN_INSUFFICIENT_EVIDENCE`. No
+execution.
+
+### Scale-match policy (Stage 14)
+
+**Central design finding:** the measurement layer alone cannot
+distinguish an unintentional discontinuity (camera nudged between
+retries of the same take) from an intentional close/far shot change
+(a creator deliberately switching framing) — building such a classifier
+would itself be a NEW HEURISTIC, forbidden by this gate's own scope
+banner. The safe design is that **the Product-Owner-approved numeric
+band ITSELF becomes the safety boundary**: `SCALE_MATCH` only ever
+fires when the scale delta falls inside the approved "probably
+accidental" band; any delta larger than that (more likely an
+intentional shot change) always resolves to `ABSTAIN_INSUFFICIENT_
+EVIDENCE`, never a forced correction. No semantic intent is fabricated
+anywhere.
+
+### Position-match policy (Stage 15)
+
+Identical reasoning applied to horizontal (`face_center_dx`) and
+vertical (`face_center_dy`) deltas independently — each has its own
+Product-Owner band (Stage 23 items 1/2); a delta inside its band ->
+`POSITION_MATCH`; outside -> abstain.
+
+### Combined scale + position (Stage 16)
+
+**Yes** — a single `VisualJoinPolicyDecision` may authorize
+`SCALE_AND_POSITION_MATCH` when both deltas independently fall inside
+their own approved bands and no safety block applies. **Deterministic
+priority ladder (binding, matches the directive's own order exactly):**
+
+```
+1. face safety        (BLOCKED_FACE_SAFETY)
+2. product safety      (BLOCKED_PRODUCT_SAFETY_UNKNOWN)
+3. crop-bound feasibility (geometric feasibility of any candidate window)
+4. continuity improvement (the actual SCALE_MATCH / POSITION_MATCH /
+   SCALE_AND_POSITION_MATCH / STATIC_REFRAME / PUNCH_IN decision)
+```
+
+No visual action may violate an earlier tier to achieve a later tier's
+improvement — a strict lexicographic ladder, mirroring D-249's/D-256's
+own status-ladder precedent exactly.
+
+### Exposure / color P0 status (Stage 18)
+
+**Measurement available now (D-258); correction stays P1, confirmed.**
+The V1 action vocabulary (Stage 3) deliberately contains no
+`EXPOSURE_MATCH`/`COLOR_MATCH` action — those correction TYPES named in
+D-257's Stage 12 design remain entirely out of this policy layer's
+scope for V1.
+
+### True gaze (Stage 19)
+
+No true gaze measurement exists (D-257/D-258, unchanged). Gaze is
+**explicitly excluded from P0 policy** — no gaze-based action exists in
+the V1 vocabulary; documented limitation, not silently dropped.
+
+### Numeric policy audit (Stage 23) — every value required before implementation
+
+| # | Decision | Status |
+|---|---|---|
+| 1 | Face-center discontinuity threshold X (horizontal) | PRODUCT_OWNER_DECISION_REQUIRED |
+| 2 | Face-center discontinuity threshold Y (vertical) | PRODUCT_OWNER_DECISION_REQUIRED |
+| 3 | Face-scale discontinuity threshold (area_ratio delta) | PRODUCT_OWNER_DECISION_REQUIRED |
+| 4 | Headroom discontinuity threshold | PRODUCT_OWNER_DECISION_REQUIRED |
+| 5 | Punch-in scale (%) | PRODUCT_OWNER_DECISION_REQUIRED |
+| 6 | Max punch-in scale (hard ceiling) | PRODUCT_OWNER_DECISION_REQUIRED |
+| 7 | Reframe max translation | PRODUCT_OWNER_DECISION_REQUIRED |
+| 8 | Max visual-correction crop loss (% of original frame area) | PRODUCT_OWNER_DECISION_REQUIRED |
+| 9 | Minimum reliable face-detection rate (clip eligibility floor) | PRODUCT_OWNER_DECISION_REQUIRED |
+| 10 | Minimum clip duration for punch-in applicability | PRODUCT_OWNER_DECISION_REQUIRED |
+
+**None are `ALREADY_CANONICAL`** (confirmed by direct search — no such
+value exists anywhere in this repository or its docs). **None are
+`NOT_REQUIRED`** — every one gates a real V1 P0 execution path
+(Stage 4). No value is invented or defaulted by this gate.
+
+### Recommendation options (Stage 24) — RECOMMENDATION ONLY, none canonized
+
+| # | Decision | Conservative (subtle) | Balanced | Aggressive |
+|---|---|---|---|---|
+| 1 | Face-center X threshold (normalized frame-width units) | 0.03–0.05 | 0.015–0.03 | 0.008–0.015 |
+| 2 | Face-center Y threshold (normalized) | 0.03–0.05 | 0.015–0.03 | 0.008–0.015 |
+| 3 | Face-scale threshold (relative area_ratio change) | 40–60% | 20–40% | 10–20% |
+| 4 | Headroom threshold (normalized) | 0.08–0.12 | 0.04–0.08 | 0.02–0.04 |
+| 5 | Punch-in scale | 5–8% | 8–15% | 15–25% |
+| 6 | Max punch-in scale (absolute ceiling) | 15–20% | 20–25% | 25–30% |
+| 7 | Reframe max translation (normalized) | 0.05–0.08 | 0.08–0.15 | 0.15–0.25 |
+| 8 | Max crop loss (% of original frame area) | 5–10% | 10–20% | 20–30% |
+| 9 | Min face-detection rate floor | 0.9–1.0 | 0.7–0.9 | 0.5–0.7 |
+| 10 | Min clip duration for punch-in | 1.5–2.5s | 0.8–1.5s | 0.4–0.8s |
+
+For Talking Head UGC specifically: **conservative** minimizes any risk
+of a visible/artificial-feeling correction at the cost of leaving more
+real discontinuities uncorrected; **balanced** targets the
+mid-magnitude discontinuities most likely to read as sloppy editing
+without touching plausible intentional framing choices; **aggressive**
+corrects more but raises the risk of "fighting" an intentional creative
+choice or introducing a perceptible zoom/crop artifact on typical
+phone-shot UGC source resolution. No option is recommended over another
+here — this table exists to bound the Product Owner's decision, not to
+make it.
+
+### Visual safety matrix (Stage 25)
+
+| CONDITION | EVIDENCE | POLICY STATE | ALLOWED ACTION | BLOCKED ACTION | REASON |
+|---|---|---|---|---|---|
+| Good framing | Deltas within PO band (once set) | READY_NO_CHANGE | NO_CHANGE | any correction | no evidence of discontinuity |
+| Face clipped (source) | `face_bbox_clipped_*=True` | BLOCKED | none that worsen clipping | STATIC_REFRAME/PUNCH_IN that reduce visible face area | face-safety firewall |
+| No face detected | `MEASUREMENT_STATUS_NO_FACE` | ABSTAIN | NO_CHANGE only | any face-anchored correction | no anchor to correct against |
+| Multiple faces | `multiple_faces_detected=True` | BLOCKED | NO_CHANGE only | all correction actions | fail-closed: cannot single-face-optimize safely |
+| Large face-position delta | `face_center_dx/dy` beyond PO band | ABSTAIN (beyond band) / READY_FOR_VISUAL_CORRECTION (within band) | POSITION_MATCH within band | forced correction beyond band | intentional-shot-change ambiguity |
+| Large face-scale delta | `face_area_ratio_delta` beyond PO band | same pattern | SCALE_MATCH within band | forced correction beyond band | same ambiguity |
+| Headroom delta beyond band | `headroom_delta` beyond PO band | same pattern | STATIC_REFRAME/POSITION_MATCH within band | forced correction beyond band | same |
+| Product visibility unknown/Noop-default | `product_visibility` unmeasured | BLOCKED | NO_CHANGE only | any crop/reframe/punch-in | cannot verify a crop wouldn't exclude an unlocated product |
+| Product presence scalar high (real, non-Noop) | `product_visibility>0`, real provider | BLOCKED | NO_CHANGE only | any crop/reframe/punch-in | scalar presence ≠ location; still no bbox |
+| Caption-safe unknown | `caption_safe_status=NOT_ESTABLISHED` | proceeds with existing assumption | actions not dependent on caption geometry | actions assuming a specific safe region | no established region to reason about |
+| Portrait input | `orientation=PORTRAIT` | normal evaluation | any authorized action | — | matches expected pipeline target |
+| Landscape input | `orientation=LANDSCAPE` | UNKNOWN (flagged) | NO_CHANGE only | reframe/punch-in tuned for portrait assumptions | current renderer already letterboxes; portrait-tuned correction not proven safe here |
+| Square input | `orientation=SQUARE` | UNKNOWN (flagged) | NO_CHANGE only | reframe/punch-in | same reasoning |
+
+### Renderer execution contract (Stage 26, design only)
+
+Future renderer operations this plan would eventually authorize:
+`scale` (technical fit, already exists, unchanged), `crop` (NEW — a
+symbolic, normalized rectangular window `{x_min, y_min, x_max, y_max}`,
+never a raw `crop=` filter string), `pad` (already exists, retained for
+residual aspect handling after any crop), `translate crop window` (a
+position offset, NEW, symbolic), `static zoom` (a constant scale factor
+for a punch-in span, NEW, symbolic). The plan expresses these as
+structured INTENT only (mirroring `AudioFinishingPlan.authorized_
+whole_video_gain_db`'s own "authorize a number, never a filter string"
+discipline) — the renderer alone would translate intent into the actual
+ffmpeg filter chain at execution time. This module never emits ffmpeg
+syntax, preserving the Policy-decides/Renderer-executes doctrine
+(D-257 Stage 15, D-249 §18.3) exactly.
+
+### Idempotence / provenance design (Stage 27, schema only)
+
+Mirrors D-256's double-finishing firewall exactly: a deterministic
+`visual_finishing_identity` (SHA-256 over source content identity +
+`policy_version` + the authorized plan's own decision fields + output
+content identity when available, matching `compute_finishing_identity`'s
+established pattern) and a `decide_visual_refinishing` function
+returning the same four-way vocabulary (`NEW_SOURCE` /
+`SAME_SOURCE_SAME_POLICY_ALREADY_FINISHED` / `SAME_SOURCE_NEW_POLICY_
+VERSION` / `FINISHED_OUTPUT_SUPPLIED_AS_NEW_SOURCE`) — preventing a
+punch-in-on-punch-in or crop-on-crop stack. Schema design only; no code
+written by this gate.
+
+### Commercial multi-user safety (Stage 28)
+
+By design: stateless (pure functions of already-computed measurement
+objects), job-local (no shared state across jobs, matching D-258's own
+per-call MediaPipe-instance discipline), immutable-input-oriented
+(frozen dataclasses throughout), tenant-safe (a plan's only inputs are
+exactly one job's own measurements — no cross-tenant data path exists
+or is proposed), deterministic (same measurement inputs + same
+`policy_version` -> same plan, always). No shared face/tracking state
+across jobs is designed or implied anywhere in this gate.
+
+### Language independence (Stage 29)
+
+Confirmed, unchanged from D-257/D-258: every policy concept here
+(geometry, luma, color, safety) is language-independent by
+construction. English/Spanish scope unchanged; Spanglish/code-switching
+remains out of scope V1; no language-specific Visual Finishing logic
+proposed.
+
+### Smart Sales Funnel firewall (Stage 30)
+
+The closed reasons/warnings vocabulary IS the firewall mechanism, not
+just a stated rule: `reasons`/`warnings` fields draw only from a fixed
+enum of visual-quality/safety codes (e.g.
+`REASON_FACE_POSITION_DISCONTINUITY`, `REASON_FACE_SCALE_DISCONTINUITY`,
+`REASON_HEADROOM_DISCONTINUITY`, `REASON_JUMP_CUT_CONCEALMENT`,
+`REASON_INSUFFICIENT_FACE_EVIDENCE`, `REASON_MULTI_FACE_PRESENT`,
+`REASON_PRODUCT_SAFETY_UNVERIFIED`,
+`WARNING_CAPTION_SAFE_REGION_NOT_ESTABLISHED`,
+`REASON_ORIENTATION_UNSUPPORTED_FOR_CORRECTION`) — none of which can
+express "hook," "CTA," "benefit," or any commercial-emphasis concept.
+A future maintainer cannot smuggle Smart Sales Funnel logic into this
+vocabulary without adding a conspicuously out-of-place new constant,
+making the firewall structural, not just a documented intention.
+
+### First implementation gate (Stage 31)
+
+**D-260 — Visual Finishing Policy Contract + Plan Generation, offline
+implementation, no video mutation** — implements exactly the types and
+vocabularies designed in this gate, generating real `VisualFinishingPlan`
+objects from D-258's real measurements. **Gated on Product Owner
+approval of the Stage 23/24 numeric decisions** — without them, D-260
+can still implement the full NO_CHANGE/ABSTAIN/BLOCKED_* paths safely
+(none of those require a number), but cannot implement any of
+`STATIC_REFRAME`/`PUNCH_IN`/`SCALE_MATCH`/`POSITION_MATCH`/
+`SCALE_AND_POSITION_MATCH` until the thresholds exist. Not implemented
+by this gate.
+
+### Verdict
+
+**A. SAFE VISUAL FINISHING POLICY ARCHITECTURE DEFINED — P0/P1/P2
+BOUNDARIES DEFINED — PRODUCT OWNER NUMERIC DECISIONS IDENTIFIED — READY
+FOR APPROVAL THEN PLAN-GENERATION IMPLEMENTATION.**
+
+Rationale: B is wrong — no numeric value is already canonical anywhere
+(confirmed by direct search), so a full policy is not yet safely
+derivable without new Product-Owner input. C is wrong — the D-258
+measurement foundation is sufficient to build a SAFE architecture
+around (real face bbox/position/scale/luma/color/join facts exist);
+what is missing is execution-enabling NUMBERS, not measurement
+capability itself, and the architecture safely defaults to
+NO_CHANGE/ABSTAIN/BLOCKED_* in their absence. D is wrong — no conflict
+found; this slots cleanly after D-258 in the same
+Measurement->Policy->Plan->Execution->QC chain Audio Finishing already
+proved.
+
+### Confirmation
+
+Design/forensic only. No `cutsell_worker/*.py` file, no `tests/*.py`
+file was created or modified by this gate. No video mutated. No render
+policy changed. No numeric recommendation was canonized — every value
+in Stage 24 is explicitly RECOMMENDATION ONLY, bounded, not adopted. No
+new threshold or heuristic is active anywhere in the codebase as a
+result of this gate. No RAW, no Modal, no RunPod, no provider call.
+
+**Canonical status:** unchanged for every closed track (Freeze/
+Boundary/Pacing V2/Handle-Aware Pacing/Audio Finishing P0 remain
+CLOSED; Audio Join remains SAFE/PARTIALLY QUALIFIED). Visual Finishing
+MEASUREMENT remains EXISTS (offline-proven, D-258); Visual Finishing
+POLICY architecture is now DESIGNED (this entry) but not implemented;
+Visual Finishing PLAN/RENDERER-EXECUTION/POST-RENDER-VISUAL-QC remain
+MISSING-FUTURE.
+
+**Exact Product Owner decisions required (restated from Stage 23/24):**
+the 10 numeric values in the audit table above, each with a bounded
+conservative/balanced/aggressive recommendation range, plus the
+punch-in consecutive-alternation qualitative rule.
+
+**Exact next gate:** D-260 — Visual Finishing Policy Contract + Plan
+Generation (offline implementation, no video mutation) — not
+implemented by this gate, and its correction-authorizing paths remain
+blocked until the Product Owner numeric decisions above are made.
+
+**Decision entry reference:** this entry (D-259).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-260.
+
+WAIT FOR PRODUCT OWNER APPROVAL OF VISUAL NUMERIC POLICY.
