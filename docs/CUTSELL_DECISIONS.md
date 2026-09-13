@@ -71946,3 +71946,422 @@ Then STOP.
 
 DO NOT IMPLEMENT D-273.
 DO NOT LAUNCH RAW.
+
+## D-273 — Source Normalization Architecture / Policy Design (offline forensic + design only)
+
+**Objective.** Post D-272A (live early source format gate, Verdict A,
+`FORMAT NORMALIZATION` the current remaining P0 subtrack). Define
+CutSell's canonical normalized source-media contract and the smallest
+safe normalization architecture, so a `NORMALIZE_REQUIRED` source can
+become safe canonical media, re-enter the D-272 policy, and become
+`ACCEPT`. Design only -- no transcode, no pixel rotation, no HDR
+tonemap, no VFR->CFR, no HEVC->H264, no 10-bit->8-bit, no renderer/
+Boundary/Freeze/Pacing/Audio/Visual-Finishing/QC-authority change.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `42d10f4` (exact expected
+match, D-272A), clean tree -- confirmed before this gate began.
+
+### Grounding (read/inspected before designing)
+
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` Section 2 (Layer 1
+Media Perception: "ffmpeg/ffprobe media integrity" is evidence-only,
+upstream of editorial membership; Layer 7 Boundary: FFmpeg executes
+ranges, Boundary owns them; Layer 8: downstream QC diagnoses/routes,
+never edits) and Section 4 (the two Watch+Listen roles) place source
+normalization architecturally at/before Layer 1 -- a media-fidelity
+precondition, never an editorial authority, matching D-272A's own
+placement before `process_local_sources`.
+
+Real source inspection, not assumption: `render.py`'s every ffmpeg
+command unconditionally applies `format=yuv420p` (video) and
+`aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo`
+(audio) regardless of source properties, at `RENDER_FPS_DEFAULT = 30`,
+1080x1920 (`export_job.py`'s `_RENDER_WIDTH`/`_RENDER_HEIGHT`), encoded
+`libx264`/`aac`, `RENDER_FFMPEG_TIMEOUT_SEC = 1200.0`. No renderer
+command sets `-color_primaries`/`-color_trc`/`-colorspace` at all (a
+real, pre-existing, adjacent gap -- output color tagging relies on
+decoder-side convention, not something this gate's own scope touches).
+`visual_finishing_measurement.py` has its OWN independent
+`_probe_rotation_degrees` (a second, separate rotation reader from
+D-271's own classification-time one) -- confirms a real, currently
+divergence-risking duplication that source-level rotation normalization
+would eliminate by construction (post-normalization, both readers see
+"no rotation" since the metadata is gone). `audio_finishing_measurement.py`
+measures whatever sample rate/channels the source actually has -- it does
+not assume 48k/stereo, confirming source-level audio normalization is not
+required for it. `uploads.py`'s `ALLOWED_VIDEO_EXTENSIONS` already rejects
+MKV/AVI at upload (`.mp4/.mov/.m4v/.webm` only), consistent with D-270's
+own finding. Dockerfiles confirm ffmpeg is `apt-get install`ed on a
+registry base image, unchanged since D-271's own capability-provenance
+finding. This sandbox's ffmpeg confirms both `tonemap` and `zscale`
+filters exist (`ffmpeg -filters`) -- real, but explicitly local-sandbox
+evidence only, never production-verified, per D-271's own binding
+discipline. No file named after "media reality tests" exists in `tests/`
+-- an honest gap, not fabricated.
+
+### Stage 1-4 -- canonical normalized media contract
+
+`CanonicalSourceMediaContract` (design, not yet typed in code):
+**container MP4** (renderer's own implicit output container; `uploads.py`
+already treats MP4/MOV/M4V/WEBM as the QuickTime-plus-WEBM allowed set;
+MP4 is the most universal re-mux/re-encode target and needs no new
+tooling). **Video codec H.264/AVC** (renderer encodes exclusively via
+`libx264`; D-272's own capability-gating already treats H.264 as
+ungated/native; universal decode ubiquity). **Pixel format/bit depth:
+8-bit yuv420p** (the renderer's own `format=yuv420p` filter already
+assumes this unconditionally -- today HDR/10-bit sources are SILENTLY
+naively clipped to this by the same filter with no real tonemap, which
+is the actual D-270 P0 defect this gate designs around, not merely "not
+formatted correctly"). **Orientation:** physical pixels already correct,
+rotation metadata 0/absent (Stage 5). **Color: BT.709 primaries/transfer/
+matrix, tv range** -- the de facto SDR web/mobile standard and the only
+color model any downstream authority (renderer, Visual Finishing) is
+built to assume; NOT independently re-verified against renderer OUTPUT
+tagging (the renderer itself never tags color metadata either, a
+pre-existing, separate, unaddressed convention this gate does not widen
+or fix). **Canonical FPS policy:** see Stage 7/8 (deliberately NOT a
+flat "must be 30fps" rule). **Audio:** see Stage 18 (deliberately NOT
+normalized at the source layer).
+
+### Stage 5/6 -- orientation and rotation transforms
+
+Goal: physical pixels correctly oriented, rotation metadata stripped to
+0/absent after normalization -- exactly D-271's own canonical
+"coded 1920x1080 + rotation 90 -> display 1080x1920" example, now
+applied to pixels instead of merely classified. Conceptual mapping
+(well-established ffmpeg semantics, no command written/executed):
+0 -> no-op; 90 -> a 90-degree physical rotation in the direction implied
+by the source's own DISPLAY_MATRIX/ROTATE_TAG sign convention; 180 -> a
+180-degree rotation (two 90s, or a combined flip); 270 -> the opposite
+90-degree direction from the 90 case. After the transform, coded
+dimensions become the display dimensions and no rotation tag is written
+to the output.
+
+### Stage 7/8 -- frame-rate normalization and canonical FPS
+
+Real finding, not assumption: the renderer's own per-segment `fps=`
+filter ALREADY retimes every accepted source (24/30/60fps alike) to the
+render's own 30fps at RENDER TIME today, and every editorial timing
+authority (`probe_media`/`SourceMediaProfile`, ASR, Boundary) operates on
+real-time float durations/timestamps, never frame indices. **Recommendation:
+CFR sources of any real rate (24/30/60/etc.) remain ACCEPT, untouched by
+source normalization** -- forcing an extra CFR-to-CFR resample before the
+renderer's own resample would only add redundant re-encode passes with no
+correctness benefit. **Only LIKELY_VFR/VFR sources require normalization**
+(VFR's real problem is unpredictable frame timing, not "the wrong number");
+the normalized output's target rate should be the SOURCE's OWN measured
+average rate (D-271's `avg_frame_rate`), not a forced 30fps -- the
+renderer's own later 30fps conversion still happens exactly as today, so
+this gate does not assume normalized sources must always be 30fps (per
+the directive's own explicit instruction).
+
+### Stage 9/10 -- VFR->CFR strategy and A/V sync
+
+Timestamp/PTS-driven (never frame-count-driven): a CFR video track
+resampled to the source's own measured average rate by duplicating/
+dropping frames according to real PTS positions (conceptually `-vsync
+cfr`/`fps=<measured_avg_fps>`), audio left untouched in timing (video-
+side resampling alone) so speech alignment is never shifted by the video
+transform. Verification reuses the SAME measured-duration-comparison
+discipline D-097 Priority C already established for dead-air source-vs-
+render reconciliation, applied here as a RELATIVE check (does normalized
+A/V duration drift exceed what the ORIGINAL source already had) rather
+than an invented absolute tolerance -- no new numeric threshold.
+
+### Stage 11-14 -- HDR strategy
+
+The hardest call in this gate, decided from real evidence, not
+convention. CutSell's entire pipeline is SDR-only today (confirmed: no
+HDR-aware code path exists anywhere in `render.py`/Visual/Audio
+Finishing); D-270 already found HDR sources are TODAY silently, naively
+clipped to 8-bit yuv420p with no real tonemap -- the actual defect, not
+merely a formatting gap. Given iPhone HDR capture (HLG/Dolby-Vision-
+adjacent) is a common DEFAULT on modern iPhones, and CutSell's own V1
+scope targets ordinary iPhone/Android UGC (Stage 48), outright rejecting
+all HDR would reject a real, non-theoretical share of user uploads.
+**Recommendation: Option A -- tone-map PQ and HLG to canonical BT.709
+SDR**, conditional on a production tonemap-capability confirmation using
+the SAME `RuntimeCapabilityInput`-style capability-gate discipline D-272
+already established for HEVC/AV1 (a new `tonemap_available` field,
+default unconfirmed) -- until confirmed, PQ/HLG remain
+`INSUFFICIENT_EVIDENCE`/blocked exactly as today, never silently
+downconverted (no silent-fallback invariant carried forward unchanged).
+Option C (preserve HDR through the whole pipeline) is rejected for V1 --
+it would require every downstream authority (renderer, Visual Finishing,
+QC) to become HDR-aware, a materially larger redesign with no current
+architectural support. **Dolby Vision: REJECT in V1** (Stage 14) --
+naively treating it as generic PQ risks a wrong tonemap (DV's dynamic
+metadata differs from static PQ, and profile 5 has no separate base
+layer); D-271 already established DV is detected ONLY from a real
+`DOVI configuration record`, never inferred, and this gate extends that
+same conservatism to action, not merely detection. `HDR_OTHER`: same
+treatment as Dolby Vision (the catch-all for anything not confidently
+classified).
+
+### Stage 15-17 -- codec normalization targets
+
+**HEVC:** two separable questions -- can the runtime decode it, and
+should normalized media stay HEVC. Answer to the second is NO: H.264 is
+the one codec every downstream authority already treats as native/
+ungated; keeping normalized media in HEVC would only move the
+production-decode-reliability problem downstream instead of closing it
+once at the normalization boundary. So: decode HEVC (only if capability
+confirmed) -> re-encode normalized output as H.264. **Production HEVC
+capability qualification (Stage 16):** recommend a container-image
+build-time contract PLUS a worker-process STARTUP self-check (the same
+`capture_local_ffmpeg_capability`-style probe run against a small bundled
+test asset at process boot, cached for the process lifetime) as the
+binding runtime-truth source -- CI-only qualification is explicitly
+rejected as sufficient alone, since CI runs in a different environment
+than the production worker image (the exact gap D-271 already flagged:
+sandbox capability != production-verified capability). **AV1/VP9/
+ProRes/MPEG4 (Stage 17):** do not broaden V1 support merely because
+ffmpeg can theoretically decode them. AV1 stays gated behind the same
+startup-capability mechanism as HEVC; VP9/ProRes/MPEG4 remain
+`INSUFFICIENT_EVIDENCE` (P2) -- none are a meaningful share of default
+iPhone/Android camera output.
+
+### Stage 18-20 -- audio and stream-selection policy
+
+**Audio (Stage 18):** do NOT normalize source audio codec/sample-rate/
+channels. Real evidence: the renderer's own filtergraph ALREADY
+normalizes every segment to 48kHz/stereo/fltp at RENDER TIME regardless
+of source, and ASR (faster-whisper) handles arbitrary input sample
+rate/channel layout internally -- source-level audio normalization would
+be a redundant resample pass solving a problem that does not exist,
+explicitly not conflated with Audio Finishing's own separate, unrelated
+loudness-normalization authority. **Missing audio (Stage 19):** preserve
+current ACCEPT behavior unchanged -- the renderer already synthesizes
+silence (`anullsrc=channel_layout=stereo:sample_rate=48000`) when a
+segment has none; no upstream component actually requires a source-level
+audio stream to exist. **Stream selection (Stage 20):** do not add
+implicit first-stream selection; continue to block multi-video/multi-
+audio ambiguity via `INSUFFICIENT_EVIDENCE` exactly as D-272 already
+does -- an explicit, disposition-aware stream-selection policy is a real
+P1 addition, not required to close Media Diversity P0 (most phone
+captures have exactly one video + one audio stream).
+
+### Stage 21-25 -- timeline, identity, and plan design
+
+**Canonical timeline (Stage 21/22):** normalized media begins at
+timeline zero (video and audio), no negative PTS/DTS, monotonic
+timestamps, stable time base -- verified via the SAME relative-
+consistency check as Stage 10 (compare against the original source's own
+internal relationship), never an invented absolute tolerance.
+**`SourceNormalizationPlan`** (Stage 24, frozen, immutable, design only):
+`source_identity` (reusing D-267's own SHA-256 identity convention),
+`source_profile_reference`, `normalization_contract_version` (int,
+mirrors `SOURCE_FORMAT_POLICY_VERSION`'s own versioning), and one
+explicit action field per normalizable property (`rotate_action`,
+`vfr_action`, `hdr_action`, `bit_depth_action`, `pixel_format_action`,
+`timeline_action`, `codec_action`), each a SCREAMING_SNAKE_CASE
+constant, never a raw boolean/enum guess. **Plan identity (Stage 25):**
+SHA-256 over `(source_identity, normalization_contract_version, ordered
+action-field tuple)` -- reusing the same `compute_render_identity`-style
+hashing pattern already established (D-267), never invented fresh; same
+source + same profile + same policy version + same actions -> same plan
+identity; any different action -> a different identity.
+
+### Stage 26-28 -- outcome vocabulary, mandatory re-probe, no loop
+
+Outcome vocabulary adopted verbatim from the directive's own Stage 26:
+`NORMALIZATION_NOT_REQUIRED` / `NORMALIZATION_PLANNED` /
+`NORMALIZATION_SUCCEEDED` / `NORMALIZATION_FAILED` /
+`NORMALIZATION_UNSUPPORTED` / `NORMALIZATION_VERIFICATION_FAILED`.
+**Mandatory flow (Stage 27):** normalize -> D-271 `probe_source_media_
+profile` on the NORMALIZED output (never trust ffmpeg's exit code alone,
+matching that function's own "never raises, always re-probes" doctrine)
+-> D-272 `evaluate_source_format_policy` re-evaluation -> only `ACCEPT`
+may enter the editorial pipeline. **No infinite loop (Stage 28):** at
+most ONE normalization pass per source per job; a still-`NORMALIZE_
+REQUIRED` (or worse) result after that one pass becomes `NORMALIZATION_
+VERIFICATION_FAILED`, never a retry -- extends this session's own
+established "no rescue/reconciliation authority for a symptom" doctrine
+(D-095) to normalization specifically.
+
+### Stage 29-35 -- storage, hashing, cache, resource safety, atomicity
+
+**Original preservation (29) / temp storage (30):** the original source
+is never mutated; the normalized artifact is a new derived file written
+into the SAME per-job `tempfile.TemporaryDirectory` `worker_job.py`
+already scopes around every downloaded source, using the SAME naming
+convention already in use (`{source_order:03d}-{source_asset_id}...`) --
+no new path-construction pattern, no new cleanup mechanism (the existing
+context-manager teardown already covers it). **Hashing (31):** reuse
+D-267's own SHA-256 convention on the NORMALIZED bytes, never the
+original's hash. **Cache/reuse (32):** job-scoped reuse only in V1 -- no
+cross-job/cross-tenant cache, per CLAUDE.md's own binding tenant-
+isolation rule and this stage's own explicit instruction; a future
+cross-job cache keyed by (source SHA-256, plan identity) is a legitimate
+P2 idea only with explicit per-tenant scoping added, not built here.
+**Resource safety / timeout (33/34):** reuse D-266's own timeout-
+ownership and bounded-resource principles rather than inventing new
+ones; explicitly do NOT automatically reuse `RENDER_FFMPEG_TIMEOUT_SEC =
+1200` -- that constant scopes the RENDERER's execution against the much
+shorter FINAL edited output, while normalization runs against the raw,
+potentially long, unedited source (a genuinely different workload).
+Recommend a distinct `NORMALIZATION_FFMPEG_TIMEOUT_SEC`, scaled to
+source duration rather than one flat number -- the exact scaling
+constant is a genuine Product Owner numeric decision, escalated here
+rather than invented, matching this stage's own explicit instruction.
+Many-stream/resolution/memory bounds reuse D-271's own already-designed
+`resource_risk_flags` pattern (optional, `None`-default, never fire on
+their own) -- same no-invented-threshold discipline. **Atomic output
+(35):** reuse D-266's temp -> validate -> atomic-promote pattern
+exactly, no new pattern invented.
+
+### Stage 36-38 -- failures, user-facing behavior, observability
+
+Failure categories adopted verbatim from the directive's own Stage 36:
+`NORMALIZATION_FFMPEG_FAILED`, `NORMALIZATION_TIMEOUT`, `NORMALIZATION_
+OUTPUT_MISSING`, `NORMALIZATION_OUTPUT_EMPTY`, `NORMALIZATION_PROFILE_
+MISMATCH`, `NORMALIZATION_POLICY_STILL_BLOCKED`, `NORMALIZATION_
+UNSUPPORTED_HDR`, `NORMALIZATION_CODEC_UNAVAILABLE`. **User-facing
+behavior (37, foundation only):** today (D-272A) `NORMALIZE_REQUIRED`
+blocks the job with `VIDEO_REQUIRES_NORMALIZATION`; the FUTURE desired
+state (once a real executor exists) is `NORMALIZE_REQUIRED` -> attempt
+automatic normalization -> re-probe/re-evaluate -> `ACCEPT` -> continue
+silently, with a user-visible error surfacing ONLY on `NORMALIZATION_
+FAILED`/`UNSUPPORTED`/`VERIFICATION_FAILED`, carrying the failure-
+specific code instead of the generic one. This gate does not change
+D-272A's current live behavior. **Observability (38):** extend D-272A's
+own per-source diagnostic dict with `normalization_plan_identity`,
+`normalization_actions_performed`, `normalized_profile_summary`,
+`normalized_sha256`, `duration_before_sec`/`duration_after_sec`, `av_
+sync_check_passed`, `final_decision` -- same no-secrets/no-raw-path
+discipline as D-272A.
+
+### Stage 39-42 -- output format QC, consistency, source of truth
+
+D-271's own `OutputFormatContract` (pure type, no implementation) remains
+the right foundation; recommend a future `verify_output_format(profile,
+contract) -> list[str]` pure comparison function, applied to BOTH
+normalized sources (verification) and the final rendered output (closing
+D-270's own original missing-format-QC finding) -- one function, two
+call sites, never two implementations. **Visual Finishing consistency
+(40):** real, grounded finding -- `visual_finishing_measurement.py`'s
+own independent `_probe_rotation_degrees` and D-271's classification-
+time rotation reader are two SEPARATE code paths today; post-
+normalization both naturally agree (no rotation metadata left to read
+differently), which is itself one of the strongest arguments for
+building normalization at all. **Editorial timeline consistency (41) /
+source of truth (42):** once normalized, the normalized file becomes the
+SOLE input to every downstream editorial authority (ASR, BestTake,
+Boundary, Pacing) -- `worker_job.py`'s own `local_paths` dict must be
+updated to the normalized path before `process_local_sources` is called
+(a concrete D-274B implementation detail, not built here); the original
+is retained only for provenance/identity, never mixed into editorial
+analysis.
+
+### Stage 43-45 -- multi-source jobs, tenant isolation, cost control
+
+**Multi-source (43):** each source resolves independently -- ACCEPT
+sources use the original path, `NORMALIZE_REQUIRED` sources use their
+own normalized derived path; `process_local_sources` receives one final,
+resolved per-source path list, never a mixed pre/post-normalization
+state for the same source. **Tenant isolation (44):** already satisfied
+by construction -- normalized artifacts live inside the same per-job
+`TemporaryDirectory` RQ already scopes per job/process, never a
+predictable global name; no new isolation mechanism is needed. **Cost
+control (45):** already satisfied by the existing decision vocabulary --
+`REJECT`/`INSUFFICIENT_EVIDENCE` sources never reach a normalizer at all
+(D-272A already blocks them before any further processing); normalization
+is only ever attempted for `NORMALIZE_REQUIRED`.
+
+### Stage 46/47 -- qualification matrices
+
+**Synthetic (46):** of the 18 listed fixtures, all but Dolby Vision are
+classified `REAL_SYNTHETIC_POSSIBLE` given prior gates' own confirmed
+ffmpeg generation capability (rotation stays `PARSER_ONLY`, per D-271's
+own confirmed real-injection failure in this ffmpeg build); Dolby Vision
+is `REAL_PHONE_REQUIRED` (needs a genuine `DOVI configuration record`,
+not achievable via ordinary synthetic generation in this sandbox).
+**Real-phone (47):** iPhone H.264 SDR/HEVC SDR/HDR/rotation-orientation/
+VFR, Android H.264 SDR/HEVC-if-available/VFR/HDR-if-available -- adopted
+verbatim as the future qualification requirement; no samples launched in
+this gate.
+
+### Stage 48-51 -- V1 scope, priority matrix, decomposition, exit criteria
+
+**V1 scope (48):** rotation normalization, VFR->CFR (source's own
+measured rate), HEVC->H264 (capability-gated), HDR PQ/HLG->SDR tonemap
+(capability-gated), 10-bit/non-standard-pixel-format->8-bit yuv420p,
+timeline zero-reset. Explicitly OUT of V1: Dolby Vision, AV1/VP9/
+ProRes/MPEG4, multi-stream disambiguation, 5.1/exotic audio, MOV edit-
+list edge cases beyond a simple start offset. **P0/P1/P2 (49):** P0 =
+rotation, VFR/timeline, HEVC common-mobile decode, HDR common-mobile
+strategy, 10-bit/pixel-format-to-8-bit, canonical re-verification loop.
+P1 = multi-stream stream-selection, exotic audio, MOV edit-list edge
+cases, output format QC. P2 = AV1/VP9/ProRes/exotic containers, Dolby
+Vision, cross-job normalized-media caching. **Implementation
+decomposition (50):**
+- D-274A -- Canonical Source Normalization Contract + Plan Types (pure
+  types only: `CanonicalSourceMediaContract`, `SourceNormalizationPlan`,
+  outcome vocabulary, plan-identity hashing -- no execution).
+- D-274B -- Rotation + Timeline/VFR Normalization Executor (smallest,
+  least architecturally risky real-ffmpeg slice; first end-to-end wiring
+  of the mandatory re-probe/re-policy loop and the `local_paths`
+  source-of-truth swap).
+- D-274C -- HEVC->H.264 Normalization + Production Capability
+  Qualification (the startup self-check mechanism from Stage 16, then
+  the decode+transcode executor gated behind it).
+- D-274D -- HDR (PQ/HLG) Tonemap + 10-bit/Pixel-Format Normalization
+  (highest visual-quality risk; sequenced after the simpler slices prove
+  the executor architecture).
+- D-274E -- Output Format QC (`verify_output_format` real
+  implementation, applied to normalized sources and final rendered
+  output alike; closes D-270's own original finding).
+**Beta exit criteria (51):** Media Diversity P0 = CLOSED only when
+common H.264 SDR (already true), HEVC SDR (D-274C), rotation (D-274B),
+VFR (D-274B), HDR strategy (D-274D), 10-bit handling (D-274D),
+missing-video (already true, D-272A), and output format QC (D-274E) are
+ALL proven via real Video00-class RAW evidence, not merely offline/
+CleanCutBench -- matching this session's own established offline-proof-
+vs-RAW-proof distinction (D-097.13).
+
+### Canonical status update
+
+LIVE EARLY SOURCE FORMAT GATE = CLOSED (D-272A, unchanged, not
+reopened). **FORMAT NORMALIZATION = CURRENT P0 SUBTRACK** (architecture
+now defined by this entry; zero lines of normalization code exist yet).
+No closed track reopened. Security/Privacy/Multi-user track remains
+ALWAYS ON per CLAUDE.md's own binding rule -- tenant isolation and cost
+control for the FUTURE normalizer are both satisfied by construction per
+Stage 44/45 above, recorded here rather than deferred.
+
+### Verdict
+
+**A -- Source normalization architecture defined -- canonical media
+contract + normalization plan + re-probe loop safe -- ready for
+incremental normalization implementation.** Every design decision above
+is grounded in real, inspected code (renderer's own filtergraph
+assumptions, D-271/D-272/D-272A's own established types/disciplines,
+`uploads.py`'s own container allowlist) with NO redesign required of the
+current media/timeline architecture -- Boundary/ASR/renderer already
+operate on real-time float timestamps rather than frame indices, which
+is exactly what makes "only normalize VFR, never force CFR sources to
+resample twice" safe. Two items are flagged, not blocking, for
+confirmation at their OWN specific implementation gate rather than here:
+the HDR tone-map-vs-reject choice (D-274D) and the normalization-timeout
+numeric value (D-274B/C) are both real Product Owner-facing decisions
+this design escalates rather than invents, per this directive's own
+Stage 11/34 instructions -- they do not block D-274A/B from proceeding
+under this architecture.
+
+**Exact next gate:** D-274A -- Canonical Source Normalization Contract +
+Plan Types (pure types, no execution) -- not implemented, not decided by
+this entry; a Product Owner authorization call.
+
+**Product Owner decision required?** Not to begin D-274A/B. Yes, at the
+point of D-274D (HDR tone-map-vs-reject authorization) and D-274B/C
+(normalization timeout numeric value) specifically -- both already
+flagged above, not fresh escalations invented now.
+
+**Decision entry reference:** this entry (D-273).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-274.
+DO NOT LAUNCH RAW.
