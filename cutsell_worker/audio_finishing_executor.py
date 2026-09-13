@@ -77,7 +77,7 @@ import hashlib
 import json
 import os
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dataclass_replace
 
 from .audio_finishing_measurement import (
     MEASUREMENT_STATUS_MEASUREMENT_ERROR,
@@ -88,6 +88,9 @@ from .audio_finishing_measurement import (
 from .audio_finishing_policy import (
     ACCEPTABLE_LOUDNESS_LOWER_BOUND_LUFS,
     ACCEPTABLE_LOUDNESS_UPPER_BOUND_LUFS,
+    GAIN_STATE_CORRECTION_ALLOWED,
+    GAIN_STATE_CORRECTION_LIMITED,
+    GAIN_STATE_NO_CHANGE_NEEDED,
     MAX_AUTOMATIC_GAIN_CORRECTION_DB,
     PEAK_EVIDENCE_FALLBACK_SAMPLE_PEAK,
     PEAK_EVIDENCE_TRUE_PEAK,
@@ -96,9 +99,11 @@ from .audio_finishing_policy import (
     PLAN_STATUS_BLOCKED,
     PLAN_STATUS_UNKNOWN,
     TRUE_PEAK_CEILING_DBTP,
+    AdjacentTakeAdjustment,
     AudioFinishingPlan,
 )
 from .media_probe import probe_media
+from .render_plan import RenderSegment
 
 _FFMPEG = "ffmpeg"
 _DEFAULT_TIMEOUT_SEC = 120.0
@@ -488,3 +493,311 @@ def _verify_execution(plan: AudioFinishingPlan, record: AudioFinishingExecutionR
         errors=tuple(errors),
         provenance={"output_path": record.output_path},
     )
+
+
+# ===========================================================================
+# LEVEL 1 -- ADJACENT-TAKE GAIN EXECUTION FOUNDATION (D-252)
+# ===========================================================================
+"""
+D-251 built the LEVEL-2 (whole-video) executor above. This section adds
+the LEVEL-1 (adjacent-take continuity) executor -- one finishing
+execution authority, per D-252's own "prefer one finishing execution
+authority" instruction, rather than a second module.
+
+## Scope: plan-authorized segment gain only
+
+This executes ONLY `AudioFinishingPlan.adjacent_take_adjustments` against
+already-built `RenderSegment` objects (`render_plan.py`, D-036/D-097.2's
+canonical pre-render representation), applying each authorized
+adjustment's `authorized_correction_db` to the EXISTING
+`RenderSegment.audio_volume` linear-multiplier field -- the same field
+`render.py`'s live `_segment_command`/`_concat_render_command` already
+read (D-246's trace: `volume=<audio_volume>` is applied first in the
+per-segment audio filter chain, BEFORE the 12ms click fade, so a flat
+gain multiplier composes with the fade trivially and cannot reintroduce
+a click, per D-250 Stage 11's own reasoning, now confirmed directly
+against the live filter-chain code). Nothing here decides whether a
+mismatch is meaningful, whether two segments share a speaker, or whether
+correction is needed -- those are `evaluate_adjacent_take_continuity`'s
+job (`audio_finishing_policy.py`, unchanged). This module only asks: is
+this specific, already-authorized `authorized_correction_db` safe and
+identifiable to apply, and if so, applies EXACTLY that number.
+
+## STAGE 1 finding: segment identity is caller-supplied, not guaranteed
+
+`AdjacentTakeAdjustment.left_segment_id`/`right_segment_id` are typed
+`str | None` -- `generate_audio_finishing_plan`'s own `adjacent_pairs`
+parameter accepts `None` for either identity (the policy layer does not
+require the caller to supply real segment identity; the CALLER, an
+already-decided Selection/Boundary authority, is documented to be
+responsible for supplying it). This is a real, honest structural gap:
+nothing downstream of `evaluate_adjacent_take_continuity` enforces that
+an adjustment authorized for `direction="RAISE_LEFT"` actually carries a
+non-`None` `left_segment_id`. This module does NOT paper over that gap
+with positional/array-index inference (explicitly forbidden, D-252
+Stage 3) -- it fails closed (`ADJACENT_EXECUTION_STATUS_IDENTITY_MISMATCH`)
+whenever the identity a `direction` requires is missing, and reports
+`ADJACENT_EXECUTION_STATUS_SEGMENT_NOT_FOUND` whenever a real, non-`None`
+identity does not match any `RenderSegment.clip_id` in the segments the
+caller supplied (this is also the structural cross-source-leakage guard:
+an adjustment computed against a different render's segments finds no
+matching `clip_id` here and touches nothing).
+
+## STAGE 8 finding: a segment can appear in two adjacency relationships
+
+`generate_audio_finishing_plan` evaluates each `adjacent_pairs` entry in
+total isolation -- nothing in the policy layer prevents a middle segment
+in a 3-segment chain (A-B, B-C) from receiving two independently-computed,
+independently-authorized corrections (once as B in the A-B pair, once as
+B in the B-C pair). No new numeric weighting/merge scheme is invented
+here (forbidden, Stage 8): the chosen, documented rule is **conflict ->
+abstain** -- when more than one ACTIONABLE adjustment (a real,
+nonzero-authorized correction) targets the same resolved segment
+identity, none of them are applied, and each is reported as
+`ADJACENT_EXECUTION_STATUS_DUPLICATE_TARGET_CONFLICT`. A segment named by
+one actionable adjustment and one merely-informational
+`NO_CHANGE_NEEDED` adjustment is not a conflict -- the single real
+correction still applies.
+
+## STAGE 9 finding: composition with a pre-existing `audio_volume`
+
+`RenderSegment.audio_volume` is a single scalar (no history of prior
+gains). A finishing correction MULTIPLIES into whatever value is already
+there (`new_audio_volume = existing_audio_volume * 10**(db/20)`) rather
+than overwriting it -- gains compound multiplicatively in the linear
+domain (equivalently, dB values add), so this is the physically correct
+way to let an existing manual/editorial gain (e.g. `draft_edits.py`'s
+`swap_take` layer, D-024) and an automatic finishing correction coexist,
+never silently discarding one. Both the prior value and the correction
+that was multiplied in are recorded on the result record.
+
+## STAGE 18 finding: peak safety is already guaranteed upstream
+
+`evaluate_adjacent_take_continuity` (`audio_finishing_policy.py`,
+unchanged this gate) already calls `evaluate_peak_safety` on the raised
+side and resolves `gain_state` to `BLOCKED_PEAK_RISK`/`BLOCKED_CLIPPING`
+when unsafe -- this module consumes that `gain_state` as the sole
+authority and adds NO new peak check, NO limiter, and NO new numeric
+threshold at this stage (confirmed by a test constructing a
+`BLOCKED_PEAK_RISK` adjustment and proving zero mutation results). The
+limiter remains whole-video/final-safety only (D-250/D-251), unchanged.
+
+## No DSP, no rendering, here
+
+This section never invokes `ffmpeg`/`subprocess` and never touches a
+media file -- it returns a NEW tuple of `RenderSegment` objects (frozen
+dataclasses, `dataclasses.replace`d, never mutated in place) plus a
+tuple of typed result records. `render.py`'s existing segment/concat
+machinery, unchanged this gate, is what would eventually consume the
+returned segments on some future, separately-authorized live-integration
+gate -- this module does not call it.
+"""
+
+ADJACENT_EXECUTION_STATUS_ADJUSTMENT_APPLIED = "ADJUSTMENT_APPLIED"
+ADJACENT_EXECUTION_STATUS_NO_CHANGE = "NO_CHANGE"
+ADJACENT_EXECUTION_STATUS_PLAN_NOT_AUTHORIZED = "PLAN_NOT_AUTHORIZED"
+ADJACENT_EXECUTION_STATUS_SEGMENT_NOT_FOUND = "SEGMENT_NOT_FOUND"
+ADJACENT_EXECUTION_STATUS_DUPLICATE_TARGET_CONFLICT = "DUPLICATE_TARGET_CONFLICT"
+ADJACENT_EXECUTION_STATUS_IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
+ADJACENT_EXECUTION_STATUS_INVALID_GAIN = "INVALID_GAIN"
+ADJACENT_EXECUTION_STATUS_ALREADY_APPLIED = "ALREADY_APPLIED"
+ADJACENT_EXECUTION_STATUS_OTHER = "OTHER"
+
+_ADJACENT_ACTIONABLE_STATES = (GAIN_STATE_CORRECTION_ALLOWED, GAIN_STATE_CORRECTION_LIMITED)
+
+
+@dataclass(frozen=True)
+class SegmentGainAdjustmentResult:
+    segment_id: str | None
+    adjustment_application_id: str | None
+    prior_audio_volume: float | None
+    authorized_correction_db: float | None
+    applied_linear_multiplier: float | None
+    resulting_audio_volume: float | None
+    execution_status: str
+    reason: str
+    provenance: dict = field(default_factory=dict)
+
+
+def db_to_linear(gain_db: float) -> float:
+    """The one, canonical dB-to-linear conversion (D-252 Stage 5): never
+    reimplemented elsewhere, never a second formula."""
+    return 10.0 ** (gain_db / 20.0)
+
+
+def compute_adjustment_application_id(plan: AudioFinishingPlan, segment_id: str, authorized_correction_db: float, direction: str | None) -> str:
+    """A pure, deterministic function of the plan's policy version, the
+    resolved segment identity, the exact authorized correction, and the
+    direction -- no mutable global state (matches D-251's
+    `compute_execution_id` pattern exactly)."""
+    payload = {
+        "policy_version": plan.policy_version,
+        "segment_id": segment_id,
+        "authorized_correction_db": authorized_correction_db,
+        "direction": direction,
+    }
+    blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:24]
+
+
+def _resolve_target_segment_id(adjustment: AdjacentTakeAdjustment) -> str | None:
+    if adjustment.direction == "RAISE_LEFT":
+        return adjustment.left_segment_id
+    if adjustment.direction == "RAISE_RIGHT":
+        return adjustment.right_segment_id
+    return None
+
+
+def apply_adjacent_take_adjustments(
+    plan: AudioFinishingPlan,
+    segments: tuple[RenderSegment, ...],
+    *,
+    already_applied_ids: frozenset[str] = frozenset(),
+) -> tuple[tuple[RenderSegment, ...], tuple[SegmentGainAdjustmentResult, ...]]:
+    """STAGE 2-15/18: the one LEVEL-1 entry point. Pure, deterministic,
+    immutable-input-oriented (Stage 15/20): `plan` and `segments` are
+    never mutated; a NEW segments tuple and a tuple of per-adjustment
+    result records are returned. Every segment not targeted by an
+    APPLIED adjustment is returned as the exact same object (`is`
+    identity preserved) it was passed in as -- the structural proof that
+    no independent per-clip normalization ever happens here (Stage 7)."""
+    segments_by_clip_id: dict[str, RenderSegment] = {segment.clip_id: segment for segment in segments}
+
+    # STAGE 6: gate strictly per-adjustment `gain_state` -- never the
+    # top-level `plan.plan_status` (Level 1 and Level 2 are independent
+    # per the canonical two-level architecture; an unrelated whole-video
+    # block must never suppress an otherwise-safe adjacent correction).
+    actionable: list[tuple[AdjacentTakeAdjustment, str]] = []
+    non_actionable_results: list[SegmentGainAdjustmentResult] = []
+
+    for adjustment in plan.adjacent_take_adjustments:
+        if adjustment.gain_state == GAIN_STATE_NO_CHANGE_NEEDED:
+            non_actionable_results.append(SegmentGainAdjustmentResult(
+                segment_id=_resolve_target_segment_id(adjustment), adjustment_application_id=None,
+                prior_audio_volume=None, authorized_correction_db=adjustment.authorized_correction_db,
+                applied_linear_multiplier=None, resulting_audio_volume=None,
+                execution_status=ADJACENT_EXECUTION_STATUS_NO_CHANGE,
+                reason=adjustment.reason, provenance={},
+            ))
+            continue
+        if adjustment.gain_state not in _ADJACENT_ACTIONABLE_STATES:
+            # ABSTAIN_INSUFFICIENT_EVIDENCE / BLOCKED_SILENCE /
+            # BLOCKED_CLIPPING / BLOCKED_PEAK_RISK / UNKNOWN -- policy
+            # already decided; this module performs no gain mutation and
+            # invents no override.
+            non_actionable_results.append(SegmentGainAdjustmentResult(
+                segment_id=_resolve_target_segment_id(adjustment), adjustment_application_id=None,
+                prior_audio_volume=None, authorized_correction_db=adjustment.authorized_correction_db,
+                applied_linear_multiplier=None, resulting_audio_volume=None,
+                execution_status=ADJACENT_EXECUTION_STATUS_PLAN_NOT_AUTHORIZED,
+                reason=adjustment.reason, provenance={"gain_state": adjustment.gain_state},
+            ))
+            continue
+
+        target_segment_id = _resolve_target_segment_id(adjustment)
+        if target_segment_id is None:
+            # STAGE 1/3: the plan authorized a correction but the
+            # adjustment does not carry the identity needed to know WHICH
+            # segment to touch -- never guess by position.
+            non_actionable_results.append(SegmentGainAdjustmentResult(
+                segment_id=None, adjustment_application_id=None,
+                prior_audio_volume=None, authorized_correction_db=adjustment.authorized_correction_db,
+                applied_linear_multiplier=None, resulting_audio_volume=None,
+                execution_status=ADJACENT_EXECUTION_STATUS_IDENTITY_MISMATCH,
+                reason="adjustment authorizes a correction but its direction's segment_id is missing",
+                provenance={"direction": adjustment.direction},
+            ))
+            continue
+
+        if adjustment.authorized_correction_db is None or abs(adjustment.authorized_correction_db) > MAX_AUTOMATIC_GAIN_CORRECTION_DB + 1e-6:
+            non_actionable_results.append(SegmentGainAdjustmentResult(
+                segment_id=target_segment_id, adjustment_application_id=None,
+                prior_audio_volume=None, authorized_correction_db=adjustment.authorized_correction_db,
+                applied_linear_multiplier=None, resulting_audio_volume=None,
+                execution_status=ADJACENT_EXECUTION_STATUS_INVALID_GAIN,
+                reason=f"authorized_correction_db={adjustment.authorized_correction_db!r} is missing or exceeds "
+                       f"the {MAX_AUTOMATIC_GAIN_CORRECTION_DB} dB envelope -- refusing to apply",
+                provenance={},
+            ))
+            continue
+
+        actionable.append((adjustment, target_segment_id))
+
+    # STAGE 8: conflict -> abstain when two+ actionable adjustments target
+    # the same resolved segment identity.
+    targets_seen: dict[str, list[AdjacentTakeAdjustment]] = {}
+    for adjustment, target_segment_id in actionable:
+        targets_seen.setdefault(target_segment_id, []).append(adjustment)
+
+    conflict_results: list[SegmentGainAdjustmentResult] = []
+    non_conflicting: list[tuple[AdjacentTakeAdjustment, str]] = []
+    for target_segment_id, adjustments in targets_seen.items():
+        if len(adjustments) > 1:
+            for adjustment in adjustments:
+                conflict_results.append(SegmentGainAdjustmentResult(
+                    segment_id=target_segment_id, adjustment_application_id=None,
+                    prior_audio_volume=None, authorized_correction_db=adjustment.authorized_correction_db,
+                    applied_linear_multiplier=None, resulting_audio_volume=None,
+                    execution_status=ADJACENT_EXECUTION_STATUS_DUPLICATE_TARGET_CONFLICT,
+                    reason=f"{len(adjustments)} actionable adjustments target segment {target_segment_id!r} -- "
+                           "neither applied (D-252 Stage 8: conflict -> abstain, no new merge/weighting invented)",
+                    provenance={},
+                ))
+        else:
+            non_conflicting.append((adjustments[0], target_segment_id))
+
+    apply_results: list[SegmentGainAdjustmentResult] = []
+    updated_segments: dict[str, RenderSegment] = {}
+
+    for adjustment, target_segment_id in non_conflicting:
+        segment = segments_by_clip_id.get(target_segment_id)
+        if segment is None:
+            # STAGE 3/19 cross-source-leakage guard: a segment_id naming a
+            # clip not present in THIS call's `segments` never touches
+            # anything -- structurally impossible to leak across sources.
+            apply_results.append(SegmentGainAdjustmentResult(
+                segment_id=target_segment_id, adjustment_application_id=None,
+                prior_audio_volume=None, authorized_correction_db=adjustment.authorized_correction_db,
+                applied_linear_multiplier=None, resulting_audio_volume=None,
+                execution_status=ADJACENT_EXECUTION_STATUS_SEGMENT_NOT_FOUND,
+                reason=f"no segment with clip_id={target_segment_id!r} in the supplied segments",
+                provenance={},
+            ))
+            continue
+
+        application_id = compute_adjustment_application_id(
+            plan, target_segment_id, adjustment.authorized_correction_db, adjustment.direction,
+        )
+        if application_id in already_applied_ids:
+            apply_results.append(SegmentGainAdjustmentResult(
+                segment_id=target_segment_id, adjustment_application_id=application_id,
+                prior_audio_volume=segment.audio_volume, authorized_correction_db=adjustment.authorized_correction_db,
+                applied_linear_multiplier=None, resulting_audio_volume=segment.audio_volume,
+                execution_status=ADJACENT_EXECUTION_STATUS_ALREADY_APPLIED,
+                reason="this exact adjustment was already applied to this segment -- skipping to avoid double-gain",
+                provenance={},
+            ))
+            continue
+
+        linear = db_to_linear(adjustment.authorized_correction_db)
+        prior_volume = segment.audio_volume
+        # STAGE 9: multiplicative composition with whatever gain (manual
+        # editorial or a prior finishing pass) already sits on this
+        # segment -- never a silent overwrite.
+        resulting_volume = prior_volume * linear
+        updated_segments[target_segment_id] = dataclass_replace(segment, audio_volume=resulting_volume)
+
+        apply_results.append(SegmentGainAdjustmentResult(
+            segment_id=target_segment_id, adjustment_application_id=application_id,
+            prior_audio_volume=prior_volume, authorized_correction_db=adjustment.authorized_correction_db,
+            applied_linear_multiplier=linear, resulting_audio_volume=resulting_volume,
+            execution_status=ADJACENT_EXECUTION_STATUS_ADJUSTMENT_APPLIED,
+            reason=adjustment.reason,
+            provenance={"direction": adjustment.direction, "policy_version": plan.policy_version},
+        ))
+
+    final_segments = tuple(
+        updated_segments.get(segment.clip_id, segment) for segment in segments
+    )
+    all_results = tuple(non_actionable_results + conflict_results + apply_results)
+    return final_segments, all_results

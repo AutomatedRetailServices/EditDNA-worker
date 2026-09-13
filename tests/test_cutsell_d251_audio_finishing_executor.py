@@ -497,17 +497,29 @@ def test_reexecuting_same_plan_is_a_noop_via_existing_record(too_quiet_wav, medi
 def test_adjacent_take_adjustments_never_read_or_executed():
     # Structural guard via AST, not a naive substring scan (the module's
     # own docstring legitimately explains this exclusion in prose): no
-    # real attribute-access node anywhere in the module ever reads
-    # `.adjacent_take_adjustments` off a plan.
+    # real attribute-access node in the WHOLE-VIDEO (D-251) execution path
+    # ever reads `.adjacent_take_adjustments` off a plan. D-252 later added
+    # a SEPARATE, distinctly-scoped `apply_adjacent_take_adjustments`
+    # function to this same module (one finishing execution authority,
+    # per D-252's own instruction) that legitimately does read it -- this
+    # guard is scoped to only the D-251 whole-video functions to keep
+    # proving the invariant that actually matters: the whole-video stage
+    # itself never touches Level-1 (adjacent-take) plan data.
     import ast
     import inspect
 
     import cutsell_worker.audio_finishing_executor as executor_module
 
-    tree = ast.parse(inspect.getsource(executor_module))
-    attribute_accesses = {
-        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
-    }
+    whole_video_only_functions = (
+        executor_module.execute_audio_finishing_plan,
+        executor_module._verify_execution,
+        executor_module._ffmpeg_execute,
+        executor_module._build_audio_filter_chain,
+    )
+    attribute_accesses = set()
+    for func in whole_video_only_functions:
+        tree = ast.parse(inspect.getsource(func))
+        attribute_accesses.update(node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute))
     assert "adjacent_take_adjustments" not in attribute_accesses
 
 

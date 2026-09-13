@@ -64760,3 +64760,277 @@ against a real Video00 render). Not implemented by this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-252. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-252 — Adjacent-Take Gain Execution Foundation, LEVEL 1 (offline, synthetic media, no live integration)
+
+**Objective.** Post D-251 (whole-video executor foundation, verdict A). Implement
+the missing LEVEL-1 execution: deterministic application of
+`AudioFinishingPlan.adjacent_take_adjustments` to `RenderSegment.audio_volume`,
+synthetic media only, no live pipeline integration, no whole-video/policy
+change, no new numeric threshold.
+
+### STAGE 1 — existing adjustment contract, and an honest gap
+
+`AdjacentTakeAdjustment` (`audio_finishing_policy.py`, unchanged) carries
+`left_segment_id: str | None`, `right_segment_id: str | None`,
+`measured_delta_lu`, `gain_state`, `requested_correction_db`,
+`authorized_correction_db`, `direction` ("RAISE_LEFT"|"RAISE_RIGHT"|None),
+`limiter_needed`, `reason` — no `provenance` field (unlike every other
+Finishing dataclass). **Segment identity is caller-supplied, not
+guaranteed**: `generate_audio_finishing_plan`'s own `adjacent_pairs`
+parameter types `left_segment_id`/`right_segment_id` as `str | None`, and
+nothing downstream enforces non-`None`. This gate does not paper over
+that gap with positional/array-index inference (forbidden, Stage 3) — it
+fails closed (`IDENTITY_MISMATCH`) whenever a `direction` names a side
+whose identity is missing, and this is reported here rather than blocking
+implementation, per Stage 1's own instruction.
+
+### STAGE 2 — execution owner
+
+Added to `cutsell_worker/audio_finishing_executor.py` (the SAME module as
+D-251's whole-video executor) rather than a new file — "prefer one
+finishing execution authority," per this gate's own instruction. No
+policy logic added to `render.py`.
+
+### STAGE 3/4 — segment targeting, `RenderSegment.audio_volume` semantics
+
+Targeting is exclusively by `RenderSegment.clip_id` (the render plan's
+own D-036 canonical identity field) — never positional. Audited
+`render_plan.py`/`render.py` directly: `audio_volume: float = 1.0` is a
+plain LINEAR multiplier (not dB), read by `_segment_command` and the live
+`_concat_render_command` as `volume=<audio_volume>` — the FIRST filter in
+the per-segment audio chain, applied BEFORE the 12ms click fade
+(`_audio_join_fade_filters`), before `aformat`/`apad`/`atrim`. A flat
+gain multiplier composing before a fade cannot reintroduce a click (it
+scales the whole waveform including the fade ramp uniformly) — confirmed
+directly against the live filter-chain code, not assumed. Nothing about
+`audio_volume` affects timing (`start`/`end`/`duration_sec` are separate
+fields) — gain-only, structurally.
+
+### STAGE 5 — dB → linear conversion
+
+`db_to_linear(gain_db) = 10 ** (gain_db / 20)` — the one canonical
+conversion, used nowhere else with a different formula. The exact
+authorized dB is preserved on the result record (`authorized_correction_db`)
+alongside the applied linear value (`applied_linear_multiplier`); the
+canonical ±6dB envelope is read, never altered.
+
+### STAGE 6 — only authorized adjustments execute
+
+Gating is strictly per-adjustment `gain_state` (`GAIN_STATE_NO_CHANGE_NEEDED`
+→ `NO_CHANGE`; `ABSTAIN_INSUFFICIENT_EVIDENCE`/`BLOCKED_SILENCE`/
+`BLOCKED_CLIPPING`/`BLOCKED_PEAK_RISK`/`UNKNOWN` → `PLAN_NOT_AUTHORIZED`;
+`CORRECTION_ALLOWED`/`CORRECTION_LIMITED` → proceeds) — **never the
+top-level `plan.plan_status`**, a deliberate design choice: Level 1 and
+Level 2 are independent per the canonical two-level architecture, so an
+unrelated whole-video block must never suppress an otherwise-safe
+adjacent correction. Only `authorized_correction_db` is ever applied;
+`requested_correction_db` is read only for audit/comparison, never used
+when it differs (proven by a dedicated test asserting the applied linear
+value corresponds to the authorized, not requested, number).
+
+### STAGE 7 — no independent per-clip normalization (proven structurally)
+
+`apply_adjacent_take_adjustments` returns, for every segment not targeted
+by an APPLIED adjustment, the EXACT SAME object (`is` identity, not merely
+equal) it was passed in — proven by a 5-segment fixture with exactly one
+authorized adjustment, asserting exactly one object changed.
+
+### STAGE 8 — a segment in two adjacency relationships
+
+Confirmed structurally: `generate_audio_finishing_plan` evaluates each
+`adjacent_pairs` entry in total isolation, so a 3-segment chain (A-B, B-C)
+CAN produce two independently-authorized corrections both targeting
+segment B. **Chosen rule: conflict → abstain**, with no new numeric
+weighting/merge scheme (forbidden by this gate) — when 2+ ACTIONABLE
+adjustments (real, nonzero authorized corrections) target the same
+resolved segment identity, none apply, each reported
+`DUPLICATE_TARGET_CONFLICT`. A segment named by one actionable adjustment
+and one merely-`NO_CHANGE_NEEDED` adjustment is not a conflict.
+
+### STAGE 9 — composition with a pre-existing `audio_volume`
+
+`RenderSegment.audio_volume` is a single scalar with no gain history.
+A finishing correction MULTIPLIES into whatever is already there
+(`new = existing * linear`) rather than overwriting — the physically
+correct composition (gains compound multiplicatively / dB values add),
+letting a pre-existing manual/editorial gain and an automatic finishing
+correction coexist. Both `prior_audio_volume` and the multiplier applied
+are recorded on the result.
+
+### STAGE 10/11 — click fade and timing, unchanged
+
+No fade duration, no click policy, no segment `start`/`end`, no ordering,
+and no join timing is touched anywhere in this module — confirmed by the
+end-to-end Stage 17 replay (identical rendered duration before/after) and
+by construction (the module never references `start`/`end`/ordering at
+all, only `audio_volume`).
+
+### STAGE 12/17 — synthetic fixtures + real level-measurement replay
+
+All 20 Stage 12 fixture categories covered via directly-constructed
+`AdjacentTakeAdjustment`/`RenderSegment` objects (pure-Python, matching
+D-249's own convention — the execution LOGIC needs no media). One real,
+end-to-end integration test additionally renders a genuine two-segment
+video (via the actual live `render.render_preview`) BEFORE and AFTER
+applying a real plan-authorized adjustment, and re-measures explicit
+windows with D-247's real `measure_audio`: the corrected side's real
+measured loudness moves >1 LU in the intended direction, the untouched
+side stays within 0.5 LU (measurement noise floor, not a new tolerance —
+directional/structural proof, per this gate's own "no new acceptance
+threshold" instruction), and both renders' total real duration match
+within 0.05s (encoder-rounding-scale, not a policy tolerance).
+
+### STAGE 13 — output/execution contract
+
+`SegmentGainAdjustmentResult` (frozen dataclass): `segment_id`,
+`adjustment_application_id`, `prior_audio_volume`,
+`authorized_correction_db`, `applied_linear_multiplier`,
+`resulting_audio_volume`, `execution_status`, `reason`, `provenance` — a
+plain, additive, typed record; nothing is hidden inside `RenderSegment`
+itself (the segment only ever carries the final `audio_volume` number,
+not why it changed — that history lives on this result record instead).
+
+### STAGE 14 — idempotence
+
+`compute_adjustment_application_id` (SHA-256 of policy version + resolved
+segment id + authorized dB + direction) mirrors D-251's own
+`compute_execution_id` pattern exactly — pure, deterministic, no mutable
+global state. A caller-supplied `already_applied_ids` frozenset lets a
+second call on the same plan+segments skip re-applying (status
+`ALREADY_APPLIED`, no double-gain) — proven by a test applying a plan
+twice and asserting the resulting `audio_volume` does not change between
+the two calls.
+
+### STAGE 15 — plan immutability
+
+`plan.adjacent_take_adjustments` is read, never assigned to; a test
+asserts the SAME tuple object survives a call unchanged and that the
+frozen `AudioFinishingPlan` still raises `FrozenInstanceError` on
+mutation attempts. `apply_adjacent_take_adjustments` returns NEW
+`RenderSegment` objects (via `dataclasses.replace`) — never mutates the
+input segments in place.
+
+### STAGE 16 — whole-video executor composition order (still valid)
+
+```
+adjacent authorized gain (this gate, pre-concat, audio_volume field)
+  -> renderer concat / click fade / join behavior (unchanged)
+  -> whole-video finishing executor (D-251, post-concat, unchanged)
+  -> limiter if authorized (D-251, unchanged)
+  -> remeasurement (D-247, unchanged)
+  -> verification (D-251, unchanged)
+```
+No live integration performed this gate — this order is proven internally
+consistent (both stages read/write disjoint concerns: `audio_volume`
+pre-render vs. a separate post-render file) but not yet wired together in
+one call chain.
+
+### STAGE 18 — peak interaction: already guaranteed upstream
+
+`evaluate_adjacent_take_continuity` (`audio_finishing_policy.py`,
+unchanged) ALREADY calls `evaluate_peak_safety` on the raised side and
+resolves `gain_state` to `BLOCKED_PEAK_RISK`/`BLOCKED_CLIPPING` when
+unsafe — this executor consumes that `gain_state` as the sole authority
+and adds NO new peak check and NO limiter at this stage (a structural AST
+test confirms `alimiter`/`evaluate_peak_safety` never appear inside
+`apply_adjacent_take_adjustments`'s own source; a runtime test constructs
+a `BLOCKED_PEAK_RISK` adjustment and proves zero mutation results). The
+limiter remains whole-video/final-safety only, unchanged.
+
+### STAGE 19 — failure vocabulary
+
+`ADJACENT_EXECUTION_STATUS_{ADJUSTMENT_APPLIED, NO_CHANGE,
+PLAN_NOT_AUTHORIZED, SEGMENT_NOT_FOUND, DUPLICATE_TARGET_CONFLICT,
+IDENTITY_MISMATCH, INVALID_GAIN, ALREADY_APPLIED, OTHER}` — no exception
+ever escapes `apply_adjacent_take_adjustments`'s normal execution
+contract (a pure function over already-validated in-memory structures;
+every failure mode is a returned status, never a raised exception).
+
+### STAGE 20 — security / scale
+
+Stateless (no module-level mutable state), deterministic (pure function
+of its inputs), immutable-input-oriented (Stage 15), job-local (operates
+only on the `segments` tuple passed in, no shared registry), no shell
+construction (no subprocess call exists in this code path at all — it
+never touches ffmpeg), safe for concurrent independent jobs (nothing
+shared across calls except the caller-supplied `already_applied_ids`,
+which the caller itself owns per-job).
+
+### Tests
+
+`tests/test_cutsell_d252_adjacent_take_gain_execution.py` (new, 25
+cases, all passing) — covers Stage 21's full 39-item contract: exact dB
+conversion; no-change/allowed/limited/blocked/abstain/unknown/short-window
+gating; requested-vs-authorized enforcement; targeted-vs-untouched
+segment identity (`is`-preserved) proof; global-normalization
+impossibility proof; cross-source-leakage impossibility; reordered/
+positional-independence proof; identity-mismatch and missing-segment
+fail-closed behavior; duplicate-target conflict (both a pure 2-pair
+conflict and a legitimate single-actionable 3-segment chain that is
+NOT a conflict); pre-existing `audio_volume` multiplicative composition;
+idempotence (same plan twice, no double-gain) and distinct-application-id
+proof; plan immutability; invalid-gain defense-in-depth; the peak-safety
+consumption/no-new-check structural proof; and the real end-to-end
+before/after level-measurement replay.
+
+**Regressions updated (D-081-precedent "update existing tests for new
+behavior"):** `tests/test_cutsell_d251_audio_finishing_executor.py`'s
+`test_adjacent_take_adjustments_never_read_or_executed` was originally
+scoped to the WHOLE module (correct when that module was whole-video-only);
+now that this gate legitimately adds an adjacent-take function to the
+same module (Stage 2), the guard is re-scoped to exactly the D-251
+whole-video functions (`execute_audio_finishing_plan`, `_verify_execution`,
+`_ffmpeg_execute`, `_build_audio_filter_chain`) — the invariant it
+protects (the whole-video stage never touches Level-1 plan data) is
+unchanged and still proven; only the test's scope was corrected.
+
+### Offline qualification
+
+`python3 -m compileall cutsell_worker tests` — clean. Targeted: the new
+25-case suite + D-247's 24 + D-249's 45 + D-251's 26 (updated) + D-028's
+27, together — 147/147 passed, zero regression. `CleanCutBench` 55/55 in
+default and both explicit `CUTSELL_CLEAN_CUT_CORE_V1` modes. Full
+render-path regression battery (same 14 files as D-251): **197 passed**
+(117.56s), zero failures. Full `tests/` run (excluding the three
+pre-existing baseline exceptions already established across D-241–D-251):
+**6929 passed, 12 deselected, 13 subtests passed, 0 failed** (228.62s) —
+the delta from D-251's own 6904-passed baseline is exactly the 25 new
+D-252 tests; zero new failures.
+
+### Confirmation
+
+One existing file extended (`cutsell_worker/audio_finishing_executor.py`
+— additive functions only, D-251's own whole-video code paths unchanged
+and re-verified), one new test file, one existing test re-scoped (not
+weakened — same invariant, correct scope). `render.py`,
+`post_render_media_qc.py`, `finishing_contract.py`,
+`audio_finishing_measurement.py`, and `audio_finishing_policy.py` are all
+untouched and read-only this gate. No live pipeline integration. No
+whole-video policy or executor behavior changed. No new numeric
+threshold. No denoise/hum/compressor/limiter at the adjacent stage. No
+media file ever mutated by this module (it returns in-memory
+`RenderSegment` objects only). No RAW. No provider.
+
+**Verdict: A — ADJACENT-TAKE GAIN EXECUTION FOUNDATION OFFLINE PROVEN —
+PLAN-AUTHORIZED SEGMENT GAIN WORKS — READY FOR END-TO-END AUDIO FINISHING
+COMPOSITION.**
+
+**Canonical status:** unchanged — the six D-249 values used exactly as-is
+(only via `MAX_AUTOMATIC_GAIN_CORRECTION_DB`, for the same defense-in-depth
+envelope check D-251 already established); no new threshold.
+
+**Next gate (per this gate's own Stage 22 preference for synthetic
+composition first, since an integration seam remains unproven — Level 1
+and Level 2 have never been exercised together in one call chain):**
+D-253 — End-to-End Audio Finishing Composition, offline/synthetic,
+combining adjacent correction + renderer + whole-video correction +
+limiter + remeasurement + verification in one proven chain. Not
+implemented by this gate.
+
+Then STOP.
+
+DO NOT IMPLEMENT D-253. DO NOT LAUNCH RAW.
