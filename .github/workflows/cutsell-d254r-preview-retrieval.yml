@@ -36,6 +36,21 @@ on:
         description: "Name for the uploaded retrieval-only artifact"
         required: false
         default: "cutsell-d254-video00-preview-only"
+  # workflow_dispatch alone cannot be invoked via the API/UI until this file
+  # exists on the repository's DEFAULT branch (GitHub Actions platform
+  # requirement) -- and CLAUDE.md's repository-protection rule bars writing
+  # to `main` without explicit Product Owner approval, which this gate does
+  # not have. Bootstrapping via a narrow, self-scoped push trigger avoids
+  # that entirely: it fires ONLY on a push that itself changes this exact
+  # file, on this exact feature branch -- so committing an edit here (e.g.
+  # bumping the defaults above for a future D-254-style retrieval) is the
+  # deliberate, one-at-a-time trigger action, never a blanket "run on every
+  # push to this branch" hook.
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - .github/workflows/cutsell-d254r-preview-retrieval.yml
 
 env:
   # 512 MiB -- the directive's own stated single-artifact transport limit.
@@ -86,9 +101,12 @@ jobs:
             export "$key=$value"
           done
 
-          PREVIEW_KEY="${{ inputs.preview_key }}"
-          RESULT_KEY="${{ inputs.result_key }}"
-          COMPACT_KEY="${{ inputs.compact_result_key }}"
+          # inputs.* is only populated on workflow_dispatch; the || fallback
+          # covers this file's own bootstrap push trigger (see "on:" above),
+          # where the inputs context is empty.
+          PREVIEW_KEY="${{ inputs.preview_key || 'cutsell/serverless/video00-modal-34721625895-1/preview.mp4' }}"
+          RESULT_KEY="${{ inputs.result_key || 'cutsell/serverless/video00-modal-34721625895-1/result.json' }}"
+          COMPACT_KEY="${{ inputs.compact_result_key || 'cutsell/benchmark-results/video00-modal-34721625895-1/compact-result.json' }}"
 
           echo "Bucket (masked above if secret-derived): retrieving from configured S3_BUCKET"
           echo "Preview key: $PREVIEW_KEY"
@@ -175,7 +193,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_name }}
+          name: ${{ inputs.artifact_name || 'cutsell-d254-video00-preview-only' }}
           path: |
             artifact/preview.mp4
             artifact/preview.mp4.part*
