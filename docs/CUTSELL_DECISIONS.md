@@ -67532,3 +67532,275 @@ Then STOP.
 DO NOT IMPLEMENT D-260.
 
 WAIT FOR PRODUCT OWNER APPROVAL OF VISUAL NUMERIC POLICY.
+
+
+---
+
+## D-260 — Visual Finishing Policy Contract + Plan Generation (offline implementation, no video mutation)
+
+**Objective.** D-259 designed the V1 Visual Finishing POLICY + PLAN
+layer and identified ten Product-Owner numeric decisions. This
+directive supplies the Product-Owner-approved values and one
+qualitative rule; this gate implements the POLICY + PLAN layer against
+them -- no execution, no video mutation.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `c125e3c` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Product-Owner-approved canonical V1 visual policy (now encoded verbatim)
+
+```
+FACE_CENTER_X_DISCONTINUITY_THRESHOLD          = 0.025
+FACE_CENTER_Y_DISCONTINUITY_THRESHOLD          = 0.025
+FACE_SCALE_RELATIVE_AREA_DISCONTINUITY_THRESHOLD = 0.30
+HEADROOM_DISCONTINUITY_THRESHOLD               = 0.06
+DEFAULT_PUNCH_IN_SCALE                          = 1.10
+MAX_PUNCH_IN_SCALE                              = 1.15
+MAX_REFRAME_TRANSLATION_NORMALIZED              = 0.10
+MAX_ADDITIONAL_CROP_LOSS_NORMALIZED             = 0.10
+MIN_RELIABLE_FACE_DETECTION_RATE                = 0.75
+MIN_PUNCH_IN_CLIP_DURATION_SEC                  = 1.5
+```
+
+Plus the qualitative rule **NO FORCED PUNCH-IN ALTERNATION** — encoded
+structurally (see Confirmation below), not as a number.
+
+### What was built
+
+New `cutsell_worker/visual_finishing_policy.py` (owner module, per
+Stage 1's binding: separate from `render.py`, the measurement module,
+MediaPipe authorities, and technical QC):
+
+- **Action vocabulary** (11 states) and **plan-status vocabulary** (6
+  states), exact string constants matching D-259's design and this
+  directive's own naming.
+- **`evaluate_clip_policy(measurement, *, product_safety_established=False)`**
+  — a clip's own intrinsic eligibility. Checks, in order: measurement
+  unavailable/no-face/low-face-rate → `ABSTAIN_INSUFFICIENT_EVIDENCE`;
+  multi-face evidence (derived from the clip's own sampled frames) →
+  `BLOCKED_MULTI_FACE`; pre-existing face-bbox clipping → `BLOCKED_
+  FACE_SAFETY`; product safety not established → `BLOCKED_PRODUCT_
+  SAFETY_UNKNOWN`; else `NO_CHANGE` (eligible baseline).
+- **`evaluate_join_policy(...)`** — the actual correction decision,
+  given two clip decisions and their join measurement. Priority ladder
+  (STAGE 25/16, checked in this exact order): inherits either clip's
+  `BLOCKED_FACE_SAFETY` → `BLOCKED_MULTI_FACE` → `BLOCKED_PRODUCT_
+  SAFETY_UNKNOWN` → `ABSTAIN_INSUFFICIENT_EVIDENCE`; only once both
+  clips are eligible does it compare `face_center_dx`/`dy`, the
+  **relative** face-scale change, and `headroom_delta` against the
+  three geometric thresholds (`abs(delta) > threshold`, strict) to
+  choose `NO_CHANGE` / `POSITION_MATCH` / `SCALE_MATCH` / `PUNCH_IN` /
+  `STATIC_REFRAME` / `SCALE_AND_POSITION_MATCH`. Requested vs.
+  authorized translation/scale are always reported separately (never
+  silently pretending a full correction occurred); translation and
+  scale are clamped to `MAX_REFRAME_TRANSLATION_NORMALIZED`/`MAX_
+  ADDITIONAL_CROP_LOSS_NORMALIZED` (both 0.10 in V1, a documented
+  symbolic simplification since no real crop-window geometry exists
+  yet) and `MAX_PUNCH_IN_SCALE` respectively.
+- **A load-bearing unit-semantics fix caught during this gate's own
+  implementation** (exactly the trap D-259 Stage 14 warned about):
+  D-258's `VisualJoinMeasurement.face_area_ratio_delta` is an ABSOLUTE
+  difference between two already-tiny area-ratio fractions; the
+  approved `FACE_SCALE_RELATIVE_AREA_DISCONTINUITY_THRESHOLD = 0.30` is
+  a **relative** (30%) change. Reusing the absolute delta directly
+  would have made the scale check permanently inert (an absolute delta
+  of 0.30 essentially never occurs on face-area ratios of ~0.04). Fixed
+  by adding `_relative_scale_delta()`, computing `(right - left) / left`
+  from the two clips' own `face_area_ratio_median` values, never
+  reusing D-258's absolute field for this comparison.
+- **A floating-point boundary bug caught and fixed during this gate's
+  own smoke-testing, before any test was written**: an "exactly at
+  threshold" fixture built via bbox geometry (e.g. `0.5 + 0.025`, then
+  measured back as a delta) produced `0.025000000000000022` under
+  IEEE-754, incorrectly tripping a strict `>` comparison. Fixed by
+  adding a fixed, negligible `_THRESHOLD_EPSILON = 1e-9` guard on all
+  three geometric comparisons — this is not a new policy threshold (it
+  never changes which side of a real measurement's boundary a
+  comparison falls on; it only protects the literal exact-equality case
+  the Product Owner's own thresholds define from representation noise
+  many orders of magnitude below any real measurement's own precision).
+- **Punch-in eligibility** (`MIN_PUNCH_IN_CLIP_DURATION_SEC` gate):
+  `clip_duration_sec` is an explicit, caller-supplied parameter (D-258's
+  `VisualClipMeasurement` does not itself store a clip's total duration
+  — only per-frame sample timestamps within a `[0.05, 0.95]` window —
+  so this module never guesses it; a caller with real segment-duration
+  context, e.g. the existing `RenderSegment.duration_sec`, supplies it).
+  When a scale discontinuity is present and the duration gate passes,
+  `PUNCH_IN` is chosen (default authorized scale `1.10`, hard ceiling
+  `1.15`); when it fails, the plan falls back to `SCALE_MATCH` bounded
+  by the same `1.15` ceiling, and `REASON_PUNCH_IN_CLIP_TOO_SHORT` is
+  recorded.
+- **Closed, machine-only reasons/warnings/safety-blocker vocabulary**
+  (the Smart Sales Funnel firewall's actual mechanism, per D-259 Stage
+  30): `REASON_NO_DISCONTINUITY_EVIDENCE`, `REASON_FACE_POSITION_
+  DISCONTINUITY`, `REASON_FACE_SCALE_DISCONTINUITY`, `REASON_HEADROOM_
+  DISCONTINUITY`, `REASON_JUMP_CUT_CONCEALMENT_CANDIDATE`, `REASON_
+  INSUFFICIENT_FACE_EVIDENCE`, `REASON_FACE_ALREADY_CLIPPED`, `REASON_
+  TRANSLATION_EXCEEDS_MAX`, `REASON_CROP_LOSS_EXCEEDS_MAX`, `REASON_
+  PUNCH_IN_CLIP_TOO_SHORT`, `REASON_ORIENTATION_UNSUPPORTED_FOR_
+  CORRECTION`; `SAFETY_BLOCKER_MULTI_FACE_PRESENT`/`_FACE_ALREADY_
+  CLIPPED`/`_PRODUCT_SAFETY_UNKNOWN`; `WARNING_CAPTION_SAFE_REGION_NOT_
+  ESTABLISHED`/`_LUMA_DIFFERENCE_DIAGNOSTIC_ONLY`/`_COLOR_DIFFERENCE_
+  DIAGNOSTIC_ONLY` — none of which can express a commercial concept, a
+  structural property proven by a dedicated test scanning the actual
+  string VALUES (not the module's own prose, which legitimately
+  discusses "Smart Sales Funnel" to document this very firewall).
+- **`VisualClipPolicyDecision`**, **`VisualJoinPolicyDecision`**,
+  **`VisualFinishingPlan`** — frozen dataclasses with every field D-259
+  Stage 5/6/7 specified; no raw ffmpeg string on any of them (proven
+  structurally).
+- **`compute_visual_finishing_plan_identity`** — deterministic SHA-256
+  (24-hex-char digest), matching D-251/D-252/D-253/D-256's own
+  `compute_execution_id`-family pattern exactly: keyed on policy
+  version, canonical-threshold snapshot, and every clip/join decision's
+  own action + authorized correction values — never on `source_id`'s
+  filename-like content or any path (proven: two measurements differing
+  only in `source_id` produce the identical plan identity when their
+  decision content is identical). This is the schema/identity half of
+  the cumulative-correction firewall D-259 Stage 22 asked for
+  (`decide_visual_refinishing`'s own 4-way decision logic is NOT built
+  by this gate — it remains D-259's schema-only design, unchanged,
+  since this directive's scope is policy + plan generation, not a
+  double-finishing-style refinishing decision function).
+- **`generate_visual_finishing_plan(...)`** — the single top-level entry
+  point; derives `plan_status` via a fixed ladder (`BLOCKED` if any
+  decision is `BLOCKED_*`, else `ABSTAIN` if all are `ABSTAIN_*`, else
+  `READY_NO_CHANGE` if all are `NO_CHANGE`, else `READY_FOR_VISUAL_
+  CORRECTION`/`PARTIAL` depending on whether an abstention coexists with
+  an authorized correction, else `UNKNOWN`).
+
+### No forced punch-in alternation (qualitative rule, encoded structurally)
+
+`evaluate_join_policy`'s own signature takes no "previous action,"
+"alternation," or "rhythm" parameter at all — a structural, not merely
+documented, guarantee that a decision can never be a function of what
+happened at a neighboring join. Every decision is purely evidence-local
+(the same measurement inputs always produce the same decision,
+regardless of call order or any other join's outcome), proven by a
+dedicated test. The remaining piece of Stage 22's cumulative-correction
+firewall (detecting that a SOURCE has already been finished under the
+same policy — the actual "no crop-on-crop" stacking prevention) is the
+schema `decide_visual_refinishing`-style function D-259 designed but
+this gate's scope does not build; `compute_visual_finishing_plan_
+identity` supplies the deterministic identity that function would need,
+proven filename-independent and policy-version-sensitive.
+
+### Product safety: the honest consequence, stated plainly
+
+Per D-259 Stage 8's own recommendation (option B) and this directive's
+Stage 11 ("fail closed unless existing evidence genuinely establishes
+that product safety is not implicated"), `product_safety_established`
+defaults to `False`. Since D-258's `product_bbox_status` is *always*
+`"UNAVAILABLE"` (no detector exists, confirmed unchanged), **every real
+plan generated against today's actual measurement inputs, with no
+override, will have every correction-authorizing decision resolve to
+`BLOCKED_PRODUCT_SAFETY_UNKNOWN`** — this is the correct, safe, and
+directive-mandated V1 behavior, not a defect. The parameter exists so a
+future gate, once real product-bbox evidence exists, can flip it
+per-clip without touching this module's contract again. This gate's own
+test suite exercises every correction-authorizing path by explicitly
+passing `product_safety_established=True`, never by weakening the
+default — the default itself is never touched by any test.
+
+### Tests
+
+New `tests/test_cutsell_d260_visual_finishing_policy.py` — 67
+pure-Python tests (no ffmpeg, no cv2/mediapipe, matching D-249's own
+test philosophy: directly-constructed `VisualClipMeasurement`/
+`VisualFrameMeasurement` fixtures with exact literal values, never
+floating-point-noisy geometry reconstructions). Covers: all ten
+canonical values exact; boundary-equality and above-threshold behavior
+for X/Y/scale/headroom (each independently, with the floating-point
+epsilon fix verified); `NO_CHANGE` bias on identical clips; low/exact/
+`None` face-detection-rate abstention; `NO_FACE`/`UNAVAILABLE`/
+`DECODE_ERROR` measurement-status abstention; multi-face blocking (both
+at clip level and propagated to join level); face-clipping blocking;
+product-safety-unknown blocking by default and unblocking when
+established; the `product_bbox_status` fabrication-proof; caption-
+unknown emitting a warning without fabricating a region and without
+blocking an otherwise-safe correction; the full punch-in duration gate
+(short clip falls back to `SCALE_MATCH`, exact-duration clip gets
+`PUNCH_IN` at the default `1.10` scale, an extreme delta never exceeds
+`1.15`, requested vs. authorized always separated); reframe-translation
+clamping to the max; the documented crop-loss/translation-ceiling
+equivalence; combined `SCALE_AND_POSITION_MATCH`; face-safety and
+product-safety priority overriding continuity improvement even for a
+large, otherwise-correctable delta; absence of `EXPOSURE_MATCH`/
+`COLOR_MATCH` actions and of the word "gaze" anywhere in the module;
+large luma/color differences alone never triggering a P0 action; no
+sales vocabulary in the closed vocabulary's actual string values; the
+no-forced-alternation structural proof; deterministic/filename-
+independent/policy-version-sensitive plan identity; frozen/immutable
+plan and decision dataclasses; absence of renderer filter-syntax
+tokens and of any `execute_*` function; absence of coupling to
+`render.py`/`local_performance.py`/`speech_visual_microtrim.py`/Pacing/
+Boundary/Freeze/Audio-Finishing; absence of provider/RAW references;
+the full plan-status derivation ladder (`READY_NO_CHANGE`/`READY_FOR_
+VISUAL_CORRECTION`/`BLOCKED`/`ABSTAIN`/`PARTIAL`/`UNKNOWN`, each
+proven); the three dataclasses' full Stage 5/6/7 field-list
+completeness; and the relative-vs-absolute scale-delta unit-semantics
+regression test (protecting the exact bug caught during implementation
+from ever silently recurring).
+
+### Offline qualification
+
+- `compileall` on `cutsell_worker/` + `tests/`: clean.
+- New targeted suite: **67/67 passed**.
+- D-258's measurement suite + this gate's suite + `local_performance`'s
+  own regression suite run together: **125 passed, 9 skipped** (the
+  9 skips are D-258's own cv2/mediapipe-gated integration tests,
+  unchanged, unrelated to this gate).
+- CleanCutBench, both modes: **55/55** (`CUTSELL_CLEAN_CUT_CORE_V1=0`),
+  **55/55** (`=1`) — unaffected, as expected.
+- Full `tests/` suite (3 pre-existing, unrelated baseline exceptions
+  excluded): **7137 passed, 9 skipped, 2 deselected, 13 subtests
+  passed** (226.32s), exit 0 — 67 more passes than D-258's 7070
+  baseline (this gate's own new tests), zero new failures, zero new
+  skips.
+- `render.py`, `post_render_media_qc.py`, `local_performance.py`,
+  `speech_visual_microtrim.py`, and D-258's own
+  `visual_finishing_measurement.py` all confirmed byte-identical (`git
+  diff --stat` empty on all five).
+
+### Confirmation
+
+Policy + plan only: the module contains no crop/reframe/punch-in
+EXECUTION anywhere (no `execute_*` function exists at all, proven
+structurally), no video mutation, no `ffmpeg`/`subprocess` call, no
+renderer filter-syntax token. No numeric policy beyond the ten
+Product-Owner-approved values (proven: `canonical_thresholds_snapshot()`
+contains exactly 10 entries). No new heuristic: every decision is a
+direct comparison of an already-real D-258 measurement against an
+already-approved constant, with no invented intent classifier
+(the scale/position-match ambiguity between "accidental discontinuity"
+and "intentional shot change" is resolved exactly as D-259 designed —
+the approved numeric band itself is the safety boundary, never a
+fabricated semantic judgment). No Pacing/Boundary/Freeze/Audio-Finishing
+change: none of those modules imported or touched. No RAW, no Modal, no
+RunPod, no provider call.
+
+**Verdict: A — VISUAL FINISHING POLICY CONTRACT + PLAN GENERATION
+OFFLINE PROVEN — APPROVED V1 VISUAL POLICY ENCODED — READY FOR
+EXECUTION ARCHITECTURE DESIGN.**
+
+**Canonical status:** unchanged for every closed track (Freeze/
+Boundary/Pacing V2/Handle-Aware Pacing/Audio Finishing P0 remain
+CLOSED; Audio Join remains SAFE/PARTIALLY QUALIFIED). Visual Finishing
+MEASUREMENT remains EXISTS (D-258); Visual Finishing POLICY + PLAN
+GENERATION now EXISTS (offline-proven, this entry) with ten
+Product-Owner-approved V1 numeric values now canonical; Visual
+Finishing RENDERER-EXECUTION and POST-RENDER-VISUAL-QC remain
+MISSING-FUTURE. Smart Sales Funnel scope unchanged.
+
+**Exact next gate:** D-261 — Visual Finishing Execution Architecture
+Design (offline, no video mutation) — determines how structured
+crop/reframe/punch-in plans map into renderer operations safely. Not
+implemented by this gate.
+
+**Decision entry reference:** this entry (D-260).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-261. DO NOT LAUNCH RAW.
