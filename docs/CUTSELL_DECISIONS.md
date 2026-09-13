@@ -68671,3 +68671,201 @@ this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-263. DO NOT LAUNCH RAW.
+
+## D-263 — End-to-End Visual Finishing Composition (offline implementation, synthetic media only, no live pipeline integration)
+
+**Objective.** Prove the full Visual Finishing chain works as ONE
+deterministic system: VISUAL MEASUREMENT (D-258) -> VISUAL POLICY
+(D-260) -> VisualFinishingPlan -> VISUAL EXECUTOR (D-262) -> EXISTING
+RENDERER (`render.py`, unchanged) -> POST-RENDER VISUAL MEASUREMENT
+(D-258, re-used) -> VERIFICATION (new). Synthetic media only, no real
+RAW, no live pipeline integration.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `5399132` (D-262, exact
+expected match), clean tree except this directive's own new files --
+confirmed before this gate began.
+
+### What was built
+
+**New `cutsell_worker/visual_finishing_composition.py`** (owner
+module, orchestrates the four existing proven modules without
+duplicating any of their logic):
+
+- **Bounded composition-status vocabulary** (12 states): `SUCCESS`,
+  `NO_CHANGE`, `PARTIAL`, `ABSTAIN`, `BLOCKED`, `MEASUREMENT_FAILED`,
+  `POLICY_FAILED`, `EXECUTION_FAILED`, `RENDER_FAILED`, `VERIFY_
+  FAILED`, `ALREADY_APPLIED`, `OTHER`.
+- **`VisualFinishingCompositionInput`** (frozen): renderer-compatible
+  baseline `RenderSegment`s, source identity, output/work directory,
+  and a set of OPTIONAL override fields (`pre_measurements`, `pre_
+  plan`, `product_safety_established`, `clip_durations_sec`, `previous_
+  execution_ids`, `face_bboxes`, `post_measurement_overrides`) --
+  every override defaults to `None`, so the DEFAULT path always calls
+  the real measurement/policy modules; overrides exist only for cases
+  this gate's own directive explicitly authorizes hand-construction
+  for (exact-literal policy-divergence fixtures, since this sandbox
+  has no cv2/mediapipe; idempotence/identity proofs needing a KNOWN
+  plan; a post-render measurement stand-in when the real one is
+  environment-unavailable).
+- **`VisualFinishingCompositionResult`** (frozen): `composition_id`,
+  `policy_version`, `plan_id`, `source_identity`, `pre_measurements`,
+  `join_measurements`, `clip_decisions`, `join_decisions`, `execution_
+  records`, `render_output_path`, `rendered_segments`, `post_
+  measurements`, `verification_results`, `overall_status`, `warnings`,
+  `errors`, `provenance`.
+- **`compose_visual_finishing(input)`** -- the single orchestration
+  entry point. Always calls, in order: `measure_visual_clip`/`compute_
+  visual_join_measurement` (D-258, real, unless overridden) ->
+  `generate_visual_finishing_plan` (D-260, real, unless a `pre_plan`
+  is supplied) -> `execute_visual_finishing_decision` per join
+  (D-262, real, always) -> `render.render_preview` (the one LIVE
+  renderer entry point, real, always) -> `measure_visual_clip` again
+  on the rendered output (D-258, real, unless overridden) ->
+  `_verify_execution` (new, see below). Every phase is wrapped in a
+  bounded `try/except` mapping any exception to the matching
+  `*_FAILED` status -- never an unbounded crash, never a masked
+  failure.
+- **The one genuinely NEW capability: `_verify_execution`.** D-262
+  defined `VisualFinishingVerificationResult`'s TYPE but explicitly
+  left its computation "MISSING-FUTURE pending a future gate" -- this
+  one. Compares a PRE and POST `VisualClipMeasurement` (both produced
+  by the SAME unchanged D-258 measurement authority) against the
+  executed action's own intended DIRECTION only (`_direction_ok`: a
+  literal sign comparison, e.g. "did face area increase", "did face
+  center move the authorized way") -- never an invented perceptual
+  magnitude threshold (this gate's own Stage 10 instruction, honored
+  literally: no new numeric constant appears anywhere in this
+  function).
+- **The correction-target convention** (this gate's own explicit,
+  documented design decision, not previously specified): every
+  authorized correction always targets the RIGHT clip of its join,
+  converging it toward the already-established LEFT neighbor.
+
+### Two real, pre-existing findings surfaced (not introduced, not
+fixed -- "no new policy" scope)
+
+1. **D-260's `_bound_scale` PUNCH_IN branch always clamps `authorized_
+   scale` down to `DEFAULT_PUNCH_IN_SCALE` (1.10)** whenever a scale
+   break triggers punch-in, regardless of the ceiling (`MAX_PUNCH_IN_
+   SCALE`, 1.15) -- an authorized punch-in scale of exactly 1.15 is
+   UNREACHABLE through the real policy path today. Consequently
+   `MAX_ADDITIONAL_CROP_LOSS_NORMALIZED` can also never be
+   independently tripped by the executor's own re-check when fed a
+   correctly-clamped real plan (both ceilings are literally the same
+   value D-260 already enforces before the executor ever sees it) --
+   a self-consistent defense-in-depth property, not a bug. The "max
+   punch-in"/"crop ceiling exceeded" fixtures in this gate's own test
+   suite use a `pre_plan` override with a directly-constructed,
+   deliberately-out-of-bounds decision (an injected fault simulating a
+   hypothetically buggy upstream policy) to exercise the EXECUTOR's own
+   fail-closed handling -- exactly D-262's own precedent for the same
+   boundary. Product-Owner decision on whether `_bound_scale` should
+   ever authorize above `DEFAULT_PUNCH_IN_SCALE` is out of this gate's
+   scope.
+2. **D-260's `_derive_plan_status` maps a plan mixing an eligible
+   NO_CHANGE clip with an ABSTAIN clip (no correction action anywhere)
+   to `PLAN_STATUS_UNKNOWN`**, not `PLAN_STATUS_ABSTAIN` -- a real gap
+   in that one function, out of this gate's "no new policy" scope to
+   fix. This module's own `_derive_overall_status` reads the plan's
+   already-computed `clip_decisions`/`join_decisions` actions directly
+   (a pure status ROLLUP of decisions D-260 already made, no new
+   threshold, no re-evaluation of any evidence) to report `ABSTAIN`
+   correctly regardless -- verified by `test_low_face_detection_
+   abstains`.
+
+### Tests
+
+New `tests/test_cutsell_d263_visual_finishing_composition.py`: 53
+tests (52 run, 1 skipped for cv2/mediapipe in this sandbox). Covers:
+full-chain proofs for all six actions (NO_CHANGE/PUNCH_IN/POSITION_
+MATCH/STATIC_REFRAME/SCALE_MATCH/SCALE_AND_POSITION_MATCH, measurement
+override -> REAL policy -> REAL executor -> REAL render, never a
+hand-authored plan in these main cases); requested-vs-authorized
+preservation; no-policy-recomputation (proven via a `monkeypatch` that
+raises if `generate_visual_finishing_plan` is called when `pre_plan`
+is supplied); no-geometry-recomputation (source-scan for all ten
+threshold names); all five safety-block/abstain paths (multi-face,
+face-safety, product-safety, low-face-rate, no-face, short-clip) with
+an explicit assertion that the renderer still runs but produces ZERO
+mutation; the crop-ceiling injected-fault proof; caption-after-
+transform ordering; 9:16/resolution/audio/timing preservation (all
+checked against the REAL rendered output via `probe_media`);
+composition-identity determinism, distinctness-under-a-different-plan,
+filename-independence, and policy-version-sensitivity; idempotence
+(`ALREADY_APPLIED`, no cumulative re-scaling); verification PASS/FAIL/
+UNVERIFIABLE (the real cv2/mediapipe-absent post-measurement path is
+proven to report `UNVERIFIABLE` honestly, never a fabricated PASS/
+FAIL, and never masks an otherwise-successful composition as failed);
+render-failure containment (`monkeypatch`ed to raise, never silently
+absorbed); empty-input structural failure; frozen-dataclass immutability;
+forced-alternation/exposure/color/gaze/sales/provider/RAW vocabulary
+scans; and ten parametrized `git diff`-vs-HEAD guards confirming this
+gate touched no unrelated authority (measurement/policy/executor/
+Pacing/Boundary/audio-finishing/technical-QC files all unchanged).
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker tests` -- clean.
+- Targeted D-258+D-260+D-262+D-263 suite: 233 passed, 10 skipped.
+- `render`-keyword suite (332 tests, includes the D-171/D-172 `git
+  diff`-vs-HEAD guard tests): all 332 passed -- no self-resolving
+  failure this time (this gate added only NEW files; `render.py`/
+  `render_plan.py` were not touched further since D-262's own already-
+  committed change).
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0`/`=1`):
+  55/55, unaffected.
+- Full `tests/` suite (excluding the three pre-existing baseline
+  exceptions): **7249 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, ZERO failures.**
+
+### Confirmation
+
+No real RAW, no Modal, no RunPod, no provider call. No live pipeline
+wiring: `compose_visual_finishing` is called only by this gate's own
+tests; no production call site was changed to route through it, and
+every existing production `RenderSegment`/plan-generation path remains
+untouched. No new numeric policy or threshold -- the composition
+module never references any of the ten D-260 constants by name
+anywhere in its own source (verified by test); it only ever consumes
+an already-decided `authorized_*` value. No exposure/color-correction/
+gaze/Smart-Sales-Funnel logic (verified with docstrings stripped, the
+same false-positive-proof technique as D-262). No forced punch-in
+alternation: no function anywhere in the new module takes a "previous
+action"/"prior action" parameter (verified by AST test), and the
+correction-target convention (always the right clip of a join) is
+static, never conditioned on any prior decision. No Pacing/Boundary/
+Freeze/Audio-Join/Audio-Finishing/technical-QC-authority change
+(confirmed both by the full-suite run and by explicit `git diff`-vs-
+HEAD guards on each of those files). Encode count: still exactly ONE
+video encode per composition (`render.render_preview` -> `_concat_
+render_command`, unchanged) -- no separate second visual pass.
+
+**Canonical status:** unchanged for every closed track and for the ten
+approved V1 visual numeric values. The full Visual Finishing chain
+(MEASUREMENT -> POLICY -> PLAN -> EXECUTOR -> RENDERER -> POST-
+MEASUREMENT -> VERIFICATION) is now PROVEN END-TO-END on synthetic
+media, offline. Two real, pre-existing D-260 gaps found and honestly
+documented (not fixed -- out of "no new policy" scope): the PUNCH_IN
+scale ceiling is unreachable via the real policy path, and a mixed
+NO_CHANGE+ABSTAIN plan collapses to `PLAN_STATUS_UNKNOWN` (worked
+around at the composition-status-rollup layer only). Real-media
+qualification (cv2/mediapipe-backed measurement, real face detection)
+remains untested in this sandbox -- covered structurally by 10 skipped,
+environment-gated tests (9 from D-258, 1 from this gate), unchanged by
+this gate.
+
+**Exact next gate:** either D-264 (ONE real-media Visual Finishing
+qualification using an existing retrievable render/current corpus
+source) or a narrow live-integration gate first if the current
+production render-planning path does not yet carry a
+`VisualFinishingPlan` through to the renderer -- not implemented,
+not decided by this gate; a Product Owner call.
+
+**Decision entry reference:** this entry (D-263).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-264.
+DO NOT LAUNCH RAW.
