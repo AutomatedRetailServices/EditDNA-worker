@@ -72365,3 +72365,220 @@ Then STOP.
 
 DO NOT IMPLEMENT D-274.
 DO NOT LAUNCH RAW.
+
+## D-274A — Canonical Source Normalization Contract + Plan Types (offline implementation)
+
+**Objective.** Post D-273 (source normalization architecture design,
+Verdict A). Implement immutable canonical normalization contract types
+so future normalization executors have one source of truth:
+`CanonicalSourceMediaContract`, `SourceNormalizationPlan`, the
+normalization action/outcome/executability vocabularies, and a pure
+`NormalizationVerificationResult` seam -- zero execution, zero ffmpeg
+commands, zero filtergraph strings.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `4744bed` (exact expected
+match, D-273), clean tree -- confirmed before this gate began.
+
+### Stage 1-5 -- contract version, canonical V1 values
+
+New `cutsell_worker/source_normalization_plan.py`. `SOURCE_
+NORMALIZATION_CONTRACT_VERSION = 1`, one canonical owner.
+`CanonicalSourceMediaContract` (frozen) encodes D-273's own decisions
+verbatim: MP4 / H264 / YUV420P / 8-bit / `PHYSICAL_PIXELS_ORIENTED` /
+`0_OR_ABSENT` rotation / `PRESERVE_CFR_NORMALIZE_VFR_TO_SOURCE_RATE`
+(never a flat 30fps assumption) / timeline start-at-zero+monotonic+no-
+negative-PTS/DTS / BT709 primaries+transfer+space, TV range / SDR HDR
+target / `PRESERVE_SOURCE_NO_MANDATORY_NORMALIZATION` audio policy /
+single-stream-or-absent audio, one expected video stream.
+`CANONICAL_SOURCE_MEDIA_CONTRACT_V1` is the one module-level instance.
+
+### Stage 6 -- action vocabulary
+
+`ACTION_NO_ACTION`, `ACTION_ROTATE_90/180/270`, `ACTION_VFR_TO_CFR`,
+`ACTION_HDR_PQ_TO_SDR_BT709`, `ACTION_HDR_HLG_TO_SDR_BT709`, `ACTION_
+HEVC_TO_H264`, `ACTION_TEN_BIT_TO_EIGHT_BIT`, `ACTION_PIXEL_FORMAT_TO_
+YUV420P`, `ACTION_TIMELINE_TO_ZERO`. A `_CANONICAL_ACTION_FIELD_ORDER`
+tuple (Stage 31: timeline -> rotation -> codec -> HDR -> bit-depth ->
+pixel-format -> frame-rate -> container -> audio) drives both plan-
+identity hashing and any future executor's own sequencing -- no
+filtergraph is emitted anywhere in this module (Stage 32, confirmed by
+source-scan test).
+
+### Stage 7-17 -- the plan builder and its honest gap
+
+`build_source_normalization_plan(source_identity, profile, policy_
+decision, *, runtime_capability=None, tonemap_available=False, target_
+contract=CANONICAL_SOURCE_MEDIA_CONTRACT_V1)` is a pure function.
+`ACCEPT` -> `NORMALIZATION_NOT_REQUIRED`, `plan=None`, no fake actions
+(Stage 12, literal). `REJECT`/`INSUFFICIENT_EVIDENCE` -> `NORMALIZATION_
+UNSUPPORTED`, `plan=None` (Stage 11 -- never plan for a source blocked
+for other reasons). `NORMALIZE_REQUIRED` -> a full plan mapping each
+D-272 normalization reason to its action: rotation (90/180/270, or
+`INVALID_SOURCE_STATE` for a malformed/unmappable angle -- Stage 27),
+VFR (uses `profile.effective_fps` directly, never a hardcoded 30 --
+Stage 26; `INVALID_SOURCE_STATE` if unavailable), HDR (PQ/HLG ->
+tonemap actions gated behind a new, explicit `tonemap_available` signal
+-- Stage 15; Dolby Vision/`HDR_OTHER` -> `EXECUTABILITY_UNSUPPORTED`,
+never a fake DV-as-PQ action -- Stage 7/14), 10-bit and non-standard
+pixel format -> their own actions, HEVC -> `HEVC_TO_H264` gated behind
+D-272's own `RuntimeCapabilityInput.hevc_decode_confirmed` (Stage 14),
+non-zero start time -> `TIMELINE_TO_ZERO` (Stage 25).
+
+**A real, honest gap surfaced rather than papered over** (recorded in
+the module's own docstring, not silently reconciled): D-272's own
+`evaluate_source_format_policy` does NOT emit a normalization reason
+for "codec is HEVC" by itself -- a capability-confirmed, otherwise-
+clean HEVC source resolves to plain `ACCEPT` today, never `NORMALIZE_
+REQUIRED`, so it never reaches this plan builder and is never
+transcoded to H.264, contrary to D-273's own stated intent ("decode
+HEVC if capability confirmed, normalize to canonical H.264"). Given
+Stage 12's own literal, unambiguous instruction ("If D-272 decision ==
+ACCEPT: return NOT_REQUIRED. Do not create fake actions") and this
+gate's own scope banner never authorizing a D-272 change, this module
+follows D-272 literally: `codec_action`/`timeline_action` are only ever
+computed INSIDE an already-`NORMALIZE_REQUIRED` plan (triggered by some
+OTHER property), where a HEVC codec or a non-zero start time can still
+ride along as an additional planned action. Fixing the underlying gap
+means reopening D-272 itself -- a real, future, separately-authorized
+decision, not made here. Confirmed via a dedicated regression test
+(`test_pure_clean_hevc_resolves_accept_no_plan`).
+
+### Stage 9/10 -- deterministic, path-independent plan identity
+
+`_compute_plan_identity` reuses `render_delivery.py`'s own `json.dumps
+(sort_keys=True, default=str)` -> SHA-256 -> `[:24]` bounded-digest
+convention (D-267), prefixed `normplan_` -- never a new scheme. Inputs:
+`source_identity` (opaque, caller-supplied, never a path -- `build_
+source_normalization_plan` raises `ValueError` on an empty one and its
+signature has no `path`/`filename` parameter at all, confirmed by
+inspection), `contract_version`, the ordered action tuple, and the
+target contract. Proven deterministic (same inputs -> same identity),
+source-identity-sensitive (different identity -> different plan
+identity even with identical actions), and action-sensitive (a
+different rotation action alone changes the identity).
+
+### Stage 16/17 -- executability and outcome vocabularies
+
+`EXECUTABILITY_EXECUTABLE/NOT_REQUIRED/UNSUPPORTED/CAPABILITY_
+UNVERIFIED/INVALID_SOURCE_STATE` on the plan itself; the coarser
+`NORMALIZATION_NOT_REQUIRED/PLANNED/SUCCEEDED/FAILED/UNSUPPORTED/
+VERIFICATION_FAILED` outcome vocabulary at the result level (plus the
+Stage 36 future-executor failure categories as vocabulary only, never
+constructed by this execution-free gate). A dedicated source-scan test
+(`test_no_normalization_succeeded_fabricated_without_verification`)
+confirms `build_source_normalization_plan` itself never constructs
+`NORMALIZATION_SUCCEEDED` -- that value is only ever returned by the
+separate `verification_outcome` function, and only when a caller
+supplies an already-`ACCEPT` re-evaluated decision (Stage 17's own "do
+not fabricate SUCCEEDED").
+
+### Stage 18-21 -- verification contract, mandatory re-probe, one-pass firewall
+
+`NormalizationVerificationResult` (frozen) + `verify_normalized_source`
++ `verification_outcome`: pure functions a future executor calls AFTER
+running D-271's `probe_source_media_profile` and D-272's `evaluate_
+source_format_policy` on its OWN normalized output -- this module never
+re-probes or re-evaluates itself (Stage 19's own mandatory contract,
+encoded as a type rather than executed). Only a re-evaluated `ACCEPT`
+verifies; a still-blocked result (any of `NORMALIZE_REQUIRED`/`REJECT`/
+`INSUFFICIENT_EVIDENCE`) is `verified=False` with the still-blocking
+reasons carried as `errors`, mapping to `NORMALIZATION_VERIFICATION_
+FAILED` (Stage 21), never silently treated as success. `MAX_
+NORMALIZATION_ATTEMPTS = 1` + `is_normalization_attempt_allowed(count)`
+encode the one-pass firewall (Stage 20/28) as an immutable invariant --
+no retry loop is built.
+
+### Stage 22-24/29/30 -- identity design, original preservation
+
+`NormalizedSourceReference` (frozen, types only): `original_source_
+identity`, `normalization_plan_identity`, `normalized_output_sha256`
+(defaults `None`, never reusing the original's hash -- Stage 24).
+`SourceNormalizationPlan` carries no field resembling an in-place
+overwrite (confirmed by field-name inspection) -- the original source
+remains provenance-only, exactly as D-273 designed.
+
+### Stage 30/31 -- multi-action composition, canonical order
+
+A single profile can trigger rotation + VFR + HDR + 10-bit
+simultaneously; the plan composes all applicable actions in one object,
+proven via a combined fixture. `_CANONICAL_ACTION_FIELD_ORDER` is a
+fixed, tested tuple -- stable regardless of which properties happen to
+need normalization.
+
+### Stage 33/34 -- security, tenant isolation
+
+`source_identity` is an opaque, caller-supplied internal identity --
+never a filesystem path, never a raw upload filename, no AWS
+credentials/presigned URLs/secrets anywhere in the module (confirmed by
+source-scan tests). No new auth model, no global cache -- this gate
+builds no cache at all (per D-273's own job-scoped-only recommendation,
+deferred to a future executor gate if ever needed).
+
+### Stage 35 -- diagnostics
+
+`plan_diagnostics(result) -> dict`: outcome, contract version, plan
+identity, source identity, the full action-by-property map,
+executability, blocking capability gaps, reason codes -- no media
+bytes, no filesystem paths, no secrets.
+
+### Verification run
+
+- New `tests/test_cutsell_d274a_source_normalization_plan.py`: **78
+  passed** -- the full Stage 1-35 contract/plan/action/outcome/
+  executability/verification/one-pass/diagnostics matrix, the honest
+  HEVC-under-ACCEPT gap regression, path/filename-independence proofs,
+  no-execution/no-filesystem/no-secrets source-scans, and the Stage 27
+  regression firewall (render/render_delivery/render_plan/media_probe/
+  source_media_profile/source_format_policy/post_render_media_qc/
+  visual+audio finishing/boundary_engine_pass/pacing_transition_
+  decision/post_render_watch_listen_qc/live_render_qc/finishing_
+  contract/export_job/exports/tenant_safe_delivery/uploads/worker_job/
+  flow_b/gpu_execution_provider all confirmed byte-for-byte unchanged).
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- D-266 through D-274A targeted suites together: **637 passed, 0
+  failed.**
+- `worker_job`/`flow_b`-adjacent regression subset: **43 passed, 0
+  failed.**
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`): 55
+  passed each (unaffected -- this gate never touches Selection/
+  Boundary/Freeze/editorial authority).
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: **7886 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, 0 failed** (78 net new tests over D-272A's own 7808).
+
+### Canonical status update
+
+LIVE EARLY SOURCE FORMAT GATE = CLOSED (D-272A, unchanged). **FORMAT
+NORMALIZATION ARCHITECTURE = CLOSED. CANONICAL NORMALIZATION CONTRACT +
+PLAN TYPES = CLOSED** (this entry). **NORMALIZATION EXECUTION = CURRENT
+P0 SUBTRACK** (D-274B onward -- zero ffmpeg-executing normalization code
+exists yet). No closed track reopened; the honest D-272 HEVC gap
+recorded above is a finding, not a reopening. Security/Privacy/Multi-
+user track remains ALWAYS ON per CLAUDE.md's own binding rule.
+
+### Verdict
+
+**A -- Canonical normalization contract + plan types proven --
+deterministic plan / identity / re-probe / one-pass safety closed --
+ready for rotation + VFR/timeline executor.** Every D-273 design
+decision now has a real, tested, immutable type: the canonical target
+contract, a deterministic path-independent plan identity, the full
+action/outcome/executability vocabularies, the mandatory re-probe/re-
+evaluate verification contract, and the one-pass firewall -- all proven
+against real D-271/D-272 typed fixtures, zero execution anywhere.
+
+**Exact next gate:** D-274B -- Rotation + VFR/Timeline Normalization
+Executor -- not implemented, not decided by this entry; a Product Owner
+authorization call. Per this directive's own instruction, if a
+normalization-timeout numeric policy is required before that gate can
+proceed, only that specific Product Owner value should be escalated at
+that time (already flagged in D-273, not a fresh escalation here).
+
+**Decision entry reference:** this entry (D-274A).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-274B.
+DO NOT LAUNCH RAW.
