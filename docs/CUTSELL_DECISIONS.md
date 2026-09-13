@@ -71573,3 +71573,183 @@ Then STOP.
 
 DO NOT IMPLEMENT D-272.
 DO NOT LAUNCH RAW.
+
+## D-272 — Source Format Policy / Early Media Gate (offline implementation)
+
+**Objective.** Post D-271 (source media probe + format classification
+foundation, Verdict A). Build `cutsell_worker/source_format_policy.py`:
+a pure `evaluate_source_format_policy(profile, ...)` that turns D-271's
+own `SourceMediaProfile` into one of four decisions --
+`ACCEPT`/`NORMALIZE_REQUIRED`/`REJECT`/`INSUFFICIENT_EVIDENCE` -- with
+machine-readable, severity-split reason codes (`blocking_reasons`/
+`normalization_reasons`/`warnings`), so a real source can be gated
+BEFORE expensive editorial compute (ASR/GPU/semantic reasoning) starts.
+No transcode, no HDR tonemap, no rotation pixel transform, no fps
+conversion -- decision only, never mutation.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `ee983f5` (exact expected
+match, D-271), clean tree -- confirmed before this gate began.
+
+### Stage 1-9 — decision vocabulary, reason codes, severity split
+
+`SourceFormatPolicyDecision` (frozen): `decision`, `policy_version`,
+`reason_codes` (all reasons, ordered), `blocking_reasons`,
+`normalization_reasons`, `warnings`, `source_profile_status`,
+`source_format_class` (D-271's own classification, carried through, not
+recomputed independently), `user_facing_error_code`, plus
+`can_enter_editorial_pipeline`/`requires_normalization`/`is_rejected`
+convenience properties. `INSUFFICIENT_EVIDENCE`-triggering reasons
+(unknown container, unknown codec, capability-gated codec unverified,
+multi-stream ambiguity) are correctly `blocking_reasons` members -- they
+block entry exactly like `REJECT` does; `normalization_reasons` is
+reserved for reasons that genuinely resolve via `NORMALIZE_REQUIRED`
+(this distinction was a real design bug caught and fixed during
+implementation, before any test ran, not a test-driven fix).
+
+### Stage 10-27 — per-property policy rules
+
+Hard `REJECT`: failed probe, missing video, invalid (<=0) coded
+dimensions, MKV/AVI container (D-270's own confirmed unsupported set),
+any codec in `KNOWN_UNSUPPORTED_VIDEO_CODECS` (deliberately an EMPTY
+frozenset today -- D-270's own audit found nothing hard-rejected at the
+codec level by the renderer itself; this is a real, tested structural
+seam for a future finding, proven by temporarily monkeypatching the
+frozenset and confirming the REJECT branch fires, then restoring it).
+`INSUFFICIENT_EVIDENCE`: unknown container, unknown codec, more than one
+video or audio stream (no stream-selection policy exists), and any
+non-H.264 codec without runtime-capability confirmation. H.264 has NO
+capability gate (this pipeline's native/most-tested format); HEVC/AV1
+are gated via `RuntimeCapabilityInput` (`hevc_decode_confirmed`/
+`av1_decode_confirmed`, both default `False` -- explicitly NOT the same
+type as D-271's own permanently-local-sandbox-only
+`LocalFfmpegCapabilitySnapshot`, which must never be fed into policy as
+production truth); any other non-H.264 codec (VP9/ProRes/MPEG4) has no
+confirmation mechanism yet and is always `INSUFFICIENT_EVIDENCE`.
+`NORMALIZE_REQUIRED` (non-blocking, additive reasons): non-zero/unknown-
+source rotation, any HDR status (PQ/HLG/Dolby Vision/other), likely-VFR,
+>8-bit depth, non-8-bit-acceptable pixel format. Non-blocking `warnings`
+only: missing audio, BT.2020 primaries with no transfer evidence
+(`COLOR_METADATA_UNCERTAIN` -- D-271's own conservative `HDR_STATUS_
+UNKNOWN`, never fabricated SDR or HDR), and optional resource-risk flags
+(`max_pixel_count`/`max_duration_sec`, both default `None` and never
+fire on their own -- confirmed by inspection that no existing canonical
+whole-source resolution/duration ceiling exists in this codebase, so
+none was invented; a dedicated source-scan test proves no new numeric
+threshold was hardcoded).
+
+### Stage 28-31 — user-facing error codes, editorial-entry composition
+
+`_user_facing_error_code` maps a blocked decision to one of
+`VIDEO_CORRUPT`/`VIDEO_STREAM_AMBIGUOUS`/`RUNTIME_CODEC_SUPPORT_
+UNVERIFIED`/`VIDEO_REQUIRES_NORMALIZATION`/`UNSUPPORTED_VIDEO_FORMAT`
+(never exposed for `ACCEPT`). `evaluate_source_for_editorial_entry(path,
+...)` composes D-271's `probe_source_media_profile` with this module's
+own `evaluate_source_format_policy` into the one pure function a future
+call site would invoke.
+
+### Stage 32 — integration seam, identified and proven, deliberately NOT activated
+
+The earliest real call site is `cutsell_worker/worker_job.py::run_
+flow_b_job`'s existing per-source loop (`download_source` + `probe_
+media`, confirmed by reading the full file), immediately before
+`process_local_sources` (`flow_b.py`'s own ASR/GPU/semantic-reasoning
+entry point, confirmed by signature inspection). This gate proves the
+seam (`evaluate_source_for_editorial_entry`) works correctly against
+real synthetic media and does NOT wire it into `worker_job.py` itself --
+confirmed by a git-diff guard test
+(`test_worker_job_not_modified_by_this_gate`). Rejecting or blocking a
+real user's upload is an editorial/product-policy decision (CLAUDE.md's
+own D-091 escalation condition A), matching this session's established
+"prove the seam, activate later under separate authorization" pattern
+(D-266's timeout seam before D-266A; D-269's stale-job guard before
+D-269A).
+
+### Verification run
+
+- `python3 -m py_compile`: clean (re-confirmed after the two test-file
+  fixes below, not only before).
+- New `tests/test_cutsell_d272_source_format_policy.py`: **96 passed**
+  -- the full Stage 8-42 policy matrix against real ffmpeg-generated
+  synthetic fixtures (H.264 MP4/MOV/24fps/60fps, HEVC MP4 when a local
+  encoder exists, HDR-PQ/HLG-tagged, no-audio, audio-only, corrupt file,
+  MKV file) plus hand-built ffprobe-JSON-shaped parser tests for
+  properties D-271 already established cannot be attached via a real
+  fixture in this ffmpeg build (rotation metadata), the Stage 31/38
+  editorial-entry helper tests, the Stage 32/38 integration-seam-proven-
+  but-not-activated tests, and the Stage 39/40 regression firewall
+  (render/render_delivery/render_plan/media_probe/source_media_profile/
+  post_render_media_qc/all visual+audio finishing/boundary_engine_pass/
+  pacing_transition_decision/post_render_watch_listen_qc/live_render_qc/
+  finishing_contract/export_job/exports/tenant_safe_delivery/uploads/
+  worker_job/flow_b/gpu_execution_provider all confirmed byte-for-byte
+  unchanged via `git diff --stat HEAD`), plus security/no-secrets/no-
+  encode-command checks.
+- One real design bug found and fixed BEFORE running any test (reason-
+  severity conflation -- see Stage 1-9 above), and two of this gate's
+  own test-authoring false positives found and fixed via failing tests:
+  a raw-source (non-docstring-stripped) substring scan that false-
+  matched this module's own scope-discipline docstring (fixed by
+  reusing the established `_source_without_docstrings` AST-stripping
+  helper), and a naive `"profile.hdr_status ="` substring check that
+  matched inside the legitimate `"profile.hdr_status =="` comparison
+  (fixed with a trailing-space-qualified check).
+- D-266 through D-272 targeted suites together: **508 passed, 0
+  failed.**
+- `worker_job`/`flow_b` regression subset: **16 passed, 0 failed**
+  (confirms this gate touched neither file's behavior).
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`): 1
+  passed each (unaffected -- this gate never touches Selection/
+  Boundary/Freeze/editorial authority).
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: **7757 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, 0 failed** (96 net new tests over D-271's own 7661 -- this
+  gate's own new file, touching no existing test file).
+
+### Canonical status update
+
+RENDERER / EXPORT HARDENING: execution safety = CLOSED (D-265/D-266/
+D-266A); identity/hash foundation = CLOSED (D-267); remote delivery
+tenant safety = FOUNDATION + LIVE PATH ACTIVATION = CLOSED (D-269/
+D-269A); format/media-diversity audit = CLOSED (D-270); source media
+probe/classification = CLOSED (D-271). **SOURCE FORMAT EARLY POLICY
+GATE = CLOSED** (this entry) -- a real, tested, offline
+ACCEPT/NORMALIZE_REQUIRED/REJECT/INSUFFICIENT_EVIDENCE decision now
+exists; the real `worker_job.py` call site is deliberately NOT wired
+(a separate, explicitly-authorized activation gate, matching D-266A/
+D-269A's own pattern). **FORMAT NORMALIZATION = CURRENT REMAINING P0
+SUBTRACK** (rotation pixel transform, HDR tonemap, and any future
+codec-conversion behavior all remain unimplemented; this gate only
+decides WHETHER normalization is required, never performs it). Security/
+Privacy/Multi-user track remains ALWAYS ON per CLAUDE.md's own binding
+rule.
+
+### Verdict
+
+**A — Early source format policy gate proven -- ACCEPT/NORMALIZE_
+REQUIRED/REJECT/INSUFFICIENT_EVIDENCE safe -- common format risks
+blocked before expensive editorial processing -- ready for source
+normalization architecture.** Every property D-271's own classification
+foundation surfaced (rotation, HDR, VFR, bit depth, pixel format,
+missing/multi-stream audio and video, unknown/unsupported codec and
+container, capability-gated codecs, invalid dimensions, resource risk)
+now has a real, tested, conservative policy answer with a severity-split
+reason vocabulary and a user-facing error code -- proven end-to-end via
+the composed `evaluate_source_for_editorial_entry` helper against real
+synthetic media, with the real activation into `worker_job.py`
+deliberately deferred to a separately-authorized gate, matching this
+session's own established seam-then-activate pattern.
+
+**Exact next gate:** source normalization architecture (rotation pixel
+transform, HDR tonemap, and/or the `worker_job.py` activation of this
+gate's own policy) -- not implemented, not decided by this entry; a
+Product Owner authorization call (activation itself is CLAUDE.md's own
+D-091 escalation condition A).
+
+**Decision entry reference:** this entry (D-272).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-273.
+DO NOT LAUNCH RAW.
