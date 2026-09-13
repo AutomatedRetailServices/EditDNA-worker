@@ -70870,3 +70870,533 @@ Then STOP.
 
 DO NOT IMPLEMENT D-270.
 DO NOT LAUNCH RAW.
+
+## D-270 — Renderer Format / Media-Diversity Hardening Audit (offline forensic + design only, no code change)
+
+**Objective.** Post D-269A (remote delivery tenant safety = FOUNDATION +
+LIVE PATH ACTIVATION, CLOSED). Audit whether CutSell can safely ingest and
+render the real phone/video files hundreds or thousands of users will
+upload. Pure forensic + design: no `cutsell_worker/*.py` file was
+modified to produce this entry, no codec/fps/resolution/color-space/
+rotation/transcode/retry/Pacing/Boundary/Freeze/Audio/Visual Finishing/QC
+change, no RAW.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `f24abfc` (exact expected
+match, D-269A), clean tree — confirmed before this gate began.
+
+### Stage 1 — current source contract (as read)
+
+`cutsell_worker/uploads.py`'s `ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov",
+".m4v", ".webm"}` / `ALLOWED_CONTENT_TYPES` (matching MIME strings +
+`application/octet-stream`) is the ENTIRE upload-time gate — extension
+and declared content-type only, checked against neither the file's real
+bytes nor any codec/profile/pixel-format/color evidence. `.mkv`/`.avi`
+are REJECTED_BY_CONTRACT (not in the extension set). Everything else
+(codec inside the container, profile, pixel format, bit depth, VFR,
+rotation, HDR, color space, sample rate, channel count) is
+UNTESTED_BY_CONTRACT — the render pipeline's own ffmpeg decode step is
+the true, unverified-for-diversity gatekeeper.
+
+- SUPPORTED_BY_CONTRACT: `.mp4`, `.mov`, `.m4v` containers (extension +
+  MIME only).
+- INCIDENTALLY_WORKS: `.webm` (allowed by contract, but this is a
+  browser/screen-recording format phone cameras essentially never
+  produce — its presence in the allowlist is not evidence of deliberate
+  mobile-camera validation).
+- UNTESTED: every codec/profile/pixel-format/rotation/HDR/color/audio
+  property of an accepted file.
+- REJECTED_BY_CONTRACT: `.mkv`, `.avi`, and any other extension.
+
+### Stage 2/3/4 — container/codec/H.264-variant support (code evidence)
+
+`render.py`'s ffmpeg command construction (`_ffmpeg` calls throughout the
+file) is IDENTICAL regardless of source format: decode via a plain
+`-i <path>` (no explicit demuxer/codec hints), scale + pad to a FIXED
+output canvas (`scale={width}:{height}:force_original_aspect_ratio=decrease`
+then `pad={width}:{height}:...`), force `format=yuv420p` in the
+filtergraph, encode `-c:v libx264 -preset veryfast -crf 20` (always,
+never HEVC/VP9/AV1 on output), `-c:a aac -b:a 160k -ar 48000` with
+`aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo`
+(always resamples to 48 kHz stereo, regardless of source rate/channel
+layout — a real, already-existing normalization the audit did not need
+to invent). No container/codec allowlist or rejection exists inside the
+renderer itself — whatever `-i` can decode, it will attempt to render.
+
+- SUPPORTED (decode, by ffmpeg's own general capability, confirmed in
+  this sandbox's ffmpeg 6.1.1 full build): H.264/AVC (all common
+  profiles), HEVC/H.265 (software decoder present and round-trip-tested
+  in-sandbox: HEVC-encoded synthetic clip decoded and re-encoded to H.264
+  successfully), VP9/AV1 (libvpx/libdav1d present).
+- PARTIAL: ProRes (a QuickTime-native codec real iPhones can produce in
+  some capture modes/pro apps) — decoder presence not independently
+  probed in this audit; plausible via ffmpeg's own `prores`
+  decoder but UNTESTED here.
+- UNTESTED end-to-end through THIS pipeline (no synthetic fixture run
+  through `render_preview` in this audit — design-only gate): MPEG-4
+  Part 2, exotic H.264 4:2:2/4:4:4/10-bit variants specifically.
+- REJECTED: nothing at the codec level by the renderer itself; only the
+  UPLOAD contract's extension check can reject a file before ffmpeg ever
+  sees it.
+
+**Pixel format / bit depth:** the filtergraph's `format=yuv420p` forces
+EVERY output to 8-bit 4:2:0, unconditionally. A 10-bit HEVC source (very
+common on newer iPhones in certain capture modes, and standard for any
+HDR capture) is silently downconverted to 8-bit 4:2:0 with no explicit
+tone-mapping step — this is the single clearest P0/P1-boundary finding
+in this audit (Stage 10/11/12).
+
+### Stage 5 — HEVC / iPhone (critical mobile case)
+
+Confirmed IN-SANDBOX: this environment's ffmpeg 6.1.1 (`--enable-gpl
+--enable-libx265`) both encodes AND decodes HEVC; a synthetic HEVC clip
+round-tripped to H.264 successfully. **Not independently verified:** the
+REAL worker image's ffmpeg build. `Dockerfile.cutsell.worker` /
+`Dockerfile.cutsell.serverless` both install ffmpeg via `apt-get install
+... ffmpeg` on top of `madiator2011/better-pytorch:cuda12.4-torch2.6.0`
+(no custom ffmpeg build, no `--enable-libx265` flag under the codebase's
+own control); `modal_video00_full_benchmark.py`'s Modal image similarly
+`apt_install`s ffmpeg on a registry base image. HEVC DECODE does not
+require `libx265` (that is an ENCODE-only dependency; ffmpeg's own
+built-in `hevc` decoder is native and ships in virtually every modern
+distribution's standard ffmpeg package) — so HEVC decode capability on
+the real production image is PLAUSIBLE but genuinely UNVERIFIED by this
+audit (no provider call authorized). MOV container decode: no evidence of
+any problem (ffmpeg's `mov,mp4,m4a,3gp,3g2,mj2` demuxer handles both
+uniformly; the renderer's `-i` call is container-agnostic). Rotation
+metadata / VFR / HDR: see Stages 8-11 below — all real, all currently
+unaddressed at the render-identity/measurement layer.
+
+### Stage 6/7 — VFR and output FPS
+
+`media_probe.py`'s `probe_media` reads ONLY `avg_frame_rate`, never
+`r_frame_rate` — the two-value comparison that is the standard way to
+detect VFR (a source is VFR when `avg_frame_rate != r_frame_rate`) is
+STRUCTURALLY ABSENT from this codebase's own canonical probe. A
+`variable_frame_rate_hint` field already exists in the client-supplied
+source-metadata contract (proven by
+`tests/test_cutsell_d134_overlap_contract_normalization.py::
+test_unknown_vfr_remains_unknown`) but is consumed by NO production code
+found in this audit — the product has already anticipated VFR as a real
+concern at the contract level without ever wiring it to any behavior.
+**Output FPS is FIXED, not inherited:** every `render.py` render command
+applies an explicit `fps={fps}` filter (default `RENDER_FPS_DEFAULT = 30`,
+the same constant D-266/D-267/D-269A all pin) BEFORE encoding — this
+ALREADY forces every output to constant frame rate at 30 fps regardless
+of source VFR/CFR status, via ffmpeg's own `fps` filter (duplicate/drop
+frames as needed to hit the target). This is a genuine, already-existing
+structural mitigation for VFR-at-output; what is MISSING is any
+observability of it (the render never records whether the source was VFR,
+how many frames were duplicated/dropped, or whether A/V drift resulted).
+
+### Stage 8/9 — rotation metadata / orientation normalization
+
+`render.py` contains no `-noautorotate`/`-autorotate` override anywhere
+— rotation handling is 100% INHERITED from whatever the installed
+ffmpeg's own demuxer default is (this sandbox's ffmpeg 6.1.1 defaults to
+`-autorotate 1` for the mov/mp4 demuxer, i.e. auto-rotate on decode;
+UNVERIFIED for the production image's own ffmpeg version). More
+significantly: `visual_finishing_measurement.py` has its OWN separate
+rotation-tag reader (`_probe_rotation_degrees`, added at "STAGE 18" of
+that module's own history — reads `stream_tags=rotate` and
+`stream_side_data=rotation` via a dedicated ffprobe call) that
+`media_probe.py`'s canonical probe does NOT have. Tracing every use of
+`rotation_degrees` in that module confirms it is threaded through purely
+as OBSERVABILITY — it is carried into `VisualClipMeasurement` but never
+used to swap `frame_width`/`frame_height`, correct `_orientation_
+category`'s portrait/landscape/square classification, or transform the
+`cv2.VideoCapture`-decoded frame before face/pose measurement.
+`cv2.VideoCapture` on Linux does not itself apply container rotation
+metadata (unlike ffmpeg's own demuxer-level autorotate) — so a portrait
+phone video stored as landscape pixel dimensions plus a 90°/270° rotation
+tag can be measured by `visual_finishing_measurement.py` using the WRONG
+physical orientation for framing decisions (punch-in/reframe policy is
+orientation-aware per `visual_finishing_policy.py`), while the RENDERER's
+own ffmpeg decode may (if autorotate is on) already display it correctly
+— a genuine cross-module INCONSISTENCY, not merely a gap (Stage 24).
+
+### Stage 10/11/12 — HDR/SDR, color metadata, pixel format
+
+No `color_primaries`/`color_transfer`/`colorspace`/`color_range` flag
+appears anywhere in `render.py`'s ffmpeg command construction — output
+color metadata is 100% ffmpeg-default-inherited, never explicitly set or
+verified. Combined with the unconditional `format=yuv420p` (8-bit)
+filter (Stage 2-4 above), an HDR source (PQ/HLG, BT.2020, 10-bit) is
+downconverted to 8-bit yuv420p with NO tone-mapping and no corrected
+color tagging — the single most concrete "could genuinely look wrong"
+finding of this entire audit: real HDR phone footage rendered through
+this pipeline today would very likely wash out, clip highlights, or
+shift saturation, with zero observability of it happening. Output pixel
+format is uniformly 8-bit yuv420p, which IS the correct, maximally
+mobile/TikTok-compatible choice for the OUTPUT side — the gap is
+entirely on the INPUT interpretation side (no tone-mapping, no explicit
+`-color_primaries bt709 -color_trc bt709 -colorspace bt709` output
+tagging to make the SDR-range intent explicit rather than inherited).
+
+### Stage 13/14 — odd dimensions, very large / low resolution
+
+Verified directly (synthetic, this sandbox): encoding a 321×241 source
+DIRECTLY with libx264/yuv420p fails immediately ("width not divisible by
+2"); the SAME source decoded then run through the renderer's own
+mandatory `scale=...,pad=...` chain to the fixed even output canvas
+(1080×1920) succeeds cleanly. The renderer's always-even, always-fixed
+output canvas is a structural safety net against odd source dimensions
+that appears to work by construction, not by explicit odd/even handling
+logic — LOW risk, but never regression-tested with a real odd-dimension
+fixture in this codebase's own suite (a genuine, cheap, addable gap).
+Very large resolution (4K/6K/8K): no explicit resolution ceiling/rejection
+found anywhere in the upload or render path; a 4K/6K/8K source would
+decode and scale down to the fixed output canvas, at real CPU/RAM/time
+cost this audit did not measure — bounded only by the existing 1200s
+render timeout (D-266A), which is a genuine but coarse backstop, not a
+format-aware one. **Low resolution:** `render.py`'s
+`scale=...force_original_aspect_ratio=decrease` filter UPSCALES a
+source smaller than the output canvas to fill as much of the target frame
+as its aspect ratio allows (ffmpeg's own documented "decrease" semantics
+— the calculated size is decreased only far enough to not EXCEED the
+target, which for a small source can mean substantial upscaling, e.g.
+480×854 → close to 1080×1920 is a ~2.25x scale) — independent of, and
+potentially much larger than, `visual_finishing_policy.py`'s own explicit
+`MAX_PUNCH_IN_SCALE = 1.15` ceiling. The 1.15x cap governs Visual
+Finishing's OWN punch-in action; it does not, and was never meant to,
+bound the renderer's own baseline fit-to-canvas upscale of a low-
+resolution source. This is a real, previously-undocumented quality risk
+this audit surfaces for the first time.
+
+### Stage 16/17/18/19/20 — audio sample rate, channels, missing streams
+
+Every render command's `aformat=sample_fmts=fltp:sample_rates=48000:
+channel_layouts=stereo` filter unconditionally resamples to 48 kHz
+stereo and unconditionally converts mono to stereo (via ffmpeg's own
+default up-mix when a mono input is asked to conform to a stereo channel
+layout) — this is a real, already-existing, correct-by-construction
+normalization for 44.1k/48k/96k and mono/stereo sources; 5.1/multichannel
+sources would similarly be down-mixed to stereo by the SAME filter
+(untested with a real 5.1 fixture in this audit). **Missing audio:** every
+render path that needs an audio track for a segment lacking one
+synthesizes `anullsrc=channel_layout=stereo:sample_rate=48000` (silence)
+explicitly in the ffmpeg command — video-only source clips are
+SUPPORTED, never a hard failure, by an existing, deliberate mechanism.
+**Missing video (audio-only source entering the talking-head path):** no
+explicit guard was found in `render_plan.py`/`render.py` for a source
+with `has_audio=True` but no video stream — `media_probe.py`'s own
+`MediaProbe` defaults `width=0, height=0` when no video stream exists,
+which would very likely produce a black/zero-dimension segment rather
+than an explicit, named failure; this is UNTESTED and the fail behavior
+is NOT explicit today (a real gap, Stage 19's own framing). **Multiple
+streams:** `media_probe.probe_media` picks the FIRST video stream
+(`next(... codec_type == "video" ...)`) and reports `has_audio` as "any
+audio stream present" — a file with multiple video tracks (e.g. a
+picture-in-picture recording, or a video with an embedded thumbnail
+track) or multiple audio tracks (dubbed/alternate-language tracks) has
+NO explicit stream-selection policy; the render's own `-map` calls
+(`-map 0:v:0`/`-map 1:a:0` in the two-clip-audio path; `-map [vout]
+-map [aout]` in the filtergraph-concat path) implicitly select "the
+first of whatever ffmpeg finds," which is a real but reasonable default
+— never validated against a genuine multi-stream fixture.
+
+### Stage 21/22/23 — time base, MOV edit lists, corrupt frames
+
+No explicit non-zero-`start_time`/negative-timestamp/unusual-`time_base`
+handling exists anywhere in the probe or render path — `render_
+plan.py`'s segment timing is expressed purely in seconds relative to the
+draft's own timeline, never read from or reconciled against the
+SOURCE file's own `start_time`/PTS/DTS; this is UNTESTED, not
+demonstrated broken. Apple MOV "edit lists" (a real, well-known iOS
+capture artifact where the container declares a playback start offset
+different from the first decoded frame) are not explicitly probed or
+compensated for anywhere in this codebase — ffmpeg's own decode
+generally honors edit lists by default, but this pipeline's OWN
+seek/trim math (`-ss`/duration-based `trim=` filters, per the ffmpeg
+command construction) does not verify that its assumed zero-based
+timeline matches what an edit-list-bearing file actually presents; a
+plausible but unverified corruption-of-timing risk. **Corrupt frame
+tolerance:** `render.py`'s own execution-safety layer (D-266, unchanged
+by this audit) already distinguishes ffmpeg exit-code failure (hard
+decode failure → `RenderExecutionFailure`) from success; there is no
+explicit handling for "ffmpeg logged a recoverable decode warning but
+still exited 0" (an isolated bad frame) — this pipeline's `-loglevel
+error` flag on every render command means WARNING-level decode messages
+are actively suppressed and never surfaced, so an isolated-bad-frame
+scenario would currently be invisible either way.
+
+### Stage 24/25 — measurement consistency (visual/audio) vs. renderer
+
+**Visual:** see Stage 8/9 above — a genuine, demonstrated cross-module
+rotation-orientation inconsistency between `visual_finishing_
+measurement.py` (reads rotation, never applies it) and the renderer
+(applies whatever ffmpeg's own autorotate default is, inherited, never
+verified). **Audio:** `audio_finishing_measurement.py` has its OWN
+dedicated `_probe_audio_stream_fields` ffprobe call (sample_rate/
+channels/channel_layout) that `media_probe.py` does not expose at all —
+this measurement module is MORE thorough than the render path's own
+canonical probe, mirroring the same pattern found for rotation. LUFS
+measurement (`_INTEGRATED_LOUDNESS_RE`, real ffmpeg loudnorm-filter
+parsing) runs against whatever the SOURCE file's own native sample rate/
+channel layout is — it measures BEFORE the renderer's own 48kHz/stereo
+normalization has ever run, so a LUFS value measured pre-render and a
+final rendered file's ACTUAL loudness after resampling/channel
+conversion could differ; no evidence found that this delta is measured
+or reconciled anywhere.
+
+### Stage 26 — caption/Unicode
+
+No evidence found that container/codec diversity affects caption
+burn-in or Unicode handling specifically — caption rendering is a
+separate ffmpeg `drawtext`/overlay concern operating on the ALREADY-
+decoded, ALREADY-normalized (yuv420p, fixed geometry) frame buffer, which
+is by then format-independent. Not flagged as a format-diversity risk.
+
+### Stage 27 — mobile reality matrix
+
+| Platform | Format | Classification |
+|---|---|---|
+| iPhone | HEVC MOV | Renders (decode support present in this sandbox's ffmpeg; NOT verified on the real worker image). Rotation/orientation risk (Stage 8/9). VFR possible (Stage 6, mitigated at output by fixed fps). HDR risk if captured in Dolby Vision/HDR mode (Stage 10). |
+| iPhone | H.264 MOV | Renders (best-understood path — H.264/yuv420p/8-bit is exactly this pipeline's own native output format). Same rotation/VFR/HDR caveats as above. |
+| iPhone | ProRes (rare, pro-app capture) | PARTIAL/UNTESTED. |
+| Android | H.264 MP4 | Renders; best-understood path, same as iPhone H.264. |
+| Android | HEVC MP4 | Same HEVC caveats as iPhone HEVC; rotation-tag conventions differ by OEM camera app and are equally unverified. |
+| Android | Unusual/OEM resolutions | Covered by Stage 13/14's scale/pad safety net; UNTESTED with a real device sample. |
+
+### Stage 28 — ffprobe/source-probe coverage gap matrix
+
+`media_probe.py` (the render pipeline's ONE canonical probe) captures
+ONLY: `duration_sec`, `width`, `height`, `fps` (avg_frame_rate only),
+`has_audio` (boolean). It does NOT capture: container/format_name,
+codec_name/profile, pixel format, bit depth, `r_frame_rate` (no VFR
+detection possible), rotation/displaymatrix, color_primaries/
+color_transfer/colorspace/color_range, sample_rate, channels/
+channel_layout, stream count/selection, start_time/time_base. Every one
+of these gaps is independently, separately patched by OTHER modules for
+their OWN narrow purposes (`visual_finishing_measurement.py`'s own
+rotation probe; `audio_finishing_measurement.py`'s own sample_rate/
+channels probe) — confirming the "multiple ad-hoc probes, no canonical
+source-format profile" duplication this gate's own Stage 30 architecture
+is meant to resolve.
+
+### Stage 29 — technical QC format coverage gap matrix
+
+`post_render_media_qc.py` (the entire technical-QC surface: `probe_
+decode_integrity`, `check_accidental_silence`, `check_frozen_frames`,
+`check_dead_black_frames`, `check_audio_discontinuity_at_boundaries`)
+verifies ONLY decode integrity, silence, frozen/black frames, and
+audio-join discontinuity — it contains ZERO checks of container, video
+codec, audio codec, fps, pixel format, resolution, rotation, color
+metadata, or sample rate/channels on the OUTPUT file. `render_
+delivery.py`'s `technical_qc_status_from_live_render_qc` (D-267,
+unchanged) reads only `LiveRenderQCResult.deliverable`, itself derived
+from these same content-only checks. **The entire QC authority stack,
+top to bottom, verifies EDITORIAL/PERCEPTUAL correctness only — it has
+NO format-compliance verification of any kind today.** This is the
+single cleanest, most complete gap this audit found.
+
+### Stage 30 — format classification architecture (design only)
+
+```
+SOURCE PROBE (expand media_probe.py or add a companion probe: container,
+codec/profile, pixel format, bit depth, avg/r_frame_rate, rotation/
+displaymatrix, color_primaries/transfer/colorspace/range, sample_rate,
+channels/channel_layout, stream inventory, start_time)
+  -> FORMAT CLASSIFICATION (a pure, deterministic function of the probe:
+     KNOWN_SAFE / NEEDS_NORMALIZATION / UNSUPPORTED / UNKNOWN_ABSTAIN --
+     never a network call, never a guess)
+  -> NORMALIZATION REQUIREMENTS (a structured statement of what the
+     renderer would need to do differently for THIS source -- e.g.
+     "rotate 90 before scale," "tone-map HDR to SDR," "resample 96k" --
+     never itself performing the transcode)
+  -> RENDER (D-265-D-269A's own unchanged authority; consumes the
+     normalization requirement as an input, never redesigned by this
+     gate)
+  -> OUTPUT VERIFICATION (extends post_render_media_qc.py's own
+     authority with format-compliance checks: does the OUTPUT actually
+     have the fixed geometry/pixel-format/fps/sample-rate/channels this
+     pipeline promises, regardless of what the SOURCE was)
+```
+Design only. No implementation authorized or performed by this entry.
+
+### Stage 31 — accept/normalize/reject classification (future desired behavior, no code change)
+
+| Condition | Future behavior |
+|---|---|
+| H.264 MP4/MOV, yuv420p, 8-bit, CFR | ACCEPT_AS_IS |
+| HEVC MP4/MOV, yuv420p, 8-bit, CFR | ACCEPT_AS_IS (decode + existing 8-bit output pipeline already handles this) |
+| VFR source | NORMALIZE (already effectively normalized by the existing fixed-fps output filter; formalize by measuring and recording it) |
+| Rotation-tagged source | NORMALIZE (apply/verify orientation before any orientation-dependent measurement or crop decision) |
+| 10-bit / HDR (PQ/HLG/BT.2020) | NORMALIZE (explicit tone-map to SDR/BT.709 before yuv420p conversion, replacing today's silent implicit downconvert) |
+| Mono / non-48k audio | ACCEPT_AS_IS (already normalized by the existing `aformat` filter) |
+| 5.1/multichannel audio | NORMALIZE (verify/confirm the existing down-mix behaves correctly; currently untested) |
+| No audio track | ACCEPT_AS_IS (already handled via `anullsrc`) |
+| No video track (audio-only into a video path) | REJECT_UNSUPPORTED (explicit, named failure — not today's implicit zero-dimension path) |
+| Multiple video/audio streams | ACCEPT_AS_IS with an explicit, logged stream-selection choice (formalizing today's implicit "first stream" default) |
+| MKV/AVI/other rejected extension | REJECT_UNSUPPORTED (already true at upload) |
+| ProRes | ABSTAIN (insufficient evidence in this audit; needs its own targeted investigation before a decision) |
+| Very large resolution (4K+) | ACCEPT_AS_IS, bounded by the existing 1200s timeout (no new threshold invented, per this gate's own instruction) |
+| Very low resolution | ACCEPT_AS_IS with an explicit, surfaced quality-risk flag (never silently invisible upscaling, as today) |
+
+### Stage 32 — synthetic testability (verified in this sandbox, this audit)
+
+Confirmed LOCALLY GENERATABLE and round-trip-tested in this sandbox:
+H.264 MP4 (trivial, already this codebase's own standard test-fixture
+pattern), MOV container, mono 44.1kHz audio, odd-dimension source
+(321×241 — confirmed the renderer's own scale/pad chain handles it),
+HEVC MP4 (this sandbox's ffmpeg 6.1.1 both encodes AND decodes HEVC; a
+synthetic clip round-tripped HEVC→H.264 successfully). **Confirmed
+HARDER than a one-line ffmpeg flag:** rotation-metadata injection — two
+different attempted approaches (`-metadata:s:v rotate=90` on output;
+the newer `-display_rotation` option) both failed to attach a readable
+rotation tag/side-data in this ffmpeg build/version as attempted; this
+needs either a small dedicated investigation into this ffmpeg version's
+own correct mechanism, or a real captured sample, before a rotation
+regression fixture can be built. VFR fixture generation was not
+attempted in this audit (design-only gate) but is plausible via ffmpeg's
+own variable-`-r`/concatenated-mixed-fps-segment techniques — untested
+here.
+
+### Stage 33 — real phone sample need
+
+Not required to START the proposed D-271 (source probe/format
+classification foundation, offline, synthetic-fixture-driven) — every
+P0 finding in this audit is either directly evidenced by code inspection
+(no probe capability, no QC coverage, unconditional 8-bit downconvert, no
+rotation application) or independently reproducible with synthetic
+ffmpeg-generated media. Real iPhone/Android samples WOULD be needed
+before claiming the eventual normalization behavior is correct on real
+capture idiosyncrasies (true VFR patterns, real edit-list offsets, real
+OEM rotation-tag conventions, real HDR metadata) — this is a later,
+explicitly-flagged need, not a blocker for D-271's own offline start.
+
+### Stage 34 — security / DoS
+
+No pathological-input hardening beyond the existing 1200s render timeout
+(D-266A) and the existing upload size ceiling (`MAX_UPLOAD_BYTES = 2
+GiB`, `uploads.py`) was found specific to FORMAT diversity: a decoder-
+bomb-shaped file (absurd resolution declared in metadata but tiny actual
+data, or vice versa), a file with hundreds of streams, or malformed
+metadata designed to make ffprobe/ffmpeg hang or crash are not
+independently guarded against beyond ffmpeg's own general robustness and
+the render timeout's own coarse backstop. This connects directly to the
+1200s timeout (D-266A) as the LAST line of defense, not a
+format-aware one — a genuinely format-diversity-flavored security gap,
+correctly P1 (real but not the most likely near-term exploit path given
+`CUTSELL_AUTH_REQUIRED` gating who can submit jobs at all).
+
+### Stage 35 — P0/P1/P2 matrix
+
+**P0:**
+1. Zero format-compliance verification anywhere in the technical QC
+   stack (Stage 29) — an output could silently violate its own promised
+   contract (geometry/pixel-format/fps/audio) with nothing to catch it.
+2. Rotation metadata read but never applied to correct orientation-
+   dependent visual measurement (Stage 8/9/24) — a real, demonstrated
+   cross-module inconsistency affecting framing decisions for a large
+   fraction of real phone uploads.
+3. HDR/10-bit sources silently downconverted to 8-bit yuv420p with no
+   tone-mapping and no corrected color tagging (Stage 10/11/12) — the
+   single most likely "looks visibly wrong" real-user scenario.
+4. No canonical source-format probe (VFR detection, rotation, color,
+   bit depth, codec/profile all absent from `media_probe.py`) — Stage 28.
+5. Missing-video-track (audio-only source into a video path) has no
+   explicit rejection — implicit zero-dimension behavior instead
+   (Stage 19).
+
+**P1:**
+6. Real HEVC-decode capability of the ACTUAL production worker image is
+   unverified (plausible, not confirmed — Stage 5).
+7. Unbounded low-resolution upscale via the renderer's own baseline
+   scale-to-fit step, independent of and larger than Visual Finishing's
+   own 1.15x punch-in ceiling (Stage 15) — a previously-undocumented
+   quality risk.
+8. MOV edit-list / non-zero start_time / unusual time_base reconciliation
+   unverified (Stage 21/22).
+9. Multi-stream (multiple video/audio tracks) selection is implicit,
+   never validated against a real fixture (Stage 20).
+10. Format-diversity-flavored DoS surface (decoder bombs, malformed
+    metadata, stream-count abuse) beyond the existing coarse 1200s
+    timeout (Stage 34).
+11. LUFS measured pre-render vs. actual post-render loudness after
+    resample/channel-conversion delta unreconciled (Stage 25).
+
+**P2:**
+12. Exotic container/codec support (ProRes, MPEG-4 Part 2, 4:2:2/4:4:4
+    H.264) genuinely untested (Stage 3/4).
+13. `.webm`/VP9/AV1 support exists but is essentially unused by the real
+    mobile-camera use case (Stage 1/2).
+14. Corrupt-frame / recoverable-decode-warning visibility (`-loglevel
+    error` actively suppresses warnings) — Stage 23.
+
+### Stage 36 — beta blocker
+
+**Yes — common users could upload normal phone videos today that render
+incorrectly**, specifically: (a) any HDR-captured clip (a standard
+capture mode on recent iPhones and many Android flagships) risks visible
+washout/color shift with zero detection (P0 #3); (b) any portrait phone
+video whose rotation metadata is read by `visual_finishing_measurement.py`
+but not applied could produce wrong-orientation framing decisions during
+Visual Finishing (P0 #2) — the renderer's own final pixels may still be
+correctly oriented (inherited ffmpeg autorotate), but the EDITORIAL
+decision about how to crop/punch-in that frame could already be wrong by
+the time rendering happens. Common H.264/HEVC SDR phone video without
+rotation-dependent Visual Finishing decisions is the BEST-supported case
+and likely renders correctly today, but nothing in this codebase
+currently PROVES that for a real device sample.
+
+### Stage 37 — commercial scale (design only)
+
+At thousands of users, the same Stage 30 architecture (probe →
+classify → normalize-requirement → render → output-verify) is the right
+shape at any scale — the marginal cost of the missing probe/QC coverage
+is a constant per-render CPU cost (one more bounded ffprobe call, a few
+more filtergraph checks), not something that gets structurally harder
+with volume. What DOES get harder with volume is the BLAST RADIUS of an
+unnoticed format-diversity defect (Stage 35's P0 #1's absence of output
+verification means a systematic HDR-washout bug, once shipped, would
+affect every HDR upload silently until a human noticed) — this is the
+strongest argument for closing P0 #1 (output format verification) early
+in D-271, not deferring it.
+
+### Stage 38 — first implementation gate
+
+D-271 — Source Media Probe / Format Classification Foundation, offline
+implementation: a structured source-format profile (container, codec/
+profile, pixel format, bit depth, VFR detection via avg/r_frame_rate,
+rotation, color metadata, audio sample_rate/channels/layout,
+normalization-requirement state) — NO transcode behavior yet. Not
+implemented by this entry.
+
+### Canonical status update
+
+RENDERER / EXPORT HARDENING: execution safety = CLOSED (D-265/D-266/
+D-266A); identity/hash foundation = CLOSED (D-267); remote delivery
+tenant safety = FOUNDATION + LIVE PATH ACTIVATION = CLOSED (D-269/
+D-269A). **RENDERER FORMAT/MEDIA DIVERSITY = CURRENT SUBTRACK, AUDITED,
+NOT YET IMPLEMENTED** (this entry). Security/Privacy/Multi-user track
+remains ALWAYS ON per CLAUDE.md's own binding rule.
+
+### Verdict
+
+**A — Common mobile format foundation partially supported — clear P0
+media-diversity gaps identified — ready for source format classification
+foundation.** The core decode/normalize/encode pipeline (fixed-geometry
+scale+pad, fixed 8-bit yuv420p output, fixed 48kHz-stereo audio
+normalization, fixed 30fps CFR output) is real, sound, and already
+handles a surprising amount of diversity BY CONSTRUCTION (VFR-to-CFR,
+mono-to-stereo, odd-dimension sources, missing audio) without this
+codebase ever having explicitly designed for it. The gaps are real and
+concentrated exactly where this gate's own directive expected them:
+zero format-compliance output verification, rotation metadata that is
+read but not applied, and silent HDR-to-SDR downconversion with no
+tone-mapping. None of these require a renderer redesign — D-271's own
+proposed probe/classification foundation is the right, bounded next
+step.
+
+**Exact next gate:** D-271 — Source Media Probe / Format Classification
+Foundation (offline implementation) — not implemented, not decided by
+this entry; a Product Owner authorization call.
+
+**Decision entry reference:** this entry (D-270).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-271.
+DO NOT LAUNCH RAW.
