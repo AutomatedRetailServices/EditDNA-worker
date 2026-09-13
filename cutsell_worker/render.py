@@ -241,12 +241,41 @@ def _concat_render_command(
         command += ["-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}", "-i", segment.source_path]
         video_input = input_index
         input_index += 1
-        video_chain = [
-            f"[{video_input}:v]scale={width}:{height}:force_original_aspect_ratio=decrease",
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-            "setsar=1",
-            f"fps={fps}",
-        ]
+        # D-262 (Visual Finishing EXECUTOR): an optional, already-authorized
+        # (D-260 policy -> D-262 executor) pixel-space scale+crop geometry
+        # instruction, consumed here BEFORE the existing fit-to-canvas step
+        # (D-261 Stage 13's chosen insertion point -- source-pixel-space
+        # geometry, zero filtergraph restructuring). `segment.visual_transform`
+        # is `None` on every live-produced segment today (`build_render_plan`
+        # never assigns it), so this branch is dead in production and the
+        # `else` below reproduces today's video chain byte-for-byte. Applied
+        # only when the spec's own recorded source dimensions match the
+        # PROBED source -- any mismatch fails closed (transform silently
+        # skipped, never applied against the wrong geometry) rather than
+        # trusting a stale spec.
+        visual_transform = segment.visual_transform
+        apply_transform = (
+            visual_transform is not None
+            and visual_transform.source_width == probe.width
+            and visual_transform.source_height == probe.height
+        )
+        if apply_transform:
+            video_chain = [
+                f"[{video_input}:v]scale={visual_transform.scaled_width}:{visual_transform.scaled_height}",
+                f"crop={visual_transform.crop_width}:{visual_transform.crop_height}:"
+                f"{visual_transform.crop_x}:{visual_transform.crop_y}",
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                "setsar=1",
+                f"fps={fps}",
+            ]
+        else:
+            video_chain = [
+                f"[{video_input}:v]scale={width}:{height}:force_original_aspect_ratio=decrease",
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                "setsar=1",
+                f"fps={fps}",
+            ]
         caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
         if caption:
             video_chain.append(caption)

@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Mapping, Tuple
+from typing import TYPE_CHECKING, Mapping, Tuple
 
 from .contracts import DraftTimeline
+
+if TYPE_CHECKING:  # pragma: no cover -- type-only, avoids a new hard runtime
+    # dependency from render_plan.py onto the D-262 executor module (this
+    # file otherwise only imports .contracts).
+    from .visual_finishing_executor import VisualTransformSpec
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,17 @@ class RenderSegment:
     # `render.py`'s own "no mode selection logic" contract).
     audio_start: float | None = None
     audio_end: float | None = None
+    # D-262 (Visual Finishing EXECUTOR, OFFLINE ONLY -- no live caller sets
+    # this; `build_render_plan` below never assigns it, so every existing
+    # production segment keeps `visual_transform` `None` and the renderer's
+    # video chain is therefore byte-identical to today's output). When
+    # explicitly set (test-only today), a `VisualTransformSpec` is a pure,
+    # already-authorized (D-260 policy -> D-262 executor) pixel-space
+    # scale+crop geometry instruction consumed by `render.py`'s own
+    # filtergraph construction -- never invented by the renderer itself,
+    # matching this file's existing `audio_start`/`audio_end` precedent
+    # exactly.
+    visual_transform: "VisualTransformSpec | None" = None
 
     @property
     def duration_sec(self) -> float:

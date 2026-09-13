@@ -68391,3 +68391,283 @@ POST-RENDER-VISUAL-QC remain MISSING-FUTURE pending D-262.
 Then STOP.
 
 DO NOT IMPLEMENT D-262. DO NOT LAUNCH RAW.
+
+## D-262 — Visual Finishing Executor Foundation (offline implementation, synthetic media only, no live pipeline integration)
+
+**Objective.** D-261 designed -- but did not implement -- how a
+structured `VisualFinishingPlan` becomes deterministic renderer
+geometry. This gate implements the EXECUTOR layer against that design,
+on synthetic media only, plus the minimal additive `render.py`/
+`render_plan.py` hook -- no real RAW, no live pipeline wiring (every
+existing production `RenderSegment` still renders with `visual_
+transform=None`, byte-identical output).
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `de63a74` (D-261, exact
+expected match), clean tree except this directive's own new `.py`
+files -- confirmed before this gate began.
+
+### What was built
+
+**New `cutsell_worker/visual_finishing_executor.py`** (owner module,
+separate from the measurement/policy modules and `render.py`, per
+D-261 Stage 1's binding):
+
+- **Failure/execution-status vocabulary** (12 states, exact string
+  constants): `SUCCESS`, `NO_ACTION_NEEDED`, `PLAN_NOT_EXECUTABLE`,
+  `FACE_SAFETY_BLOCKED`, `PRODUCT_SAFETY_BLOCKED`, `CROP_LIMIT_
+  EXCEEDED`, `INVALID_GEOMETRY`, `SOURCE_DIMENSIONS_UNAVAILABLE`,
+  `RENDER_FAILURE`, `POST_VERIFY_FAILED`, `ALREADY_APPLIED`, `OTHER`.
+  Plus a 4-state verification vocabulary (`PASS`/`FAIL`/`PARTIAL`/
+  `UNVERIFIABLE`) for post-render checks.
+- **`VisualTransformSpec`** (frozen dataclass) -- symbolic pixel-space
+  geometry only (`action`, `source_width`/`height`, `scale_factor`,
+  `scaled_width`/`height`, `crop_x`/`y`/`width`/`height`), never a raw
+  ffmpeg filter string. `render.py` alone converts this into filter
+  syntax.
+- **`VisualFinishingExecutionRecord`** / **`VisualFinishingVerification
+  Result`** (frozen dataclasses) matching D-261 Stage 2's field lists.
+- **`compute_transform_geometry(...)`** -- the core geometry function
+  for all five correction actions. Uses ONE pipeline throughout: scale
+  the source frame by `S >= 1.0`, then crop a `source_width x
+  source_height` window back out (D-261 Stage 4/8's ordering). For
+  `PUNCH_IN`/`SCALE_MATCH`/`SCALE_AND_POSITION_MATCH`, `S =
+  authorized_scale` (verbatim from the plan, never re-clamped against
+  `MAX_PUNCH_IN_SCALE` -- that ceiling is D-260's own responsibility;
+  the executor only translates an already-authorized value). For pure
+  `STATIC_REFRAME`/`POSITION_MATCH` (no scale in the plan), `S = 1 /
+  (1 - crop_loss)` -- the minimal zoom that reserves exactly the
+  requested translation's own magnitude as crop headroom. A
+  `focal_x`/`focal_y` parameter (default frame-center) lets the crop
+  center on the clip's own already-measured, already-face-safety-
+  cleared face center instead of blind geometric center.
+- **`compute_crop_loss(tx, ty) = max(|tx|, |ty|)`** -- the TRANSLATION-
+  induced crop-window reduction only, **never** a function of the
+  independently-bounded scale factor (see the self-caught finding
+  below). Always `0.0` for a pure scale-only `PUNCH_IN`/`SCALE_MATCH`.
+- **`compute_transformed_face_bbox(spec, face_bbox)`** /
+  **`is_face_contained(...)`** -- pure arithmetic re-projection of a
+  SOURCE-normalized face bbox through the exact scale+crop geometry the
+  renderer is about to apply, and literal `[0,1]` containment. No
+  detector re-run.
+- **`compute_visual_execution_id(...)`** -- deterministic SHA-256
+  identity over already-decided content (policy version, source
+  identity, plan id, clip id, action, transform spec), matching
+  `compute_execution_id`/`compute_finishing_identity`/`compute_visual_
+  finishing_plan_identity`'s established pattern. Filename-independent;
+  policy-version-sensitive.
+- **`execute_visual_finishing_decision(decision, clip_measurement, *,
+  plan_id, source_identity=None, face_bbox=None,
+  previous_execution_id=None)`** -- the single top-level entry point.
+  Routes `BLOCKED_MULTI_FACE`/`ABSTAIN_INSUFFICIENT_EVIDENCE`/`UNKNOWN`
+  to `PLAN_NOT_EXECUTABLE` (no selection, executor does nothing);
+  `BLOCKED_PRODUCT_SAFETY_UNKNOWN` to `PRODUCT_SAFETY_BLOCKED`;
+  `BLOCKED_FACE_SAFETY` to `FACE_SAFETY_BLOCKED`; `NO_CHANGE` to
+  `NO_ACTION_NEEDED`; an unrecognized action string to `OTHER`; missing
+  source dimensions to `SOURCE_DIMENSIONS_UNAVAILABLE`. For the five
+  correction actions it computes geometry, then independently
+  RE-VERIFIES both crop-loss (`> MAX_ADDITIONAL_CROP_LOSS_NORMALIZED`
+  -> `CROP_LIMIT_EXCEEDED`) and face containment when a real
+  `face_bbox` is supplied (`FACE_SAFETY_BLOCKED` on failure) before
+  ever returning `SUCCESS` -- D-261 Stage 9/10's "policy intent alone
+  is not enough" doctrine: the plan's own authorization is translated,
+  never blindly trusted. Absent face evidence is reported honestly
+  (`UNVERIFIABLE`), never assumed safe. A `previous_execution_id`
+  match on an otherwise-`SUCCESS` outcome returns `ALREADY_APPLIED`.
+
+### The crop-loss / translation unit-semantics finding (self-caught,
+not from any directive text)
+
+A literal reading of D-261's own geometric prose ("crop loss = `1 -
+crop_area/scaled_frame_area`") would make even the approved `DEFAULT_
+PUNCH_IN_SCALE = 1.10` exceed the approved `MAX_ADDITIONAL_CROP_LOSS_
+NORMALIZED = 0.10` ceiling -- a 1.10x linear zoom mathematically
+discards `1 - 1/1.10^2 ~= 17.4%` of the field of view, not 10%,
+contradicting the Product Owner's own two already-approved numbers
+being simultaneously satisfiable under that formula. Root-caused by
+re-reading D-260's own already-committed code: `_bound_translation`
+already treats `MAX_REFRAME_TRANSLATION_NORMALIZED` and `MAX_
+ADDITIONAL_CROP_LOSS_NORMALIZED` (both `0.10`) as literally the SAME
+clamped quantity. Concluded -- and encoded -- that "crop loss" in this
+system's vocabulary means the TRANSLATION-induced crop-window
+reduction ONLY, never a function of the separately-and-independently-
+bounded scale/zoom factor (which has its own ceiling, `MAX_PUNCH_IN_
+SCALE`). Verified by test (`test_crop_loss_is_never_a_function_of_
+scale`, `test_crop_loss_pure_scale_action_is_zero`) and by the exact
+geometry checks below.
+
+### Additive `render.py` / `render_plan.py` integration (D-214 discipline)
+
+- **`render_plan.py`**: new optional `visual_transform:
+  "VisualTransformSpec | None" = None` field on `RenderSegment`, via a
+  `TYPE_CHECKING`-guarded import of `VisualTransformSpec` from the new
+  executor module (zero new hard runtime dependency -- `render_plan.py`
+  still only imports `.contracts` at runtime; verified by import-time
+  test with the executor module popped from `sys.modules`).
+  `build_render_plan` never assigns it, so every live-produced
+  `RenderSegment` keeps `visual_transform=None` -- exactly D-214's own
+  `audio_start`/`audio_end` "no live caller sets these" precedent.
+- **`render.py`**: `_concat_render_command` (the one LIVE render path)
+  now consumes `segment.visual_transform` when present, inserting a new
+  `scale=<scaled_width>:<scaled_height>,crop=<crop_width>:<crop_
+  height>:<crop_x>:<crop_y>` filter clause at the START of that
+  segment's own video chain, BEFORE the existing `scale=...:force_
+  original_aspect_ratio=decrease` fit-to-canvas step -- D-261 Stage
+  13's chosen insertion point, source-pixel-space geometry, zero
+  filtergraph restructuring, zero new ffmpeg process. Applied ONLY when
+  the spec's own recorded `source_width`/`source_height` match the
+  ACTUALLY PROBED source; any mismatch fails closed (transform silently
+  skipped, falls back to the unmodified path) rather than cropping
+  against stale/wrong geometry. `segment.visual_transform` is `None` on
+  every live-produced segment today, so this branch is dead in
+  production; the `else` branch reproduces today's video chain
+  byte-for-byte (proven by test against real ffmpeg-generated synthetic
+  media, not just static string inspection).
+  `_concat_render_command_with_audio_windows` (the D-214 test-only
+  path) and `render_preview`'s call signature are both untouched.
+
+### Bugs self-caught and fixed before any test was written
+
+1. Two unused imports (`MAX_PUNCH_IN_SCALE`, `MAX_REFRAME_TRANSLATION_
+   NORMALIZED`) left over from an earlier draft that mentioned them
+   only in docstring prose, not in code -- removed (the executor
+   deliberately does not re-clamp against either; D-260's policy layer
+   already enforces both ceilings).
+2. `compute_transformed_face_bbox` initially re-derived scaled pixel
+   dimensions as a fresh float (`source * scale_factor`) rather than
+   using the SAME integer `scaled_width`/`scaled_height` the crop
+   window was actually cut from -- a latent geometric inconsistency
+   between the bbox-safety check and the real crop. Fixed by adding
+   `scaled_width`/`scaled_height` as explicit `VisualTransformSpec`
+   fields (computed once, alongside `crop_x`/`y`/`width`/`height`) and
+   having `compute_transformed_face_bbox` consume them directly.
+
+### Test-authoring false positives caught and fixed (the same class as
+D-256/D-260, hit a third time)
+
+Three vocabulary-scan tests (`test_module_never_calls_ffmpeg_or_
+subprocess`, `test_module_has_no_exposure_color_or_gaze_logic`,
+`test_no_sales_vocabulary_anywhere_in_executor_module`) and one
+geometry-purity test (`test_crop_loss_is_never_a_function_of_scale`)
+initially failed against the module's OWN scope-discipline docstring
+prose ("never calls ffmpeg itself...", "no exposure correction... no
+gaze logic... no smart sales funnel...", "authorized scale factor")
+legitimately describing what the code does NOT do. Fixed generically
+with a `_source_without_docstrings()` AST helper (strips every module/
+function/class docstring before scanning) rather than special-casing
+individual words -- reusable for any future module-scope-discipline
+test in this suite. A fifth test (`test_module_does_not_reimport_new_
+numeric_thresholds`) initially flagged the private routing frozensets/
+dict (`_CORRECTION_ACTIONS`, `_SCALE_ONLY_ACTIONS`, `_ACTION_TO_
+BLOCKED_STATUS`) as "new numeric constants" via an overly broad
+`ast.walk`; fixed by restricting the scan to (a) module top-level
+`tree.body` only (excluding local variables inside function bodies,
+e.g. `base_scale`) and (b) assignments whose VALUE is an int/float
+literal (excluding string-vocabulary and structural constants). A
+sixth test (`test_execution_id_sensitive_to_policy_version`) patched
+`visual_finishing_policy.POLICY_VERSION` and expected the change to
+propagate into the executor's own `from ... import POLICY_VERSION`
+binding -- it does not (a `from` import binds a separate name in the
+importing module's own namespace); fixed by patching `cutsell_worker.
+visual_finishing_executor.POLICY_VERSION` directly, the actual read
+site.
+
+### Tests
+
+New `tests/test_cutsell_d262_visual_finishing_executor.py`: 60 tests.
+Two tiers, matching D-249/D-258/D-260's own established split:
+directly-constructed dataclass fixtures with exact literal values for
+all pure geometry/routing/identity logic (crop-loss math, all five
+correction actions' exact geometry, focal-point offset, invalid/
+degenerate-input error paths, face-bbox transform + containment at
+exact boundaries, all 11 action routings + unrecognized-action,
+idempotence/`ALREADY_APPLIED`, frozen-dataclass immutability, scope-
+discipline/forbidden-vocabulary/no-reinterpretation checks), plus REAL
+locally-ffmpeg-generated synthetic media (`testsrc`/`sine` lavfi
+sources, D-097.2/D-214's own precedent) for the `render.py` integration
+proof: `NO_CHANGE`-path byte-for-byte match, transform insertion
+ordering, end-to-end ffmpeg execution producing a real playable output
+at the correct output resolution, dimension-mismatch fail-closed
+behavior, caption-after-transform ordering, and the `TYPE_CHECKING`-
+only import discipline.
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker tests` -- clean.
+- Targeted: `test_cutsell_d258_visual_finishing_measurement.py` +
+  `test_cutsell_d260_visual_finishing_policy.py` +
+  `test_cutsell_d262_visual_finishing_executor.py` -- 181 passed, 9
+  skipped (cv2/mediapipe not installed in this sandbox; ffmpeg-gated
+  tests in the new suite all ran and passed since ffmpeg IS available).
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`):
+  55/55 -- unaffected, as expected (D-262 is a dormant, non-live-wired
+  addition).
+- Full `tests/` suite (excluding the three pre-existing baseline
+  exceptions -- `test_semantic_stitch.py` collection error,
+  `test_video00_modal_hybrid_semantic_parity.py`, `test_hybrid_story_
+  guard_incomplete_retry.py`): **7195 passed, 9 skipped, 12 deselected,
+  13 subtests passed**, with exactly TWO failures, both EXPECTED and
+  SELF-RESOLVING: `test_cutsell_d171_language_spine_consumer_
+  migration.py::test_27_render_unchanged` and `test_cutsell_d172_
+  watch_listen_besttake_v2_evidence.py::test_33_render_unchanged`. Both
+  assert `git diff --stat HEAD -- cutsell_worker/{render,render_plan,
+  render_versions}.py == ""` -- a working-tree-vs-committed-HEAD scope
+  fence from the Language-Spine/Watch-Listen gates guarding against
+  THOSE gates accidentally touching the renderer, not a standing
+  prohibition on all future, separately-authorized renderer changes.
+  This gate's own `render.py`/`render_plan.py` edits are the explicitly
+  authorized change D-262's own directive text mandates (Stage 14);
+  once committed, working tree == HEAD and both assertions pass again
+  automatically (re-verified post-commit below, not silently assumed).
+
+### Post-commit re-verification
+
+After committing this gate's changes, `test_27_render_unchanged` and
+`test_33_render_unchanged` were re-run in isolation and PASSED (working
+tree now matches the new HEAD). No other test in the full suite was
+affected by this commit landing.
+
+### Confirmation
+
+No real RAW, no Modal, no RunPod, no provider call. No live pipeline
+wiring: every existing production `RenderSegment`/plan-generation call
+site is untouched and continues to produce `visual_transform=None`
+segments with byte-identical renderer output. No new numeric policy or
+threshold -- the ten D-260 values are the only numbers referenced
+anywhere in this module, all read verbatim via import, none recomputed
+or extended (`MAX_ADDITIONAL_CROP_LOSS_NORMALIZED` is the only one
+consulted directly, for the execution-time crop-loss re-verification;
+`MAX_PUNCH_IN_SCALE`/`MAX_REFRAME_TRANSLATION_NORMALIZED` are
+deliberately NOT re-imported since the executor never re-clamps an
+already-authorized plan value). No new heuristic beyond the geometry
+this gate's own directive mandated. No Pacing/Boundary/Freeze/Audio-
+Finishing change (confirmed unaffected by the full-suite run). No
+exposure/color-correction/gaze/Smart-Sales-Funnel logic anywhere in the
+new module (verified by vocabulary-scan tests with docstrings
+stripped). No forced punch-in alternation: no function anywhere in the
+new module takes a "previous action"/"prior action" parameter
+(verified by AST test).
+
+**Canonical status:** unchanged for every closed track and for the ten
+approved V1 visual numeric values. Visual Finishing EXECUTOR now BUILT
+and OFFLINE-QUALIFIED (this entry), with a minimal additive, non-live-
+wired `render.py`/`render_plan.py` integration point. POST-RENDER
+VISUAL VERIFICATION (re-using D-258's `measure_visual_clip` against a
+transformed output) and the ~30-item synthetic fixture matrix beyond
+this gate's own 60-test contract remain MISSING-FUTURE pending a future
+gate. Real MediaPipe-detected face bboxes (vs. this gate's directly-
+constructed exact-literal fixtures) remain untested in this sandbox
+(cv2/mediapipe not installed) -- covered structurally by D-258's own
+9 skipped, environment-gated tests, unchanged by this gate.
+
+**Exact next gate:** post-render visual verification wiring + the
+remaining synthetic fixture/test-contract expansion, still offline,
+still no live pipeline integration, still no RAW -- not implemented by
+this gate.
+
+**Decision entry reference:** this entry (D-262).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-263. DO NOT LAUNCH RAW.
