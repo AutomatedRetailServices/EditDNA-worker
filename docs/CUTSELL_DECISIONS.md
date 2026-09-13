@@ -69661,3 +69661,133 @@ Then STOP.
 
 DO NOT IMPLEMENT D-267.
 DO NOT LAUNCH RAW.
+
+## D-266A — Activate Canonical Render FFmpeg Timeout (offline implementation)
+
+**Objective.** Post D-266 (Verdict B). Activate D-266's already-proven timeout
+seam using the Product-Owner-approved canonical value `RENDER_FFMPEG_TIMEOUT_SEC
+= 1200` (20 minutes, ONE live ffmpeg render subprocess's own maximum duration).
+No other renderer behavior change.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `271a5b9` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Canonical policy recorded
+
+```
+RENDER_FFMPEG_TIMEOUT_SEC = 1200
+```
+
+Renderer SUBPROCESS execution-safety policy ONLY — never a whole-job,
+workflow, queue, upload, measurement, or Modal/RunPod timeout, and never
+reused for an unrelated operation (this gate's own explicit constraint,
+honored: no other module defines this constant, and no other timeout
+value in the codebase was changed).
+
+### What was built (`cutsell_worker/render.py` only)
+
+- D-266's `RENDER_SUBPROCESS_TIMEOUT_SEC: float | None = None` seam
+  renamed to the canonical `RENDER_FFMPEG_TIMEOUT_SEC: float = 1200.0` —
+  one owner, one value, no duplication (verified by an AST scan of every
+  other `cutsell_worker/*.py` module).
+- `_run()`'s `timeout_sec` parameter default now resolves to this
+  constant. No live call site (`render_preview`,
+  `render_timeline_with_audio_windows`, `render_audio_join_treatment_
+  preview`) overrides it — every real ffmpeg encode invocation now
+  receives `timeout=1200.0` with no conditional fallback to `None`
+  (proven by a real ffmpeg run with a `subprocess.run` spy).
+- D-266's structured `subprocess.TimeoutExpired` handling is unchanged —
+  it already produced `RENDER_FAILURE_FFMPEG_TIMEOUT` with
+  `timed_out=True`/`timeout_sec`/command fingerprint/bounded stderr; this
+  gate only activated the numeric bound feeding it, per D-266's own
+  Stage 6 "no conditional fallback" instruction.
+
+### Tests
+
+New `tests/test_cutsell_d266a_render_ffmpeg_timeout_activation.py` (22
+tests, real ffmpeg where a live render is exercised, deterministic mocks
+for every boundary/failure case — **no real 20-minute test anywhere**,
+per this gate's own Stage 5 instruction): canonical value exactly 1200,
+single-owner AST scan (no other module defines the constant), old D-266
+seam name confirmed gone; `_run()`'s default timeout confirmed 1200 via a
+mocked `subprocess.run`; a real `render_preview` call confirmed every
+ffmpeg ENCODE invocation (identified by `+faststart`, i.e. `_run()`'s own
+real output — filtered out from `media_probe.probe_media`'s ffprobe call
+and `tighten_trailing_silence`'s own separate `silencedetect` probe,
+which are different, pre-existing, out-of-scope subprocess calls, D-266's
+own documented boundary) receives `timeout=1200.0`; a mocked
+`TimeoutExpired` at the boundary produces the full structured contract
+(category, `timed_out=True`, `timeout_sec=1200.0`, fingerprint, bounded
+stderr, diagnostics row); a mocked "just under 1200s" execution completes
+normally (proves a hard cutoff, not an early abort); a timeout surfaced
+through `render_preview` leaves no final output and no leftover temp
+file; no-retry-after-timeout source scan; a real successful render under
+the timeout produces byte-identical geometry/codec/audio behavior to
+D-266; codec/CRF/preset/resolution/audio-format source-scan unchanged;
+10 parametrized `git diff`-vs-HEAD guards confirming `render_plan.py`,
+Audio Finishing, Visual Finishing, Boundary, Pacing, technical QC, and
+`media_probe.py` are all untouched; a source-scan confirming the policy
+is recorded in `render.py` itself (D-266A + 1200 both present).
+
+One pre-existing D-266 test updated for the intentional rename
+(`test_timeout_seam_defaults_to_none_today` → `test_timeout_seam_
+activated_by_d266a`, now asserting the activated value instead of the
+pending seam — not a behavior change to what it tests, the seam's own
+state).
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker tests` — clean.
+- New D-266A test file alone: 22 passed.
+- `render`/`D266`/`d266`/`D266A`/`d266a`-keyword suite (includes the
+  D-171/D-172 `git diff`-vs-HEAD guard tests): 413 passed before commit
+  (the two guard tests fail pre-commit exactly per their own established
+  precedent, resolving once committed).
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0`/`=1`): 55/55,
+  unaffected.
+- Full `tests/` suite (excluding the three documented pre-existing
+  baseline exceptions): **7330 passed, 10 skipped, 12 deselected, 13
+  subtests passed** — zero genuine failures (same two self-resolving
+  guards).
+
+### Confirmation
+
+No codec/CRF/preset/filtergraph/resolution/audio-format change (all
+confirmed present verbatim by source-scan test). No retry added. No
+Pacing/Boundary/Freeze/Audio-Join/Audio-Finishing/Visual-Finishing/
+technical-QC-authority change (10 explicit `git diff`-vs-HEAD guards +
+full suite). No RAW, no Modal, no RunPod, no provider. Timeout is
+documented and treated strictly as execution-safety policy (DoS/cost
+bound on paid compute, bounded malformed-media hang, deterministic
+failure handling) — never as an editorial-quality signal.
+
+**Closed D-265 P0 count: 3 of 3.** Failure observability (D-266) =
+CLOSED. Atomic publication (D-266) = CLOSED. Bounded ffmpeg execution
+(D-266A) = CLOSED.
+
+**Canonical status:** RENDER EXECUTION SAFETY FOUNDATION is now fully
+`RENDER_EXECUTION_SAFETY_P0_CLOSED` — all three of D-265's P0 findings are
+implemented, activated, and qualified. Renderer/Export Hardening at large
+remains open beyond these three items (D-265's own remaining P1/P2 list:
+rotation/orientation verification, structured error taxonomy at the
+`probe_media`/`_run` boundary, duration-drift observability, output-
+hashing contract — unaffected by this gate).
+
+### Verdict
+
+**A — D-265's three P0 render execution gaps fully closed. 1200s ffmpeg
+timeout active. Ready for the next Renderer/Export hardening gate.**
+
+**Exact next gate:** D-267 — RENDER IDENTITY + DELIVERY CONTRACT
+FOUNDATION (render identity, output SHA-256, `DELIVERY_READY` contract,
+upload/export state, final integrity diagnostics) — not implemented, not
+authorized by this entry.
+
+**Decision entry reference:** this entry (D-266A).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-267.
+DO NOT LAUNCH RAW.

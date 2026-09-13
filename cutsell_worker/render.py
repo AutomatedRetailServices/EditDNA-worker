@@ -52,23 +52,23 @@ RENDER_FAILURE_ATOMIC_PROMOTION_FAILED = "ATOMIC_PROMOTION_FAILED"
 RENDER_FAILURE_INVALID_OUTPUT_PATH = "INVALID_OUTPUT_PATH"
 RENDER_FAILURE_OTHER = "OTHER"
 
-# --- Stage 1/6: timeout seam, deliberately unbounded today ------------------
-# No existing repository convention establishes a canonical subprocess
-# timeout sized for a FULL multi-segment render encode. Existing values
-# found elsewhere in this codebase (a 60s `_DEFAULT_TIMEOUT_SEC` for the
-# technical post-render QC probes and the audio-finishing measurement pass,
-# 90s for the human-boundary-polish probes, 120s for the audio-finishing
-# execution pass, a 600s `_SUBPROCESS_TIMEOUT_SEC` for the audio-silence and
-# prosodic-audio whole-file analysis passes) are each sized for a bounded,
-# single-purpose probe or a whole-file AUDIO analysis pass -- none of them
-# was chosen with an arbitrary-length,
-# multi-segment VIDEO encode in mind, and reusing one here without that
-# evidence would itself be an invented threshold wearing someone else's
-# authority. This seam is therefore left at `None` (= no timeout, i.e. the
-# EXACT existing behavior before this gate) until the Product Owner
-# authorizes a real value. See docs/CUTSELL_DECISIONS.md D-266:
-# TIMEOUT_POLICY_PENDING_PRODUCT_OWNER.
-RENDER_SUBPROCESS_TIMEOUT_SEC: float | None = None
+# --- D-266A: canonical, Product-Owner-approved render subprocess timeout ---
+# D-266's own forensic found no existing repository convention sized for a
+# FULL multi-segment render encode (the closest values -- a 60s
+# `_DEFAULT_TIMEOUT_SEC` for the technical post-render QC probes and the
+# audio-finishing measurement pass, 90s for the human-boundary-polish
+# probes, 120s for the audio-finishing execution pass, a 600s
+# `_SUBPROCESS_TIMEOUT_SEC` for the audio-silence and prosodic-audio
+# whole-file analysis passes -- are each sized for a bounded, single-
+# purpose probe or a whole-file AUDIO analysis pass, never a VIDEO encode)
+# and left this seam at `None`, pending a Product Owner decision
+# (TIMEOUT_POLICY_PENDING_PRODUCT_OWNER). D-266A activates that decision:
+# ONE canonical owner for ONE live ffmpeg render subprocess's own maximum
+# duration -- 20 minutes. This is renderer subprocess execution-safety
+# policy ONLY: never a whole-job, workflow, queue, upload, measurement, or
+# Modal/RunPod timeout, and never reused for an unrelated operation. See
+# docs/CUTSELL_DECISIONS.md D-266A.
+RENDER_FFMPEG_TIMEOUT_SEC: float = 1200.0
 
 # --- Stage 4/24: bounded stderr/stdout excerpt ------------------------------
 # Reuses the bound already established in post_render_media_qc.py's own
@@ -152,11 +152,15 @@ def _run(
     *,
     output_path: str | Path,
     source_identity: tuple[str, ...] = (),
-    timeout_sec: float | None = RENDER_SUBPROCESS_TIMEOUT_SEC,
+    timeout_sec: float | None = RENDER_FFMPEG_TIMEOUT_SEC,
     diagnostics: list[dict] | None = None,
 ) -> None:
-    """Execute one ffmpeg command. The SUCCESS path is byte-for-byte the
-    same behavior as before D-266 (run the command, return `None`). Every
+    """Execute one ffmpeg command. The SUCCESS path (any render at or under
+    `RENDER_FFMPEG_TIMEOUT_SEC`) is byte-for-byte the same behavior as
+    before D-266 (run the command, return `None`) -- D-266A activates a
+    concrete bound (1200s) here; every live call site relies on this
+    default and never overrides it with `None` (D-266A Stage 2: no
+    conditional fallback to infinite timeout). Every
     FAILURE path now raises a structured `RenderExecutionError` -- see the
     D-266 section above -- instead of a bare string-message `RuntimeError`."""
     fingerprint = _command_fingerprint(command)

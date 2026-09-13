@@ -613,8 +613,11 @@ def test_render_execution_failure_is_frozen():
 # Stage 6 -- timeout seam, unbounded today, wired end to end
 # =============================================================================
 
-def test_timeout_seam_defaults_to_none_today():
-    assert render.RENDER_SUBPROCESS_TIMEOUT_SEC is None
+def test_timeout_seam_activated_by_d266a():
+    # D-266A activated the seam D-266 left at None with the Product-Owner-
+    # approved canonical value; see test_cutsell_d266a_render_ffmpeg_timeout_
+    # activation.py for the full D-266A boundary/contract test matrix.
+    assert render.RENDER_FFMPEG_TIMEOUT_SEC == 1200.0
 
 
 def test_timeout_expired_is_caught_and_never_propagates_raw(monkeypatch):
