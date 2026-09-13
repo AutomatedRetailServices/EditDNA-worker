@@ -759,3 +759,577 @@ jobs:
             artifact/d254c-technical-qc.json
           retention-days: 14
           if-no-files-found: warn
+
+
+      # =====================================================================
+      # D-264: ONE REAL-MEDIA VISUAL FINISHING QUALIFICATION, executed on
+      # THIS SAME runner against the SAME already-downloaded preview.mp4
+      # (no re-download, no second source). Reuses D-254C's own real clip-
+      # identity extraction (result.json's live_render_qc.attempts[-1]),
+      # then runs the real D-258 measurement -> D-260 policy -> D-263
+      # composition (executor + renderer + post-measurement + verification)
+      # chain. preview.mp4 ITSELF is the one real media source each
+      # segment's own as-rendered window is re-cut from -- no raw per-clip
+      # source asset exists or is used; Visual Finishing is a POST-PROCESS
+      # finishing pass over the already-delivered renderer output, exactly
+      # as D-262/D-263 designed it. Product bbox remains unavailable (D-257
+      # finding, unchanged) -- product_safety_established is never set for
+      # any real clip, so the fail-closed default applies honestly.
+      # =====================================================================
+
+      # mediapipe supplies its own compatible cv2 dependency (see
+      # requirements.cutsell.worker.txt's own comment) -- installing only
+      # mediapipe, pinned to the exact same version the worker image uses,
+      # is the minimal real-face-detection dependency for D-258's own
+      # measure_visual_clip; no other ML/vision package is installed.
+      - name: Install mediapipe (D-264, brings its own compatible cv2 dependency)
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet 'mediapipe==0.10.21'
+
+      - name: D-264 preflight -- confirm real cv2/mediapipe import and lightweight module load
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import cv2
+          import mediapipe
+          import cutsell_worker.visual_finishing_measurement as vm
+          import cutsell_worker.visual_finishing_policy as vp
+          import cutsell_worker.visual_finishing_executor as ve
+          import cutsell_worker.visual_finishing_composition as vc
+          print('cv2 version:', cv2.__version__)
+          print('mediapipe version:', mediapipe.__version__)
+          print('visual finishing modules import cleanly with real cv2/mediapipe available')
+          "
+
+      - name: D-264 write real-media Visual Finishing qualification driver script
+        shell: bash
+        run: |
+          cat > /tmp/d264_run.py <<'PYEOF'
+          import dataclasses
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+
+          from cutsell_worker.media_probe import probe_media
+          from cutsell_worker.render_plan import RenderSegment
+          from cutsell_worker.visual_finishing_composition import (
+              VisualFinishingCompositionInput,
+              compose_visual_finishing,
+          )
+          from cutsell_worker.visual_finishing_executor import EXECUTION_STATUS_SUCCESS
+          from cutsell_worker.visual_finishing_measurement import (
+              compute_visual_join_measurement,
+              measure_visual_clip,
+          )
+          from cutsell_worker.visual_finishing_policy import (
+              MAX_ADDITIONAL_CROP_LOSS_NORMALIZED,
+              MAX_PUNCH_IN_SCALE,
+              MAX_REFRAME_TRANSLATION_NORMALIZED,
+              MIN_PUNCH_IN_CLIP_DURATION_SEC,
+              MIN_RELIABLE_FACE_DETECTION_RATE,
+              POLICY_VERSION,
+              VISUAL_ACTION_ABSTAIN_INSUFFICIENT_EVIDENCE,
+              VISUAL_ACTION_BLOCKED_FACE_SAFETY,
+              VISUAL_ACTION_BLOCKED_MULTI_FACE,
+              VISUAL_ACTION_BLOCKED_PRODUCT_SAFETY_UNKNOWN,
+              VISUAL_ACTION_NO_CHANGE,
+              VISUAL_ACTION_POSITION_MATCH,
+              VISUAL_ACTION_PUNCH_IN,
+              VISUAL_ACTION_SCALE_AND_POSITION_MATCH,
+              VISUAL_ACTION_SCALE_MATCH,
+              VISUAL_ACTION_STATIC_REFRAME,
+              generate_visual_finishing_plan,
+          )
+          from cutsell_worker.post_render_media_qc import run_post_render_media_qc
+
+          ARTIFACT_DIR = "artifact"
+          PREVIEW = os.path.join(ARTIFACT_DIR, "preview.mp4")
+          RESULT_JSON = os.path.join(ARTIFACT_DIR, "result.json")
+          AFTER = os.path.join(ARTIFACT_DIR, "d264-after-visual-finishing.mp4")
+          AFTER_REPLAY = os.path.join(ARTIFACT_DIR, "d264-after-visual-finishing-replay.mp4")
+          BEFORE_COPY = os.path.join(ARTIFACT_DIR, "before_visual_finishing.mp4")
+          AFTER_COPY = os.path.join(ARTIFACT_DIR, "after_visual_finishing.mp4")
+
+
+          def to_plain(obj):
+              if obj is None:
+                  return None
+              if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+                  return dataclasses.asdict(obj)
+              if isinstance(obj, tuple):
+                  return [to_plain(x) for x in obj]
+              return obj
+
+
+          def dump(name, obj):
+              with open(os.path.join(ARTIFACT_DIR, name), "w") as f:
+                  json.dump(to_plain(obj), f, indent=2, default=str)
+
+
+          def sha256_of(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+
+          def ffprobe_json(path):
+              args = [
+                  "ffprobe", "-v", "error", "-print_format", "json",
+                  "-show_format", "-show_streams", path,
+              ]
+              out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
+              return json.loads(out)
+
+
+          summary = {}
+          summary["source_path"] = PREVIEW
+          summary["source_sha256"] = sha256_of(PREVIEW)
+
+          pre_probe = ffprobe_json(PREVIEW)
+          probe = probe_media(PREVIEW)
+          summary["source_duration_sec"] = probe.duration_sec
+          summary["source_resolution"] = f"{probe.width}x{probe.height}"
+          pre_video_streams = [s for s in pre_probe.get("streams", []) if s.get("codec_type") == "video"]
+          pre_audio_streams = [s for s in pre_probe.get("streams", []) if s.get("codec_type") == "audio"]
+          summary["source_video_codec"] = pre_video_streams[0].get("codec_name") if pre_video_streams else None
+          summary["source_audio_codec"] = pre_audio_streams[0].get("codec_name") if pre_audio_streams else None
+
+          # --- PART: real clip/boundary identity -- SAME extraction logic D-254C
+          # already proved against this exact result.json (engine-recorded, never
+          # waveform-derived). This is the ONE real media source for this gate --
+          # preview.mp4 ITSELF is treated as the source file each segment's own
+          # as-rendered window is re-cut from (this gate's own explicit "EXACTLY
+          # ONE REAL-MEDIA SOURCE MAXIMUM" / "NO SECOND RENDER SOURCE" scope --
+          # no raw per-clip source asset exists or is used here; Visual Finishing
+          # operates as a POST-PROCESS finishing pass over the already-delivered
+          # renderer output, exactly as D-262/D-263 designed it to).
+          segments = []
+          identity_status = "CLIP_IDENTITY_INSUFFICIENT"
+          identity_note = ""
+          try:
+              with open(RESULT_JSON) as f:
+                  result = json.load(f)
+              live_qc = result.get("live_render_qc") or {}
+              attempts = live_qc.get("attempts") or []
+              if attempts:
+                  last = attempts[-1]
+                  boundary_state = last.get("input_boundary_state") or []
+                  trims = last.get("renderer_trailing_trims") or []
+                  trim_by_key = {}
+                  for row in trims:
+                      if not isinstance(row, dict):
+                          continue
+                      try:
+                          tightened = float(row.get("tightened_end"))
+                      except (TypeError, ValueError):
+                          continue
+                      key = (str(row.get("clip_id") or ""), row.get("render_fragment_id") or None)
+                      trim_by_key[key] = tightened
+                  for row in boundary_state:
+                      if not isinstance(row, dict) or "clip_id" not in row:
+                          continue
+                      clip_id = str(row["clip_id"])
+                      try:
+                          start = float(row["start"])
+                          end = float(row["end"])
+                      except (TypeError, ValueError, KeyError):
+                          continue
+                      fragment = row.get("render_fragment_id")
+                      tightened = trim_by_key.get((clip_id, fragment))
+                      if tightened is None and fragment is not None:
+                          tightened = trim_by_key.get((clip_id, None))
+                      as_rendered_end = tightened if (tightened is not None and start < tightened < end) else end
+                      segments.append({
+                          "clip_id": clip_id,
+                          "source_start": start,
+                          "source_end": end,
+                          "as_rendered_duration": max(0.0, as_rendered_end - start),
+                      })
+                  if segments:
+                      identity_status = "CLIP_IDENTITY_AVAILABLE"
+                  else:
+                      identity_note = "live_render_qc.attempts present but input_boundary_state empty/degenerate"
+              else:
+                  identity_note = "result.json has no live_render_qc.attempts"
+          except FileNotFoundError:
+              identity_note = "result.json not found locally"
+          except Exception as exc:  # noqa: BLE001 -- reported, never silently swallowed
+              identity_note = f"result.json inspection failed: {exc}"
+
+          cum = 0.0
+          for seg in segments:
+              seg["render_start"] = cum
+              seg["render_end"] = cum + seg["as_rendered_duration"]
+              cum += seg["as_rendered_duration"]
+
+          summary["clip_identity_status"] = identity_status
+          summary["clip_identity_note"] = identity_note
+          summary["exact_selected_clip_count"] = len(segments)
+          summary["sum_segment_durations_sec"] = cum
+          summary["segment_duration_reconciliation_delta_sec"] = cum - probe.duration_sec
+          with open(os.path.join(ARTIFACT_DIR, "d264-segments.json"), "w") as f:
+              json.dump(segments, f, indent=2, default=str)
+
+          if identity_status != "CLIP_IDENTITY_AVAILABLE":
+              summary["real_media_classification"] = "REAL_MEDIA_PARTIAL_IDENTITY"
+              summary["verdict"] = "D"
+              with open(os.path.join(ARTIFACT_DIR, "d264-summary.json"), "w") as f:
+                  json.dump(summary, f, indent=2, default=str)
+              print("=== D-264 SUMMARY (identity insufficient, stopping) ===")
+              print(json.dumps(summary, indent=2, default=str))
+              raise SystemExit(0)
+
+          render_segments = tuple(
+              RenderSegment(
+                  clip_id=seg["clip_id"], source_asset_id=seg["clip_id"], source_path=PREVIEW,
+                  start=seg["render_start"], end=seg["render_end"],
+              )
+              for seg in segments
+          )
+          clip_durations_sec = {seg["clip_id"]: seg["as_rendered_duration"] for seg in segments}
+
+          # --- PART 1: real pre visual measurement (D-258, real cv2/mediapipe) ---
+          clip_measurements = []
+          for seg in segments:
+              duration = max(0.0, seg["render_end"] - seg["render_start"])
+              count = 8
+              if duration <= 0.0:
+                  timestamps = (seg["render_start"],)
+              elif count == 1:
+                  timestamps = (seg["render_start"] + duration / 2.0,)
+              else:
+                  start_t, end_t = duration * 0.05, duration * 0.95
+                  step = (end_t - start_t) / (count - 1)
+                  timestamps = tuple(seg["render_start"] + start_t + i * step for i in range(count))
+              m = measure_visual_clip(PREVIEW, timestamps=timestamps, source_id=summary["source_sha256"], clip_id=seg["clip_id"])
+              clip_measurements.append(m)
+          clip_measurements = tuple(clip_measurements)
+          dump("d264-pre-measurements.json", clip_measurements)
+
+          measurement_status_counts = {}
+          face_detection_rates = []
+          multi_face_clip_count = 0
+          for m in clip_measurements:
+              measurement_status_counts[m.measurement_status] = measurement_status_counts.get(m.measurement_status, 0) + 1
+              if m.face_detection_rate is not None:
+                  face_detection_rates.append(m.face_detection_rate)
+              if any(f.multiple_faces_detected for f in m.frames):
+                  multi_face_clip_count += 1
+          summary["measurement_status_counts"] = measurement_status_counts
+          summary["face_detection_rate_summary"] = {
+              "count": len(face_detection_rates),
+              "min": min(face_detection_rates) if face_detection_rates else None,
+              "max": max(face_detection_rates) if face_detection_rates else None,
+              "mean": (sum(face_detection_rates) / len(face_detection_rates)) if face_detection_rates else None,
+          }
+          summary["multi_face_clip_count"] = multi_face_clip_count
+          summary["clip_measurement_count"] = len(clip_measurements)
+
+          # --- PART: real join measurements (D-258, pure) ---
+          join_measurements = tuple(
+              compute_visual_join_measurement(clip_measurements[i], clip_measurements[i + 1])
+              for i in range(len(clip_measurements) - 1)
+          )
+          dump("d264-join-measurements.json", join_measurements)
+          summary["join_measurement_count"] = len(join_measurements)
+
+          # --- PART 2: real policy generation (D-260, unchanged, no numeric change).
+          # product_safety_established deliberately omitted (defaults False for
+          # every clip) -- product bbox remains unavailable (D-257 finding,
+          # unchanged); this gate never bypasses that fail-closed default. ---
+          plan = generate_visual_finishing_plan(
+              clip_measurements, join_measurements, source_id=summary["source_sha256"],
+              clip_durations_sec=clip_durations_sec,
+          )
+          dump("d264-visual-plan.json", plan)
+          summary["plan_status"] = plan.plan_status
+          summary["visual_finishing_identity"] = plan.visual_finishing_identity
+          summary["policy_version"] = plan.policy_version
+
+          action_counts = {}
+          for d in plan.join_decisions:
+              action_counts[d.action] = action_counts.get(d.action, 0) + 1
+          summary["action_distribution"] = action_counts
+          summary["no_change_count"] = action_counts.get(VISUAL_ACTION_NO_CHANGE, 0)
+          summary["punch_in_count"] = action_counts.get(VISUAL_ACTION_PUNCH_IN, 0)
+          summary["static_reframe_count"] = action_counts.get(VISUAL_ACTION_STATIC_REFRAME, 0)
+          summary["position_match_count"] = action_counts.get(VISUAL_ACTION_POSITION_MATCH, 0)
+          summary["scale_match_count"] = action_counts.get(VISUAL_ACTION_SCALE_MATCH, 0)
+          summary["scale_and_position_match_count"] = action_counts.get(VISUAL_ACTION_SCALE_AND_POSITION_MATCH, 0)
+          summary["abstain_count"] = action_counts.get(VISUAL_ACTION_ABSTAIN_INSUFFICIENT_EVIDENCE, 0)
+          summary["blocked_face_count"] = action_counts.get(VISUAL_ACTION_BLOCKED_FACE_SAFETY, 0)
+          summary["blocked_multi_face_count"] = action_counts.get(VISUAL_ACTION_BLOCKED_MULTI_FACE, 0)
+          summary["blocked_product_count"] = action_counts.get(VISUAL_ACTION_BLOCKED_PRODUCT_SAFETY_UNKNOWN, 0)
+
+          # --- PART 3: safety audit (pre-execution, canonical values read verbatim,
+          # never recomputed/altered). ---
+          safety_findings = []
+          for d in plan.join_decisions:
+              if d.authorized_scale is not None and d.authorized_scale > MAX_PUNCH_IN_SCALE + 1e-9:
+                  safety_findings.append(f"{d.left_clip_id}->{d.right_clip_id}: authorized_scale exceeds ceiling")
+              for tx in (d.authorized_translation_x, d.authorized_translation_y):
+                  if tx is not None and abs(tx) > MAX_REFRAME_TRANSLATION_NORMALIZED + 1e-9:
+                      safety_findings.append(f"{d.left_clip_id}->{d.right_clip_id}: authorized_translation exceeds ceiling")
+              if d.action == VISUAL_ACTION_PUNCH_IN:
+                  dur = clip_durations_sec.get(d.right_clip_id)
+                  if dur is not None and dur < MIN_PUNCH_IN_CLIP_DURATION_SEC:
+                      safety_findings.append(f"{d.left_clip_id}->{d.right_clip_id}: punch-in authorized on a sub-{MIN_PUNCH_IN_CLIP_DURATION_SEC}s clip")
+          for cd in plan.clip_decisions:
+              if cd.face_detection_rate is not None and cd.face_detection_rate < MIN_RELIABLE_FACE_DETECTION_RATE and cd.action != VISUAL_ACTION_ABSTAIN_INSUFFICIENT_EVIDENCE:
+                  safety_findings.append(f"{cd.clip_id}: low face-detection rate but not abstained")
+          summary["pre_execution_safety_findings"] = safety_findings
+          summary["safe_to_execute"] = len(safety_findings) == 0
+
+          # --- PART 4: real execution via the D-263 composition chain (measurement
+          # and plan already computed above, real, passed through -- never
+          # recomputed by the composition call below). ---
+          work_dir = os.path.join(ARTIFACT_DIR, "work")
+          os.makedirs(work_dir, exist_ok=True)
+          pre_measurement_map = {m.clip_id: m for m in clip_measurements}
+
+          comp_input = VisualFinishingCompositionInput(
+              source_identity=summary["source_sha256"], segments=render_segments,
+              output_path=AFTER, work_dir=work_dir,
+              render_width=probe.width, render_height=probe.height, render_fps=int(round(probe.fps)) if probe.fps else 30,
+              pre_measurements=pre_measurement_map, pre_plan=plan,
+          )
+          result_obj = compose_visual_finishing(comp_input)
+          dump("d264-execution-records.json", result_obj.execution_records)
+          dump("d264-post-measurements.json", result_obj.post_measurements)
+          dump("d264-verification.json", result_obj.verification_results)
+
+          summary["overall_status"] = result_obj.overall_status
+          summary["composition_id"] = result_obj.composition_id
+          summary["render_output_path"] = result_obj.render_output_path
+
+          executed_corrections = [
+              r for r in result_obj.execution_records if r.execution_status == EXECUTION_STATUS_SUCCESS
+          ]
+          summary["executed_correction_count"] = len(executed_corrections)
+          summary["face_safety_violation_count"] = sum(1 for r in result_obj.execution_records if r.execution_status == "FACE_SAFETY_BLOCKED")
+          summary["crop_limit_violation_count"] = sum(1 for r in result_obj.execution_records if r.execution_status == "CROP_LIMIT_EXCEEDED")
+          # Part 3's own explicit post-execution ceiling check: every EXECUTED
+          # correction's own crop_loss must still be <=0.10, verbatim against the
+          # same canonical value (never recomputed/altered).
+          post_execution_findings = [
+              f"{r.clip_id}: crop_loss {r.crop_loss} exceeds {MAX_ADDITIONAL_CROP_LOSS_NORMALIZED}"
+              for r in executed_corrections
+              if r.crop_loss is not None and r.crop_loss > MAX_ADDITIONAL_CROP_LOSS_NORMALIZED + 1e-9
+          ] + [
+              f"{r.clip_id}: authorized_scale {r.authorized_scale} exceeds {MAX_PUNCH_IN_SCALE}"
+              for r in executed_corrections
+              if r.authorized_scale is not None and r.authorized_scale > MAX_PUNCH_IN_SCALE + 1e-9
+          ]
+          summary["post_execution_safety_findings"] = post_execution_findings
+
+          per_correction = []
+          for r in executed_corrections:
+              per_correction.append({
+                  "clip_id": r.clip_id, "action": r.action,
+                  "authorized_scale": r.authorized_scale,
+                  "authorized_translation_x": r.authorized_translation_x,
+                  "authorized_translation_y": r.authorized_translation_y,
+                  "crop_x": r.crop_x, "crop_y": r.crop_y, "crop_width": r.crop_width, "crop_height": r.crop_height,
+                  "crop_loss": r.crop_loss, "face_safety_status": r.face_safety_status,
+                  "execution_status": r.execution_status,
+              })
+          summary["executed_corrections"] = per_correction
+
+          req_auth = []
+          for d in plan.join_decisions:
+              if d.action in (VISUAL_ACTION_PUNCH_IN, VISUAL_ACTION_STATIC_REFRAME, VISUAL_ACTION_POSITION_MATCH, VISUAL_ACTION_SCALE_MATCH, VISUAL_ACTION_SCALE_AND_POSITION_MATCH):
+                  req_auth.append({
+                      "left": d.left_clip_id, "right": d.right_clip_id, "action": d.action,
+                      "requested_scale": d.requested_scale, "authorized_scale": d.authorized_scale,
+                      "requested_translation_x": d.requested_translation_x, "authorized_translation_x": d.authorized_translation_x,
+                      "requested_translation_y": d.requested_translation_y, "authorized_translation_y": d.authorized_translation_y,
+                  })
+          summary["requested_vs_authorized"] = req_auth
+
+          # pre/post face-center/scale/headroom summaries.
+          def _median_or_none(values):
+              values = [v for v in values if v is not None]
+              if not values:
+                  return None
+              values = sorted(values)
+              n = len(values)
+              mid = n // 2
+              return values[mid] if n % 2 else (values[mid - 1] + values[mid]) / 2.0
+
+          pre_by_clip = {m.clip_id: m for m in clip_measurements}
+          post_by_clip = {m.clip_id: m for m in result_obj.post_measurements}
+          summary["pre_face_center_summary"] = {
+              "x_median": _median_or_none([m.face_center_x_median for m in clip_measurements]),
+              "y_median": _median_or_none([m.face_center_y_median for m in clip_measurements]),
+          }
+          summary["post_face_center_summary"] = {
+              "x_median": _median_or_none([m.face_center_x_median for m in result_obj.post_measurements]),
+              "y_median": _median_or_none([m.face_center_y_median for m in result_obj.post_measurements]),
+          }
+          summary["pre_face_scale_summary"] = {
+              "area_ratio_median": _median_or_none([m.face_area_ratio_median for m in clip_measurements]),
+          }
+          summary["post_face_scale_summary"] = {
+              "area_ratio_median": _median_or_none([m.face_area_ratio_median for m in result_obj.post_measurements]),
+          }
+          summary["headroom_before"] = _median_or_none([m.headroom_ratio_median for m in clip_measurements])
+          summary["headroom_after"] = _median_or_none([m.headroom_ratio_median for m in result_obj.post_measurements])
+
+          # --- PART 6/7: timing/audio/output-geometry preservation. ---
+          output_ready = bool(result_obj.render_output_path and os.path.exists(result_obj.render_output_path))
+          after_probe = ffprobe_json(result_obj.render_output_path) if output_ready else None
+          after_video_streams = [s for s in after_probe.get("streams", []) if s.get("codec_type") == "video"] if after_probe else []
+          after_audio_streams = [s for s in after_probe.get("streams", []) if s.get("codec_type") == "audio"] if after_probe else []
+          after_media_probe = probe_media(result_obj.render_output_path) if output_ready else None
+
+          summary["output_resolution"] = f"{after_media_probe.width}x{after_media_probe.height}" if after_media_probe else None
+          summary["nine_sixteen_preserved"] = bool(
+              after_media_probe and after_media_probe.width == probe.width and after_media_probe.height == probe.height
+          )
+          summary["audio_preserved"] = bool(after_audio_streams)
+          summary["duration_delta_sec"] = (after_media_probe.duration_sec - probe.duration_sec) if after_media_probe else None
+          summary["output_video_codec"] = after_video_streams[0].get("codec_name") if after_video_streams else None
+          summary["output_audio_codec"] = after_audio_streams[0].get("codec_name") if after_audio_streams else None
+          summary["captions_preserved"] = "N/A_no_captions_in_this_source"
+
+          # --- PART 10: idempotence -- same source + same plan -> same identity;
+          # a second composition call with the first run's own execution ids as
+          # previous_execution_ids must produce ALREADY_APPLIED (no visual_
+          # transform re-applied), never a compounded second DSP pass. ---
+          plan_replay = generate_visual_finishing_plan(
+              clip_measurements, join_measurements, source_id=summary["source_sha256"],
+              clip_durations_sec=clip_durations_sec,
+          )
+          summary["visual_finishing_identity_reproducible"] = (plan_replay.visual_finishing_identity == plan.visual_finishing_identity)
+
+          previous_execution_ids = {
+              (r.plan_id, r.clip_id): r.execution_id for r in result_obj.execution_records
+          }
+          # VisualFinishingCompositionInput keys previous_execution_ids by
+          # (left_clip_id, right_clip_id) -- rebuild that exact shape from the
+          # join decisions this composition already evaluated.
+          previous_by_join = {}
+          for d in plan.join_decisions:
+              match = next((r for r in result_obj.execution_records if r.clip_id == d.right_clip_id), None)
+              if match is not None:
+                  previous_by_join[(d.left_clip_id, d.right_clip_id)] = match.execution_id
+
+          replay_input = VisualFinishingCompositionInput(
+              source_identity=summary["source_sha256"], segments=render_segments,
+              output_path=AFTER_REPLAY, work_dir=work_dir,
+              render_width=probe.width, render_height=probe.height, render_fps=int(round(probe.fps)) if probe.fps else 30,
+              pre_measurements=pre_measurement_map, pre_plan=plan,
+              previous_execution_ids=previous_by_join,
+          )
+          replay_result = compose_visual_finishing(replay_input)
+          second_dsp_performed = any(s.visual_transform is not None for s in replay_result.rendered_segments)
+          summary["second_visual_execution_performed"] = second_dsp_performed
+          summary["composition_id_reproducible"] = (replay_result.composition_id != result_obj.composition_id) or (not executed_corrections)
+          dump("d264-replay-execution-records.json", replay_result.execution_records)
+
+          # --- PART 13: existing technical QC (unchanged authority). ---
+          qc_status = None
+          if output_ready:
+              qc_result = run_post_render_media_qc(result_obj.render_output_path)
+              qc_status = qc_result.status
+              with open(os.path.join(ARTIFACT_DIR, "d264-technical-qc.json"), "w") as f:
+                  json.dump(
+                      {"status": qc_result.status, "findings": [to_plain(x) for x in qc_result.findings]},
+                      f, indent=2, default=str,
+                  )
+          summary["technical_qc_status"] = qc_status
+
+          # --- PART 11: before/after review package. ---
+          shutil.copyfile(PREVIEW, BEFORE_COPY)
+          if output_ready:
+              shutil.copyfile(result_obj.render_output_path, AFTER_COPY)
+          summary["before_media_included"] = os.path.exists(BEFORE_COPY)
+          summary["after_media_included"] = os.path.exists(AFTER_COPY)
+
+          # --- Real-media classification (per this gate's own mandated vocabulary). ---
+          if not summary["safe_to_execute"] or post_execution_findings:
+              classification = "REGRESSION"
+          elif executed_corrections:
+              classification = "REAL_MEDIA_QUALIFIED_WITH_CORRECTION"
+          elif result_obj.overall_status == "BLOCKED":
+              classification = "REAL_MEDIA_QUALIFIED_WITH_SAFETY_BLOCK"
+          elif result_obj.overall_status in ("NO_CHANGE",):
+              classification = "REAL_MEDIA_QUALIFIED_NO_CHANGE"
+          elif result_obj.overall_status == "ABSTAIN":
+              classification = "REAL_MEDIA_QUALIFIED_WITH_SAFETY_BLOCK"
+          else:
+              classification = "REAL_MEDIA_EXECUTION_GAP"
+          summary["real_media_classification"] = classification
+
+          verdict_map = {
+              "REAL_MEDIA_QUALIFIED_WITH_CORRECTION": "A",
+              "REAL_MEDIA_QUALIFIED_NO_CHANGE": "B",
+              "REAL_MEDIA_QUALIFIED_WITH_SAFETY_BLOCK": "C",
+              "REAL_MEDIA_PARTIAL_IDENTITY": "D",
+              "REAL_MEDIA_EXECUTION_GAP": "E",
+              "REAL_MEDIA_MEASUREMENT_FAILURE": "F",
+              "REGRESSION": "G",
+          }
+          summary["verdict"] = verdict_map.get(classification, "E")
+
+          with open(os.path.join(ARTIFACT_DIR, "d264-summary.json"), "w") as f:
+              json.dump(summary, f, indent=2, default=str)
+
+          print("=== D-264 SUMMARY (full content) ===")
+          print(json.dumps(summary, indent=2, default=str))
+          PYEOF
+          # Same lesson as D-254C's own documented fix: YAML's `run: |`
+          # block scalar already strips this step's common base indentation
+          # before bash sees it -- do not sed/strip anything further. Write
+          # as-is, then syntax-check.
+          python3 -m py_compile /tmp/d264_run.py
+          echo "Driver script written to /tmp/d264_run.py and syntax-checked"
+
+      - name: D-264 run real-media Visual Finishing qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$(pwd)" python3 /tmp/d264_run.py
+
+      - name: Report D-264 review artifact bundle size before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          du -ch \
+            artifact/before_visual_finishing.mp4 \
+            artifact/after_visual_finishing.mp4 \
+            artifact/d264-summary.json \
+            artifact/d264-segments.json \
+            artifact/d264-pre-measurements.json \
+            artifact/d264-join-measurements.json \
+            artifact/d264-visual-plan.json \
+            artifact/d264-execution-records.json \
+            artifact/d264-post-measurements.json \
+            artifact/d264-verification.json \
+            2>/dev/null | tail -1 || true
+
+      - name: Upload D-264 visual finishing review artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-d264-visual-finishing-review
+          path: |
+            artifact/before_visual_finishing.mp4
+            artifact/after_visual_finishing.mp4
+            artifact/d264-summary.json
+            artifact/d264-segments.json
+            artifact/d264-pre-measurements.json
+            artifact/d264-join-measurements.json
+            artifact/d264-visual-plan.json
+            artifact/d264-execution-records.json
+            artifact/d264-replay-execution-records.json
+            artifact/d264-post-measurements.json
+            artifact/d264-verification.json
+            artifact/d264-technical-qc.json
+          retention-days: 14
+          if-no-files-found: warn
