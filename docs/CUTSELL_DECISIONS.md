@@ -71400,3 +71400,176 @@ Then STOP.
 
 DO NOT IMPLEMENT D-271.
 DO NOT LAUNCH RAW.
+
+## D-271 — Source Media Probe / Format Classification Foundation (offline implementation)
+
+**Objective.** Post D-270 (renderer format/media-diversity hardening
+audit, Verdict A). Build a typed, immutable `SourceMediaProfile` that
+answers "what exactly is this file?" from one bounded ffprobe call, and
+a pure `classify_source_format` function that turns that profile into a
+conservative SUPPORTED_NATIVE/NORMALIZATION_REQUIRED/UNSUPPORTED/
+INSUFFICIENT_EVIDENCE verdict with machine-readable reasons. No
+transcode, no color conversion, no HDR tonemap, no rotation correction,
+no fps/codec/filtergraph change, no upload rejection, no renderer
+mutation — a purely additive, read-only classifier wired into nothing
+yet.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `ce80ffc` (exact expected
+match, D-270), clean tree — confirmed before this gate began.
+
+### Stage 1-27 — `cutsell_worker/source_media_profile.py` (new module): `SourceMediaProfile` + `probe_source_media_profile`
+
+One bounded `ffprobe -show_format -show_streams -of json` call (never
+re-probes, never mutates, real subprocess timeout) populates every field
+D-270's own gap analysis named: `container_name` (normalized, with the
+QuickTime-family and matroska/webm-family extension-tiebreak exceptions
+this gate discovered are the ONLY two places ffprobe's own `format_name`
+cannot distinguish sibling containers by content — confirmed both live,
+not assumed), `video_codec`/`raw_video_codec`, `video_profile`,
+`pixel_format`, `bit_depth` (explicit ffprobe field first, then a known
+pix_fmt mapping, else honestly `None`), `coded_width`/`coded_height`,
+`display_width`/`display_height` (rotation-aware swap, arithmetic only —
+proven against Stage 10's own canonical "coded 1920x1080 + rotation 90
+-> display 1080x1920" example exactly), `rotation_degrees` + `rotation_
+source` provenance (`DISPLAY_MATRIX` takes priority over the legacy
+`ROTATE_TAG`, normalized negative angles, malformed non-canonical angles
+honestly reported as `None` rather than rounded), `avg_frame_rate`/`r_
+frame_rate`/`effective_fps`/`vfr_status` (CFR/LIKELY_VFR/UNKNOWN only —
+this probe's own avg-vs-r-frame-rate evidence can never honestly support
+a hard `VFR` claim, per this gate's own explicit instruction; `VFR_
+STATUS_VFR` remains defined for a future gate with real frame-level
+timing evidence), `color_primaries`/`color_transfer`/`color_space`/
+`color_range`, `hdr_status` (PQ/HLG from `color_transfer` only, Dolby
+Vision only from a real `DOVI configuration record` side-data entry —
+never inferred from BT.2020/10-bit alone in either direction: absent
+transfer evidence is `UNKNOWN`, never fabricated `SDR`), `audio_codec`/
+`audio_sample_rate_hz`/`audio_channels`/`audio_channel_layout`, stream
+counts, start times, time bases, and a `probe_status` (`COMPLETE`/
+`PARTIAL`/`FAILED`) that never discards partial information on failure.
+
+### Stage 28/29/30 — `classify_source_format`
+
+A pure function of the profile alone. Missing video -> `UNSUPPORTED`.
+Unrecognized/MKV/AVI container -> `UNSUPPORTED`. Unknown codec or
+multiple video/audio streams (no stream-selection policy exists yet) ->
+`INSUFFICIENT_EVIDENCE`. Non-zero rotation, HDR (any of PQ/HLG/Dolby
+Vision/other), >8-bit video, or any non-H.264 codec (D-270's own finding:
+production decode capability for anything else is unverified) ->
+`NORMALIZATION_REQUIRED`, each with its own reason code. LIKELY_VFR and
+missing-audio are non-blocking, informational-only reasons (D-270 already
+established the renderer normalizes both structurally). Confirmed exactly
+against every one of D-270's own P0 findings via real synthetic fixtures
+and, where a real fixture proved genuinely unavailable, a hand-built
+ffprobe-JSON-shaped parser test (Stage 39's own distinction).
+
+### Stage 32/33/34/37 — supporting foundations, no behavior change
+
+`orientation_category` -- a pure, standalone helper (PORTRAIT/LANDSCAPE/
+SQUARE/UNKNOWN from DISPLAY dimensions) that does NOT import from or
+modify `visual_finishing_measurement.py` (confirmed by a git-diff guard
+and a source-scan test) -- a future gate may wire that module's own
+orientation decision to call this instead of its current raw-coded-
+dimension logic; this gate does not presume to make that change itself.
+HDR/VFR are structurally surfaced via `hdr_status`/`vfr_status` alone,
+never hidden. `resource_risk_flags` accepts `max_pixel_count`/`max_
+duration_sec` that default to `None` and never fire on their own --
+confirmed by inspection that no existing canonical whole-source
+resolution or duration ceiling exists in this codebase (only a render-
+execution-time bound and an upload-size bound, neither applicable), so
+none was invented; `MANY_STREAMS`/`UNKNOWN_CODEC` need no threshold and
+work today.
+
+### Stage 40/41 — `LocalFfmpegCapabilitySnapshot` / `capture_local_ffmpeg_capability`
+
+Real, bounded `ffmpeg -version`/`-decoders`/`-encoders` subprocess calls
+(no network, no provider) confirm THIS sandbox's ffmpeg 6.1.1 has HEVC
+decode+encode and AV1 decode -- always labelled `RUNTIME_CAPABILITY_
+LOCAL_SANDBOX_ONLY_NOT_PRODUCTION_VERIFIED`, per this gate's own binding
+instruction never to claim production HEVC support from local-sandbox
+evidence alone (confirmed as a real, enforced constant, not merely a
+comment).
+
+### Stage 42 — `OutputFormatContract` (pure type only)
+
+Defined as the future shape a technical-QC output-format-verification
+seam would check a rendered file against -- no `verify_output_format`
+function exists in this module (confirmed by a test), and `post_render_
+media_qc.py` is untouched (git-diff guard).
+
+### Verification run
+
+- `python3 -m py_compile`: clean.
+- New `tests/test_cutsell_d271_source_media_profile.py`: **120 passed**
+  -- the full Stage 1-42 fixture+contract matrix against real ffmpeg-
+  generated synthetic fixtures (H.264 MP4/MOV/24fps/60fps, HEVC MP4 when
+  a local encoder exists, mono/no-audio/audio-only, BT.709/HDR-PQ/HLG
+  color-tagged, odd/portrait coded dimensions, a corrupt file, an MKV
+  file) plus hand-built ffprobe-JSON parser tests for properties this
+  ffmpeg build/version could not be made to attach via a real fixture
+  (rotation metadata -- see the next paragraph) and every classification/
+  reason-code/orientation/resource-flag/capability-snapshot/output-
+  contract behavior the directive's own Stage 43 test contract named.
+- **Rotation-fixture investigation (Stage 38/39), confirmed live in this
+  gate, not merely asserted from D-270's own prior finding:** both
+  `-metadata:s:v rotate=90` (re-encode AND `-c copy` stream-copy modes)
+  and the newer `-display_rotation` option (confirmed to be an INPUT-
+  only option in this ffmpeg 6.1.1 build -- attempting it as an output
+  flag fails with ffmpeg's own "input option applied to output" error)
+  were tried and neither attached a readable rotation tag or side-data
+  entry. This is genuinely `FIXTURE_NOT_AVAILABLE_LOCALLY` (Stage 39's
+  own honest category), recorded as a real, currently-passing regression
+  test (`test_rotation_fixture_generation_not_available_locally`) that
+  will fail loudly -- not silently -- if a future ffmpeg upgrade changes
+  this. Rotation-dependent classification/dimension-swap behavior is
+  instead fully proven via the parser-level tests.
+- D-266/D-266A/D-267/D-269/D-269A/D-271 targeted suites together: **412
+  passed, 0 failed.**
+- Visual/audio finishing + media_probe + upload test files (excluding
+  the documented `test_semantic_stitch.py` baseline exception): **496
+  passed, 10 skipped, 0 failed.**
+- `compileall` over `cutsell_worker/`, `cutsell_app/`, `tests/`: clean.
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`): 1
+  passed each (unaffected -- this gate never touches Selection/Boundary/
+  Freeze/editorial authority).
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: **7661 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, 0 failed** (120 net new tests over D-269A's own 7541 -- this
+  gate's own new file, touching no existing test file).
+
+### Canonical status update
+
+RENDERER / EXPORT HARDENING: execution safety = CLOSED (D-265/D-266/
+D-266A); identity/hash foundation = CLOSED (D-267); remote delivery
+tenant safety = FOUNDATION + LIVE PATH ACTIVATION = CLOSED (D-269/
+D-269A); format/media-diversity audit = CLOSED (D-270). **SOURCE MEDIA
+PROBE / FORMAT CLASSIFICATION FOUNDATION = CLOSED** (this entry) -- a
+real, tested, offline classifier now exists; it is wired into NO live
+call site yet (D-272's own explicit job). Security/Privacy/Multi-user
+track remains ALWAYS ON per CLAUDE.md's own binding rule.
+
+### Verdict
+
+**A — Source media probe + format classification foundation proven —
+rotation/VFR/HDR/codec/audio/stream facts explicit — ready for early
+source format policy gate.** Every D-270 P0 finding this gate's own
+directive named a foundation for (no canonical probe, rotation read-
+without-apply, silent HDR downconvert, no missing-video rejection path)
+now has a real, tested, honestly-bounded classification answer -- proven
+against real synthetic media wherever a fixture could be built, and
+against a hand-built parser-level payload for the one property (rotation
+metadata injection) this ffmpeg build/version could not be made to
+attach.
+
+**Exact next gate:** D-272 — Source Format Policy / Early Media Gate
+(use this gate's own classification to decide ACCEPT/NORMALIZE_REQUIRED/
+REJECT before expensive processing) — not implemented, not decided by
+this entry; a Product Owner authorization call.
+
+**Decision entry reference:** this entry (D-271).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-272.
+DO NOT LAUNCH RAW.
