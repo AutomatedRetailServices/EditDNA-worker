@@ -71753,3 +71753,196 @@ Then STOP.
 
 DO NOT IMPLEMENT D-273.
 DO NOT LAUNCH RAW.
+
+## D-272A — Live Early Source Format Gate Activation (offline implementation)
+
+**Objective.** Post D-272 (source format policy foundation, Verdict A,
+integration seam proven but deliberately NOT activated). Product Owner
+authorized live conservative gating. Wire D-271's `probe_source_media_
+profile` and D-272's `evaluate_source_format_policy` into the real
+`cutsell_worker/worker_job.py::run_flow_b_job` call site, at the earliest
+safe point -- after the existing per-source download/probe loop, before
+`process_local_sources` (the ASR/GPU/semantic-reasoning entry point). No
+transcode, no normalization implementation, no HDR tonemap, no rotation
+pixel transform, no fps conversion.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `3fb2cdd` (exact expected
+match, D-272), clean tree -- confirmed before this gate began.
+
+### Stage 1/2 -- exact live entry point, no duplicated policy
+
+`evaluate_source_format_gate(local_paths)` (new, `worker_job.py`): for
+every already-downloaded local source, calls D-271's own `source_media_
+profile.probe_source_media_profile` then D-272's own `source_format_
+policy.evaluate_source_format_policy` -- the SAME two functions D-272's
+own `evaluate_source_for_editorial_entry` composes, called separately
+here only so the profile's own properties (container/codec/rotation/HDR/
+VFR/bit-depth) can be surfaced in diagnostics alongside the decision. No
+codec/HDR/rotation/VFR/stream rule is reimplemented in `worker_job.py`
+(confirmed by source-scan test). Deliberately does NOT pass a
+`RuntimeCapabilityInput` (Stage 7): no canonical production HEVC/AV1
+capability evidence source exists in this job today, and D-271's own
+`LocalFfmpegCapabilitySnapshot` remains permanently local-sandbox-only --
+every non-H.264 codec stays honestly `INSUFFICIENT_EVIDENCE` live until a
+real capability source exists (confirmed by a spy test asserting
+`runtime_capability` is never passed).
+
+### Stage 3-9 -- decision-to-behavior mapping, every source must ACCEPT
+
+`ACCEPT` -> unchanged behavior, `process_local_sources` called exactly as
+before. `NORMALIZE_REQUIRED`/`REJECT`/`INSUFFICIENT_EVIDENCE` -> a new
+`SourceFormatGateBlocked` exception is raised BEFORE `process_local_
+sources`, carrying every blocked source's structured diagnostic (decision,
+reason codes, user-facing error code -- never a raw filesystem path).
+Every source in a job must independently ACCEPT (Stage 9's own safest
+default, confirmed by inspection that no existing product contract allows
+silently skipping a bad source); one blocked source among several stops
+the whole job before any of them reach expensive processing.
+
+### Stage 10/11/23 -- diagnostics, user-facing error codes, observability
+
+Bounded, per-source diagnostics (source_asset_id, decision, policy_
+version, reason codes by severity, container/codec/rotation/HDR/VFR/bit-
+depth) are attached to the successful job result (`source_format_
+diagnostics`) and, on a block, to both the `processing_failed`
+notification payload and `job.meta` -- reusing D-272's own `USER_FACING_
+*` vocabulary (`VIDEO_REQUIRES_NORMALIZATION`, `UNSUPPORTED_VIDEO_
+FORMAT`, `VIDEO_CORRUPT`, `VIDEO_STREAM_AMBIGUOUS`, `RUNTIME_CODEC_
+SUPPORT_UNVERIFIED`) unchanged, no invented polished UX copy.
+
+### Stage 12 -- job status mapping, no new lifecycle
+
+No parallel job lifecycle: a blocked job still reaches the existing
+`state="failed"` path via the existing exception handler. The one real
+fix made here: `error_code` is now derived from `SourceFormatGateBlocked.
+primary_error_code` (D-272's own vocabulary) instead of collapsing to the
+generic exception class name, with the corrected code threaded into both
+the notification payload and `job.meta["error_code"]` (a bug caught and
+fixed during implementation, before commit -- the initial version built
+`error_payload["error"]` from the class name before correcting `error_
+code`, so the dict never picked up the fix).
+
+### Stage 13/14 -- proven via spies, real fixtures
+
+A dedicated fixture wires every OTHER `run_flow_b_job` collaborator
+(download, ASR/brain construction, draft creation, notifications,
+timeline assets, usage accounting) to lightweight fakes/spies while
+leaving the real per-source loop and the real gate exercised end to end.
+Confirmed via spy counts: an ACCEPT source (real H.264 SDR MP4 fixture)
+reaches `process_local_sources` exactly once; every blocked decision
+(missing video, corrupt source, MKV container, rotation, HDR-PQ, unknown
+codec) reaches it zero times.
+
+### Stage 18/19/20 -- missing video, corrupt media, missing audio
+
+Missing-video source -> `REJECT`, zero downstream calls (closes D-270's
+own missing-video P0 at the real job-entry layer). Missing-audio, valid
+H.264 SDR video -> `ACCEPT` unchanged (renderer's own silence synthesis
+untouched). Genuinely corrupt media: honestly documented that a file
+corrupt enough already fails the PRE-EXISTING, narrower `media_probe.
+probe_media` call earlier in the SAME per-source loop (out of this gate's
+scope, unchanged) before this gate's own evaluation is ever reached -- the
+load-bearing invariant (no downstream processing on corrupt media) still
+holds, just via a different, pre-existing exception path for that one
+edge case rather than this gate's own `SourceFormatGateBlocked` wrapper;
+recorded rather than silently overclaimed.
+
+### Stage 25/26/27 -- backward compatibility, no normalization, firewall
+
+Accepted H.264 SDR jobs are behaviorally identical -- `process_local_
+sources` arguments, selection/ASR/GPU/editorial-engine/renderer behavior
+all unchanged. No rotate/tonemap/VFR-convert/codec-convert/resample/
+filtergraph code exists anywhere in this gate (confirmed by source-scan).
+Firewall confirmed unchanged via git-diff guards: render/render_delivery/
+render_plan/media_probe/post_render_media_qc/visual_finishing_
+measurement/boundary_engine_pass/pacing_transition_decision/post_render_
+watch_listen_qc/live_render_qc/finishing_contract/export_job/exports/
+tenant_safe_delivery/uploads/gpu_execution_provider, plus D-272's own
+`source_format_policy.py`/`source_media_profile.py`/`flow_b.py` (D-272
+remains sole policy authority; this gate only calls it).
+
+### D-272's own firewall test updated (self-resolving guard pattern)
+
+D-272's own `test_worker_job_not_modified_by_this_gate` and its
+`test_unrelated_authorities_unchanged` parametrize entry for `worker_
+job.py` asserted that file untouched -- correct at D-272 time, now
+superseded by this separately-authorized activation gate. Renamed to
+`test_worker_job_activation_deferred_to_d272a` (confirms D-272's own
+seam functions remain importable) and removed `worker_job.py` from that
+parametrize list, with an explanatory comment pointing at this gate's own
+authoritative firewall -- the same pattern D-269A used for `exports.py`.
+
+### Verification run
+
+- New `tests/test_cutsell_d272a_live_source_format_gate.py`: **52
+  passed** -- the Stage 28 synthetic/live-seam matrix (real ffmpeg
+  fixtures for H.264/no-audio/missing-video/corrupt/MKV, parser-
+  controlled profiles for rotation/HDR/VFR/10-bit/multi-stream/unknown-
+  codec/HEVC-unverified/invalid-dimensions), the Stage 3-13 `run_flow_b_
+  job` integration tests (ACCEPT reaches the mocked downstream exactly
+  once; every blocked decision reaches it zero times; multi-source one-
+  blocked stops the whole job; error-code/job-status mapping), the Stage
+  26 no-mutation/no-transcode source-scan tests, the Stage 2/32 no-
+  duplicated-policy tests, and the Stage 27 firewall (16 files plus
+  D-271/D-272/flow_b untouched).
+- D-272's own test file updated for the self-resolving guard (above) and
+  re-verified.
+- `compileall` over `cutsell_worker/`: clean, before and after the
+  `error_code`/`error_payload` ordering fix.
+- D-266/D-266A/D-267/D-269/D-269A/D-271/D-272/D-272A targeted suites
+  together: **559 passed, 0 failed.**
+- `worker_job`/`flow_b`-adjacent regression subset (clean-worker infra/
+  job-retry/batch/api/media-ingest/m0-m1/mixed-trim, hybrid pipeline,
+  editorial mode): **43 passed, 0 failed.**
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`): 55
+  passed each (unaffected -- this gate never touches Selection/Boundary/
+  Freeze/editorial authority).
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: **7808 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, 0 failed** (net new tests over D-272's own 7757, no genuine
+  regression).
+
+### Canonical status update
+
+RENDERER / EXPORT HARDENING: execution safety = CLOSED (D-265/D-266/
+D-266A); identity/hash foundation = CLOSED (D-267); remote delivery
+tenant safety = FOUNDATION + LIVE PATH ACTIVATION = CLOSED (D-269/
+D-269A); format/media-diversity audit = CLOSED (D-270); source media
+probe/classification = CLOSED (D-271); source format policy = CLOSED
+(D-272). **LIVE EARLY SOURCE FORMAT GATE = CLOSED** (this entry) -- non-
+ACCEPT media is now blocked before expensive editorial processing at the
+real `worker_job.py` call site. **FORMAT NORMALIZATION = CURRENT
+REMAINING P0 SUBTRACK** (rotation normalization, VFR->canonical timing,
+HDR strategy, 10-bit/pixel-format handling, production HEVC capability
+qualification, output-format technical QC -- all still unimplemented;
+this gate only decides and blocks, it never normalizes). Security/
+Privacy/Multi-user track remains ALWAYS ON per CLAUDE.md's own binding
+rule; this gate is recorded there too -- it prevents malformed-media
+compute waste, unsupported-codec paid worker use, and ambiguous-stream
+processing from reaching expensive compute.
+
+### Verdict
+
+**A -- Live early source format gate activated -- non-ACCEPT media
+blocked before expensive editorial processing -- ready for source
+normalization architecture.** Every D-272 decision (`ACCEPT`/`NORMALIZE_
+REQUIRED`/`REJECT`/`INSUFFICIENT_EVIDENCE`) now has a proven, real live
+consequence at the actual `worker_job.py` job-entry layer -- H.264 SDR
+jobs proceed unchanged, every other case is blocked before ASR/GPU/
+semantic reasoning, proven via spies on the real function (not merely the
+policy function in isolation).
+
+**Exact next gate:** D-273 -- Source Normalization Architecture / Policy
+Design (rotation normalization, VFR->canonical timing, HDR strategy,
+10-bit/pixel-format handling, production HEVC capability qualification,
+canonical normalized-media contract) -- not implemented, not decided by
+this entry; a Product Owner authorization call.
+
+**Decision entry reference:** this entry (D-272A).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-273.
+DO NOT LAUNCH RAW.

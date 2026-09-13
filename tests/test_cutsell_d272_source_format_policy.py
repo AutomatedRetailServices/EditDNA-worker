@@ -725,12 +725,18 @@ def test_seam_never_imports_asr_or_gpu_modules():
         assert needle not in source
 
 
-def test_worker_job_not_modified_by_this_gate():
-    """This gate proves the seam works -- it does NOT wire it into
-    `worker_job.py`. Rejecting a real upload is an editorial/product
-    policy decision (CLAUDE.md's own D-091 escalation condition A), not
-    something an offline implementation gate activates unilaterally."""
-    assert _run_git_diff("cutsell_worker/worker_job.py") == ""
+def test_worker_job_activation_deferred_to_d272a():
+    """D-272 itself proved the seam works without wiring it into
+    `worker_job.py` (rejecting a real upload is an editorial/product
+    policy decision -- CLAUDE.md's own D-091 escalation condition A).
+    D-272A is the separately-authorized Product Owner activation gate
+    that legitimately extends `worker_job.py` -- this test only confirms
+    D-272's own seam functions (`evaluate_source_for_editorial_entry`,
+    `evaluate_source_format_policy`) still exist and are importable,
+    rather than re-asserting the now-superseded "untouched" guard (see
+    `test_cutsell_d272a_live_source_format_gate.py`'s own firewall)."""
+    assert hasattr(sfp, "evaluate_source_for_editorial_entry")
+    assert hasattr(sfp, "evaluate_source_format_policy")
 
 
 # =============================================================================
@@ -835,7 +841,10 @@ def test_diagnostics_fields_present_no_secrets():
     "cutsell_worker/exports.py",
     "cutsell_worker/tenant_safe_delivery.py",
     "cutsell_worker/uploads.py",
-    "cutsell_worker/worker_job.py",
+    # worker_job.py deliberately removed from this list: D-272A (the
+    # separately-authorized Product Owner activation gate) legitimately
+    # extends it -- see test_cutsell_d272a_live_source_format_gate.py's
+    # own firewall for the current authoritative unrelated-files list.
     "cutsell_worker/flow_b.py",
     "cutsell_worker/gpu_execution_provider.py",
 ])
