@@ -66256,3 +66256,520 @@ instruction.
 Then STOP.
 
 DO NOT IMPLEMENT NEXT TRACK. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-257 — Visual Finishing Architecture Audit (offline forensic + design only)
+
+**Objective.** Post D-256 (Audio Finishing P0 CLOSED). Audit CutSell's
+CURRENT visual-finishing capabilities against actual code and design the
+smallest safe V1 Visual Finishing architecture for the core product:
+professional Cut.ai-style Talking Head UGC editing. No implementation.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `793afe4` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Canonical status consolidation (recorded, restated from the
+directive and D-098/D-256, not re-litigated)
+
+`FREEZE = CLOSED`, `BOUNDARY = CLOSED`, `PACING V2 = CLOSED`,
+`HANDLE-AWARE PACING = CLOSED`, `AUDIO JOIN = SAFE / PARTIALLY QUALIFIED`,
+**`AUDIO FINISHING P0 = CLOSED`** (D-256's own outcome-contract +
+double-finishing-firewall proof; Level-1 real-execution against Video00
+media remains a separately-tracked, non-P0 open item). Audio Finishing
+P1 remains later polish absent a beta blocker. No closed track is
+reopened by this gate.
+
+### Method
+
+Every finding below is grounded in the actual source files read this
+gate (`visual_analysis.py`, `visual_openai.py`, `local_performance.py`,
+`speech_visual_microtrim.py`, `contracts.py`'s `MediaSignals`,
+`render.py`, `render_plan.py`'s `RenderSegment`, `media_overlay_render.py`,
+`caption_settings.py`, `post_render_media_qc.py`,
+`perceptual_watch_listen.py`, `finishing_contract.py`) plus
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` (Section 13.2 Track
+C, Section 17.2/17.4, Section 18) and `docs/CUTSELL_DECISIONS.md` through
+D-256. No number or heuristic is invented; every "MISSING" below was
+confirmed by its absence in the actual code, not inferred.
+
+### Stage 1 — Current visual pipeline (exact, code-grounded)
+
+```
+RAW frames
+  -> Track C Visual/Performance Perception (visual_analysis.py contract +
+     visual_openai.py's REAL GPT-4o-mini frame-scoring adapter -- 10
+     coarse 0-1 QUALITY SCORES, no geometry; local_performance.py's REAL
+     MediaPipe Holistic face/pose/hand LANDMARK extraction -- feeds
+     retry/reset-candidate detection, not framing decisions)
+  -> Selection / BestTake / Resolver (consumes MediaSignals scalars,
+     e.g. framing_quality/face_visibility, as EDITORIAL QUALITY signals
+     only -- never a geometric/visual-finishing input)
+  -> Freeze -> BoundaryEngine (audio/timing only) -> Pacing (timing only)
+  -> speech_visual_microtrim.py (post-render, ASR-word-guarded +
+     MediaPipe FaceMesh/Pose -- TEMPORAL micro-trim of dead gaps inside
+     ONE already-rendered file; not a framing correction)
+  -> render.py (_concat_render_command: uniform ffmpeg
+     scale=...force_original_aspect_ratio=decrease + centered
+     pad=1080:1920 letterbox, burned-in captions via subtitles= filter,
+     12 ms AUDIO-only join fades; ZERO crop/zoom/punch-in/color/exposure
+     filter of any kind)
+  -> post_render_media_qc.py (FROZEN_OR_REPEATED_FRAME, DEAD_BLACK_FRAME,
+     decode/export integrity, audio-discontinuity -- no visual-framing
+     check) + perceptual_watch_listen.py (4 EVALUATED capabilities, all
+     audio/transcript-derived; framing_and_eye_contact and
+     gesture_continuity_across_cut explicitly NOT_IMPLEMENTED)
+  -> final MP4
+```
+
+**Owners found (actual code, not aspirational):**
+
+| Capability | Owner | Status |
+|---|---|---|
+| crop | none | MISSING |
+| scale (technical fit-to-canvas) | `render.py` `_concat_render_command`/`_segment_command` | IMPLEMENTED (uniform, non-editorial) |
+| reframe | none | MISSING |
+| zoom/punch-in | none | MISSING |
+| face detection | `local_performance.py` (MediaPipe Holistic, real) + `speech_visual_microtrim.py` (MediaPipe FaceMesh, real) + `visual_openai.py` (LLM score, not a detector) | PARTIAL |
+| face position | `speech_visual_microtrim.py`'s `_VisualState.face_center_y` (y-only, one module, temporal use only) | PARTIAL |
+| gaze | `local_performance.py`'s `eye_contact_proxy` (head-yaw proxy) + `visual_openai.py`'s LLM `eye_contact` score | PARTIAL (proxy only, not true gaze) |
+| exposure | none | MISSING |
+| color | none | MISSING |
+| shot continuity | `local_performance.py`'s reset-candidate deltas (pre-Freeze retry signal, not a post-render join measurement) | PARTIAL |
+| transition concealment | none (hard `concat` cuts; 12 ms fade is AUDIO only) | MISSING |
+| captions | `caption_settings.py` (enabled/preset) + `render.py`'s `_caption_filter` (burned-in, fixed bottom-center, fixed `MarginV=120`) | IMPLEMENTED (static, not layout-aware) |
+| safe areas | none | MISSING |
+
+### Stage 2 — Jump-cut concealment
+
+Punch-in, alternating crop, micro-scale variation, reframe, cut-on-motion,
+visual transition: all **MISSING**. `render.py`'s join is a literal
+`concat=n=...:v=1:a=1` with zero video-side treatment — the ONLY join
+treatment anywhere is the existing 12 ms **audio** fade
+(`_audio_join_fade_filters`, D-094.3/F14). No `DIAGNOSTIC_ONLY` case
+exists either: nothing here is even measured today, let alone concealed.
+
+### Stage 3 — Face/head continuity
+
+Face bbox: **MISSING**. Face center: **PARTIAL** (y-only,
+`speech_visual_microtrim.py`, single-file temporal use only — no x, no
+box, not exposed for cross-clip comparison). Head scale: **PARTIAL**
+(`face_height` proxy, same module, same caveat). Eye line, headroom,
+x-position: **MISSING**. Multiple faces: **MISSING** (`FaceMesh` is
+hard-configured `max_num_faces=1`). Face confidence: **PARTIAL**
+(MediaPipe computes it internally via `min_detection_confidence`; never
+surfaced as a stored per-frame value).
+
+Can CutSell currently detect a subject jumping left/right across
+adjacent SELECTED takes? **No** — no x-position is tracked for the face
+at all. Face scale changing drastically? **No, not as a cross-clip
+join measurement** — the underlying delta primitive exists but only
+compares frames WITHIN one continuous already-rendered file across a
+sub-second gap, never across a hard cut between two different source
+clips. Excessive headroom change? **No.** Framing discontinuity across
+adjacent selected takes? **No** — no module compares two different
+clips' framing at all today.
+
+### Stage 4 — Gaze continuity
+
+True gaze estimation (eye-direction/camera-gaze vector): **NONE**. What
+exists is explicitly a **proxy**: `local_performance.py`'s
+`eye_contact_proxy` derives from head-yaw geometry (nose position
+relative to eye midpoint), and `visual_openai.py`'s `eye_contact` is an
+LLM-scored 0-1 impression, not a measured angle. Head pose: **proxy
+only** — a single yaw-like scalar, not a real pitch/roll/yaw triple.
+This audit does not overclaim either as true gaze.
+
+**Classification: P1.** Not P0 — a professional talking-head look is
+driven far more by framing/jump-cut concealment (Stage 2/3) than
+sub-degree gaze tracking, and no real gaze estimator exists to build a
+P0 correction on without new modeling work this gate does not authorize.
+
+### Stage 5 — Exposure continuity
+
+Brightness/luma measurement, white-balance/contrast difference
+measurement: **NONE found anywhere in `cutsell_worker/*.py`**. Adjacent
+clips **cannot** be objectively compared for exposure today. (ffmpeg's
+own `signalstats` filter is a well-known, not-yet-used primitive that
+would supply this cheaply — noted for Stage 17, not built here.)
+
+### Stage 6 — Color consistency
+
+Histogram/color metrics, white balance, temperature/tint, saturation,
+contrast, color-space handling beyond codec compatibility: **NONE**.
+`render.py`'s `format=yuv420p` is a pixel-format/codec-compatibility
+conversion, not color grading; `setsar=1` is aspect-ratio metadata only.
+**Confirmed: the renderer preserves source color exactly — zero color
+processing of any kind** (no `eq=`, `curves=`, `colorbalance=`, `lut3d=`
+anywhere).
+
+### Stage 7 — Reframe/crop
+
+**The renderer does not crop to 9:16 — it letterboxes/pads.**
+`scale=...force_original_aspect_ratio=decrease` + centered
+`pad=1080:1920:(ow-iw)/2:(oh-ih)/2` preserves the ENTIRE source frame
+inside a fixed 1080x1920 canvas with black bars, geometrically centered
+on the FRAME, never the subject. Subject centering, safe crop,
+face-aware crop, product-aware crop, caption-safe region, dynamic
+reframe: all **MISSING**. Exact output assumption: every clip,
+regardless of native aspect ratio or original framing, gets the
+identical uniform pad treatment — technically correct and
+editorially neutral, with zero visual-finishing intelligence applied.
+
+### Stage 8 — Punch-in policy (design only, not implemented)
+
+Candidate roles: (1) conceal a jump cut, (2) emphasize a beat/reaction,
+(3) alternate framing across near-identical adjacent shots of the same
+subject, (4) rescue a source clip with poor original framing. **Binding
+constraint for core V1:** punch-in must be a purely deterministic
+VISUAL-QUALITY decision (a bounded, enumerated preset applied only when
+a measured jump-cut/discontinuity condition is met) — never a commercial
+emphasis decision ("punch in here because it's the CTA") which is Smart
+Sales Funnel territory (Stage 21). **No numeric zoom percentage is
+canonical today** — none exists in any const table; one must go through
+the same Product-Owner-approval discipline Audio Finishing's six
+canonical values used (D-249), never invented by an audit gate.
+
+### Stage 9 — Product visibility
+
+Product visible: **PARTIAL** — `MediaSignals.product_visibility` exists,
+populated only by the LLM-based `OpenAIVisualProvider`
+(`NoopVisualProvider` defaults to `0.0`) as a coarse 0-1 scalar. Product
+bbox: **MISSING** — no spatial location exists, only a presence score.
+Hands/product interaction, demonstration shot: **MISSING**. **Core
+Visual Finishing cannot today prevent a crop from cutting the product
+out** — both because no crop authority exists yet at all (Stage 7) and
+because even the existing product signal has no location to protect.
+
+### Stage 10 — Caption interaction
+
+Caption placement: **EXISTS** (fixed bottom-center, `MarginV=120`,
+ffmpeg burned-in `subtitles=` filter) but is static, not layout-aware.
+Caption-safe / UI-safe / TikTok-interface-safe region: **NONE** — no
+"safe area" concept exists anywhere in this codebase. A future visual
+reframe MUST reserve a bottom caption-safe band and, ideally, a
+right-edge UI-icon-safe margin — recorded as a requirement only, per the
+directive's "do not invent caption design" instruction.
+
+### Stage 11 — Visual join analysis (measurable today?)
+
+Face position delta, face scale delta: **not measurable across a real
+editorial join today** — the one real primitive
+(`speech_visual_microtrim.py`'s face_center_y/face_height) compares
+frames WITHIN one continuous rendered file across a sub-second
+ASR-guarded gap, never across a hard cut between two different SELECTED
+source clips; reusing it for cross-clip joins needs real (if modest)
+rework, not zero-cost wiring. Frame brightness delta, color delta:
+**not measurable** (zero foundation, Stage 5/6). Camera/framing
+discontinuity: **not measurable**. Motion continuity: **partially
+measurable** — `local_performance.py`'s frame-to-frame grayscale
+`cv2.absdiff` motion scalar exists but only within one source's own
+frame sequence, never compared across a join.
+
+### Stage 12 — Candidate correction types (design, none adopted)
+
+A. `NO_CHANGE` — baseline. B. `STATIC_REFRAME` — a fixed deterministic
+recrop/recenter from a one-time measured subject position (P0
+candidate). C. `PUNCH_IN` — bounded scale-in at a cut point (P0
+candidate, needs Stage 8's canonical numeric policy first). D.
+`SCALE_MATCH` — normalize face scale across adjacent clips (P1, needs
+Stage 11's cross-clip gap closed first). E. `POSITION_MATCH` — normalize
+subject position across adjacent clips (P1, same dependency). F.
+`EXPOSURE_MATCH` (P1, needs Stage 5 built first — zero foundation
+today). G. `COLOR_MATCH` (P2, needs Stage 6 built first — zero
+foundation, more aesthetic than functional). H. `FAIL_CLOSED`/`ABSTAIN`
+— the mandatory default, matching Audio Finishing's own
+`ABSTAIN_INSUFFICIENT_EVIDENCE`/`BLOCKED_*` doctrine: when measurement
+is unavailable or a correction would cross a Stage 14 firewall, the
+plan abstains, never guesses. Not all belong in V1 (see Stage 13).
+
+### Stage 13 — P0/P1/P2 matrix (grounded in the actual findings above)
+
+**P0:**
+- Correct 9:16 output framing verification — ALREADY STRUCTURALLY TRUE
+  (render.py's letterbox/pad guarantees canvas dimensions); V1 needs
+  only a technical QC assertion confirming it, not a new correction.
+- Face-not-cut-off safety — needs a **NEW** face-bbox/position
+  measurement (today's signals are proxies/scores, not spatial); must
+  be built, not reused.
+- Product-not-unintentionally-cropped-when-known — needs a **NEW**
+  product bbox AND blocked structurally until any crop authority exists
+  at all (today's renderer never crops).
+- Obvious framing-discontinuity DETECTION across adjacent selected
+  takes — a genuinely new cross-clip measurement (Stage 11 gap).
+- Deterministic punch-in/reframe where safe — needs Stage 8's canonical
+  numeric policy, Product-Owner-approved, before any correction ships.
+- Render preservation — ALREADY MET (scale-decrease-only, never
+  crops/discards source content); must stay true once crop is added.
+- Visual QC — technical checks EXIST (frozen/black frame, decode
+  integrity); PERCEPTUAL visual QC (framing/eye-contact) is explicitly
+  `NOT_IMPLEMENTED` today, never silently passed.
+
+**P1:** exposure matching (zero foundation), color matching (zero
+foundation), more advanced gaze continuity (could reuse the existing
+head-yaw proxy for a coarse "looking away too long" flag, short of true
+gaze).
+
+**P2:** advanced motion matching (a narrow primitive exists, needs
+generalizing), aesthetic/cinematic polish (not started), advanced
+subject tracking across a moving frame (today's tracking is
+landmark-only, not robust multi-object re-identification).
+
+**Out of scope (permanent, not a maturity gap):** Smart Sales Funnel
+commercial reasoning, B-roll semantic insertion, product-demo semantic
+choice, commercial beat sequencing (Stage 21).
+
+### Stage 14 — Visual quality firewalls (design)
+
+Never: crop face accidentally (blocked until a face-bbox measurement +
+firewall check exist); crop known product accidentally (same, product
+bbox); upscale excessively without authority (**already true today** —
+`render.py`'s scale filter is `force_original_aspect_ratio=decrease`
+only, i.e. downsize-to-fit, never upsample past source resolution — a
+real existing protection, recorded explicitly as a firewall to
+preserve, not just an accident); create visible interpolation artifact
+(protected by the same decrease-only behavior); change clip timing /
+alter Pacing / alter story or order (Selection/Freeze/Boundary/Pacing
+remain untouched — Visual Finishing consumes their output only,
+identical to Audio Finishing's own non-negotiable placement); fabricate
+missing visual content (no generative fill/outpainting — a crop/reframe
+lacking real frame data must ABSTAIN, never synthesize); change product
+appearance (bounds any future color-matching correction to lighting
+consistency, never brand color); change creator identity (no
+face-swap/beautification/de-aging — the creator's real likeness is
+immutable, the visual analogue of CLAUDE.md's "never invent speech").
+
+### Stage 15 — Renderer authority
+
+Confirmed as the exact same doctrine Audio Finishing already proved
+(D-249 §18.3, D-256): **Visual Finishing POLICY decides; RENDERER
+EXECUTES.** `render.py` must never itself decide a punch-in trigger,
+crop target, exposure correction, or product emphasis — those become a
+new `VisualFinishingPlan` (mirroring `AudioFinishingPlan`) the renderer
+consumes as already-authorized structured intent, never inferred
+internally.
+
+### Stage 16 — Measurement -> Policy -> Plan -> Execution -> QC
+
+**Recommend this become canonical for Visual Finishing**, for the
+identical reasons D-249/D-251/D-256 already validated for Audio: it
+separated DSP from policy, made abstention safe-by-default, and let
+D-256 build a full product-state contract without ever touching the
+executor.
+
+```
+VISUAL MEASUREMENT -> VISUAL POLICY -> VISUAL PLAN
+    -> RENDERER EXECUTION -> POST-RENDER VISUAL QC
+```
+
+This is a documentation recommendation only; not implemented by this
+gate.
+
+### Stage 17 — Visual measurement foundation (first gate's target)
+
+Frame width/height (trivial, ffprobe-available today), face bbox (NEW),
+face confidence (NEW — MediaPipe already computes it internally, only
+needs surfacing), face center x/y (NEW — only y half-exists narrowly
+today), face area ratio (NEW, derivable from bbox), headroom (NEW,
+derivable from bbox+frame height), subject center (NEW, could generalize
+`local_performance.py`'s existing body-centroid PATTERN), brightness/
+luma (NEW, zero foundation — ffmpeg's `signalstats` filter is the
+obvious primitive), contrast (NEW, same family), color statistics (NEW,
+same family), product bbox if already available (**not available** — a
+new detector decision, deferred). No corrections at this stage.
+
+### Stage 18 — Synthetic/fixture strategy (design only)
+
+Centered talking head (baseline PASS); subject too far left/right
+(deterministic synthetic composite at known x-offsets); face scale
+mismatch (two synthetic "zoom"-level variants); headroom mismatch
+(vertical-offset variants); bright/dark adjacent clips (ffmpeg
+`eq=brightness=` variants, deterministic ground truth); warm/cool clips
+(`colorbalance=` variants); product near frame edge (a synthetic marker
+composited near an edge — a REAL product-bbox fixture needs a detector
+decision first); multiple faces (a two-subject composite — note
+`speech_visual_microtrim.py`'s `FaceMesh` is hard-configured
+`max_num_faces=1` and would need reconfiguring even to observe this);
+no face (blank/solid-color clip); face partially occluded (a synthetic
+occlusion bar); already-good framing (positive control). Matches D-247's
+own "no real RAW, synthetic ffmpeg fixtures only" precedent. No RAW
+executed by this gate.
+
+### Stage 19 — Real-media qualification strategy (design only)
+
+Prefer reuse of the existing Video00 corpus — the D-254R-retrieved,
+sha256-verified `preview.mp4` (and its raw counterpart), already proven
+reachable via the D-254C GitHub-Actions-runner-side execution
+architecture (this sandbox cannot download media artifacts directly,
+confirmed three times across D-254/D-254R/D-254C). Nothing run by this
+gate.
+
+### Stage 20 — Visual QC (current capability, technical vs perceptual)
+
+**Technical (EXISTING, `post_render_media_qc.py`):**
+`FROZEN_OR_REPEATED_FRAME` (`freezedetect`), `DEAD_BLACK_FRAME`
+(`blackdetect`), decode/export integrity (full null-decode),
+audio-discontinuity-at-boundaries. **Not present:** explicit
+invalid-resolution/wrong-orientation assertion (structurally guaranteed
+by construction since the renderer hardcodes 1080x1920, but never
+explicitly asserted post-render), crop-clipping (moot — no crop exists
+yet), face-clipping (needs face bbox first), visual
+discontinuity/color-exposure-jump-at-cuts (needs Stage 5/6/11
+measurement first).
+
+**Perceptual (`perceptual_watch_listen.py` v1):** 4 `EVALUATED`
+capabilities (`dead_air_on_mp4`, `speech_energy_at_cuts`,
+`reset_debris_at_edges`, `repeated_audience_content`) — **all
+audio/transcript-derived; zero touch pixels.** 4 `NOT_IMPLEMENTED`:
+`facial_expression_post_line`, `gesture_continuity_across_cut`,
+`clipped_phoneme_asr_realign`, `framing_and_eye_contact` — explicitly
+acknowledged gaps; the module's own `overall_status` never returns
+`EVALUATED_PASS` while any `NOT_IMPLEMENTED` capability is present, so
+these gaps are never silently swallowed.
+
+**Separation confirmed:** the technical/perceptual QC firewall Audio
+Finishing preserved (`post_render_media_qc.py` vs Watch+Listen) already
+exists cleanly for what little visual QC is built; Visual Finishing
+should follow the identical split — a technical layer for hard defects
+(corrupt crop, black-bar overflow, aspect mismatch) and a perceptual
+layer for framing/continuity judgment, never merged.
+
+### Stage 21 — Smart Sales Funnel firewall
+
+Confirmed: no code anywhere does Hook/Problem/Benefit/CTA reasoning
+today — that vocabulary exists exclusively in `D-098` §17.2 as
+documentation, MISSING/FUTURE. A future Visual Finishing plan MAY expose
+hooks (e.g. a `visual_finishing_reason` field a later Smart Sales Funnel
+layer could read) but implements zero commercial intelligence itself.
+Explicitly kept out of D-257 and any near-term Visual Finishing gate.
+
+### Stage 22 — Security / commercial readiness track
+
+**Positive findings (already true today, worth preserving explicitly):**
+no `shell=True` anywhere in `cutsell_worker/*.py` (list-arg subprocess
+calls throughout — no shell-injection surface via ffmpeg/ffprobe/
+MediaPipe invocation); `tempfile` used broadly for per-job isolation;
+`render.py`'s scale filter is decrease-only (incidentally bounds an
+upscale/decompression-abuse vector already); `local_performance.py`
+already caps `max_frames=9000` and downsamples any frame wider than
+640px before landmark inference (a real, existing partial mitigation).
+
+**Visual-Finishing-specific risks recorded for a LATER dedicated
+security gate** (no critical existing regression found; nothing fixed
+here per the directive's own "no security implementation unless
+critical" rule):
+- malicious/corrupt video input reaching a NEW frame-decode path
+  (MediaPipe/OpenCV/ffmpeg) — needs resource- and time-bounded decode.
+- decoder/ffmpeg isolation — extend the existing per-job subprocess
+  isolation to any new visual-measurement subprocess.
+- path traversal — validate any new user-supplied media path (e.g. a
+  future product-reference image) the same way existing source paths
+  already are.
+- shell injection — keep the existing no-`shell=True` discipline for
+  any new ffmpeg invocation this track adds.
+- temp-file isolation — any new per-job frame/thumbnail extraction stays
+  in the same per-job tempfile scope, never shared/global.
+- cross-user asset leakage — a future product-reference-image feature
+  must not let one tenant's upload be reused by another tenant's job.
+- oversized frame/memory abuse — needs an explicit bound for
+  adversarially large resolution/frame-count input (extend
+  `local_performance.py`'s existing 640px-downsample/9000-frame-cap
+  pattern to any new visual-measurement code).
+- decompression bombs — needs an explicit decoded-resolution ceiling
+  before any new pixel-level processing.
+- malformed media — extend `probe_decode_integrity`'s discipline
+  (currently applied to RENDERED output) to any new pre-render
+  visual-measurement pass over SOURCE media.
+- job-level CPU/RAM abuse — a new per-clip frame-sampling pass adds
+  real MediaPipe inference cost; needs the same per-job resource/
+  timeout envelope the existing RunPod/Modal providers already apply,
+  sized for the added cost.
+- image/frame extraction isolation — frame buffers stay per-job, no new
+  shared global state.
+
+**Permanent cross-cutting track confirmed/recorded (new, standing
+section):**
+
+> **SECURITY / PRIVACY / MULTI-USER COMMERCIAL READINESS = ALWAYS-ON
+> CROSS-CUTTING TRACK.** Runs in parallel with every feature track,
+> never postponed to launch (CLAUDE.md's own binding rule, restated
+> here as a permanent architectural section). Includes: auth/authz,
+> tenant isolation, secrets, upload/media safety, storage ownership,
+> rate limiting, cost-abuse controls, dependency/container scanning,
+> audit/retention, pre-beta security review. Visual Finishing's own
+> risks above are filed under this track, not a substitute for it.
+
+### Stage 23 — Supported languages V1
+
+Recorded: **ENGLISH, SPANISH** supported; **SPANGLISH/code-switching**
+out of scope V1 (unchanged product policy, not re-litigated). Confirmed
+by this audit: every visual capability examined above (face/framing/
+exposure/color/crop/punch-in) is language-independent by construction —
+none of it depends on spoken language. No Spanglish-specific visual
+logic is needed or proposed.
+
+### Stage 24 — First implementation gate (design only, not launched)
+
+**D-258 — VISUAL FINISHING MEASUREMENT FOUNDATION (OFFLINE /
+DIAGNOSTICS ONLY).** Should implement exactly Stage 17's measurement set
+(frame dimensions, face bbox + confidence + center x/y + area ratio +
+headroom, subject center, brightness/luma, contrast, color statistics —
+deferring product bbox, since no detector exists yet and that is a
+separate, larger decision) against Stage 18's synthetic fixtures,
+producing a structured `VisualMeasurement` object mirroring
+`AudioFinishingMeasurement`'s exact discipline: real numbers or explicit
+`None`/`UNKNOWN`, never fabricated. Zero corrections, zero renderer
+change, zero new render policy. **Not implemented by this gate.**
+
+### Verdict
+
+**A. VISUAL FINISHING ARCHITECTURE PARTIALLY PRESENT — CLEAR P0/P1 GAPS
+IDENTIFIED — MEASUREMENT->POLICY->PLAN->EXECUTION ARCHITECTURE APPROVED
+— READY FOR VISUAL MEASUREMENT FOUNDATION.**
+
+Rationale: real, reusable primitives already exist and were proven live
+(`local_performance.py`'s MediaPipe Holistic pipeline,
+`speech_visual_microtrim.py`'s FaceMesh/Pose usage, a non-destructive
+letterbox-safe renderer that never crops or upsamples past source
+resolution, working caption burn-in, working technical QC, and — most
+importantly — a proven Measurement->Policy->Plan->Execution->QC pattern
+from Audio Finishing ready to replicate) — ruling out Verdict C. But
+face bbox/position, product bbox, brightness, and color measurement are
+all genuinely absent, not merely unhardened — ruling out Verdict B. No
+architectural conflict was found anywhere in the existing
+Boundary->Pacing->Audio/Visual polish->Render chain D-098 §17.2 already
+names — ruling out Verdict D.
+
+### Canonical update
+
+`AUDIO FINISHING P0 = CLOSED` (confirmed, per D-256's real outcome-
+contract + double-finishing-firewall proof). New permanent section
+recorded: `SECURITY / PRIVACY / MULTI-USER COMMERCIAL READINESS =
+ALWAYS-ON CROSS-CUTTING TRACK` (Stage 22, restated above). No unrelated
+architecture redesigned.
+
+### Confirmation
+
+Audit/design only. No `cutsell_worker/*.py` file, no `tests/*.py` file,
+no `.github/workflows/*.yml` file was created or modified by this gate.
+No video mutated. No render policy changed. No new visual threshold or
+heuristic introduced. No RAW, no Modal, no RunPod, no provider call. The
+Security/Privacy/Multi-User cross-cutting track is preserved and
+reinforced, not weakened.
+
+**Canonical status:** unchanged numerically for Audio Finishing
+(confirmed CLOSED); new architecture-audit section recorded for Visual
+Finishing (this entry).
+
+**Exact next gate:** not authorized by this directive — D-258 (Visual
+Finishing Measurement Foundation, offline/diagnostics only) is the
+designed next step but is explicitly NOT launched by this gate.
+
+**Decision entry reference:** this entry (D-257).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-258. DO NOT LAUNCH RAW.
