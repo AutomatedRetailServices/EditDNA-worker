@@ -1,13 +1,18 @@
 """FFmpeg renderer for the clean CutSell draft timeline."""
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
+import hashlib
+import json
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 from typing import Iterable
+import uuid
 
 from .contracts import TextOverlay
 from .media_overlay_render import (
@@ -22,10 +27,289 @@ _SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9.]+)")
 _SILENCE_END_RE = re.compile(r"silence_end:\s*([0-9.]+)")
 
 
-def _run(command: list[str]) -> None:
-    completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+# =============================================================================
+# D-266 -- RENDER EXECUTION SAFETY FOUNDATION (offline hardening, no encode
+# behavior change on any successful render)
+# =============================================================================
+#
+# Closes exactly the three P0 findings D-265's forensic audit named in this
+# file's live execution path: (1) ffmpeg failure evidence (stderr, command,
+# return code) was discarded in favor of a bare
+# `RuntimeError("ffmpeg_render_failed")`; (2) the live render subprocess had
+# no timeout, so a hung/malformed-media ffmpeg could block a paid compute
+# worker indefinitely; (3) the renderer wrote directly to the final delivery
+# path, so a crash mid-encode could leave a truncated file there,
+# indistinguishable from a successful delivery. Nothing below changes any
+# codec, filter, resolution, fps, audio parameter, or selection/boundary/
+# pacing/finishing behavior -- see docs/CUTSELL_DECISIONS.md D-266.
+
+# --- Stage 5: bounded failure-category vocabulary --------------------------
+RENDER_FAILURE_FFMPEG_NONZERO_EXIT = "FFMPEG_NONZERO_EXIT"
+RENDER_FAILURE_FFMPEG_TIMEOUT = "FFMPEG_TIMEOUT"
+RENDER_FAILURE_OUTPUT_MISSING = "OUTPUT_MISSING"
+RENDER_FAILURE_OUTPUT_EMPTY = "OUTPUT_EMPTY"
+RENDER_FAILURE_ATOMIC_PROMOTION_FAILED = "ATOMIC_PROMOTION_FAILED"
+RENDER_FAILURE_INVALID_OUTPUT_PATH = "INVALID_OUTPUT_PATH"
+RENDER_FAILURE_OTHER = "OTHER"
+
+# --- Stage 1/6: timeout seam, deliberately unbounded today ------------------
+# No existing repository convention establishes a canonical subprocess
+# timeout sized for a FULL multi-segment render encode. Existing values
+# found elsewhere in this codebase (a 60s `_DEFAULT_TIMEOUT_SEC` for the
+# technical post-render QC probes and the audio-finishing measurement pass,
+# 90s for the human-boundary-polish probes, 120s for the audio-finishing
+# execution pass, a 600s `_SUBPROCESS_TIMEOUT_SEC` for the audio-silence and
+# prosodic-audio whole-file analysis passes) are each sized for a bounded,
+# single-purpose probe or a whole-file AUDIO analysis pass -- none of them
+# was chosen with an arbitrary-length,
+# multi-segment VIDEO encode in mind, and reusing one here without that
+# evidence would itself be an invented threshold wearing someone else's
+# authority. This seam is therefore left at `None` (= no timeout, i.e. the
+# EXACT existing behavior before this gate) until the Product Owner
+# authorizes a real value. See docs/CUTSELL_DECISIONS.md D-266:
+# TIMEOUT_POLICY_PENDING_PRODUCT_OWNER.
+RENDER_SUBPROCESS_TIMEOUT_SEC: float | None = None
+
+# --- Stage 4/24: bounded stderr/stdout excerpt ------------------------------
+# Reuses the bound already established in post_render_media_qc.py's own
+# `probe_decode_integrity` (`output.strip()[:2000]`) rather than inventing a
+# new one.
+_STDERR_EXCERPT_MAX_CHARS = 2000
+
+
+@dataclass(frozen=True)
+class RenderExecutionFailure:
+    """D-266 Stage 2: bounded, structured evidence for one render subprocess
+    failure. Replaces the previous bare `RuntimeError("ffmpeg_render_failed")`
+    / `RuntimeError("ffmpeg_render_missing_output")` strings. Never carries
+    the raw command argv or environment -- only a deterministic fingerprint
+    of the command is canonical (Stage 2/3/24); this module has no S3/URL/
+    credential inputs today (confirmed: no boto3/network-path construction
+    anywhere in this file), so stderr/command here structurally cannot carry
+    a signed URL or token, but nothing below ever promotes a raw argv string
+    to a stored field regardless."""
+
+    error_category: str
+    return_code: int | None
+    command_fingerprint: str
+    executable: str
+    stderr_excerpt: str
+    stdout_excerpt: str
+    timed_out: bool
+    timeout_sec: float | None
+    output_path: str
+    source_identity: tuple[str, ...]
+
+
+class RenderExecutionError(RuntimeError):
+    """Raised everywhere this module used to raise a bare `RuntimeError` on
+    a render subprocess/output-publication failure. Still a `RuntimeError`
+    subclass (isinstance-compatible with any existing blanket
+    `except RuntimeError` caller), but `.failure` now carries the full
+    structured `RenderExecutionFailure` instead of a two-word string."""
+
+    def __init__(self, failure: RenderExecutionFailure) -> None:
+        super().__init__(f"render_execution_failed:{failure.error_category}")
+        self.failure = failure
+
+
+def _command_fingerprint(command: list[str]) -> str:
+    """D-266 Stage 3: deterministic identity of one ffmpeg invocation for
+    observability/regression correlation only -- NEVER consulted as policy
+    authority anywhere in this module. Reuses this codebase's existing
+    SHA-256-based identity-hashing convention (`hashlib.sha256(...).
+    hexdigest()[:24]`, established for D-263/D-264's own composition/
+    execution identities) rather than inventing a new scheme."""
+    normalized = json.dumps(list(command))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
+
+
+def _bounded_excerpt(text: str | bytes | None) -> str:
+    if not text:
+        return ""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    return text.strip()[:_STDERR_EXCERPT_MAX_CHARS]
+
+
+def _diagnostics_row(failure: RenderExecutionFailure, *, wall_time_sec: float) -> dict:
+    return {
+        "execution_status": "FAILED",
+        "error_category": failure.error_category,
+        "command_fingerprint": failure.command_fingerprint,
+        "executable": failure.executable,
+        "return_code": failure.return_code,
+        "timed_out": failure.timed_out,
+        "timeout_sec": failure.timeout_sec,
+        "stderr_excerpt": failure.stderr_excerpt,
+        "output_path": failure.output_path,
+        "wall_time_sec": round(wall_time_sec, 3),
+    }
+
+
+def _run(
+    command: list[str],
+    *,
+    output_path: str | Path,
+    source_identity: tuple[str, ...] = (),
+    timeout_sec: float | None = RENDER_SUBPROCESS_TIMEOUT_SEC,
+    diagnostics: list[dict] | None = None,
+) -> None:
+    """Execute one ffmpeg command. The SUCCESS path is byte-for-byte the
+    same behavior as before D-266 (run the command, return `None`). Every
+    FAILURE path now raises a structured `RenderExecutionError` -- see the
+    D-266 section above -- instead of a bare string-message `RuntimeError`."""
+    fingerprint = _command_fingerprint(command)
+    executable = command[0] if command else ""
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # subprocess.run's own timeout handling already kills the child
+        # process before re-raising -- no child is intentionally left
+        # running (D-266 Stage 6).
+        failure = RenderExecutionFailure(
+            error_category=RENDER_FAILURE_FFMPEG_TIMEOUT,
+            return_code=None,
+            command_fingerprint=fingerprint,
+            executable=executable,
+            stderr_excerpt=_bounded_excerpt(exc.stderr),
+            stdout_excerpt=_bounded_excerpt(exc.stdout),
+            timed_out=True,
+            timeout_sec=timeout_sec,
+            output_path=str(output_path),
+            source_identity=source_identity,
+        )
+        if diagnostics is not None:
+            diagnostics.append(_diagnostics_row(failure, wall_time_sec=time.monotonic() - started))
+        raise RenderExecutionError(failure) from exc
+    wall_time_sec = time.monotonic() - started
     if completed.returncode != 0:
-        raise RuntimeError("ffmpeg_render_failed")
+        failure = RenderExecutionFailure(
+            error_category=RENDER_FAILURE_FFMPEG_NONZERO_EXIT,
+            return_code=completed.returncode,
+            command_fingerprint=fingerprint,
+            executable=executable,
+            stderr_excerpt=_bounded_excerpt(completed.stderr),
+            stdout_excerpt=_bounded_excerpt(completed.stdout),
+            timed_out=False,
+            timeout_sec=timeout_sec,
+            output_path=str(output_path),
+            source_identity=source_identity,
+        )
+        if diagnostics is not None:
+            diagnostics.append(_diagnostics_row(failure, wall_time_sec=wall_time_sec))
+        raise RenderExecutionError(failure)
+    if diagnostics is not None:
+        diagnostics.append({
+            "execution_status": "SUCCESS",
+            "command_fingerprint": fingerprint,
+            "executable": executable,
+            "return_code": completed.returncode,
+            "timed_out": False,
+            "output_path": str(output_path),
+            "wall_time_sec": round(wall_time_sec, 3),
+        })
+
+
+def _job_local_temp_output_path(destination: Path, execution_id: str) -> Path:
+    """D-266 Stage 7/8/22: a unique, job-local temp path in the SAME
+    directory as `destination` (required for `os.replace` to be atomic) --
+    ffmpeg writes here, never to `destination` directly. Keeps
+    `destination`'s own suffix as the trailing extension (`preview.mp4` ->
+    `.preview.mp4.<execution_id>.rendering.mp4`) so ffmpeg's own
+    extension-based muxer inference is unaffected (Stage 22)."""
+    return destination.with_name(f".{destination.name}.{execution_id}.rendering{destination.suffix}")
+
+
+def _validate_output_path(destination: Path) -> None:
+    """D-266 Stage 10: fail closed, with a named category, rather than
+    handing ffmpeg (or `os.replace`) a path this module can already tell is
+    wrong. Does not change behavior for any path that was already valid --
+    every existing production caller passes a plain file path."""
+    if destination.exists() and destination.is_dir():
+        raise RenderExecutionError(RenderExecutionFailure(
+            error_category=RENDER_FAILURE_INVALID_OUTPUT_PATH,
+            return_code=None, command_fingerprint="", executable="",
+            stderr_excerpt="", stdout_excerpt="", timed_out=False, timeout_sec=None,
+            output_path=str(destination), source_identity=(),
+        ))
+
+
+def _cleanup_temp_output(temp_output: Path) -> None:
+    """D-266 Stage 11: best-effort cleanup of a leftover temp render
+    artifact after any failure. Never raises -- a cleanup failure is a
+    secondary diagnostic, never allowed to mask the primary failure the
+    caller is already propagating. Never touches `destination`, any source
+    media, or any other job's temp file (the path is this execution's own
+    unique, job-local name)."""
+    try:
+        if temp_output.exists():
+            temp_output.unlink()
+    except OSError:
+        pass
+
+
+def _finalize_render_output(
+    temp_output: Path,
+    destination: Path,
+    *,
+    output_path: str,
+    source_identity: tuple[str, ...],
+    diagnostics: list[dict] | None = None,
+) -> None:
+    """D-266 Stages 7/9/10/12: validate the just-rendered temp file, then
+    atomically publish it to `destination`. `os.replace` unconditionally
+    overwrites an existing destination (POSIX and Windows alike) --
+    preserving this module's existing, unchanged always-overwrite semantics
+    (previously ffmpeg's own `-y` flag), just making the publish atomic.
+    Raises `RenderExecutionError` on any failure; the caller owns temp
+    cleanup on the failure path (this function never deletes `temp_output`
+    itself, even when it raises, so a caller-side cleanup always has
+    something consistent to act on)."""
+    if not temp_output.exists():
+        failure = RenderExecutionFailure(
+            error_category=RENDER_FAILURE_OUTPUT_MISSING,
+            return_code=None, command_fingerprint="", executable="",
+            stderr_excerpt="", stdout_excerpt="", timed_out=False, timeout_sec=None,
+            output_path=output_path, source_identity=source_identity,
+        )
+        if diagnostics is not None:
+            diagnostics.append(_diagnostics_row(failure, wall_time_sec=0.0))
+        raise RenderExecutionError(failure)
+    if temp_output.stat().st_size <= 0:
+        failure = RenderExecutionFailure(
+            error_category=RENDER_FAILURE_OUTPUT_EMPTY,
+            return_code=None, command_fingerprint="", executable="",
+            stderr_excerpt="", stdout_excerpt="", timed_out=False, timeout_sec=None,
+            output_path=output_path, source_identity=source_identity,
+        )
+        if diagnostics is not None:
+            diagnostics.append(_diagnostics_row(failure, wall_time_sec=0.0))
+        raise RenderExecutionError(failure)
+    try:
+        os.replace(temp_output, destination)
+    except OSError as exc:
+        failure = RenderExecutionFailure(
+            error_category=RENDER_FAILURE_ATOMIC_PROMOTION_FAILED,
+            return_code=None, command_fingerprint="", executable="",
+            stderr_excerpt=_bounded_excerpt(str(exc)), stdout_excerpt="",
+            timed_out=False, timeout_sec=None,
+            output_path=output_path, source_identity=source_identity,
+        )
+        if diagnostics is not None:
+            diagnostics.append(_diagnostics_row(failure, wall_time_sec=0.0))
+        raise RenderExecutionError(failure) from exc
+    if diagnostics is not None:
+        diagnostics.append({
+            "execution_status": "SUCCESS",
+            "temp_path": str(temp_output),
+            "final_path": str(destination),
+            "atomic_promoted": True,
+        })
 
 
 def tighten_trailing_silence(
@@ -327,6 +611,7 @@ def render_preview(
     text_overlays: Iterable[TextOverlay] = (),
     media_overlays: Iterable[LocalMediaOverlay] = (),
     trim_report: list[dict] | None = None,
+    execution_diagnostics: list[dict] | None = None,
 ) -> str:
     """Render clips, captions, text and photo/video overlay lanes.
 
@@ -334,6 +619,20 @@ def render_preview(
     trailing edge `tighten_trailing_silence` actually moved -- the renderer's
     last mechanical op is recorded, never silent, so a RAW can attribute
     every exit to its owner (see boundary_engine_pass.py's ownership table).
+
+    ``execution_diagnostics`` (D-266 Stage 23, optional, mutated): one row
+    per ffmpeg invocation and one final row for output publication -- see
+    `_diagnostics_row`/`_run`/`_finalize_render_output` above. Additive only;
+    `None` (the default) reproduces the exact prior calling convention.
+
+    D-266: every ffmpeg write in this function now targets a job-local temp
+    path in `output_path`'s own directory, never `output_path` itself; the
+    ONLY write to `output_path` is one atomic `os.replace` after the temp
+    file is confirmed to exist and be non-empty (see `_finalize_render_
+    output`). A crash/kill mid-encode can therefore never leave a truncated
+    file at the delivery path. Every failure now raises a structured
+    `RenderExecutionError` instead of a bare `RuntimeError`. No codec,
+    filter, resolution, fps, or audio parameter changed.
     """
     segment_tuple = []
     for segment in segments:
@@ -357,37 +656,65 @@ def render_preview(
         raise ValueError("invalid render geometry")
 
     destination = Path(output_path)
+    _validate_output_path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="cutsell-render-") as directory:
-        for segment in segment_tuple:
-            if segment.end <= segment.start:
-                raise ValueError(f"invalid render segment {segment.clip_id}")
-        has_final_overlays = bool(text_tuple or media_tuple)
-        joined = destination if not has_final_overlays else Path(directory) / "joined.mp4"
-        # D-097.2: one pass, exact frame-aligned per-segment durations, gapless
-        # concat filter -- see the module comment above render_preview.
-        _run(_concat_render_command(
-            segment_tuple, joined, width=width, height=height, fps=fps, workdir=Path(directory),
-        ))
+    execution_id = uuid.uuid4().hex[:12]
+    temp_output = _job_local_temp_output_path(destination, execution_id)
+    source_identity = tuple(segment.clip_id for segment in segment_tuple)
 
-        if has_final_overlays:
-            ass_path = None
-            if text_tuple:
-                ass = Path(directory) / "text-overlays.ass"
-                _write_text_overlay_ass(text_tuple, ass, width=width, height=height)
-                ass_path = str(ass)
-            _run(build_final_overlay_command(
-                str(joined), str(destination),
-                media_overlays=media_tuple,
-                text_overlays=text_tuple,
-                width=width,
-                height=height,
-                ass_path=ass_path,
-            ))
+    try:
+        with tempfile.TemporaryDirectory(prefix="cutsell-render-") as directory:
+            for segment in segment_tuple:
+                if segment.end <= segment.start:
+                    raise ValueError(f"invalid render segment {segment.clip_id}")
+            has_final_overlays = bool(text_tuple or media_tuple)
+            # D-266: `joined` is the concat step's own output -- the FINAL
+            # job-local temp file when there are no overlays (one encode,
+            # same as before D-266), or an intermediate file inside the
+            # already-existing scratch `directory` when an overlay pass
+            # still has to run on top of it (also unchanged from before).
+            joined = temp_output if not has_final_overlays else Path(directory) / "joined.mp4"
+            # D-097.2: one pass, exact frame-aligned per-segment durations, gapless
+            # concat filter -- see the module comment above render_preview.
+            _run(
+                _concat_render_command(
+                    segment_tuple, joined, width=width, height=height, fps=fps, workdir=Path(directory),
+                ),
+                output_path=joined, source_identity=source_identity,
+                diagnostics=execution_diagnostics,
+            )
 
-    if not destination.exists() or destination.stat().st_size <= 0:
-        raise RuntimeError("ffmpeg_render_missing_output")
+            if has_final_overlays:
+                ass_path = None
+                if text_tuple:
+                    ass = Path(directory) / "text-overlays.ass"
+                    _write_text_overlay_ass(text_tuple, ass, width=width, height=height)
+                    ass_path = str(ass)
+                _run(
+                    build_final_overlay_command(
+                        str(joined), str(temp_output),
+                        media_overlays=media_tuple,
+                        text_overlays=text_tuple,
+                        width=width,
+                        height=height,
+                        ass_path=ass_path,
+                    ),
+                    output_path=temp_output, source_identity=source_identity,
+                    diagnostics=execution_diagnostics,
+                )
+
+        # D-266 Stages 7/9/12: the ONLY write to `destination` in this whole
+        # function -- ffmpeg itself never targets it directly (see
+        # `temp_output` above), so a killed/crashed encode can never leave a
+        # truncated file AT the delivery path.
+        _finalize_render_output(
+            temp_output, destination, output_path=str(destination),
+            source_identity=source_identity, diagnostics=execution_diagnostics,
+        )
+    except BaseException:
+        _cleanup_temp_output(temp_output)
+        raise
     return str(destination)
 
 
@@ -633,13 +960,25 @@ def render_timeline_with_audio_windows(
             raise ValueError(f"invalid render segment {segment.clip_id}")
 
     destination = Path(output_path)
+    _validate_output_path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="cutsell-render-timeline-") as directory:
-        _run(_concat_render_command_with_audio_windows(
-            segment_tuple, destination, width=width, height=height, fps=fps, workdir=Path(directory),
-        ))
-    if not destination.exists() or destination.stat().st_size <= 0:
-        raise RuntimeError("ffmpeg_render_missing_output")
+    execution_id = uuid.uuid4().hex[:12]
+    temp_output = _job_local_temp_output_path(destination, execution_id)
+    source_identity = tuple(segment.clip_id for segment in segment_tuple)
+    try:
+        with tempfile.TemporaryDirectory(prefix="cutsell-render-timeline-") as directory:
+            _run(
+                _concat_render_command_with_audio_windows(
+                    segment_tuple, temp_output, width=width, height=height, fps=fps, workdir=Path(directory),
+                ),
+                output_path=temp_output, source_identity=source_identity,
+            )
+        _finalize_render_output(
+            temp_output, destination, output_path=str(destination), source_identity=source_identity,
+        )
+    except BaseException:
+        _cleanup_temp_output(temp_output)
+        raise
     return str(destination)
 
 
@@ -878,13 +1217,24 @@ def render_audio_join_treatment_preview(
     else:
         audio_filters.append("".join(labels) + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0[aout]")
 
+    destination = Path(output_path)
+    _validate_output_path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    execution_id = uuid.uuid4().hex[:12]
+    temp_output = _job_local_temp_output_path(destination, execution_id)
+    source_identity = tuple(label.strip("[]") for label in labels)
+
     command += [
         "-filter_complex", ";".join(audio_filters),
         "-map", "[aout]",
-        str(output_path),
+        str(temp_output),
     ]
-    _run(command)
-    destination = Path(output_path)
-    if not destination.exists() or destination.stat().st_size <= 0:
-        raise RuntimeError("ffmpeg_audio_join_treatment_missing_output")
+    try:
+        _run(command, output_path=temp_output, source_identity=source_identity)
+        _finalize_render_output(
+            temp_output, destination, output_path=str(destination), source_identity=source_identity,
+        )
+    except BaseException:
+        _cleanup_temp_output(temp_output)
+        raise
     return str(destination)

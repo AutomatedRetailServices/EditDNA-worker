@@ -271,13 +271,21 @@ def test_a_clear_pause_is_still_one_primary_interval(tmp_path):
 
 
 def test_renderer_records_its_trailing_trims(monkeypatch, tmp_path):
+    from pathlib import Path
     from cutsell_worker import render
     seg = RenderSegment(clip_id="a", source_asset_id="src", source_path="/x.mp4", start=0.0, end=5.0)
     monkeypatch.setattr(render, "tighten_trailing_silence", lambda s: s.__class__(**{**s.__dict__, "end": 4.6}))
-    monkeypatch.setattr(render, "_run", lambda command: None)
+
+    # D-266: `_run` now writes to a job-local temp path (never `output_path`
+    # directly) and takes structured keyword-only context; the stub below
+    # emulates a successful ffmpeg run by creating whatever temp file it was
+    # asked to produce, so the real `_finalize_render_output` atomic-promotion
+    # step downstream has something real to validate and promote.
+    def _stub_run(command, *, output_path, **_kwargs):
+        Path(output_path).write_bytes(b"x")
+    monkeypatch.setattr(render, "_run", _stub_run)
     monkeypatch.setattr(render, "_concat_render_command", lambda *a, **k: ["true"])
     out = tmp_path / "out.mp4"
-    out.write_bytes(b"x")
     report: list = []
     render.render_preview((seg,), str(out), trim_report=report)
     assert report == [{

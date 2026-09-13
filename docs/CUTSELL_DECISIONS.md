@@ -69434,3 +69434,230 @@ Then STOP.
 
 DO NOT IMPLEMENT D-266.
 DO NOT LAUNCH RAW.
+
+## D-266 — Render Execution Safety Foundation (offline implementation)
+
+**Objective.** Post D-265 (renderer/export hardening architecture audit).
+Close exactly the three P0 findings D-265 named in `render.py`'s live
+execution path — (1) discarded ffmpeg failure evidence, (2) no subprocess
+timeout, (3) non-atomic output publication — without changing any codec,
+filter, resolution, fps, audio parameter, retry policy, or selection/
+boundary/pacing/finishing behavior on a successful render.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `36de3cc` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Stage 1/6 — existing timeout audit
+
+Searched the repository for a canonical subprocess/render/job timeout
+convention before implementing anything. Found per-module local
+`_DEFAULT_TIMEOUT_SEC`/`_SUBPROCESS_TIMEOUT_SEC` constants, each sized for
+a *different, bounded* operation shape: 60s for the technical post-render
+QC probes and the audio-finishing measurement pass, 90s for the
+human-boundary-polish probes, 120s for the audio-finishing execution pass,
+600s for the audio-silence/prosodic-audio whole-file analysis passes. None
+was sized with an arbitrary-length, multi-segment VIDEO encode in mind.
+
+**Result: `PRODUCT_OWNER_TIMEOUT_DECISION_REQUIRED`.** Per this gate's own
+Stage 1/6 instruction, no value was invented. A `RENDER_SUBPROCESS_TIMEOUT_SEC`
+seam now exists (module-level constant, `None` by default) and every
+subprocess invocation in `render.py` accepts an explicit `timeout_sec`
+parameter defaulting to that seam — so the mechanism is fully wired
+end-to-end (including structured `subprocess.TimeoutExpired` handling) and
+activating real bounded timeouts later requires changing exactly one
+constant, no code. Today's behavior (no timeout) is unchanged.
+
+### What was built (`cutsell_worker/render.py` only)
+
+- **`RenderExecutionFailure`** (frozen dataclass) / **`RenderExecutionError`**
+  (a `RuntimeError` subclass, isinstance-compatible with any existing
+  blanket `except RuntimeError` caller) — replaces the two bare
+  `RuntimeError("ffmpeg_render_failed")` / `RuntimeError("ffmpeg_render_
+  missing_output")` strings with bounded, structured evidence:
+  `error_category`, `return_code`, `command_fingerprint`, `executable`,
+  `stderr_excerpt`/`stdout_excerpt` (bounded to 2000 chars — reuses the
+  bound already established in `post_render_media_qc.py`'s own
+  `probe_decode_integrity`, never a new invented number), `timed_out`,
+  `timeout_sec`, `output_path`, `source_identity`. The raw command argv is
+  never stored as a canonical field — only a deterministic SHA-256
+  fingerprint (`hashlib.sha256(...).hexdigest()[:24]`, this codebase's own
+  existing identity-hashing convention) is, for observability/regression
+  correlation only, never policy authority.
+- **Bounded failure-category vocabulary**: `FFMPEG_NONZERO_EXIT`,
+  `FFMPEG_TIMEOUT`, `OUTPUT_MISSING`, `OUTPUT_EMPTY`,
+  `ATOMIC_PROMOTION_FAILED`, `INVALID_OUTPUT_PATH`, `OTHER`.
+- **`_run()` rewritten**: still runs one ffmpeg command and returns `None`
+  on success (byte-for-byte unchanged success behavior); every failure
+  (nonzero exit or `subprocess.TimeoutExpired`) now raises a structured
+  `RenderExecutionError` instead of a bare string. An optional
+  `diagnostics: list[dict] | None` parameter (mirrors the existing
+  `trim_report` mutated-list convention) appends one observability row per
+  invocation (execution status, fingerprint, return code, timed-out flag,
+  stderr excerpt, wall time) when a caller wants it — additive only.
+- **Atomic output publication**: `_job_local_temp_output_path` (a unique,
+  job-local temp file in the SAME directory as the final destination —
+  required for atomic `os.replace` — preserving the destination's own
+  suffix so ffmpeg's extension-based muxer inference is unaffected),
+  `_validate_output_path` (fails closed with `INVALID_OUTPUT_PATH` if the
+  destination already exists as a directory), `_finalize_render_output`
+  (validates the temp file exists and is non-empty, then atomically
+  `os.replace`s it onto the destination — preserving the exact prior
+  always-overwrite semantics, previously ffmpeg's own `-y` flag, now
+  atomic), `_cleanup_temp_output` (best-effort, never raises, never
+  touches the destination, source media, or any other job's files).
+  `render_preview`, `render_timeline_with_audio_windows` (D-214, test-only),
+  and `render_audio_join_treatment_preview` (D-233, test-only) all now
+  write ffmpeg's actual output to a temp path and promote atomically —
+  `output_path` is written to exactly once, only on confirmed success.
+  Every code path (success, ffmpeg failure, timeout, promotion failure)
+  cleans up its own temp artifact via a `try/except BaseException:
+  cleanup; raise` wrapper.
+
+### Two smaller, honestly-recorded gaps found during implementation (not fixed, out of this gate's exact P0 scope)
+
+1. A malformed/corrupt source fails inside `media_probe.probe_media`
+   (ffprobe, `check=True`) **before** this gate's `_run`/temp-output
+   machinery is ever reached — the exception surfaced is `probe_media`'s
+   own unstructured `subprocess.CalledProcessError`, not a
+   `RenderExecutionError`. This gate's P0 scope was the render ENCODE
+   subprocess's own failure handling (`_run`); hardening `probe_media`'s
+   own error path is a separate, smaller gap for a future gate. The
+   safety property that DOES hold regardless: no temp or final file is
+   ever created, since the probe fails before any ffmpeg write begins —
+   proven by `test_malformed_source_leaves_no_output_even_though_probe_
+   fails_first`.
+2. `tighten_trailing_silence`'s own `subprocess.run` call (a `silencedetect`
+   probe, pre-existing, unrelated to the three named P0s) still has no
+   timeout and already degrades softly on nonzero exit (returns the
+   segment unchanged) rather than raising — a different failure shape from
+   `_run`'s. Left unchanged; named here for a future hardening pass rather
+   than silently left unrecorded.
+
+### Tests
+
+New `tests/test_cutsell_d266_render_execution_safety.py`: 62 tests (real
+ffmpeg success-path proofs via a `pytestmark_ffmpeg`-gated lavfi-synthesized
+source, plus unit-level structured-failure/atomic-promotion/concurrency/
+path-safety proofs). Covers: success-path geometry/multi-segment/caption/
+audio-mute/`VisualTransformSpec`/no-transform equivalence (real encodes,
+real `probe_media` checks); shell-never-used + argv-list proof; special
+characters (spaces/Unicode/apostrophe) in output paths; existing-final-file
+overwrite preserved; structured nonzero-exit/timeout/success diagnostics
+rows at the `_run` unit level; command-fingerprint determinism and
+sensitivity; bounded stderr excerpt; atomic-promotion primitives
+(missing/empty temp, successful promotion, overwrite, invalid-directory
+output path, cleanup never touching unrelated files); temp-naming
+extension/directory preservation and non-PID-only uniqueness; the P0
+regression proofs themselves (partial-temp-never-published, timeout-
+leaves-no-output, nonzero-exit structured propagation, the malformed-source
+boundary case above); real concurrent renders via `threading` to
+independent outputs with no temp collision; no-`shell=True` source scan;
+temp-output-extension-preserves-mux-inference (a real ffmpeg run); D-233's
+audio-join-treatment preview gets the same atomic treatment; 15 parametrized
+`git diff`-vs-HEAD guards confirming Audio Finishing, Visual Finishing,
+Boundary, Pacing, technical QC, `media_probe.py`, and `finishing_contract.py`
+are all untouched; no-retry-loop and no-network/credential-construction
+vocabulary scans (via the established AST docstring-stripping technique,
+reused from D-262/D-263, to avoid this file's own scope-discipline prose
+tripping its own scan); codec/geometry-constants-unchanged source scan;
+`RenderExecutionError`/`RenderExecutionFailure` type/immutability checks;
+timeout-seam-defaults-to-`None` and `TimeoutExpired`-never-escapes-raw
+checks.
+
+Two pre-existing tests updated for the intentionally-changed internal
+`_run` signature (not a behavior change to what they test):
+`test_renderer_records_its_trailing_trims` (its `_run` stub now accepts
+the new keyword-only context and writes to whatever `output_path` it is
+given, so the real `_finalize_render_output` downstream has a real temp
+file to validate and promote) and one docstring wording fix in `render.py`
+itself (the module's own timeout-survey comment named an unrelated
+module's filename literally, tripping `test_cutsell_d251_audio_finishing_
+executor.py`'s existing "render.py never imports/references the Audio
+Finishing executor" architectural firewall test — reworded to describe
+the same modules without their literal filenames, no code or import
+changed).
+
+### Offline qualification
+
+- `python3 -m compileall -q cutsell_worker tests` — clean.
+- New D-266 test file alone: 62 passed.
+- `render`-keyword suite (`tests/ -k "render or D266 or d266"`, includes
+  the D-171/D-172 `git diff`-vs-HEAD guard tests): 391 passed before commit
+  (the two guard tests fail pre-commit exactly as their own established
+  precedent describes, resolving once committed — see Confirmation below).
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0`/`=1`): 55/55,
+  unaffected.
+- Full `tests/` suite (excluding the three documented pre-existing
+  baseline exceptions): **7308 passed, 10 skipped, 12 deselected, 13
+  subtests passed** — zero genuine failures (the same two self-resolving
+  guards accounted for above).
+
+### Confirmation
+
+Post-commit, `test_27_render_unchanged`/`test_33_render_unchanged`
+re-verified PASSING (working tree now equals the new HEAD, exactly the
+D-171/D-172 self-resolving pattern). No codec/preset/crf/fps/resolution/
+audio-format change (`libx264`, `-crf 20`, `aac`, `160k`, `RENDER_FPS_
+DEFAULT = 30` all confirmed present verbatim by source-scan test). No
+render filtergraph semantic change — every existing `_concat_render_
+command`/`_concat_render_command_with_audio_windows`/caption/overlay/
+`VisualTransformSpec` code path is untouched; only WHERE ffmpeg's output
+bytes land (a job-local temp file) and HOW a failure is reported changed.
+No Pacing/Boundary/Freeze/Audio-Join/Audio-Finishing/Visual-Finishing/
+technical-QC-authority change (confirmed by both the full-suite run and
+15 explicit `git diff`-vs-HEAD guards). No retry policy added (no retry
+counter, no loop, no `max_attempts`/`retry_count` identifier anywhere in
+the module — verified by source scan). No new ungrounded numeric
+threshold (the timeout seam is `None`; the 2000-char stderr bound reuses
+an existing constant; the SHA-256 fingerprint truncation reuses an
+existing convention). Shell safety unchanged: `shell=True` confirmed
+absent from `render.py`; every subprocess invocation remains an argv list.
+No secrets in scope: `render.py` has no S3/URL/credential construction
+(confirmed absent by source scan) — the redaction requirement is
+satisfied by never promoting raw command argv to a stored/canonical
+field, not by a regex with nothing real to redact.
+
+**Canonical status:** FREEZE/BOUNDARY/PACING V2/HANDLE-AWARE PACING/AUDIO
+FINISHING P0/VISUAL FINISHING P0 all remain CLOSED, unchanged. RENDER
+EXECUTION SAFETY FOUNDATION (this gate's three P0s) is now
+`RENDER_EXECUTION_SAFETY_P0_IMPLEMENTED_TIMEOUT_POLICY_PENDING` — the
+observability and atomic-output P0s are fully closed and proven; the
+timeout P0's mechanism is fully wired but its numeric policy is an open
+Product Owner decision (Verdict B, below). Renderer/Export Hardening at
+large remains open beyond these three items (see D-265's own remaining
+P1/P2 list — unaffected by this gate).
+
+### Verdict
+
+**B — OBSERVABILITY + ATOMIC OUTPUT PROVEN — TIMEOUT NUMERIC POLICY
+REQUIRES PRODUCT OWNER DECISION.** P0-1 (observability) and P0-3 (atomic
+output) are fully implemented, tested, and qualified. P0-2 (hung-process/
+DoS bound) has its full execution mechanism built and tested (a real
+`subprocess.TimeoutExpired` is caught and reported through the same
+structured failure path, proven by `test_run_raises_structured_error_on_
+timeout`/`test_timeout_expired_is_caught_and_never_propagates_raw`) but
+carries no live numeric bound yet, per this gate's own Stage 1/6
+instruction against inventing one.
+
+**Exact next gate:** Product Owner decision on a numeric render subprocess
+timeout (informed by real render durations this codebase has already
+observed — e.g. D-097.2's own single-pass concat render timings — rather
+than reused from an unrelated audio-analysis convention). Once decided,
+activating it is a one-constant change, not a new implementation gate.
+Separately, D-265's own remaining P1/P2 Renderer/Export findings (rotation/
+orientation verification, structured error taxonomy at the boundary
+between `probe_media` and `_run`, duration-drift observability,
+output-hashing contract) remain open for a possible future D-267.
+
+**Product Owner decision required:** YES — the render subprocess timeout
+numeric value only (escalation condition A, product/scope decision). No
+other part of this gate requires escalation.
+
+**Decision entry reference:** this entry (D-266).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-267.
+DO NOT LAUNCH RAW.
