@@ -179,10 +179,14 @@ def test_export_submit_rejects_missing_selected_source_asset(monkeypatch):
 
 
 def test_get_job_returns_progress_without_exposing_internal_tracebacks(monkeypatch):
+    # D-269 Stage 14: the route handler now passes its own defense-in-depth
+    # `user_id` (the authenticated principal, `None` when auth is disabled
+    # for this test session -- see tests/conftest.py) through to
+    # fetch_job_snapshot; the stub must accept it.
     monkeypatch.setattr(
         api,
         "fetch_job_snapshot",
-        lambda job_id: JobSnapshot(job_id, "analyzing", progress=42),
+        lambda job_id, **kwargs: JobSnapshot(job_id, "analyzing", progress=42),
     )
     response = TestClient(api.app).get("/v1/jobs/job-1")
     assert response.status_code == 200
@@ -196,7 +200,7 @@ def test_get_job_returns_progress_without_exposing_internal_tracebacks(monkeypat
 
 
 def test_get_job_returns_404_for_unknown_job(monkeypatch):
-    def missing(_job_id):
+    def missing(_job_id, **_kwargs):
         raise KeyError("missing")
     monkeypatch.setattr(api, "fetch_job_snapshot", missing)
     response = TestClient(api.app).get("/v1/jobs/missing")
@@ -207,7 +211,7 @@ def test_cancel_job_returns_canceled_state(monkeypatch):
     monkeypatch.setattr(
         api,
         "cancel_job",
-        lambda job_id: JobSnapshot(job_id, "canceled"),
+        lambda job_id, **kwargs: JobSnapshot(job_id, "canceled"),
     )
     response = TestClient(api.app).post("/v1/jobs/job-1/cancel")
     assert response.status_code == 200

@@ -120,6 +120,7 @@ def update_project(
     state: str | None = None,
     sources: list[dict[str, Any]] | None = None,
     latest_job_id: str | None = None,
+    latest_job_started_at: float | None = None,
     title: str | None = None,
     render_version: dict[str, Any] | None = None,
     client=None,
@@ -127,12 +128,38 @@ def update_project(
     target = _redis_client(client)
     key = project_key(user_id=user_id, project_id=project_id)
     current = get_project(user_id=user_id, project_id=project_id, client=target)
-    if state is not None:
-        current["state"] = str(state)
     if sources is not None:
         current["sources"] = list(sources)
     if latest_job_id is not None:
-        current["latest_job_id"] = str(latest_job_id)
+        # D-269 Stage 21/22: a late-completing OLDER job must never regress
+        # this project's "latest" pointer once a NEWER job has already
+        # become authoritative. `latest_job_started_at` is the CANDIDATE
+        # job's own real, already-existing timestamp (e.g. RQ's `Job.
+        # started_at`/`enqueued_at`) -- never an invented sequence number
+        # (this gate's own Stage 21 instruction). Every existing caller
+        # omits it, so `is_job_still_current` always returns True for them
+        # and this call is byte-for-byte the prior unconditional-overwrite
+        # behavior -- this is a built, tested, not-yet-activated seam,
+        # exactly D-266's own timeout-seam precedent.
+        from .tenant_safe_delivery import is_job_still_current
+        if is_job_still_current(
+            current_latest_job_id=current.get("latest_job_id"),
+            current_latest_job_started_at=current.get("latest_job_started_at"),
+            candidate_job_id=latest_job_id,
+            candidate_job_started_at=latest_job_started_at,
+        ):
+            current["latest_job_id"] = str(latest_job_id)
+            if latest_job_started_at is not None:
+                current["latest_job_started_at"] = float(latest_job_started_at)
+            if state is not None:
+                current["state"] = str(state)
+        # else: this candidate is a stale/older job -- its own state/
+        # latest_job_id update is silently skipped (Stage 22: "old output
+        # remains auditable but not current"). `render_version` below is
+        # still appended regardless -- an append-only audit trail is never
+        # gated by this guard.
+    elif state is not None:
+        current["state"] = str(state)
     if title is not None:
         current["title"] = str(title).strip()[:120] or current.get("title") or "Untitled Cut"
     if render_version is not None:

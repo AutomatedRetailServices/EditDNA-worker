@@ -4,7 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from cutsell_app.auth_middleware import AuthScopeMiddleware
@@ -414,20 +414,33 @@ def submit_export(payload: ExportSubmitRequest):
 
 
 @app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse)
-def get_job(job_id: str):
+def get_job(job_id: str, request: Request):
+    # D-269 Stage 14: defense-in-depth ownership check AT this handler's own
+    # call site -- D-268 found this route's ownership enforcement lived
+    # entirely in AuthScopeMiddleware, invisible here. `auth_user_id` is
+    # `None` only when auth is disabled (local/test, see auth_middleware.py);
+    # whenever a real authenticated principal exists, this handler now
+    # verifies ownership itself too, never relying solely on middleware
+    # ordering.
+    auth_user_id = getattr(request.state, "auth_user_id", None)
     try:
-        snapshot = fetch_job_snapshot(job_id)
+        snapshot = fetch_job_snapshot(job_id, user_id=auth_user_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="job not found") from None
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="job does not belong to this user") from None
     return JobStatusResponse(**snapshot.__dict__)
 
 
 @app.post("/v1/jobs/{job_id}/cancel", response_model=JobStatusResponse)
-def cancel_processing_job(job_id: str):
+def cancel_processing_job(job_id: str, request: Request):
+    auth_user_id = getattr(request.state, "auth_user_id", None)
     try:
-        snapshot = cancel_job(job_id)
+        snapshot = cancel_job(job_id, user_id=auth_user_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="job not found") from None
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="job does not belong to this user") from None
     return JobStatusResponse(**snapshot.__dict__)
 
 

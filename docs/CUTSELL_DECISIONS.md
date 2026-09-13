@@ -70408,3 +70408,243 @@ Then STOP.
 
 DO NOT IMPLEMENT D-269.
 DO NOT LAUNCH RAW.
+
+## D-269 — Tenant-Safe Remote Delivery Foundation (offline implementation, no real S3 mutation)
+
+**Objective.** Post D-268 (audit, Verdict A, Stage 32 proposed scope).
+Close the P0 (auth fails open by default) and the four named P1 gaps
+(D-267 unwired, no post-upload remote verification, IDOR protection
+invisible at the handler's own call site, stale "latest job" pointer
+race) with a bounded, fully offline foundation. No real S3 mutation, no
+network call, no provider, no RAW anywhere in this gate.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `3a8bef8` (exact expected
+match, D-268), clean tree except this gate's own in-progress changes —
+confirmed before this gate began.
+
+### Stage 1 — auth fails CLOSED by default
+
+`cutsell_app/auth_middleware.py` gained `_auth_required()`: absent,
+missing, or mistyped `CUTSELL_AUTH_REQUIRED` is now **secure by
+default** — this closes D-268's own P0 finding exactly (a missing/
+mistyped flag could previously disable the entire tenant-isolation layer
+silently). The only way to disable enforcement is the one new, explicitly
+named `CUTSELL_AUTH_DISABLED_FOR_LOCAL_DEV_ONLY` flag; `CUTSELL_
+AUTH_REQUIRED=1` always wins over it when both are set. A new `tests/
+conftest.py` sets that local-dev flag for the whole pytest session so the
+existing test suite's long-standing convention of exercising `cutsell_app.
+main.app` without a bearer token keeps working with **zero** other
+test-file changes — production and any real deployment never load
+`conftest.py`, so the fail-closed default is never affected by it.
+
+### Stage 14 — handler-level defense-in-depth (IDOR no longer invisible)
+
+D-268's own finding: ownership enforcement for `/v1/jobs/{job_id}` lived
+entirely in `AuthScopeMiddleware`, invisible at the FastAPI handler's own
+call site. `cutsell_app/main.py`'s `get_job`/`cancel_processing_job` now
+read `auth_user_id` off `request.state` themselves and pass it into
+`fetch_job_snapshot`/`cancel_job`, catching `PermissionError` -> 403
+alongside the existing `KeyError` -> 404 — ownership is now enforced at
+BOTH layers independently, so removing or reordering the middleware can
+no longer silently reopen this path. Required updating 3 test stubs in
+`tests/test_cutsell_clean_worker_api.py` to accept the new `user_id`
+keyword.
+
+### Stage 2-13/16/19/26/27/30 — `cutsell_worker/tenant_safe_delivery.py` (new module)
+
+The core of this gate. Binds OWNER + PROJECT + JOB + RENDER IDENTITY +
+OUTPUT SHA-256 + REMOTE OBJECT REFERENCE into one immutable
+`TenantSafeDeliveryRecord`, on top of D-267's own `RenderDeliveryRecord`
+(never re-derived — a render/QC/hash-level blocker from D-267 always
+passes straight through unchanged):
+
+- `DeliveryOwnershipScope` (`user_id`/`project_id`/`job_id`, frozen,
+  non-empty-validated) — deliberately **no** `tenant_id`/`organization_id`
+  (this product has no tenant/org model today; inventing one here would
+  itself have been an ungrounded addition).
+- `build_tenant_safe_export_key` — a fully deterministic (no `uuid4`),
+  server-side-identity-only S3 key binding all four components; the same
+  job against the same render plan always yields the same key (duplicate
+  delivery overwrites rather than accumulating — Stage 23's idempotence
+  requirement satisfied structurally, not by chance).
+- `verify_remote_delivery` — offline-verifiable against
+  `RemoteObjectMetadataFixture` (a stand-in for a real `head_object`
+  response); absence of remote hash metadata is honestly `NOT_AVAILABLE`,
+  never fabricated as a match; an S3 ETag is never treated as a SHA-256
+  proxy (`is_etag_valid_sha256_proxy` always returns `False`, restating
+  `render_delivery.py`'s own permanent refusal).
+- `evaluate_tenant_safe_delivery` — the fail-closed bridge: render-
+  identity mismatch, ownership mismatch, remote-object mismatch, failed
+  remote verification, or a failed upload each independently block
+  `DELIVERY_READY`; `require_remote=False` (default) mirrors D-267's own
+  local-only contract.
+- `authorize_delivery_access`/`assert_delivery_access` — full-scope
+  equality only; matching just `user_id` (with a different project/job)
+  is explicitly proven **not** to authorize access (no ID alone grants
+  access). `assert_delivery_access(requesting=None, ...)` skips the check
+  only when there is genuinely no identity to compare (mirrors `jobs.py`'s
+  own existing `_assert_job_owner` precedent) — never when one exists and
+  disagrees.
+- `authorize_presign_issuance` — pure decision (`(bool, reason)`), no real
+  URL or network call anywhere in this module.
+- `is_job_still_current` — the stale-"latest-job"-pointer guard: an older
+  job's completion can never regress a project's pointer once a newer
+  job's completion is already recorded; the same job is always allowed to
+  re-record itself; missing ordering evidence (either timestamp absent,
+  or nothing recorded yet) is always allowed through, preserving every
+  existing caller's current behavior exactly.
+- `tenant_safe_delivery_diagnostics` — machine-readable status surface,
+  no media contents, no credentials.
+
+### Stage 21/22 — `project_store.update_project` stale-job guard (wired, currently inert for every existing caller)
+
+`update_project` gained an optional `latest_job_started_at: float | None`
+parameter. When `latest_job_id` is supplied, the write is now gated by
+`is_job_still_current` using the CANDIDATE job's own real start timestamp
+(e.g. RQ's `Job.started_at`) rather than an invented sequence number. Every
+existing call site omits the new parameter, so `is_job_still_current`
+always returns `True` for them and this change is **byte-for-byte the
+prior unconditional-overwrite behavior** for every caller that exists
+today — this is a built, tested, not-yet-activated seam, the same pattern
+D-266 used for its own execution timeout (later activated by D-266A).
+Proven both ways in `tests/test_cutsell_d269_tenant_safe_remote_delivery.
+py`: a stale older job cannot regress `latest_job_id`/`state`; a newer job
+always can; the same job is idempotent.
+
+### Verification run
+
+- `python3 -m py_compile` on every changed/new file: clean.
+- `tests/test_cutsell_clean_worker_projects.py`: 2 passed (confirms the
+  `project_store.py` -> `tenant_safe_delivery.py` import resolves and the
+  stale-job guard introduces no regression).
+- The 8 at-risk auth/job test files (`test_cutsell_clean_worker_auth.py`,
+  `test_cutsell_clean_worker_api.py`, `test_cutsell_clean_worker_job_
+  retry.py`, `test_job_progress_cancellation.py`, `test_cutsell_clean_
+  worker_projects.py`, `test_cutsell_clean_worker_multipart.py`, `test_
+  cutsell_clean_worker_playback_urls.py`, `test_api_rq_contract.py`): 54
+  passed, 0 failed.
+- New `tests/test_cutsell_d269_tenant_safe_remote_delivery.py`: **90
+  passed** — full Stage-2/4-23/26/27/30 fixture+contract matrix: ownership
+  scope validation/immutability/no-tenant-field; deterministic tenant-safe
+  export key isolating different users/projects/jobs (including same
+  literal `project_id` text across two different users), rejecting
+  non-`render_` identities, never embedding a raw/hostile filename,
+  hashing Unicode user/project values safely, rejecting an unsafe prefix;
+  remote verification for missing object/key mismatch/size mismatch/
+  render-identity mismatch/hash unknown/hash mismatch/hash matched, ETag
+  never treated as SHA-256; the tenant bridge reaching `DELIVERY_READY`
+  on a full valid chain and independently blocking on render-identity
+  mismatch, wrong project, wrong job, wrong remote SHA, wrong remote size,
+  missing remote object when required, local-only stopping at
+  `READY_FOR_UPLOAD`, and passing D-267's own QC-fail/upload-fail
+  statuses through unchanged; same-user-different-jobs isolation; frozen
+  record, no secret fields; full-scope-only ownership authorization (no ID
+  alone); presign authorized only for the owner on a `DELIVERY_READY`
+  record and denied both for a different user and a not-yet-ready record,
+  performing no real network call; the stale-job guard (old-cannot-
+  overwrite-new, new-can, same-job idempotent, every existing caller's
+  omitted-timestamp behavior unconditional); diagnostics shape and no-
+  secrets; secure-auth-default / explicit-local-bypass-only / `CUTSELL_
+  AUTH_REQUIRED` always wins / mistyped-value-stays-secure; the two job
+  handlers passing `user_id` through and returning 403 on
+  `PermissionError`; no `shell=True`, no network/credential construction,
+  no upload/presign network call, no provider/RunPod/Modal reference
+  anywhere in the new module; render timeout still `1200.0`; codec/
+  filtergraph unchanged; and a parametrized git-diff-vs-HEAD guard proving
+  this gate never touched render.py, render_delivery.py, render_plan.py,
+  audio/visual finishing (executor+composition), boundary_engine_pass.py,
+  pacing_transition_decision.py, post_render_media_qc.py, post_render_
+  watch_listen_qc.py, live_render_qc.py, media_probe.py, finishing_
+  contract.py, multipart_uploads.py, gpu_execution_provider.py, jobs.py,
+  exports.py, or uploads.py.
+- `tests/test_cutsell_d266_render_execution_safety.py` + `..._d266a_...` +
+  `..._d267_...` + `..._d269_...` together: **238 passed, 0 failed.**
+- `compileall` over `cutsell_worker/`, `cutsell_app/`, `tests/`: clean.
+- CleanCutBench, both modes (`CUTSELL_CLEAN_CUT_CORE_V1=0` and `=1`): 1
+  passed each (unaffected — this gate never touches Selection/Boundary/
+  Freeze/editorial authority).
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions (`test_semantic_stitch.py` collection error, `test_video00_
+  modal_hybrid_semantic_parity.py`, `test_hybrid_story_guard_incomplete_
+  retry.py`): **7487 passed, 10 skipped, 12 deselected, 13 subtests
+  passed, 0 failed.**
+
+### Stage 36 — commercial multi-user readiness (re-assessed)
+
+**Ownership enforcement:** the auth P0 is now CLOSED — auth fails closed
+by default in every environment that does not explicitly opt out, closing
+the specific blast-radius risk D-268 flagged (a misconfigured/staging/
+future environment silently exposed). **Handler-level IDOR protection**
+now exists independently of middleware ordering (Stage 14), with a real
+test pinning it. **Delivery integrity/job isolation:** the `tenant_safe_
+delivery.py` primitives (ownership+render-identity+remote-object binding,
+remote verification, presign authorization, stale-job guard) are fully
+proven OFFLINE against the full fixture matrix above — this is real,
+tested machinery, not a design sketch. **What remains explicitly NOT
+done in this gate** (D-268's Stage 32 items 1/2/3/7, deliberately outside
+this gate's own authorized live-code scope): `evaluate_tenant_safe_
+delivery` is not yet called from `export_job.py`'s real render/upload
+path; no real S3 object anywhere carries `job_id`/`render_identity`/
+`output_sha256` in its metadata yet; no real `head_object` call ever
+feeds `verify_remote_delivery`; no real RQ job timestamp is yet passed
+into `project_store.update_project`'s new `latest_job_started_at`
+parameter by any live call site (every existing caller still gets the
+prior unconditional-overwrite behavior byte-for-byte); the client-facing
+job result still returns the raw `export_uri`. The stale-job race and the
+D-267-unwired gap are therefore **structurally closed at the primitive
+level and proven correct in isolation, but NOT YET closed on the live
+delivery path** — a real export today still does not compute or check
+any of this.
+
+**10 users: READY**, same conditional basis as D-268 (a correctly
+configured `CUTSELL_AUTH_REQUIRED=1` deployment), now on a strictly safer
+foundation (fail-closed default removes the single-flag blast radius
+entirely). **100 users: FOUNDATION_ONLY. 1000+ users: FOUNDATION_ONLY.**
+Delivery-ownership *security* has measurably improved (P0 closed, IDOR
+defense-in-depth real, the tenant-binding/remote-verification/stale-job
+primitives built and offline-proven) but the platform overall remains
+FOUNDATION_ONLY until this foundation is actually wired into the live
+export path, and until load/billing/runtime hardening beyond this gate's
+own scope are completed. This is not a step backward from D-268's
+Verdict A framing — it is the same honest posture applied to a superset
+of what is now proven.
+
+### Canonical status update
+
+RENDERER / EXPORT HARDENING: execution safety = CLOSED (D-265/D-266/
+D-266A); identity/hash foundation = CLOSED (D-267); **tenant-safe remote
+delivery FOUNDATION = CLOSED at the offline/primitive level (this entry);
+live-path activation (export_job.py wiring, real S3 metadata binding,
+real post-upload verification, real RQ-timestamp wiring, raw-URI
+removal) remains OPEN, not authorized by this gate.** Format/media-
+diversity hardening (D-268's own Stage 33) remains explicitly deferred,
+not reopened, not forgotten.
+
+### Verdict
+
+**B — Mostly proven, one gap remains.** The auth P0 is fully closed and
+the handler-level IDOR defense-in-depth is real and tested — those two
+items are no longer gaps. The remaining gap is that the tenant-safe
+delivery/remote-verification/stale-job-pointer foundation, while fully
+proven OFFLINE against a 90-case fixture+contract matrix, has **not yet
+been activated on the real `export_job.py` delivery path** — no live
+call site today computes a `TenantSafeDeliveryRecord`, verifies a real
+remote object, or feeds a real job timestamp into the stale-job guard.
+Until that live wiring happens, a real production export still runs
+exactly as it did after D-268 (local-only D-267 delivery record, direct
+`store_export` upload, unconditional `update_project` overwrite) — this
+gate closes the *auth* P0 for real and proves the *delivery-binding*
+primitives correct, but does not yet change what a real export does.
+
+**Exact next gate:** live-wiring D-269's own primitives into
+`export_job.py`'s real path (D-268's Stage 32 items 1/2/3/7) — a Product
+Owner authorization call, not decided by this entry.
+
+**Decision entry reference:** this entry (D-269).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-270.
+DO NOT LAUNCH RAW.
