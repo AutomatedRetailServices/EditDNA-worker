@@ -65234,3 +65234,147 @@ Not launched or authorized by this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-254. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-254 — One Real-Media Audio Finishing Qualification (SOURCE-UNAVAILABLE, no execution attempted)
+
+**Objective.** Post D-253 (end-to-end synthetic composition proven, verdict A). Qualify
+the full Level1→render→Level2→limiter→verify chain on exactly ONE real media
+source, preferring an existing rendered artifact over a new RAW. No policy
+change, no numeric change, no second source, no post-result patch.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `2635d180` (exact match to
+expected `2635d18`), clean tree — confirmed before and after this gate (no
+code touched).
+
+### Read / inspected
+
+`CLAUDE.md`; `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`;
+`docs/CUTSELL_DECISIONS.md` through D-253 (D-243, D-244, D-245 read in full
+for source-selection context); `audio_finishing_measurement.py`,
+`audio_finishing_policy.py`, `audio_finishing_executor.py`,
+`audio_finishing_composition.py`, `render.py`, `post_render_media_qc.py`
+(unchanged this gate, read-only).
+
+### Source selection — attempted, in the directive's own priority order
+
+**Priority 1 — D-245 Video00 human-review artifact.** Located via
+`list_workflow_run_artifacts` on run `34721625895`: artifact
+`cutsell-video00-modal-human-review` (id `10306820918`, 579,424,622 bytes,
+not expired). Resolved a real, valid, temporary download URL via GitHub's
+own `download_workflow_run_artifact` API — this succeeded (the API call
+itself is not blocked). The actual byte download then failed:
+`curl: (56) CONNECT tunnel failed, response 403` against
+`productionresultssa17.blob.core.windows.net`, with this sandbox's own
+egress proxy reporting `connect_rejected (the egress proxy denied the
+CONNECT (organization policy))`.
+
+**Confirmed not a size/timeout artifact, not a one-off:** the identical
+failure was reproduced against a second, unrelated, much smaller artifact
+(`cutsell-video00-modal-validator-reports`, 42,055 bytes, from D-243's run
+`34719014347`) — same host, same `403 connect_rejected`. Every GitHub
+Actions artifact download, regardless of identity or size, resolves to a
+`*.blob.core.windows.net` URL and is blocked at this sandbox's network
+policy layer, not by GitHub, not by artifact expiry, and not by content
+size.
+
+**This is not a new finding** — it is the same structural sandbox
+limitation D-243 and D-245 already documented independently ("Download
+blocked by this sandbox's own persistent Azure Blob egress-proxy 403 (same
+limitation as every prior gate)"), now confirmed for a third and fourth
+time, from this session specifically, with an explicit root cause (an
+organization-level CONNECT policy on the blob-storage host class GitHub
+Actions artifacts are served from).
+
+**Priority 2 — D-243 sibling artifact.** Same conclusion applies by
+construction: its own artifacts resolve to the identical blocked host
+(confirmed directly above via the validator-reports probe on this exact
+run). Not separately re-attempted for the full human-review MP4, since the
+failure mode is already proven host-wide, not artifact-specific.
+
+**Priority 3 — another existing recent real render from the current
+pipeline.** Checked the working tree directly: `find . -iname "*.mp4"`
+(excluding `.git`) returns **zero** results — no real media file is
+committed to or already present in this repository checkout.
+
+**Direct S3 path considered and rejected as illegitimate, not merely
+attempted-and-failed:** `cutsell_worker/*.py` and
+`.github/workflows/cutsell-video00-modal-raw.yml` confirm every RAW/
+render/reference S3 object this project uses is addressed via
+`S3_BUCKET`/`AWS_REGION`/`SOURCE_KEY`/`RESULT_KEY`/`HUMAN_GOLD_KEY`/
+`CUTAI_REFERENCE_KEY`, all supplied as GitHub Actions repository secrets
+(`secrets.AWS_ACCESS_KEY_ID`, `secrets.S3_BUCKET`, etc.) injected only
+inside the GitHub Actions runner environment — none of these names or
+values exist in this sandbox's own environment. This sandbox does carry
+its own ambient `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars, but
+they belong to this session's own infrastructure, not this project's
+private bucket — no bucket name, key, or authorization scope tying them to
+this project's real media is known. Per `SECURITY_CONSTITUTION.md` and
+CLAUDE.md's "do not expose/move secrets" repository-protection rule,
+these ambient credentials were **not** used to probe an unidentified S3
+target on the strength of a coincidental credential match; doing so would
+not be a legitimate "existing render retrieval," it would be
+credential misuse against an unknown resource.
+
+**Conclusion: no suitable existing real render is retrievable from this
+sandbox**, across all three priorities the directive itself names. Per the
+directive's own explicit instruction ("If no suitable existing render can
+be retrieved: STOP and report source-unavailable... Do NOT launch a second
+upstream RAW merely to create one"), **no RAW was launched**, no
+execution was attempted, and no synthetic substitute was used in its
+place.
+
+### Everything downstream of source acquisition
+
+Not attempted — the directive's own chain (pre-finish measurement,
+adjacent-take measurement, policy plan generation, plan safety audit,
+execution, Level 1/Level 2 audits, post-finish measurement, before/after
+comparison, loudness/true-peak verification, timing/video safety,
+idempotence, perceptual review package, technical QC) all require a real
+media file in hand first. None of it was fabricated or run against
+synthetic media in this gate — D-253 already proved the chain end-to-end
+on synthetic media; this gate exists specifically to prove it on real
+media, and no real media is currently obtainable from this sandbox.
+
+### Confirmation
+
+Zero `.py`/workflow files touched. Zero threshold/policy/numeric change.
+No second RAW, no second render, no RunPod, no provider change. No
+production code change of any kind. `docs/CUTSELL_DECISIONS.md` is the
+only file changed by this gate.
+
+**Verdict: F — OBSERVABILITY / SOURCE RETRIEVAL FAILURE.** The blocker is
+this sandbox's own network egress policy on the GitHub Actions artifact
+storage host class (`*.blob.core.windows.net`), not a code defect, not an
+engine regression, and not evidence against D-253's own proven synthetic
+chain.
+
+**Canonical status:** unchanged — D-253's synthetic proof stands; real-media
+qualification (D-254's own objective) remains open, blocked on artifact
+retrieval, not on architecture.
+
+**Audio Finishing P0 execution track status:** NOT closed. Cannot close
+without a real-media qualification result, and none was obtainable this
+gate.
+
+**Exact next gate:** a Product Owner decision among: (a) authorize a
+retrieval path this sandbox can actually reach (e.g. dispatch a workflow
+step that re-uploads the target artifact somewhere this sandbox's egress
+policy allows, or grant this sandbox the real `S3_BUCKET`/AWS credentials
+this project's own workflow uses), (b) accept a human downloading the
+artifact via the GitHub Actions UI directly (already possible today, per
+D-243/D-245's own "PO review availability" notes) and relaying the file
+into this sandbox by another channel, or (c) authorize exactly one new
+RAW specifically because no existing render is retrievable — each is a
+Product Owner scope/authorization decision, not decided or launched by
+this gate.
+
+**Decision entry reference:** this entry (D-254).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-255. DO NOT LAUNCH RAW.
