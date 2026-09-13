@@ -67804,3 +67804,590 @@ implemented by this gate.
 Then STOP.
 
 DO NOT IMPLEMENT D-261. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-261 — Visual Finishing Execution Architecture Design (offline, no video mutation)
+
+**Objective.** D-258 proved MEASUREMENT; D-260 proved POLICY + PLAN
+against ten Product-Owner-approved numeric values. This gate designs —
+does not implement — how a structured `VisualFinishingPlan` becomes
+deterministic renderer operations. No execution, no video mutation, no
+new numeric policy.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `1b53981` (exact expected
+match), clean tree — confirmed before this gate began.
+
+### Architecture preserved
+
+```
+VISUAL MEASUREMENT (D-258) -> VISUAL POLICY + PLAN (D-260)
+    -> FUTURE VISUAL EXECUTOR (this gate's design)
+        -> RENDERER (render.py, unchanged authority)
+            -> POST-RENDER VISUAL MEASUREMENT/QC (re-uses D-258)
+```
+
+Policy decides. Executor translates symbolic intent into renderer
+geometry. Renderer executes; it never invents visual intent.
+
+### Renderer capability audit (Stage 2, exact, code-grounded)
+
+`render.py`'s `_concat_render_command` builds ONE per-segment filter
+chain, per segment, all joined by ffmpeg's `concat` FILTER (not the
+demuxer) into a single encode:
+
+```
+[N:v] scale=W:H:force_original_aspect_ratio=decrease
+    , pad=W:H:(ow-iw)/2:(oh-ih)/2
+    , setsar=1
+    , fps=F
+    , [subtitles=... if caption_text set]
+    , trim=duration=<exact>
+    , setpts=PTS-STARTPTS
+    , format=yuv420p [vN]
+```
+then `[v0][a0]...[vN][aN] concat=n=N:v=1:a=1 [vout][aout]`, encoded
+once with `libx264 -preset veryfast -crf 20`.
+
+- **Current scale operation:** `scale=1080:1920:force_original_aspect_
+  ratio=decrease` — fit-to-canvas, DOWNSIZE-ONLY (never upsamples past
+  source resolution).
+- **Current pad operation:** `pad=1080:1920:(ow-iw)/2:(oh-ih)/2` —
+  frame-centered letterbox/pillarbox, black bars, never subject-aware.
+- **Output size:** fixed `1080x1920` (portrait), `fps` normalized to a
+  configured target (`RENDER_FPS_DEFAULT`).
+- **Aspect-ratio handling:** `setsar=1` (pixel aspect ratio only,
+  unrelated to display aspect) plus the scale/pad pair above.
+- **Caption burn-in order:** the `subtitles=` filter is appended
+  **AFTER** scale+pad, **BEFORE** trim/concat — i.e., captions are
+  already burned in OUTPUT canvas coordinates, on the already-
+  normalized 1080x1920 frame, per-segment.
+- **Audio/video filtergraph relationship:** entirely separate chains
+  (`[N:v]...[vN]` vs `[N:a]...[aN]`) joined only by the final `concat`
+  step — video transforms cannot touch the audio filtergraph by
+  construction.
+- **Per-segment filter ownership:** each segment gets its OWN
+  independent filter chain before the join — heterogeneous per-segment
+  treatment (some cropped, some not) is ALREADY a first-class, existing
+  capability of this architecture; no restructuring needed to support
+  per-clip visual transforms.
+- **Concat behavior:** the FILTER-based concat (D-097.2), not the
+  demuxer — one ffmpeg process, one encode, frame-exact output
+  duration.
+
+**Smallest insertion point (the central Stage-2 finding):** a new
+crop/zoom/translate stage inserted at the **START** of each segment's
+own video chain — operating on the raw decoded SOURCE frame in its own
+native resolution, **BEFORE** the existing `scale=...,pad=...`
+normalization step — requires no restructuring of the filter graph, no
+new ffmpeg invocation, and no change to caption burn-in order. D-258's
+measurements are themselves normalized to each clip's own SOURCE
+`frame_width`/`frame_height` (via `probe_media`), so a symbolic,
+normalized `[0,1]` crop/translate/scale intent maps directly onto that
+same source coordinate space with no re-derivation.
+
+### Stage 1 — Execution owner
+
+**Recommend B, refined:** a new, dedicated
+`cutsell_worker/visual_finishing_executor.py` (mirrors
+`audio_finishing_executor.py`'s own naming and role exactly) that
+translates a `VisualClipPolicyDecision`/`VisualJoinPolicyDecision` into
+a concrete `crop=`/`scale=` filter FRAGMENT — but the fragment is
+spliced into `render.py`'s EXISTING, UNCHANGED `_concat_render_command`
+video chain, never a second, competing filtergraph builder or a
+separate post-render pass. This is precisely "a bounded plan-to-render
+adapter + unchanged render.py execution primitives" (option B), realized
+as its own owner module (matching option A's separation-of-concerns
+benefit) rather than logic embedded inside `render.py` itself — the
+executor module OWNS the geometry math and safety validation;
+`render.py` gains, at most, one new optional parameter per segment (a
+pre-built filter fragment string) it splices into the chain it already
+owns, never a new decision of its own.
+
+### Stage 3 — NO_CHANGE
+
+Produces the identical filter chain `render.py` emits today: no
+inserted crop/translate/scale stage at all. Byte-identical ffmpeg
+command for a `NO_CHANGE` decision on every clip — the existing
+renderer path IS the control, requiring literally zero new code to
+prove (an executor that never activates for an all-`NO_CHANGE` plan is,
+by construction, indistinguishable from today's renderer).
+
+### Stage 4 — PUNCH_IN execution geometry
+
+Scale-then-crop (not crop-then-scale), for a determinstic reason: the
+authorized scale factor (`1.10`-`1.15`) is defined relative to the
+SOURCE frame's own full extent, so it must be applied to the full,
+unscaled source first (`scale=iw*S:ih*S`), and the crop that re-centers
+the now-larger frame back to the original W×H footprint comes second
+(`crop=W:H:x:y`) — cropping first would require re-deriving the scale
+factor against an already-reduced frame, an unnecessary and error-prone
+extra step. Target center: the plan's own `target_scale`/measured
+`face_center_x/y` (the SAME normalized point D-258 measured and D-260's
+policy validated as face-safe) — never a generic frame-center guess.
+Boundary clamping: the crop rectangle's `x`/`y` offsets are computed as
+`(scaled_width - W) * face_center_x - W/2`-style expressions, then
+clamped to `[0, scaled_width - W]`/`[0, scaled_height - H]` so the crop
+window can never read outside the (now-larger) scaled frame. Face
+containment verification (Stage 10 below) is checked BEFORE the
+transform is accepted as valid, using the SAME scale/crop math the
+executor is about to emit — not a separate, potentially-drifting
+estimate.
+
+### Stage 5 — STATIC_REFRAME geometry
+
+Input: `authorized_translation_x`/`authorized_translation_y` from the
+plan (already clamped to ±`MAX_REFRAME_TRANSLATION_NORMALIZED = 0.10`
+by D-260's own policy layer — the executor never re-clamps against a
+DIFFERENT number, only re-verifies the plan's own authorized value
+against the concrete geometry it is about to emit, per Stage 9).
+Conversion to pixels: `pixel_dx = authorized_translation_x *
+source_width`, `pixel_dy = authorized_translation_y * source_height` —
+a direct, source-resolution-scaled conversion, since the normalized
+unit is already frame-fraction-based (matching D-258's own
+`face_center_x/y` convention). No universal face-center-equals-0.5
+rule is invented: the translation is always relative to the CURRENT
+measured position, moving it toward the plan's own `target_position_x/
+y` (itself derived from the adjacent reference clip in D-260's join
+policy, never a generic center), exactly as D-259 Stage 17 required.
+
+### Stage 6 — POSITION_MATCH geometry
+
+Identical mechanism to `STATIC_REFRAME` (both are, at the geometry
+level, a bounded 2-D crop-window translation without any scale
+change) — the ONLY difference between the two actions is which
+D-260 policy path produced the authorized translation (a horizontal/
+vertical face-center join comparison vs. a headroom-only comparison).
+The executor therefore implements ONE shared `_translate_crop_window`
+primitive used by both actions, reducing duplicate geometry logic.
+Frame bounds, aspect ratio, and face containment are all re-verified
+(Stage 9/10) against the SAME final crop rectangle before it is
+accepted, regardless of which action authorized it. No renderer
+guessing: every pixel offset traces to a specific plan field.
+
+### Stage 7 — SCALE_MATCH geometry
+
+Uses `authorized_scale` directly from the plan — the executor never
+independently recomputes the relative-scale-delta math D-260 already
+performed (avoiding the exact "silently reinterpret delta units" trap
+D-259/D-260 already caught once). Never exceeds `MAX_PUNCH_IN_SCALE =
+1.15` (the plan itself already enforces this ceiling; the executor's
+own pre-render validation, Stage 9, re-checks it defensively rather
+than trusting the plan blindly, matching Audio Finishing's own
+executor-re-validates-a-plan's-own-authorized-value discipline).
+**Scale-down is NOT authorized in V1** — D-260's `_bound_scale` helper
+computes `authorized_scale = min(1.0 + abs(relative_delta), ceiling)`,
+which is always `>= 1.0`; nothing in the approved ten values or D-260's
+own policy logic ever produces a sub-1.0 scale target. A scale-down
+would need to either crop MORE of the frame away (to keep output
+dimensions fixed) or pad more heavily (reintroducing/enlarging
+letterbox bars) — both require a NEW Product-Owner decision this gate
+does not make. Recorded explicitly:
+**`PRODUCT_OWNER_OR_LATER_POLICY_DECISION_REQUIRED`** if scale-down
+correction is ever wanted; V1's execution architecture only implements
+the zoom-in (`>= 1.0`) path D-260's own policy already authorizes.
+
+### Stage 8 — SCALE_AND_POSITION_MATCH geometry
+
+**Deterministic order: SCALE first, then TRANSLATE/CROP** — for the
+same reason as Stage 4's punch-in ordering: the authorized translation
+is a fraction of the SOURCE frame's own extent, and applying it against
+an already-scaled (larger) frame changes what "0.10 of the frame" means
+in pixels unless the scale is applied first and the translation is then
+computed against the POST-scale frame dimensions (`scaled_width =
+source_width * authorized_scale`), which is exactly what Stage 4's own
+crop-window math already does. This is not a new rule — it is the SAME
+`scale -> crop(translate)` pipeline `PUNCH_IN` already uses, just with
+`authorized_translation_x/y` sourced from the position-match side of the
+decision instead of (or in addition to) the face-safe centering
+`PUNCH_IN` uses. One shared, order-verified pipeline avoids the
+ambiguity a second, independently-ordered implementation could
+introduce.
+
+### Stage 9 — Crop-loss accounting (execution-time, not just policy-time)
+
+Deterministic calculation: `crop_loss = 1.0 - (crop_window_area /
+scaled_frame_area)` (both measured in the same, post-scale pixel
+space) — the fraction of the (already-scaled) frame the crop rectangle
+discards. **The executor MUST independently verify this against
+`MAX_ADDITIONAL_CROP_LOSS_NORMALIZED = 0.10` at execution time, before
+emitting the ffmpeg filter fragment** — policy intent alone (D-260's
+own `authorized_translation`/`authorized_scale` fields) is necessary
+but not sufficient, since the ACTUAL crop-loss depends on the executor's
+own concrete geometry (frame dimensions, aspect-ratio math) that the
+policy layer, working only in normalized units, cannot fully verify
+without redoing the executor's own arithmetic. If the concrete geometry
+would exceed the ceiling despite the plan's own authorization (e.g. a
+rounding/aspect-ratio edge case), the executor fails closed
+(`CROP_LIMIT_EXCEEDED`, Stage 20) rather than silently over-cropping.
+No new margin introduced — the same `0.10` value, checked twice, by two
+different authorities, for two different reasons (policy: is this
+correction proportionate; executor: does the concrete geometry actually
+honor that authorization).
+
+### Stage 10 — Face-safety validation (execution-time)
+
+Given the source face bbox (from the SAME `VisualClipMeasurement` the
+plan was built from) and the executor's own proposed crop/scale/
+translate transform, compute the TRANSFORMED bbox by applying the
+identical scale+crop arithmetic to the bbox's own four corners.
+Require, literally, in the crop window's own normalized `[0,1]` space:
+`x_min >= 0`, `y_min >= 0`, `x_max <= 1`, `y_max <= 1` — no invented
+safety margin beyond the literal frame boundary, matching D-260's own
+`face_bbox_clipped_*` convention exactly. **Any violation fails the
+transform closed** (`FACE_SAFETY_BLOCKED`, Stage 20) — the executor
+never emits a transform it cannot itself verify is face-safe, even if
+the plan authorized it (a defensive re-check, not a trust boundary
+removal: the plan SHOULD already guarantee this via D-260's own
+`BLOCKED_FACE_SAFETY` gate, but the executor is the last authority
+before a real ffmpeg command exists, and re-verifying costs nothing).
+
+### Stage 11 — Product safety (execution-time)
+
+The executor has NO override authority over the plan's `BLOCKED_
+PRODUCT_SAFETY_UNKNOWN` decision — if the plan says a clip/join is
+product-safety-blocked, the executor performs no crop/reframe/punch-in
+transform for it at all (falls through to the `NO_CHANGE` path,
+byte-identical to today's renderer for that segment). No product-
+location inference of any kind is designed or permitted at the
+executor layer — this is strictly a pass-through of D-260's own
+fail-closed decision, never a second opinion.
+
+### Stage 12 — Multi-face
+
+Identical posture to product safety: `BLOCKED_MULTI_FACE` means the
+executor performs no transform for that clip/join. No subject
+selection, no "first detected face" heuristic, no tie-break logic of
+any kind at the execution layer — multi-face handling is entirely
+D-260's policy-layer responsibility (already fail-closed there); the
+executor has nothing further to decide.
+
+### Stage 13 — Caption interaction (verified against actual code)
+
+Confirmed against `render.py`'s own filter chain (Stage 2 audit above):
+captions already burn in AFTER scale+pad, in OUTPUT canvas coordinates.
+Inserting the new crop/translate/scale stage BEFORE scale+pad (Stage
+2's own recommended insertion point) automatically satisfies this
+gate's own recommended principle — **transform source video first, then
+burn captions in output coordinates** — with ZERO reordering of the
+existing caption filter's position in the chain. No new safe-region
+geometry is invented; captions remain exactly where they already are,
+unaffected by any visual-finishing transform applied upstream of them
+in the same chain.
+
+### Stage 14 — 9:16 output contract
+
+The new crop/scale/translate stage operates entirely in SOURCE pixel
+space, upstream of and independent from the existing
+`scale=1080:1920:...,pad=...` normalization — which remains completely
+unmodified. Output resolution, orientation, and pixel aspect ratio are
+therefore structurally guaranteed unchanged by construction: whatever
+frame the new stage produces (still the source's own aspect ratio,
+just cropped/zoomed/translated) is fed into the SAME fit-to-canvas
+logic that already normalizes every clip today, regardless of its
+original aspect ratio. No output-resolution change of any kind.
+
+### Stage 15 — Upscale quality
+
+`render.py`'s `scale=` filter sets no explicit `-sws_flags`, so ffmpeg
+applies its own documented default scaler (bicubic) — confirmed by the
+absence of any `flags=`/`sws_flags` argument anywhere in `render.py`'s
+filter-string construction. A `PUNCH_IN`'s own `scale=iw*S:ih*S` stage
+would use the identical default (no new scaler is introduced). Whether
+a 1.10-1.15x zoom-in is "technically acceptable" depends on the SOURCE
+clip's own native resolution relative to the 1080x1920 output target —
+a genuinely open question this gate does not resolve with an invented
+number. **`PRODUCT_OWNER_OR_LATER_POLICY_DECISION_REQUIRED`**: whether
+a minimum source-resolution floor should gate `PUNCH_IN`/`SCALE_MATCH`
+eligibility (e.g., a source captured well below 1080p might show
+visible softening at 1.15x) is left as an explicit, named open item for
+a future gate — not invented here.
+
+### Stage 16 — Timing firewall
+
+Structural, not policy: the new crop/translate/scale filter stage is
+purely SPATIAL (operates on pixel content within a frame), inserted
+into a segment's existing VIDEO chain only. It has no access to, and
+never modifies, `segment.start`/`segment.end`/`duration_sec`, the
+`trim=duration=<exact>` stage (unchanged, still computed the same way
+D-097.2 established), Pacing, Boundary, Ordering, story, or the audio
+chain's own timing (`audio_start`/`audio_end`, unrelated to any video
+filter). Clip start/end/duration are never touched by any visual
+transform this architecture designs.
+
+### Stage 17 — Audio firewall
+
+The video and audio filtergraphs remain entirely separate chains
+(Stage 2 audit) joined only at the final `concat` step — a video-only
+filter insertion cannot, by the existing architecture's own structure,
+touch `[N:a]` at all. No audio sample, no Audio Finishing gain value,
+no Audio Join fade, no audio codec parameter is designed to change.
+The only "audio-adjacent" mechanic this gate's own execution
+necessarily shares with the rest of the pipeline is the unavoidable
+container remux/encode step itself (the same single `ffmpeg` process
+already re-encodes both streams together) — not a new audio-affecting
+operation.
+
+### Stage 18 — Idempotence (execution identity, schema + design)
+
+Mirrors D-256's Audio Finishing double-finishing firewall and D-260's
+own `visual_finishing_identity` pattern: a deterministic
+`visual_execution_identity` (SHA-256, matching `compute_execution_id`'s
+established shape) keyed on: source media content identity + `POLICY_
+VERSION` + the specific `VisualFinishingPlan`'s own
+`visual_finishing_identity` (D-260, already proven filename-independent
+and policy-version-sensitive) + the concrete authorized transform
+values actually about to be applied (crop rectangle, scale factor,
+translation). Two executions against the SAME source, SAME plan, and
+SAME authorized transform always agree; a re-finishing decision
+(`NEW_SOURCE`/`SAME_SOURCE_SAME_POLICY_ALREADY_FINISHED`/`SAME_SOURCE_
+NEW_POLICY_VERSION`/`FINISHED_OUTPUT_SUPPLIED_AS_NEW_SOURCE` — D-259's
+already-designed 4-way vocabulary, unchanged) prevents stacking a
+`1.10x` punch-in on an already-punched-in output, or a translation on
+an already-translated one. No filename-based identity anywhere.
+
+### Stage 19 — Execution record design
+
+```
+VisualFinishingExecutionRecord (frozen, schema only)
+  execution_id: str
+  plan_id: str  # the plan's own visual_finishing_identity
+  source_id: str | None
+  clip_id: str | None
+  action: str  # VISUAL_ACTION_*
+
+  input_frame_width: int | None
+  input_frame_height: int | None
+  authorized_translation_x: float | None
+  authorized_translation_y: float | None
+  authorized_scale: float | None
+
+  actual_crop_x: float | None       # pixel or normalized, executor's choice, documented
+  actual_crop_y: float | None
+  actual_crop_width: float | None
+  actual_crop_height: float | None
+  actual_scale_factor: float | None
+  actual_translation_x: float | None
+  actual_translation_y: float | None
+
+  face_safety_result: str           # PASS / FAIL, per Stage 10
+  product_safety_result: str        # PASS / BLOCKED, per Stage 11
+  crop_loss_result: str             # WITHIN_LIMIT / EXCEEDED, per Stage 9
+
+  renderer_operation: str           # a symbolic name, e.g. "SCALE_THEN_CROP" -- never a raw filter string as canonical state
+  execution_status: str             # Stage 20 vocabulary
+  errors: tuple[str, ...]
+  provenance: dict
+```
+Matches `AudioFinishingExecutionRecord`'s own shape and discipline
+(no raw ffmpeg command line stored as canonical policy/execution
+state — only symbolic facts). Schema only; not implemented by this
+gate.
+
+### Stage 20 — Failure vocabulary (design)
+
+```
+EXECUTION_STATUS_SUCCESS
+EXECUTION_STATUS_NO_ACTION_NEEDED
+EXECUTION_STATUS_PLAN_NOT_EXECUTABLE
+EXECUTION_STATUS_FACE_SAFETY_BLOCKED
+EXECUTION_STATUS_PRODUCT_SAFETY_BLOCKED
+EXECUTION_STATUS_CROP_LIMIT_EXCEEDED
+EXECUTION_STATUS_INVALID_GEOMETRY
+EXECUTION_STATUS_SOURCE_DIMENSIONS_UNAVAILABLE
+EXECUTION_STATUS_RENDER_FAILURE
+EXECUTION_STATUS_POST_VERIFY_FAILED
+EXECUTION_STATUS_ALREADY_APPLIED
+EXECUTION_STATUS_OTHER
+```
+Bounded, mirrors D-251's `EXECUTION_STATUS_*` vocabulary shape exactly.
+No silent fallback: every one of these is a distinct, named outcome; an
+unexpected exception at execution time maps to `OTHER` with the real
+exception recorded in `errors`, never silently treated as `SUCCESS`.
+
+### Stage 21 — Post-render visual verification (design)
+
+Re-runs D-258's own `measure_visual_clip` on the TRANSFORMED output
+segment (or the whole rendered file), reusing the exact same
+measurement module unchanged. Compares, for an authorized action:
+face remains contained (no `face_bbox_clipped_*` newly `True` that
+wasn't already true pre-transform); output orientation/dimensions still
+match the 9:16 contract (Stage 14); the action's own intended metric
+moved in the correct direction (Stage 22); no new black/frozen-frame
+evidence (reusing `post_render_media_qc.py`'s existing, unchanged
+`check_dead_black_frames`/`check_frozen_frames`, referenced additively
+exactly as D-258 already designed); duration unchanged (Stage 16's own
+firewall, now verified post-hoc too). **No new perceptual threshold
+beyond the existing ten canonical values is defined here** — this
+stage is a verification-of-execution-fidelity check, not a new quality
+gate.
+
+### Stage 22 — Action-specific verification (design)
+
+`PUNCH_IN`: post-measured `face_area_ratio` should reflect the
+authorized scale factor (within a tolerance TBD at implementation,
+not invented here). `POSITION_MATCH`: post-measured `face_center_x/y`
+moved toward `target_position_x/y`, not away from it. `SCALE_MATCH`:
+post-measured `face_area_ratio` moved toward the neighbor's own value,
+not away. `STATIC_REFRAME`: translation applied AND face remains safe
+post-transform (Stage 10's check re-run on the real output, not just
+the pre-render prediction). `SCALE_AND_POSITION_MATCH`: both checked
+independently. **A `PARTIAL` plan is never required to reach its exact
+target** — verification for a partial correction checks "moved in the
+authorized direction, within the authorized bound," never "reached the
+originally-requested value," matching D-260's own requested-vs-
+authorized separation.
+
+### Stage 23/24 — Exposure/color/gaze
+
+Execution architecture leaves a structural hook (an unused, reserved
+slot in `VisualFinishingExecutionRecord`'s own future extension point,
+not a new field added by this gate) for exposure/color correction to
+attach at P1 — **no active P0 correction filter is designed or
+implemented**. No gaze execution logic exists or is designed; D-260's
+own exclusion is unchanged.
+
+### Stage 25 — Smart Sales Funnel firewall
+
+The SAME closed, machine-only vocabulary discipline D-260 already
+established (Stage 30 test proving no commercial word in any
+vocabulary VALUE) extends unchanged to the new `EXECUTION_STATUS_*` and
+symbolic `renderer_operation` vocabulary designed in this gate — none
+of these values can express "Hook"/"CTA"/"sales emphasis"/"product
+benefit"/"sales beat." Core Visual Finishing execution only.
+
+### Stage 26 — Security / untrusted media (design, no implementation)
+
+Executor design requirements (matching D-258's own established
+discipline for the measurement layer): job-local geometry computation
+(pure Python arithmetic on already-real numbers, no subprocess of its
+own beyond the ffmpeg invocation `render.py` already performs); no new
+shell-injection surface (the crop/scale filter FRAGMENT is built via
+the SAME list-arg, no-`shell=True` discipline every existing ffmpeg
+call in this codebase already follows — confirmed unchanged); no ffmpeg
+arg injection (numeric filter parameters are always formatted from
+already-validated floats, never from unsanitized user text — matching
+`render.py`'s own existing `f"{value:.3f}"`-style formatting
+convention); job-local temporary paths (no new shared/global path,
+matching `render.py`'s own existing per-job `workdir` pattern); tenant
+isolation (a plan's inputs are exactly one job's own measurements —
+unchanged from D-260); bounded subprocess duration (the crop/scale
+insertion adds no NEW subprocess call at all — it is one additional
+filter clause inside the SAME already-bounded `render.py` invocation);
+bounded resource usage (no new per-frame decode loop — the transform is
+a filter-graph clause evaluated by the SAME single ffmpeg process
+already running); no shared mutable transform state (frozen dataclasses
+throughout, matching every other Finishing-family module in this
+codebase). No production security implementation is required beyond
+what already exists, since this design reuses the existing renderer's
+own already-hardened invocation pattern rather than introducing a new
+subprocess surface.
+
+### Stage 27/28/29 — Performance, render integration, encode strategy
+
+**Current render already re-encodes video once** per output (the
+`_concat_render_command` path, `libx264 -preset veryfast -crf 20`) —
+stream-copy is already impossible today the moment ANY segment needs
+scale/pad/caption treatment, which is EVERY segment, always (the
+existing architecture already commits to one full re-encode
+unconditionally). Comparing:
+
+- **Option A (inside existing per-segment filtergraph):** the new
+  crop/scale/translate clause is one MORE filter in a chain that is
+  ALREADY being evaluated and encoded once. **Zero additional encode
+  generations, zero additional ffmpeg process, zero additional decode
+  pass.** CPU cost increases only by the marginal cost of one more
+  filter operation per affected segment (negligible relative to the
+  encode itself).
+- **Option B (separate post-render pass):** would decode the ALREADY-
+  ENCODED (lossy H.264) output and re-encode it a SECOND time — a real,
+  measurable additional generation loss (a second lossy re-encode of an
+  already-lossy source), a second full ffmpeg process, roughly double
+  the wall-clock/CPU cost for the affected portion of the pipeline, and
+  a second temp-file lifecycle to manage.
+- **Option C (hybrid):** inherits Option B's generation-loss and
+  double-encode cost for whichever transforms it defers to the
+  post-pass, with no compensating benefit for V1's scope (all six V1
+  actions are purely spatial/per-segment and fit cleanly inside Option
+  A's own per-segment chain — there is no forcing function requiring a
+  post-pass for anything in this gate's scope).
+
+**V1 recommendation: Option A.** Concurrent-job/temp-disk/output-file-
+size implications are UNCHANGED from today's baseline under Option A
+(no new process, no new temp file, no new intermediate artifact); under
+Option B they would scale linearly with the number of visually-
+corrected outputs (each needing its own extra decode+encode+temp
+file), a real, avoidable commercial-scale cost Option A does not incur.
+Traceability, idempotence, and future P1 extensibility are equally
+achievable under either option (both can carry the same execution
+record/identity schema) — cost and quality alone decide this
+recommendation, and both favor Option A decisively.
+
+### Stage 30 — Synthetic executor fixtures (design only, not built)
+
+The full 25-item matrix the directive specifies, plus the two the
+directive's own examples already cover under "same/different plan
+replay," is accepted as the design target for D-262's own test suite:
+`NO_CHANGE`; `1.10`/`1.15` punch-in (centered face); reframe `±0.10` on
+each axis independently (4 fixtures); combined scale+position;
+face-near-edge on all four sides (4 fixtures); crop-limit exactly
+`0.10` and `>0.10`; multi-face/product-unknown/no-face abstention (3
+fixtures); portrait/landscape/square source; low-res source; malformed
+source; already-visually-finished source (idempotence proof); same-plan
+replay; different-plan (distinct identity). No RAW; all synthetic
+ffmpeg fixtures, matching D-247/D-258's own established convention.
+
+### Stage 31 — First execution implementation gate
+
+**D-262 — Visual Finishing Executor Foundation, offline, synthetic
+media only.** Scope: `NO_CHANGE`, `PUNCH_IN`, `STATIC_REFRAME`,
+`POSITION_MATCH`, `SCALE_MATCH`, `SCALE_AND_POSITION_MATCH` — all six
+V1 actions, with face/crop/product safety validation and post-
+measurement verification (D-258 re-used). No real RAW. Not implemented
+by this gate.
+
+### Verdict
+
+**A. VISUAL FINISHING EXECUTION ARCHITECTURE DEFINED — SAFE
+DETERMINISTIC V1 RENDER STRATEGY SELECTED — READY FOR SYNTHETIC
+EXECUTOR IMPLEMENTATION.**
+
+Rationale: B is wrong — no single remaining geometry/renderer decision
+blocks implementation; every action (`NO_CHANGE` through `SCALE_AND_
+POSITION_MATCH`) has a fully specified, deterministic geometry and
+insertion point, with the one genuinely open item (Stage 15's minimum-
+source-resolution question) explicitly named as a FUTURE, non-blocking
+policy question, not a gap in this gate's own architecture. C is wrong
+— the existing renderer's per-segment filtergraph structure (Stage 2)
+already supports exactly the insertion point this design needs, with
+zero restructuring and zero extra encode cost. D is wrong — no
+conflict was found anywhere in `render.py`'s existing architecture;
+Option A slots a new filter clause into a chain that already varies
+per-segment by design.
+
+### Confirmation
+
+Design only. No `cutsell_worker/*.py` file, no `tests/*.py` file was
+created or modified by this gate. No video mutated. No render output
+changed (`render.py` untouched — confirmed via `git diff`, empty). No
+new numeric policy or threshold: the ten D-260 values are the only
+numbers referenced anywhere in this design, all read verbatim, none
+recomputed or extended. No new heuristic. No Pacing/Boundary/Freeze/
+Audio-Finishing change. No RAW, no Modal, no RunPod, no provider call.
+
+**Canonical status:** unchanged for every closed track and for the ten
+approved V1 visual numeric values. Visual Finishing EXECUTION
+ARCHITECTURE now DESIGNED (this entry); EXECUTOR/RENDERER-INTEGRATION/
+POST-RENDER-VISUAL-QC remain MISSING-FUTURE pending D-262.
+
+**Exact next gate:** D-262 — Visual Finishing Executor Foundation
+(offline, synthetic media only). Not implemented by this gate.
+
+**Decision entry reference:** this entry (D-261).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-262. DO NOT LAUNCH RAW.
