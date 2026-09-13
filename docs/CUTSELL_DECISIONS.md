@@ -69076,3 +69076,361 @@ Then STOP.
 
 DO NOT IMPLEMENT NEXT TRACK.
 DO NOT LAUNCH SECOND RAW.
+
+## D-265 — Renderer / Export Hardening Architecture Audit (offline forensic + design only, no code change)
+
+**Objective.** Post D-264 (Visual Finishing P0 real-media qualified, safety-block
+path). Audit `render.py`/`render_plan.py`'s renderer/export pipeline and its
+immediate neighbors (technical QC, finishing contract, media probe, job/queue
+and provider/S3 boundaries) for correctness, safety, and failure-mode
+hardening gaps, and classify every real finding into a P0/P1/P2 matrix. Pure
+forensic + design: no `cutsell_worker/*.py` file was touched to produce this
+entry, no render/export behavior changed, no test added, no RAW launched.
+
+**Note on directive fidelity.** This session's compaction lost the verbatim
+enumerated stage list of the originating directive; only a summarized
+category list survived. Rather than invent a false-precision 38-item
+numbering that might not match the lost original, this entry organizes its
+findings by the substantive categories the retained summary names, grounded
+directly in code read this gate (`render.py`, `render_plan.py`,
+`post_render_media_qc.py`, `media_probe.py`, `finishing_contract.py`, plus
+targeted greps across `cutsell_worker/` and `.github/workflows/`). Some
+named categories (S3/storage ownership, queue/worker concurrency internals,
+Modal/RunPod GPU-provider lifecycle detail) were audited at lower depth this
+pass — flagged explicitly below, not silently assumed clean.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `28ddb6d` (exact expected match),
+clean tree — confirmed before this gate began.
+
+### 1. Renderer pipeline map (as read, `render.py` + `render_plan.py`)
+
+`build_render_plan` (draft → `RenderSegment` tuple, contiguous-segment
+coalescing) → `render_preview` (`tighten_trailing_silence` per segment →
+`_concat_render_command`, ONE ffmpeg pass: per-segment seek/scale/crop/pad/
+caption/`trim`/`setpts`, concat filter, single encode → optional final
+overlay pass for text/media overlays) → caller-owned `run_post_render_media_qc`
+(decode integrity, silence, freeze, black-frame, audio-discontinuity-at-
+boundary checks) → caller-owned `run_bounded_physical_repair_loop` (bounded
+re-render/re-QC, never touches selection). `render_timeline_with_audio_windows`
+(D-214, independent audio/video windows) and `render_audio_join_treatment_preview`
+(D-233) are test-only execution capabilities, confirmed NOT imported by
+`render_preview` or any production call site — the single live path remains
+`render_preview` → `_concat_render_command`.
+
+### 2. Output contract classification
+
+| Property | Value | Class |
+|---|---|---|
+| Video codec | `libx264`, preset `veryfast`, `crf 20` | IMPLEMENTATION_DEFAULT (hardcoded literal in `_concat_render_command`/`_segment_command`, not a named/documented constant, not caller-configurable) |
+| Audio codec | `aac`, `160k`, `48000 Hz` | IMPLEMENTATION_DEFAULT (same pattern) |
+| Container/fast-start | `-movflags +faststart` | CANONICAL (matches `finishing_contract.py`'s own documented `fast_start=True` target field — the one place this repo names it as an intentional delivery property) |
+| Canvas | `1080x1920`, `fps=30` | IMPLEMENTATION_DEFAULT (function default args on `render_preview`/`RENDER_FPS_DEFAULT`, overridable by caller, never asserted against a product spec anywhere read this gate) |
+| Pixel format | `yuv420p` (forced in filter chain) | CANONICAL (correct universal-compatibility choice, deliberate) |
+| Frame rate discipline | `fps={fps}` filter forces CFR before `trim` | CANONICAL/IMPLEMENTED (converts any VFR source to CFR at encode) |
+| Segment duration exactness | `rendered_segment_duration_sec` (ceil-to-frame) | CANONICAL, documented (D-097.2 module comment) |
+| Output hashing / identity | none computed by the renderer itself | UNSPECIFIED (D-264 verified identity via an ad hoc external sha256, not a renderer-owned contract) |
+| Finishing pass (loudness/true-peak/color) | `finishing_contract.py` Protocol only | MISSING/FUTURE, explicitly not implemented (per that module's own docstring) |
+
+No canonical, single-source-of-truth "renderer output contract" document
+exists today; the table above is this gate's own reconstruction from code,
+not a pre-existing spec.
+
+### 3. Codec / CFR-VFR / timebase / A/V sync
+
+- **CFR enforcement:** IMPLEMENTED — the `fps={fps}` filter runs before
+  `trim=duration=...` on every segment, so a VFR source is normalized to CFR
+  before the exact-duration trim; this is correct ordering (trimming a VFR
+  stream by wall-clock duration before CFR-normalizing it would be the wrong
+  order and was not found).
+- **Timebase resets:** IMPLEMENTED per segment — `setpts=PTS-STARTPTS` /
+  `asetpts=PTS-STARTPTS` reset both streams' timestamps to zero before the
+  `concat` filter, which is the correct precondition for `concat` (a
+  mis-based PTS on any input is a documented source of concat A/V drift).
+- **A/V duration matching:** IMPLEMENTED per segment — video is trimmed by
+  frame (`trim=duration=<ceil-to-frame>`), audio is independently
+  `apad`+`atrim`'d to the SAME literal duration value, so both streams enter
+  `concat` already equal-length; this is the structural reason D-097.2/.4's
+  join-instant fixes worked.
+- **Whole-file A/V sync verification:** PARTIAL — `post_render_media_qc.py`'s
+  own docstring already says this honestly: ffprobe-level stream
+  `start_time`/`duration` can catch a gross whole-stream misalignment, but
+  no audio/video cross-correlation exists, so a sub-frame or slow-drift
+  desync is not detected by any check in this pipeline today. Not a new
+  finding — restated because it is directly renderer/export-adjacent and
+  belongs in this audit's coverage-gap list (Section 12).
+
+### 4. Duration-drift contract (extends D-264's own +0.5456 s finding)
+
+`rendered_segment_duration_sec` rounds every segment's tightened duration UP
+to the next whole output frame (`math.ceil(duration_sec * fps - 1e-6) / fps`).
+This is a per-segment, one-directional (never negative) rounding bias that
+accumulates additively across N segments — D-264 measured +0.5456 s over 23
+real segments on Video00 (≈24 ms/segment average, consistent with a
+30 fps ceiling-rounding bias). **Finding (new, this gate):** there is no
+explicit contract anywhere in `render.py`/`render_plan.py` bounding
+cumulative drift (no assertion, no ceiling, no per-job budget) — the
+D-097.2 module comment documents WHY the rounding exists (frame-exact joins)
+but not what maximum accumulated drift is acceptable before it should be
+flagged. For short edits (≤10-15 segments) this is invisible (`<0.4 s`); for
+a long-form multi-segment edit, drift could grow to a perceptibly wrong
+final duration relative to the frozen plan's own sum. Classified P2
+(architecturally sound and expected, not a defect) with a named follow-up
+recommendation: report cumulative drift as an observable field on the
+render result rather than only being discoverable via a manual sha256/
+before-after duration diff, as D-264 had to do ad hoc.
+
+### 5. Source-format diversity / rotation / color-space / HDR
+
+- `media_probe.py`'s `MediaProbe` carries only `duration_sec`, `width`,
+  `height`, `fps`, `has_audio` — no codec name, no color space/transfer/
+  primaries, no rotation/display-matrix metadata, no HDR flag. `render.py`
+  consumes only `probe.width`/`probe.height`/`probe.has_audio`, never
+  queries rotation or color metadata from any source clip.
+- **Finding (new):** no rotation/orientation handling exists in the render
+  chain. A source file carrying a display-matrix rotation (common on
+  phone-recorded H.264/HEVC, directly relevant to D-129 Section 12's own
+  iOS media-reality contract: "front-camera mirroring, rotation/orientation
+  metadata") would be scaled/cropped/padded by `scale`/`pad` using ffmpeg's
+  default behavior for that container's rotation tag — which for most
+  modern ffmpeg builds auto-rotates via the display matrix before filtering
+  (correct default), but this is never verified or asserted by any test in
+  this repo; it is an ffmpeg-version-dependent default, not a codified
+  CutSell contract. Classified P1 (real gap directly named by D-129's own
+  iOS media-reality contract, not yet exercised against a real
+  rotated-metadata source).
+- **Color space/HDR:** UNSPECIFIED / not handled anywhere in the render
+  chain — no `colorspace`/`zscale` filter, no HDR tone-mapping. Given
+  Milestone 1 scope (Cut.ai commercial parity, SDR delivery) this is
+  reasonable to defer, but is an explicit, currently-undocumented gap
+  should an HDR (Dolby Vision/HLG) phone source ever reach the renderer —
+  classified P2 pending real evidence of an HDR source.
+
+### 6. Corrupt / malformed media fail behavior
+
+`render.py`'s own `_run()` helper: on nonzero ffmpeg exit, raises
+`RuntimeError("ffmpeg_render_failed")` with **no stderr, no command, no
+segment/clip identity attached**. Contrast with `post_render_media_qc.py`'s
+own `_run()`, which returns `(returncode, combined_stdout_stderr)` for the
+caller to inspect. **Finding (new, P0 candidate):** a malformed/corrupt
+source clip, an invalid filter-graph parameter (e.g. a bad caption path), or
+any other real ffmpeg failure during the LIVE render surfaces to the caller
+as a bare, undiagnosable `RuntimeError("ffmpeg_render_failed")` — this
+directly violates CLAUDE.md's own binding engineering rule "Preserve
+observability; never accept silent provider fallback." Every prior D-097.x
+forensic in this decision log that root-caused a real render defect did so
+by re-deriving evidence from QC/perceptual layers precisely because the
+renderer itself throws away the one signal (ffmpeg's own stderr) that would
+usually name the failure directly. This is the single highest-value,
+smallest fix in this whole audit (see Section 16).
+
+### 7. ffmpeg failure/error contract mapping
+
+No structured error taxonomy exists across the render/QC boundary. `_run()`
+raises a bare string-message `RuntimeError`; `post_render_media_qc.py`
+returns typed `PostRenderQCResult`/`PostRenderFinding` objects. There is no
+shared vocabulary (e.g. `RENDER_FAILED_DECODE_ERROR` vs
+`RENDER_FAILED_FILTER_ERROR` vs `RENDER_FAILED_MISSING_SOURCE`) a caller
+could branch on. Classified P1 — worth a bounded, additive exception type
+(carrying command + returncode + stderr) rather than a generic
+`RuntimeError`, without changing any encode behavior.
+
+### 8. Retry contract and idempotence
+
+No retry logic exists inside `render.py` itself — a transient ffmpeg failure
+(e.g. a momentary source-file read hiccup on a network-mounted path) is not
+retried at this layer; retry, if any, is an ownership question for the
+caller (job orchestration layer, not audited in file-by-file depth this
+pass — see Section 17). `render_preview` is otherwise a pure function of its
+inputs (same segments → same command → same output, modulo encoder
+non-determinism, see Section 15) — calling it twice with the same
+`output_path` simply re-renders and overwrites (via ffmpeg's own `-y`),
+which is idempotent in effect but NOT safe under concurrent/partial-failure
+conditions (Section 9).
+
+### 9. Output-identity / partial-output / atomic-promotion safety (P0)
+
+**Finding (new, P0 candidate):** `render_preview`/`_concat_render_command`
+write directly to the caller-supplied final `output_path` via ffmpeg's own
+`-y` overwrite — there is no temp-path-then-atomic-`os.replace` promotion
+step anywhere in this file. If the ffmpeg process is killed, OOM-killed, or
+the container is torn down mid-encode (a realistic RunPod/Modal termination
+scenario this codebase has hit before per its own GPU-teardown history), the
+final `output_path` can be left containing a truncated, partially-written
+MP4 — indistinguishable at that path from a successfully delivered file
+unless something re-runs `probe_decode_integrity`. `render_preview`'s own
+closing check (`destination.exists() and .st_size > 0`) does NOT catch this
+class of failure — a truncated file still exists and has nonzero size. This
+is the same failure class D-097.2 originally fixed for a DIFFERENT reason
+(join drift, not crash-safety) by moving to a single-pass concat filter; a
+single pass reduces the WINDOW for a partial write but does not close it —
+one process, one temp file, one atomic rename would.
+
+### 10. Temp-file lifecycle
+
+IMPLEMENTED correctly: `render_preview` uses `tempfile.TemporaryDirectory`
+as a context manager — every part/caption/`.srt`/joined-file artifact lives
+inside it, and Python's own context-manager semantics guarantee cleanup on
+BOTH the normal-exit and exception paths (verified by reading the control
+flow: `_run()` raising inside the `with` block still triggers
+`TemporaryDirectory.__exit__`). No leaked temp files were found in this
+module. This is a clean spot, not a finding.
+
+### 11. S3/storage ownership, concurrent-job isolation, GPU/CPU boundary (lower-depth this pass)
+
+- **S3/storage:** `render.py`/`render_plan.py` themselves have zero S3
+  awareness (grep confirms no `boto3`/`s3_client`/`S3_BUCKET` reference in
+  either file) — storage/upload ownership lives entirely in
+  `storage.py`/`uploads.py`/`multipart_uploads.py`/`exports.py`, none of
+  which were read in this pass. **This audit does not certify S3 upload
+  atomicity, credential handling, or bucket-key collision safety** —
+  named as an explicit follow-up, not silently assumed clean.
+  `serverless_handler.py` is confirmed to be the one file in this
+  workflow already using an `::add-mask::` masking discipline for
+  AWS/RunPod credentials (per D-254R/D-254C/D-264's own established
+  pattern), so credential HANDLING at the CI/workflow layer has prior,
+  repeated verification; this gate did not re-verify it end to end.
+- **Concurrent-job isolation:** `tempfile.TemporaryDirectory`'s OS-level
+  uniqueness guarantees per-process temp-dir isolation; the remaining
+  question — whether two concurrent jobs could ever be handed the SAME
+  final `output_path` — is a job-orchestration/queueing concern
+  (`queueing.py`/`jobs.py`/`worker_job.py`), not audited file-by-file this
+  pass.
+- **GPU/CPU boundary:** CONFIRMED — `render.py` contains no `nvenc`/CUDA/GPU
+  encoder reference anywhere; the renderer is CPU-only (`libx264` software
+  encode), consistent with D-098's doctrine that GPU execution is reserved
+  for the Modal/RunPod inference/benchmark stages, never the final export
+  encode. This boundary is clean and intentional, not a gap.
+
+### 12. Technical QC coverage gap list (restated, not re-derived)
+
+`post_render_media_qc.py`'s own module docstring already gives the honest,
+canonical gap list for this layer: phoneme/breath-alignment cuts, CV-based
+defects (body/mic/camera reset debris, facial expression, framing beyond
+gross aspect-ratio), and fine-grained (sub-frame) A/V sync drift are all
+explicitly NOT built, for stated reasons (no ASR-phoneme alignment
+capability; no cv2/mediapipe at the time that module was written — since
+superseded for Visual Finishing's OWN narrower measurement scope by D-258/
+D-262/D-263/D-264, but never wired into `post_render_media_qc.py` itself).
+This audit reuses that list rather than re-deriving it — it remains
+accurate as read.
+
+### 13. Resource bounds / DoS / cost-abuse threat design (P0/P1)
+
+**Finding (new, P0 candidate):** `render.py`'s `_run()` calls
+`subprocess.run(...)` with **no `timeout` argument** — confirmed by the
+earlier grep sweep (`render.py` is one of the files in this repo calling
+`subprocess.run` without a `timeout` anywhere in the file). A malformed or
+adversarial source file that causes ffmpeg to hang (a known ffmpeg failure
+mode against certain corrupt/crafted containers) blocks the render step
+indefinitely with no upper bound — this is a direct, currently-open
+DoS/cost-abuse vector (a stuck GPU/CPU worker holding a paid compute slot
+indefinitely) and violates the same "no silent hang" spirit as the
+observability rule in Section 6. There is also no explicit bound anywhere
+in `render.py` on total segment count, total output duration, or total
+overlay count — those bounds, if any exist, live upstream (job
+admission/validation layer, not re-audited here).
+
+### 14. Queue/worker behavior, retry/idempotence at the job layer (lower-depth this pass)
+
+`jobs.py`/`queueing.py`/`worker_job.py`/`pod_job_server.py` were listed but
+not read line-by-line this gate; `serverless_handler.py` was greped only
+(no full read). This audit therefore does NOT certify job-level retry
+semantics, idempotency keys, or dead-letter handling — named explicitly as
+an unaudited area rather than assumed safe, consistent with this document's
+own "Do not invent" discipline.
+
+### 15. Determinism classification
+
+`_concat_render_command`'s output is a pure function of its `RenderSegment`
+inputs (same segments → same generated ffmpeg command string) — this is
+**SEMANTIC-DETERMINISTIC** (same selection, same timing, same joins, every
+time). It is **NOT asserted BYTE-DETERMINISTIC**: `libx264`'s `veryfast`
+preset is a multi-threaded encoder and no `-threads 1` (or equivalent
+single-thread pin) appears anywhere in the command construction, so
+frame-level encoder output can legitimately vary in exact bytes between two
+runs of the identical command on the same machine (a well-known libx264
+property under multi-threaded rate control), even though the decoded
+content is equivalent. D-264's own idempotence proof (`composition_id_
+reproducible=true`) tested PLAN/decision identity, never raw output bytes —
+consistent with this classification, not contradicting it.
+
+### 16. P0 / P1 / P2 hardening matrix (from ACTUAL findings above only)
+
+| # | Finding | Section | Class |
+|---|---|---|---|
+| 1 | `_run()` discards ffmpeg stderr/command on failure — bare `RuntimeError("ffmpeg_render_failed")` | 6 | **P0** |
+| 2 | No subprocess timeout on the live render `_run()` — an ffmpeg hang blocks indefinitely | 13 | **P0** |
+| 3 | No atomic temp-path→rename promotion — a crash mid-encode can leave a truncated file at the final delivery path, undetected by `render_preview`'s own existence/size check | 9 | **P0** |
+| 4 | No structured render-failure error taxonomy (render.py vs post_render_media_qc.py inconsistency) | 7 | P1 |
+| 5 | No rotation/orientation metadata verification against real phone sources (D-129's own iOS media-reality contract names this directly) | 5 | P1 |
+| 6 | Cumulative per-segment duration-drift is unbounded/unobserved as an explicit contract (works today, invisible for long-form edits) | 4 | P2 |
+| 7 | No renderer-owned output-hashing/identity contract (D-264 needed an ad hoc external sha256) | 2 | P2 |
+| 8 | No canonical, single-document renderer output contract (this gate's Section 2 table is a reconstruction, not a pre-existing spec) | 2 | P2 |
+| 9 | Color-space/HDR entirely unhandled | 5 | P2 (no real source has exercised this yet) |
+| 10 | S3/storage ownership, job/queue retry semantics, GPU/CPU provider lifecycle detail not re-audited this pass | 11, 14 | UNAUDITED (named, not classified) |
+
+Findings #1-#3 (all P0) are structurally independent, additive, and each
+individually testable without touching selection, boundary, pacing, visual
+finishing, or any encode parameter (codec/crf/resolution/fps unchanged) —
+they only change how the SAME encode is invoked, observed on failure, and
+published.
+
+### 17. Smallest first implementation gate (design only — NOT implemented, likely D-266)
+
+Proposed scope for a future D-266 (Product Owner authorization required,
+not granted by this entry): fix exactly the three P0 findings above and
+nothing else —
+1. Capture ffmpeg's stderr + the exact command in `_run()`'s failure path
+   and attach it to a new, narrow exception type (or a returned failure
+   detail) instead of the bare `RuntimeError` string.
+2. Add a bounded `timeout` to every `subprocess.run` call in `render.py`
+   (render + `tighten_trailing_silence`'s `silencedetect` probe), with a
+   fail-closed timeout error distinct from a normal ffmpeg failure.
+3. Render to a temp path inside the existing `TemporaryDirectory` (already
+   used for parts/overlays) and `os.replace()` it onto the caller's
+   `output_path` only after `probe_decode_integrity`-style confirmation
+   the file is non-empty and decodes — never publish a file that has not
+   been confirmed complete.
+
+None of the three changes the encode parameters, the segment geometry, the
+join treatment, captions, overlays, or any Visual/Audio Finishing
+authority — this is renderer-internal crash-safety and observability
+hardening only, directly testable via monkeypatched `subprocess.run`
+(timeout/failure injection) and a killed-mid-encode simulation, following
+this repo's own established test-authoring conventions (real function
+calls, injected faults via `monkeypatch`, never a parallel reimplementation).
+
+### Canonical status consolidation (per this gate's own required record)
+
+FREEZE=CLOSED. BOUNDARY=CLOSED. PACING V2=CLOSED. HANDLE-AWARE PACING=CLOSED.
+AUDIO JOIN=SAFE/PARTIALLY QUALIFIED. AUDIO FINISHING P0=CLOSED. VISUAL
+FINISHING P0=CLOSED (product-bbox safety is a deferred capability per
+D-264's own Verdict C — noted here, not reopened by this entry). RENDERER/
+EXPORT HARDENING is now AUDITED (this entry) with 3 P0 findings, 2 P1
+findings, and 4 P2/UNAUDITED items recorded — NOT YET IMPLEMENTED.
+
+### Verdict
+
+**Verdict A — ARCHITECTURE SOUND, THREE BOUNDED P0 HARDENING GAPS FOUND,
+NEXT GATE DESIGNED, NOT AUTHORIZED.** The renderer's core encode/join/timing
+architecture (CFR enforcement, timebase reset, frame-exact A/V duration
+matching, temp-file lifecycle, CPU/GPU boundary) is correct and requires no
+redesign. Three genuine, narrow, independently-fixable crash-safety/
+observability gaps exist (stderr/command loss on failure, unbounded
+subprocess time, non-atomic output promotion) that should be the FIRST
+Renderer/Export hardening implementation gate. No RAW evidence motivates
+this — these are structural code-reading findings, consistent with this
+project's own "structural root-cause" and "preserve observability" rules
+being violated today at exactly the three points named.
+
+**Exact next gate:** Product Owner authorization of D-266 (Section 17's
+three-item scope) — not started by this entry.
+
+**Decision entry reference:** this entry (D-265).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-266.
+DO NOT LAUNCH RAW.
