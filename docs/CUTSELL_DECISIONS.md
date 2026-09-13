@@ -63938,3 +63938,658 @@ execution.
 Then STOP.
 
 DO NOT IMPLEMENT D-250. DO NOT LAUNCH RAW.
+
+
+---
+
+## D-250 — Audio Finishing CORRECTION EXECUTION design (offline, no media mutation)
+
+**Objective.** Post D-249 (policy + plan generation, verdict A). Design —
+never implement — the deterministic EXECUTION layer that will one day
+consume an `AudioFinishingPlan` (D-249) and turn it into real ffmpeg
+operations. No `.py` production file is touched this gate.
+
+### STAGE 1 — Plan field → DSP action mapping
+
+| Plan field | Authorizes | Action | Preconditions | Fail-closed behavior |
+|---|---|---|---|---|
+| `plan_status` | gate for everything below | n/a | must be `READY_NO_CHANGE`/`READY_FOR_CORRECTION`/`READY_WITH_LIMITER`/`PARTIAL` | `ABSTAIN`/`BLOCKED`/`UNKNOWN` → executor performs **zero** action, copies input to output unchanged, records `PLAN_NOT_EXECUTABLE` |
+| `authorized_whole_video_gain_db` | one whole-video gain filter | `volume=<gain>dB` on the muxed output, applied once | non-`None`, `plan_status` allows correction | `None`/`0.0` → no gain filter added |
+| `adjacent_take_adjustments` | per-segment `audio_volume` nudges | modifies the existing `RenderSegment.audio_volume` linear multiplier for the raised segment(s) only, pre-concat | `gain_state` is `CORRECTION_ALLOWED`/`CORRECTION_LIMITED`, `authorized_correction_db` non-zero | any adjustment whose `gain_state` is `ABSTAIN_INSUFFICIENT_EVIDENCE`/`BLOCKED_*` contributes **no** change to that segment |
+| `limiter_authorized` | one `alimiter` stage | inserted once, last, on the whole-video signal | `True` AND a positive gain was actually authorized somewhere (whole-video or adjacent) | `False` → no limiter stage exists in the graph at all (not a no-op limiter — literally absent) |
+| `true_peak_ceiling_dbtp` | limiter's configured ceiling | `alimiter=limit=<linear equivalent of -1.0 dBTP>` | `limiter_authorized=True` | never used to justify skipping post-execution verification (Stage 6) |
+| `peak_evidence_source` | whether the executor may trust an already-computed peak decision at all | n/a — informational only, executor does not re-derive peak safety, it only executes what the plan already decided | `TRUE_PEAK`/`FALLBACK_SAMPLE_PEAK` | `UNAVAILABLE` should never coexist with a positive `authorized_*_gain_db` (the policy layer already guarantees this — D-249's `evaluate_peak_safety` blocks that combination); if it ever does, the executor treats it as `PLAN_NOT_EXECUTABLE` rather than trusting the plan blindly (defense in depth, never silently trusting an inconsistent object) |
+| `abstentions` | nothing (informational) | none | always readable | a non-empty tuple never blocks an otherwise-authorized action elsewhere in the same plan (an abstention on one segment does not veto a different, independently-authorized segment or the whole-video pass) |
+| `reasons` | nothing (informational/audit) | none | always readable | carried into Stage 18's audit output verbatim |
+
+**No `normalization_strategy` field exists on the current D-249
+`AudioFinishingPlan`** (D-248's Stage 3 sketch proposed one; D-249's actual
+implementation folded that decision into `whole_video_state` +
+`authorized_whole_video_gain_db` instead, which is sufficient to drive
+Stage 2's execution and avoids a second, redundant "which strategy" enum
+that could disagree with the gain the plan already computed). This gate
+records that as the real, current shape rather than designing against a
+field that does not exist — a future D-251+ gate MAY add a
+`normalization_strategy` field if Stage 7 below's chosen strategy needs
+one, but nothing here assumes it already does.
+
+### STAGE 2 — Whole-video gain execution
+
+**Design: simple deterministic gain (`volume=<db>dB`), not `loudnorm`.**
+The policy layer (D-249) already computed the exact required gain from a
+real, already-measured `integrated_loudness_lufs` — there is nothing left
+for `loudnorm`'s own internal measurement pass to discover. Re-measuring
+inside the DSP step would be a second, potentially-disagreeing loudness
+computation for the same file, undermining D-249's own "requested vs
+authorized gain, never silently reached differently" discipline. `volume=`
+is a single deterministic multiply, trivially idempotent-by-inspection
+(the exact same input and gain value always produce the exact same
+output, modulo encoder determinism), and requires no internal ffmpeg
+loudness-gating heuristics between the policy's number and the applied
+number.
+
+- **Simple gain sufficient?** Yes, since D-249 already resolved the exact
+  target gain; `loudnorm`'s dynamic/single-pass mode would apply ITS OWN
+  measurement and target, which could disagree with the policy layer's
+  authorized number — never acceptable (Stage 8 below expands on this).
+- **Avoid dynamic-mode `loudnorm`?** Yes, entirely, for V1 execution of an
+  already-authorized `authorized_whole_video_gain_db`. Dynamic-mode
+  `loudnorm` computes AND applies its own target in one pass with its own
+  internal heuristics (a limiter-like true-peak safety net baked in,
+  frame-level gating) — none of which the policy layer controls or can
+  audit after the fact. It reintroduces exactly the "renderer invents its
+  own gain" failure mode Stage 21 (Architecture) is written to prevent.
+- **Two-pass measured `loudnorm`?** Considered and rejected as redundant
+  for V1 (Stage 8) — D-247/D-249 already performed an equivalent
+  measurement pass; a second one duplicates cost without adding new
+  information the policy hasn't already used.
+- **Gain before or after limiter?** Gain first, limiter last (Stage 5/10)
+  — the limiter's whole reason to exist is to catch whatever peak
+  consequence the already-decided gain produces, so it must observe the
+  post-gain signal.
+
+### STAGE 3 — Adjacent-take continuity execution
+
+**Design: per-segment, pre-concat, via the EXISTING `RenderSegment.audio_volume`
+field — never a post-concat automation/envelope.**
+
+`render.py`'s `RenderSegment`/`ClipSpec` (`contracts.py:205`,
+`render_plan.py:18`) already carries `audio_volume: float = 1.0`, a plain
+linear multiplier consumed by the existing, unmodified `_segment_command`/
+`_concat_render_command`/`_concat_render_command_with_audio_windows`
+filter chains (`volume=<effective_volume>` — D-246's own trace). A future
+executor's ONLY new responsibility for Level 1 is: for each authorized
+`AdjacentTakeAdjustment` whose `direction` names a segment, convert
+`authorized_correction_db` to a linear multiplier
+(`10 ** (authorized_correction_db / 20.0)`) and multiply it into that
+segment's ALREADY-EXISTING `audio_volume` before the render plan is built
+— never a new filter stage, never a new field, never a post-concat pass.
+
+**Why pre-concat, not post-concat automation/envelope:**
+- **Timing exactness preserved.** `audio_volume` is applied inside the
+  per-segment filter chain that already runs before the frame-exact
+  concat (D-097.2's own "single gapless pass" renderer contract) — a
+  level change here cannot move, trim, or pad a single frame; a
+  post-concat automation/envelope pass would need to locate the exact
+  join timestamps a SECOND time in the muxed output, redoing work the
+  render plan already knows exactly.
+- **No cross-source leakage.** Each segment's gain is scoped to its own
+  `RenderSegment`, by construction — there is no mechanism by which
+  adjusting one segment's `audio_volume` could touch another segment's
+  samples, unlike a post-concat automation curve that must be positioned
+  correctly relative to the whole timeline and could drift if any earlier
+  join's duration is ever off by even one frame.
+- **No new renderer capability required.** `audio_volume` already exists,
+  is already read by every one of the three current concat command
+  builders, and is already exercised by existing tests
+  (`render_plan.py:107`'s own tolerance-aware equality check treats an
+  `audio_volume` delta as a real, comparable difference) — this is the
+  smallest possible change surface, not a new one.
+- **No gain ramp by default** (Stage 4) — a flat per-segment multiplier is
+  the simplest, most auditable primitive; a ramp would be an additional,
+  separately-justified capability layered on top of this, not a
+  replacement for it.
+
+### STAGE 4 — Gain ramp / transition smoothing
+
+A hard gain step exactly at a cut, on top of an already-present 12ms
+click-fade (Stage 11), is unlikely to itself be an audible "step" the way
+a raw discontinuous waveform sample jump is (D-097.4's click detector
+specifically measures sample-to-sample jumps, not slow gain-envelope
+changes) — a per-segment CONSTANT gain multiplier does not introduce a
+new discontinuity inside the click-fade window; it only changes the
+segment's overall level, uniformly, including through the existing fade.
+**Design recommendation:** instant per-segment gain switch (the constant
+`audio_volume` multiplier already described in Stage 3) is sufficient for
+V1 — no new ramp mechanism is designed or required.
+
+If a future real-media qualification ever shows an audible level "pump"
+specifically attributable to the gain step itself (as opposed to the
+underlying take-to-take difference the correction exists to fix), a bounded
+ramp duration would be a new capability needing its own numeric value.
+**No such value exists today; none is invented here.**
+`PRODUCT_OWNER_OR_LATER_POLICY_DECISION_REQUIRED` if that capability is
+ever pursued — not decided by this gate, and not currently believed
+necessary given the reasoning above.
+
+### STAGE 5 — Limiter execution
+
+**Filter family: `alimiter`** (ffmpeg's standard sample-domain limiter),
+the only limiter-family filter this codebase's own D-233 audio-join
+executor precedent and D-246's audit already reference as available
+without a new dependency.
+
+- **Where in the chain?** Last — after both the per-segment adjacent-take
+  gain (Stage 3, pre-concat) and the whole-video gain (Stage 2,
+  post-concat) have already been applied, immediately before final
+  encode. This matches Stage 8's D-249 design ("limiter role: final
+  peak-safety only... after normalization").
+- **Does the limiter ceiling map directly to -1.0 dBTP?** NOT directly and
+  safely. **`alimiter`'s `limit` parameter operates on SAMPLE-domain
+  peaks, not BS.1770 true peak** (the same true-peak-vs-sample-peak
+  distinction D-247/D-249 already treat as load-bearing). ffmpeg's
+  documentation for `alimiter` does not describe an inter-sample/
+  oversampled true-peak-aware limiting mode; it limits the samples it can
+  see. Setting `limit` to the linear equivalent of -1.0 dBFS (sample
+  domain) is a reasonable, honestly-labeled APPROXIMATION of the -1.0
+  dBTP true-peak ceiling, not a guarantee of it.
+- **Is oversampling available/required?** ffmpeg does not expose a
+  documented true-peak-aware oversampling mode on `alimiter` in this
+  codebase's already-confirmed 6.1.1-3ubuntu5 build (no such option was
+  found in this session's own empirical `-h filter=astats`/`ebur128`
+  probing of this build, and `alimiter`'s own option list, not yet probed
+  this gate, is not claimed to have one — see Stage 6's explicit
+  non-overclaim). Do NOT overclaim true-peak-safe limiting capability the
+  filter has not been shown to have.
+- **Consequence:** the executor must NEVER claim -1.0 dBTP compliance
+  from limiter configuration alone (Stage 6).
+
+### STAGE 6 — True-peak safety (post-execution verification, not trust)
+
+Because `alimiter` is (at best) a sample-peak-domain safety net, not a
+verified true-peak-domain one, the executor's compliance claim can ONLY
+come from **re-measuring the actual output file** with D-247's own real
+`ebur128=peak=true` true-peak measurement — the same tool that produced
+the original policy input, applied again to the real rendered bytes.
+
+**Design contract:**
+1. Execute the plan (gain + optional limiter).
+2. Re-measure the real output file's `true_peak_dbfs` via
+   `audio_finishing_measurement.measure_audio`.
+3. Compare against `TRUE_PEAK_CEILING_DBTP` (-1.0 dBTP, unchanged).
+4. If still over ceiling → this is a genuine post-execution failure
+   (`POST_VERIFY_OUT_OF_POLICY`, Stage 13), not something the executor may
+   silently accept because "the limiter was configured." Stage 15 covers
+   the bounded retry this can trigger.
+
+This is the direct, structural reason Stage 14 exists as its own pipeline
+stage rather than folding verification into execution: a limiter
+CONFIGURATION is a request, not a proof.
+
+### STAGE 7 — Normalization strategy (V1 selection)
+
+**Selected: C — hybrid (bounded gain first, limiter second, then
+verification)**, decomposed as:
+1. Per-segment bounded adjacent-take gain (Stage 3) — pre-concat.
+2. Whole-video bounded gain from the already-computed
+   `authorized_whole_video_gain_db` (Stage 2) — post-concat, simple
+   `volume=`.
+3. Limiter, only if `limiter_authorized` (Stage 5) — last.
+4. Real post-execution measurement (Stage 6/14).
+
+Compared against the alternatives:
+- **A (simple calculated gain alone, no limiter):** insufficient whenever
+  `limiter_authorized=True` — would ship a file the policy layer itself
+  flagged as peak-risky.
+- **B (ffmpeg `loudnorm` two-pass mastering):** rejected for V1 as
+  redundant re-measurement (Stage 8) and as a second, less auditable
+  source of the loudness decision than the policy layer already computed
+  — `loudnorm`'s internal gating/limiting behavior is a second, less
+  transparent decision-maker layered on top of D-249's own.
+- **D (other):** not identified as superior to C on any axis evaluated.
+
+**Comparison table:**
+
+| Axis | A (gain only) | B (loudnorm 2-pass) | C (hybrid, selected) |
+|---|---|---|---|
+| Predictability | High | Medium (internal heuristics) | High |
+| Artifact risk | Low, but peak-unsafe when limiter needed | Medium (own gating/limiting can surprise) | Low |
+| Idempotence | Trivial | Non-trivial (re-measures each run) | Trivial (Stage 9) |
+| Latency | Lowest | Highest (2 full passes) | Low-medium (1 pass + optional limiter + 1 verify) |
+| Complexity | Lowest | Highest | Low-medium |
+| True-peak implication | No protection | Some, but conflated with its own target logic | Explicit, separately verified (Stage 6) |
+
+### STAGE 8 — One-pass vs two-pass
+
+**One-pass gain+limiter, NOT two-pass `loudnorm`, for V1.** `loudnorm` is
+not used at all in this design (Stage 2/7), so the one-pass/two-pass
+question resolves to: does the EXECUTOR itself need two ffmpeg passes?
+**No** — the gain value and limiter authorization are already fully
+determined by the policy layer before any DSP runs; a single ffmpeg
+invocation (segment gains baked into the existing render, one whole-video
+`volume=` + optional `alimiter=` on the final mux) is sufficient and
+strictly more deterministic/repeatable than any internal two-pass
+`loudnorm` negotiation would be. The one genuinely separate "second pass"
+in this design is Stage 6's verification measurement — that is a
+DIAGNOSTIC pass, not a second correction pass, and is priced into Stage
+19's scale analysis as such.
+
+### STAGE 9 — Identity / idempotence contract
+
+**Design: an execution marker carried in `AudioFinishingPlan.provenance`
+(a field that already exists on the D-249 dataclass) plus a
+content-derived guard, not a new dataclass.**
+
+- The executor, when it eventually exists, must write a marker into the
+  OUTPUT file's OWN provenance/diagnostics record (not the input plan,
+  which is immutable data) recording: the exact `policy_version`, the
+  exact `authorized_whole_video_gain_db`/`adjacent_take_adjustments`
+  applied, and a fingerprint of the INPUT file it was applied to (e.g. a
+  content hash or the input `AudioFinishingMeasurement`'s own
+  `provenance`) — directly extending D-095's already-binding "CODE EXISTS
+  != VIDEO USED IT" traceability discipline to this new layer.
+- **Re-applying the same plan to a file that already carries a matching
+  marker must be a no-op** (skip, do not re-apply the gain a second time)
+  — this is the deterministic guard against accidental double-gain the
+  directive requires.
+- **Re-applying a DIFFERENT plan** (e.g. after a re-render changed the
+  measurement) must always be treated as a fresh, independent execution —
+  the marker is keyed to the specific input+plan pair, never treated as a
+  blanket "finishing already happened" flag.
+- This reuses the existing provenance-dict pattern already present on
+  both `AudioFinishingMeasurement.provenance` and
+  `AudioFinishingPlan.provenance` rather than inventing a new state file
+  or a new "finishing version" concept — one project-native mechanism,
+  not a second one.
+
+### STAGE 10 — Audio Join interaction (exact order)
+
+```
+1. Adjacent-take continuity gain (Stage 3)  -- per-segment audio_volume,
+   BEFORE join composition (it is definitionally about the state of the
+   two takes at a join, before any join treatment smooths across it)
+2. Audio Join treatment (CLICK_FADE / SHORT_CROSSFADE / J_CUT / L_CUT /
+   MICRO_AUDIO_OVERLAP / ambience carry/bridge) -- UNCHANGED, whichever
+   is already authorized for that join
+3. Render (concat/mux) -- UNCHANGED
+4. Whole-video gain (Stage 2)                -- AFTER join composition,
+   on the real muxed output; a gain-only operation on already-finalized
+   audio cannot invalidate join timing (D-248 Stage 12, restated and now
+   given an exact position)
+5. Limiter (Stage 5)                          -- LAST
+6. Post-execution measurement (Stage 6/14)
+```
+
+This is identical to D-248 Stage 11/12's design, now made concrete with
+exact tool placement: the adjacent-take gain nudge is expressed as the
+SAME `audio_volume` value the join filter chain already consumes (Stage
+3), so it composes with whichever join treatment is authorized rather
+than competing with it — there is no separate "gain filter vs. join
+filter" ordering conflict to resolve, because they are the same filter
+chain slot.
+
+### STAGE 11 — Click/pop interaction
+
+The existing unconditional 12ms `afade` (`_AUDIO_JOIN_FADE_SEC = 0.012`,
+D-094.3/F14) is applied inside the SAME per-segment filter chain as
+`audio_volume` (`render.py`'s `_segment_command`/`_concat_render_command`
+apply `volume=<audio_volume>` and the fade in the same chain, per D-246's
+trace). Because `volume=` is a flat multiplier applied uniformly to the
+whole segment (including through the fade), **gain execution order
+relative to the fade does not matter for the fade's own click-safety
+property** — scaling a fade-in/fade-out ramp by a constant factor still
+produces a fade-in/fade-out ramp, just at a different level; it cannot
+reintroduce a click. **No new click policy is designed or required** —
+this section only records why the existing one keeps working unmodified.
+
+### STAGE 12 — Channel / sample-rate strategy
+
+**Design: measure and gain-plan pre-standardization (on the real source),
+execute the whole-video pass post-standardization (on the real delivered
+48k/stereo signal).** This restates and makes exact D-248 Stage 16's
+already-established rule:
+- Per-segment/adjacent-take measurement (D-247) already runs on real
+  source files, independent of the renderer's later 48k/stereo
+  `aformat` standardization — a mono source's OWN native level is what
+  gets measured and corrected via `audio_volume`, never a level implicitly
+  altered by the later stereo up-mix.
+- The whole-video gain/limiter pass necessarily operates on the actual
+  delivered file (already 48k/stereo by the time Level-2 measurement/
+  execution would run), which is correct and intentional — Level 2's job
+  is to finish the ACTUAL delivered signal, not a pre-standardization
+  proxy for it.
+- **Explicit invariant preserved, unchanged:** ffmpeg's default mono→stereo
+  `aformat` conversion duplicates the mono channel into both stereo
+  channels rather than mixing/summing (verified in D-248) — the
+  standardization step itself must never be mistaken for, or produce, an
+  unintended perceived-loudness change; nothing in this design touches or
+  needs to touch that behavior.
+
+### STAGE 13 — Failure modes (bounded vocabulary, design only)
+
+Project-native naming, matching the existing `*_STATUS_*`/`GAIN_STATE_*`
+convention:
+
+- `EXECUTION_STATUS_PLAN_NOT_EXECUTABLE` — `plan_status` was `ABSTAIN`/
+  `BLOCKED`/`UNKNOWN`; executor performed zero action by design, not by
+  accident.
+- `EXECUTION_STATUS_MEASUREMENT_REFERENCE_MISSING` — the plan's
+  `measurement_reference` is absent/malformed; cannot safely proceed.
+- `EXECUTION_STATUS_INVALID_GAIN` — a gain value outside any sane bound
+  (e.g. non-finite, or a magnitude the policy layer could never have
+  produced given the ±6dB envelope) reached the executor — a structural
+  defense against a corrupted/tampered plan, not an expected runtime path.
+- `EXECUTION_STATUS_PEAK_SAFETY_UNVERIFIED` — Stage 6's post-execution
+  true-peak re-measurement itself failed/was unavailable (distinct from
+  the plan's own pre-execution `peak_evidence_source`) — never treated as
+  "probably fine."
+- `EXECUTION_STATUS_FFMPEG_FAILURE` — the DSP subprocess itself returned
+  nonzero/produced no output, matching `_run`'s existing never-raise,
+  caller-decides convention (D-247/D-028).
+- `EXECUTION_STATUS_POST_VERIFY_OUT_OF_POLICY` — DSP ran, produced output,
+  but Stage 6's re-measurement shows the delivered file still outside the
+  canonical loudness band or over the true-peak ceiling — a genuine
+  execution-quality failure, feeding Stage 15's bounded retry.
+- `EXECUTION_STATUS_OUTPUT_MISSING` — the expected output path does not
+  exist after a claimed-successful ffmpeg run — a decode-integrity-style
+  literal check (D-028 precedent), not inferred from a return code alone.
+- `EXECUTION_STATUS_OTHER` — an explicitly-named escape hatch for a
+  genuinely unanticipated condition; never silently mapped to a
+  false-success state.
+
+No state here authorizes a silent fallback to "ship it anyway."
+
+### STAGE 14 — Post-execution verification (design)
+
+After a future executor runs, re-run **exactly** the D-247 measurement
+(`measure_audio`) against the real output file and compare against the
+same six canonical values, producing a SEPARATE verification result
+object (not merged into or replacing the render's existing
+`PostRenderQCResult`/`LiveRenderQCResult` verdict — Stage 16 of D-249, and
+this gate's own "no QC authority change," both still bind):
+
+```
+ExecutionVerificationResult:
+  output_measurement            # a real AudioFinishingMeasurement of the actual output
+  loudness_in_range: bool       # within [-15.0, -13.0] LUFS
+  true_peak_within_ceiling: bool
+  audio_present: bool
+  duration_preserved: bool      # matches pre-execution duration within tolerance
+  channel_sample_rate_expected: bool
+  verification_status: str      # PASS | POLICY_OUT_OF_RANGE | TECHNICAL_FAILURE
+```
+
+This is deliberately a NEW, additive object — current QC remains
+authoritative for PASS/FAIL delivery exactly as D-249 Stage 16 already
+established; this result is diagnostic until a future, separately-scoped
+gate (never this one) decides whether/how it becomes delivery-blocking.
+
+### STAGE 15 — Retry contract
+
+**One deterministic retry, maximum, permitted only when Stage 14's
+`verification_status == POLICY_OUT_OF_RANGE`.**
+
+- **What may change on retry:** only re-deriving the gain/limiter
+  parameters from the ACTUAL post-first-attempt measurement (i.e., treat
+  the first attempt's real output as a new, real `AudioFinishingMeasurement`
+  and run it back through the UNCHANGED D-249 policy functions to get a
+  second, corrective plan) — never a hand-tuned "try harder" heuristic,
+  never a second, different numeric envelope.
+- **What must remain fixed:** all six canonical values (unchanged), the
+  ±6dB max-automatic-gain envelope (applied fresh each time, never
+  compounded across attempts beyond its own bound), and the executor's
+  own architecture (Stages 1-13 unchanged on retry).
+- **No new numeric retry tolerance is invented.** The existing
+  `LOUDNESS_TOLERANCE_LU`/`TRUE_PEAK_CEILING_DBTP` ARE the retry's success
+  criteria — there is no separate "retry tolerance" concept needed.
+- If a second attempt still fails verification: STOP, report
+  `POST_VERIFY_OUT_OF_POLICY` as a terminal state, route to human review —
+  never a third automatic attempt, and never a silent acceptance.
+
+No numeric policy value is invented for this contract — flagged as
+`NOT_REQUIRED` in Stage 21's decision table below, not
+`PRODUCT_OWNER_DECISION_REQUIRED`, since the existing six values already
+fully define "acceptable" for the retry's own purposes.
+
+### STAGE 16 — Render integration (V1 recommendation)
+
+**Selected: B — a separate post-render finishing pass**, NOT folding
+finishing filters into `render.py`'s existing concat filtergraph (option
+A), for V1.
+
+Rationale (compared explicitly):
+- **Timing safety:** A is riskier — `render.py`'s existing concat
+  filtergraph is a proven, frame-exact, single-pass contract (D-097.2's
+  "renderer rebuilt as one gapless pass" achievement); inserting a
+  whole-video gain/limiter stage into that SAME graph risks perturbing
+  the exact timing math multiple prior D-097.x gates fought hard to
+  stabilize. B keeps that graph completely untouched.
+- **Complexity:** B is simpler to reason about and test in isolation — a
+  finishing pass takes one input file and one plan and produces one
+  output file, independent of anything about how the input was produced.
+- **Traceability:** B makes Stage 9's idempotence marker trivial to attach
+  (one clear "before finishing" / "after finishing" file pair); folding
+  into A would require threading finishing state through the existing
+  render-plan/segment machinery, a materially larger surface.
+- **Failure isolation:** B means a finishing failure (Stage 13) never
+  corrupts or blocks the underlying EDIT render, which remains valid and
+  deliverable on its own even if finishing fails — directly serving this
+  gate's own "no render output change" instruction for THIS gate, and a
+  strong safety property for the eventual executor too.
+- **Performance:** A would save one decode/encode pass; B costs one
+  additional full encode. Stage 19 prices this explicitly and judges it
+  acceptable for V1 commercial scale.
+- **Future denoise/hum compatibility:** B generalizes cleanly — any future
+  P2 capability (denoise, hum removal, compression) slots into the SAME
+  separate pass without ever touching the edit-render graph again; A
+  would need to keep re-opening that graph for every future capability.
+
+**C (hybrid) was considered** (e.g., baking Stage 3's per-segment gain
+into the edit render, since it already reuses the existing
+`audio_volume` field, while keeping Stage 2/5's whole-video gain+limiter
+as a separate B-style pass) — **this is in fact the actual selected
+design**, since Stage 3 already established per-segment gain as a
+same-graph, same-field change (zero new pass) while Stage 2/5/6 are a
+genuinely separate post-render pass. Labeling it precisely: **B for the
+whole-video/limiter stage, a same-graph field-value change (not a new
+pass) for the per-segment stage** — not a third ffmpeg invocation, just
+the existing render consuming an `audio_volume` the plan happened to
+compute.
+
+### STAGE 17 — Finishing contract owner (no duplicate authorities)
+
+**`finishing_contract.py` (D-024) becomes the natural home for a future
+`FinishingProvider` implementation that WRAPS this design's executor** —
+its existing `FinishingSpec`/`FinishingResult`/`FinishingProvider` shape
+(`target_loudness_lufs`, `true_peak_ceiling_dbtp`, `status`,
+`output_path`, `decode_verified`, `detail`) already matches almost
+exactly what Stage 14/18 need, and its own binding docstring ("operates
+strictly after Selection Freeze and Boundary/Render... never mutates
+semantics... only prepares the already-final rendered file for delivery")
+is precisely this design's own scope. **No change to `finishing_contract.py`
+is made or proposed by this docs-only gate** — this section only records
+the intended future relationship:
+
+```
+audio_finishing_measurement.py   -- MEASUREMENT (unchanged, D-247)
+audio_finishing_policy.py        -- POLICY + PLAN (unchanged, D-249)
+[future executor module]         -- EXECUTION (designed here, D-250; not built)
+        implements
+finishing_contract.FinishingProvider   -- the durable D-024 interface
+                                            this design's executor would
+                                            eventually satisfy
+render.py                        -- UNCHANGED; produces the edit render
+                                     the executor's separate pass (Stage 16)
+                                     consumes as input
+post_render_media_qc.py          -- UNCHANGED; existing physical QC stays
+                                     authoritative for PASS/FAIL; Stage 14's
+                                     result is additive, never merged in
+```
+
+No duplicate authority is created: measurement stays the single source of
+real numbers, policy stays the single source of the gain/limiter
+decision, a future executor would be the single place that decision is
+turned into ffmpeg, and `finishing_contract.py` stays the single
+already-agreed interface shape that executor would implement — one
+executor, one interface, never two.
+
+### STAGE 18 — Audit / provenance schema (design)
+
+```
+AudioFinishingExecutionRecord:
+  input_measurement          # the real pre-execution AudioFinishingMeasurement
+  policy_version              # from the AudioFinishingPlan
+  plan_id                      # a stable identifier for this specific plan
+                                # (e.g. a hash of its own contents + input
+                                # measurement provenance -- Stage 9's marker)
+  requested_whole_video_gain_db
+  authorized_whole_video_gain_db
+  segment_adjustments          # the applied AdjacentTakeAdjustment set
+  limiter_authorized: bool
+  filters_actually_used        # e.g. ["volume", "alimiter"] -- structured
+                                # tokens, not a raw command line
+  output_measurement           # the real post-execution AudioFinishingMeasurement (Stage 6)
+  verification_status          # Stage 14's ExecutionVerificationResult status
+  execution_status              # Stage 13's EXECUTION_STATUS_*
+  errors
+  provenance                    # tool versions, timestamps, code/commit
+                                 # fingerprint -- D-095's traceability discipline
+```
+
+**Raw ffmpeg stderr is explicitly NOT the canonical contract** — it may be
+captured and attached under `provenance` for human debugging (matching
+`post_render_media_qc._run`'s existing "combined stdout+stderr, never
+raises" pattern), but every field a caller or a future QC gate reasons
+about is a structured, typed value derived FROM that output, never the
+raw text itself.
+
+### STAGE 19 — Performance / scale (estimate, no infrastructure change)
+
+- **Extra ffmpeg pass count per finished video (V1 design):** the edit
+  render is unchanged (0 extra passes there, Stage 16's per-segment gain
+  is a field value, not a pass); the finishing pass adds exactly ONE
+  additional encode pass (Stage 2/5's whole-video gain+limiter) plus ONE
+  additional lightweight measurement-only pass (Stage 6/14's
+  verification, reusing D-247's already-cheap ffmpeg filter-only
+  invocations, no re-encode). A retry (Stage 15, bounded to one) would at
+  most double the finishing pass's own cost, never the edit render's.
+- **CPU cost:** one additional `libx264`-class encode is the dominant new
+  cost (comparable to the edit render's own encode, since finishing
+  outputs a full video file); the verification pass is comparatively
+  cheap (filter-only, no video re-encode needed — audio stream analysis
+  only).
+- **I/O cost:** one additional full video file write per finished video
+  (the finishing pass's output), plus the temporary input read (the edit
+  render's own output).
+- **Temp storage:** the finishing pass's output should be treated as a
+  distinct artifact from the edit render's own output until verification
+  passes (Stage 6), so peak temporary storage per job is roughly 2x one
+  video's size during that window — bounded and per-job (Stage 20), not
+  unbounded.
+- **Concurrency pressure:** adding one more encode pass per job
+  increases total CPU-seconds per job by roughly the same order as the
+  edit render itself — a real, non-trivial increase at commercial
+  multi-user scale, but bounded and predictable (no new unbounded loop is
+  introduced; the bounded-retry contract, Stage 15, caps the worst case
+  at 2x this pass's own cost).
+- **Can measurement + correction + verification reuse decode work?** Only
+  partially: the finishing pass necessarily re-encodes video (even if
+  filtered only on audio, `-c:v` still needs a decode/encode round-trip
+  unless the executor design explicitly uses stream-copy on the video
+  track, `-c:v copy`, while only re-encoding audio — **this is the
+  concrete, low-risk optimization a future D-251+ implementation should
+  adopt**: copy video, filter+re-encode only the audio stream, which
+  avoids the video encode cost entirely for the finishing pass). This
+  gate records the opportunity; it does not implement it.
+- **Is a separate post-render pass acceptable for V1?** Yes, given the
+  `-c:v copy` optimization above keeps the added cost audio-encode-sized,
+  not full-video-encode-sized, for the common case.
+
+No infrastructure change is proposed or required by this analysis.
+
+### STAGE 20 — Security / isolation (design requirements)
+
+- **Explicit file paths from internal render jobs only** — the future
+  executor's input/output paths must always be derived from the calling
+  job's own already-validated paths (the same convention every existing
+  `_run`/`subprocess.run` call site in this codebase already follows —
+  D-247/D-028's own `_run` helpers take a `list[str]` args array, never a
+  shell string).
+- **No shell string construction** — every ffmpeg invocation must remain
+  an argument list (`subprocess.run([...], shell=False)` implicitly, by
+  never opting into `shell=True`), exactly matching every existing
+  `_run` helper in this codebase.
+- **Per-job temp/output isolation** — the finishing pass's intermediate
+  and output files must live under the SAME per-job working directory
+  convention the render pipeline already uses (never a shared/global temp
+  path), so two concurrent jobs can never collide.
+- **No cross-job artifact reuse** — Stage 9's idempotence marker is keyed
+  to a specific input+plan pair; it must never be interpreted as "any
+  file with this marker is safe to skip," only "this exact file, already
+  verified against this exact plan."
+- **Deterministic, bounded filenames/paths** — output paths should be a
+  deterministic function of the job id and a fixed suffix (e.g.
+  `<job_id>_finished.mp4`), never a random/timestamp-only name that could
+  collide or complicate the idempotence check.
+
+No implementation is made; these are binding design requirements for
+whichever future gate builds the executor.
+
+### STAGE 21 — V1 execution strategy (final selection)
+
+**Selected: A — PER-SEGMENT BOUNDED GAIN PRE-CONCAT + WHOLE-VIDEO BOUNDED
+GAIN POST-CONCAT + LIMITER IF AUTHORIZED + POST-MEASUREMENT VERIFY** —
+exactly as named in this gate's own Stage 21 options, and consistent with
+every stage above: Stage 3 (pre-concat per-segment), Stage 2 (post-concat
+whole-video), Stage 5 (limiter last, conditional), Stage 6/14
+(post-execution real re-measurement, never trusted blindly from
+configuration). B (loudnorm-based mastering) and C (as separately named
+in the option list, a monolithic "separate post-render full finishing
+pass" with no per-segment/whole-video split) are both subsumed/rejected
+by the more precise design above (Stage 7/16 already explain exactly
+why). D (hybrid) is, in the precise sense recorded in Stage 16, what
+option A actually is once the per-segment/post-concat split is made
+explicit — A is the correct, precise name for the selected strategy.
+
+**Why A:** it is the only option that (1) never re-derives a decision the
+policy layer already made deterministically (rules out B), (2) keeps the
+proven, frame-exact edit-render graph completely untouched (favors the
+per-segment-field-value + separate-whole-video-pass split over folding
+everything into one monolithic pass), (3) makes the limiter strictly
+conditional and last (never a default), and (4) never claims safety
+without re-measuring the real output (Stage 6) — every property this
+entire gate's stages independently converged on.
+
+### STAGE 22 — What D-251 should implement (design only, not authorized)
+
+**D-251 — Audio Finishing Executor Foundation, offline, synthetic media
+only** (not implemented by this gate): the smallest safe next step is a
+standalone function that (a) accepts one real `AudioFinishingPlan` plus
+its already-rendered input file, (b) applies ONLY the whole-video gain +
+optional limiter (Stage 2/5) as a SEPARATE output file (Stage 16, `-c:v
+copy` per Stage 19's optimization), (c) re-measures the real output
+(Stage 6), (d) returns a structured `ExecutionVerificationResult` (Stage
+14) — explicitly EXCLUDING per-segment/adjacent-take execution (Stage 3,
+which touches the edit-render's own `RenderSegment.audio_volume` field
+and is architecturally a different integration point, better suited to
+its own later gate) and EXCLUDING any live pipeline wiring. Tested
+exclusively against locally-generated synthetic fixtures (the same
+convention as D-247/D-249), never real RAW media. D-250 does not
+implement any part of this.
+
+### VERDICT
+
+**A. AUDIO FINISHING EXECUTION ARCHITECTURE DEFINED — SAFE DETERMINISTIC
+V1 STRATEGY SELECTED — READY FOR SYNTHETIC EXECUTOR IMPLEMENTATION.**
+
+**Confirmation.** Design/forensic only. No `.py` production file changed.
+No media mutated. No RAW launched. No provider introduced. No canonical
+numeric value altered — the six D-249 values are used exactly as-is
+throughout every stage above, and Stage 15's retry contract explicitly
+introduces zero new numeric tolerance. No policy change (D-249's
+`audio_finishing_policy.py` is read-only this gate). `docs/CUTSELL_DECISIONS.md`
+is the only file changed.
+
+Then STOP.
+
+DO NOT IMPLEMENT D-251. DO NOT LAUNCH RAW.
