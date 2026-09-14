@@ -76406,3 +76406,156 @@ DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
 DO NOT START CALIBRATION.
+
+## D-282A — Timeline API Authority / Storage Reference Hardening
+
+**Objective.** Post D-282. A narrow corrective closure of two API
+authority leaks D-282's own routes left open: (1) `POST /timeline-
+assets` accepted a client-supplied `source_uri` as trusted storage
+authority; (2) `POST /timeline/export`'s response returned the
+renderer's raw local `output_path`. D-277/D-278/D-279/D-280/D-281
+semantics, renderer, BestTake, Freeze, Boundary, Pacing, Audio Join,
+Audio Finishing, and Visual Finishing are all untouched.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `6836a5d` (exact expected
+match, D-282), clean tree -- confirmed before this gate began.
+`cutsell_app/timeline_routes.py`, `cutsell_worker/timeline_asset_
+upload_bridge.py`, `cutsell_worker/uploads.py`, the existing presigned-
+upload conventions (`uploads.create_presigned_upload`/`create_
+presigned_voice_over_upload`), the existing resumable-upload session
+pattern (`multipart_uploads.py`), and the existing remote-delivery
+pattern (`exports.py`/`tenant_safe_delivery.py`/`export_job.py`) were
+all inspected before designing the fix, per Stage 1's own instruction.
+
+### What was built
+
+**`cutsell_worker/timeline_upload_registration.py`** (new): closes leak
+1. Mirrors `multipart_uploads.py`'s own pre-existing Redis-backed,
+ownership-checked upload-session pattern for the single-PUT presigned-
+upload flow D-281's own B-roll/VO ingest already uses.
+`register_timeline_upload` mints an opaque `upload_id = f"tup_{uuid4()
+.hex}"` bound to the exact `{user_id, project_id, media_class}` that
+requested it, via an injectable `presign_upload` callable (the SAME
+`client=None`-style seam this codebase already uses for `persist_
+media`/`fetch_media`/`materialize`) that defaults to `uploads.py`'s own,
+completely unmodified, `create_presigned_upload`/`create_presigned_
+voice_over_upload`. `resolve_and_consume_timeline_upload` is the ONLY
+way a real `source_uri` is ever recovered: it re-checks ownership,
+project scope, and media class, and consumes the session exactly once
+(no replay). A client never supplies a filesystem path, S3 URI, bucket,
+or object key anywhere in this flow.
+
+**`cutsell_worker/timeline_export_reference.py`** (new): closes leak 2.
+`register_export_reference` mints an opaque `export_id = f"exp_{uuid4()
+.hex}"` mapping (Redis-backed, ownership-checked, short-lived) to the
+renderer's real local `output_path` -- the real path is never returned
+to any caller of this function's own return value, which is the id
+alone. `resolve_export_reference` is the ONLY way it is recovered. This
+is explicitly a LOCAL-artifact delivery reference matching this whole
+D-276..D-282 lineage's own "fake/local storage only" discipline, not a
+replacement for the existing real remote tenant-safe delivery path
+(`exports.py`/`tenant_safe_delivery.py`/`export_job.py`), which stays
+completely untouched -- a future gate wiring real S3 delivery can swap
+this reference's resolution target without changing the opaque
+`export_id` contract callers already depend on.
+
+**`cutsell_app/timeline_routes.py`** (modified, additive within this
+file only): `TimelineAssetCreateRequest.source_uri` replaced with
+`upload_id`; `create_timeline_asset` resolves it via `timeline_upload_
+registration` before calling D-282's own, completely unmodified,
+`timeline_asset_upload_bridge` ingest functions. New `POST /{project_
+id}/timeline-uploads` route (`request_timeline_upload`) is the only way
+a client learns where to PUT bytes. `TimelineExportResponse.output_path`
+replaced with `export_id`; `export_timeline` registers a reference
+instead of returning the path. New `GET /{project_id}/timeline/export/
+{export_id}/download` route (`download_timeline_export`) is the only
+way a client obtains the rendered artifact's bytes, ownership-checked
+via `_require_project` + `export_ref.resolve_export_reference`. A new,
+additive, route-local outcome mapping extends `_ROUTE_ERROR_STATUS`
+(`UPLOAD_NOT_FOUND`/`UPLOAD_NOT_OWNED`: 404 no-leak, `UPLOAD_MEDIA_
+CLASS_MISMATCH`: 422, `UPLOAD_ALREADY_CONSUMED`: 409, `EXPORT_
+REFERENCE_NOT_FOUND`/`EXPORT_REFERENCE_NOT_OWNED`: 404) -- D-279's and
+D-281's own error-vocabulary/status mappings are never modified.
+
+### Stage 10 audit (no code change)
+
+`cutsell_app/auth_middleware.AuthScopeMiddleware` (unmodified) already
+rejects any request whose body `user_id` differs from the bearer-
+resolved `auth_user_id` before a route handler ever runs -- audited and
+confirmed still governs both of D-282A's own new routes with zero
+redesign, per the directive's own "do not redesign all auth in this
+gate" instruction.
+
+### A defense-in-depth finding, not a defect
+
+Because this codebase's project model is single-owner, a genuine cross-
+user request against an EXISTING project is always denied by `_require_
+project` before either new resolver's own ownership check is ever
+reached (proven by the pre-existing `test_wrong_user_cannot_save_
+timeline`/`test_wrong_user_cannot_list_project_assets` pattern this
+gate's own tests follow). Both `resolve_and_consume_timeline_upload`
+and `resolve_export_reference` were additionally proven, at the module
+level (bypassing the project-ownership gate), to enforce user ownership
+on their own -- real defense in depth for any future multi-owner/
+shared-project model, not dead code.
+
+### New test file: `tests/test_cutsell_d282_timeline_api_bridge.py` (rewritten)
+
+The existing 24 D-282 tests were adapted to the new `upload_id`/
+`export_id` contract (a two-step `_authorize_upload`/`_create_asset`
+helper drives the fake `presign_upload` seam; no real S3/boto3 in this
+suite). 17 new tests added (41 total) proving: raw `source_uri` no
+longer accepted (422, Pydantic-rejected); `upload_id` is server-issued
+and opaque (`tup_` prefix, never the raw path); cross-user and cross-
+project upload reuse denied at the module level; VO/B-roll media-class
+mismatch denied both directions; replay of a consumed `upload_id`
+denied (409); unknown `upload_id`/`export_id` bounded 404; unknown
+`media_class` rejected by Pydantic; export response and schema never
+contain `output_path`; `export_id` round-trips through a real
+ownership-checked download route; wrong-user download denied; no `/tmp/
+`, `/mnt/`, `/var/`, `local://`, or `s3://` in any client-facing JSON
+across create/list/save/get/export; no real S3 mutation in either new
+module; auth-principal audit.
+
+### Verification run
+
+- New test file: **41 passed**, 0 failed (10.80s).
+- `compileall` over `cutsell_app/`, `cutsell_worker/`, `tests/`: clean.
+- Targeted regression subset (D-278/D-279/D-280/D-281/D-282 timeline +
+  multipart/auth/upload/project_store/account_lifecycle/main): **1249
+  passed, 7212 deselected**, 0 failed (116.60s).
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8451 passed, 10 skipped, 13 subtests passed, 0
+  failed** (440.81s) -- exactly D-282's own 8434-test baseline plus
+  this gate's net +17 new tests (41 new minus the 24 the rewrite
+  replaced), confirming zero regression anywhere else in the suite.
+
+### Verdict
+
+**A -- D-282A STORAGE/AUTHORITY HARDENING PROVEN -- NO CLIENT STORAGE
+AUTHORITY -- NO LOCAL EXPORT PATH LEAK -- BACKEND READY FOR CONTROLLED
+MOBILE INTEGRATION.**
+
+**Product Owner decision required:** NO for this gate's own scope
+(same open item as D-282: the controlled `cutsell/mobile-v1-clean`
+integration plan itself, escalation condition G).
+
+**Exact next step:** unchanged from D-282's own recommendation -- a
+controlled, explicit integration step onto `cutsell/mobile-v1-clean`
+(never automatic) bringing in this now-hardened backend surface
+(five asset/timeline routes plus the two new upload-authorization/
+export-download routes) without disturbing existing iOS work or the
+`9f97531` reconciliation question, followed by the Mobile V1 Timeline
+UI gate itself.
+
+**Decision entry reference:** this entry (D-282A).
+
+Then STOP.
+
+DO NOT SWITCH BRANCHES.
+DO NOT MERGE.
+DO NOT REBASE.
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT START CALIBRATION.

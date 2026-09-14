@@ -28,6 +28,26 @@ DURABLE_DIR` environment variable -- no silent tempdir default (D-281's
 own Stage 34 invariant, restated at the API layer). Tests set this to a
 `tmp_path`-backed fake/local durable directory; no real S3 mutation
 happens anywhere in this module.
+
+## D-282A -- storage/authority hardening (additive to this file only)
+
+Two authority leaks D-282A closes, both entirely within this route layer
+(D-277/D-278/D-279/D-280/D-281 semantics are untouched):
+
+1. `POST /timeline-assets` no longer accepts a client-supplied
+   `source_uri`. The client first calls `POST /timeline-uploads` (this
+   file's own new route) to obtain an opaque, server-issued `upload_id`
+   bound to its exact user/project/media_class (`cutsell_worker.
+   timeline_upload_registration`, mirroring the pre-existing `multipart_
+   uploads.py` session pattern); ingest then resolves that `upload_id`
+   into the real storage reference SERVER-SIDE and consumes it exactly
+   once. A raw storage reference never appears in an ingest request body.
+
+2. `POST /timeline/export`'s response no longer contains `output_path`
+   (a raw local filesystem path). It returns an opaque `export_id`
+   (`cutsell_worker.timeline_export_reference`) instead; the client
+   fetches the rendered artifact through this file's own new, ownership-
+   checked `GET /timeline/export/{export_id}/download` route.
 """
 from __future__ import annotations
 
@@ -35,6 +55,7 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 
 from cutsell_worker import timeline_asset_registry as reg
@@ -42,17 +63,25 @@ from cutsell_worker import timeline_asset_registry_store as store
 from cutsell_worker import timeline_asset_upload_bridge as bridge
 from cutsell_worker import timeline_composition as tc
 from cutsell_worker import timeline_composition_executor as tce
+from cutsell_worker import timeline_export_reference as export_ref
+from cutsell_worker import timeline_upload_registration as upload_reg
 from cutsell_worker.project_store import get_project
 
 router = APIRouter(prefix="/v1/projects", tags=["timeline"])
 
 BASE_EDIT_ASSET_MISMATCH = "BASE_EDIT_ASSET_MISMATCH"
 
-# Stage 28: this route's own single additive outcome beyond D-279's 8 --
-# never added to D-281's own `store.SERVICE_ERROR_STATUS` (which stays
+# Stage 28: this route's own additive outcomes beyond D-279's 8 -- never
+# added to D-281's own `store.SERVICE_ERROR_STATUS` (which stays
 # untouched), kept local to this route layer instead.
 _ROUTE_ERROR_STATUS: dict[str, int] = {
     BASE_EDIT_ASSET_MISMATCH: 409,
+    upload_reg.UPLOAD_NOT_FOUND: 404,
+    upload_reg.UPLOAD_NOT_OWNED: 404,
+    upload_reg.UPLOAD_MEDIA_CLASS_MISMATCH: 422,
+    upload_reg.UPLOAD_ALREADY_CONSUMED: 409,
+    export_ref.EXPORT_REFERENCE_NOT_FOUND: 404,
+    export_ref.EXPORT_REFERENCE_NOT_OWNED: 404,
 }
 
 
@@ -77,11 +106,36 @@ def _persist_media():
 # Request/response models (Stage 25/26/27)
 # =============================================================================
 
+class TimelineUploadAuthorizationRequest(BaseModel):
+    user_id: str
+    media_class: str
+    original_name: str
+    content_type: str | None = None
+    size_bytes: int = Field(gt=0)
+
+    @field_validator("media_class")
+    @classmethod
+    def _valid_media_class(cls, value: str) -> str:
+        if value not in (upload_reg.MEDIA_CLASS_VIDEO, upload_reg.MEDIA_CLASS_VOICE_OVER):
+            raise ValueError(f"unknown media_class: {value!r}")
+        return value
+
+
+class TimelineUploadAuthorizationResponse(BaseModel):
+    upload_id: str
+    method: str
+    upload_url: str
+    fields: dict[str, str] = Field(default_factory=dict)
+    content_type: str | None = None
+    max_bytes: int | None = None
+    expires_in: int
+
+
 class TimelineAssetCreateRequest(BaseModel):
     user_id: str
     role: str
     media_kind: str
-    source_uri: str
+    upload_id: str
     replaces_asset_id: str | None = None
 
     @field_validator("role")
@@ -180,7 +234,7 @@ class TimelineExportRequest(BaseModel):
 
 class TimelineExportResponse(BaseModel):
     outcome: str
-    output_path: str | None = None
+    export_id: str | None = None
     format_qc_status: str | None = None
     reasons: list[str] = Field(default_factory=list)
 
@@ -233,24 +287,63 @@ def _asset_to_response(asset: reg.TimelineMediaAsset) -> TimelineAssetResponse:
     return TimelineAssetResponse(**view)
 
 
+def _media_class_for(*, role: reg.TimelineAssetRole, media_kind: reg.TimelineMediaKind) -> str:
+    """Stage 4/5/8/9: the SAME branch `create_timeline_asset` already used
+    to pick B-roll vs. voice-over ingest now also decides which
+    `media_class` an `upload_id` must have been issued for -- a client
+    cannot authorize a video upload and then consume it as a voice-over
+    asset (or vice versa)."""
+    if media_kind == reg.TimelineMediaKind.AUDIO or role == reg.TimelineAssetRole.VOICE_OVER:
+        return upload_reg.MEDIA_CLASS_VOICE_OVER
+    return upload_reg.MEDIA_CLASS_VIDEO
+
+
 # =============================================================================
 # Routes
 # =============================================================================
+
+@router.post("/{project_id}/timeline-uploads", response_model=TimelineUploadAuthorizationResponse)
+def request_timeline_upload(project_id: str, payload: TimelineUploadAuthorizationRequest):
+    """D-282A Stage 1-3: the ONLY way a client ever learns where to PUT
+    bytes. Returns an opaque `upload_id` bound to this exact user/project/
+    media_class -- never a value the client can later swap for a
+    different one at ingest time."""
+    _require_project(user_id=payload.user_id, project_id=project_id)
+    try:
+        authorization = upload_reg.register_timeline_upload(
+            project_id=project_id, user_id=payload.user_id, media_class=payload.media_class,
+            original_name=payload.original_name, content_type=payload.content_type,
+            size_bytes=payload.size_bytes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    return TimelineUploadAuthorizationResponse(**authorization)
+
 
 @router.post("/{project_id}/timeline-assets", response_model=TimelineAssetResponse)
 def create_timeline_asset(project_id: str, payload: TimelineAssetCreateRequest):
     _require_project(user_id=payload.user_id, project_id=project_id)
     role = reg.TimelineAssetRole(payload.role)
     media_kind = reg.TimelineMediaKind(payload.media_kind)
+    expected_media_class = _media_class_for(role=role, media_kind=media_kind)
     try:
-        if media_kind == reg.TimelineMediaKind.AUDIO or role == reg.TimelineAssetRole.VOICE_OVER:
+        source_uri = upload_reg.resolve_and_consume_timeline_upload(
+            upload_id=payload.upload_id, user_id=payload.user_id, project_id=project_id,
+            expected_media_class=expected_media_class,
+        )
+    except upload_reg.TimelineUploadResolutionError as exc:
+        _bounded_error(exc.outcome)
+    try:
+        if expected_media_class == upload_reg.MEDIA_CLASS_VOICE_OVER:
             asset = bridge.ingest_voice_over_asset_from_upload(
-                user_id=payload.user_id, project_id=project_id, source_uri=payload.source_uri,
+                user_id=payload.user_id, project_id=project_id, source_uri=source_uri,
                 persist_media=_persist_media(), replaces_asset_id=payload.replaces_asset_id,
             )
         else:
             asset = bridge.ingest_broll_asset_from_upload(
-                user_id=payload.user_id, project_id=project_id, role=role, source_uri=payload.source_uri,
+                user_id=payload.user_id, project_id=project_id, role=role, source_uri=source_uri,
                 persist_media=_persist_media(), normalization_output_dir=_durable_media_dir(),
             )
     except RuntimeError as exc:
@@ -368,8 +461,15 @@ def export_timeline(project_id: str, payload: TimelineExportRequest):
     if isinstance(result, tce.CompositionExecutionResult):
         if result.outcome not in (tce.COMPOSITION_SUCCEEDED, tce.BASE_ONLY_BYPASS):
             _bounded_error(result.outcome, tuple(result.errors))
+        # D-282A Stage 7/8: the real local artifact path is registered
+        # server-side and NEVER placed in this response -- only the
+        # opaque reference the client uses with the download route below.
+        export_id = export_ref.register_export_reference(
+            user_id=payload.user_id, project_id=project_id, local_output_path=result.output_path,
+            format_qc_status=result.diagnostics.get("format_qc_status"),
+        )
         return TimelineExportResponse(
-            outcome=result.outcome, output_path=result.output_path,
+            outcome=result.outcome, export_id=export_id,
             format_qc_status=result.diagnostics.get("format_qc_status"),
         )
     if isinstance(result, reg.TimelineExportRequestResult):
@@ -379,3 +479,22 @@ def export_timeline(project_id: str, payload: TimelineExportRequest):
     outcome = getattr(result, "outcome", "OTHER")
     reasons = getattr(result, "reason_codes", None) or getattr(result, "errors", ())
     _bounded_error(outcome, tuple(reasons))
+
+
+@router.get("/{project_id}/timeline/export/{export_id}/download")
+def download_timeline_export(project_id: str, export_id: str, user_id: str):
+    """D-282A Stage 8/9: the ONLY way a client ever obtains the rendered
+    artifact's bytes -- an ownership-checked local passthrough (this
+    whole D-276..D-282 lineage's own 'fake/local storage only' discipline,
+    Stage: never a real S3 mutation in this gate). A future gate wiring
+    real remote tenant-safe delivery swaps this route's own internals
+    without changing the opaque `export_id` contract callers already
+    depend on."""
+    _require_project(user_id=user_id, project_id=project_id)
+    try:
+        record = export_ref.resolve_export_reference(
+            export_id=export_id, user_id=user_id, project_id=project_id,
+        )
+    except export_ref.ExportReferenceResolutionError as exc:
+        _bounded_error(exc.outcome)
+    return FileResponse(record["local_output_path"], media_type="video/mp4")
