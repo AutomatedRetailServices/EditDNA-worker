@@ -466,7 +466,10 @@ def test_no_second_normalization_pass(asymmetric_landscape_mp4, tmp_path):
 @pytest.mark.parametrize("field,action", [
     ("hdr_action", snp.ACTION_HDR_PQ_TO_SDR_BT709),
     ("hdr_action", snp.ACTION_HDR_HLG_TO_SDR_BT709),
-    ("codec_action", snp.ACTION_HEVC_TO_H264),
+    # D-274C Stage 8: ACTION_HEVC_TO_H264 is now IMPLEMENTED (see
+    # tests/test_cutsell_d274c_hevc_capability_and_normalization.py) and
+    # legitimately removed from this "still unsupported" matrix -- self-
+    # resolving guard, same pattern as D-272B's own precedent.
     ("bit_depth_action", snp.ACTION_TEN_BIT_TO_EIGHT_BIT),
     ("pixel_format_action", snp.ACTION_PIXEL_FORMAT_TO_YUV420P),
 ])

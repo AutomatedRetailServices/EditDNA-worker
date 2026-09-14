@@ -73002,3 +73002,192 @@ Then STOP.
 
 DO NOT IMPLEMENT NEXT GATE.
 DO NOT LAUNCH RAW.
+
+## D-274C — Production HEVC Capability + HEVC→H264 Normalization (offline implementation + runtime-capability foundation)
+
+**Objective.** Post D-274B. Establish a typed production-truth HEVC
+capability contract and implement HEVC SDR → canonical H264 normalization
+using the existing D-274 architecture. No live worker activation, no
+HDR/10-bit execution, no RAW/provider/paid compute.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `e8f71c6` (exact expected
+match, D-274B), clean tree -- confirmed before this gate began.
+
+### Stages 1-4 -- production capability contract + mechanism
+
+New module `cutsell_worker/production_runtime_capability.py`: typed
+`ProductionRuntimeCapability` (`hevc_decoder_available`, `h264_encoder_
+available`, `ffmpeg_version`, `capability_source`, `production_
+verification_status`, `errors`). Reuses -- never duplicates -- D-271's
+own bounded, real-subprocess `capture_local_ffmpeg_capability` mechanism
+(Stage 3's own "use ffmpeg decoder listing... do not infer capability
+merely because ffmpeg executable exists" satisfied by construction, since
+this IS that same real-decoder/encoder-listing mechanism, never a
+presence check). Two capture entry points share the identical mechanism
+and differ only in their honest label: `capture_local_sandbox_capability_
+for_testing` (`CAPABILITY_SOURCE_LOCAL_SANDBOX`) and `capture_production_
+worker_capability` (`CAPABILITY_SOURCE_PRODUCTION_STARTUP_SELF_CHECK`,
+the function a real worker startup sequence would call). H264 encoder
+availability (Stage 4) is captured via the same snapshot's own
+`libx264_present` field -- no fallback encoder is ever introduced
+anywhere in this module or the executor.
+
+### Stage 1's own honest disclosure -- no production verification performed
+
+Inspected `worker/container image definitions, Dockerfiles, runtime
+startup code`: `Dockerfile.cutsell.worker` installs ffmpeg via plain
+`apt-get install ffmpeg` on top of `madiator2011/better-pytorch:cuda12.4-
+torch2.6.0`; `rq_worker.py`'s own `run_worker()` (invoked from
+`entrypoint.sh`) is the exact existing worker-process startup seam Stage
+2 asked to be identified. This gate does NOT build or run that CUDA-based
+production image (pulling/building it is itself heavy, network- and
+disk-intensive work this gate's own "offline implementation" and "no
+paid compute" banners do not authorize, and no live worker dispatch is
+authorized either) -- so `production_verification_status` NEVER becomes
+`PRODUCTION_CAPABILITY_ESTABLISHED` anywhere in this gate's own code or
+tests; every real capture (sandbox or "production-labelled") returns
+`PRODUCTION_CAPABILITY_NOT_YET_ESTABLISHED`. Neither `rq_worker.py` nor
+`entrypoint.sh` is modified -- Stage 2's own "determine the seam" is
+satisfied by identification and documentation, not by wiring.
+
+### Stage 6 -- fail-closed bridge into D-272's RuntimeCapabilityInput
+
+`bridge_to_runtime_capability_input(capability) -> sfp.RuntimeCapability
+Input` maps `hevc_decoder_available` -> `hevc_decode_confirmed` ONLY when
+`production_verification_status == PRODUCTION_CAPABILITY_ESTABLISHED` --
+enforced in code, not left to caller discipline (Stage 1's own "capability
+must represent the ACTUAL worker runtime"). Since no capture path in this
+gate ever produces `ESTABLISHED`, every real bridge call this gate
+performs yields `hevc_decode_confirmed=False`. The WIRING itself is still
+structurally proven (mirroring D-272B's own Stage 7 precedent): one test
+simulates an `ESTABLISHED` capability at the test level (never a code
+change) and confirms the bridge then correctly threads `True` through to
+D-272. `av1_decode_confirmed` is never asserted by this bridge (Stage 6's
+own scope discipline), regardless of what the sandbox's own ffmpeg build
+supports.
+
+### Stage 8 -- executor support, minimal by design
+
+`cutsell_worker/source_normalization_executor.py`'s own `_UNSUPPORTED_
+ACTIONS` set: `ACTION_HEVC_TO_H264` removed (now implemented). Zero other
+code change was needed to actually EXECUTE HEVC normalization -- the
+generic command construction already decodes whatever the source's real
+codec is and encodes to the plan's own canonical target (`libx264`), so
+enabling HEVC input required only removing the entry that pre-emptively
+rejected it.
+
+### Stages 10-11 -- HDR / 10-bit firewall, satisfied for free
+
+D-274A's own plan builder independently sets `codec_action=HEVC_TO_H264`
+AND `hdr_action`/`bit_depth_action` on the SAME plan for a real HEVC+HDR
+or HEVC+10-bit source (D-272B's own Stage 6 multi-action composition,
+confirmed still true). Since `ACTION_HDR_PQ_TO_SDR_BT709`, `ACTION_HDR_
+HLG_TO_SDR_BT709`, and `ACTION_TEN_BIT_TO_EIGHT_BIT` all REMAIN in `_
+UNSUPPORTED_ACTIONS` (never touched by this gate), the pre-existing
+Stage-37 unsupported-action pre-check already rejects any HEVC+HDR or
+HEVC+10-bit plan before any ffmpeg call -- Stage 11's own recommended
+"Option A: explicitly keep HEVC 10-bit SDR unsupported until D-274D" is
+satisfied with ZERO additional code, confirmed via a REAL 10-bit HEVC
+fixture (libx265, `yuv420p10le`) whose plan carries both actions and is
+correctly rejected. Dolby Vision remains D-274A's own pre-existing
+`unsupported=True` branch, confirmed unaffected.
+
+### Stage 4/21 -- H264 encoder pre-check, additive and optional
+
+`execute_source_normalization` gained an optional, keyword-only `codec_
+capability: ProductionRuntimeCapability | None = None` parameter
+(defaulting to `None` for full backward compatibility with every pre-
+D-274C call site/test). When supplied AND the plan requests `HEVC_TO_
+H264`, `h264_encoder_available=False` is rejected with the new `
+NORMALIZATION_CODEC_UNAVAILABLE` failure category (D-274A's own pre-
+declared, previously-unused constant) BEFORE any ffmpeg call. When
+omitted, behavior is byte-identical to D-274B.
+
+### Stages 12-19 -- real HEVC fixtures, full contract proven
+
+Built genuine `libx265`-encoded HEVC fixtures (this sandbox's ffmpeg has
+both `libx265` encode and native `hevc` decode) and ran them through the
+REAL D-271→D-272→D-274A→D-274C chain: SDR 8-bit HEVC MP4 (with and
+without audio) and HEVC MOV both normalize to canonical MP4/H264/yuv420p/
+8-bit and re-evaluate to `DECISION_ACCEPT`; a genuine asymmetric-marker
+HEVC+ROTATE_90 composition proves real pixel-level rotation correctness
+on HEVC input (dims swap 320x240->240x320, TL marker moves to TR); a
+genuine `-itsoffset`-shifted HEVC+TIMELINE_TO_ZERO composition proves
+start-time normalization; a genuine concat-built VFR HEVC fixture (24fps
++60fps segments, same D-274B technique, HEVC-encoded) proves HEVC+VFR_TO_
+CFR composition; a multi-action HEVC+rotation+timeline composition proves
+all three compose in one ffmpeg generation. Original source bytes proven
+unchanged (SHA-256); normalized hash computed from actual promoted bytes.
+
+### Verification run
+
+- New `tests/test_cutsell_d274c_hevc_capability_and_normalization.py`:
+  **37 passed** -- capability contract/mechanism reuse/fail-closed bridge
+  (11 tests), D-272 policy matrix (confirmed/unknown/H264-unaffected),
+  plan bridge, HEVC MP4/MOV/no-audio/audio-preserved normalization,
+  reprobe+reevaluation+ACCEPT, original-preserved+hash, HEVC+rotation/
+  +timeline/+VFR/multi-action composition (real fixtures throughout), HDR-
+  PQ/HLG/Dolby-Vision/10-bit rejection before ffmpeg, H264-encoder-
+  unavailable pre-check, `codec_capability`-omitted backward-compat, no-
+  live-activation (`worker_job.py`/`rq_worker.py`/`entrypoint.sh`
+  source-scans), and the 5-file closed-track firewall.
+- D-274B's own test file: one self-resolving guard update (`test_
+  unsupported_action_rejected_before_ffmpeg`'s `HEVC_TO_H264` parametrize
+  entry removed -- now legitimately supported; same pattern as D-272B's
+  own precedent) -- re-verified green.
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- D-266 through D-274C targeted suites together: **620 passed, 0
+  failed.**
+- worker/renderer/finishing/delivery regression subset + CleanCutBench-
+  equivalent (same file set as D-274B's own verification, plus `test_
+  cutsell_d050c1_5_full_cleancutbench_parity.py`): **819 passed, 10
+  skipped, 0 failed.**
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: result recorded below once the run completes.
+
+### Canonical status update
+
+ROTATION/VFR/TIMELINE NORMALIZATION EXECUTOR = CLOSED (D-274B, unchanged).
+HEVC SDR NORMALIZATION = CLOSED at the offline/runtime-contract level --
+the capability contract, mechanism, fail-closed bridge, and executor
+support are all proven; PRODUCTION VERIFICATION of that capability inside
+the real deployed worker container remains explicitly, honestly OPEN (no
+docker build/run of the real image was authorized or attempted this
+gate). NORMALIZATION EXECUTION is further closed for SDR HEVC only.
+Remaining P0: HDR/10-bit normalization (D-274D), output format QC, live
+auto-normalization activation, REAL production capability verification
+(building/running the actual worker image, or capturing a genuine
+deployed-container startup log) -- this last item did not exist as an
+open P0 before this gate and is the gate's own honest addition to the
+list.
+
+### Verdict
+
+**B -- HEVC NORMALIZATION EXECUTOR PROVEN -- PRODUCTION RUNTIME CAPABILITY
+ACTIVATION GAP REMAINS.** Every offline mechanism (contract, capture,
+fail-closed bridge, plan bridge, executor support, HDR/10-bit firewall,
+H264-encoder pre-check, real HEVC fixture proof across rotation/VFR/
+timeline/multi-action) is built and proven correct. What remains
+unestablished -- deliberately, per this gate's own Stage 1 "do not use
+developer-sandbox capability as production truth" -- is genuine
+confirmation that the REAL deployed worker container actually reports
+`hevc_decoder_available=True`/`h264_encoder_available=True`; this gate
+could not (and per its own "no paid compute"/"no live activation" banners,
+should not) build or run that image to find out. This is Verdict B, not
+A, precisely because Verdict A's own "HEVC SDR MOBILE PATH SAFE" claim
+would overstate what was actually established this session.
+
+**Exact next gate:** D-274C-A -- Live Runtime Capability Activation (a
+Product Owner authorization call: either a controlled, disk-bounded
+offline build/inspection of the real worker image's ffmpeg layer, or
+wiring `capture_production_worker_capability` into `rq_worker.py`'s own
+`run_worker()` and confirming via a genuine deployed-container log).
+
+**Decision entry reference:** this entry (D-274C).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT GATE.
+DO NOT LAUNCH RAW.

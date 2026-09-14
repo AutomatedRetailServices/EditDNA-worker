@@ -45,6 +45,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import production_runtime_capability as prc
 from . import source_format_policy as sfp
 from . import source_media_profile as smp
 from . import source_normalization_plan as snp
@@ -78,10 +79,21 @@ _ROTATION_FILTER: dict[str, str] = {
     snp.ACTION_ROTATE_270: "transpose=2",
 }
 
+# D-274C Stage 8: ACTION_HEVC_TO_H264 is now IMPLEMENTED and removed from
+# this set -- the standard command-construction path already decodes
+# whatever codec the source carries and encodes to the plan's own target
+# (libx264), so no HEVC-specific filter/flag was ever needed once the
+# pre-existing unsupported-action gate stopped blocking it. HDR and 10-bit
+# actions remain here UNCONDITIONALLY -- Stage 10/11's own HDR/10-bit
+# firewall requirement is satisfied for FREE by this same set: a plan with
+# `codec_action=HEVC_TO_H264` AND `hdr_action` or `bit_depth_action` set
+# (D-272B's own Stage 6 multi-action composition: HEVC+HDR-PQ, HEVC+10-bit)
+# is still rejected here, before any ffmpeg call, because those OTHER
+# action fields are independently inspected by `_unsupported_actions_
+# present` below -- no HEVC-specific carve-out was added or is needed.
 _UNSUPPORTED_ACTIONS: frozenset[str] = frozenset({
     snp.ACTION_HDR_PQ_TO_SDR_BT709,
     snp.ACTION_HDR_HLG_TO_SDR_BT709,
-    snp.ACTION_HEVC_TO_H264,
     snp.ACTION_TEN_BIT_TO_EIGHT_BIT,
     snp.ACTION_PIXEL_FORMAT_TO_YUV420P,
 })
@@ -102,6 +114,10 @@ FAILURE_ATOMIC_PROMOTION_FAILED = "NORMALIZATION_ATOMIC_PROMOTION_FAILED"
 FAILURE_TIMEOUT_POLICY_REQUIRED = "NORMALIZATION_TIMEOUT_POLICY_REQUIRED"
 FAILURE_INVALID_INPUT = "NORMALIZATION_INVALID_INPUT"
 FAILURE_SECOND_PASS_REJECTED = "NORMALIZATION_SECOND_PASS_REJECTED"
+# D-274C Stage 21: reuses D-274A's own pre-declared (previously unused)
+# NORMALIZATION_CODEC_UNAVAILABLE -- Stage 4's own "verify canonical H264
+# encoder availability... no fallback encoder silently introduced" check.
+FAILURE_CODEC_UNAVAILABLE = snp.NORMALIZATION_CODEC_UNAVAILABLE
 
 
 @dataclass(frozen=True)
@@ -229,12 +245,21 @@ def execute_source_normalization(
     timeout_sec: float | None = NORMALIZATION_FFMPEG_TIMEOUT_SEC,
     runtime_capability: "sfp.RuntimeCapabilityInput | None" = None,
     attempt_count: int = 0,
+    codec_capability: "prc.ProductionRuntimeCapability | None" = None,
 ) -> NormalizationExecutionResult:
     """Stages 2/17/32-35: execute exactly the actions `plan` names, in one
     ffmpeg generation, then run the MANDATORY D-271 re-probe + D-272
     re-evaluation + D-274A verification loop on the actual output. Never
     re-decides whether normalization is needed (Stage 2); never runs a
-    second pass (Stage 18/35)."""
+    second pass (Stage 18/35).
+
+    `codec_capability` (D-274C Stage 4, optional, defaults to `None` for
+    full backward compatibility with every pre-D-274C caller/test): when
+    the plan requests `ACTION_HEVC_TO_H264` and a `ProductionRuntime
+    Capability` is supplied, its `h264_encoder_available` is checked
+    BEFORE any ffmpeg call -- "no fallback encoder silently introduced."
+    When omitted, this pre-check is skipped and ffmpeg's own nonzero-exit
+    failure path remains the safety net (unchanged D-274B behavior)."""
     diagnostics: dict = {
         "plan_identity": plan.plan_identity,
         "actions_requested": {
@@ -284,6 +309,27 @@ def execute_source_normalization(
             verification=None, diagnostics=diagnostics,
             failure=NormalizationExecutionFailure(
                 error_category=FAILURE_UNSUPPORTED_ACTION,
+                return_code=None, command_fingerprint="", stderr_excerpt="",
+                timed_out=False, timeout_sec=timeout_sec, plan_identity=plan.plan_identity,
+            ),
+        )
+
+    # D-274C Stage 4 -- H264 encoder availability pre-check, BEFORE ffmpeg.
+    # Only consulted when the caller supplies `codec_capability` AND the
+    # plan actually requests HEVC_TO_H264; a caller that never passes this
+    # (every pre-D-274C test/call site) gets byte-identical behavior.
+    if (
+        plan.codec_action == snp.ACTION_HEVC_TO_H264
+        and codec_capability is not None
+        and not codec_capability.h264_encoder_available
+    ):
+        diagnostics["execution_status"] = "REJECTED_CODEC_UNAVAILABLE"
+        return NormalizationExecutionResult(
+            outcome=snp.NORMALIZATION_FAILED,
+            normalized_path=None, normalized_reference=None, normalized_profile=None,
+            verification=None, diagnostics=diagnostics,
+            failure=NormalizationExecutionFailure(
+                error_category=FAILURE_CODEC_UNAVAILABLE,
                 return_code=None, command_fingerprint="", stderr_excerpt="",
                 timed_out=False, timeout_sec=timeout_sec, plan_identity=plan.plan_identity,
             ),
