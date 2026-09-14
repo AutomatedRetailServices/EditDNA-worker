@@ -2,7 +2,20 @@
 
 Provider-backed multimodal judging can replace/augment this scorer without changing
 contracts. This module never deletes content.
-"""
+
+## D-280 mode-aware face-evidence safety (minimal, additive)
+
+`score_take`/`rank_takes` weighted `face_visibility`/`eye_contact` at a
+fixed 0.08/0.09 for every take, with no way to say those two signals
+are simply NOT_APPLICABLE to a genuinely faceless primary take
+(D-276's own FACELESS_PRODUCT/PRODUCT_HANDS/DEMO_ACTION A-roll). Every
+existing call site (`rank_takes` and every direct test call) invokes
+`score_take(take)` with no `visual_mode` argument, so `visual_mode`
+defaults to `None` and this module's own arithmetic is byte-for-byte
+unchanged from before D-280 -- this is NOT a BestTake rewrite, no new
+scoring model, no weight table redesign; it is the smallest possible
+mode-aware correction, applied only when a caller explicitly supplies
+a settled face-independent `visual_mode` (see `visual_mode.py`)."""
 from __future__ import annotations
 
 from collections import Counter
@@ -10,6 +23,7 @@ import re
 from typing import Iterable, Tuple
 
 from .contracts import CandidateTake, RankedTake
+from .visual_mode import VisualMode, requires_face_evidence
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
 _RESTART_TAIL_RE = re.compile(
@@ -108,7 +122,22 @@ def _handling_failure_penalty(signal) -> float:
     return penalty
 
 
-def score_take(take: CandidateTake) -> RankedTake:
+_FACE_VISIBILITY_WEIGHT = 0.08
+_EYE_CONTACT_WEIGHT = 0.09
+
+
+def score_take(take: CandidateTake, *, visual_mode: VisualMode | None = None) -> RankedTake:
+    """D-280: `visual_mode` is optional and defaults to `None`. Every
+    existing call site in this codebase invokes `score_take(take)` with
+    no second argument, so for them this function's arithmetic is
+    byte-for-byte identical to before D-280 -- `face_evidence_
+    applicable` only ever becomes `False` when a caller EXPLICITLY
+    passes a settled face-independent mode (`requires_face_evidence(...)
+    is False`); an unknown/unsupplied mode, or an explicit face-
+    dependent one, keeps the original weighting exactly (Stage 4's own
+    fail-conservative direction: an uncertain mode never loses face-
+    evidence weight it might actually deserve, and talking-head scoring
+    is never weakened to accommodate faceless footage)."""
     signal = take.signals
     completeness = 1.0 if take.complete_idea else 0.45
     duration_fit = 1.0 if 0.7 <= take.duration_sec <= 20.0 else 0.65
@@ -116,12 +145,34 @@ def score_take(take: CandidateTake) -> RankedTake:
         score = 0.70 * completeness + 0.30 * duration_fit
         return RankedTake(take.clip_id, round(_bounded(score), 4), "text_timing_baseline")
 
-    score = (
+    face_evidence_applicable = True
+    if visual_mode is not None:
+        face_evidence_applicable = requires_face_evidence(visual_mode) is not False
+
+    if face_evidence_applicable:
+        face_term = _FACE_VISIBILITY_WEIGHT * signal.face_visibility
+        eye_term = _EYE_CONTACT_WEIGHT * signal.eye_contact
+        renormalize = 1.0
+        reason = "watch_listen_baseline"
+    else:
+        # NOT_APPLICABLE: a face-independent primary take (D-276's own
+        # FACELESS_PRODUCT/PRODUCT_HANDS/DEMO_ACTION A-roll) is never
+        # scored as deficient for lacking face/eye-contact evidence.
+        # The two face-dependent terms are excluded entirely and the
+        # remaining positive weight (which otherwise sums to exactly
+        # 1.0 - _FACE_VISIBILITY_WEIGHT - _EYE_CONTACT_WEIGHT) is
+        # renormalized back to 1.0, so a faceless take is judged purely
+        # on its own applicable evidence, never structurally capped
+        # below a talking-head take's own achievable ceiling.
+        face_term = 0.0
+        eye_term = 0.0
+        renormalize = 1.0 / (1.0 - _FACE_VISIBILITY_WEIGHT - _EYE_CONTACT_WEIGHT)
+        reason = "watch_listen_baseline_face_independent"
+
+    other_positive = (
         0.16 * completeness
         + 0.06 * duration_fit
         + 0.12 * signal.audio_quality
-        + 0.08 * signal.face_visibility
-        + 0.09 * signal.eye_contact
         + 0.06 * signal.framing_quality
         + 0.05 * signal.product_visibility
         + 0.07 * signal.motion_stability
@@ -129,11 +180,14 @@ def score_take(take: CandidateTake) -> RankedTake:
         + 0.10 * signal.expression_naturalness
         + 0.07 * signal.gesture_naturalness
         + 0.07 * signal.delivery_energy
+    )
+    score = (
+        renormalize * (other_positive + face_term + eye_term)
         - 0.12 * signal.visual_fumble
         - 0.08 * signal.distraction_risk
         - _handling_failure_penalty(signal)
     )
-    return RankedTake(take.clip_id, round(_bounded(score), 4), "watch_listen_baseline")
+    return RankedTake(take.clip_id, round(_bounded(score), 4), reason)
 
 
 def _material_prefix_fragment(candidate: CandidateTake, reference: CandidateTake) -> bool:

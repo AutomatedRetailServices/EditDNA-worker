@@ -75739,3 +75739,218 @@ Then STOP.
 DO NOT IMPLEMENT D-280.
 DO NOT TOUCH cutsell/mobile-v1-clean.
 DO NOT START CALIBRATION.
+
+
+## D-280 — Faceless / Product / Hands / Demo Visual-Mode Safety Foundation
+
+**Objective.** Post D-279. D-276 established that a face is NOT
+required for canonical primary A-roll (`TALKING_HEAD_A_ROLL`,
+`FACELESS_PRODUCT_A_ROLL`, `PRODUCT_HANDS_A_ROLL`, `DEMO_ACTION_A_ROLL`),
+but D-258/D-260's real visual stack has proven evidence only for face/
+gaze/headroom/face-scale and none for product/hands/demo. Build the
+minimal SAFETY / ROUTING foundation that prevents `NO_FACE -> BAD_CLIP
+/ INVALID_A_ROLL / VISUAL_FINISHING_FAILURE` for canonical faceless
+footage -- not advanced product/demo understanding.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `a9ceb08` (exact expected
+match, D-279), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-279 re-read. `visual_finishing_
+measurement.py` (D-258), `visual_finishing_policy.py` (D-260), and
+`visual_finishing_executor.py` (D-262) inspected in full; BestTake/
+selection evidence owners (`deterministic_best_take_authority.py`,
+`take_judge.py`, `local_performance.py`, `case_b_performance_
+evidence.py`, `watch_listen_besttake_*.py`, `strategy.py`) inspected;
+P1 (`local_performance.py`) and P2 (`brain_runtime.py`) inspected for a
+visible-speaker/talking-head assumption; `timeline_composition.py` and
+`timeline_composition_executor.py` (D-277/D-278) inspected for
+independence from any visual-mode concept.
+
+### Stage 5/9/30 finding: Visual Finishing ALREADY safe -- zero code
+change to D-258/D-260/D-262
+
+A genuinely no-face clip's own `VisualClipMeasurement.measurement_
+status` resolves `NO_FACE` (D-258, unchanged), and D-260's own
+`evaluate_clip_policy` short-circuits `NO_FACE`/low-face-detection-rate
+to `ABSTAIN_INSUFFICIENT_EVIDENCE` BEFORE it can ever reach the multi-
+face/clipped-face `BLOCKED_*` branches -- proven directly against the
+real, unchanged D-260 code (new tests
+`test_product_hands_no_face_clip_policy_is_abstain_never_face_blocked`/
+`test_no_face_clip_measurement_status_is_no_face_not_a_blocked_or_
+invalid_status`). D-262's own executor then produces NO transform spec
+at all for `ABSTAIN_INSUFFICIENT_EVIDENCE` (`EXECUTION_STATUS_PLAN_NOT_
+EXECUTABLE`, proven by test) -- i.e. `NO_CHANGE`-equivalent, never an
+unsafe blind crop. **No refactor was needed to satisfy Stage 5/11's own
+invariant; this gate proves it instead of re-implementing it,** exactly
+per Stage 10's own "refactor only enough" instruction (here: zero).
+`canonical_thresholds_snapshot()` is asserted, by test, to still equal
+exactly the original ten D-260 values -- no new numeric policy.
+
+### Stage 13/14/31 finding: ONE real BestTake face assumption -- found
+and minimally corrected
+
+`take_judge.py::score_take` weighted `face_visibility`/`eye_contact`
+at a fixed 0.08/0.09 for EVERY take, with no way to mark those two
+signals `NOT_APPLICABLE` for a genuinely faceless primary take -- a
+real, structural (if modest) down-rank of legitimate faceless/product/
+hands/demo footage purely for lacking face evidence, exactly the
+Stage 13 audit was asked to find. Classified: WEIGHTED, not MANDATORY
+(`score_take` never rejects/raises on `face_visibility == 0`).
+`deterministic_best_take_authority.py` (MANDATORY BestTake authority)
+and `brain_runtime.py` (P2) have NO face/gaze dependency at all
+(NOT_USED, confirmed by source-inspection test) -- audited, unchanged.
+`local_performance.py` (P1) computes real `face_visibility`/`eye_
+contact` evidence but is not itself a rejection gate. `strategy.py`
+already treats low-face + high-product as `EditStrategy.FACELESS`
+(advisory only, pre-existing, unchanged) -- a genuinely POSITIVE
+existing signal, left untouched.
+
+**The fix (Stage 14, minimal, additive, NOT a BestTake rewrite):**
+`score_take` gained one optional keyword-only parameter, `visual_mode:
+VisualMode | None = None`. Every existing call site (`rank_takes`'s own
+real call, and every direct test call across the suite) invokes
+`score_take(take)` with no second argument, so `visual_mode` defaults
+to `None` and the function's arithmetic is byte-for-byte IDENTICAL to
+before D-280 (proven by test: `score_take(take)` == `score_take(take,
+visual_mode=VisualMode.TALKING_HEAD)` == `score_take(take, visual_mode=
+VisualMode.UNKNOWN)`). Only when a caller EXPLICITLY supplies a settled
+face-independent mode (`requires_face_evidence(mode) is False`) do the
+two face-dependent terms become excluded entirely (`NOT_APPLICABLE`,
+never scored as zero-is-bad) and the remaining positive weight --
+which otherwise sums to exactly `1.0 - 0.08 - 0.09` -- is renormalized
+back to `1.0`, so a faceless take is judged purely on its own
+applicable evidence, never structurally capped below a talking-head
+take's own achievable ceiling. A legitimately bad faceless take (real
+visual fumble, distraction, poor motion/product visibility) still
+scores lower than a clean talking-head baseline -- no blanket pass
+(proven by test).
+
+### New module: `cutsell_worker/visual_mode.py`
+
+Pure types and pure functions only; imports only `visual_finishing_
+policy.MIN_RELIABLE_FACE_DETECTION_RATE` (reused verbatim, never a new
+threshold) and stdlib. Never imports Freeze/Boundary/Pacing/Audio-
+Join/Audio-Finishing/Timeline/Renderer/Delivery (confirmed by AST
+source-inspection test).
+
+- **`VisualMode`** (Stage 1): `TALKING_HEAD`, `TALKING_HEAD_WITH_
+  PRODUCT`, `PRODUCT_HANDS`, `PRODUCT_ONLY`, `DEMO_ACTION`,
+  `SUPPORTING_VISUAL`, `UNKNOWN`.
+- **`VisualModeEvidenceState`** (Stage 2): `SUPPORTED`/`LIKELY`/
+  `INSUFFICIENT_EVIDENCE`/`UNKNOWN`.
+- **`EvidenceAvailability`** (Stage 7/27): `PRESENT`/`NOT_PRESENT`/
+  `UNAVAILABLE`/`NOT_APPLICABLE`/`UNKNOWN` -- four distinct absence
+  states, never collapsed (proven by test); a `product_bbox`/`hands_
+  bbox` may only be set alongside a positively `PRESENT` state
+  (`__post_init__` fail-closed assertion, never a fabricated
+  coordinate).
+- **`requires_face_evidence(mode)`** (Stage 4): `True` for the two
+  talking-head modes, `False` for the four face-independent modes,
+  `None` (never guessed) for `UNKNOWN`.
+- **`applicable_evidence_families(mode)`** (Stage 6): pure routing
+  table -- `TALKING_HEAD` gets FACE/GAZE/HEADROOM/FRAMING/SPEECH_
+  FLUENCY; `PRODUCT_HANDS`/`PRODUCT_ONLY` get SPEECH_FLUENCY/GENERIC_
+  VISUAL_CONTINUITY/PRODUCT_HANDS_EVIDENCE (no face/gaze); `DEMO_
+  ACTION` gets SPEECH_FLUENCY/MOTION_ACTION_CONTINUITY (no face).
+- **`product_location_known(...)`** (Stage 8, D-259/D-260 restated):
+  `True` only for `PRESENT`/`NOT_PRESENT` -- every real clip in this
+  codebase today resolves `False` (no product detector exists), the
+  honest, expected V1 answer.
+- **`VisualModeEvidence`/`VisualModeClassification`** (Stage 25):
+  frozen dataclasses.
+- **`EditorialContentRole`** (Stage 16/17): `PRIMARY_A_ROLL`/
+  `SUPPLEMENTAL_BROLL` -- the main-engine-side sibling of D-279's
+  manual-timeline `TimelineAssetRole`, deliberately a separate type (a
+  mobile-only feature's vocabulary must not silently ripple into the
+  core engine's own role concept); `VISUAL_MODE_ROLE_FORBIDDEN_
+  EQUIVALENCES` is a literal empty `frozenset` -- proof, not merely
+  absence of code, that no `(mode, role)` pair (in particular `PRODUCT_
+  HANDS` + `BROLL`) is ever forbidden.
+- **`classify_visual_mode(...)`** (Stage 22/23/24): the ONE
+  conservative, rule-based V1 classifier. Reuses D-260's own `MIN_
+  RELIABLE_FACE_DETECTION_RATE` (never a new threshold) as the "strong
+  face evidence" bar -> `TALKING_HEAD`/`SUPPORTED`. Absence of face
+  evidence NEVER auto-infers `PRODUCT_HANDS`/`PRODUCT_ONLY`/`DEMO_
+  ACTION` (Stage 23's own explicit instruction, proven by test) --
+  stays `UNKNOWN`/`LIKELY`, honest about not having a real product/
+  hands/demo detector. `None` face-detection-rate stays `UNKNOWN`/
+  `UNKNOWN`. An `uploaded_role_hint` is carried for observability only
+  and never changes the returned mode (proven by test). The full
+  seven-value vocabulary exists so a FUTURE detector or manual/
+  editorial assignment can construct a genuine `PRODUCT_HANDS`/
+  `PRODUCT_ONLY`/`DEMO_ACTION`/`SUPPORTING_VISUAL`/`TALKING_HEAD_WITH_
+  PRODUCT` classification directly -- this classifier is not the only
+  way to produce one.
+
+### No product recognition, no AI B-roll (Stage 28/29)
+
+Confirmed by source-inspection test (docstring-stripped): no `sku`,
+`clip_score`, `ranking_model`, `auto_place`, `similarity_score`, or
+`*_broll_suggest*` literal anywhere in `visual_mode.py`'s real code.
+
+### Test evidence (Stage 39, 49 tests)
+
+New `tests/test_cutsell_d280_visual_mode_safety_foundation.py`, 49
+tests, all passing: bounded vocabulary/immutability (5); `requires_
+face_evidence` per mode incl. `UNKNOWN` never guessing (8); evidence-
+family routing incl. `UNKNOWN` routes to none (4); evidence seams/
+absence semantics/no-fake-bbox/product-location-known (6); role/mode
+independence incl. the literal-empty-forbidden-set proof (3); the
+conservative classifier incl. no-auto-inference and threshold reuse
+(5); no-product-recognition source scan (1); the real, unchanged
+Visual Finishing safety matrix proven against D-258/D-260/D-262
+directly (5); the BestTake minimal fix incl. default-unaffected/
+unknown-mode-unaffected/faceless-not-penalized/faceless-reaches-full-
+ceiling/legitimate-failure-still-fails/weighted-not-mandatory/`rank_
+takes`-never-passes-visual_mode (7); P1/P2 audit source scans (2);
+closed-track-firewall AST import check + no-ffmpeg/cv2/mediapipe +
+ten-thresholds-unchanged tripwire (3).
+
+### Verification run
+
+- New test file: **49 passed**, 0 failed.
+- Targeted regression subset (D-258/D-260/D-262/D-263 visual
+  finishing, `take_judge`/BestTake-confidence, CleanCutBench-equivalent
+  x2, D-277/D-278/D-279 timeline, D-280 itself): **519 passed, 10
+  skipped**, 0 failed (77.36s).
+- `compileall` over `cutsell_worker/`, `tests/`, `scripts/`: clean.
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8382 passed, 10 skipped, 13 subtests passed, 0
+  failed** (399.29s) -- exactly D-279's own 8333-test baseline plus
+  this gate's 49 new tests, confirming zero regression anywhere else
+  in the suite (`take_judge.py`'s own change is exercised by every
+  existing caller with `visual_mode` defaulted to `None`, and every
+  one of those existing tests still passed unchanged).
+
+### Verdict
+
+**A -- FACELESS / PRODUCT / HANDS / DEMO V1 SAFETY FOUNDATION PROVEN --
+NO-FACE PRIMARY FOOTAGE NO LONGER INHERITS TALKING-HEAD-ONLY
+ASSUMPTIONS -- READY FOR PERSISTENCE WIRING + MOBILE INTEGRATION /
+MIXED-MODE CALIBRATION.** Visual Finishing's own existing behavior was
+already safe (proven, not re-implemented); the one real BestTake
+weighted face-dependency was found and given the smallest possible
+mode-aware correction, with zero regression to any existing caller;
+P1/P2 and the deterministic BestTake authority carry no face
+dependency at all; role and visual mode are proven structurally
+independent; no product/demo AI, no AI B-roll, of any kind was
+introduced.
+
+**Product Owner decision required:** NO for this gate's own scope.
+
+**Exact next gate (per this directive's own Product-Owner-authorized
+sequence):** D-281 -- Timeline Asset Persistence / API Live Wiring.
+After D-281: return to `cutsell/mobile-v1-clean` / PR #25 for V1
+timeline UI integration. Calibration sequencing to be re-evaluated
+after D-281/mobile-contract activation. Not implemented or authorized
+by this entry.
+
+**Decision entry reference:** this entry (D-280).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-281.
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT START CALIBRATION.
