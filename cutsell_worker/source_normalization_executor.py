@@ -54,17 +54,33 @@ from . import source_normalization_plan as snp
 from .render_delivery import compute_output_sha256
 
 # =============================================================================
-# Stage 22 -- normalization timeout seam. Mirrors D-266's own original
-# `TIMEOUT_POLICY_PENDING_PRODUCT_OWNER` design (the seam D-266A later
-# resolved for RENDER_FFMPEG_TIMEOUT_SEC=1200.0). D-274B's own audit found
-# NO existing canonical normalization/media-operation timeout to reuse, and
-# Stage 22 explicitly forbids silently reusing RENDER_FFMPEG_TIMEOUT_SEC.
-# This seam stays `None` until a Product Owner decision activates a number
-# (the same shape D-266A itself followed for the renderer). Callers/tests
-# inject a concrete `timeout_sec` explicitly; the module-level default is
-# never silently substituted with an invented number.
+# D-274F-A: canonical, Product-Owner-approved source-normalization
+# subprocess timeout. Mirrors D-266A's own exact precedent for the
+# renderer (`render.RENDER_FFMPEG_TIMEOUT_SEC`): D-274B's own original
+# audit found NO existing canonical normalization/media-operation timeout
+# to reuse, and explicitly forbade silently reusing `RENDER_FFMPEG_
+# TIMEOUT_SEC`, so this seam stayed `None` pending a Product Owner
+# decision (Stage 22's own `TIMEOUT_POLICY_PENDING_PRODUCT_OWNER`
+# design). D-274F-A activates that decision: ONE canonical owner for ONE
+# live ffmpeg source-normalization subprocess's own maximum duration --
+# 30 minutes. This is source-normalization subprocess execution-safety
+# policy ONLY -- never the renderer's own (`RENDER_FFMPEG_TIMEOUT_SEC`
+# stays 1200.0, unchanged, a deliberately SEPARATE policy for a
+# separate workload), never a whole-job/workflow/queue/upload/probe/ASR/
+# provider timeout, and never reused for an unrelated operation. See
+# docs/CUTSELL_DECISIONS.md D-274F-A.
+#
+# The `timeout_sec` parameter below still accepts an explicit `None`
+# (Stage 3's own "safe dependency/config seam" -- exercised directly by
+# `test_timeout_seam_requires_product_owner_when_none`): passing `None`
+# explicitly still returns `PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED`
+# rather than silently falling back to this module constant. Only the
+# MODULE-LEVEL DEFAULT changed -- every live call site
+# (`worker_job.resolve_sources_for_editorial_entry`) relies on this
+# default and never overrides it with `None` (same discipline D-266A
+# itself already established for the renderer).
 # =============================================================================
-NORMALIZATION_FFMPEG_TIMEOUT_SEC: float | None = None  # TIMEOUT_POLICY_PENDING_PRODUCT_OWNER
+NORMALIZATION_FFMPEG_TIMEOUT_SEC: float = 1800.0
 PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED = "PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED"
 
 _STDERR_EXCERPT_MAX_CHARS = 2000  # reuses post_render_media_qc.py's own [:2000] bound

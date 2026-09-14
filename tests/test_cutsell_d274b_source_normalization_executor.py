@@ -521,9 +521,13 @@ def test_timeout_via_injected_tiny_timeout(asymmetric_landscape_mp4, tmp_path):
 
 
 def test_timeout_seam_requires_product_owner_when_none(asymmetric_landscape_mp4, tmp_path):
-    """Stage 22: NORMALIZATION_FFMPEG_TIMEOUT_SEC stays None until a
-    Product Owner decision activates a number -- never silently reused
-    from RENDER_FFMPEG_TIMEOUT_SEC=1200."""
+    """Stage 22's own defense-in-depth seam, still exercised directly:
+    D-274F-A activated `NORMALIZATION_FFMPEG_TIMEOUT_SEC` to 1800.0
+    (docs/CUTSELL_DECISIONS.md D-274F-A), but a caller that explicitly
+    passes `timeout_sec=None` -- bypassing the module's own default
+    entirely -- still correctly returns `PRODUCT_OWNER_NORMALIZATION_
+    TIMEOUT_REQUIRED` rather than silently falling back to any number,
+    never silently reused from RENDER_FFMPEG_TIMEOUT_SEC=1200 either."""
     plan = _make_plan(rotation_action=snp.ACTION_ROTATE_90)
     result = _exec(
         asymmetric_landscape_mp4, plan, output_directory=str(tmp_path), timeout_sec=None,

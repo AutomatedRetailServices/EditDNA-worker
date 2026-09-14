@@ -340,6 +340,12 @@ def test_render_timeout_still_unchanged():
     assert render_module.RENDER_FFMPEG_TIMEOUT_SEC == 1200.0
 
 
-def test_normalization_timeout_seam_still_unchanged():
+def test_normalization_timeout_seam_now_activated_via_d274f_a():
+    """This gate's own original assertion documented the seam was still
+    `None` -- true at the time. D-274F-A (a later, separately-authorized,
+    Product-Owner-approved gate: "activate canonical source normalization
+    timeout") is exactly the gate that activates it to 1800.0 seconds
+    (docs/CUTSELL_DECISIONS.md D-274F-A). Renamed + rewritten as a
+    self-resolving guard rather than left failing or silently deleted."""
     from cutsell_worker import source_normalization_executor as exe
-    assert exe.NORMALIZATION_FFMPEG_TIMEOUT_SEC is None
+    assert exe.NORMALIZATION_FFMPEG_TIMEOUT_SEC == 1800.0

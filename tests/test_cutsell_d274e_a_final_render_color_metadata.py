@@ -360,9 +360,12 @@ def test_output_bytes_differ_from_pre_remediation_shape_but_identity_does_not(sd
     # D-274F (a later, separately-authorized, Product-Owner-authorized
     # gate: "live auto-normalization activation") legitimately wires the
     # real probe/policy/plan/executor/format-QC chain into `worker_job.py`
-    # itself -- self-resolving guard, removed from this list for that
-    # reason (docs/CUTSELL_DECISIONS.md D-274F has the full disclosure).
-    "cutsell_worker/source_normalization_executor.py",
+    # itself. D-274F-A (a still-later, separately-authorized, Product-
+    # Owner-authorized gate: "activate canonical source normalization
+    # timeout") legitimately activates `source_normalization_executor.
+    # py`'s own timeout seam (`NORMALIZATION_FFMPEG_TIMEOUT_SEC` ->
+    # 1800.0). Both removed from this list for those reasons (docs/
+    # CUTSELL_DECISIONS.md D-274F and D-274F-A have the full disclosure).
     "cutsell_worker/source_normalization_plan.py",
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",

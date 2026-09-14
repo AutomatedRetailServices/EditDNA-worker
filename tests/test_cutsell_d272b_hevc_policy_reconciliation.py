@@ -357,11 +357,17 @@ def test_11b_hevc_live_gate_established_normalize_required(wired_worker_job, hev
     authorized gate: "live auto-normalization activation") legitimately
     changes what happens NEXT: this gate's own resolution seam now
     attempts normalization (plan executable, since capability is
-    established) -- but `run_flow_b_job` never overrides the still-absent
-    canonical normalization timeout, so the executor's own timeout seam
-    is what ultimately blocks the job, with the NEW `VIDEO_NORMALIZATION_
-    TIMEOUT_POLICY_REQUIRED` code. Renamed assertion updated as a self-
-    resolving guard (docs/CUTSELL_DECISIONS.md D-274F)."""
+    established). D-274F-A (a still-later, separately-authorized,
+    Product-Owner-approved gate: "activate canonical source normalization
+    timeout") then activated the real 1800s ceiling, so the executor's own
+    subprocess genuinely runs to completion -- but this fixture's own
+    plain `hevc_mp4` (this test file's own base fixture, no explicit
+    color-metadata tags) still correctly lands the D-274E format QC at
+    `PARTIAL` (missing evidence, not a violation -- the HEVC-to-H264
+    re-encode never wrote NEW color tags of its own, D-274D's own "do not
+    mislabel non-HDR outputs" discipline), which this gate's own stricter
+    PASS-only AND-requirement still correctly blocks. Renamed + rewritten
+    as a self-resolving guard (docs/CUTSELL_DECISIONS.md D-274F-A)."""
     from cutsell_worker import production_runtime_capability as prc
     from cutsell_worker import worker_runtime_capability as wrc
     established = prc.ProductionRuntimeCapability(
@@ -374,7 +380,7 @@ def test_11b_hevc_live_gate_established_normalize_required(wired_worker_job, hev
         worker_job.run_flow_b_job(_payload(hevc_mp4))
     assert wired_worker_job["process_local_sources"] == 0
     assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
-    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
+    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_VERIFICATION_FAILED
 
 
 @pytestmark_ffmpeg
@@ -382,12 +388,13 @@ def test_11b_hevc_live_gate_structural_proof_with_confirmed_capability(monkeypat
     """Stage 7's own structural claim: IF a real capability source were
     wired into the live gate (simulated here, not today's default),
     confirmed HEVC's NORMALIZE_REQUIRED decision is unchanged, never
-    bypassing to ACCEPT. D-274F (a later, separately-authorized, Product-
-    Owner-authorized gate: "live auto-normalization activation")
-    legitimately changes what happens NEXT -- see this file's own
-    `test_11b_hevc_live_gate_established_normalize_required` above for
-    the full explanation; same self-resolving-guard update applied here
-    (docs/CUTSELL_DECISIONS.md D-274F)."""
+    bypassing to ACCEPT. D-274F/D-274F-A (later, separately-authorized,
+    Product-Owner-authorized gates: "live auto-normalization activation"
+    and "activate canonical source normalization timeout") legitimately
+    change what happens NEXT -- see this file's own `test_11b_hevc_live_
+    gate_established_normalize_required` above for the full explanation;
+    same self-resolving-guard update applied here (docs/CUTSELL_
+    DECISIONS.md D-274F-A)."""
     real_policy = worker_job.evaluate_source_format_policy
 
     def _confirmed(profile, **kwargs):
@@ -399,7 +406,7 @@ def test_11b_hevc_live_gate_structural_proof_with_confirmed_capability(monkeypat
         worker_job.run_flow_b_job(_payload(hevc_mp4))
     assert wired_worker_job["process_local_sources"] == 0
     assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
-    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
+    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_VERIFICATION_FAILED
 
 
 # ---------------------------------------------------------------------------

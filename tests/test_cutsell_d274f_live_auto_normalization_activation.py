@@ -399,43 +399,106 @@ def test_vp9_insufficient_evidence_never_normalizes(vp9_source_mp4, monkeypatch)
 
 
 # =============================================================================
-# Timeout policy seam (Stage 10/41) -- the ONLY acceptable escalation when
-# everything else works
+# Timeout policy (D-274F-A: SOURCE_NORMALIZATION_TIMEOUT_SEC = 1800,
+# Product-Owner-approved and now genuinely active in production)
 # =============================================================================
 
-def test_normalize_required_with_no_timeout_override_returns_product_owner_escalation(h264_sdr_mp4, monkeypatch):
+def test_normalize_required_with_no_timeout_override_uses_canonical_1800s_and_succeeds(h264_sdr_mp4, monkeypatch):
+    """D-274F-A's own activation: `resolve_sources_for_editorial_entry`
+    with NO override now resolves to the real, Product-Owner-approved
+    `sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC` (1800.0) -- a source that
+    genuinely normalizes in well under 1800s (every synthetic fixture in
+    this file does) now SUCCEEDS via the production default, never
+    escalating to a Product-Owner-required state. This supersedes D-274F's
+    own `test_normalize_required_with_no_timeout_override_returns_
+    product_owner_escalation` (renamed here as a self-resolving guard,
+    docs/CUTSELL_DECISIONS.md D-274F-A has the full disclosure)."""
     profile = _probe_with_rotation_override(h264_sdr_mp4, 90)
     monkeypatch.setattr(smp, "probe_source_media_profile", _patched_probe_for_original_only(h264_sdr_mp4, profile))
     with tempfile.TemporaryDirectory() as tmp:
         resolved, sfd, nd, blocked = worker_job.resolve_sources_for_editorial_entry(
             {"s1": h264_sdr_mp4}, output_directory=tmp,
-        )  # no normalization_timeout_sec override -- production default
+        )  # no normalization_timeout_sec override -- REAL production default
     assert sfd[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
-    assert not resolved
-    assert blocked
-    assert nd[0]["normalization_outcome"] == sne.PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED
-    assert blocked[0]["user_facing_error_code"] == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
+    assert not blocked, blocked
+    assert resolved["s1"] != h264_sdr_mp4
+    assert nd[0]["normalization_outcome"] == snp.NORMALIZATION_SUCCEEDED
+    assert nd[0]["format_qc_status"] == ofq.STATUS_PASS
+    assert nd[0]["resolved_source_kind"] == worker_job.RESOLVED_SOURCE_KIND_NORMALIZED
 
 
 def test_production_call_site_never_overrides_timeout():
     """Stage 10: `run_flow_b_job` (the real production call site) must
     NEVER pass its own `normalization_timeout_sec` -- proven by source
     inspection, the same convention D-266/D-274B's own 'no invented
-    number' tests use, never by re-deriving the value at runtime."""
+    number' tests use, never by re-deriving the value at runtime. This
+    remains true after D-274F-A: production consumes the canonical
+    default via `resolve_sources_for_editorial_entry`'s own internal
+    resolution, never a literal passed from `run_flow_b_job` itself."""
     source = inspect.getsource(worker_job.run_flow_b_job)
     assert "normalization_timeout_sec" not in source
 
 
-def test_executor_own_timeout_constant_stays_none():
-    assert sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC is None
+def test_resolve_function_resolves_none_to_canonical_executor_constant():
+    """D-274F-A Stage 1/2/3: `resolve_sources_for_editorial_entry` itself
+    must resolve its own `None` default to `sne.NORMALIZATION_FFMPEG_
+    TIMEOUT_SEC` -- the ONE canonical owner -- never a duplicated literal
+    of its own. Checked against the function's own CODE, docstring
+    excluded (a docstring may legitimately explain the policy in prose
+    without that being a duplicated literal in code)."""
+    import ast
+
+    tree = ast.parse(inspect.getsource(worker_job.resolve_sources_for_editorial_entry))
+    func = tree.body[0]
+    if (
+        func.body
+        and isinstance(func.body[0], ast.Expr)
+        and isinstance(getattr(func.body[0], "value", None), ast.Constant)
+        and isinstance(func.body[0].value.value, str)
+    ):
+        func.body = func.body[1:]  # drop the docstring
+    code_only = ast.unparse(tree)
+    assert "sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC" in code_only
+    assert "1800" not in code_only
+
+
+def test_executor_own_timeout_constant_is_canonical_1800():
+    """D-274F-A Stage 1: the ONE canonical owner, exactly 1800.0 seconds."""
+    assert sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC == 1800.0
 
 
 def test_no_canonical_normalization_timeout_reused_from_renderer():
-    """Stage 10's own explicit ban: never silently reuse the renderer's
-    1200s timeout."""
+    """Stage 7/9's own explicit ban: source-normalization (1800s) and
+    final-render (1200s) timeouts are deliberately SEPARATE V1 policies
+    for separate workloads -- never silently unified."""
     from cutsell_worker import render as render_module
 
     assert sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC != render_module.RENDER_FFMPEG_TIMEOUT_SEC
+    assert render_module.RENDER_FFMPEG_TIMEOUT_SEC == 1200.0
+
+
+def test_explicit_none_means_use_canonical_policy_not_escalation(h264_sdr_mp4, monkeypatch):
+    """D-274F-A's own contract: at THIS function's own level, `None` means
+    'use the canonical production policy', never 'escalate to Product
+    Owner'. The ONLY way to still exercise the executor's own
+    `PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED` seam is to call the
+    EXECUTOR directly with an explicit `timeout_sec=None`, which
+    `test_cutsell_d274b_source_normalization_executor.py::test_timeout_
+    seam_requires_product_owner_when_none` already covers --
+    `resolve_sources_for_editorial_entry` itself has NO way to reach that
+    state anymore, by design (Stage 2: 'production normal path must no
+    longer resolve to' it). This test documents that fact directly
+    rather than leaving it implicit."""
+    profile = _probe_with_rotation_override(h264_sdr_mp4, 90)
+    monkeypatch.setattr(smp, "probe_source_media_profile", _patched_probe_for_original_only(h264_sdr_mp4, profile))
+    with tempfile.TemporaryDirectory() as tmp:
+        resolved, sfd, nd, blocked = worker_job.resolve_sources_for_editorial_entry(
+            {"s1": h264_sdr_mp4}, output_directory=tmp, normalization_timeout_sec=None,
+        )
+    # Passing None explicitly is indistinguishable from omitting it --
+    # both resolve to the canonical 1800s policy and succeed.
+    assert not blocked, blocked
+    assert nd[0]["normalization_outcome"] == snp.NORMALIZATION_SUCCEEDED
 
 
 # =============================================================================
@@ -1017,12 +1080,19 @@ def test_worker_job_never_invokes_subprocess_directly():
 @pytest.mark.parametrize(
     "rel_path",
     [
+        # D-274F-A (a later, separately-authorized, Product-Owner-
+        # authorized gate: "activate canonical source normalization
+        # timeout") legitimately activates `source_normalization_
+        # executor.py`'s own timeout seam -- removed from this list for
+        # that reason (docs/CUTSELL_DECISIONS.md D-274F-A has the full
+        # disclosure). This is a HEAD-relative check anyway (self-
+        # resolving on commit); removed explicitly since both D-274F's
+        # and D-274F-A's own changes land in the same qualification pass.
         "cutsell_worker/render.py",
         "cutsell_worker/media_overlay_render.py",
         "cutsell_worker/render_delivery.py",
         "cutsell_worker/live_render_qc.py",
         "cutsell_worker/post_render_media_qc.py",
-        "cutsell_worker/source_normalization_executor.py",
         "cutsell_worker/source_normalization_plan.py",
         "cutsell_worker/source_format_policy.py",
         "cutsell_worker/source_media_profile.py",
@@ -1153,16 +1223,26 @@ def _probe_override_on_call(call_number: int, *, rotation_degrees: int):
     return _fake
 
 
-def test_normalize_required_no_timeout_blocks_via_run_flow_b_job(wired_worker_job, h264_sdr_mp4, monkeypatch):
-    """Production default: `run_flow_b_job` itself never overrides the
-    timeout, so a genuinely NORMALIZE_REQUIRED source blocks the whole
-    job with the Product-Owner-escalation error code -- proven through
-    the REAL job entry point, not just the helper function directly."""
+def test_normalize_required_no_override_anywhere_succeeds_via_real_canonical_1800s(wired_worker_job, h264_sdr_mp4, monkeypatch):
+    """D-274F-A's own activation, proven at maximum realism: `run_flow_b_
+    job` called with ZERO monkeypatching of the resolution function
+    itself (unlike `test_rotation_live_normalized_path_reaches_
+    downstream_via_run_flow_b_job` below, which still wraps `resolve_
+    sources_for_editorial_entry` for a small test timeout out of an
+    abundance of caution) -- the REAL, unmodified `resolve_sources_for_
+    editorial_entry` resolves its own `None` default straight through to
+    the REAL `sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC` (1800.0), and a
+    genuinely fast synthetic normalization completes and reaches
+    downstream. Supersedes D-274F's own `test_normalize_required_no_
+    timeout_blocks_via_run_flow_b_job` (renamed here as a self-resolving
+    guard, docs/CUTSELL_DECISIONS.md D-274F-A has the full disclosure)."""
     monkeypatch.setattr(smp, "probe_source_media_profile", _probe_override_on_call(1, rotation_degrees=90))
-    with pytest.raises(worker_job.SourceFormatGateBlocked) as excinfo:
-        worker_job.run_flow_b_job(_payload(uri=h264_sdr_mp4))
-    assert wired_worker_job["process_local_sources"] == 0
-    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
+    result = worker_job.run_flow_b_job(_payload(uri=h264_sdr_mp4))
+    assert wired_worker_job["process_local_sources"] == 1
+    seen_path = wired_worker_job["seen_local_paths"]["s1"]
+    assert Path(seen_path).name.startswith("normalized_")
+    assert result["source_normalization_diagnostics"][0]["normalization_outcome"] == "NORMALIZATION_SUCCEEDED"
+    assert result["source_normalization_diagnostics"][0]["format_qc_status"] == "PASS"
 
 
 def test_rotation_live_normalized_path_reaches_downstream_via_run_flow_b_job(wired_worker_job, h264_sdr_mp4, monkeypatch):

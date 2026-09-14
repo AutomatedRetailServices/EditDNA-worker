@@ -262,19 +262,23 @@ def resolve_sources_for_editorial_entry(
     own `MAX_NORMALIZATION_ATTEMPTS = 1`) -- `attempt_count=0` on every
     call here, no retry loop of any kind, no second pass on any failure.
 
-    `normalization_timeout_sec` is a raw pass-through to `source_
-    normalization_executor.execute_source_normalization`'s own `timeout_
-    sec` kwarg. Stage 10: D-274B's own audit found NO canonical
-    normalization/media-operation timeout anywhere in this repository, and
-    explicitly forbids silently reusing the renderer's own 1200s
-    (`render.RENDER_FFMPEG_TIMEOUT_SEC`). `run_flow_b_job` (the real,
-    production call site) NEVER overrides this parameter's `None` default
-    -- so, in production, every real NORMALIZE_REQUIRED source currently
-    resolves to `PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED` until a
-    Product Owner decision activates a concrete number at a future gate
-    (D-274F-A). Only test code injects a small, bounded override to prove
-    the rest of this chain end-to-end (Stage 41's own explicit
-    instruction) -- this is never a silently-invented production default.
+    `normalization_timeout_sec` defaults to `None`, meaning "use the one
+    canonical production policy" -- resolved below to `source_
+    normalization_executor.NORMALIZATION_FFMPEG_TIMEOUT_SEC` (D-274F-A:
+    1800.0 seconds, Product-Owner-approved, the SOLE owner of this
+    number; never duplicated as a literal here). `run_flow_b_job` (the
+    real production call site) never overrides this parameter, so every
+    real NORMALIZE_REQUIRED source in production consumes the canonical
+    30-minute ceiling. Passing an explicit override here (test code only
+    -- Stage 41's own explicit instruction) takes precedence over the
+    canonical default, for a small, bounded timeout that proves the
+    chain end-to-end without waiting 1800 seconds; this is never a
+    silently-invented production default, and the executor's own
+    `PRODUCT_OWNER_NORMALIZATION_TIMEOUT_REQUIRED` seam still fires if a
+    caller explicitly passes `timeout_sec=None` all the way through
+    (defense-in-depth, exercised directly by the executor's own unit
+    tests, never reachable from this function since `None` here always
+    resolves to the canonical constant first).
 
     Preserves original source ordering (Stage 13): this function only
     ever assigns `resolved_local_paths[source_asset_id]`, on the SAME
@@ -303,6 +307,18 @@ def resolve_sources_for_editorial_entry(
     # optimism") -- one real capability source, never two independently
     # drifting ones.
     worker_capability = wrc.get_worker_runtime_capability()
+
+    # D-274F-A Stage 2/3: `None` here means "use the canonical production
+    # policy" -- resolved to the ONE canonical owner at call time (never a
+    # duplicated literal, never bound at function-definition time, so a
+    # test that monkeypatches `sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC`
+    # directly is honored exactly like a real production call). An
+    # explicit override always wins.
+    effective_timeout_sec = (
+        normalization_timeout_sec
+        if normalization_timeout_sec is not None
+        else sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC
+    )
 
     resolved_local_paths: dict[str, str] = {}
     source_format_diagnostics: list[dict] = []
@@ -362,7 +378,7 @@ def resolve_sources_for_editorial_entry(
             local_path,
             plan_result.plan,
             output_directory=output_directory,
-            timeout_sec=normalization_timeout_sec,
+            timeout_sec=effective_timeout_sec,
             runtime_capability=runtime_capability,
             attempt_count=0,
             codec_capability=worker_capability,

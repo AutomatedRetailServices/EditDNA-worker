@@ -472,21 +472,29 @@ def test_mkv_container_live_reject_blocks_before_downstream(wired_worker_job, mk
 
 
 @pytestmark_ffmpeg
-def test_rotation_live_normalize_required_now_attempts_normalization_then_blocks_on_timeout_policy(wired_worker_job, monkeypatch, h264_mp4):
+def test_rotation_live_normalize_required_now_attempts_normalization_then_blocks_on_reprobe_mismatch(wired_worker_job, monkeypatch, h264_mp4):
     """D-272A's own original assertion here documented the PRE-D-274F
     terminal state: NORMALIZE_REQUIRED blocked immediately with
     `VIDEO_REQUIRES_NORMALIZATION`, no normalization attempt. D-274F (a
     later, separately-authorized, Product-Owner-authorized gate: "live
     auto-normalization activation") legitimately changes this: the source
     now enters `resolve_sources_for_editorial_entry`'s own NORMALIZE_
-    REQUIRED branch, builds a plan, and attempts normalization -- but
-    since `run_flow_b_job` (the real production call site) never
-    overrides the still-absent canonical normalization timeout (Stage
-    10), the executor's own timeout seam is what ultimately blocks this
-    job, with the NEW `VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED`
-    code -- never bypassing to `process_local_sources` either way.
-    Renamed + rewritten as a self-resolving guard rather than left
-    failing or silently deleted (docs/CUTSELL_DECISIONS.md D-274F)."""
+    REQUIRED branch, builds a plan, and attempts normalization. D-274F-A
+    (a still-later, separately-authorized, Product-Owner-approved gate:
+    "activate canonical source normalization timeout") then activated the
+    real 1800s ceiling, so the executor's own subprocess genuinely runs to
+    completion here -- but THIS test's own blanket `probe_source_media_
+    profile` stub (returning the SAME rotated profile for every path,
+    Stage 15's own disclosed parser-controlled technique) also intercepts
+    the executor's own MANDATORY re-probe of its real output file, which
+    still reports `rotation_degrees=90` no matter what the real ffmpeg
+    output actually contains -- so the D-272 re-evaluation genuinely still
+    sees NORMALIZE_REQUIRED and the job still, correctly, blocks (never
+    bypassing to `process_local_sources` either way), now via
+    `VIDEO_NORMALIZATION_VERIFICATION_FAILED` (a re-probe/re-evaluate
+    mismatch, not a timeout). Renamed + rewritten as a self-resolving
+    guard rather than left failing or silently deleted (docs/CUTSELL_
+    DECISIONS.md D-274F-A)."""
     # A real, valid fixture so the pre-existing, unrelated `probe_media`
     # call earlier in the loop succeeds -- only D-271's own probe is
     # replaced with a parser-controlled rotated profile (Stage 15: proves
@@ -496,7 +504,7 @@ def test_rotation_live_normalize_required_now_attempts_normalization_then_blocks
         worker_job.run_flow_b_job(_payload(uri=h264_mp4))
     assert wired_worker_job["process_local_sources"] == 0
     assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
-    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
+    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_VERIFICATION_FAILED
 
 
 @pytestmark_ffmpeg

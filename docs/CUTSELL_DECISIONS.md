@@ -74288,3 +74288,182 @@ Then STOP.
 
 DO NOT IMPLEMENT NEXT GATE.
 DO NOT LAUNCH RAW.
+
+
+
+## D-274F-A — Activate Canonical Source Normalization Timeout
+
+**Objective.** Post D-274F. Product-Owner-approved V1 policy:
+`SOURCE_NORMALIZATION_TIMEOUT_SEC = 1800` (30 minutes, seconds) --
+closes the ONE remaining gap D-274F's own Verdict B identified.
+`RENDER_FFMPEG_TIMEOUT_SEC` (1200s) is confirmed unchanged, a
+deliberately separate policy for a separate workload.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `bdb5057` (exact expected
+match, D-274F), clean tree -- confirmed before this gate began.
+
+### Stage 1 -- canonical owner
+
+`cutsell_worker/source_normalization_executor.py::NORMALIZATION_
+FFMPEG_TIMEOUT_SEC` changed from `float | None = None` to
+`float = 1800.0` -- the SAME module D-274B originally left the seam in,
+mirroring D-266A's own exact precedent for the renderer
+(`RENDER_FFMPEG_TIMEOUT_SEC = 1200.0`, defined in `render.py`, unchanged).
+No duplicated `1800` literal exists anywhere else in production code
+(`worker_job.py`'s own resolution function reads the constant by
+reference, `sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC`, never a copy --
+proven by an AST-based test that strips the function's own docstring
+before scanning for a stray literal).
+
+### Stage 2/3 -- live executor activation, test override preserved
+
+`execute_source_normalization`'s own `timeout_sec: float | None =
+NORMALIZATION_FFMPEG_TIMEOUT_SEC` default parameter already referenced
+the module constant, so it picks up 1800.0 automatically -- no change
+needed there. `worker_job.resolve_sources_for_editorial_entry` (D-274F's
+own live resolution seam) now resolves its own `normalization_timeout_
+sec=None` default to `sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC` at CALL time
+(not def time, so a test that monkeypatches the module constant directly
+is honored identically to a real production call) immediately before
+calling the executor. `run_flow_b_job` (the real production call site)
+is confirmed, by source inspection, to still never pass its own
+`normalization_timeout_sec` -- production genuinely now resolves through
+to the real 1800.0 canonical policy on every real NORMALIZE_REQUIRED
+source. An explicit override at either level (test code only) still
+takes precedence, unchanged from D-274F's own contract.
+
+### Stage 4/6 -- timeout failure, one-pass contract unaffected
+
+The executor's own pre-existing `subprocess.TimeoutExpired` handling
+(`FAILURE_TIMEOUT` category, `timed_out=True`, `timeout_sec` echoed
+verbatim, `plan_identity`, `command_fingerprint`, bounded stderr) is
+completely untouched code -- only the NUMBER a normal call now carries
+into that same, already-proven path changed. `MAX_NORMALIZATION_
+ATTEMPTS` stays exactly `1`; the executor's own `is_normalization_
+attempt_allowed` and its own `attempt_count=0` call convention in
+`worker_job.py` are both unmodified. `test_timeout_seam_requires_
+product_owner_when_none` (D-274B's own defense-in-depth proof: a caller
+that explicitly passes `timeout_sec=None` all the way through, bypassing
+the canonical default entirely, still correctly returns `PRODUCT_OWNER_
+NORMALIZATION_TIMEOUT_REQUIRED`) is confirmed still passing, unmodified
+in behavior -- `resolve_sources_for_editorial_entry` itself simply has
+no way to reach that state anymore, by design.
+
+### Stage 5 -- final-output behavior on timeout unaffected
+
+No promotion, no downstream substitution, no `process_local_sources`,
+no ASR/BestTake/P1/P2/renderer reached on any executor failure
+(including a genuine timeout) -- these are the SAME pre-existing D-274F
+invariants, re-verified in the full targeted regression run below; this
+gate changes only which number the executor's own pre-existing timeout
+machinery is handed.
+
+### Stage 7 -- renderer timeout firewall confirmed
+
+`render.RENDER_FFMPEG_TIMEOUT_SEC == 1200.0`, confirmed unchanged by
+direct test assertion; `sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC (1800.0) !=
+render.RENDER_FFMPEG_TIMEOUT_SEC (1200.0)`, confirmed by direct
+inequality assertion -- two deliberately separate V1 policies for two
+separate workloads, exactly as this gate's own Stage 7 requires.
+
+### Stage 8 -- multiple sources, independent budgets
+
+Unaffected: `resolve_sources_for_editorial_entry`'s own per-source loop
+(D-274F's own architecture) calls the executor once per NORMALIZE_
+REQUIRED source, each with its own independent `timeout_sec=1800.0` --
+no job-level or combined budget was ever introduced, and none is
+introduced here.
+
+### Stage 10 -- success path behaviorally identical
+
+Every plan/action/filter/codec/HDR-transform/QC/source-replacement/
+editorial-pipeline behavior D-274F already proved end-to-end is
+unmodified; this gate's own full offline suite (below) reached the
+IDENTICAL pass count as D-274F's own final qualification (8207 passed,
+10 skipped, 13 subtests passed), confirming zero behavioral drift beyond
+the timeout number itself.
+
+### A genuine, honest side-effect this gate's own qualification surfaced
+
+Several existing tests (D-272A's own rotation test, two D-272B HEVC
+tests, D-274F's own two no-override tests) had asserted the PRE-D-274F-A
+terminal state: "NORMALIZE_REQUIRED attempts normalization, then blocks
+on the ABSENT timeout policy." With the real 1800s ceiling now active,
+these sources' own synthetic fixtures genuinely complete normalization
+well under 1800s -- some now reach a real `NORMALIZATION_SUCCEEDED`/
+format-QC-`PASS` success end-to-end (proving D-274F-A's own activation
+directly); others still correctly block, but now via `VIDEO_
+NORMALIZATION_VERIFICATION_FAILED` rather than the timeout code, for two
+distinct, honest reasons specific to those tests' OWN techniques: (1) a
+blanket `probe_source_media_profile` stub that also intercepts the
+executor's own mandatory re-probe of its REAL output file (so the
+re-probe never reflects the real post-normalization state -- a
+disclosed limitation of that specific parser-controlled-evidence
+technique, not a system defect), and (2) a plain, un-tagged HEVC test
+fixture whose HEVC-to-H264 re-encode never had reason to write NEW color
+tags of its own (D-274D's own "do not mislabel non-HDR outputs"
+discipline), correctly landing D-274E's own format QC at `PARTIAL` under
+this gate's own stricter PASS-only requirement. In every case the one
+real, load-bearing invariant -- the job still, correctly, blocks, never
+bypassing to `process_local_sources` on anything short of a genuine
+PASS -- is unchanged and re-verified. All updated via the established
+self-resolving-guard pattern (rename + rewrite with a docstring
+explaining exactly why, never left failing or silently deleted).
+
+### Verification run
+
+- D-272/D-274/D-266/D-267/D-269/D-271 targeted cluster (including all
+  eight files this gate touches or its own qualification updates):
+  **958 passed, 0 failed** (identical count to D-274F's own final run --
+  the self-resolving-guard renames replaced failing assertions with
+  passing ones, net test count unchanged).
+- New D-274F test file's own full re-run: **63 passed** (was 62 under
+  D-274F; one new test added -- `test_resolve_function_resolves_none_
+  to_canonical_executor_constant` -- proving the single-canonical-owner
+  contract via AST-stripped source inspection).
+- Render/finishing/Pacing/Boundary/Freeze/Audio-Join/delivery/
+  clean_worker/universal_clean_cut/live_render_qc cluster: **2651
+  passed, 10 skipped, 13 subtests passed, 0 failed** (D-274F's own final
+  run: 2652 passed -- the one-fewer count is `test_no_canonical_
+  normalization_timeout_reused_from_renderer` moving from a bare
+  inequality check to a two-assertion version within the SAME test
+  function, not a lost test).
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8207 passed, 10 skipped, 13 subtests passed, 0
+  failed** (464.58s) -- IDENTICAL pass count to D-274F's own final
+  qualification run, confirming zero net regression.
+
+### Canonical status update
+
+SOURCE NORMALIZATION TIMEOUT POLICY = CLOSED. LIVE AUTO-NORMALIZATION =
+CLOSED / PRODUCT-ACTIVATED: every real NORMALIZE_REQUIRED source in
+production now genuinely attempts normalization under a real,
+Product-Owner-approved 30-minute ceiling, with the full D-271 -> D-272 ->
+D-274A -> D-274B/C/D -> D-271 re-probe -> D-272 re-evaluate -> D-274E
+format QC chain proven end-to-end, real synthetic media, through the
+actual production call site. MEDIA-DIVERSITY P0 IMPLEMENTATION = CLOSED
+EXCEPT REAL-PHONE QUALIFICATION.
+
+### Verdict
+
+**A -- CANONICAL 1800S SOURCE NORMALIZATION TIMEOUT ACTIVE -- LIVE
+AUTO-NORMALIZATION PRODUCT-ACTIVATED -- READY FOR REAL-PHONE
+QUALIFICATION.** Every stage of D-274F-A's own scope (Stages 1-10) is
+implemented, tested, and proven correct; zero new normalization
+capability, zero new codec/HDR/color/format-QC policy, zero editorial-
+pipeline change, zero regression across the full 8207-test offline
+suite, identical to D-274F's own final pass count.
+
+**Exact next gate:** D-275 -- Real-Phone Media Qualification -- not
+implemented, not decided by this entry; a Product Owner authorization
+call.
+
+**Decision entry reference:** this entry (D-274F-A).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-275.
+DO NOT LAUNCH RAW.

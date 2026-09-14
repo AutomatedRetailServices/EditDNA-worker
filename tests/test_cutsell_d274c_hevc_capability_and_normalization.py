@@ -585,8 +585,15 @@ def test_codec_capability_omitted_preserves_d274b_behavior(hevc_sdr_8bit_mp4, tm
 # No live activation / timeout seam unchanged
 # =============================================================================
 
-def test_timeout_seam_still_unset_by_default():
-    assert exe.NORMALIZATION_FFMPEG_TIMEOUT_SEC is None
+def test_timeout_seam_now_activated_via_d274f_a():
+    """This gate's own original assertion documented the seam was still
+    unset by default -- true at the time. D-274F-A (a later, separately-
+    authorized, Product-Owner-approved gate: "activate canonical source
+    normalization timeout") is exactly the gate that activates it to
+    1800.0 seconds (docs/CUTSELL_DECISIONS.md D-274F-A). Renamed +
+    rewritten as a self-resolving guard rather than left failing or
+    silently deleted."""
+    assert exe.NORMALIZATION_FFMPEG_TIMEOUT_SEC == 1800.0
 
 
 def test_no_live_activation_worker_job_now_legitimately_wired_via_d274f():
