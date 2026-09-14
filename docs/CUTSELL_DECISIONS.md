@@ -75319,3 +75319,201 @@ Then STOP.
 DO NOT IMPLEMENT D-278.
 DO NOT TOUCH cutsell/mobile-v1-clean.
 DO NOT START CALIBRATION.
+
+
+## D-278 — V1 Manual B-roll + Layered Audio/Voice-Over Composition Foundation
+
+**Objective.** Post D-277, sequence step B. Build a deterministic
+backend composition layer that EXECUTES the D-277 `TimelineComposition`
+contract: base CutSell edit + manual B-roll + audio-authority
+precedence + voice-over -> one final composed render passing
+`FINAL_RENDER_OUTPUT_CONTRACT_V1`. Offline backend/render
+implementation only -- no UI, no microphone, no AI B-roll.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `96ddc99` (exact expected
+match, D-277), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-277 re-read. The 7 listed files
+(`timeline_composition.py`, `render.py`, `render_plan.py`,
+`media_overlay_render.py`, `audio_finishing_executor.py`,
+`output_format_qc.py`, `render_delivery.py`) inspected; none of the
+existing five were edited by this gate (only imported by reference:
+`render.RENDER_FFMPEG_TIMEOUT_SEC`, `render.RENDER_FPS_DEFAULT`,
+`render.CANONICAL_OUTPUT_COLOR_METADATA_FLAGS`,
+`output_format_qc.FINAL_RENDER_OUTPUT_CONTRACT_V1`).
+
+### What was built (Stage 1-2: dedicated owner + plan type)
+
+New `cutsell_worker/timeline_composition_executor.py` -- the ONE
+dedicated composition authority (Stage 1). Never imports BestTake,
+Pacing, Boundary, Freeze, Visual Finishing, Audio Finishing policy, or
+Audio Join (confirmed by a source-inspection test, docstring-stripped
+per the AST technique this session already established, since this
+module's own prose legitimately names all of those things while
+explaining what it does NOT touch).
+
+**`TimelineRenderPlan`** (Stage 2): resolves D-277 state + caller-
+resolved assets into explicit render operations -- video overlay
+windows, audio-authority segments, caption regions, and a
+`plan_identity`. Built by `build_timeline_render_plan`, a pure
+function: validates via `timeline_composition.validate_composition`
+first (fail-closed, `TIMELINE_INVALID`), checks every referenced asset
+exists (`ASSET_MISSING`), checks the caller's resolved-asset duration
+agrees with the placement's own claimed duration (`ASSET_BOUNDS_
+INVALID`), and enforces Stage 20/21's own no-silent-time-stretch rule
+(`BROLL_DURATION_MISMATCH` / `VOICEOVER_DURATION_MISMATCH` when a
+placement's timeline span and source span disagree by more than a
+10ms float tolerance -- a check D-277's own `validate_composition`
+never needed since it has no asset-duration context).
+
+### Video composition (Stage 4-6, 19, 22)
+
+Every `BrollPlacement` becomes one full-frame ffmpeg `overlay=...
+enable='between(t,start,end)'` window, trimmed/scaled/time-shifted from
+its own `source_in_sec`/`source_out_sec`. Outside every B-roll window
+the base edit's own video plays untouched -- proven empirically: a red
+base + a blue B-roll placed at `[2,6)` measures red at t=1, blue at
+t=3, and red again at t=7 (base resumes exactly, no timeline shift).
+
+### Audio composition (Stage 6-10, 23, 26-27)
+
+Reuses `timeline_composition.caption_source_for_region`'s own
+precedence verbatim (never re-derived) to partition the timeline into
+contiguous, non-overlapping audio-authority segments, extracts exactly
+one source's audio per segment (mapped through the covering
+placement's own `source_in_sec` offset), and concatenates every
+segment in series with ffmpeg's `concat` filter -- never `amix`, so no
+two speech sources are ever summed. Proven empirically with three
+distinct sine tones (440Hz primary / 880Hz B-roll / 1320Hz VO):
+`KEEP_PRIMARY_VOICE` keeps 440Hz under a visual B-roll switch;
+`USE_BROLL_AUDIO` switches to 880Hz for exactly its window and returns
+to 440Hz after; a `VOICE_OVER` placement switches to 1320Hz and
+suppresses the primary voice for its own window, resuming 440Hz after;
+`VOICE_OVER` wins over both `KEEP_PRIMARY_VOICE` and `USE_BROLL_AUDIO`
+in an overlapping-interval scenario, exactly per D-277's own
+precedence.
+
+### Captions (Stage 11-13)
+
+`resolve_caption_regions` computes the same authority partition as a
+pure, ordered `CaptionRegion` (start/end/authority) tuple -- no ASR, no
+burned-in rendering, no fabricated text (confirmed structurally:
+`CaptionRegion` carries only an authority label, never a text field).
+
+### A genuine bug found and fixed via real execution (not hypothesized)
+
+The first real smoke-test run produced a composed file that failed
+`FINAL_RENDER_OUTPUT_CONTRACT_V1`'s own `AUDIO_CHANNELS` check: a mono
+synthetic test tone produced a mono final output, because ffmpeg's
+audio `concat` filter requires every segment to share the same channel
+layout, not just the same sample rate, and no segment's own filter
+chain forced stereo. Fixed by adding `aformat=channel_layouts=stereo`
+to every real-audio segment's own filter chain before `aresample`;
+re-verified end-to-end afterward (`format_qc_status: PASS`).
+
+### Render safety (Stage 31, 34-35) -- reused, never duplicated
+
+`render.RENDER_FFMPEG_TIMEOUT_SEC` (1200.0) read by reference, an
+explicit override accepted for tests only (same `None`-means-canonical
+contract D-274F-A established); confirmed by a source-inspection test
+that the literal `1200` never appears in `execute_timeline_composition`
+itself. Job-local temp output + atomic `os.replace` promote (a private
+copy of `render.py`'s own D-266 doctrine, per this codebase's
+established per-module convention). `shell=False` throughout
+(confirmed: `shell=True` never appears in the module, docstring-
+stripped). Ten structured failure categories (`TIMELINE_INVALID`,
+`ASSET_MISSING`, `ASSET_BOUNDS_INVALID`, `BROLL_DURATION_MISMATCH`,
+`VOICEOVER_DURATION_MISMATCH`, `COMPOSITION_FFMPEG_FAILED`,
+`COMPOSITION_TIMEOUT`, `OUTPUT_MISSING`, `OUTPUT_EMPTY`, `OUTPUT_
+FORMAT_QC_FAILED`) -- never a bare exception.
+
+### Base-only bypass (Stage 38)
+
+A composition with zero manual placements is architecturally identical
+to the base edit -- `execute_timeline_composition` returns
+`BASE_ONLY_BYPASS` with `output_path == base_edit_asset.local_path`,
+never a needless re-encode, never a mutation of the base edit file
+(confirmed: SHA-256 identical before/after).
+
+### Faceless agnosticism + post-launch firewall (Stage 42-43)
+
+Confirmed by source inspection (docstring-stripped): the executor
+never references `face`, `product_bbox`, `hand_bbox`, `scene_mode`, or
+`visual_mode`, and never references `similarity`, `ranking`,
+`auto_place`, `sales_beat`, or `clip_score` -- the identical code path
+composes talking-head, faceless-product, hands/product, and
+demo-action primary footage with zero special-casing, and contains no
+AI placement/ranking logic of any kind.
+
+### Test evidence (Stage 44-47) -- real ffmpeg, distinguishable-signal
+fixtures, not command inspection
+
+New `tests/test_cutsell_d278_timeline_composition_executor.py`, 37
+tests. Real solid-color video fixtures (red base / blue B-roll-A /
+green B-roll-B) and real distinct sine-tone audio (440/880/990/1320/
+1760 Hz) verified by direct pixel-averaging and FFT peak-frequency
+measurement of the ACTUAL composed output (never inferred from exit
+code alone, per Stage 45/46's own instruction). Covers: base-only
+bypass (2 tests); all three B-roll audio modes with visual+audio
+evidence (3); multiple non-overlapping B-roll in one generation (1);
+voice-over over primary (1); B-roll+VO same-interval precedence, both
+`KEEP_PRIMARY_VOICE` and `USE_BROLL_AUDIO` variants (2); multiple VO
+segments (1); caption authority for all three sources (4); moved/
+trimmed/replaced B-roll composition (3); D-277-validation-not-bypassed
+for overlap/bounds (2); missing-asset for both B-roll and VO (2);
+duration-mismatch for B-roll, VO, and a stale resolved-asset duration
+(3); paths with spaces and Unicode paths (2); original-asset
+preservation (1); format-QC pass (1); plan-identity determinism and
+path-independence, and timeline-edit-changes-identity (2); silent-
+asset fallback (1); canonical-timeout-by-default (1); five structural/
+source-inspection checks (dedicated owner, no `shell=True`, timeout
+reused not duplicated, no AI placement code, faceless-agnostic).
+
+### Verification run
+
+- New test file: **37 passed**, 0 failed (61.65s, real ffmpeg
+  encodes).
+- `compileall` over `cutsell_worker/`, `tests/`, `scripts/`: clean.
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8280 passed, 10 skipped, 13 subtests passed, 0
+  failed** (527.93s) -- exactly D-277's own 8243-test baseline plus
+  this gate's 37 new tests, confirming zero regression anywhere else.
+
+### Verdict
+
+**A -- V1 MANUAL B-ROLL + LAYERED AUDIO / VOICE-OVER COMPOSITION
+FOUNDATION PROVEN -- BACKEND CAN EXECUTE D-277 TIMELINE CONTRACT --
+READY FOR MOBILE / ASSET-INTEGRATION LAYER.** Every D-277 semantic
+behavior (three audio modes, VO precedence, multi-placement, move/
+trim/replace/delete, caption authority, path-independent identity) is
+now proven executable end-to-end against real media, with real
+measured evidence, at the correct final-render technical contract. One
+real bug (mono-audio-breaks-stereo-contract) was found and fixed via
+actual execution, not hypothesized.
+
+**Exact recommended next gate:** the directive itself asks this entry
+to recommend between two named options rather than choose
+automatically. Recommendation: **D-279 -- Manual Timeline Asset
+Ingest/Persistence API Contract** before the Faceless/Product
+visual-mode foundation -- this executor already assumes "already-
+resolved, already-qualified" assets (Stage 14/15/40), and every
+manual-timeline test in this gate had to hand-construct that
+resolution; a real ingest/persistence contract is the more direct
+prerequisite for the mobile/asset-integration layer this gate's own
+Verdict A points to, whereas the Faceless/Product visual-mode
+foundation (Stage 42 confirmed this executor already needs none of
+it) can proceed independently and in parallel without blocking on it.
+Not decided by this entry -- a Product Owner sequencing call.
+
+**Product Owner decision required:** YES -- which of the two named
+D-279 candidates (or both, in parallel) to authorize next.
+
+**Decision entry reference:** this entry (D-278).
+
+Then STOP.
+
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT IMPLEMENT NEXT GATE.
+DO NOT START CALIBRATION.
