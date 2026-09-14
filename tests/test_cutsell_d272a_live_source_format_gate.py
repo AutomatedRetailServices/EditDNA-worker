@@ -255,10 +255,26 @@ def test_unknown_codec_gate_insufficient_evidence(monkeypatch):
 
 
 def test_hevc_runtime_unverified_gate_insufficient_evidence(monkeypatch):
+    """D-274C-A now feeds a REAL, dynamically-established capability into
+    this gate (see `test_gate_uses_established_worker_capability` and
+    `test_gate_falls_back_to_insufficient_evidence_when_unestablished`
+    below for the two live cases this supersedes) -- this specific test
+    forces the pre-D-274C-A UNESTABLISHED case explicitly, since that is
+    what its own name asserts ('runtime unverified'), rather than relying
+    on an implicit always-off default that no longer reflects live
+    behavior."""
     from dataclasses import replace
+    from cutsell_worker import production_runtime_capability as prc
+    from cutsell_worker import worker_runtime_capability as wrc
     profile = replace(_rotated_profile(0), video_codec=smp.VIDEO_CODEC_HEVC, raw_video_codec="hevc",
                        rotation_source=smp.ROTATION_SOURCE_NONE)
     monkeypatch.setattr(smp, "probe_source_media_profile", lambda path, **kw: profile)
+    unestablished = prc.ProductionRuntimeCapability(
+        hevc_decoder_available=False, h264_encoder_available=False, ffmpeg_version=None,
+        capability_source=prc.CAPABILITY_SOURCE_PRODUCTION_STARTUP_SELF_CHECK,
+        production_verification_status=prc.PRODUCTION_VERIFICATION_STATUS_UNESTABLISHED,
+    )
+    monkeypatch.setattr(wrc, "get_worker_runtime_capability", lambda: unestablished)
     [diag] = worker_job.evaluate_source_format_gate({"s1": "x.mp4"})
     assert diag["decision"] == sfp.DECISION_INSUFFICIENT_EVIDENCE
     assert sfp.REASON_HEVC_RUNTIME_UNVERIFIED in diag["blocking_reasons"]
@@ -280,9 +296,16 @@ def test_diagnostics_deterministic_and_multi_source_order_preserved(monkeypatch)
     assert all(d["decision"] == sfp.DECISION_ACCEPT for d in diags)
 
 
-def test_gate_never_passes_runtime_capability_confirmed(monkeypatch):
-    """Stage 7: no canonical production HEVC/AV1 capability source exists in
-    this job -- the live gate must never feed a confirmed RuntimeCapabilityInput."""
+def test_gate_passes_the_established_worker_capability_input(monkeypatch):
+    """D-274C-A supersedes D-272A's own original Stage 7 ('no canonical
+    production capability source exists, so never pass one') -- self-
+    resolving guard, same pattern as D-272B's own precedent. The live
+    gate now passes EXACTLY `worker_runtime_capability.get_worker_
+    runtime_capability_input()`'s own result -- traced here with a
+    distinctive sentinel to prove it is that call's result and not some
+    other hardcoded value, never a duplicated derivation."""
+    from cutsell_worker import source_format_policy as sfp_module
+    from cutsell_worker import worker_runtime_capability as wrc
     captured = {}
     real = sfp.evaluate_source_format_policy
 
@@ -290,10 +313,34 @@ def test_gate_never_passes_runtime_capability_confirmed(monkeypatch):
         captured.update(kwargs)
         return real(profile, **kwargs)
 
+    sentinel = sfp_module.RuntimeCapabilityInput(hevc_decode_confirmed=True, av1_decode_confirmed=False)
     monkeypatch.setattr(worker_job, "evaluate_source_format_policy", _spy)
+    monkeypatch.setattr(wrc, "get_worker_runtime_capability_input", lambda: sentinel)
     monkeypatch.setattr(smp, "probe_source_media_profile", lambda path, **kw: _rotated_profile(0))
     worker_job.evaluate_source_format_gate({"s1": "x.mp4"})
-    assert captured.get("runtime_capability") is None
+    assert captured.get("runtime_capability") is sentinel
+
+
+def test_gate_falls_back_to_insufficient_evidence_when_unestablished(monkeypatch):
+    """The other half of the D-274C-A pairing: when the worker's own
+    capability establishment did NOT genuinely succeed, the live gate's
+    behavior is byte-identical to every pre-D-274C-A default (all-`False`
+    RuntimeCapabilityInput) -- confirmed via the real bridge function,
+    not a hand-rolled stand-in."""
+    from dataclasses import replace
+    from cutsell_worker import production_runtime_capability as prc
+    from cutsell_worker import worker_runtime_capability as wrc
+    profile = replace(_rotated_profile(0), video_codec=smp.VIDEO_CODEC_HEVC, raw_video_codec="hevc",
+                       rotation_source=smp.ROTATION_SOURCE_NONE)
+    monkeypatch.setattr(smp, "probe_source_media_profile", lambda path, **kw: profile)
+    unestablished = prc.ProductionRuntimeCapability(
+        hevc_decoder_available=True, h264_encoder_available=True, ffmpeg_version="x",
+        capability_source=prc.CAPABILITY_SOURCE_PRODUCTION_STARTUP_SELF_CHECK,
+        production_verification_status=prc.PRODUCTION_VERIFICATION_STATUS_UNESTABLISHED,
+    )
+    monkeypatch.setattr(wrc, "get_worker_runtime_capability", lambda: unestablished)
+    [diag] = worker_job.evaluate_source_format_gate({"s1": "x.mp4"})
+    assert diag["decision"] == sfp.DECISION_INSUFFICIENT_EVIDENCE
 
 
 # ---------------------------------------------------------------------------

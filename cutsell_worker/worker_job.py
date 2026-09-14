@@ -80,17 +80,27 @@ def evaluate_source_format_gate(local_paths: dict[str, str]) -> list[dict]:
     call site introduces zero duplicated codec/HDR/rotation/VFR/stream
     policy. D-272 remains the sole policy authority.
 
-    Deliberately does NOT pass a `RuntimeCapabilityInput` (Stage 7): no
-    canonical production HEVC/AV1 capability evidence source exists in
-    this job today, and D-271's own `LocalFfmpegCapabilitySnapshot` is
-    permanently local-sandbox-only -- it must never be fed into policy as
-    production truth. Leaving it unset keeps every non-H.264 codec
-    honestly `INSUFFICIENT_EVIDENCE` until a real capability source exists.
+    D-274C-A Stage 6: now passes a REAL `RuntimeCapabilityInput`, built
+    from this worker process's own established capability snapshot
+    (`worker_runtime_capability.get_worker_runtime_capability_input`) --
+    memoized once per process, never re-probed per source/job (Stage 5).
+    That bridge fails closed on its own authority (production_
+    verification_status must be genuinely ESTABLISHED, decoder AND
+    canonical H264 encoder both present -- D-274C-A Stage 7): whenever
+    establishment did not genuinely succeed, this call is byte-identical
+    to every prior gate's own all-`False` default, so H.264 sources and
+    every existing test remain completely unaffected. This function still
+    introduces ZERO duplicated HEVC/HDR/codec logic of its own -- it only
+    supplies D-272's own existing capability input parameter with real
+    evidence instead of an always-empty default.
     """
+    from . import worker_runtime_capability as wrc
+
+    runtime_capability = wrc.get_worker_runtime_capability_input()
     diagnostics: list[dict] = []
     for source_asset_id, local_path in local_paths.items():
         profile = smp.probe_source_media_profile(local_path)
-        decision = evaluate_source_format_policy(profile)
+        decision = evaluate_source_format_policy(profile, runtime_capability=runtime_capability)
         diagnostics.append(_source_format_diagnostic(source_asset_id, profile, decision))
     return diagnostics
 

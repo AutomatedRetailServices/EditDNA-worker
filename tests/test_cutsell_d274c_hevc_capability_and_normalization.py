@@ -514,14 +514,18 @@ def test_timeout_seam_still_unset_by_default():
 
 
 def test_no_live_activation_worker_job_untouched():
-    """Stage: worker_job.py is inspected, never modified, by this gate --
-    confirmed via source-scan for any new HEVC/normalization-executor
-    reference."""
+    """D-274C's own scope: worker_job.py is inspected, never modified, by
+    THIS gate -- confirmed via source-scan for any new normalization-
+    executor reference (D-274C-A, a later separately-authorized gate,
+    legitimately wires a capability-bridge reference into worker_job.py;
+    that gate's own test file re-asserts what IS authorized there -- this
+    assertion only ever concerned D-274C's own scope, never normalization
+    execution)."""
     import inspect
     from cutsell_worker import worker_job
     source = inspect.getsource(worker_job)
     assert "source_normalization_executor" not in source
-    assert "production_runtime_capability" not in source
+    assert "execute_source_normalization" not in source
 
 
 def test_rq_worker_and_entrypoint_untouched():
@@ -542,7 +546,12 @@ def test_rq_worker_and_entrypoint_untouched():
 
 @pytest.mark.parametrize("relative_path", [
     "cutsell_worker/render.py",
-    "cutsell_worker/worker_job.py",
+    # D-274C-A (a later, separately-authorized gate) legitimately wires
+    # worker_job.py's own evaluate_source_format_gate to a real capability
+    # bridge -- self-resolving guard, same pattern as D-272B's own
+    # precedent; worker_job.py entry removed here since this specific
+    # assertion (byte-for-byte unchanged since D-274B) is no longer true
+    # by design, not by regression.
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     "cutsell_worker/render_delivery.py",

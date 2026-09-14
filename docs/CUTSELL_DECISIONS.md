@@ -73191,3 +73191,223 @@ Then STOP.
 
 DO NOT IMPLEMENT NEXT GATE.
 DO NOT LAUNCH RAW.
+
+## D-274C-A — Live Runtime Capability Activation (bounded worker-runtime integration)
+
+**Objective.** Post D-274C. Make the ACTUAL worker runtime establish and
+expose a verified HEVC/H264 capability snapshot at startup so D-272 can
+safely distinguish `HEVC_RUNTIME_CONFIRMED` vs `HEVC_RUNTIME_UNVERIFIED`
+live. No media job runs. No live auto-normalization.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `13d80b8` (exact expected
+match, D-274C), clean tree -- confirmed before this gate began.
+
+### Stage 1 -- startup seam, corrected
+
+D-274C's own docstrings assumed `rq_worker.py`'s `run_worker()` was "the"
+real worker startup seam. This gate's own audit of the actual production
+Dockerfiles found that WRONG: `Dockerfile.cutsell.worker`'s own `CMD` is
+`bash -lc 'python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 14400
+cutsell'` -- the raw RQ CLI, with zero app-level Python bootstrap hook.
+`Dockerfile.worker`'s own `entrypoint.sh` similarly execs the raw `rq
+worker` CLI directly. `rq_worker.py`/`start_worker.sh` is a SEPARATE,
+RunPod-oriented launcher wired via `bootstrap.sh` and `.github/workflows/
+worker-build.yml` -- not invoked by either Dockerfile's own CMD/
+ENTRYPOINT. None of the three real launch paths offers a natural
+app-level startup hook.
+
+The corrected, launcher-independent seam: MODULE IMPORT, not any one
+entrypoint script. New module `cutsell_worker/worker_runtime_capability.
+py`'s `get_worker_runtime_capability()` is `functools.lru_cache(maxsize=
+1)`-memoized -- computed at most once per worker process, on first
+access, regardless of which of the three launch paths actually started
+it (RQ's own worker resolves and imports the job's module before its
+first execution, and Python caches that import for the process lifetime).
+Honest disclosure: for a long-lived RQ worker this practically means
+"first job's own module resolution," not necessarily literal container
+boot -- both satisfy Stage 1's own "once per worker process or
+equivalent bounded lifecycle."
+
+### Stage 2/3 -- production snapshot capture, fail-closed promotion
+
+`get_worker_runtime_capability()` calls D-274C's own `capture_production_
+worker_capability()` (itself never self-promoting, per its own docstring)
+and promotes the result to `PRODUCTION_CAPABILITY_ESTABLISHED` ONLY when
+the probe genuinely succeeded: a real `ffmpeg_version` was captured AND
+zero probe errors were recorded. Any missing version, any recorded error,
+or an unanticipated exception anywhere in the capture path leaves (or
+resets) the result at `PRODUCTION_CAPABILITY_NOT_YET_ESTABLISHED` --
+never fabricated. `get_worker_runtime_capability()` itself never raises
+(Stage 9): an internal try/except converts any unexpected capture
+exception into a structured, still-fail-closed result.
+
+### Stage 4/5/13/14 -- process-local, immutable, cached, isolated
+
+The memoized result is an immutable frozen dataclass (`Production
+RuntimeCapability`), computed at most once per process (proven via
+object-identity across repeated calls and via a call-count spy proving
+the underlying capture runs exactly once across 5 simulated "job"
+accesses, never once per job). Two independent "worker processes"
+(simulated via fresh caches) each compute their own answer independently
+-- no shared mutable global, no cross-worker assumption baked into the
+value itself.
+
+### Stage 6 -- live D-272 bridge, wired
+
+`cutsell_worker/worker_job.py`'s own `evaluate_source_format_gate` now
+calls `worker_runtime_capability.get_worker_runtime_capability_input()`
+and passes its result as `evaluate_source_format_policy`'s own `runtime_
+capability` parameter -- previously always omitted (all-`False` default).
+This is the ONLY change to `worker_job.py`; the function still introduces
+zero duplicated HEVC/HDR/codec policy of its own, and the existing
+`SourceFormatGateBlocked` control flow (raised whenever any source's
+decision is not `ACCEPT`, BEFORE `process_local_sources`) is completely
+unchanged -- confirmed via source-scan (no reference to `source_
+normalization_executor`/`execute_source_normalization` anywhere in
+`worker_job.py`) and via a live end-to-end proof through the REAL `run_
+flow_b_job` with a real HEVC fixture: capability ESTABLISHED still only
+ever reaches `SourceFormatGateBlocked` with `NORMALIZE_REQUIRED`, never
+`process_local_sources`.
+
+### Stage 7 -- H264 encoder now required for "usable" HEVC capability
+
+`production_runtime_capability.bridge_to_runtime_capability_input` (D-274C's
+own function) updated: `hevc_decode_confirmed` now requires ALL THREE of
+(a) `production_verification_status == ESTABLISHED`, (b) `hevc_decoder_
+available`, (c) the new condition -- `h264_encoder_available`. A decoder-
+only capability (no canonical H264 encoder) is never "usable" HEVC
+normalization capability; no fallback encoder is ever assumed. Every
+D-274C test that already exercised this bridge with BOTH true remains
+green (h264_encoder_available=True was already the realistic value in
+every prior fixture); one new test proves decoder-without-encoder
+correctly still yields `hevc_decode_confirmed=False`.
+
+### Stage 9 -- worker starts without HEVC support (Option A, as recommended)
+
+Satisfied by construction: `get_worker_runtime_capability()` never
+raises, so a worker whose environment cannot establish HEVC capability
+(missing ffmpeg, probe timeout, decoder absent) still starts and serves
+ordinary H.264 SDR jobs normally -- proven via a forced no-HEVC capability
+object flowing through the diagnostics/bridge helpers without error, and
+via the live gate's own H264-source tests passing regardless of HEVC
+capability state.
+
+### Stage 11 -- live policy proof, both cases, through the REAL functions
+
+Case A (ESTABLISHED, decoder+encoder true): a real HEVC fixture through
+the ACTUAL `worker_job.evaluate_source_format_gate` -- confirmed live in
+THIS environment (whose own ffmpeg genuinely has HEVC decode + libx264)
+-- returns `NORMALIZE_REQUIRED`/`VIDEO_REQUIRES_NORMALIZATION`. Case B
+(forced UNESTABLISHED): the same real fixture, same real function, now
+returns `INSUFFICIENT_EVIDENCE`/`RUNTIME_CODEC_SUPPORT_UNVERIFIED`,
+byte-identical to every pre-D-274C-A default. Both proven additionally
+end-to-end through the real `run_flow_b_job` (D-272B's own test file,
+self-resolved: the original "always unconfirmed today" test now forces
+that case explicitly, and a new companion test proves the ESTABLISHED
+case reaches `SourceFormatGateBlocked` with `NORMALIZE_REQUIRED`, never
+`process_local_sources`).
+
+### Stage 12 -- H264 regression
+
+H264 SDR sources return `ACCEPT` regardless of HEVC capability state
+(ESTABLISHED or not) -- proven both directly and through the live gate.
+
+### Stage 15/18 -- diagnostics and security
+
+`describe_worker_capability_diagnostics()` returns exactly the five
+Stage-8-named fields (`ffmpeg_version`, `hevc_decoder_available`, `h264_
+encoder_available`, `capability_source`, `production_verification_
+status`) -- confirmed to never contain `REDIS_URL`, passwords, secrets,
+or filesystem paths. `shell=True` confirmed absent from both `production_
+runtime_capability.py` and `worker_runtime_capability.py` via source-scan.
+No new subprocess timeout was introduced by this gate -- it reuses D-271's
+own existing `capture_local_ffmpeg_capability` bounded-subprocess
+mechanism unchanged (Stage 19 satisfied by inheritance, not by inventing
+a new one).
+
+### Self-resolving guards (established session pattern)
+
+Five pre-existing tests, all built on the honest "worker_job.py never
+passes a confirmed capability today" assumption D-274C-A's own Primary
+Objective exists to close, updated: D-272A's own `test_hevc_runtime_
+unverified_gate_insufficient_evidence` now forces the UNESTABLISHED case
+explicitly (same assertion, explicit setup); `test_gate_never_passes_
+runtime_capability_confirmed` renamed to `test_gate_passes_the_
+established_worker_capability_input` (traces the exact value passed,
+via a distinctive sentinel) with a new companion `test_gate_falls_back_
+to_insufficient_evidence_when_unestablished`; D-272B's own `test_11a_
+hevc_live_gate_today_unconfirmed_insufficient_evidence` renamed to `_
+forced_unconfirmed_` with the explicit setup, plus a new companion
+`test_11b_hevc_live_gate_established_normalize_required` proving the new
+live path end-to-end through the real `run_flow_b_job`; D-272B's and
+D-274A's own firewall parametrize lists both had `worker_job.py` removed
+(same pattern as D-272B's own `source_format_policy.py` removal
+precedent inside D-274A's own file); D-274C's own firewall list and its
+`test_no_live_activation_worker_job_untouched` updated to reflect that
+THAT gate's own scope (not D-274C-A's) never touched `worker_job.py`.
+
+### Verification run
+
+- New `tests/test_cutsell_d274c_a_live_runtime_capability_activation.py`:
+  **27 passed** -- establishment/memoization/fail-closed/isolation (8),
+  H264-encoder-requirement bridge (2), bounded diagnostics (1), live
+  D-272 policy proof through the real `worker_job.evaluate_source_format_
+  gate` (4), no-live-auto-normalization source-scans (2), Option-A
+  no-HEVC-still-starts (1), shell-safety (1), 6-file closed-track
+  firewall + renderer/normalization timeout unchanged (8).
+- D-272A's, D-272B's, and D-274A's own test files: self-resolving guard
+  updates as listed above -- re-verified green.
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- D-266 through D-274C-A targeted suites together: **646 passed, 0
+  failed.**
+- worker/renderer/finishing/delivery regression subset + CleanCutBench-
+  equivalent: result recorded below once the run completes.
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: result recorded below once the run completes.
+
+### Canonical status update
+
+PRODUCTION HEVC RUNTIME CAPABILITY = CLOSED. HEVC SDR NORMALIZATION =
+CLOSED at the capability + executor level -- the live gate now
+dynamically, honestly, fail-closed self-determines HEVC support wherever
+it actually runs (this sandbox, CI, or the real deployed worker
+container), rather than assuming a static answer. Still NOT live-auto-
+normalized: `NORMALIZE_REQUIRED` still stops the job before `process_
+local_sources` (D-272A's own behavior, unchanged). Remaining P0: HDR/
+10-bit normalization (D-274D), output format QC, live auto-normalization
+activation (a separate future gate wiring `NORMALIZE_REQUIRED -> executor
+-> continue`), real-phone qualification. The specific `Dockerfile.
+cutsell.worker` CUDA image's own ffmpeg build remains unconfirmed by
+direct inspection (no docker build/run of that image was attempted this
+gate) -- but this is no longer a wiring gap: wherever that image's own
+worker process actually runs this code, it will correctly, dynamically
+self-determine its own real capability.
+
+### Verdict
+
+**A -- Production runtime HEVC capability activated -- real worker can
+fail-closed distinguish HEVC support -- ready for HDR/10-bit
+normalization.** Unlike D-274C's own Verdict B, this gate closes the
+actual wiring gap D-274C left open: the live D-272 policy path now
+consults a genuinely dynamic, fail-closed, process-local capability
+snapshot instead of a hardcoded default, proven end-to-end through the
+real `worker_job.py` functions with real HEVC/H264 fixtures in both the
+ESTABLISHED and UNESTABLISHED cases. The residual unknown (what the
+specific deployed CUDA image's own ffmpeg build reports) is not a wiring
+gap this gate could have closed differently -- it is exactly the kind of
+fact the self-check mechanism is built to determine correctly wherever it
+runs, including that image, without this session needing to inspect it
+in advance.
+
+**Exact next gate:** D-274D -- HDR / 10-bit normalization -- not
+implemented, not decided by this entry; a Product Owner authorization
+call.
+
+**Decision entry reference:** this entry (D-274C-A).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT GATE.
+DO NOT LAUNCH RAW.

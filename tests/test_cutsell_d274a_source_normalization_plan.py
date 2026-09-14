@@ -544,7 +544,10 @@ _FIREWALL_FILES = [
     "cutsell_worker/exports.py",
     "cutsell_worker/tenant_safe_delivery.py",
     "cutsell_worker/uploads.py",
-    "cutsell_worker/worker_job.py",
+    # worker_job.py removed: D-274C-A (a later, separately-authorized
+    # gate) legitimately wires a real capability bridge into it --
+    # self-resolving guard, same pattern as source_format_policy.py's
+    # own removal above.
     "cutsell_worker/flow_b.py",
     "gpu_execution_provider.py",
 ]

@@ -320,19 +320,53 @@ def _payload(uri: str) -> dict:
 
 
 @pytestmark_ffmpeg
-def test_11a_hevc_live_gate_today_unconfirmed_insufficient_evidence(wired_worker_job, hevc_mp4):
-    """worker_job.py's own evaluate_source_format_gate never passes a
-    runtime_capability today (confirmed: zero occurrences in the module's
-    source) -- so a real HEVC source live is INSUFFICIENT_EVIDENCE
-    exactly as before D-272B. D-272B's new NORMALIZE_REQUIRED path only
-    becomes reachable once a real production capability source is wired
-    into the live gate (a separate, future activation)."""
-    assert "runtime_capability" not in Path("cutsell_worker/worker_job.py").read_text(encoding="utf-8")
+def test_11a_hevc_live_gate_forced_unconfirmed_insufficient_evidence(wired_worker_job, hevc_mp4, monkeypatch):
+    """D-272B's own original claim here ('worker_job.py never passes a
+    runtime_capability today') is superseded by D-274C-A, a later,
+    separately-authorized gate that wires a REAL, dynamically-established
+    capability into this exact live path (see `test_cutsell_d274c_a_
+    live_runtime_capability_activation.py` for that gate's own proof) --
+    self-resolving guard, same pattern as this file's own precedent for
+    D-269A/D-272A. This test now forces the UNESTABLISHED case explicitly
+    to preserve its original intent: when capability establishment has
+    NOT genuinely succeeded, a real HEVC source live is still
+    INSUFFICIENT_EVIDENCE, byte-identical to every pre-D-274C-A default."""
+    from cutsell_worker import production_runtime_capability as prc
+    from cutsell_worker import worker_runtime_capability as wrc
+    unestablished = prc.ProductionRuntimeCapability(
+        hevc_decoder_available=True, h264_encoder_available=True, ffmpeg_version="x",
+        capability_source=prc.CAPABILITY_SOURCE_PRODUCTION_STARTUP_SELF_CHECK,
+        production_verification_status=prc.PRODUCTION_VERIFICATION_STATUS_UNESTABLISHED,
+    )
+    monkeypatch.setattr(wrc, "get_worker_runtime_capability", lambda: unestablished)
     with pytest.raises(worker_job.SourceFormatGateBlocked) as excinfo:
         worker_job.run_flow_b_job(_payload(hevc_mp4))
     assert wired_worker_job["process_local_sources"] == 0
     assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_INSUFFICIENT_EVIDENCE
     assert excinfo.value.primary_error_code == sfp.USER_FACING_RUNTIME_CODEC_SUPPORT_UNVERIFIED
+
+
+@pytestmark_ffmpeg
+def test_11b_hevc_live_gate_established_normalize_required(wired_worker_job, hevc_mp4, monkeypatch):
+    """D-274C-A's own live proof, end-to-end through the REAL `run_flow_b_
+    job`: once capability establishment genuinely succeeds (simulated
+    here at the test level, mirroring this whole session's own established
+    'structural proof' pattern), a real HEVC source now correctly blocks
+    with NORMALIZE_REQUIRED/VIDEO_REQUIRES_NORMALIZATION -- still NEVER
+    reaching `process_local_sources` (no live auto-normalization)."""
+    from cutsell_worker import production_runtime_capability as prc
+    from cutsell_worker import worker_runtime_capability as wrc
+    established = prc.ProductionRuntimeCapability(
+        hevc_decoder_available=True, h264_encoder_available=True, ffmpeg_version="x",
+        capability_source=prc.CAPABILITY_SOURCE_PRODUCTION_STARTUP_SELF_CHECK,
+        production_verification_status=prc.PRODUCTION_VERIFICATION_STATUS_ESTABLISHED,
+    )
+    monkeypatch.setattr(wrc, "get_worker_runtime_capability", lambda: established)
+    with pytest.raises(worker_job.SourceFormatGateBlocked) as excinfo:
+        worker_job.run_flow_b_job(_payload(hevc_mp4))
+    assert wired_worker_job["process_local_sources"] == 0
+    assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
+    assert excinfo.value.primary_error_code == "VIDEO_REQUIRES_NORMALIZATION"
 
 
 @pytestmark_ffmpeg
@@ -440,7 +474,10 @@ _FIREWALL_FILES = [
     "cutsell_worker/exports.py",
     "cutsell_worker/tenant_safe_delivery.py",
     "cutsell_worker/uploads.py",
-    "cutsell_worker/worker_job.py",
+    # worker_job.py removed: D-274C-A (a later, separately-authorized
+    # gate) legitimately wires a real capability bridge into it --
+    # self-resolving guard, same pattern as this file's own D-272A
+    # precedent above.
     "cutsell_worker/flow_b.py",
     "gpu_execution_provider.py",
 ]
