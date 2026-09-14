@@ -41,6 +41,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install ffmpeg
+        # The test suite has always implicitly relied on ffmpeg being
+        # present on this runner (real media fixtures for prosodic/audio,
+        # pacing, and source-normalization coverage). That assumption is
+        # no longer safe to leave implicit, so declare it explicitly here
+        # rather than depend on whatever the hosted runner image happens
+        # to ship with.
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
       - name: Compile clean worker and app
         run: python -m compileall cutsell_worker cutsell_app
       - name: Install test runner and runtime dependencies

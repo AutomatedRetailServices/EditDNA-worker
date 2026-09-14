@@ -63,6 +63,14 @@ def h264_fixture(tmp_path_factory):
 
 
 def _has_real_hevc_capability() -> bool:
+    # Called from a `@pytest.mark.skipif(...)` decorator argument, which
+    # evaluates at collection/import time -- *before* this module's own
+    # `pytestmark` ffmpeg-presence skip can take effect. Must therefore be
+    # resilient to a missing ffmpeg binary itself, not just report on its
+    # capabilities: a runner without ffmpeg has no real HEVC capability,
+    # full stop, matching the module-level skip's own fail-closed intent.
+    if shutil.which("ffmpeg") is None:
+        return False
     encoders = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
     decoders = subprocess.run(["ffmpeg", "-hide_banner", "-decoders"], capture_output=True, text=True).stdout
     return "libx265" in encoders.lower() and "hevc" in decoders.lower()
