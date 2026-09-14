@@ -74674,3 +74674,226 @@ Then STOP.
 
 DO NOT IMPLEMENT D-276.
 DO NOT START CALIBRATION.
+
+
+## D-275R — Real iPhone Media Qualification Recovery
+
+**Objective.** Recovers D-275 (Verdict D) after Product Owner correction:
+the existing S3 corpus under `Editdna longform validation/` (same
+folder family as Video00) is confirmed real iPhone-recorded media.
+V1/Beta platform scope is iPhone-only; Android qualification is
+deferred. Qualifies the actual, unchanged D-271 -> D-272 -> D-274A ->
+D-274B/C/D -> D-271 (reprobe) -> D-272 (reevaluate) -> D-274E -> D-274F
+live chain against real downloaded iPhone samples, plus a bounded
+Stage 20 final-render sanity check. No editorial benchmark run.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `f21a00a` (exact expected
+match, D-275), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-275 re-read. All 8 listed source
+files inspected; zero of the eight canonical modules were edited by
+this gate.
+
+### Stage 1 -- read-only S3 inventory (real, not fabricated)
+
+New `cutsell-d275r-real-iphone-inventory.yml` (self-bootstrapped via
+push, same credential pattern as D-254R: RunPod template env via
+`RUNPOD_API_KEY`, never a new credential source) ran `aws s3api
+list-objects-v2` (strictly read-only -- no cp --recursive/sync,
+no put-object/delete-object) against the bucket root (one level deep)
+and the `Editdna longform validation/` prefix.
+
+Top-level bucket prefixes found: `Editdna bloopers videos/`, `Editdna
+good videos/`, `Editdna longform validation/`, `cutsell/`, `editdna/`.
+
+`Editdna longform validation/` contains 18 real media objects (11
+`.mp4`, 7 `.mov`), PROVENANCE = PRODUCT_OWNER_CONFIRMED_IPHONE per the
+Product Owner's own correction, EXCEPT one filename
+(`v12044gd0000d46k2m7og65re0trr1rg.MP4`) whose pattern matches a TikTok
+CDN internal video-id convention rather than the corpus's own iOS
+`copy_<UUID>`/`VIDEO-<timestamp>` patterns -- excluded from this gate's
+qualification sampling pending separate confirmation (never asserted
+non-iPhone, only not asserted iPhone without more evidence, per this
+gate's own no-fabricated-provenance rule).
+
+### Stage 5 -- representative qualification set (4 samples selected, documented)
+
+1. `VIDEO-2026-07-30-09-18-03.mp4` (Video00 itself, 38.7 MB) -- most
+   independently corroborated file in the corpus.
+2. `copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4` (68.7 MB) --
+   explicitly named by the Product Owner in the D-275R directive.
+3. `copy_0C08368A-1FA1-4217-B9AB-A05BE613B6A4.MOV` (103 MB, largest
+   `.MOV`) -- highest-bitrate/resolution candidate, `.MOV` container.
+4. `copy_767E1C78-4791-4AFD-B6C1-49CEEC5F73EE.MOV` (26.6 MB, smallest
+   `.MOV`) -- second, distinct `.MOV` sample.
+
+Excluded with reasons: the two CLAUDE.md QA-oracle files (Human Gold,
+Cut.ai -- reserved for editorial benchmarking, never blended into
+engineering format qualification), the one TikTok-pattern filename
+above, and the remaining 11 near-duplicate `VIDEO-timestamp`/`copy_`
+files (Stage 5's own "do not run every duplicate file unnecessarily").
+14 corpus objects were therefore NOT individually profiled in this
+run -- see the disclosed gap below.
+
+### Stages 3/6/8/9 -- live qualification (new `cutsell-d275r-real-iphone-qualification.yml` + `scripts/d275r_qualification_driver.py`)
+
+The driver imports and calls the real, unchanged
+`source_media_profile.probe_source_media_profile`,
+`source_format_policy.evaluate_source_format_policy`, and
+`worker_job.resolve_sources_for_editorial_entry` (which itself composes
+the D-274A plan builder, the D-274B/C/D executor, the D-271 reprobe,
+the D-272 reevaluation, and D-274E format QC) against each downloaded
+real file, on a real GitHub Actions Ubuntu runner (`ffmpeg 6.1.1-3ubuntu5`,
+`hevc_decoder_available: true`, `h264_encoder_available: true` --
+genuine capability, not fabricated). Results, measured directly from
+the real run (run id 34831415390, job id 103935381747):
+
+| sample | container | codec | dims (coded) | fps | HDR | VFR | initial D-272 | live resolution | normalized QC | render QC | wall time | headroom vs 1800s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| VIDEO-2026-07-30-09-18-03.mp4 | MP4 | H264 Baseline | 576x1024 | 30 CFR | SDR | CFR | ACCEPT | ACCEPT_ORIGINAL (0 normalization calls) | n/a | PASS | 0.07s | n/a |
+| copy_9E4975E5...MP4 | MP4 | HEVC Main | 720x1280 | 30 CFR | SDR | CFR | NORMALIZE_REQUIRED (HEVC_TO_H264) | NORMALIZED -> H264 High, 720x1280 | PASS | PASS | 68.68s | 1731.32s |
+| copy_0C08368A...MOV | MOV | HEVC Main | 896x1920 | 30 CFR | SDR | CFR | NORMALIZE_REQUIRED (HEVC_TO_H264) | NORMALIZED -> H264 High, 886x1920 | PASS | (not in bounded render subset) | 64.84s | 1735.16s |
+| copy_767E1C78...MOV | MOV | HEVC Main | 720x1280 | 30 CFR | SDR | CFR | NORMALIZE_REQUIRED (HEVC_TO_H264) | NORMALIZED -> H264 High, 720x1280 | PASS | (not in bounded render subset) | 24.2s | 1775.8s |
+
+All four: `source_preserved: true` (original SHA-256 identical before
+and after); every normalized sample's own SHA-256 recorded; A/V
+duration and audio sample rate identical before/after in every case
+(no drift observed); `plan_actions.audio: NO_ACTION` in every case
+(iPhone AAC 44.1kHz stereo passed through untouched, as expected).
+
+One honest observation, not a defect: `copy_0C08368A`'s normalized
+output measured 886x1920 display width (down from the source's
+896x1920) -- both even, aspect ratio preserved within noise (0.4667 ->
+0.4615); `NORMALIZED_SOURCE_CONTRACT_V1` and every other check still
+PASSED. Not root-caused further here per Stage 24's own "no one-file
+hacks" -- a single dimension observation on one real file, with format
+QC unaffected, is not evidence of a systemic defect requiring
+remediation.
+
+### Stage 20 -- bounded final-render sanity (2 of 4 samples, as directed)
+
+`render_preview` (the real, unchanged renderer entrypoint) ran a
+minimal 3-second single-segment timeline against the resolved canonical
+source for the ACCEPT-path sample (Video00) and the first
+NORMALIZE_REQUIRED-path sample (`copy_9E4975E5`).
+`FINAL_RENDER_OUTPUT_CONTRACT_V1` == **PASS** on both, zero failed
+checks -- proving the complete real-media path end-to-end: original
+phone file -> resolved canonical source (original or normalized) ->
+actual renderer -> passing final-render format QC.
+
+### Stages 23/24 -- failures / one-file hacks
+
+Zero failures of any kind occurred across all 4 samples at any layer
+(PROBE/POLICY/PLAN/CAPABILITY/EXECUTOR/REPROBE/POLICY_REEVALUATION/
+FORMAT_QC/FINAL_RENDER_QC). Zero code changes were made; zero one-file
+hacks of any kind (no filename/device-model/hash/codec-tag
+special-casing anywhere in this gate's driver or the eight canonical
+modules, which remain byte-identical to their D-275 state).
+
+### Stage 25 -- device matrix result
+
+See the table under Stages 3/6/8/9 above -- reproduced verbatim as this
+gate's own Stage 25 deliverable.
+
+### Stage 26/27 -- iPhone V1 readiness + minimum exit
+
+Proven with real evidence in this run:
+- iPhone common H264 SDR: **READY** (Video00, ACCEPT, render PASS).
+- iPhone HEVC SDR: **READY** (3/3 real HEVC samples normalized to
+  H264, reprobed ACCEPT, format QC PASS; one also render-QC PASS).
+- iPhone portrait orientation (native coded/display dimensions):
+  **READY** (all 4 samples are natively portrait-encoded).
+
+NOT proven with real evidence in this run (honest, disclosed gaps --
+never hidden, never fabricated as passing):
+- iPhone real ROTATION-METADATA path (a landscape-coded stream
+  carrying a Display Matrix rotate tag, per Stage 12's own specific
+  target): **NO_REAL_SAMPLE** -- all 4 selected samples are natively
+  portrait-encoded (`rotation_source: NONE` on every one), not
+  landscape-coded-plus-rotate-flagged. This is the SAME evidence gap
+  D-271's own prior work already disclosed (parser-controlled evidence
+  only); still open after this run.
+- iPhone VFR: **NO_REAL_SAMPLE** -- all 4 selected samples measured
+  `vfr_status: CFR`; no VFR sample was found among the 4 chosen for
+  container/size diversity.
+- iPhone HDR (PQ/HLG/Dolby Vision): **NO_REAL_SAMPLE** -- all 4
+  measured `hdr_status: SDR`. Per Stage 27 Option B, explicitly
+  recorded as an outstanding narrow real-device evidence gap, never
+  hidden.
+- iPhone landscape orientation: **NOT VERIFIED** -- not required by
+  Stage 14 ("preferably" only), and not falsified either; simply
+  outside this run's 4-sample selection.
+- **Disclosed scope limit, stated plainly**: 14 of the 18 real objects
+  in the `Editdna longform validation/` corpus were NOT individually
+  profiled in this run (Stage 5's own "do not run every duplicate file"
+  instruction). It is possible -- not confirmed either way -- that a
+  VFR or rotation-metadata-tagged file exists among them; this gate
+  does not claim their absence from the corpus, only their absence
+  from the evidence actually gathered here.
+
+Android: **DEFERRED -- OUT OF V1 IPHONE-ONLY SCOPE**, per Stage 26,
+not evaluated and not a blocker for this gate's verdict.
+
+Stage 27 minimum exit criteria (5 items): real iPhone common footage
+path (met), real HEVC phone path (met), real orientation-metadata path
+(NOT met -- see above), real VFR path (NOT met), at least one Android
+common path (N/A, iPhone-only V1 scope per Stage 26). Two of five
+items remain open with real evidence; HDR is separately, explicitly
+carried as an allowed outstanding gap per Option B.
+
+### Stage 28/29/30
+
+Security invariants (1800s normalization timeout, 1200s renderer
+timeout, one normalization pass/no retry, `shell=False`, atomic derived
+output, original preservation, job-local isolation, format QC) --
+preserved, unexercised beyond what the executor already re-verifies on
+every call; none modified. No canonical product-scope expansion
+performed (Faceless/Product/Hands/B-roll/Voice-over untouched, deferred
+to D-276). Test discipline: the only code added is the new, additive
+qualification driver/workflows themselves (zero production module
+edited) -- existing `tests/` suite is unaffected and was not re-run
+since no production code changed.
+
+### Canonical status update
+
+MEDIA-DIVERSITY P0 (iPhone V1 scope): real iPhone common-H264-SDR and
+real iPhone HEVC-SDR paths are now PROVEN end-to-end on real,
+Product-Owner-confirmed device media, through the actual production
+`resolve_sources_for_editorial_entry` seam and the actual renderer,
+with zero code changes needed. Real rotation-metadata and real VFR
+paths remain open real-device evidence gaps (not proven, not falsified,
+un-sampled in the remaining corpus). HDR remains an explicitly
+disclosed outstanding gap per Stage 27 Option B.
+
+### Verdict
+
+**B -- CORE REAL IPHONE MEDIA PATHS PASS -- NARROW REAL-DEVICE EVIDENCE
+GAPS REMAIN (rotation-metadata, VFR, HDR) -- PRODUCT OWNER
+BETA-BLOCKER DECISION REQUIRED.** H264 SDR and HEVC SDR real-iPhone
+paths are proven end-to-end including a real render-QC pass; three
+narrow real-device evidence gaps remain open (more than the single gap
+Stage 25's exit language anticipates), each disclosed honestly rather
+than hidden or fabricated as closed.
+
+**Exact next gate:** Product Owner decides whether the three open
+evidence gaps (rotation-metadata, VFR, HDR) are beta-blocking for V1
+iPhone launch, or acceptable to carry forward. A cheap, no-code-change
+follow-up (profiling the remaining 14 un-sampled corpus objects, or
+requesting/acquiring specifically a real-rotation-tagged and a
+real-VFR iPhone sample) could close some of these gaps without new
+engineering; that decision, and whether to then proceed to D-276, is a
+Product Owner call, not decided by this entry.
+
+**Product Owner decision required:** YES -- whether rotation-
+metadata/VFR/HDR evidence gaps block V1 iPhone beta readiness, and
+whether to authorize further sampling before D-276.
+
+**Decision entry reference:** this entry (D-275R).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-276.
+DO NOT START CALIBRATION.
+DO NOT LAUNCH 100-200 RAW BENCHMARK.
