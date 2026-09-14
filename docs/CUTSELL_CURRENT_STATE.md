@@ -13,6 +13,76 @@ This file is the operational checkpoint. Update it whenever the active benchmark
 - Base SHA remains `2fb13e5aa228e8e525b942a9b49182032b797e61`
 - PR #24 remains historical/reference backup and must stay untouched.
 
+## Mobile backend integration checkpoint — D-277 through D-282A (current)
+
+**Canonical HEAD:** `86a058d20567078af918d7f8dc8d02da84a85417`
+
+`cutsell/mobile-v1-clean` now contains the full D-277 through D-282A timeline/
+mobile-backend contract chain (timeline architecture/composition, manual
+B-roll + layered audio/voice-over composition foundation, timeline asset
+registry, faceless/product visual-mode safety, live asset persistence, the
+FastAPI mobile timeline bridge, and its upload/export authority hardening),
+brought in from `feature/runpod-pod-on-demand` in a controlled integration
+gate.
+
+Integration method and safety record:
+- fast-forward only (`git merge --ff-only`) — no rebase, no merge commit, no
+  cherry-pick, no force push, at any point in this checkpoint;
+- the branch was a strict git ancestor of the backend source before this
+  merge, so the fast-forward was structurally conflict-free;
+- the prior session's local-only commit `9f97531` (a RAW workflow
+  evidence-preservation fix, unrelated to this integration) was explicitly
+  **not** recovered, rebased, cherry-picked, or pushed — it remains
+  quarantined under the local tag `quarantine/9f97531-raw-evidence-fix`,
+  outside this branch's history;
+- `main` remains untouched at `2fb13e5aa228e8e525b942a9b49182032b797e61`;
+- PR #25 remains OPEN / DRAFT / UNMERGED throughout.
+
+Three real, pre-existing environment/CI gaps were exposed by running the
+existing "CutSell Clean Worker CI" job against this combined code for the
+first time (none are editorial/Selection logic, none were introduced by this
+integration — each was root-caused and fixed as its own commit, verified
+against a from-scratch CI-parity environment before pushing):
+1. `numpy`/`Pillow` were hard transitive imports of `cutsell_worker` (since
+   D-187/D-274b/c) but never declared in `requirements.cutsell.api.txt`.
+2. The hosted CI runner no longer ships `ffmpeg` by default; CI now installs
+   it explicitly, and one test helper that crashed instead of skipping when
+   ffmpeg was absent was fixed to fail closed.
+3. Eight pre-existing test files hardcoded this Claude Code sandbox's own
+   absolute checkout path instead of computing the repo root; fixed to
+   compute `Path(__file__).resolve().parents[1]`, verified from an unrelated
+   working directory.
+
+Verified state at `86a058d2`:
+- **CutSell Clean Worker CI — PASS** (full `tests/test_cutsell_*.py`,
+  compileall, staging API container health check);
+- **CutSell iOS CI — PASS** (real Xcode Simulator build);
+- existing native SwiftUI `mobile/ios/` work (29 files: auth, upload,
+  projects, processing, preview, timeline editor, export) preserved
+  unmodified by this integration;
+- no RunPod/GPU/provider spend — two GPU-cost workflows
+  (`CutSell Video00 Unified Selection RAW`, `Round24 Serverless GPU Gate`)
+  were auto-triggered as a path-filter side effect of the fast-forward and
+  cancelled immediately while still in their Docker-build stage, before any
+  paid compute began.
+
+**Not yet true, do not assume otherwise:**
+- calibration has **not** started;
+- Cut.ai parity is **not** proven for anything in this checkpoint;
+- TestFlight/production readiness is **not** complete (`cutsell-ios-ci.yml`
+  still builds Simulator-only, `CODE_SIGNING_ALLOWED=NO`, no
+  signing/archive/App Store Connect step exists);
+- no mobile UI was added or changed by this integration — the backend/API
+  contracts are now available on this branch, ready for the mobile Timeline
+  UI implementation gate, but that implementation has not started.
+
+**Exact next product gate:** wire D-279's formal timeline asset registry
+contract into the existing `TimelineAssets.swift` consumer (the one D-27x
+contract closest to something the iOS app already partially does — informal
+filmstrip/waveform consumption — and additive/backend-only, so it doesn't
+require resolving D-278's audio/voice-over UX or D-280's visual-mode safety
+semantics first).
+
 ## Current focus
 
 **Clean Cut Core V1 migration (idea-first, SWAP out of scope).** See
