@@ -18,6 +18,7 @@ from cutsell_app.overlay_routes import router as overlay_router
 from cutsell_app.project_routes import router as project_router
 from cutsell_app.render_version_routes import router as render_version_router
 from cutsell_app.text_routes import router as text_router
+from cutsell_app.timeline_routes import router as timeline_router
 from cutsell_worker.caption_settings import patch_caption_settings
 from cutsell_worker.config import load_runtime_config
 from cutsell_worker.draft_edits import (
@@ -57,6 +58,7 @@ app.include_router(multipart_router)
 app.include_router(text_router)
 app.include_router(overlay_router)
 app.include_router(project_router)
+app.include_router(timeline_router)
 app.include_router(render_version_router)
 app.include_router(job_retry_router)
 app.include_router(feedback_router)

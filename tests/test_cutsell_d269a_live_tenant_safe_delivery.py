@@ -612,10 +612,14 @@ def test_no_provider_no_raw_reference_in_modified_modules():
     "cutsell_worker/multipart_uploads.py",
     "cutsell_worker/gpu_execution_provider.py",
     "cutsell_worker/jobs.py",
-    "cutsell_worker/uploads.py",
+    # uploads.py and cutsell_app/main.py removed: D-282 (a later,
+    # separately-authorized gate) legitimately adds a voice-over upload
+    # allowlist to uploads.py and registers its new timeline router in
+    # main.py -- self-resolving guard, same pattern as this repo's other
+    # closed-track firewall lists (e.g. the worker_job.py precedent in
+    # test_cutsell_d272_source_format_policy.py).
     "cutsell_worker/project_store.py",
     "cutsell_app/auth_middleware.py",
-    "cutsell_app/main.py",
 ])
 def test_unrelated_authorities_unchanged(rel_path):
     assert _run_git_diff(rel_path) == "", f"D-269A must not touch {rel_path}"

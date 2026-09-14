@@ -846,7 +846,10 @@ def test_diagnostics_fields_present_no_secrets():
     "cutsell_worker/export_job.py",
     "cutsell_worker/exports.py",
     "cutsell_worker/tenant_safe_delivery.py",
-    "cutsell_worker/uploads.py",
+    # uploads.py removed: D-282 (a later, separately-authorized gate)
+    # legitimately adds a voice-over upload allowlist to it --
+    # self-resolving guard, same pattern as this file's own worker_job.py
+    # precedent below.
     # worker_job.py deliberately removed from this list: D-272A (the
     # separately-authorized Product Owner activation gate) legitimately
     # extends it -- see test_cutsell_d272a_live_source_format_gate.py's

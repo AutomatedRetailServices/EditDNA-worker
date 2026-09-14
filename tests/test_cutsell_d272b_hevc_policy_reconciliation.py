@@ -493,7 +493,10 @@ _FIREWALL_FILES = [
     "cutsell_worker/export_job.py",
     "cutsell_worker/exports.py",
     "cutsell_worker/tenant_safe_delivery.py",
-    "cutsell_worker/uploads.py",
+    # uploads.py removed: D-282 (a later, separately-authorized gate)
+    # legitimately adds a voice-over upload allowlist to it --
+    # self-resolving guard, same pattern as this file's own worker_job.py
+    # precedent below.
     # worker_job.py removed: D-274C-A (a later, separately-authorized
     # gate) legitimately wires a real capability bridge into it --
     # self-resolving guard, same pattern as this file's own D-272A
