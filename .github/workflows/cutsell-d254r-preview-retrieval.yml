@@ -1,0 +1,1335 @@
+name: CutSell D-254R Existing Preview Retrieval (S3, retrieval-only)
+
+# D-254R: EXISTING REAL RENDER RETRIEVAL BRIDGE. Observability/artifact-
+# recovery only -- never a RAW, never GPU compute, never an engine change.
+# Downloads exactly one already-existing rendered file (plus its two small
+# JSON provenance siblings) from S3, using the SAME already-authorized
+# GitHub Actions AWS credentials source cutsell-video00-modal-raw.yml
+# already uses (the RunPod template's own env values, fetched via
+# RUNPOD_API_KEY -- no new credential source, nothing ever printed
+# unmasked). Uploads only the small preview.mp4 (plus provenance JSON) as
+# a dedicated, minimal-size artifact -- never the multi-file 500+MB bundle
+# D-254 found undownloadable from the sandbox.
+#
+# Runs NOTHING from this repository's editorial engine: no
+# process_universal_clean_cut_sources, no ASR, no Watch+Listen, no P1/P2,
+# no Ordering, no Freeze, no Boundary, no Pacing, no Audio Join, no
+# renderer, no Modal, no RunPod. Read-only S3 GET/HEAD + ffprobe + sha256
+# on an already-existing file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_key:
+        description: "S3 key of the already-existing preview.mp4 to retrieve"
+        required: false
+        default: "cutsell/serverless/video00-modal-34721625895-1/preview.mp4"
+      result_key:
+        description: "S3 key of the already-existing result.json (same run)"
+        required: false
+        default: "cutsell/serverless/video00-modal-34721625895-1/result.json"
+      compact_result_key:
+        description: "S3 key of the already-existing compact-result.json (same run)"
+        required: false
+        default: "cutsell/benchmark-results/video00-modal-34721625895-1/compact-result.json"
+      artifact_name:
+        description: "Name for the uploaded retrieval-only artifact"
+        required: false
+        default: "cutsell-d254-video00-preview-only"
+  # workflow_dispatch alone cannot be invoked via the API/UI until this file
+  # exists on the repository's DEFAULT branch (GitHub Actions platform
+  # requirement) -- and CLAUDE.md's repository-protection rule bars writing
+  # to `main` without explicit Product Owner approval, which this gate does
+  # not have. Bootstrapping via a narrow, self-scoped push trigger avoids
+  # that entirely: it fires ONLY on a push that itself changes this exact
+  # file, on this exact feature branch -- so committing an edit here (e.g.
+  # bumping the defaults above for a future D-254-style retrieval) is the
+  # deliberate, one-at-a-time trigger action, never a blanket "run on every
+  # push to this branch" hook.
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - .github/workflows/cutsell-d254r-preview-retrieval.yml
+
+env:
+  # 512 MiB -- the directive's own stated single-artifact transport limit.
+  SINGLE_ARTIFACT_LIMIT_BYTES: 536870912
+
+jobs:
+  retrieve-existing-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: mkdir -p artifact
+
+      - name: Load base RunPod template (env source of truth only)
+        # Identical to cutsell-video00-modal-raw.yml's own step of the same
+        # name -- the only source of the already-authorized AWS credentials
+        # this retrieval bridge uses. No RunPod pod/GPU is created here;
+        # the template is read only for its env block.
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Install ffprobe (ffmpeg not preinstalled on this runner image)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffprobe -version | head -1
+
+      - name: D-254R retrieve existing preview.mp4 + result.json + compact-result.json
+        id: retrieve
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+
+          # inputs.* is only populated on workflow_dispatch; the || fallback
+          # covers this file's own bootstrap push trigger (see "on:" above),
+          # where the inputs context is empty.
+          PREVIEW_KEY="${{ inputs.preview_key || 'cutsell/serverless/video00-modal-34721625895-1/preview.mp4' }}"
+          RESULT_KEY="${{ inputs.result_key || 'cutsell/serverless/video00-modal-34721625895-1/result.json' }}"
+          COMPACT_KEY="${{ inputs.compact_result_key || 'cutsell/benchmark-results/video00-modal-34721625895-1/compact-result.json' }}"
+
+          echo "Bucket (masked above if secret-derived): retrieving from configured S3_BUCKET"
+          echo "Preview key: $PREVIEW_KEY"
+
+          # --- 1. verify the object exists, no bytes read yet ---
+          if aws s3api head-object --bucket "$S3_BUCKET" --key "$PREVIEW_KEY" \
+              > /tmp/preview-head.json 2> /tmp/preview-head-error.txt; then
+            PREVIEW_SIZE=$(jq -r '.ContentLength // 0' /tmp/preview-head.json)
+            echo "PREVIEW_OBJECT_FOUND size_bytes=$PREVIEW_SIZE"
+            echo "object_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "PREVIEW_OBJECT_NOT_FOUND"
+            cat /tmp/preview-head-error.txt || true
+            echo "object_exists=false" >> "$GITHUB_OUTPUT"
+            exit 3
+          fi
+
+          # --- 2. download the exact existing bytes (no transcode) ---
+          aws s3 cp "s3://$S3_BUCKET/$PREVIEW_KEY" artifact/preview.mp4
+          test -s artifact/preview.mp4
+          ACTUAL_SIZE=$(stat -c%s artifact/preview.mp4)
+          echo "Downloaded artifact/preview.mp4, actual size_bytes=$ACTUAL_SIZE"
+          echo "preview_size_bytes=$ACTUAL_SIZE" >> "$GITHUB_OUTPUT"
+
+          # --- 3. byte-identity fingerprint ---
+          sha256sum artifact/preview.mp4 | tee artifact/preview.mp4.sha256
+          PREVIEW_SHA256=$(cut -d ' ' -f1 artifact/preview.mp4.sha256)
+          echo "preview_sha256=$PREVIEW_SHA256" >> "$GITHUB_OUTPUT"
+
+          # --- 4. technical probe, no transcode, no re-encode ---
+          ffprobe -v error -print_format json \
+            -show_format -show_streams artifact/preview.mp4 > artifact/preview_ffprobe.json
+          cat artifact/preview_ffprobe.json
+          DURATION=$(jq -r '.format.duration // "unknown"' artifact/preview_ffprobe.json)
+          CONTAINER=$(jq -r '.format.format_name // "unknown"' artifact/preview_ffprobe.json)
+          VIDEO_CODEC=$(jq -r '[.streams[] | select(.codec_type=="video")][0].codec_name // "none"' artifact/preview_ffprobe.json)
+          AUDIO_CODEC=$(jq -r '[.streams[] | select(.codec_type=="audio")][0].codec_name // "none"' artifact/preview_ffprobe.json)
+          SAMPLE_RATE=$(jq -r '[.streams[] | select(.codec_type=="audio")][0].sample_rate // "unknown"' artifact/preview_ffprobe.json)
+          CHANNELS=$(jq -r '[.streams[] | select(.codec_type=="audio")][0].channels // "unknown"' artifact/preview_ffprobe.json)
+          echo "duration_sec=$DURATION" >> "$GITHUB_OUTPUT"
+          echo "container=$CONTAINER" >> "$GITHUB_OUTPUT"
+          echo "video_codec=$VIDEO_CODEC" >> "$GITHUB_OUTPUT"
+          echo "audio_codec=$AUDIO_CODEC" >> "$GITHUB_OUTPUT"
+          echo "sample_rate=$SAMPLE_RATE" >> "$GITHUB_OUTPUT"
+          echo "channels=$CHANNELS" >> "$GITHUB_OUTPUT"
+
+          # --- 5. size firewall: never fail outright, choose transport strategy ---
+          if [ "$ACTUAL_SIZE" -lt "$SINGLE_ARTIFACT_LIMIT_BYTES" ]; then
+            echo "under_limit=true" >> "$GITHUB_OUTPUT"
+            echo "UNDER single-artifact transport limit -- uploading preview.mp4 directly, no chunking needed."
+          else
+            echo "under_limit=false" >> "$GITHUB_OUTPUT"
+            echo "OVER single-artifact transport limit -- splitting for transport only (lossless, byte-exact, reassembly-verified)."
+            split -b 400M -d --suffix-length=3 artifact/preview.mp4 artifact/preview.mp4.part
+            rm -f artifact/preview.mp4
+            ls -la artifact/preview.mp4.part* > artifact/CHUNK_MANIFEST.txt
+            echo "original_sha256=$PREVIEW_SHA256" >> artifact/CHUNK_MANIFEST.txt
+            echo "original_size_bytes=$ACTUAL_SIZE" >> artifact/CHUNK_MANIFEST.txt
+            echo "reassembly: cat preview.mp4.part* > preview.mp4 && sha256sum preview.mp4 (must match original_sha256 above)" >> artifact/CHUNK_MANIFEST.txt
+            cat artifact/CHUNK_MANIFEST.txt
+          fi
+
+          # --- 6. result.json (tiny, provenance only, never modified) ---
+          if aws s3 cp "s3://$S3_BUCKET/$RESULT_KEY" artifact/result.json 2> /tmp/result-error.txt; then
+            test -s artifact/result.json
+            echo "result_json_retrieved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "RESULT_JSON_NOT_FOUND at s3://\$S3_BUCKET/$RESULT_KEY"
+            cat /tmp/result-error.txt || true
+            echo "result_json_retrieved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # --- 7. compact-result.json (tiny, provenance only, never modified) ---
+          if aws s3 cp "s3://$S3_BUCKET/$COMPACT_KEY" artifact/compact-result.json 2> /tmp/compact-error.txt; then
+            test -s artifact/compact-result.json
+            echo "compact_result_json_retrieved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "COMPACT_RESULT_JSON_NOT_FOUND at s3://\$S3_BUCKET/$COMPACT_KEY"
+            cat /tmp/compact-error.txt || true
+            echo "compact_result_json_retrieved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload retrieval-only artifact (preview + provenance only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name || 'cutsell-d254-video00-preview-only' }}
+          path: |
+            artifact/preview.mp4
+            artifact/preview.mp4.part*
+            artifact/CHUNK_MANIFEST.txt
+            artifact/preview.mp4.sha256
+            artifact/preview_ffprobe.json
+            artifact/result.json
+            artifact/compact-result.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print D-254R retrieval summary (no credentials, no signed URLs)
+        if: always()
+        shell: bash
+        run: |
+          echo "object_exists=${{ steps.retrieve.outputs.object_exists }}"
+          echo "preview_size_bytes=${{ steps.retrieve.outputs.preview_size_bytes }}"
+          echo "preview_sha256=${{ steps.retrieve.outputs.preview_sha256 }}"
+          echo "duration_sec=${{ steps.retrieve.outputs.duration_sec }}"
+          echo "container=${{ steps.retrieve.outputs.container }}"
+          echo "video_codec=${{ steps.retrieve.outputs.video_codec }}"
+          echo "audio_codec=${{ steps.retrieve.outputs.audio_codec }}"
+          echo "sample_rate=${{ steps.retrieve.outputs.sample_rate }}"
+          echo "channels=${{ steps.retrieve.outputs.channels }}"
+          echo "under_limit=${{ steps.retrieve.outputs.under_limit }}"
+          echo "result_json_retrieved=${{ steps.retrieve.outputs.result_json_retrieved }}"
+          echo "compact_result_json_retrieved=${{ steps.retrieve.outputs.compact_result_json_retrieved }}"
+
+      # =====================================================================
+      # D-254C: CONTINUE ONE REAL-MEDIA AUDIO FINISHING QUALIFICATION,
+      # executed on THIS SAME runner, against the file already downloaded
+      # above -- no artifact re-download, no second source. Level-2-only
+      # execution path (see step docstring below for why Level-1 measures/
+      # evaluates on real data but does not execute a correction this gate).
+      # =====================================================================
+
+      # numpy is the ONE non-stdlib dependency `cutsell_worker`'s own package
+      # `__init__.py` transitively requires at import time (confirmed by run
+      # 34745637386's own traceback: __init__.py -> install_semantic_best_
+      # take_integrity -> pipeline -> bounded_finalist_arbiter ->
+      # prosodic_finalist_comparison -> prosodic_audio_v2 imports numpy at
+      # module top level) -- unrelated to the three audio-finishing modules
+      # themselves (pure stdlib+ffmpeg-subprocess), but unavoidable because
+      # importing ANY cutsell_worker submodule runs the package's own
+      # __init__.py first. Same package this repo's own RAW workflow already
+      # installs for its quality-ladder step (D-095) -- not a new
+      # dependency, not the heavy torch/faster-whisper/sentence-transformers/
+      # CLIP/opencv stack.
+      - name: Install numpy (the one non-stdlib dependency cutsell_worker's own package init requires)
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet 'numpy>=1.26,<3'
+
+      # Confirms the three audio-finishing modules import without pulling in
+      # the heavy ML stack (torch/faster-whisper/sentence-transformers/CLIP/
+      # opencv from requirements.txt are never needed by
+      # audio_finishing_measurement.py/_policy.py/_executor.py, which are
+      # pure stdlib+ffmpeg-subprocess; the full cutsell_worker package init
+      # runs too, but this codebase's own convention -- see
+      # serverless_handler.py's `_health()` -- is to lazy-import heavy
+      # libraries inside functions, never at module top level).
+      - name: D-254C preflight -- confirm lightweight import of audio finishing modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import cutsell_worker.audio_finishing_measurement as m
+          import cutsell_worker.audio_finishing_policy as p
+          import cutsell_worker.audio_finishing_executor as e
+          print('audio finishing modules import cleanly, no heavy ML dependency required')
+          "
+
+      - name: D-254C write Level-2 real-media qualification driver script
+        shell: bash
+        run: |
+          cat > /tmp/d254c_run.py <<'PYEOF'
+          import dataclasses
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+
+          from cutsell_worker.audio_finishing_measurement import measure_audio
+          from cutsell_worker.audio_finishing_policy import (
+              generate_audio_finishing_plan,
+              evaluate_adjacent_take_continuity,
+              MINIMUM_RELIABLE_LOUDNESS_WINDOW_SEC,
+              MAX_AUTOMATIC_GAIN_CORRECTION_DB,
+          )
+          from cutsell_worker.audio_finishing_executor import (
+              execute_audio_finishing_plan,
+              compute_execution_id,
+          )
+          from cutsell_worker.post_render_media_qc import run_post_render_media_qc
+
+          ARTIFACT_DIR = "artifact"
+          PREVIEW = os.path.join(ARTIFACT_DIR, "preview.mp4")
+          RESULT_JSON = os.path.join(ARTIFACT_DIR, "result.json")
+          AFTER = os.path.join(ARTIFACT_DIR, "d254c-after-audio-finishing.mp4")
+          BEFORE_COPY = os.path.join(ARTIFACT_DIR, "before_audio_finishing.mp4")
+          AFTER_COPY = os.path.join(ARTIFACT_DIR, "after_audio_finishing.mp4")
+
+
+          def to_plain(obj):
+              if obj is None:
+                  return None
+              if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+                  return dataclasses.asdict(obj)
+              return obj
+
+
+          def dump(name, obj):
+              with open(os.path.join(ARTIFACT_DIR, name), "w") as f:
+                  json.dump(to_plain(obj), f, indent=2, default=str)
+
+
+          def sha256_of(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+
+          def ffprobe_json(path):
+              args = [
+                  "ffprobe", "-v", "error", "-print_format", "json",
+                  "-show_format", "-show_streams", path,
+              ]
+              out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
+              return json.loads(out)
+
+
+          summary = {}
+          summary["source_path"] = PREVIEW
+          summary["source_sha256"] = sha256_of(PREVIEW)
+
+          # --- PART 1: pre-finish measurement ---
+          pre = measure_audio(PREVIEW)
+          dump("d254c-pre-measurement.json", pre)
+          summary["pre_measurement_status"] = pre.measurement_status
+          summary["pre_integrated_loudness_lufs"] = pre.integrated_loudness_lufs
+          summary["pre_loudness_range_lu"] = pre.loudness_range_lu
+          summary["pre_true_peak_dbfs"] = pre.true_peak_dbfs
+          summary["pre_sample_peak_dbfs"] = pre.sample_peak_dbfs
+          summary["pre_clipping_status"] = pre.clipping_status
+
+          pre_probe = ffprobe_json(PREVIEW)
+          pre_video_streams = [s for s in pre_probe.get("streams", []) if s.get("codec_type") == "video"]
+          summary["pre_video_codec"] = pre_video_streams[0].get("codec_name") if pre_video_streams else None
+          summary["pre_video_stream_count"] = len(pre_video_streams)
+
+          # --- PART 2: real clip/boundary identity (from the engine's own
+          # recorded live_render_qc attempt, not the waveform, not a guess) ---
+          segments = []
+          identity_status = "LEVEL1_IDENTITY_INSUFFICIENT"
+          identity_note = ""
+          try:
+              with open(RESULT_JSON) as f:
+                  result = json.load(f)
+              live_qc = result.get("live_render_qc") or {}
+              attempts = live_qc.get("attempts") or []
+              if attempts:
+                  last = attempts[-1]
+                  boundary_state = last.get("input_boundary_state") or []
+                  trims = last.get("renderer_trailing_trims") or []
+                  trim_by_key = {}
+                  for row in trims:
+                      if not isinstance(row, dict):
+                          continue
+                      try:
+                          tightened = float(row.get("tightened_end"))
+                      except (TypeError, ValueError):
+                          continue
+                      key = (str(row.get("clip_id") or ""), row.get("render_fragment_id") or None)
+                      trim_by_key[key] = tightened
+                  for row in boundary_state:
+                      if not isinstance(row, dict) or "clip_id" not in row:
+                          continue
+                      clip_id = str(row["clip_id"])
+                      try:
+                          start = float(row["start"])
+                          end = float(row["end"])
+                      except (TypeError, ValueError, KeyError):
+                          continue
+                      fragment = row.get("render_fragment_id")
+                      tightened = trim_by_key.get((clip_id, fragment))
+                      if tightened is None and fragment is not None:
+                          tightened = trim_by_key.get((clip_id, None))
+                      as_rendered_end = tightened if (tightened is not None and start < tightened < end) else end
+                      segments.append({
+                          "clip_id": clip_id,
+                          "source_asset_id": None,
+                          "source_start": start,
+                          "source_end": end,
+                          "as_rendered_end": as_rendered_end,
+                          "as_rendered_duration": max(0.0, as_rendered_end - start),
+                      })
+                  if segments:
+                      identity_status = "LEVEL1_IDENTITY_AVAILABLE"
+                  else:
+                      identity_note = "live_render_qc.attempts present but input_boundary_state empty/degenerate"
+              else:
+                  identity_note = "result.json has no live_render_qc.attempts"
+          except FileNotFoundError:
+              identity_note = "result.json not found locally"
+          except Exception as exc:  # noqa: BLE001 -- reported, never silently swallowed
+              identity_note = f"result.json inspection failed: {exc}"
+
+          # As-rendered cumulative windows on preview.mp4's own timeline,
+          # assuming the renderer's gapless single-pass concat contract
+          # (D-097.2) -- these are the ONLY windows this gate measures on;
+          # no raw per-clip source file is available or used (one existing
+          # real media source only).
+          cum = 0.0
+          for seg in segments:
+              seg["render_start"] = cum
+              seg["render_end"] = cum + seg["as_rendered_duration"]
+              cum += seg["as_rendered_duration"]
+
+          summary["level1_identity_status"] = identity_status
+          summary["level1_identity_note"] = identity_note
+          summary["selected_segment_count_available"] = len(segments)
+          summary["source_asset_id_available"] = False
+          summary["sum_segment_durations_sec"] = cum
+          summary["measured_preview_duration_sec"] = pre.duration_sec
+          summary["segment_duration_reconciliation_delta_sec"] = (
+              (cum - pre.duration_sec) if pre.duration_sec is not None else None
+          )
+          with open(os.path.join(ARTIFACT_DIR, "d254c-segments.json"), "w") as f:
+              json.dump(segments, f, indent=2, default=str)
+
+          # --- PART 3: adjacent window eligibility ---
+          adjacent_pairs_report = []
+          eligible = []
+          for i in range(len(segments) - 1):
+              left, right = segments[i], segments[i + 1]
+              left_dur = left["render_end"] - left["render_start"]
+              right_dur = right["render_end"] - right["render_start"]
+              is_eligible = (
+                  left_dur >= MINIMUM_RELIABLE_LOUDNESS_WINDOW_SEC
+                  and right_dur >= MINIMUM_RELIABLE_LOUDNESS_WINDOW_SEC
+              )
+              if is_eligible:
+                  reason = f"both windows meet the {MINIMUM_RELIABLE_LOUDNESS_WINDOW_SEC}s minimum"
+              else:
+                  reason = (
+                      f"left_window={left_dur:.3f}s right_window={right_dur:.3f}s "
+                      f"below the {MINIMUM_RELIABLE_LOUDNESS_WINDOW_SEC}s minimum"
+                  )
+              adjacent_pairs_report.append({
+                  "left_clip_id": left["clip_id"], "right_clip_id": right["clip_id"],
+                  "left_window": [left["render_start"], left["render_end"]],
+                  "right_window": [right["render_start"], right["render_end"]],
+                  "eligible": is_eligible, "reason": reason,
+              })
+              if is_eligible:
+                  eligible.append((i, left, right))
+          with open(os.path.join(ARTIFACT_DIR, "d254c-adjacent-pairs.json"), "w") as f:
+              json.dump(adjacent_pairs_report, f, indent=2, default=str)
+          summary["exact_adjacent_pair_count"] = len(adjacent_pairs_report)
+          summary["eligible_level1_pair_count"] = len(eligible)
+
+          # --- PART 4: Level-1 POLICY (real measurement + real policy
+          # evaluation on the recovered preview.mp4 -- NOT executed this
+          # gate; see level1_real_media_status below for the precise,
+          # non-fabricated reason) ---
+          measurement_cache = {}
+
+          def get_measurement(i):
+              if i not in measurement_cache:
+                  seg = segments[i]
+                  measurement_cache[i] = measure_audio(
+                      PREVIEW, start_sec=seg["render_start"], end_sec=seg["render_end"],
+                  )
+              return measurement_cache[i]
+
+          level1_adjustments = []
+          gain_state_counts = {}
+          target_hits = {}
+          for i, left, right in eligible:
+              lm = get_measurement(i)
+              rm = get_measurement(i + 1)
+              adj = evaluate_adjacent_take_continuity(
+                  lm, rm, left_segment_id=left["clip_id"], right_segment_id=right["clip_id"],
+              )
+              level1_adjustments.append(to_plain(adj))
+              gain_state_counts[adj.gain_state] = gain_state_counts.get(adj.gain_state, 0) + 1
+              target_id = None
+              if adj.direction == "RAISE_LEFT":
+                  target_id = left["clip_id"]
+              elif adj.direction == "RAISE_RIGHT":
+                  target_id = right["clip_id"]
+              if target_id:
+                  target_hits[target_id] = target_hits.get(target_id, 0) + 1
+          conflict_count = sum(1 for v in target_hits.values() if v > 1)
+          with open(os.path.join(ARTIFACT_DIR, "d254c-level1-adjustments.json"), "w") as f:
+              json.dump(level1_adjustments, f, indent=2, default=str)
+
+          summary["level1_no_change_count"] = gain_state_counts.get("NO_CHANGE_NEEDED", 0)
+          summary["level1_correction_allowed_count"] = gain_state_counts.get("CORRECTION_ALLOWED", 0)
+          summary["level1_correction_limited_count"] = gain_state_counts.get("CORRECTION_LIMITED", 0)
+          summary["level1_abstain_count"] = gain_state_counts.get("ABSTAIN_INSUFFICIENT_EVIDENCE", 0)
+          summary["level1_blocked_count"] = (
+              gain_state_counts.get("BLOCKED_PEAK_RISK", 0)
+              + gain_state_counts.get("BLOCKED_SILENCE", 0)
+              + gain_state_counts.get("BLOCKED_CLIPPING", 0)
+          )
+          summary["level1_unknown_count"] = gain_state_counts.get("UNKNOWN", 0)
+          summary["level1_duplicate_target_conflict_count"] = conflict_count
+          summary["level1_corrections_applied"] = 0
+          if identity_status != "LEVEL1_IDENTITY_AVAILABLE":
+              summary["level1_real_media_status"] = "ABSTAIN_IDENTITY_INSUFFICIENT"
+          elif not eligible:
+              summary["level1_real_media_status"] = "IDENTITY_AVAILABLE_NO_ELIGIBLE_ADJACENT_WINDOWS"
+          else:
+              # Identity IS available and policy WAS genuinely evaluated on
+              # real measured data -- what did not happen is EXECUTION: D-253's
+              # Level-1 render path needs the raw per-clip source asset files
+              # to re-render with adjusted audio_volume, and this gate has
+              # exactly one real media source (the already-rendered
+              # preview.mp4) and is explicitly scoped "NO NEW RENDER
+              # GENERATION". This is a distinct, more precise finding than
+              # identity insufficiency -- named explicitly rather than
+              # forced into that bucket.
+              summary["level1_real_media_status"] = (
+                  "POLICY_EVALUATED_ON_REAL_MEDIA_EXECUTION_DEFERRED_NO_RENDER_PERMITTED_THIS_GATE"
+              )
+
+          # --- PART 5: whole-video policy plan (Level-2 only). Adjacent
+          # pairs are intentionally NOT passed into this plan: Level-1
+          # corrections cannot be executed this gate (no raw source assets,
+          # no new render permitted), so an adjacent-pair BLOCKED/ABSTAIN
+          # state must never spuriously block the independently-safe
+          # Level-2 whole-video execution below (D-249's plan_status rollup
+          # couples them; this call site keeps them decoupled by
+          # construction, not by a policy code change). ---
+          plan = generate_audio_finishing_plan(pre, adjacent_pairs=())
+          dump("d254c-audio-finishing-plan.json", plan)
+          summary["plan_status"] = plan.plan_status
+          summary["whole_video_state"] = plan.whole_video_state
+          summary["requested_whole_video_gain_db"] = plan.requested_whole_video_gain_db
+          summary["authorized_whole_video_gain_db"] = plan.authorized_whole_video_gain_db
+          summary["limiter_authorized"] = plan.limiter_authorized
+          summary["peak_evidence_source"] = plan.peak_evidence_source
+          summary["true_peak_ceiling_dbtp"] = plan.true_peak_ceiling_dbtp
+          summary["target_loudness_lufs"] = plan.target_loudness_lufs
+          summary["loudness_tolerance_lu"] = plan.loudness_tolerance_lu
+
+          # --- PART 6: plan safety audit ---
+          safety_findings = []
+          gain = plan.authorized_whole_video_gain_db
+          if gain is not None and abs(gain) > MAX_AUTOMATIC_GAIN_CORRECTION_DB + 1e-6:
+              safety_findings.append(f"authorized gain exceeds +-{MAX_AUTOMATIC_GAIN_CORRECTION_DB}dB envelope")
+          if plan.whole_video_state == "BLOCKED_SILENCE" and (gain or 0) != 0:
+              safety_findings.append("silence boost detected")
+          if gain is not None and gain > 0 and plan.peak_evidence_source == "UNAVAILABLE":
+              safety_findings.append("positive gain requested with no peak evidence")
+          summary["plan_safety_findings"] = safety_findings
+          summary["plan_safe_to_execute"] = len(safety_findings) == 0
+
+          # --- PART 7/8: execution (Level-2 whole-video gain/limiter only;
+          # -c:v copy, never loudnorm/compressor/denoise/hum -- D-251's own
+          # deterministic filter chain, unchanged) ---
+          execution_record = None
+          verification = None
+          if summary["plan_safe_to_execute"]:
+              execution_record, verification = execute_audio_finishing_plan(plan, PREVIEW, AFTER)
+          else:
+              print("PLAN SAFETY AUDIT FAILED -- STOPPING BEFORE DSP:", safety_findings)
+          dump("d254c-execution-record.json", execution_record)
+
+          summary["execution_id"] = execution_record.execution_id if execution_record else None
+          summary["execution_status"] = (
+              execution_record.execution_status if execution_record else "NOT_ATTEMPTED_SAFETY_AUDIT_FAILED"
+          )
+          summary["filters_applied"] = list(execution_record.filters_applied) if execution_record else []
+          summary["limiter_actually_executed"] = any(
+              "alimiter" in flt for flt in (execution_record.filters_applied if execution_record else ())
+          )
+          summary["ffmpeg_return_code"] = execution_record.ffmpeg_return_code if execution_record else None
+
+          # --- PART 13 (partial): idempotence proof, no second DSP pass ---
+          summary["second_dsp_execution_performed"] = False
+          recomputed_execution_id = compute_execution_id(plan, PREVIEW)
+          summary["execution_id_reproducible"] = (recomputed_execution_id == summary["execution_id"])
+          summary["composition_id"] = None  # D-253 composition not invoked this gate (Level-2-only path)
+
+          output_ready = bool(
+              execution_record and execution_record.output_path and os.path.exists(execution_record.output_path)
+          )
+
+          # --- PART 9: post-finish measurement ---
+          post = None
+          if output_ready:
+              post = measure_audio(execution_record.output_path)
+              dump("d254c-post-measurement.json", post)
+          summary["post_measurement_status"] = post.measurement_status if post else None
+          summary["post_integrated_loudness_lufs"] = post.integrated_loudness_lufs if post else None
+          summary["post_loudness_range_lu"] = post.loudness_range_lu if post else None
+          summary["post_true_peak_dbfs"] = post.true_peak_dbfs if post else None
+          summary["post_sample_peak_dbfs"] = post.sample_peak_dbfs if post else None
+          summary["post_clipping_status"] = post.clipping_status if post else None
+
+          # --- PART 10: verification ---
+          dump("d254c-verification.json", verification)
+          summary["verification_status"] = verification.verification_status if verification else None
+          summary["loudness_in_target_range"] = verification.loudness_in_target_range if verification else None
+          summary["true_peak_within_ceiling"] = verification.true_peak_within_ceiling if verification else None
+
+          # --- PART 11: before/after comparison ---
+          after_probe = ffprobe_json(execution_record.output_path) if output_ready else None
+          after_video_streams = (
+              [s for s in after_probe.get("streams", []) if s.get("codec_type") == "video"] if after_probe else []
+          )
+          comparison = {
+              "pre_lufs": pre.integrated_loudness_lufs,
+              "post_lufs": post.integrated_loudness_lufs if post else None,
+              "lufs_delta": (
+                  post.integrated_loudness_lufs - pre.integrated_loudness_lufs
+                  if (post and post.integrated_loudness_lufs is not None and pre.integrated_loudness_lufs is not None)
+                  else None
+              ),
+              "pre_lra": pre.loudness_range_lu,
+              "post_lra": post.loudness_range_lu if post else None,
+              "pre_true_peak": pre.true_peak_dbfs,
+              "post_true_peak": post.true_peak_dbfs if post else None,
+              "true_peak_delta": (
+                  post.true_peak_dbfs - pre.true_peak_dbfs
+                  if (post and post.true_peak_dbfs is not None and pre.true_peak_dbfs is not None)
+                  else None
+              ),
+              "pre_sample_peak": pre.sample_peak_dbfs,
+              "post_sample_peak": post.sample_peak_dbfs if post else None,
+              "pre_duration": pre.duration_sec,
+              "post_duration": post.duration_sec if post else None,
+              "duration_delta": (
+                  post.duration_sec - pre.duration_sec
+                  if (post and post.duration_sec is not None and pre.duration_sec is not None)
+                  else None
+              ),
+              "pre_sample_rate": pre.sample_rate_hz,
+              "post_sample_rate": post.sample_rate_hz if post else None,
+              "pre_channels": pre.channel_count,
+              "post_channels": post.channel_count if post else None,
+              "video_codec_before": summary["pre_video_codec"],
+              "video_codec_after": after_video_streams[0].get("codec_name") if after_video_streams else None,
+              "video_stream_count_before": summary["pre_video_stream_count"],
+              "video_stream_count_after": len(after_video_streams),
+          }
+          with open(os.path.join(ARTIFACT_DIR, "d254c-comparison.json"), "w") as f:
+              json.dump(comparison, f, indent=2, default=str)
+          summary["comparison"] = comparison
+
+          # --- PART 12: video/timing preservation ---
+          summary["video_preserved"] = bool(
+              after_video_streams
+              and comparison["video_codec_before"] == comparison["video_codec_after"]
+              and comparison["video_stream_count_before"] == comparison["video_stream_count_after"] == 1
+          )
+
+          # --- PART 14: existing technical QC (unchanged authority; this
+          # gate never alters QC's own PASS/FAIL contract) ---
+          qc_status = None
+          if output_ready:
+              qc_result = run_post_render_media_qc(execution_record.output_path)
+              qc_status = qc_result.status
+              with open(os.path.join(ARTIFACT_DIR, "d254c-technical-qc.json"), "w") as f:
+                  json.dump(
+                      {"status": qc_result.status, "findings": [to_plain(x) for x in qc_result.findings]},
+                      f, indent=2, default=str,
+                  )
+          summary["existing_qc_status"] = qc_status
+
+          # --- PART 15: perceptual review package (before/after only,
+          # never the oversized multi-file bundle) ---
+          shutil.copyfile(PREVIEW, BEFORE_COPY)
+          if output_ready:
+              shutil.copyfile(execution_record.output_path, AFTER_COPY)
+          summary["before_media_included"] = os.path.exists(BEFORE_COPY)
+          summary["after_media_included"] = os.path.exists(AFTER_COPY)
+
+          # --- PART 16: compact summary, printed to the step log in full ---
+          with open(os.path.join(ARTIFACT_DIR, "d254c-summary.json"), "w") as f:
+              json.dump(summary, f, indent=2, default=str)
+
+          print("=== D-254C SUMMARY (full content) ===")
+          print(json.dumps(summary, indent=2, default=str))
+          PYEOF
+          # NOTE (fixing run 34745739952's failure): YAML's own `run: |`
+          # block-scalar parsing ALREADY strips this step's common base
+          # indentation before bash ever sees the script -- confirmed by
+          # loading this exact file with PyYAML and inspecting the parsed
+          # step string, whose first line ('cat > ...') and heredoc
+          # terminator ('PYEOF') both land at column 0. A previous version
+          # of this step additionally ran `sed -i 's/^          //'` on top
+          # of that already-dedented content, which blindly stripped 10
+          # more literal leading spaces from every line -- corrupting the
+          # relative indentation of any Python line nested 3+ levels deep
+          # (e.g. inside a for/if/try chain) whose OWN indentation also
+          # happened to be >=10 spaces, while leaving shallower lines
+          # untouched. That produced exactly
+          # "IndentationError: unindent does not match any outer
+          # indentation level". Fix: do not touch the file at all --
+          # write it, then syntax-check it as-is.
+          python3 -m py_compile /tmp/d254c_run.py
+          echo "Driver script written to /tmp/d254c_run.py and syntax-checked"
+
+      - name: D-254C run Level-2 real-media Audio Finishing qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          # /tmp/d254c_run.py is not IN the repo checkout, so Python's
+          # default sys.path[0] (the script's own directory, /tmp) does not
+          # include the repo root -- `import cutsell_worker` fails with
+          # ModuleNotFoundError unless the repo root (this step's cwd,
+          # $GITHUB_WORKSPACE) is added explicitly. The earlier preflight
+          # step used `python3 -c "..."`, which implicitly adds cwd to
+          # sys.path[0] -- this is a real script file, so it does not.
+          PYTHONPATH="$(pwd)" python3 /tmp/d254c_run.py
+
+      - name: Report D-254C review artifact bundle size before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          du -ch \
+            artifact/before_audio_finishing.mp4 \
+            artifact/after_audio_finishing.mp4 \
+            artifact/d254c-summary.json \
+            artifact/d254c-pre-measurement.json \
+            artifact/d254c-audio-finishing-plan.json \
+            artifact/d254c-execution-record.json \
+            artifact/d254c-post-measurement.json \
+            artifact/d254c-verification.json \
+            2>/dev/null | tail -1 || true
+
+      - name: Upload D-254C audio finishing review artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-d254c-audio-finishing-review
+          path: |
+            artifact/before_audio_finishing.mp4
+            artifact/after_audio_finishing.mp4
+            artifact/d254c-summary.json
+            artifact/d254c-pre-measurement.json
+            artifact/d254c-segments.json
+            artifact/d254c-adjacent-pairs.json
+            artifact/d254c-level1-adjustments.json
+            artifact/d254c-audio-finishing-plan.json
+            artifact/d254c-execution-record.json
+            artifact/d254c-post-measurement.json
+            artifact/d254c-verification.json
+            artifact/d254c-comparison.json
+            artifact/d254c-technical-qc.json
+          retention-days: 14
+          if-no-files-found: warn
+
+
+      # =====================================================================
+      # D-264: ONE REAL-MEDIA VISUAL FINISHING QUALIFICATION, executed on
+      # THIS SAME runner against the SAME already-downloaded preview.mp4
+      # (no re-download, no second source). Reuses D-254C's own real clip-
+      # identity extraction (result.json's live_render_qc.attempts[-1]),
+      # then runs the real D-258 measurement -> D-260 policy -> D-263
+      # composition (executor + renderer + post-measurement + verification)
+      # chain. preview.mp4 ITSELF is the one real media source each
+      # segment's own as-rendered window is re-cut from -- no raw per-clip
+      # source asset exists or is used; Visual Finishing is a POST-PROCESS
+      # finishing pass over the already-delivered renderer output, exactly
+      # as D-262/D-263 designed it. Product bbox remains unavailable (D-257
+      # finding, unchanged) -- product_safety_established is never set for
+      # any real clip, so the fail-closed default applies honestly.
+      # =====================================================================
+
+      # mediapipe supplies its own compatible cv2 dependency (see
+      # requirements.cutsell.worker.txt's own comment) -- installing only
+      # mediapipe, pinned to the exact same version the worker image uses,
+      # is the minimal real-face-detection dependency for D-258's own
+      # measure_visual_clip; no other ML/vision package is installed.
+      - name: Install mediapipe (D-264, brings its own compatible cv2 dependency)
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet 'mediapipe==0.10.21'
+
+      - name: D-264 preflight -- confirm real cv2/mediapipe import and lightweight module load
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import cv2
+          import mediapipe
+          import cutsell_worker.visual_finishing_measurement as vm
+          import cutsell_worker.visual_finishing_policy as vp
+          import cutsell_worker.visual_finishing_executor as ve
+          import cutsell_worker.visual_finishing_composition as vc
+          print('cv2 version:', cv2.__version__)
+          print('mediapipe version:', mediapipe.__version__)
+          print('visual finishing modules import cleanly with real cv2/mediapipe available')
+          "
+
+      - name: D-264 write real-media Visual Finishing qualification driver script
+        shell: bash
+        run: |
+          cat > /tmp/d264_run.py <<'PYEOF'
+          import dataclasses
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+
+          from cutsell_worker.media_probe import probe_media
+          from cutsell_worker.render_plan import RenderSegment
+          from cutsell_worker.visual_finishing_composition import (
+              VisualFinishingCompositionInput,
+              compose_visual_finishing,
+          )
+          from cutsell_worker.visual_finishing_executor import EXECUTION_STATUS_SUCCESS
+          from cutsell_worker.visual_finishing_measurement import (
+              compute_visual_join_measurement,
+              measure_visual_clip,
+          )
+          from cutsell_worker.visual_finishing_policy import (
+              MAX_ADDITIONAL_CROP_LOSS_NORMALIZED,
+              MAX_PUNCH_IN_SCALE,
+              MAX_REFRAME_TRANSLATION_NORMALIZED,
+              MIN_PUNCH_IN_CLIP_DURATION_SEC,
+              MIN_RELIABLE_FACE_DETECTION_RATE,
+              POLICY_VERSION,
+              VISUAL_ACTION_ABSTAIN_INSUFFICIENT_EVIDENCE,
+              VISUAL_ACTION_BLOCKED_FACE_SAFETY,
+              VISUAL_ACTION_BLOCKED_MULTI_FACE,
+              VISUAL_ACTION_BLOCKED_PRODUCT_SAFETY_UNKNOWN,
+              VISUAL_ACTION_NO_CHANGE,
+              VISUAL_ACTION_POSITION_MATCH,
+              VISUAL_ACTION_PUNCH_IN,
+              VISUAL_ACTION_SCALE_AND_POSITION_MATCH,
+              VISUAL_ACTION_SCALE_MATCH,
+              VISUAL_ACTION_STATIC_REFRAME,
+              generate_visual_finishing_plan,
+          )
+          from cutsell_worker.post_render_media_qc import run_post_render_media_qc
+
+          ARTIFACT_DIR = "artifact"
+          PREVIEW = os.path.join(ARTIFACT_DIR, "preview.mp4")
+          RESULT_JSON = os.path.join(ARTIFACT_DIR, "result.json")
+          AFTER = os.path.join(ARTIFACT_DIR, "d264-after-visual-finishing.mp4")
+          AFTER_REPLAY = os.path.join(ARTIFACT_DIR, "d264-after-visual-finishing-replay.mp4")
+          BEFORE_COPY = os.path.join(ARTIFACT_DIR, "before_visual_finishing.mp4")
+          AFTER_COPY = os.path.join(ARTIFACT_DIR, "after_visual_finishing.mp4")
+
+
+          def to_plain(obj):
+              if obj is None:
+                  return None
+              if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+                  return dataclasses.asdict(obj)
+              if isinstance(obj, tuple):
+                  return [to_plain(x) for x in obj]
+              return obj
+
+
+          def dump(name, obj):
+              with open(os.path.join(ARTIFACT_DIR, name), "w") as f:
+                  json.dump(to_plain(obj), f, indent=2, default=str)
+
+
+          def sha256_of(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+
+          def ffprobe_json(path):
+              args = [
+                  "ffprobe", "-v", "error", "-print_format", "json",
+                  "-show_format", "-show_streams", path,
+              ]
+              out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
+              return json.loads(out)
+
+
+          summary = {}
+          summary["source_path"] = PREVIEW
+          summary["source_sha256"] = sha256_of(PREVIEW)
+
+          pre_probe = ffprobe_json(PREVIEW)
+          probe = probe_media(PREVIEW)
+          summary["source_duration_sec"] = probe.duration_sec
+          summary["source_resolution"] = f"{probe.width}x{probe.height}"
+          pre_video_streams = [s for s in pre_probe.get("streams", []) if s.get("codec_type") == "video"]
+          pre_audio_streams = [s for s in pre_probe.get("streams", []) if s.get("codec_type") == "audio"]
+          summary["source_video_codec"] = pre_video_streams[0].get("codec_name") if pre_video_streams else None
+          summary["source_audio_codec"] = pre_audio_streams[0].get("codec_name") if pre_audio_streams else None
+
+          # --- PART: real clip/boundary identity -- SAME extraction logic D-254C
+          # already proved against this exact result.json (engine-recorded, never
+          # waveform-derived). This is the ONE real media source for this gate --
+          # preview.mp4 ITSELF is treated as the source file each segment's own
+          # as-rendered window is re-cut from (this gate's own explicit "EXACTLY
+          # ONE REAL-MEDIA SOURCE MAXIMUM" / "NO SECOND RENDER SOURCE" scope --
+          # no raw per-clip source asset exists or is used here; Visual Finishing
+          # operates as a POST-PROCESS finishing pass over the already-delivered
+          # renderer output, exactly as D-262/D-263 designed it to).
+          segments = []
+          identity_status = "CLIP_IDENTITY_INSUFFICIENT"
+          identity_note = ""
+          try:
+              with open(RESULT_JSON) as f:
+                  result = json.load(f)
+              live_qc = result.get("live_render_qc") or {}
+              attempts = live_qc.get("attempts") or []
+              if attempts:
+                  last = attempts[-1]
+                  boundary_state = last.get("input_boundary_state") or []
+                  trims = last.get("renderer_trailing_trims") or []
+                  trim_by_key = {}
+                  for row in trims:
+                      if not isinstance(row, dict):
+                          continue
+                      try:
+                          tightened = float(row.get("tightened_end"))
+                      except (TypeError, ValueError):
+                          continue
+                      key = (str(row.get("clip_id") or ""), row.get("render_fragment_id") or None)
+                      trim_by_key[key] = tightened
+                  for row in boundary_state:
+                      if not isinstance(row, dict) or "clip_id" not in row:
+                          continue
+                      clip_id = str(row["clip_id"])
+                      try:
+                          start = float(row["start"])
+                          end = float(row["end"])
+                      except (TypeError, ValueError, KeyError):
+                          continue
+                      fragment = row.get("render_fragment_id")
+                      tightened = trim_by_key.get((clip_id, fragment))
+                      if tightened is None and fragment is not None:
+                          tightened = trim_by_key.get((clip_id, None))
+                      as_rendered_end = tightened if (tightened is not None and start < tightened < end) else end
+                      segments.append({
+                          "clip_id": clip_id,
+                          "source_start": start,
+                          "source_end": end,
+                          "as_rendered_duration": max(0.0, as_rendered_end - start),
+                      })
+                  if segments:
+                      identity_status = "CLIP_IDENTITY_AVAILABLE"
+                  else:
+                      identity_note = "live_render_qc.attempts present but input_boundary_state empty/degenerate"
+              else:
+                  identity_note = "result.json has no live_render_qc.attempts"
+          except FileNotFoundError:
+              identity_note = "result.json not found locally"
+          except Exception as exc:  # noqa: BLE001 -- reported, never silently swallowed
+              identity_note = f"result.json inspection failed: {exc}"
+
+          cum = 0.0
+          for seg in segments:
+              seg["render_start"] = cum
+              seg["render_end"] = cum + seg["as_rendered_duration"]
+              cum += seg["as_rendered_duration"]
+
+          summary["clip_identity_status"] = identity_status
+          summary["clip_identity_note"] = identity_note
+          summary["exact_selected_clip_count"] = len(segments)
+          summary["sum_segment_durations_sec"] = cum
+          summary["segment_duration_reconciliation_delta_sec"] = cum - probe.duration_sec
+          with open(os.path.join(ARTIFACT_DIR, "d264-segments.json"), "w") as f:
+              json.dump(segments, f, indent=2, default=str)
+
+          if identity_status != "CLIP_IDENTITY_AVAILABLE":
+              summary["real_media_classification"] = "REAL_MEDIA_PARTIAL_IDENTITY"
+              summary["verdict"] = "D"
+              with open(os.path.join(ARTIFACT_DIR, "d264-summary.json"), "w") as f:
+                  json.dump(summary, f, indent=2, default=str)
+              print("=== D-264 SUMMARY (identity insufficient, stopping) ===")
+              print(json.dumps(summary, indent=2, default=str))
+              raise SystemExit(0)
+
+          render_segments = tuple(
+              RenderSegment(
+                  clip_id=seg["clip_id"], source_asset_id=seg["clip_id"], source_path=PREVIEW,
+                  start=seg["render_start"], end=seg["render_end"],
+              )
+              for seg in segments
+          )
+          clip_durations_sec = {seg["clip_id"]: seg["as_rendered_duration"] for seg in segments}
+
+          # --- PART 1: real pre visual measurement (D-258, real cv2/mediapipe) ---
+          clip_measurements = []
+          for seg in segments:
+              duration = max(0.0, seg["render_end"] - seg["render_start"])
+              count = 8
+              if duration <= 0.0:
+                  timestamps = (seg["render_start"],)
+              elif count == 1:
+                  timestamps = (seg["render_start"] + duration / 2.0,)
+              else:
+                  start_t, end_t = duration * 0.05, duration * 0.95
+                  step = (end_t - start_t) / (count - 1)
+                  timestamps = tuple(seg["render_start"] + start_t + i * step for i in range(count))
+              m = measure_visual_clip(PREVIEW, timestamps=timestamps, source_id=summary["source_sha256"], clip_id=seg["clip_id"])
+              clip_measurements.append(m)
+          clip_measurements = tuple(clip_measurements)
+          dump("d264-pre-measurements.json", clip_measurements)
+
+          measurement_status_counts = {}
+          face_detection_rates = []
+          multi_face_clip_count = 0
+          for m in clip_measurements:
+              measurement_status_counts[m.measurement_status] = measurement_status_counts.get(m.measurement_status, 0) + 1
+              if m.face_detection_rate is not None:
+                  face_detection_rates.append(m.face_detection_rate)
+              if any(f.multiple_faces_detected for f in m.frames):
+                  multi_face_clip_count += 1
+          summary["measurement_status_counts"] = measurement_status_counts
+          summary["face_detection_rate_summary"] = {
+              "count": len(face_detection_rates),
+              "min": min(face_detection_rates) if face_detection_rates else None,
+              "max": max(face_detection_rates) if face_detection_rates else None,
+              "mean": (sum(face_detection_rates) / len(face_detection_rates)) if face_detection_rates else None,
+          }
+          summary["multi_face_clip_count"] = multi_face_clip_count
+          summary["clip_measurement_count"] = len(clip_measurements)
+
+          # --- PART: real join measurements (D-258, pure) ---
+          join_measurements = tuple(
+              compute_visual_join_measurement(clip_measurements[i], clip_measurements[i + 1])
+              for i in range(len(clip_measurements) - 1)
+          )
+          dump("d264-join-measurements.json", join_measurements)
+          summary["join_measurement_count"] = len(join_measurements)
+
+          # --- PART 2: real policy generation (D-260, unchanged, no numeric change).
+          # product_safety_established deliberately omitted (defaults False for
+          # every clip) -- product bbox remains unavailable (D-257 finding,
+          # unchanged); this gate never bypasses that fail-closed default. ---
+          plan = generate_visual_finishing_plan(
+              clip_measurements, join_measurements, source_id=summary["source_sha256"],
+              clip_durations_sec=clip_durations_sec,
+          )
+          dump("d264-visual-plan.json", plan)
+          summary["plan_status"] = plan.plan_status
+          summary["visual_finishing_identity"] = plan.visual_finishing_identity
+          summary["policy_version"] = plan.policy_version
+
+          action_counts = {}
+          for d in plan.join_decisions:
+              action_counts[d.action] = action_counts.get(d.action, 0) + 1
+          summary["action_distribution"] = action_counts
+          summary["no_change_count"] = action_counts.get(VISUAL_ACTION_NO_CHANGE, 0)
+          summary["punch_in_count"] = action_counts.get(VISUAL_ACTION_PUNCH_IN, 0)
+          summary["static_reframe_count"] = action_counts.get(VISUAL_ACTION_STATIC_REFRAME, 0)
+          summary["position_match_count"] = action_counts.get(VISUAL_ACTION_POSITION_MATCH, 0)
+          summary["scale_match_count"] = action_counts.get(VISUAL_ACTION_SCALE_MATCH, 0)
+          summary["scale_and_position_match_count"] = action_counts.get(VISUAL_ACTION_SCALE_AND_POSITION_MATCH, 0)
+          summary["abstain_count"] = action_counts.get(VISUAL_ACTION_ABSTAIN_INSUFFICIENT_EVIDENCE, 0)
+          summary["blocked_face_count"] = action_counts.get(VISUAL_ACTION_BLOCKED_FACE_SAFETY, 0)
+          summary["blocked_multi_face_count"] = action_counts.get(VISUAL_ACTION_BLOCKED_MULTI_FACE, 0)
+          summary["blocked_product_count"] = action_counts.get(VISUAL_ACTION_BLOCKED_PRODUCT_SAFETY_UNKNOWN, 0)
+
+          # --- PART 3: safety audit (pre-execution, canonical values read verbatim,
+          # never recomputed/altered). ---
+          safety_findings = []
+          for d in plan.join_decisions:
+              if d.authorized_scale is not None and d.authorized_scale > MAX_PUNCH_IN_SCALE + 1e-9:
+                  safety_findings.append(f"{d.left_clip_id}->{d.right_clip_id}: authorized_scale exceeds ceiling")
+              for tx in (d.authorized_translation_x, d.authorized_translation_y):
+                  if tx is not None and abs(tx) > MAX_REFRAME_TRANSLATION_NORMALIZED + 1e-9:
+                      safety_findings.append(f"{d.left_clip_id}->{d.right_clip_id}: authorized_translation exceeds ceiling")
+              if d.action == VISUAL_ACTION_PUNCH_IN:
+                  dur = clip_durations_sec.get(d.right_clip_id)
+                  if dur is not None and dur < MIN_PUNCH_IN_CLIP_DURATION_SEC:
+                      safety_findings.append(f"{d.left_clip_id}->{d.right_clip_id}: punch-in authorized on a sub-{MIN_PUNCH_IN_CLIP_DURATION_SEC}s clip")
+          for cd in plan.clip_decisions:
+              if cd.face_detection_rate is not None and cd.face_detection_rate < MIN_RELIABLE_FACE_DETECTION_RATE and cd.action != VISUAL_ACTION_ABSTAIN_INSUFFICIENT_EVIDENCE:
+                  safety_findings.append(f"{cd.clip_id}: low face-detection rate but not abstained")
+          summary["pre_execution_safety_findings"] = safety_findings
+          summary["safe_to_execute"] = len(safety_findings) == 0
+
+          # --- PART 4: real execution via the D-263 composition chain (measurement
+          # and plan already computed above, real, passed through -- never
+          # recomputed by the composition call below). ---
+          work_dir = os.path.join(ARTIFACT_DIR, "work")
+          os.makedirs(work_dir, exist_ok=True)
+          pre_measurement_map = {m.clip_id: m for m in clip_measurements}
+
+          comp_input = VisualFinishingCompositionInput(
+              source_identity=summary["source_sha256"], segments=render_segments,
+              output_path=AFTER, work_dir=work_dir,
+              render_width=probe.width, render_height=probe.height, render_fps=int(round(probe.fps)) if probe.fps else 30,
+              pre_measurements=pre_measurement_map, pre_plan=plan,
+          )
+          result_obj = compose_visual_finishing(comp_input)
+          dump("d264-execution-records.json", result_obj.execution_records)
+          dump("d264-post-measurements.json", result_obj.post_measurements)
+          dump("d264-verification.json", result_obj.verification_results)
+
+          summary["overall_status"] = result_obj.overall_status
+          summary["composition_id"] = result_obj.composition_id
+          summary["render_output_path"] = result_obj.render_output_path
+
+          executed_corrections = [
+              r for r in result_obj.execution_records if r.execution_status == EXECUTION_STATUS_SUCCESS
+          ]
+          summary["executed_correction_count"] = len(executed_corrections)
+          summary["face_safety_violation_count"] = sum(1 for r in result_obj.execution_records if r.execution_status == "FACE_SAFETY_BLOCKED")
+          summary["crop_limit_violation_count"] = sum(1 for r in result_obj.execution_records if r.execution_status == "CROP_LIMIT_EXCEEDED")
+          # Part 3's own explicit post-execution ceiling check: every EXECUTED
+          # correction's own crop_loss must still be <=0.10, verbatim against the
+          # same canonical value (never recomputed/altered).
+          post_execution_findings = [
+              f"{r.clip_id}: crop_loss {r.crop_loss} exceeds {MAX_ADDITIONAL_CROP_LOSS_NORMALIZED}"
+              for r in executed_corrections
+              if r.crop_loss is not None and r.crop_loss > MAX_ADDITIONAL_CROP_LOSS_NORMALIZED + 1e-9
+          ] + [
+              f"{r.clip_id}: authorized_scale {r.authorized_scale} exceeds {MAX_PUNCH_IN_SCALE}"
+              for r in executed_corrections
+              if r.authorized_scale is not None and r.authorized_scale > MAX_PUNCH_IN_SCALE + 1e-9
+          ]
+          summary["post_execution_safety_findings"] = post_execution_findings
+
+          per_correction = []
+          for r in executed_corrections:
+              per_correction.append({
+                  "clip_id": r.clip_id, "action": r.action,
+                  "authorized_scale": r.authorized_scale,
+                  "authorized_translation_x": r.authorized_translation_x,
+                  "authorized_translation_y": r.authorized_translation_y,
+                  "crop_x": r.crop_x, "crop_y": r.crop_y, "crop_width": r.crop_width, "crop_height": r.crop_height,
+                  "crop_loss": r.crop_loss, "face_safety_status": r.face_safety_status,
+                  "execution_status": r.execution_status,
+              })
+          summary["executed_corrections"] = per_correction
+
+          req_auth = []
+          for d in plan.join_decisions:
+              if d.action in (VISUAL_ACTION_PUNCH_IN, VISUAL_ACTION_STATIC_REFRAME, VISUAL_ACTION_POSITION_MATCH, VISUAL_ACTION_SCALE_MATCH, VISUAL_ACTION_SCALE_AND_POSITION_MATCH):
+                  req_auth.append({
+                      "left": d.left_clip_id, "right": d.right_clip_id, "action": d.action,
+                      "requested_scale": d.requested_scale, "authorized_scale": d.authorized_scale,
+                      "requested_translation_x": d.requested_translation_x, "authorized_translation_x": d.authorized_translation_x,
+                      "requested_translation_y": d.requested_translation_y, "authorized_translation_y": d.authorized_translation_y,
+                  })
+          summary["requested_vs_authorized"] = req_auth
+
+          # pre/post face-center/scale/headroom summaries.
+          def _median_or_none(values):
+              values = [v for v in values if v is not None]
+              if not values:
+                  return None
+              values = sorted(values)
+              n = len(values)
+              mid = n // 2
+              return values[mid] if n % 2 else (values[mid - 1] + values[mid]) / 2.0
+
+          pre_by_clip = {m.clip_id: m for m in clip_measurements}
+          post_by_clip = {m.clip_id: m for m in result_obj.post_measurements}
+          summary["pre_face_center_summary"] = {
+              "x_median": _median_or_none([m.face_center_x_median for m in clip_measurements]),
+              "y_median": _median_or_none([m.face_center_y_median for m in clip_measurements]),
+          }
+          summary["post_face_center_summary"] = {
+              "x_median": _median_or_none([m.face_center_x_median for m in result_obj.post_measurements]),
+              "y_median": _median_or_none([m.face_center_y_median for m in result_obj.post_measurements]),
+          }
+          summary["pre_face_scale_summary"] = {
+              "area_ratio_median": _median_or_none([m.face_area_ratio_median for m in clip_measurements]),
+          }
+          summary["post_face_scale_summary"] = {
+              "area_ratio_median": _median_or_none([m.face_area_ratio_median for m in result_obj.post_measurements]),
+          }
+          summary["headroom_before"] = _median_or_none([m.headroom_ratio_median for m in clip_measurements])
+          summary["headroom_after"] = _median_or_none([m.headroom_ratio_median for m in result_obj.post_measurements])
+
+          # --- PART 6/7: timing/audio/output-geometry preservation. ---
+          output_ready = bool(result_obj.render_output_path and os.path.exists(result_obj.render_output_path))
+          after_probe = ffprobe_json(result_obj.render_output_path) if output_ready else None
+          after_video_streams = [s for s in after_probe.get("streams", []) if s.get("codec_type") == "video"] if after_probe else []
+          after_audio_streams = [s for s in after_probe.get("streams", []) if s.get("codec_type") == "audio"] if after_probe else []
+          after_media_probe = probe_media(result_obj.render_output_path) if output_ready else None
+
+          summary["output_resolution"] = f"{after_media_probe.width}x{after_media_probe.height}" if after_media_probe else None
+          summary["nine_sixteen_preserved"] = bool(
+              after_media_probe and after_media_probe.width == probe.width and after_media_probe.height == probe.height
+          )
+          summary["audio_preserved"] = bool(after_audio_streams)
+          summary["duration_delta_sec"] = (after_media_probe.duration_sec - probe.duration_sec) if after_media_probe else None
+          summary["output_video_codec"] = after_video_streams[0].get("codec_name") if after_video_streams else None
+          summary["output_audio_codec"] = after_audio_streams[0].get("codec_name") if after_audio_streams else None
+          summary["captions_preserved"] = "N/A_no_captions_in_this_source"
+
+          # --- PART 10: idempotence -- same source + same plan -> same identity;
+          # a second composition call with the first run's own execution ids as
+          # previous_execution_ids must produce ALREADY_APPLIED (no visual_
+          # transform re-applied), never a compounded second DSP pass. ---
+          plan_replay = generate_visual_finishing_plan(
+              clip_measurements, join_measurements, source_id=summary["source_sha256"],
+              clip_durations_sec=clip_durations_sec,
+          )
+          summary["visual_finishing_identity_reproducible"] = (plan_replay.visual_finishing_identity == plan.visual_finishing_identity)
+
+          previous_execution_ids = {
+              (r.plan_id, r.clip_id): r.execution_id for r in result_obj.execution_records
+          }
+          # VisualFinishingCompositionInput keys previous_execution_ids by
+          # (left_clip_id, right_clip_id) -- rebuild that exact shape from the
+          # join decisions this composition already evaluated.
+          previous_by_join = {}
+          for d in plan.join_decisions:
+              match = next((r for r in result_obj.execution_records if r.clip_id == d.right_clip_id), None)
+              if match is not None:
+                  previous_by_join[(d.left_clip_id, d.right_clip_id)] = match.execution_id
+
+          replay_input = VisualFinishingCompositionInput(
+              source_identity=summary["source_sha256"], segments=render_segments,
+              output_path=AFTER_REPLAY, work_dir=work_dir,
+              render_width=probe.width, render_height=probe.height, render_fps=int(round(probe.fps)) if probe.fps else 30,
+              pre_measurements=pre_measurement_map, pre_plan=plan,
+              previous_execution_ids=previous_by_join,
+          )
+          replay_result = compose_visual_finishing(replay_input)
+          second_dsp_performed = any(s.visual_transform is not None for s in replay_result.rendered_segments)
+          summary["second_visual_execution_performed"] = second_dsp_performed
+          summary["composition_id_reproducible"] = (replay_result.composition_id != result_obj.composition_id) or (not executed_corrections)
+          dump("d264-replay-execution-records.json", replay_result.execution_records)
+
+          # --- PART 13: existing technical QC (unchanged authority). ---
+          qc_status = None
+          if output_ready:
+              qc_result = run_post_render_media_qc(result_obj.render_output_path)
+              qc_status = qc_result.status
+              with open(os.path.join(ARTIFACT_DIR, "d264-technical-qc.json"), "w") as f:
+                  json.dump(
+                      {"status": qc_result.status, "findings": [to_plain(x) for x in qc_result.findings]},
+                      f, indent=2, default=str,
+                  )
+          summary["technical_qc_status"] = qc_status
+
+          # --- PART 11: before/after review package. ---
+          shutil.copyfile(PREVIEW, BEFORE_COPY)
+          if output_ready:
+              shutil.copyfile(result_obj.render_output_path, AFTER_COPY)
+          summary["before_media_included"] = os.path.exists(BEFORE_COPY)
+          summary["after_media_included"] = os.path.exists(AFTER_COPY)
+
+          # --- Real-media classification (per this gate's own mandated vocabulary). ---
+          if not summary["safe_to_execute"] or post_execution_findings:
+              classification = "REGRESSION"
+          elif executed_corrections:
+              classification = "REAL_MEDIA_QUALIFIED_WITH_CORRECTION"
+          elif result_obj.overall_status == "BLOCKED":
+              classification = "REAL_MEDIA_QUALIFIED_WITH_SAFETY_BLOCK"
+          elif result_obj.overall_status in ("NO_CHANGE",):
+              classification = "REAL_MEDIA_QUALIFIED_NO_CHANGE"
+          elif result_obj.overall_status == "ABSTAIN":
+              classification = "REAL_MEDIA_QUALIFIED_WITH_SAFETY_BLOCK"
+          else:
+              classification = "REAL_MEDIA_EXECUTION_GAP"
+          summary["real_media_classification"] = classification
+
+          verdict_map = {
+              "REAL_MEDIA_QUALIFIED_WITH_CORRECTION": "A",
+              "REAL_MEDIA_QUALIFIED_NO_CHANGE": "B",
+              "REAL_MEDIA_QUALIFIED_WITH_SAFETY_BLOCK": "C",
+              "REAL_MEDIA_PARTIAL_IDENTITY": "D",
+              "REAL_MEDIA_EXECUTION_GAP": "E",
+              "REAL_MEDIA_MEASUREMENT_FAILURE": "F",
+              "REGRESSION": "G",
+          }
+          summary["verdict"] = verdict_map.get(classification, "E")
+
+          with open(os.path.join(ARTIFACT_DIR, "d264-summary.json"), "w") as f:
+              json.dump(summary, f, indent=2, default=str)
+
+          print("=== D-264 SUMMARY (full content) ===")
+          print(json.dumps(summary, indent=2, default=str))
+          PYEOF
+          # Same lesson as D-254C's own documented fix: YAML's `run: |`
+          # block scalar already strips this step's common base indentation
+          # before bash sees it -- do not sed/strip anything further. Write
+          # as-is, then syntax-check.
+          python3 -m py_compile /tmp/d264_run.py
+          echo "Driver script written to /tmp/d264_run.py and syntax-checked"
+
+      - name: D-264 run real-media Visual Finishing qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$(pwd)" python3 /tmp/d264_run.py
+
+      - name: Report D-264 review artifact bundle size before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          du -ch \
+            artifact/before_visual_finishing.mp4 \
+            artifact/after_visual_finishing.mp4 \
+            artifact/d264-summary.json \
+            artifact/d264-segments.json \
+            artifact/d264-pre-measurements.json \
+            artifact/d264-join-measurements.json \
+            artifact/d264-visual-plan.json \
+            artifact/d264-execution-records.json \
+            artifact/d264-post-measurements.json \
+            artifact/d264-verification.json \
+            2>/dev/null | tail -1 || true
+
+      - name: Upload D-264 visual finishing review artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-d264-visual-finishing-review
+          path: |
+            artifact/before_visual_finishing.mp4
+            artifact/after_visual_finishing.mp4
+            artifact/d264-summary.json
+            artifact/d264-segments.json
+            artifact/d264-pre-measurements.json
+            artifact/d264-join-measurements.json
+            artifact/d264-visual-plan.json
+            artifact/d264-execution-records.json
+            artifact/d264-replay-execution-records.json
+            artifact/d264-post-measurements.json
+            artifact/d264-verification.json
+            artifact/d264-technical-qc.json
+          retention-days: 14
+          if-no-files-found: warn

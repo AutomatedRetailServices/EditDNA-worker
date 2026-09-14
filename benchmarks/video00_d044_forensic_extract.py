@@ -1,0 +1,199 @@
+"""D-044 (retry-family / idea-clustering regression audit): pure, read-only
+extraction of the pipeline-stage diagnostics needed to forensically trace a
+specific semantic outcome (which clip survived, which was discarded, and at
+which stage the decision was made) from an already-produced result.json.
+
+Never runs the pipeline, never calls a provider, never touches Modal/RunPod
+infrastructure -- this only reads a JSON file already sitting on disk
+(downloaded from S3 by the caller) and re-shapes a bounded subset of its
+`diagnostics` dict into a smaller, forensic-focused JSON. Built because the
+GitHub Actions CI log route is lossy for this purpose: GitHub's own
+`::add-mask::` log redaction blanks out any digit sequence that happens to
+coincide with a masked secret/config value printed earlier in the same job,
+which corrupts exact clip_id/timestamp/count reporting. Reading the file
+directly (as this script does, run inside the fetching job before anything
+is echoed to the log) never has that problem -- the file itself is never
+masked, only console output is.
+
+Fields sourced directly from cutsell_worker.pipeline's own DraftTimeline
+diagnostics dict (see pipeline.py's `draft = DraftTimeline(..., diagnostics=
+{...})` literal) -- this script does not invent new diagnostic keys, it only
+selects and re-shapes existing ones:
+  - attempt_reconstruction: AttemptReconstructor's own output
+  - take_grouping_reason / take_group_members: IdeaClusterer's grouping
+  - semantic_idea_equivalence: the bounded SemanticArbiter tier's decisions
+  - take_judge_groups: DeliveryScorer's RankedTake scores per retry family
+  - clean_cut_decisions: per-candidate keep/discard decisions + reasons
+  - canonical_edit_plan.ideas: CanonicalEditPlan's own idea/winner/discard map
+  - final_story_coherence_validation: StoryValidator's findings
+  - selected / discarded: the final clip lists with clip_id + text
+"""
+from __future__ import annotations
+
+import json
+import sys
+
+
+def trace_clip_ids(result: dict, clip_ids: list[str]) -> dict:
+    """D-045: general, fully unbounded search for every diagnostics path
+    that mentions any of `clip_ids` -- built to answer "which of the ~50
+    cutsell_worker cleanup/trim hooks touched this specific clip" without
+    having to guess or enumerate hook names up front. Cutsell_worker
+    installs dozens of small hooks (round8_retry_reconciliation,
+    post_selection_interior_gap_trim, etc.), most with their own
+    diagnostics key -- a clip that vanishes from selected/alternates/
+    discarded without ever being formally counted as "discarded" (D-045
+    Case A's own finding) can only be traced by searching ALL of them,
+    not the curated subset `extract()` above pulls. Fully general: works
+    for any clip_id, invents nothing Video00-specific -- the search is
+    purely structural (walks the raw JSON tree looking for string
+    matches), so it never needs to know what a hook's own diagnostics
+    schema looks like ahead of time.
+
+    Returns {clip_id: [ {"path": "diagnostics.some_hook[3].member_clip_ids[1]",
+    "context": <the smallest containing dict/list, truncated>} ... ]}."""
+    hits: dict[str, list[dict]] = {cid: [] for cid in clip_ids}
+
+    def _walk(node, path: str, parent_container):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                _walk(value, f"{path}.{key}" if path else str(key), node)
+        elif isinstance(node, list):
+            for idx, value in enumerate(node):
+                _walk(value, f"{path}[{idx}]", node)
+        elif isinstance(node, str):
+            for cid in clip_ids:
+                if cid in node:
+                    context = parent_container
+                    if isinstance(context, dict):
+                        context = {k: v for k, v in context.items() if not isinstance(v, (dict, list)) or len(str(v)) < 200}
+                    hits[cid].append({"path": path, "context": context})
+
+    _walk(result, "", None)
+    return hits
+
+
+def extract(result_path: str, keywords: list[str] | None = None, trace_clips: list[str] | None = None) -> dict:
+    with open(result_path, "r", encoding="utf-8") as fh:
+        result = json.load(fh)
+
+    diagnostics = result.get("diagnostics") or {}
+    keywords = [k.lower() for k in (keywords or [])]
+
+    def _matches(text: str) -> bool:
+        if not keywords:
+            return True
+        low = text.lower()
+        return any(k in low for k in keywords)
+
+    def _filter_list(items, text_keys: tuple[str, ...]) -> list:
+        if not keywords:
+            return list(items)
+        out = []
+        for item in items:
+            if not isinstance(item, dict):
+                out.append(item)
+                continue
+            blob = " ".join(str(item.get(k, "")) for k in text_keys)
+            if _matches(blob):
+                out.append(item)
+        return out
+
+    forensic = {
+        "schema_version": "cutsell.video00.d044_forensic_extract.v1",
+        "benchmark_id": result.get("benchmark_id"),
+        "selected_count": result.get("selected_count"),
+        "source_duration_sec": result.get("source_duration_sec"),
+        "selected": [
+            {"clip_id": c.get("clip_id"), "text": c.get("text")}
+            for c in (result.get("selected") or [])
+        ],
+        "discarded": [
+            {"clip_id": c.get("clip_id"), "text": c.get("text")}
+            for c in (result.get("discarded") or [])
+        ],
+        # D-045: "discarded" (above) is the formal draft.discarded bucket
+        # pipeline.py builds from (*discarded, *review_removed) -- a
+        # DIFFERENT, later-stage tuple than canonical_edit_plan.py's own
+        # per-idea discarded_clip_ids (which is simply "every take_judge_
+        # groups member not in draft.selected", including a clip that may
+        # have landed in draft.ALTERNATES instead of draft.discarded).
+        # Missing this bucket in the D-044 extraction hid exactly this
+        # class of clip during the D-045 audit -- included now so a clip's
+        # true resting bucket (selected/alternates/discarded, or genuinely
+        # absent from all three) is always determinable.
+        "alternates": [
+            {"clip_id": c.get("clip_id"), "text": c.get("text")}
+            for c in (result.get("alternates") or [])
+        ],
+        "attempt_reconstruction": diagnostics.get("attempt_reconstruction"),
+        "take_grouping_status": diagnostics.get("take_grouping_status"),
+        "take_grouping_reason": diagnostics.get("take_grouping_reason"),
+        "take_group_count": diagnostics.get("take_group_count"),
+        "alternate_group_count": diagnostics.get("alternate_group_count"),
+        "take_group_members": diagnostics.get("take_group_members"),
+        "semantic_idea_equivalence": diagnostics.get("semantic_idea_equivalence"),
+        "take_judge_status_counts": diagnostics.get("take_judge_status_counts"),
+        "take_judge_groups_filtered": _filter_list(
+            diagnostics.get("take_judge_groups") or [], ("clip_id", "text", "reason", "group_id", "semantic_key")
+        ),
+        "clean_cut_decisions_filtered": _filter_list(
+            diagnostics.get("clean_cut_decisions") or [], ("clip_id", "reason")
+        ),
+        "hybrid_editorial_chunks_filtered": _filter_list(
+            diagnostics.get("hybrid_editorial_chunks") or [], ("clip_id", "text", "reason")
+        ),
+        "claim_coverage_best_take": diagnostics.get("claim_coverage_best_take"),
+        "final_selection_retry_arbiter": diagnostics.get("final_selection_retry_arbiter"),
+        "canonical_edit_plan_ideas": (diagnostics.get("canonical_edit_plan") or {}).get("ideas"),
+        "final_story_coherence_validation": diagnostics.get("final_story_coherence_validation"),
+        "post_selection_complementary_family_stabilizer": diagnostics.get("post_selection_complementary_family_stabilizer"),
+        "post_selection_composite_handoff_trim": diagnostics.get("post_selection_composite_handoff_trim"),
+        # D-097.4: the authorities that decided RAW 34034507983's Level-1
+        # regions were invisible to this extract -- the Resolver's per-idea
+        # tiers/reasons, the render/QC/delivery chain, the perceptual
+        # reviewer and the stage statuses all live outside the curated
+        # subset above. Exposed here so a per-fix MP4 report never needs a
+        # second paid run to learn WHICH tier chose a winner or WHY the
+        # renderer's QC refused delivery.
+        "realization_resolver_authority": diagnostics.get("realization_resolver_authority"),
+        "realization_resolver_shadow_ideas_filtered": _filter_list(
+            (diagnostics.get("realization_resolver_shadow") or {}).get("ideas") or [],
+            ("semantic_idea_id", "decision_reason", "winner_realization_id"),
+        ),
+        "stage_status": result.get("stage_status"),
+        "live_render_qc": result.get("live_render_qc") or diagnostics.get("live_render_qc"),
+        "perceptual_watch_listen": result.get("perceptual_watch_listen") or diagnostics.get("perceptual_watch_listen"),
+        "hybrid_editorial_stage": {
+            "stage": (result.get("stage_status") or {}).get("hybrid_editorial"),
+            "requested_chunk_count": diagnostics.get("hybrid_editorial_requested_chunk_count"),
+            "budget_refused_count": diagnostics.get("hybrid_editorial_budget_exhausted_chunk_count"),
+        },
+    }
+    if trace_clips:
+        # D-045: answers "which diagnostics path(s) mention this clip_id at
+        # all" across the ENTIRE raw result (not just the curated subset
+        # above) -- see trace_clip_ids()'s own docstring for why this is
+        # needed: a clip absent from selected/alternates/discarded can only
+        # be traced by searching every hook's own diagnostics key, and
+        # there are too many to enumerate by hand.
+        forensic["clip_trace"] = trace_clip_ids(result, trace_clips)
+    return forensic
+
+
+def main() -> int:
+    import os
+
+    if len(sys.argv) < 2:
+        print("usage: video00_d044_forensic_extract.py RESULT_JSON [keyword ...]", file=sys.stderr)
+        return 2
+    result_path = sys.argv[1]
+    keywords = sys.argv[2:] or None
+    trace_clips = [c for c in os.environ.get("D045_TRACE_CLIP_IDS", "").split() if c] or None
+    forensic = extract(result_path, keywords, trace_clips=trace_clips)
+    print(json.dumps(forensic, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

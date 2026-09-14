@@ -1,0 +1,104 @@
+name: CutSell RunPod Live Diagnostic
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-runpod-live-diagnostic-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      POD_ID: vq3bsd8cwbk42s
+    steps:
+      - name: Validate credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}"
+          test -n "${REDIS_URL:-}"
+
+      - name: Inspect exact Pod
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pod.json
+          jq '{
+            id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr,
+            lastStatusChange,uptimeSeconds,runtime,machine,gpu,
+            containerDiskInGb,volumeInGb,volumeMountPath
+          }' pod.json
+
+      - name: Inspect RQ workers queue and active jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import os, json
+          from redis import Redis
+          from rq import Worker, Queue
+          from rq.registry import StartedJobRegistry, FailedJobRegistry, FinishedJobRegistry
+
+          conn = Redis.from_url(os.environ['REDIS_URL'])
+          workers = Worker.all(connection=conn)
+          print('worker_count=', len(workers))
+          for worker in workers:
+              state = worker.get_state()
+              current_job = worker.get_current_job()
+              data = {
+                  'name': worker.name,
+                  'state': state,
+                  'last_heartbeat': str(worker.last_heartbeat),
+                  'birth_date': str(worker.birth_date),
+                  'current_job_id': getattr(current_job, 'id', None),
+                  'current_job_status': str(current_job.get_status()) if current_job else None,
+                  'current_job_enqueued_at': str(getattr(current_job, 'enqueued_at', None)) if current_job else None,
+                  'current_job_started_at': str(getattr(current_job, 'started_at', None)) if current_job else None,
+                  'current_job_ended_at': str(getattr(current_job, 'ended_at', None)) if current_job else None,
+                  'current_job_meta': dict(getattr(current_job, 'meta', {}) or {}) if current_job else None,
+              }
+              print(json.dumps(data, default=str, sort_keys=True))
+
+          q = Queue('cutsell', connection=conn)
+          print('queue_count=', len(q))
+          print('queued_job_ids=', q.job_ids[:20])
+          for registry_cls, label in [
+              (StartedJobRegistry, 'started'),
+              (FailedJobRegistry, 'failed'),
+              (FinishedJobRegistry, 'finished'),
+          ]:
+              reg = registry_cls('cutsell', connection=conn)
+              ids = reg.get_job_ids()[-20:]
+              print(label + '_job_ids=', ids)
+              for job_id in ids[-5:]:
+                  from rq.job import Job
+                  try:
+                      job = Job.fetch(job_id, connection=conn)
+                  except Exception as exc:
+                      print(label, job_id, 'fetch_error', exc.__class__.__name__)
+                      continue
+                  print(json.dumps({
+                      'registry': label,
+                      'job_id': job.id,
+                      'status': str(job.get_status()),
+                      'func_name': job.func_name,
+                      'enqueued_at': str(job.enqueued_at),
+                      'started_at': str(job.started_at),
+                      'ended_at': str(job.ended_at),
+                      'last_heartbeat': str(job.last_heartbeat),
+                      'meta': dict(job.meta or {}),
+                      'exc_info_tail': (job.exc_info or '')[-1200:],
+                  }, default=str, sort_keys=True))
+          PY

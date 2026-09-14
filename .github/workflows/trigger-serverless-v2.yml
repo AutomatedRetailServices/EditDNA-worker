@@ -1,0 +1,32 @@
+name: Trigger Serverless V2 Rebuild
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/trigger-serverless-v2.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch existing Serverless GPU gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST \
+            --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/cutsell-serverless-gpu-gate.yml/dispatches" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'Content-Type: application/json' \
+            --data '{"ref":"cutsell/mobile-v1-clean"}' \
+            --output /tmp/dispatch.out)
+          echo "dispatch_http=$code"
+          test "$code" = "204"

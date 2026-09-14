@@ -1,0 +1,51 @@
+name: CutSell GHCR Pull Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Immutable CutSell worker image to validate"
+        required: true
+        default: "ghcr.io/automatedretailservices/cutsell-worker@sha256:cedf4b09c42a518fcb85873789c7bad306f7ffd428c8b5b138c2343de82500f8"
+
+permissions:
+  contents: read
+
+jobs:
+  anonymous-pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE: ${{ inputs.image }}
+    steps:
+      - name: Pull worker image without registry login
+        run: docker pull "$IMAGE"
+      - name: Resolve immutable registry digest
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE" | tee image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve image digest'; exit 9; }
+          test "$digest" = "sha256:cedf4b09c42a518fcb85873789c7bad306f7ffd428c8b5b138c2343de82500f8" || { echo 'Unexpected worker digest'; exit 10; }
+          echo "image_digest=$digest" >> "$GITHUB_STEP_SUMMARY"
+          echo "$IMAGE"
+      - name: Verify clean runtime imports and base CUDA stack
+        run: |
+          docker run --rm --entrypoint python "$IMAGE" - <<'PY'
+          import importlib.util
+          import json
+          import boto3, redis, rq, faster_whisper
+          import cutsell_worker
+          import torch
+          if importlib.util.find_spec('openai') is not None:
+              raise SystemExit('OpenAI SDK unexpectedly present in worker image')
+          print(json.dumps({
+              'cutsell_worker': True,
+              'openai_sdk_absent': True,
+              'faster_whisper': getattr(faster_whisper, '__version__', 'present'),
+              'torch_version': torch.__version__,
+              'torch_cuda': torch.version.cuda,
+              'cuda_available': torch.cuda.is_available(),
+          }, indent=2))
+          assert torch.__version__.startswith('2.6.')
+          PY

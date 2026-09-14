@@ -1,0 +1,172 @@
+name: CutSell D-275R Real iPhone Media Inventory (S3, read-only)
+
+# D-275R Stage 1: READ-ONLY S3 inventory of the existing source-media
+# corpus the Product Owner has confirmed is real iPhone-recorded footage
+# (the "Editdna longform validation/" folder family, which includes
+# Video00 itself, plus sibling/adjacent prefixes). Uses the SAME
+# already-authorized AWS credentials source cutsell-d254r-preview-
+# retrieval.yml and cutsell-video00-modal-raw.yml already use (the
+# RunPod template's own env values, fetched via RUNPOD_API_KEY) -- no
+# new credential source, nothing ever printed unmasked.
+#
+# Strictly read-only: `aws s3api list-objects-v2` / `aws s3 ls` only.
+# Never `aws s3 cp --recursive`, never `aws s3 sync`, never `put-object`,
+# never `delete-object`, never `mv`. This workflow's job is to answer
+# "what real-phone source media already exists in S3", not to download
+# or mutate any of it -- per-sample retrieval for D-271 profiling is a
+# separate, deliberately narrow follow-up step (D-254R's own single-key
+# `aws s3 cp` pattern), not this workflow.
+#
+# Runs NOTHING from this repository's editorial engine: no
+# process_universal_clean_cut_sources, no ASR, no Watch+Listen, no
+# P1/P2, no Ordering, no Freeze, no Boundary, no Pacing, no Audio Join,
+# no renderer, no Modal, no RunPod pod/GPU. Read-only S3 LIST only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      prefixes:
+        description: "Comma-separated S3 key prefixes to inventory (read-only list only)"
+        required: false
+        default: "Editdna longform validation/"
+      artifact_name:
+        description: "Name for the uploaded inventory-only artifact"
+        required: false
+        default: "cutsell-d275r-real-iphone-inventory"
+  # Same self-scoped bootstrap technique as cutsell-d254r-preview-
+  # retrieval.yml: fires ONLY on a push that itself changes this exact
+  # file, on this exact feature branch. CLAUDE.md's repository-protection
+  # rule bars writing to `main` without explicit Product Owner approval,
+  # which this gate does not have, so workflow_dispatch alone (which
+  # requires the file to already exist on the default branch) cannot be
+  # used to register this workflow for its first run.
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - .github/workflows/cutsell-d275r-real-iphone-inventory.yml
+
+jobs:
+  inventory-real-iphone-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: mkdir -p artifact
+
+      - name: Load base RunPod template (env source of truth only)
+        # Identical to cutsell-d254r-preview-retrieval.yml's own step of
+        # the same name -- the only source of the already-authorized AWS
+        # credentials this inventory bridge uses. No RunPod pod/GPU is
+        # created here; the template is read only for its env block.
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: D-275R Stage 1 -- read-only S3 inventory
+        id: inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+
+          IFS=',' read -ra PREFIXES <<< "${{ inputs.prefixes || 'Editdna longform validation/' }}"
+
+          echo "=== D-275R READ-ONLY S3 INVENTORY ===" | tee artifact/inventory.txt
+          echo "Bucket: (masked -- configured S3_BUCKET)" | tee -a artifact/inventory.txt
+
+          # 1. Top-level bucket layout (delimiter-bounded, one level deep,
+          #    read-only) so adjacent/sibling source folders the directive
+          #    warns "there may be additional iPhone-recorded files in" are
+          #    at least named, without a full recursive listing of the
+          #    entire bucket.
+          echo "" | tee -a artifact/inventory.txt
+          echo "--- top-level bucket prefixes (delimiter='/', read-only) ---" | tee -a artifact/inventory.txt
+          aws s3api list-objects-v2 --bucket "$S3_BUCKET" --delimiter "/" \
+            --query 'CommonPrefixes[].Prefix' --output json \
+            > artifact/top-level-prefixes.json 2> /tmp/top-level-error.txt || {
+              echo "TOP_LEVEL_LIST_FAILED" | tee -a artifact/inventory.txt
+              cat /tmp/top-level-error.txt | tee -a artifact/inventory.txt || true
+            }
+          if [ -s artifact/top-level-prefixes.json ]; then
+            cat artifact/top-level-prefixes.json | tee -a artifact/inventory.txt
+          fi
+
+          echo "found_object_count=0" >> "$GITHUB_OUTPUT"
+          TOTAL_FOUND=0
+
+          for PREFIX in "${PREFIXES[@]}"; do
+            echo "" | tee -a artifact/inventory.txt
+            echo "--- prefix: '$PREFIX' (read-only list-objects-v2, paginated) ---" | tee -a artifact/inventory.txt
+            SAFE_NAME=$(echo "$PREFIX" | tr -c 'A-Za-z0-9._-' '_')
+            OUT_JSON="artifact/objects_${SAFE_NAME}.json"
+
+            if aws s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "$PREFIX" \
+                --output json > "$OUT_JSON" 2> /tmp/list-error.txt; then
+              COUNT=$(jq '(.Contents // []) | length' "$OUT_JSON")
+              echo "objects_found=$COUNT for prefix '$PREFIX'" | tee -a artifact/inventory.txt
+              TOTAL_FOUND=$((TOTAL_FOUND + COUNT))
+              jq -r '(.Contents // [])[] | "\(.Key)\t\(.Size)\t\(.LastModified)"' "$OUT_JSON" \
+                | tee -a artifact/inventory.txt
+            else
+              echo "LIST_FAILED for prefix '$PREFIX'" | tee -a artifact/inventory.txt
+              cat /tmp/list-error.txt | tee -a artifact/inventory.txt || true
+            fi
+          done
+
+          echo "found_object_count=$TOTAL_FOUND" >> "$GITHUB_OUTPUT"
+
+          echo "" | tee -a artifact/inventory.txt
+          echo "--- extension breakdown across all listed objects ---" | tee -a artifact/inventory.txt
+          jq -rs '[.[] | (.Contents // [])[] | .Key] | .[]' artifact/objects_*.json 2>/dev/null \
+            | sed -E 's/.*(\.[A-Za-z0-9]+)$/\1/' | tr 'A-Z' 'a-z' | sort | uniq -c | sort -rn \
+            | tee -a artifact/inventory.txt || true
+
+          echo "" | tee -a artifact/inventory.txt
+          echo "--- likely source-media files (mp4/mov/m4v/3gp/heic extension, read-only match) ---" | tee -a artifact/inventory.txt
+          jq -rs '[.[] | (.Contents // [])[] | select(.Key | test("\\.(mp4|mov|m4v|3gp|heic)$"; "i"))]' \
+            artifact/objects_*.json 2>/dev/null > artifact/likely-source-media.json || echo "[]" > artifact/likely-source-media.json
+          jq -r '.[] | "\(.Key)\t\(.Size)"' artifact/likely-source-media.json | tee -a artifact/inventory.txt
+          MEDIA_COUNT=$(jq 'length' artifact/likely-source-media.json)
+          echo "likely_source_media_count=$MEDIA_COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload inventory-only artifact (keys/sizes/prefixes only, no media bytes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name || 'cutsell-d275r-real-iphone-inventory' }}
+          path: |
+            artifact/inventory.txt
+            artifact/top-level-prefixes.json
+            artifact/objects_*.json
+            artifact/likely-source-media.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print D-275R inventory summary (no credentials)
+        if: always()
+        shell: bash
+        run: |
+          echo "found_object_count=${{ steps.inventory.outputs.found_object_count }}"
+          echo "likely_source_media_count=${{ steps.inventory.outputs.likely_source_media_count }}"

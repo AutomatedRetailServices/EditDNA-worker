@@ -1,0 +1,123 @@
+name: CutSell D-275R2 Remaining Real iPhone Corpus Sweep
+
+# D-275R2: profiles the 14 previously-unsampled real, Product-Owner-
+# confirmed iPhone source objects (D-271 profile only), searches for
+# genuinely new format-diversity evidence (VFR, rotation metadata, HDR,
+# 10-bit, higher resolution, landscape), and runs the SAME live D-274F
+# qualification chain D-275R already proved ONLY on the specific new
+# samples that add evidence -- never a duplicate re-run of a property
+# this corpus already proved (H264 SDR / HEVC SDR / portrait). Zero
+# production code changed by this gate.
+#
+# Credentials: SAME already-authorized source as D-275R's own two
+# workflows (RunPod template env via RUNPOD_API_KEY). Read-only S3 GET
+# only (`aws s3 cp`) -- never --recursive/sync, never put-object/
+# delete-object. Each downloaded file is deleted from the runner disk
+# immediately after profiling (Stage 2) to keep disk usage bounded;
+# only the handful of files Stage 4 actually selects for qualification
+# are re-downloaded, once, for the full chain.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - .github/workflows/cutsell-d275r2-remaining-corpus-sweep.yml
+
+jobs:
+  sweep-remaining-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare directories
+        shell: bash
+        run: mkdir -p artifact samples2
+
+      - name: Install ffmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Install numpy (cutsell_worker package init dependency)
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet 'numpy>=1.26,<3'
+
+      - name: Load base RunPod template (env source of truth only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Download the 14 remaining real-iPhone corpus objects (read-only GET, never upload)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+
+          declare -A SAMPLES=(
+            ["Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4"]="samples2/5E01F214.MP4"
+            ["Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4"]="samples2/D40F1D43.MP4"
+            ["Editdna longform validation/VIDEO-2026-07-30-09-21-35.mp4"]="samples2/VIDEO_092135.mp4"
+            ["Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4"]="samples2/VIDEO_092413.mp4"
+            ["Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4"]="samples2/VIDEO_102246.mp4"
+            ["Editdna longform validation/copy_0A524783-376E-4FD4-AE19-F2C722177CDC.MOV"]="samples2/copy_0A524783.MOV"
+            ["Editdna longform validation/copy_2E76C007-26DD-48F9-9AF7-41C8849A602D.MP4"]="samples2/copy_2E76C007.MP4"
+            ["Editdna longform validation/copy_3EC2186B-4AA9-4449-BACD-52CF82719B74.MP4"]="samples2/copy_3EC2186B.MP4"
+            ["Editdna longform validation/copy_69D72849-50AA-45F7-9B13-BA21505530E5.MOV"]="samples2/copy_69D72849.MOV"
+            ["Editdna longform validation/copy_7053BB2F-D130-4DC9-81CA-F431B7FF4038.MOV"]="samples2/copy_7053BB2F.MOV"
+            ["Editdna longform validation/copy_7A0721D7-BDA7-4EE6-8A72-F7B46F19E716.MOV"]="samples2/copy_7A0721D7.MOV"
+            ["Editdna longform validation/copy_82A297CA-95F0-4546-A161-EA0FCD8804E1.MOV"]="samples2/copy_82A297CA.MOV"
+            ["Editdna longform validation/copy_CFB5F467-42AC-442A-94BF-ACA8514070E6.MP4"]="samples2/copy_CFB5F467.MP4"
+            ["Editdna longform validation/v12044gd0000d46k2m7og65re0trr1rg.MP4"]="samples2/v12044gd0000.MP4"
+          )
+          for key in "${!SAMPLES[@]}"; do
+            dest="${SAMPLES[$key]}"
+            echo "Downloading (GET only): $key -> $dest"
+            aws s3 cp "s3://$S3_BUCKET/$key" "$dest"
+            test -s "$dest"
+          done
+          du -sh samples2
+
+      - name: Syntax-check D-275R2 sweep script (committed at scripts/d275r2_corpus_sweep.py)
+        shell: bash
+        run: python3 -m py_compile scripts/d275r2_corpus_sweep.py
+
+      - name: Run D-275R2 corpus sweep (profile all 14, qualify only new-evidence candidates)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$(pwd)" python3 scripts/d275r2_corpus_sweep.py
+
+      - name: Upload D-275R2 results (JSON diagnostics only, no video bytes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-d275r2-sweep-results
+          path: |
+            artifact/d275r2-profiles.json
+            artifact/d275r2-qualification-results.json
+          retention-days: 30
+          if-no-files-found: warn

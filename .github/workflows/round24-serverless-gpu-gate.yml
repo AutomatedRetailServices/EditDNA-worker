@@ -1,0 +1,192 @@
+name: Round24 Serverless GPU Gate
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - cutsell_worker/serverless_handler.py
+      - Dockerfile.cutsell.serverless
+      - .github/workflows/round24-serverless-gpu-gate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
+  RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+
+jobs:
+  gpu-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Validate required credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
+          echo "::add-mask::$GEMINI_API_KEY"
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build push and resolve immutable Serverless image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$IMAGE_REPO:$GITHUB_SHA"
+          docker build -t "$image" -f Dockerfile.cutsell.serverless .
+          docker run --rm --entrypoint python "$image" - <<'PY'
+          import importlib.util, torch
+          import cutsell_worker.serverless_handler
+          assert importlib.util.find_spec('runpod') is not None
+          print('serverless_imports_ok=true')
+          print('torch_version=', torch.__version__)
+          PY
+          docker push "$image"
+          docker buildx imagetools inspect "$image" > image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest"
+          echo "IMAGE_DIGEST=$digest" >> "$GITHUB_ENV"
+          echo "IMMUTABLE_IMAGE=$IMAGE_REPO@$digest" >> "$GITHUB_ENV"
+          echo "image_digest=$digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm anonymous GHCR pull contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          docker image rm "$IMMUTABLE_IMAGE" >/dev/null 2>&1 || true
+          docker pull "$IMMUTABLE_IMAGE"
+          echo 'anonymous_ghcr_pull=true'
+
+      - name: Load masked production storage credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null" || exit 5
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Create Serverless template
+        shell: bash
+        run: |
+          set -euo pipefail
+          short=${GITHUB_SHA:0:12}
+          name="cutsell-serverless-$short-$GITHUB_RUN_ID"
+          jq -n \
+            --arg image "$IMMUTABLE_IMAGE" \
+            --arg name "$name" \
+            --arg aws_key "$AWS_ACCESS_KEY_ID" \
+            --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
+            --arg aws_region "$AWS_REGION" \
+            --arg bucket "$S3_BUCKET" \
+            --arg gemini "$GEMINI_API_KEY" \
+            '{imageName:$image,name:$name,category:"NVIDIA",containerDiskInGb:40,isPublic:false,isServerless:true,dockerEntrypoint:[],dockerStartCmd:[],env:{AWS_ACCESS_KEY_ID:$aws_key,AWS_SECRET_ACCESS_KEY:$aws_secret,AWS_REGION:$aws_region,S3_BUCKET:$bucket,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_MAX_EDIT_USD:"0.50",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"},ports:[],readme:"CutSell Serverless GPU gate",volumeInGb:0,volumeMountPath:"/workspace"}' > /tmp/template-create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/template-create.json \
+            --output /tmp/template.json)
+          echo "template_create_http=$code"
+          jq '{id,name,imageName,isServerless}' /tmp/template.json || true
+          test "$code" = "200" || test "$code" = "201"
+          TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
+          test -n "$TEMPLATE_ID"
+          echo "SERVERLESS_TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
+          rm -f /tmp/template-create.json
+
+      - name: Create zero-idle Serverless GPU endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg template "$SERVERLESS_TEMPLATE_ID" \
+            --arg name "cutsell-gpu-gate-$GITHUB_RUN_ID" \
+            '{templateId:$template,computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA GeForce RTX 4090","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000"],workersMin:0,workersMax:1,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:900000,flashboot:true,name:$name}' > /tmp/endpoint-create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://rest.runpod.io/v1/endpoints' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/endpoint-create.json \
+            --output /tmp/endpoint.json)
+          echo "endpoint_create_http=$code"
+          jq '{id,name,templateId,workersMin,workersMax}' /tmp/endpoint.json || true
+          test "$code" = "200" || test "$code" = "201"
+          ENDPOINT_ID=$(jq -r '.id // empty' /tmp/endpoint.json)
+          test -n "$ENDPOINT_ID"
+          echo "SERVERLESS_ENDPOINT_ID=$ENDPOINT_ID" >> "$GITHUB_ENV"
+          rm -f /tmp/endpoint-create.json
+
+      - name: Execute real Serverless CUDA health job
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://api.runpod.ai/v2/$SERVERLESS_ENDPOINT_ID/runsync" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data '{"input":{"op":"health"}}' \
+            --max-time 900 \
+            --output /tmp/health.json)
+          echo "health_http=$code"
+          jq . /tmp/health.json
+          test "$code" = "200"
+          jq -e '.output.ok == true and .output.cuda_available == true and (.output.cuda_device_count|tonumber) >= 1' /tmp/health.json >/dev/null
+          echo 'SERVERLESS_GPU_GATE=PASS' >> "$GITHUB_ENV"
+
+      - name: Publish successful GPU gate identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" --arg endpoint "$SERVERLESS_ENDPOINT_ID" --arg template "$SERVERLESS_TEMPLATE_ID" --arg image "$IMMUTABLE_IMAGE" '{run_id:$run,head_sha:$sha,status:"gpu_gate_pass",provider:"runpod_serverless",endpoint_id:$endpoint,template_id:$template,image:$image}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/serverless-gpu-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Serverless GPU gate $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/serverless-gpu-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
+          echo "endpoint_id=$SERVERLESS_ENDPOINT_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "gpu_gate=PASS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup failed endpoint/template only
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${SERVERLESS_ENDPOINT_ID:-}" ]; then
+            curl --silent --show-error --request DELETE --url "https://rest.runpod.io/v1/endpoints/$SERVERLESS_ENDPOINT_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" >/dev/null || true
+          fi
+          if [ -n "${SERVERLESS_TEMPLATE_ID:-}" ]; then
+            curl --silent --show-error --request DELETE --url "https://rest.runpod.io/v1/templates/$SERVERLESS_TEMPLATE_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" >/dev/null || true
+          fi

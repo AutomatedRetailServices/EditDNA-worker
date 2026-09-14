@@ -1,0 +1,136 @@
+name: Round20 Dynamic Capacity Focused Benchmark
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ops/round20_dynamic_capacity.py
+      - .github/workflows/round20-dynamic-capacity.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      SOURCE_SHA: f4ea2f9d5676d260205d6fe8364b99b35e4eed39
+      IMAGE_DIGEST: sha256:57ce35db2eee1348576d6745608a71faeb6f8167d8ef4e2c0177d0033d1f91d4
+      IMMUTABLE_IMAGE: ghcr.io/automatedretailservices/cutsell-worker:f4ea2f9d5676d260205d6fe8364b99b35e4eed39@sha256:57ce35db2eee1348576d6745608a71faeb6f8167d8ef4e2c0177d0033d1f91d4
+      ROUND20_RUNTIME_TIMEOUT_SEC: '90'
+      ROUND20_RQ_TIMEOUT_SEC: '480'
+      ROUND20_MAX_CANDIDATES: '24'
+      RUNPOD_DATACENTER_STOCK: datacenter-stock.json
+
+    steps:
+      - name: Publish exact Round20 run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(printf '{"run_id":%s,"head_sha":"%s","source_sha":"%s","status":"in_progress"}' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SOURCE_SHA" | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round20-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Round20 run $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round20-live.json" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "Content-Type: application/json" --data "$payload" >/dev/null
+          echo "round20_run_id=$GITHUB_RUN_ID"
+
+      - name: Checkout current CutSell branch
+        uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+          fetch-depth: 1
+
+      - name: Install orchestration dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'requests>=2.32' 'redis>=5.0' 'rq>=2.6' 'boto3>=1.34'
+
+      - name: Query live RunPod datacenter stock with safe fallback
+        shell: bash
+        run: |
+          set -u
+          rm -f datacenter-stock.json datacenter-stock.live.json
+          LIVE_OK=0
+          if wget -q https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-linux-amd64 -O runpodctl; then
+            chmod +x runpodctl
+            if ./runpodctl config --apiKey "$RUNPOD_API_KEY" >/tmp/runpodctl-config.txt 2>&1; then
+              if ./runpodctl datacenter list > datacenter-stock.live.json 2>/tmp/runpodctl-dc.err; then
+                if python -c "import json,sys; d=json.load(open('datacenter-stock.live.json')); c=sum(1 for dc in d for g in (dc.get('gpuAvailability') or []) if g.get('stockStatus') in {'High','Medium','Low'}); print('live_stock_count=', c); sys.exit(0 if isinstance(d,list) and d and c>0 else 1)"; then
+                  mv datacenter-stock.live.json datacenter-stock.json
+                  LIVE_OK=1
+                  echo "runpod_live_stock_ok=true"
+                fi
+              fi
+            fi
+          fi
+          if [ "$LIVE_OK" != "1" ]; then
+            echo "runpod_live_stock_ok=false; using repository snapshot ops/datacenter-stock.json"
+            test -s ops/datacenter-stock.json
+            cp ops/datacenter-stock.json datacenter-stock.json
+          fi
+          python -c "import json,sys; d=json.load(open('datacenter-stock.json')); live=[{'dc':dc.get('id'),'location':dc.get('location'),'gpu':g.get('gpuId'),'stock':g.get('stockStatus')} for dc in d for g in (dc.get('gpuAvailability') or []) if g.get('stockStatus') in {'High','Medium','Low'}]; print('candidate_stock_count=',len(live)); print(json.dumps(live[:80],indent=2)); sys.exit(0 if live else 1)"
+
+      - name: Execute Round20 dynamic-capacity benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ops/round20_dynamic_capacity.py
+
+      - name: Upload Round20 capacity attempts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-round20-capacity-attempts
+          path: capacity-attempts.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Round20 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-focused-round20-report-${{ env.SOURCE_SHA }}
+          path: |
+            cutsell-focused-clean-cut-benchmark.json
+            focused-result.json
+            gold-selected.json
+            round14-status.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Round20 previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-focused-round20-previews-${{ env.SOURCE_SHA }}
+          path: focused-previews/*.mp4
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Always terminate staging RunPods
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          curl --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/pods-before-clean.json
+          jq -r '.[] | select((.name // "") | startswith("cutsell-staging-worker")) | .id' /tmp/pods-before-clean.json | while read -r POD_ID; do
+            [ -z "$POD_ID" ] && continue
+            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/delete.txt)
+            echo "final_cleanup pod=$POD_ID http=$code"
+          done
+          sleep 4
+          curl --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/pods-after-clean.json
+          remaining=$(jq '[.[] | select((.name // "") | startswith("cutsell-staging-worker"))] | length' /tmp/pods-after-clean.json)
+          echo "remaining_staging_pods=$remaining"
+          test "$remaining" = "0"

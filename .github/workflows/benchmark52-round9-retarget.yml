@@ -1,0 +1,51 @@
+name: Round 9 Benchmark Retarget
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/benchmark52-round9-retarget.yml
+
+permissions:
+  contents: write
+
+jobs:
+  retarget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+          fetch-depth: 0
+
+      - name: Retarget controlled benchmark to exact Round 9 source
+        shell: bash
+        env:
+          SOURCE_SHA: 56bc224a5c9041377d0b789ecbd80fb1cadedfc3
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('.github/workflows/benchmark52-round7-controlled.yml')
+          text = path.read_text()
+          old_sha = '5ebf2020bf7161d80939ebbe3e573fdfc99d8fef'
+          new_sha = os.environ['SOURCE_SHA']
+          if old_sha not in text:
+              raise SystemExit('Expected Round 8 source SHA not found; refusing ambiguous retarget')
+          text = text.replace(old_sha, new_sha)
+          text = text.replace('Round 8', 'Round 9')
+          text = text.replace('round-8', 'round-9')
+          text = text.replace('round8', 'round9')
+          path.write_text(text)
+          PY
+          git diff --check
+          grep -F "SOURCE_SHA: $SOURCE_SHA" .github/workflows/benchmark52-round7-controlled.yml
+          grep -F "Validate Round 9 Gold gate" .github/workflows/benchmark52-round7-controlled.yml
+          git config user.name 'cutsell-benchmark-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/benchmark52-round7-controlled.yml
+          git commit -m 'ops: launch focused Round 9 from exact green source'
+          git push origin HEAD:cutsell/mobile-v1-clean

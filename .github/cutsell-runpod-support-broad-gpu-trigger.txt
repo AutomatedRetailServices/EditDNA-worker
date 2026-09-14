@@ -1,0 +1,2 @@
+Run isolated RunPod Support broad-GPU placement test after support response dated 2026-09-03.
+Retry 3: documented Serverless GPU types + allowedCudaVersions 12.4 + raw endpoint error capture.

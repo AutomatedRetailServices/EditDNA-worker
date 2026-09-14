@@ -1,0 +1,10 @@
+[
+  {
+    "id": "bzesdtg5kuk06y",
+    "name": "cutsell-staging-worker",
+    "desiredStatus": "RUNNING",
+    "imageName": "ghcr.io/automatedretailservices/cutsell-worker@sha256:fe5dc3b6d3237307d18e138a68aa7b9c98b6ee6046cc4e845b68c42d8406d6fb",
+    "costPerHr": 0.16,
+    "adjustedCostPerHr": null
+  }
+]
