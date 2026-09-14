@@ -239,7 +239,10 @@ def test_rotation_command_uses_noautorotate_before_input(asymmetric_landscape_mp
     metadata a real source might carry, guaranteeing ONLY the plan-driven
     transpose (or none) is ever applied."""
     plan = _make_plan(rotation_action=snp.ACTION_ROTATE_90)
-    video_filters, _, _ = exe._build_filter_chain(plan)
+    # D-274D: _build_filter_chain now returns a 4-tuple (adds
+    # needs_bt709_tagging) -- self-resolving guard, this plan carries no
+    # HDR action so the new value is simply unpacked and ignored here.
+    video_filters, _, _, _ = exe._build_filter_chain(plan)
     assert "transpose=1" in video_filters
     # Executed command inspection via a captured fingerprint-bearing run:
     result = _exec(asymmetric_landscape_mp4, plan, output_directory=str(tmp_path))
@@ -286,7 +289,8 @@ def test_vfr_missing_target_fps_raises_before_ffmpeg(tmp_path):
 
 def test_cfr_24_30_60_no_fps_filter_added(cfr_30fps_mp4):
     plan = _make_plan()  # frame_rate_action stays NO_ACTION
-    video_filters, _, _ = exe._build_filter_chain(plan)
+    # D-274D: _build_filter_chain now returns a 4-tuple -- see comment above.
+    video_filters, _, _, _ = exe._build_filter_chain(plan)
     assert not any(f.startswith("fps=") for f in video_filters)
 
 
@@ -463,22 +467,28 @@ def test_no_second_normalization_pass(asymmetric_landscape_mp4, tmp_path):
 # Unsupported actions -- rejected BEFORE any ffmpeg subprocess
 # =============================================================================
 
-@pytest.mark.parametrize("field,action", [
-    ("hdr_action", snp.ACTION_HDR_PQ_TO_SDR_BT709),
-    ("hdr_action", snp.ACTION_HDR_HLG_TO_SDR_BT709),
-    # D-274C Stage 8: ACTION_HEVC_TO_H264 is now IMPLEMENTED (see
-    # tests/test_cutsell_d274c_hevc_capability_and_normalization.py) and
-    # legitimately removed from this "still unsupported" matrix -- self-
-    # resolving guard, same pattern as D-272B's own precedent.
-    ("bit_depth_action", snp.ACTION_TEN_BIT_TO_EIGHT_BIT),
-    ("pixel_format_action", snp.ACTION_PIXEL_FORMAT_TO_YUV420P),
-])
-def test_unsupported_action_rejected_before_ffmpeg(asymmetric_landscape_mp4, tmp_path, monkeypatch, field, action):
+def test_unsupported_action_rejected_before_ffmpeg(asymmetric_landscape_mp4, tmp_path, monkeypatch):
+    """D-274C Stage 8 removed `ACTION_HEVC_TO_H264` from this matrix (now
+    implemented -- see test_cutsell_d274c_hevc_capability_and_normalization.
+    py); D-274D removed `ACTION_HDR_PQ_TO_SDR_BT709`, `ACTION_HDR_HLG_TO_
+    SDR_BT709`, `ACTION_TEN_BIT_TO_EIGHT_BIT`, and `ACTION_PIXEL_FORMAT_TO_
+    YUV420P` too (now implemented -- see test_cutsell_d274d_hdr_pixel_
+    format_normalization.py). `_UNSUPPORTED_ACTIONS` is therefore
+    genuinely EMPTY as of this gate (source_normalization_executor.py's
+    own Stage 2 comment) -- no currently-real action can exercise this
+    path via `_make_plan` alone. This test proves Stage 37's own
+    extensibility point still works by injecting a SYNTHETIC future
+    action into `_UNSUPPORTED_ACTIONS` (never a real, currently-supported
+    one) -- self-resolving guard, same pattern as D-272B's own
+    precedent, kept as a real assertion rather than an emptied-out
+    parametrize list that would silently skip."""
     calls = []
     monkeypatch.setattr(exe.subprocess, "run", lambda *a, **k: calls.append((a, k)) or (_ for _ in ()).throw(
         AssertionError("ffmpeg must never be invoked for an unsupported action")
     ))
-    plan = _make_plan(**{field: action})
+    fake_future_action = "FUTURE_UNIMPLEMENTED_ACTION_D274D_TEST_ONLY"
+    monkeypatch.setattr(exe, "_UNSUPPORTED_ACTIONS", frozenset({fake_future_action}))
+    plan = _make_plan(hdr_action=fake_future_action)
     result = _exec(asymmetric_landscape_mp4, plan, output_directory=str(tmp_path))
     assert result.outcome == snp.NORMALIZATION_UNSUPPORTED
     assert result.failure.error_category == exe.FAILURE_UNSUPPORTED_ACTION

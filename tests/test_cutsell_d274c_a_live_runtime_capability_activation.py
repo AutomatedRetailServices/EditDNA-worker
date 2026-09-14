@@ -306,7 +306,12 @@ def test_underlying_probe_never_uses_shell():
     "cutsell_worker/render.py",
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
-    "cutsell_worker/source_normalization_executor.py",
+    # D-274D legitimately modifies cutsell_worker/source_normalization_
+    # executor.py (its own gate-owned file: HDR tonemap wiring, the
+    # tonemap-capability pre-check, the luma diagnostic helper) --
+    # removed from THIS gate's own closed-track list. Self-resolving
+    # guard, same pattern D-274C-A itself already applied to earlier
+    # gates' own closed-track lists.
     "cutsell_worker/source_normalization_plan.py",
     "cutsell_worker/render_delivery.py",
 ])

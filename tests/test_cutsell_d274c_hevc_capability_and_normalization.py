@@ -113,6 +113,30 @@ def hevc_10bit_mp4(tmp_path_factory):
     return path
 
 
+@pytest.fixture(scope="module", params=["smpte2084", "arib-std-b67"])
+def hevc_hdr_10bit_mp4(request, tmp_path_factory):
+    """D-274D: a GENUINE HEVC + HDR (PQ or HLG) + 10-bit fixture -- real,
+    ffprobe-readable `color_transfer` tags (`smpte2084`=PQ, `arib-std-
+    b67`=HLG), not a plan/profile mismatch forced via `dataclasses.
+    replace`. D-274D's own forensic proof (docs/CUTSELL_DECISIONS.md
+    D-274D) found `zscale`'s own `transfer=linear` step requires the
+    DECODED frames to genuinely carry a PQ/HLG transfer tag it can map
+    from -- forcing a plan's `hdr_action` onto a genuinely-SDR source
+    (as this file's own D-274C-era test originally did) fails inside
+    ffmpeg itself ("no path between colorspaces"), never inside this
+    executor's own code; a composition test must use a genuinely
+    HDR-tagged source, exactly like this fixture."""
+    d = tmp_path_factory.mktemp("d274d_hevc_hdr")
+    path = str(d / f"hevc_hdr_{request.param}.mp4")
+    _ffmpeg([
+        "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10", "-t", "1",
+        "-c:v", "libx265", "-x265-params", "log-level=none", "-pix_fmt", "yuv420p10le",
+        "-color_primaries", "bt2020", "-color_trc", request.param, "-colorspace", "bt2020nc",
+        path,
+    ])
+    return path
+
+
 @pytest.fixture(scope="module")
 def hevc_no_audio_mp4(tmp_path_factory):
     d = tmp_path_factory.mktemp("d274c_hevc_noaudio")
@@ -432,18 +456,64 @@ def test_hevc_multi_action_one_generation(hevc_asymmetric_mp4, tmp_path):
 # HDR / 10-bit firewall -- rejected BEFORE ffmpeg, zero silent conversion
 # =============================================================================
 
-@pytest.mark.parametrize("hdr_action", [snp.ACTION_HDR_PQ_TO_SDR_BT709, snp.ACTION_HDR_HLG_TO_SDR_BT709])
-def test_hevc_plus_hdr_rejected_before_ffmpeg(hevc_sdr_8bit_mp4, tmp_path, monkeypatch, hdr_action):
+def test_hevc_plus_hdr_rejected_before_ffmpeg_when_HDR_TONEMAP_ACTIONS_frozen_empty(hevc_sdr_8bit_mp4, tmp_path, monkeypatch):
+    """D-274C's own original scope note here ("HDR is out of scope for
+    this gate, deferred to a later gate") is now superseded: D-274D
+    IMPLEMENTS HDR tonemap, so `_UNSUPPORTED_ACTIONS` is genuinely empty
+    and a plan combining HEVC_TO_H264 + an HDR tonemap action is now a
+    real, executable, ffmpeg-invoking combination (see
+    `test_hevc_plus_hdr_composes_in_one_generation` below for the real
+    positive proof, and test_cutsell_d274d_hdr_pixel_format_
+    normalization.py for the dedicated HDR gate's own coverage).
+
+    This test is kept, RE-PURPOSED, to prove the general firewall
+    mechanism itself still works for a genuinely unsupported action even
+    when combined with HEVC -- self-resolving guard, same pattern as
+    D-272B's own precedent -- by injecting a SYNTHETIC future action
+    rather than asserting a real HDR action is still unsupported (which
+    would now be false)."""
     calls = []
     monkeypatch.setattr(exe.subprocess, "run", lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(
-        AssertionError("must not call ffmpeg for HEVC+HDR")
+        AssertionError("must not call ffmpeg for HEVC + a genuinely unsupported action")
     ))
+    fake_future_action = "FUTURE_UNIMPLEMENTED_ACTION_D274D_TEST_ONLY"
+    monkeypatch.setattr(exe, "_UNSUPPORTED_ACTIONS", frozenset({fake_future_action}))
     _, _, result = _build_plan(hevc_sdr_8bit_mp4, "src")
-    plan = dataclasses.replace(result.plan, hdr_action=hdr_action)
+    plan = dataclasses.replace(result.plan, hdr_action=fake_future_action)
     r = _exec(hevc_sdr_8bit_mp4, plan, output_directory=str(tmp_path))
     assert r.outcome == snp.NORMALIZATION_UNSUPPORTED
     assert r.failure.error_category == exe.FAILURE_UNSUPPORTED_ACTION
     assert calls == []
+
+
+def test_hevc_plus_hdr_composes_in_one_generation(hevc_hdr_10bit_mp4, tmp_path):
+    """D-274D positive proof (this file's own self-resolving guard
+    companion to the rename above): HEVC_TO_H264 + an HDR tonemap action
+    (+ TEN_BIT_TO_EIGHT_BIT, since this genuine fixture is also 10-bit)
+    on the SAME plan executes in ONE ffmpeg generation and reaches D-272
+    ACCEPT -- mirrors `test_hevc_plus_vfr_one_generation`'s own pattern.
+    Uses `hevc_hdr_10bit_mp4` (parametrized PQ/HLG, module-scoped) -- a
+    GENUINELY HDR-tagged HEVC source, not a plan/profile mismatch (see
+    that fixture's own docstring for why a forced mismatch fails inside
+    ffmpeg itself, never inside this executor)."""
+    profile = smp.probe_source_media_profile(hevc_hdr_10bit_mp4)
+    assert profile.hdr_status in (smp.HDR_STATUS_HDR_PQ, smp.HDR_STATUS_HDR_HLG)
+    assert profile.bit_depth == 10
+    decision = sfp.evaluate_source_format_policy(profile, runtime_capability=_HEVC_CONFIRMED)
+    plan_result = snp.build_source_normalization_plan(
+        "src", profile, decision, runtime_capability=_HEVC_CONFIRMED, tonemap_available=True,
+    )
+    plan = plan_result.plan
+    assert plan is not None and plan.is_executable
+    assert plan.codec_action == snp.ACTION_HEVC_TO_H264
+    assert plan.hdr_action in (snp.ACTION_HDR_PQ_TO_SDR_BT709, snp.ACTION_HDR_HLG_TO_SDR_BT709)
+    assert plan.bit_depth_action == snp.ACTION_TEN_BIT_TO_EIGHT_BIT
+    r = _exec(hevc_hdr_10bit_mp4, plan, output_directory=str(tmp_path))
+    assert r.outcome == snp.NORMALIZATION_SUCCEEDED, r.diagnostics
+    assert r.normalized_profile.video_codec == smp.VIDEO_CODEC_H264
+    assert r.normalized_profile.hdr_status == smp.HDR_STATUS_SDR
+    assert r.normalized_profile.bit_depth == 8
+    assert r.diagnostics["final_d272_decision"] == sfp.DECISION_ACCEPT
 
 
 def test_hevc_dolby_vision_never_produces_executable_plan(hevc_sdr_8bit_mp4):
@@ -460,20 +530,26 @@ def test_hevc_dolby_vision_never_produces_executable_plan(hevc_sdr_8bit_mp4):
         assert result.outcome == snp.NORMALIZATION_UNSUPPORTED
 
 
-def test_hevc_10bit_sdr_rejected_before_ffmpeg(hevc_10bit_mp4, tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(exe.subprocess, "run", lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(
-        AssertionError("must not call ffmpeg for HEVC 10-bit")
-    ))
+def test_hevc_10bit_sdr_composes_in_one_generation(hevc_10bit_mp4, tmp_path):
+    """D-274D self-resolving guard + positive proof: `ACTION_TEN_BIT_TO_
+    EIGHT_BIT` is now implemented (D-274D's own empirical finding: the
+    executor's pre-existing fixed `-pix_fmt yuv420p` output flag already
+    downconverts 10-bit -> 8-bit with ZERO new filter code), so a genuine
+    HEVC+10-bit SDR source now composes both actions in ONE ffmpeg
+    generation and reaches D-272 ACCEPT -- this test used to assert the
+    opposite (rejected before ffmpeg, back when 10-bit was still
+    unsupported); renamed and re-purposed rather than deleted, per this
+    codebase's own self-resolving-guard discipline."""
     profile = smp.probe_source_media_profile(hevc_10bit_mp4)
     assert profile.bit_depth == 10, "fixture must genuinely be 10-bit"
     _, _, result = _build_plan(hevc_10bit_mp4, "src")
     assert result.plan.codec_action == snp.ACTION_HEVC_TO_H264
     assert result.plan.bit_depth_action == snp.ACTION_TEN_BIT_TO_EIGHT_BIT
     r = _exec(hevc_10bit_mp4, result.plan, output_directory=str(tmp_path))
-    assert r.outcome == snp.NORMALIZATION_UNSUPPORTED
-    assert r.failure.error_category == exe.FAILURE_UNSUPPORTED_ACTION
-    assert calls == []
+    assert r.outcome == snp.NORMALIZATION_SUCCEEDED, r.diagnostics
+    assert r.normalized_profile.video_codec == smp.VIDEO_CODEC_H264
+    assert r.normalized_profile.bit_depth == 8
+    assert r.diagnostics["final_d272_decision"] == sfp.DECISION_ACCEPT
 
 
 # =============================================================================

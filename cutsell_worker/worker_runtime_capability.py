@@ -111,6 +111,16 @@ def get_worker_runtime_capability() -> "prc.ProductionRuntimeCapability":
         ffmpeg_version=captured.ffmpeg_version,
         capability_source=captured.capability_source,
         production_verification_status=prc.PRODUCTION_VERIFICATION_STATUS_ESTABLISHED,
+        # D-274D: carry the probed zscale/tonemap/libplacebo evidence
+        # through the ESTABLISHED promotion too -- this branch used to
+        # reconstruct a NEW ProductionRuntimeCapability without naming
+        # these fields at all, which silently reset them to their
+        # dataclass default (`False`) even when `captured` had already
+        # genuinely measured them `True`. Caught and fixed within this
+        # same gate, before any test exercised the promoted result.
+        zscale_available=captured.zscale_available,
+        tonemap_available=captured.tonemap_available,
+        libplacebo_available=captured.libplacebo_available,
         errors=captured.errors,
     )
 
@@ -122,6 +132,24 @@ def get_worker_runtime_capability_input() -> "sfp.RuntimeCapabilityInput":
     logic (Stage 7's H264-encoder requirement included); never
     re-implements the bridge here."""
     return prc.bridge_to_runtime_capability_input(get_worker_runtime_capability())
+
+
+def get_worker_tonemap_available() -> bool:
+    """D-274D Stage 11: the seam a FUTURE, separately-authorized gate
+    would use to feed `source_normalization_plan.build_source_
+    normalization_plan`'s own `tonemap_available` kwarg with real,
+    process-measured evidence -- always routes through `production_
+    runtime_capability.bridge_to_tonemap_available`'s own fail-closed
+    logic; never re-implements the bridge here. Mirrors `get_worker_
+    runtime_capability_input`'s own D-274C-A precedent exactly.
+
+    NOT wired into any live call site by this gate: `worker_job.py` is
+    untouched here (this gate's own explicit "no live auto-normalization
+    activation" banner), so this function exists and is tested but has
+    no production caller yet -- the same disclosed shape D-274C-A itself
+    used for `get_worker_runtime_capability_input` one gate before
+    `worker_job.py` was actually wired to call it."""
+    return prc.bridge_to_tonemap_available(get_worker_runtime_capability())
 
 
 def describe_worker_capability_diagnostics() -> dict:

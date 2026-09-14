@@ -75,20 +75,77 @@ PRODUCTION_VERIFICATION_STATUS_ESTABLISHED = "PRODUCTION_CAPABILITY_ESTABLISHED"
 @dataclass(frozen=True)
 class ProductionRuntimeCapability:
     """D-274C Stage 1: one immutable snapshot of what a worker RUNTIME
-    process can actually do -- decode HEVC, encode canonical H264 -- plus
-    enough provenance (`capability_source`, `production_verification_
-    status`, `ffmpeg_version`) that a caller can tell a genuine, deployed-
-    container startup result apart from an offline/sandbox proof of the
-    same mechanism. Never fabricates `True` from the executable merely
+    process can actually do -- decode HEVC, encode canonical H264, and
+    (D-274D Stage 10) tone-map HDR to SDR -- plus enough provenance
+    (`capability_source`, `production_verification_status`, `ffmpeg_
+    version`) that a caller can tell a genuine, deployed-container
+    startup result apart from an offline/sandbox proof of the same
+    mechanism. Never fabricates `True` from the executable merely
     existing (Stage 3's own explicit warning) -- always derived from a
-    real decoder/encoder listing."""
+    real decoder/encoder/filter listing.
+
+    `zscale_available`/`tonemap_available` (D-274D): whether this
+    process's own ffmpeg build lists the `zscale` and `tonemap` filters
+    -- the two-filter chain this gate's own executor empirically proved
+    (real PQ/HLG fixtures, real ffprobe output) correctly tone-maps
+    HDR to canonical SDR BT.709. `libplacebo_available` is diagnostic
+    only (Stage 9's own "potential mechanisms may include... libplacebo,
+    or another actually-installed path") -- this gate's own proven
+    mechanism uses zscale+tonemap, never libplacebo, so it is recorded
+    but never gates anything."""
 
     hevc_decoder_available: bool
     h264_encoder_available: bool
     ffmpeg_version: str | None
     capability_source: str
     production_verification_status: str
+    # D-274D Stage 10: additive, defaulted (mirrors D-274B's own `target_
+    # fps` precedent) so every pre-D-274D caller/test that never mentions
+    # these fields is unaffected.
+    zscale_available: bool = False
+    tonemap_available: bool = False
+    libplacebo_available: bool = False
     errors: tuple[str, ...] = ()
+
+    @property
+    def hdr_tonemap_usable(self) -> bool:
+        """D-274D Stage 9: 'do not assume availability... if required
+        filter support is absent, fail closed' -- the exact two filters
+        this gate's own proven mechanism requires, nothing more."""
+        return self.zscale_available and self.tonemap_available
+
+
+def _probe_filter_availability(
+    runner: Callable[..., subprocess.CompletedProcess],
+) -> tuple[bool, bool, bool, tuple[str, ...]]:
+    """D-274D Stage 9: real, bounded `ffmpeg -filters` inspection --
+    never inferred from the executable merely existing. Reuses the exact
+    same bounded-subprocess timeout convention D-271 already established
+    for its own capability probe (`_FFPROBE_TIMEOUT_SEC` = 30.0) rather
+    than inventing a new number -- this is a metadata listing, not a
+    media transcode, the same category of operation D-271's own probe
+    already covers."""
+    errors: list[str] = []
+    try:
+        completed = runner(
+            ["ffmpeg", "-hide_banner", "-filters"],
+            capture_output=True, text=True, timeout=smp._FFPROBE_TIMEOUT_SEC,
+        )
+        output = (completed.stdout or "").lower()
+    except Exception as exc:  # noqa: BLE001 -- probe failure, never fatal
+        errors.append(f"ffmpeg_filters_probe_failed:{exc.__class__.__name__}")
+        output = ""
+    # `ffmpeg -filters`'s own listing format is stable columns of
+    # whitespace-separated tokens (flags, name, io-spec, description) --
+    # a named filter appears as its own exact token, so splitting on
+    # whitespace and checking token membership avoids false positives
+    # from substring matches (e.g. `tonemap` vs `tonemap_opencl`/
+    # `tonemap_vaapi`, which are named separately in the same listing).
+    tokens = set(output.split())
+    zscale = "zscale" in tokens
+    tonemap = "tonemap" in tokens
+    libplacebo = "libplacebo" in tokens
+    return zscale, tonemap, libplacebo, tuple(errors)
 
 
 def _snapshot_to_capability(
@@ -96,14 +153,19 @@ def _snapshot_to_capability(
     *,
     capability_source: str,
     production_verification_status: str,
+    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> ProductionRuntimeCapability:
+    zscale, tonemap, libplacebo, filter_errors = _probe_filter_availability(runner)
     return ProductionRuntimeCapability(
         hevc_decoder_available=snapshot.hevc_decoder_present,
         h264_encoder_available=snapshot.libx264_present,
+        zscale_available=zscale,
+        tonemap_available=tonemap,
+        libplacebo_available=libplacebo,
         ffmpeg_version=snapshot.ffmpeg_version,
         capability_source=capability_source,
         production_verification_status=production_verification_status,
-        errors=snapshot.errors,
+        errors=snapshot.errors + filter_errors,
     )
 
 
@@ -126,6 +188,7 @@ def capture_local_sandbox_capability_for_testing(
         snapshot,
         capability_source=CAPABILITY_SOURCE_LOCAL_SANDBOX,
         production_verification_status=PRODUCTION_VERIFICATION_STATUS_UNESTABLISHED,
+        runner=runner,
     )
 
 
@@ -154,6 +217,7 @@ def capture_production_worker_capability(
         snapshot,
         capability_source=CAPABILITY_SOURCE_PRODUCTION_STARTUP_SELF_CHECK,
         production_verification_status=PRODUCTION_VERIFICATION_STATUS_UNESTABLISHED,
+        runner=runner,
     )
 
 
@@ -185,3 +249,22 @@ def bridge_to_runtime_capability_input(
         and capability.h264_encoder_available
     )
     return sfp.RuntimeCapabilityInput(hevc_decode_confirmed=usable, av1_decode_confirmed=False)
+
+
+def bridge_to_tonemap_available(capability: ProductionRuntimeCapability) -> bool:
+    """D-274D Stage 11: the ONLY function that ever turns a
+    `ProductionRuntimeCapability`'s own tonemap evidence into the plain
+    bool `source_normalization_plan.build_source_normalization_plan`'s
+    own `tonemap_available` kwarg expects. Fails closed identically to
+    `bridge_to_runtime_capability_input` above: requires genuine
+    `ESTABLISHED` status, not just the raw `hdr_tonemap_usable`
+    filter-presence property alone -- Stage 9's own "must never invent a
+    production capability source" discipline applies to tonemap
+    capability exactly as it already applies to HEVC decode capability.
+    A capability object whose probe never reached `ESTABLISHED` (missing
+    ffmpeg, a probe exception, any recorded error) always yields `False`
+    here, even if `zscale`/`tonemap` happened to be listed."""
+    return (
+        capability.production_verification_status == PRODUCTION_VERIFICATION_STATUS_ESTABLISHED
+        and capability.hdr_tonemap_usable
+    )

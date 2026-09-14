@@ -39,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -83,20 +84,67 @@ _ROTATION_FILTER: dict[str, str] = {
 # this set -- the standard command-construction path already decodes
 # whatever codec the source carries and encodes to the plan's own target
 # (libx264), so no HEVC-specific filter/flag was ever needed once the
-# pre-existing unsupported-action gate stopped blocking it. HDR and 10-bit
-# actions remain here UNCONDITIONALLY -- Stage 10/11's own HDR/10-bit
-# firewall requirement is satisfied for FREE by this same set: a plan with
-# `codec_action=HEVC_TO_H264` AND `hdr_action` or `bit_depth_action` set
-# (D-272B's own Stage 6 multi-action composition: HEVC+HDR-PQ, HEVC+10-bit)
-# is still rejected here, before any ffmpeg call, because those OTHER
-# action fields are independently inspected by `_unsupported_actions_
-# present` below -- no HEVC-specific carve-out was added or is needed.
-_UNSUPPORTED_ACTIONS: frozenset[str] = frozenset({
+# pre-existing unsupported-action gate stopped blocking it.
+#
+# D-274D Stage 2: ACTION_HDR_PQ_TO_SDR_BT709, ACTION_HDR_HLG_TO_SDR_BT709,
+# ACTION_TEN_BIT_TO_EIGHT_BIT, and ACTION_PIXEL_FORMAT_TO_YUV420P are now
+# ALL implemented and removed too -- this set is therefore EMPTY as of
+# this gate (every currently-defined D-274A action has an executor). It
+# stays as a real, live frozenset (not deleted) as the correct
+# extensibility point for any FUTURE action D-274A might add that this
+# executor does not yet implement (Stage 37's own general principle).
+#
+# Dolby Vision and HDR_OTHER never reach this set at all -- D-274A's own
+# plan builder already marks them `unsupported=True` at the PLAN level
+# (never an executable action), so the pre-existing `if not plan.is_
+# executable: reject` check (before this set is even consulted) already
+# blocks them with zero ffmpeg subprocess calls. No Dolby-Vision-specific
+# or HDR_OTHER-specific code was added or is needed here (Stage 3/4's own
+# firewall requirement satisfied for free, same pattern as D-274C's own
+# HEVC+HDR/HEVC+10-bit firewall).
+_UNSUPPORTED_ACTIONS: frozenset[str] = frozenset()
+
+# D-274D Stage 2/8: the two HDR tone-map actions this gate implements.
+_HDR_TONEMAP_ACTIONS: frozenset[str] = frozenset({
     snp.ACTION_HDR_PQ_TO_SDR_BT709,
     snp.ACTION_HDR_HLG_TO_SDR_BT709,
-    snp.ACTION_TEN_BIT_TO_EIGHT_BIT,
-    snp.ACTION_PIXEL_FORMAT_TO_YUV420P,
 })
+
+# D-274D Stage 8/9: the real, empirically-verified ffmpeg tone-map chain
+# (this sandbox's own zscale+tonemap+zscale filters, proven against real
+# PQ- and HLG-tagged synthetic fixtures via the actual D-271 profiler and
+# D-272 policy re-evaluation -- see docs/CUTSELL_DECISIONS.md D-274D).
+# Deliberately NOT a plain `format=yuv420p` (Stage 8's own explicit
+# "that is the original defect"): decode -> linearize in the SOURCE
+# transfer domain (zscale transfer=linear) -> convert to float RGB for
+# the tonemap filter's own required pixel format -> convert primaries to
+# BT.709 (still linear) -> apply the actual tone-mapping algorithm
+# (Hable, a well-established filmic curve) -> convert back to BT.709
+# transfer/matrix/TV range -> final yuv420p. `zscale`'s own `transfer=
+# linear` step reads the INPUT's real transfer characteristics from its
+# own metadata (Stage 5/6: PQ vs HLG each has its own, distinct transfer
+# tag, both genuinely present in D-271's own probed `color_transfer`
+# field) -- this executor never guesses or infers a transfer function.
+#
+# `npl` (nominal peak luminance, Stage 8's own "signal peak") is a
+# disclosed, provisional numeric default (100 nits) -- the same
+# "well-established default, not an invented arbitrary business number"
+# treatment D-274B's own CRF-18 precedent used, since no real mastering-
+# display/content-light-level metadata is probed by D-271 today to
+# supply a source-specific value. Flagged for Product Owner confirmation
+# in the decision log if per-source precision ever matters.
+_TONEMAP_NOMINAL_PEAK_LUMINANCE_DEFAULT = 100.0
+
+
+def _hdr_tonemap_filter_segment() -> str:
+    return (
+        f"zscale=transfer=linear:npl={_TONEMAP_NOMINAL_PEAK_LUMINANCE_DEFAULT}"
+        ",format=gbrpf32le"
+        ",zscale=primaries=bt709"
+        ",tonemap=tonemap=hable:desat=0"
+        ",zscale=transfer=bt709:matrix=bt709:range=tv"
+        ",format=yuv420p"
+    )
 
 # --- Stage 23 -- structured failure category vocabulary ---------------------
 # The four generically-applicable categories D-274A already pre-declared
@@ -118,6 +166,12 @@ FAILURE_SECOND_PASS_REJECTED = "NORMALIZATION_SECOND_PASS_REJECTED"
 # NORMALIZATION_CODEC_UNAVAILABLE -- Stage 4's own "verify canonical H264
 # encoder availability... no fallback encoder silently introduced" check.
 FAILURE_CODEC_UNAVAILABLE = snp.NORMALIZATION_CODEC_UNAVAILABLE
+# D-274D Stage 9/10: mirrors FAILURE_CODEC_UNAVAILABLE's own pattern for
+# the tonemap capability pre-check -- a new, locally-scoped category
+# (this gate's genuinely new failure mode), never retrofitted into
+# source_normalization_plan.py's own vocabulary module (Stage 1
+# separation, same discipline D-274C already followed for codec).
+FAILURE_HDR_CAPABILITY_UNAVAILABLE = "NORMALIZATION_HDR_CAPABILITY_UNAVAILABLE"
 
 
 @dataclass(frozen=True)
@@ -190,6 +244,52 @@ def _cleanup_temp_output(temp_output: Path) -> None:
         pass
 
 
+# D-274D Stage 23/39: bounded, best-effort luma evidence via ffmpeg's own
+# `signalstats` filter. Time-bounded (`-t 1`) rather than frame-bounded
+# (`-frames:v N`): empirically, `-frames:v` only limits ENCODING/muxing
+# at the output stage, not how many frames the filter graph itself
+# processes before that limit applies -- `signalstats`+`metadata=print`
+# still emits one stderr block per decoded frame regardless, so `-frames:
+# v 1` does not actually bound cost. `-t 1` genuinely stops decode after
+# one second of source time, keeping this diagnostic's cost flat and
+# small regardless of total source duration (D-274B's own "cheap,
+# diagnostic-only" discipline).
+_LUMA_PROBE_TIMEOUT_SEC = 30.0  # reuses D-271's own _FFPROBE_TIMEOUT_SEC value
+
+
+def _measure_luma_summary(path: Path) -> dict | None:
+    """Diagnostic-only, NEVER fatal, NEVER gates outcome (Stage 39's own
+    "before/after A/V relation, measured, no invented tolerance" applied
+    to luminance rather than duration). Returns the LAST frame's own
+    YMIN/YAVG/YMAX from the first second of decode, or `None` on any
+    probe failure -- a caller must never treat `None` as evidence of
+    anything, only as "measurement unavailable this run."""
+    try:
+        completed = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "info", "-y",
+                "-t", "1", "-i", str(path),
+                "-vf", "signalstats,metadata=print",
+                "-f", "null", "-",
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            timeout=_LUMA_PROBE_TIMEOUT_SEC,
+        )
+    except Exception:  # noqa: BLE001 -- diagnostic-only, never fatal
+        return None
+
+    stderr = completed.stderr or ""
+    result: dict = {}
+    for field in ("YMIN", "YAVG", "YMAX"):
+        matches = re.findall(rf"lavfi\.signalstats\.{field}=([0-9.eE+-]+)", stderr)
+        if matches:
+            try:
+                result[field.lower()] = float(matches[-1])
+            except ValueError:
+                pass
+    return result or None
+
+
 def _unsupported_actions_present(plan: "snp.SourceNormalizationPlan") -> tuple[str, ...]:
     """Stage 37: inspect every action field on the plan for anything beyond
     this gate's supported vocabulary -- BEFORE any ffmpeg invocation."""
@@ -204,17 +304,40 @@ def _unsupported_actions_present(plan: "snp.SourceNormalizationPlan") -> tuple[s
     return tuple(a for a in candidate_actions if a in _UNSUPPORTED_ACTIONS)
 
 
-def _build_filter_chain(plan: "snp.SourceNormalizationPlan") -> tuple[list[str], list[str], bool]:
+def _build_filter_chain(plan: "snp.SourceNormalizationPlan") -> tuple[list[str], list[str], bool, bool]:
     """Builds the ONE-PASS (Stage 17) video/audio filter chains for the
     supported actions this plan actually requests. Returns
-    (video_filters, audio_filters, needs_audio_reencode)."""
+    (video_filters, audio_filters, needs_audio_reencode, needs_bt709_tagging).
+
+    D-274D Stage 16 ordering: rotation -> HDR tonemap -> VFR fps ->
+    timeline setpts. Rotation (`transpose`) and the timing filters
+    (`fps`, `setpts`) operate on frame geometry/timestamps only and are
+    provably independent of pixel color values, so their relative order
+    around the tonemap step never changes correctness; tonemap is placed
+    directly after rotation and before any timing filter purely so the
+    filter chain reads as "fix orientation, fix color, fix timing" in one
+    pass, matching the plan's own field declaration order.
+
+    `needs_bt709_tagging` (D-274D Stage 8): `True` only when this plan's
+    `hdr_action` is one of `_HDR_TONEMAP_ACTIONS` -- signals the caller to
+    add explicit `-color_primaries/-color_trc/-colorspace bt709` output
+    flags. Deliberately NEVER set for a non-HDR normalization (Stage 8's
+    own "do not mislabel non-HDR outputs" -- a rotation-only or VFR-only
+    output carries whatever color tags its own source already had; this
+    executor does not invent or force BT.709 on media it never touched
+    photometrically)."""
     video_filters: list[str] = []
     audio_filters: list[str] = []
     needs_audio_reencode = False
+    needs_bt709_tagging = False
 
     rotation_filter = _ROTATION_FILTER.get(plan.rotation_action)
     if rotation_filter:
         video_filters.append(rotation_filter)
+
+    if plan.hdr_action in _HDR_TONEMAP_ACTIONS:
+        video_filters.append(_hdr_tonemap_filter_segment())
+        needs_bt709_tagging = True
 
     if plan.frame_rate_action == snp.ACTION_VFR_TO_CFR:
         # Stage 10: the numeric target comes ONLY from the plan's own
@@ -234,7 +357,7 @@ def _build_filter_chain(plan: "snp.SourceNormalizationPlan") -> tuple[list[str],
         # are never forced (no -ar/-ac/loudnorm anywhere in this module).
         needs_audio_reencode = True
 
-    return video_filters, audio_filters, needs_audio_reencode
+    return video_filters, audio_filters, needs_audio_reencode, needs_bt709_tagging
 
 
 def execute_source_normalization(
@@ -246,6 +369,7 @@ def execute_source_normalization(
     runtime_capability: "sfp.RuntimeCapabilityInput | None" = None,
     attempt_count: int = 0,
     codec_capability: "prc.ProductionRuntimeCapability | None" = None,
+    tonemap_capability: "prc.ProductionRuntimeCapability | None" = None,
 ) -> NormalizationExecutionResult:
     """Stages 2/17/32-35: execute exactly the actions `plan` names, in one
     ffmpeg generation, then run the MANDATORY D-271 re-probe + D-272
@@ -259,13 +383,36 @@ def execute_source_normalization(
     Capability` is supplied, its `h264_encoder_available` is checked
     BEFORE any ffmpeg call -- "no fallback encoder silently introduced."
     When omitted, this pre-check is skipped and ffmpeg's own nonzero-exit
-    failure path remains the safety net (unchanged D-274B behavior)."""
+    failure path remains the safety net (unchanged D-274B behavior).
+
+    `tonemap_capability` (D-274D Stage 9/10, optional, defaults to `None`
+    for the identical backward-compatibility reason): when the plan
+    requests an HDR tonemap action and a `ProductionRuntimeCapability` is
+    supplied, its `hdr_tonemap_usable` (zscale AND tonemap both listed)
+    is checked BEFORE any ffmpeg call. This is a SEPARATE, distinctly-
+    named parameter from `codec_capability` even though both currently
+    accept the same `ProductionRuntimeCapability` type -- Stage 1's own
+    "PROFILE -> POLICY -> PLAN -> EXECUTOR" separation-of-concerns
+    discipline extends to keeping each gate's own capability check
+    independently toggleable by its own caller (a caller may know H264
+    capability but not yet know tonemap capability, or vice versa); a
+    single shared parameter would force both checks to rise or fall
+    together. When omitted, this pre-check is skipped and ffmpeg's own
+    nonzero-exit failure path remains the safety net."""
     diagnostics: dict = {
         "plan_identity": plan.plan_identity,
         "actions_requested": {
             "rotation_action": plan.rotation_action,
             "frame_rate_action": plan.frame_rate_action,
             "timeline_action": plan.timeline_action,
+            # D-274D Stage 39: the four fields this gate's own actions
+            # live on -- codec_action was already executable pre-D-274D
+            # (D-274C) but was never disclosed in this dict either; added
+            # here alongside the new fields for one complete picture.
+            "codec_action": plan.codec_action,
+            "hdr_action": plan.hdr_action,
+            "bit_depth_action": plan.bit_depth_action,
+            "pixel_format_action": plan.pixel_format_action,
         },
         "target_fps": plan.target_fps,
     }
@@ -335,6 +482,30 @@ def execute_source_normalization(
             ),
         )
 
+    # D-274D Stage 9/10 -- HDR tonemap capability pre-check, BEFORE ffmpeg.
+    # Only consulted when the caller supplies `tonemap_capability` AND the
+    # plan actually requests an HDR tonemap action; a caller that never
+    # passes this (every pre-D-274D test/call site) gets byte-identical
+    # behavior. Mirrors D-274C's own codec pre-check exactly (Stage 9's
+    # own "do not assume availability" applied to the second capability
+    # this executor now depends on).
+    if (
+        plan.hdr_action in _HDR_TONEMAP_ACTIONS
+        and tonemap_capability is not None
+        and not tonemap_capability.hdr_tonemap_usable
+    ):
+        diagnostics["execution_status"] = "REJECTED_HDR_CAPABILITY_UNAVAILABLE"
+        return NormalizationExecutionResult(
+            outcome=snp.NORMALIZATION_FAILED,
+            normalized_path=None, normalized_reference=None, normalized_profile=None,
+            verification=None, diagnostics=diagnostics,
+            failure=NormalizationExecutionFailure(
+                error_category=FAILURE_HDR_CAPABILITY_UNAVAILABLE,
+                return_code=None, command_fingerprint="", stderr_excerpt="",
+                timed_out=False, timeout_sec=timeout_sec, plan_identity=plan.plan_identity,
+            ),
+        )
+
     # Stage 22 -- timeout seam. No number is ever silently chosen.
     if timeout_sec is None:
         diagnostics["execution_status"] = "REJECTED_TIMEOUT_POLICY_REQUIRED"
@@ -378,6 +549,13 @@ def execute_source_normalization(
         pass
     diagnostics["duration_before_sec"] = duration_before
 
+    # D-274D Stage 23/39 -- "before" luma evidence, HDR actions only (the
+    # only case this gate genuinely changes pixel VALUES, not just
+    # geometry/timing/container). Best-effort, diagnostic-only, bounded --
+    # see `_measure_luma_summary`'s own docstring.
+    if plan.hdr_action in _HDR_TONEMAP_ACTIONS:
+        diagnostics["luma_before"] = _measure_luma_summary(source)
+
     out_dir = Path(output_directory)
     out_dir.mkdir(parents=True, exist_ok=True)
     execution_id = uuid.uuid4().hex[:16]
@@ -385,7 +563,8 @@ def execute_source_normalization(
     temp_output = _job_local_temp_output_path(final_output, execution_id)
 
     try:
-        video_filters, audio_filters, needs_audio_reencode = _build_filter_chain(plan)
+        video_filters, audio_filters, needs_audio_reencode, needs_bt709_tagging = _build_filter_chain(plan)
+        diagnostics["needs_bt709_tagging"] = needs_bt709_tagging
     except ValueError:
         diagnostics["execution_status"] = "REJECTED_INVALID_PLAN"
         return NormalizationExecutionResult(
@@ -415,6 +594,18 @@ def execute_source_normalization(
     if audio_filters:
         command += ["-af", ",".join(audio_filters)]
     command += ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p"]
+    if needs_bt709_tagging:
+        # D-274D Stage 8: explicit BT.709 output color-metadata tags --
+        # ONLY when this execution actually ran the HDR tonemap filter
+        # chain (Stage 8's own "do not mislabel non-HDR outputs"). This is
+        # genuinely writable metadata (unlike rotation metadata, which
+        # D-271's own forensic proved this ffmpeg build cannot write) --
+        # empirically confirmed via real ffprobe re-probe of a tagged
+        # fixture (docs/CUTSELL_DECISIONS.md D-274D).
+        command += [
+            "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-colorspace", "bt709", "-color_range", "tv",
+        ]
     if needs_audio_reencode:
         # Stage 14: re-encode ONLY because asetpts requires it; omit
         # -ar/-ac so the encoder's own defaults preserve the original
@@ -544,8 +735,32 @@ def execute_source_normalization(
         "video_stream_start_time": normalized_profile.video_stream_start_time,
         "audio_stream_start_time": normalized_profile.audio_stream_start_time,
         "container_name": normalized_profile.container_name,
+        # D-274D Stage 39: HDR/color-metadata evidence, both directions --
+        # the exact D-271 fields the D-272 re-evaluation below actually
+        # keys its ACCEPT/REJECT decision on for HDR/bit-depth/pixel
+        # format, disclosed rather than left implicit in `final_d272_
+        # decision` alone.
+        "hdr_status": normalized_profile.hdr_status,
+        "color_primaries": normalized_profile.color_primaries,
+        "color_transfer": normalized_profile.color_transfer,
+        "color_space": normalized_profile.color_space,
     }
     diagnostics["final_d272_decision"] = normalized_decision.decision
+
+    # D-274D Stage 39 -- HDR-specific "before" disclosure (input side) and
+    # "after" luma evidence (this execution's own output, HDR actions
+    # only -- the before/after pair `_measure_luma_summary` produces is
+    # only meaningful for a genuine value transformation, never for
+    # rotation/VFR/timeline/HEVC-only executions).
+    diagnostics["hdr_action"] = plan.hdr_action
+    diagnostics["input_color_metadata"] = {
+        "hdr_status": profile_before.hdr_status if profile_before is not None else None,
+        "color_primaries": profile_before.color_primaries if profile_before is not None else None,
+        "color_transfer": profile_before.color_transfer if profile_before is not None else None,
+        "color_space": profile_before.color_space if profile_before is not None else None,
+    }
+    if plan.hdr_action in _HDR_TONEMAP_ACTIONS:
+        diagnostics["luma_after"] = _measure_luma_summary(final_output)
 
     # --- Stage 15 -- A/V relation before/after, measured, no invented tolerance
     if duration_before is not None and normalized_profile.duration_sec is not None:

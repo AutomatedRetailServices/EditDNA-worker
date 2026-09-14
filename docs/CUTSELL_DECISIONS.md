@@ -73411,3 +73411,240 @@ Then STOP.
 
 DO NOT IMPLEMENT NEXT GATE.
 DO NOT LAUNCH RAW.
+
+
+## D-274D — HDR / 10-bit / Pixel-Format Normalization (offline implementation + synthetic qualification)
+
+**Objective.** Post D-274C-A. Product-Owner-authorized V1 HDR policy:
+PQ/HLG -> tone-map to SDR BT.709; Dolby Vision -> reject/unsupported;
+HDR_OTHER/ambiguous -> fail closed (`INSUFFICIENT_EVIDENCE`); 10-bit SDR
+-> normalize to 8-bit `yuv420p`; `yuv422`/`yuv444` SDR -> normalize to
+`yuv420p`. Offline only: no RAW/Modal/RunPod/provider/paid compute, no
+live auto-normalization activation, no Dolby Vision normalization, no
+broad exotic-codec support, no renderer/Pacing/Boundary/Freeze/Audio-
+Join/Audio-Finishing/Visual-Finishing/Delivery change.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `a37f4ae` (exact expected
+match, D-274C-A), clean tree -- confirmed before this gate began.
+
+### Stage 5/6 -- real transfer tags, both directions confirmed writable
+
+Unlike rotation metadata (D-271's own forensic: this ffmpeg build cannot
+write it), `-color_primaries`/`-color_trc`/`-colorspace` ARE genuinely
+writable AND ffprobe-readable in this environment -- confirmed via real
+PQ (`smpte2084`) and HLG (`arib-std-b67`) tagged synthetic fixtures,
+enabling REAL (not parser-only) HDR test fixtures throughout this gate.
+
+### Stage 8/9 -- the real tonemap pipeline, empirically proven before coding
+
+`ffmpeg -filters` confirms `zscale`, `tonemap`, and `libplacebo` are all
+present in this sandbox's own ffmpeg build. The proven, community-
+standard chain (deliberately NOT a plain `format=yuv420p`, which Stage
+8's own directive calls "the original defect"):
+
+```
+zscale=transfer=linear:npl=100,format=gbrpf32le,zscale=primaries=bt709,
+tonemap=tonemap=hable:desat=0,zscale=transfer=bt709:matrix=bt709:range=tv,
+format=yuv420p
+```
+
+Decode -> linearize in the SOURCE's own transfer domain (`zscale`'s own
+`transfer=linear` reads the INPUT's real, probed `color_transfer` --
+never guessed or inferred) -> float RGB for the tonemap filter's required
+pixel format -> convert primaries to BT.709 (still linear) -> apply the
+Hable filmic tonemap curve -> convert back to BT.709 transfer/matrix/TV
+range -> final `yuv420p`. Proven end-to-end through the REAL D-271
+profiler and REAL D-272 policy re-evaluation against real PQ- and
+HLG-tagged fixtures: output correctly reports `hdr_status=SDR, bit_depth=
+8, pixel_format=yuv420p`, all `bt709` color tags, and `final_d272_
+decision=ACCEPT`. Genuine luminance transformation measured via
+`signalstats` (10-bit-scale source values down to a genuinely 0-255
+8-bit-scale output) — not merely a tag change.
+
+`npl` (nominal peak luminance) uses a disclosed, provisional default of
+100 nits -- the same "well-established default, not an invented
+arbitrary business number" treatment D-274B's own CRF-18 precedent used,
+since D-271 does not probe real mastering-display/content-light-level
+metadata today to supply a source-specific value. Flagged for Product
+Owner confirmation if per-source precision ever matters.
+
+### Stage 3/4 -- Dolby Vision / HDR_OTHER: satisfied for free
+
+D-274A's own plan builder already marks Dolby Vision and HDR_OTHER
+`unsupported=True` at the PLAN level (pre-dating this gate) -- the
+pre-existing `if not plan.is_executable: reject` check in the executor
+already blocks both with ZERO new code and zero ffmpeg subprocess calls,
+confirmed via direct plan-construction tests. No Dolby-Vision-specific or
+HDR_OTHER-specific code was added or is needed (same "satisfied for
+free" pattern D-274C already used for HEVC+HDR/HEVC+10-bit).
+
+### Stage 13 -- 10-bit and broad pixel format: zero new filter code
+
+Empirically proven (real 10-bit, `yuv422p`, and `yuv444p` SDR fixtures,
+run through the REAL executor): the pre-existing fixed `-pix_fmt
+yuv420p` output flag already correctly downconverts all three cases via
+ffmpeg's own implicit `swscale` conversion at encode time. No new filter
+was added for `ACTION_TEN_BIT_TO_EIGHT_BIT` or `ACTION_PIXEL_FORMAT_TO_
+YUV420P` -- both actions were simply removed from `_UNSUPPORTED_ACTIONS`
+(now genuinely empty), and the existing command construction handles
+them for free.
+
+### Stage 8/16 -- executor wiring
+
+`source_normalization_executor.py`:
+- `_UNSUPPORTED_ACTIONS` emptied (kept live as a real, still-consulted
+  frozenset for any FUTURE unimplemented action, per Stage 37's own
+  extensibility principle).
+- `_HDR_TONEMAP_ACTIONS` + `_hdr_tonemap_filter_segment()` added (the
+  proven filter chain above).
+- `_build_filter_chain()` now returns a 4-tuple (`video_filters,
+  audio_filters, needs_audio_reencode, needs_bt709_tagging`); ordering is
+  rotation -> HDR tonemap -> VFR fps -> timeline setpts (Stage 16) --
+  rotation and the timing filters operate on geometry/timestamps only
+  and are provably independent of pixel color values, so their order
+  around tonemap never changes correctness.
+- `execute_source_normalization()`: new optional `tonemap_capability`
+  parameter (mirrors D-274C's own `codec_capability` exactly, a
+  SEPARATE parameter rather than reusing `codec_capability` so each
+  gate's own capability check stays independently toggleable) with a
+  pre-check (`hdr_tonemap_usable`) BEFORE any ffmpeg call, new failure
+  category `NORMALIZATION_HDR_CAPABILITY_UNAVAILABLE`; explicit
+  `-color_primaries/-color_trc/-colorspace bt709 -color_range tv` output
+  flags added ONLY when `needs_bt709_tagging` is true (Stage 8's own "do
+  not mislabel non-HDR outputs" -- a rotation-only or VFR-only output
+  keeps whatever color tags its source already had); new bounded,
+  diagnostic-only `_measure_luma_summary()` helper (ffmpeg `signalstats`
+  + `metadata=print`, time-bounded via `-t 1` since `-frames:v N` was
+  empirically found to NOT bound filter-graph cost, only encode/mux
+  output -- never fatal, never gates outcome); HDR-specific diagnostics
+  fields added (`hdr_action`, `input_color_metadata`, `luma_before`/
+  `luma_after`, `needs_bt709_tagging`, and `codec_action`/`bit_depth_
+  action`/`pixel_format_action` disclosed alongside the pre-existing
+  three action fields).
+
+### Stage 10/11 -- capability contract extension
+
+`production_runtime_capability.py`: `ProductionRuntimeCapability` gains
+`zscale_available`/`tonemap_available`/`libplacebo_available` (defaulted,
+additive, mirrors D-274B's own `target_fps` precedent) and an
+`hdr_tonemap_usable` property; new `_probe_filter_availability()`
+(bounded `ffmpeg -filters`, token-based matching to avoid `tonemap` vs
+`tonemap_opencl`/`tonemap_vaapi` false positives); both capture functions
+wired to populate the new fields; new `bridge_to_tonemap_available()`
+mirrors `bridge_to_runtime_capability_input`'s own fail-closed discipline
+(requires genuine `ESTABLISHED` status, not the raw filter-presence
+property alone).
+
+`worker_runtime_capability.py`: new `get_worker_tonemap_available()`
+(mirrors `get_worker_runtime_capability_input`'s own D-274C-A shape) --
+built and tested, NOT wired into any live call site (`worker_job.py`
+untouched, confirmed by source-scan, per this gate's own "no live
+auto-normalization activation" banner). A genuine bug caught and fixed
+within this same gate before any test exercised it: `get_worker_runtime_
+capability()`'s own ESTABLISHED-promotion branch reconstructed a new
+`ProductionRuntimeCapability` without naming the new zscale/tonemap/
+libplacebo fields, silently resetting them to `False` even when the
+underlying probe had genuinely measured them `True` -- fixed by carrying
+those fields through the promotion.
+
+### Self-resolving guards
+
+`_UNSUPPORTED_ACTIONS` becoming empty legitimately superseded several
+pre-existing assertions, all updated (never simply deleted):
+- D-274B's own `test_unsupported_action_rejected_before_ffmpeg`: the
+  real HDR/10-bit/pixel-format entries removed from its parametrize
+  list (now legitimately supported); rewritten as a single test that
+  injects a SYNTHETIC future action into `_UNSUPPORTED_ACTIONS` to prove
+  the general firewall mechanism still works, rather than emptying the
+  parametrize list into a silent skip.
+- D-274C's own `test_hevc_plus_hdr_rejected_before_ffmpeg` and
+  `test_hevc_10bit_sdr_rejected_before_ffmpeg`: renamed/rewritten as
+  POSITIVE composition proofs (`test_hevc_plus_hdr_composes_in_one_
+  generation` using a new genuine HEVC+HDR fixture, since forcing an HDR
+  action onto a genuinely-SDR source via `dataclasses.replace` was found
+  to fail INSIDE ffmpeg itself -- "no path between colorspaces" --
+  because `zscale`'s own linearization step requires the decoded frames
+  to genuinely carry the transfer tag it is asked to map from;
+  `test_hevc_10bit_sdr_composes_in_one_generation` using the file's own
+  pre-existing genuine 10-bit fixture); the original firewall intent is
+  preserved via a new, separate synthetic-future-action test.
+- D-274C-A's own 6-file closed-track firewall: `source_normalization_
+  executor.py` removed from its parametrize list (this gate's own,
+  legitimately-modified file).
+- Two independent two-file closed-track lists (D-274C's own, and D-274D's
+  own new one) both correctly exclude `production_runtime_capability.py`
+  and `worker_runtime_capability.py` -- both are gate-owned files this
+  and the immediately-preceding gate extend, never a third party's scope.
+
+### Verification run
+
+- New `tests/test_cutsell_d274d_hdr_pixel_format_normalization.py`:
+  **44 passed** -- PQ/HLG classification + full tonemap chain to ACCEPT
+  (5), Dolby Vision/HDR_OTHER plan-level + executor-level firewall (3),
+  10-bit zero-new-code proof (1), broad pixel-format zero-new-code proof
+  (2, parametrized), rotation+HDR and VFR+HDR one-pass composition (2),
+  tonemap-capability pre-check + independence from codec_capability (3),
+  worker-runtime tonemap seam built/tested/unwired (4), negative matrix
+  (3), security (2), 8-file closed-track firewall (8), plus fixture/
+  luma-evidence assertions folded into the above.
+- D-274B's, D-274C's, and D-274C-A's own test files: self-resolving guard
+  updates as listed above -- re-verified green together (**280 passed, 0
+  failed** across D-272A/D-272B/D-274A/D-274B/D-274C/D-274C-A/this gate's
+  own targeted files run together).
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions (`test_semantic_stitch.py`, `test_video00_modal_hybrid_
+  semantic_parity.py`, `test_hybrid_story_guard_incomplete_retry.py`):
+  **8080 passed, 10 skipped, 0 failed.**
+- `worker_job.py` confirmed untouched by source-scan (no reference to
+  `get_worker_tonemap_available`/`bridge_to_tonemap_available` anywhere).
+
+### Canonical status update
+
+HDR PQ/HLG -> SDR BT.709 NORMALIZATION = CLOSED at the offline executor
+level. TEN-BIT / BROAD-PIXEL-FORMAT NORMALIZATION = CLOSED (zero new
+filter code required, proven). DOLBY VISION / HDR_OTHER FIREWALL =
+CLOSED (satisfied for free at the plan level, pre-dating this gate).
+Every currently-defined D-274A normalization action now has a real
+executor implementation; `_UNSUPPORTED_ACTIONS` is genuinely empty and
+stays as a live extensibility point for any future action. Still NOT
+live-auto-normalized: `worker_job.py` is untouched, `NORMALIZE_REQUIRED`
+still stops the job before `process_local_sources`. The worker-runtime
+tonemap-capability seam (`get_worker_tonemap_available`) exists and is
+tested but has no production caller yet, mirroring D-274C-A's own
+disclosed shape one gate before `worker_job.py` was wired to its own
+HEVC seam. Remaining P0: output format technical QC (D-274E), live
+auto-normalization activation (a separate future gate wiring
+`NORMALIZE_REQUIRED -> executor -> continue`, for every action this
+track now implements), real-container/real-phone qualification.
+
+### Verdict
+
+**A -- HDR PQ/HLG + 10-BIT/PIXEL-FORMAT NORMALIZATION OFFLINE PROVEN --
+READY FOR OUTPUT FORMAT QC.** Every action this gate was authorized to
+implement (HDR PQ/HLG tonemap, 10-bit downconversion, broad pixel-format
+downconversion, Dolby Vision/HDR_OTHER firewall) is proven end-to-end
+through the real D-271 profiler, real D-272 policy, real D-274A plan
+builder, and real D-274D executor, against genuine synthetic fixtures
+(real color-metadata tags, real bit-depth/pixel-format sources), reaching
+D-272 ACCEPT in every positive case and structured, ffmpeg-call-free
+rejection in every negative case. The tonemap capability contract
+extension and its fail-closed pre-check are proven both positively
+(genuinely available) and negatively (forced unavailable). No renderer,
+Pacing, Boundary, Freeze, Audio-Join, Audio-Finishing, Visual-Finishing,
+or Delivery code was touched. No live auto-normalization activation
+occurred.
+
+**Exact next gate:** D-274E -- Output Format Technical QC -- not
+implemented, not decided by this entry; a Product Owner authorization
+call.
+
+**Decision entry reference:** this entry (D-274D).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-274E.
+DO NOT ACTIVATE LIVE AUTO-NORMALIZATION.
+DO NOT LAUNCH RAW.
