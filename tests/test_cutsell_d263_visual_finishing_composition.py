@@ -49,8 +49,13 @@ import dataclasses
 import inspect
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
+
+# Computed, not hardcoded: a real CI checkout lives at a different absolute
+# path than any one contributor's local sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not available on this runner")
 
@@ -634,7 +639,7 @@ def test_no_provider_or_raw_reference():
 def _run_git_diff(path: str) -> str:
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", path],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     return result.stdout.strip()
 

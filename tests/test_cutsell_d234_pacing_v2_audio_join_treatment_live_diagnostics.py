@@ -9,6 +9,11 @@ import ast
 import importlib
 import inspect
 import subprocess
+from pathlib import Path
+
+# Computed, not hardcoded: a real CI checkout lives at a different absolute
+# path than any one contributor's local sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
 
 import cutsell_worker.pacing_v2_audio_join_treatment_live_diagnostics as m
 import cutsell_worker.universal_clean_cut as ucc
@@ -361,7 +366,7 @@ class TestRegressionCanaries:
     def test_41_compileall(self):
         result = subprocess.run(
             ["python", "-m", "compileall", "-q", "cutsell_worker"],
-            cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+            cwd=_REPO_ROOT, capture_output=True, text=True,
         )
         assert result.returncode == 0, result.stdout + result.stderr
 

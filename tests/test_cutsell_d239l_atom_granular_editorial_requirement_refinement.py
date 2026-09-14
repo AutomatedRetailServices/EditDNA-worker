@@ -39,8 +39,13 @@ from __future__ import annotations
 
 import ast
 import subprocess
+from pathlib import Path
 
 import cutsell_worker.complete_lost_semantic_atom_materiality as claamod
+
+# Computed, not hardcoded: a real CI checkout lives at a different absolute
+# path than any one contributor's local sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
 from cutsell_worker.complete_lost_semantic_atom_materiality import (
     assess_complete_lost_semantic_atom_materiality,
 )
@@ -75,7 +80,7 @@ from cutsell_worker.shared_attempt_word_identity import (
 # ---------------------------------------------------------------------------
 # Shared fixtures -- the real D-239K/D-239J recovered shape.
 # ---------------------------------------------------------------------------
-_PROD_PATH = "/home/user/EditDNA-worker/cutsell_worker/complete_lost_semantic_atom_materiality.py"
+_PROD_PATH = f"{_REPO_ROOT}/cutsell_worker/complete_lost_semantic_atom_materiality.py"
 
 
 def _code_without_docstrings(path: str) -> str:
@@ -531,7 +536,7 @@ class TestNoGlobalAuthorityChange:
     def _zero_diff(self, path: str) -> None:
         result = subprocess.run(
             ["git", "diff", "--stat", "HEAD", "--", path],
-            cwd="/home/user/EditDNA-worker", capture_output=True, text=True, check=True,
+            cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
         )
         assert result.stdout.strip() == "", f"{path} unexpectedly diffs from HEAD: {result.stdout}"
 

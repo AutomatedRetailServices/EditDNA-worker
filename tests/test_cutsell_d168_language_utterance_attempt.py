@@ -8,8 +8,13 @@ the full design rationale this test suite verifies against.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
+
+# Computed, not hardcoded: a real CI checkout lives at a different absolute
+# path than any one contributor's local sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
 
 from cutsell_worker.contracts import Word
 from cutsell_worker.language_spine import adapt_words_to_language_words, segment_language_phrases
@@ -568,7 +573,7 @@ def test_37_d163_unchanged():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/watch_listen_besttake_evidence.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -580,7 +585,7 @@ def test_38_d167_unchanged():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/watch_listen_zone_usability_v2.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -608,7 +613,7 @@ def test_41_render_unchanged():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/renderer.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -629,7 +634,7 @@ def test_language_spine_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/language_spine.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -638,7 +643,7 @@ def test_take_segmentation_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/take_segmentation.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -647,7 +652,7 @@ def test_attempt_reconstruction_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/attempt_reconstruction.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -656,7 +661,7 @@ def test_raw_understanding_map_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/raw_understanding_map.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -665,7 +670,7 @@ def test_watch_listen_understanding_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/watch_listen_understanding.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 

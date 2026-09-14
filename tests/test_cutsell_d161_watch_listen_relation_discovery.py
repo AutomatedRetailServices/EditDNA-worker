@@ -19,7 +19,13 @@ beyond short, obviously-synthetic sentences.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
+# Computed, not hardcoded: a real CI checkout lives at a different absolute
+# path than any one contributor's local sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
 
 from cutsell_worker.attempt_relationship_authority import (
     FAMILY_ACTION_ABSTAIN_UNCERTAIN,
@@ -953,7 +959,7 @@ def test_62_no_besttake_deliveryscorer_boundary_pacing_module_imports_discovery(
         "boundary_engine.py", "temporal_editing.py",
     ]
     for name in forbidden_modules:
-        matches = glob.glob(f"/home/user/EditDNA-worker/cutsell_worker/{name}")
+        matches = glob.glob(f"{_REPO_ROOT}/cutsell_worker/{name}")
         for path in matches:
             source = open(path, encoding="utf-8").read()
             assert "watch_listen_relation_discovery" not in source, path

@@ -11,8 +11,13 @@ from __future__ import annotations
 
 import inspect
 import subprocess
+from pathlib import Path
 
 import pytest
+
+# Computed, not hardcoded: a real CI checkout lives at a different absolute
+# path than any one contributor's local sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
 
 from cutsell_worker.contracts import CandidateTake, Word
 from cutsell_worker.language_spine_consumer_migration import (
@@ -39,7 +44,7 @@ from cutsell_worker.take_grouping_provider import (
 def _run_git_diff(path: str) -> str:
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", path],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     return result.stdout.strip()
 

@@ -9,8 +9,13 @@ suite verifies against.
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
+
+# Computed, not hardcoded: a real CI checkout lives at a different absolute
+# path than any one contributor's local sandbox.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
 
 from cutsell_worker.language_spine import normalize_language_text
 from cutsell_worker.language_utterance_attempt import (
@@ -444,7 +449,7 @@ def test_30_old_serialized_ids_unaffected():
     for path in ("cutsell_worker/canonical_identity.py", "cutsell_worker/contracts.py", "cutsell_worker/pipeline.py"):
         result = subprocess.run(
             ["git", "diff", "--stat", "HEAD", "--", path],
-            cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+            cwd=_REPO_ROOT, capture_output=True, text=True,
         )
         assert result.stdout.strip() == "", path
 
@@ -473,7 +478,7 @@ def test_33_no_d158_change():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/attempt_relationship_authority.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -485,7 +490,7 @@ def test_34_no_d161_change():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/watch_listen_relation_discovery.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -514,7 +519,7 @@ def test_37_d163_regression():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/watch_listen_besttake_evidence.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -526,7 +531,7 @@ def test_38_d167_regression():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/watch_listen_zone_usability_v2.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -572,7 +577,7 @@ def test_language_utterance_attempt_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/language_utterance_attempt.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -581,7 +586,7 @@ def test_language_spine_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/language_spine.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -590,7 +595,7 @@ def test_semantic_claims_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/semantic_claims.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
@@ -599,7 +604,7 @@ def test_semantic_idea_equivalence_untouched():
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--stat", "HEAD", "--", "cutsell_worker/semantic_idea_equivalence.py"],
-        cwd="/home/user/EditDNA-worker", capture_output=True, text=True,
+        cwd=_REPO_ROOT, capture_output=True, text=True,
     )
     assert result.stdout.strip() == ""
 
