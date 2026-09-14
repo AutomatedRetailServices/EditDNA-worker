@@ -74467,3 +74467,210 @@ Then STOP.
 
 DO NOT IMPLEMENT D-275.
 DO NOT LAUNCH RAW.
+
+
+## D-275 — Real-Phone Media Qualification
+
+**Objective.** Post D-274F-A. Qualify the complete live media path
+(D-271 profile -> D-272 policy -> normalization if required -> D-271
+reprobe -> D-272 reevaluate -> D-274E QC -> live Flow-B source
+resolution -> mocked downstream editorial entry) against REAL
+phone-originated source files, per sample, per the required minimum
+matrix (5 iPhone categories, 5 Android categories). This gate qualifies
+MEDIA REALITY, not CutSell selection quality -- no editorial benchmark,
+no Human Gold, no Cut.ai comparison, no RAW.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `74691d2` (exact expected
+match, D-274F-A), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-274F-A re-read. The 8 listed
+source files (`source_media_profile.py`, `source_format_policy.py`,
+`source_normalization_plan.py`, `source_normalization_executor.py`,
+`output_format_qc.py`, `worker_runtime_capability.py`, `worker_job.py`,
+`render.py`) confirmed unchanged since D-274F-A -- this gate is
+qualification-only and made zero edits to any of them.
+
+### Stage 1 -- sample inventory (the actual finding of this gate)
+
+An exhaustive search of the repository turned up **zero real-phone media
+files of any kind**, and zero manifest referencing any:
+
+- `git ls-files` filtered to video/media extensions (`mp4|mov|m4v|3gp|
+  avi|mkv|hevc|heic`): **no matches**.
+- A disk-level `find` for the same extensions anywhere under the
+  repository root (catches untracked/gitignored fixtures): **no
+  matches**.
+- No directory named `fixtures/`, `assets/`, `samples/`, `media/`,
+  `test_data/`, or `testdata/` exists anywhere in the tree.
+- `git ls-files` piped through `file` for any tracked binary blob that
+  isn't a known non-media type (`.pyc`/image/icon/font): **no matches**
+  -- every tracked file is source/text/JSON/YAML or a small static
+  image asset, never video.
+- A repo-wide grep for `iPhone|Android|s3://.*manifest|real[_-]?phone|
+  device[_-]?sample` across `.py`/`.md`/`.txt`/`.json`/`.yml` surfaced
+  only: (a) generic `s3://{bucket}/{key}` f-string plumbing used with
+  fake bucket names in unit tests (`s3://bucket/...`, `s3://fake-bucket/
+  ...`), none device-specific; (b) the iOS CI workflow's own
+  `iphonesimulator`/`"iPhone 16e"` SDK-destination strings, which name a
+  *build simulator device*, not a captured video file; (c) exactly ONE
+  test-code occurrence of a device-flavored *filename string*,
+  `test_cutsell_d271_source_media_profile.py:509`'s `probe_source_media_
+  profile("iphone.mov", runner=_fake_runner(payload))` -- inspected
+  directly: `payload` is a hand-built synthetic ffprobe JSON dict
+  (Stage 39's own documented technique, `test_rotation_display_matrix_
+  swaps_dimensions`), and `"iphone.mov"` is never a real file on disk,
+  only an arbitrary label passed to a stub runner. It carries **zero**
+  real device provenance and does not count toward Stage 1 inventory.
+- No S3 manifest of real-phone qualification samples is referenced
+  anywhere in the codebase, docs, or CI workflows. The only real,
+  human-recorded media referenced anywhere in this repository is the
+  three fixed Video00 QA files (RAW / Cut.ai / Human Gold) named in
+  CLAUDE.md's own quality-ladder section -- these are a single specific
+  editorial benchmark recording, not a device-diversity sample set, and
+  Stage 4 explicitly excludes Human Gold/Cut.ai/large calibration from
+  this gate's scope; they are not evidence toward the iPhone/Android
+  matrix either way.
+- AWS credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) and
+  `boto3` are present in this environment and general internet egress to
+  AWS is reachable, but no `S3_BUCKET` value is configured here and no
+  manifest key or bucket name for a real-phone sample set is documented
+  anywhere in the repository. Blindly enumerating an arbitrary
+  production bucket name found only in an unrelated script's docstring
+  comment (`script2clipshop-video-automatedretailservices`) is outside
+  Stage 1's own scope ("search existing repository/test assets/S3
+  manifests/local fixtures" -- i.e. documented, referenced locations,
+  not exploratory production-bucket crawling with found credentials for
+  an unrelated purpose) and was deliberately not attempted.
+
+**Classification of every finding:** SYNTHETIC (all existing fixtures,
+built via `ffmpeg -f lavfi testsrc`/hand-built ffprobe JSON payloads, as
+extensively documented across D-271 through D-274F-A) or NOT APPLICABLE
+(the `"iphone.mov"` label, the iOS simulator strings, the Video00 QA
+benchmark files). **Zero REAL_PHONE_CONFIRMED. Zero REAL_PHONE_LIKELY.**
+No device provenance is fabricated or assumed anywhere in this entry.
+
+### Stage 2/3 -- required minimum matrix vs. found samples
+
+All 10 required categories (iPhone H264 SDR / HEVC SDR / portrait-
+orientation / VFR / HDR-PQ-or-Dolby; Android H264 SDR / HEVC SDR /
+VFR / portrait-orientation / HDR) are **MISSING**. Per Stage 3's own
+explicit instruction, synthetic media is not substituted to declare
+closure, and no category is marked satisfied on synthetic-fixture
+evidence alone.
+
+### Stages 5-22 -- not executed
+
+No real-phone sample exists in this environment to profile, classify,
+normalize, reprobe, QC, or render. Per-sample verification (original
+profile, initial policy, ACCEPT/NORMALIZE_REQUIRED path, HEVC, HDR/DV
+firewall, real rotation, real VFR, audio variants, portrait/landscape,
+4K, multi-action, SHA preservation, timeout headroom, final-render
+sanity, color sanity, A/V sync) has **no subject to run against** and is
+correctly not fabricated.
+
+### Stage 23/24 -- failure classification / no one-file hacks
+
+Not applicable: no sample was run, so no per-layer failure occurred.
+**Zero code changes made in this gate** -- nothing to classify by
+systemic layer, no one-file hack risk, no remediation gate to design.
+This is a pure evidence-gap finding, not a defect finding.
+
+### Stage 25 -- device matrix result
+
+| sample | provenance | device | container | codec | HDR | VFR | rotation | initial policy | normalization actions | final policy | normalized QC | final render QC | duration | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| (none available) | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | -- | NO REAL-PHONE SAMPLE AVAILABLE |
+
+### Stage 26 -- beta phone readiness
+
+All nine categories: **INSUFFICIENT_EVIDENCE** (real-phone evidence
+does not exist in this environment for any of them; this is distinct
+from NOT_READY, which would imply a real sample was tried and failed).
+
+- iPhone common SDR: INSUFFICIENT_EVIDENCE
+- iPhone HEVC: INSUFFICIENT_EVIDENCE
+- iPhone HDR: INSUFFICIENT_EVIDENCE
+- iPhone orientation: INSUFFICIENT_EVIDENCE
+- iPhone VFR: INSUFFICIENT_EVIDENCE
+- Android common SDR: INSUFFICIENT_EVIDENCE
+- Android HEVC: INSUFFICIENT_EVIDENCE
+- Android HDR: INSUFFICIENT_EVIDENCE
+- Android VFR: INSUFFICIENT_EVIDENCE
+
+### Stage 27 -- minimum exit criteria
+
+Not met. Zero of the five required minimums (real iPhone common
+footage, real HEVC phone path, real orientation-metadata path, real VFR
+path, at least one Android common path) are established with real
+evidence. HDR is not hidden as a gap -- it is one of nine categories
+reported as an evidence gap alongside the other eight, per Stage 27's
+own instruction not to single it out or conceal it while every other
+category is in the identical state.
+
+### Stage 28 -- security
+
+Preserved, unchanged, unexercised by this gate: 1800s normalization
+timeout, 1200s renderer timeout, one normalization pass / no retry,
+`shell=False`, atomic derived output, original preservation, job-local
+isolation, format QC. No security-relevant code path was touched or
+newly exercised in this gate.
+
+### Stage 29 -- no canonical product-scope expansion
+
+Not performed. Faceless/Product/Hands/B-roll/Voice-over remain out of
+canonical scope, deferred to the Product-Owner-authorized D-276 gate
+(now itself gated on this entry's Verdict D, not automatically
+unblocked).
+
+### Stage 30 -- test / qualification
+
+Zero code changed in this gate -> docs-only outcome per Stage 30's own
+instruction; no new unit tests manufactured for a qualification report
+that found no code to change. `git status` confirmed clean before and
+after the Stage 1 search (a pure read-only inventory).
+
+### Canonical status update
+
+MEDIA-DIVERSITY P0: real-phone qualification **NOT YET POSSIBLE IN THIS
+ENVIRONMENT** -- no real-phone sample of any kind is available to
+exercise the fully-implemented, synthetically-proven D-271 -> D-272 ->
+D-274A/B/C/D -> D-274E -> D-274F/D-274F-A live chain against. The
+implementation itself is unchanged and remains CLOSED at the
+synthetic/offline level (D-274F-A's own status stands). Real-device
+evidence is the outstanding item, not implementation completeness.
+
+### Verdict
+
+**D -- INSUFFICIENT REAL-PHONE MEDIA AVAILABLE TO QUALIFY.** No
+REAL_PHONE_CONFIRMED or REAL_PHONE_LIKELY sample exists anywhere in this
+repository, its test fixtures, or any manifest referenced by it; no
+device provenance was fabricated to manufacture a different verdict, and
+no synthetic fixture was substituted to declare closure, per this gate's
+own explicit Stage 3/24 instructions.
+
+**Exact missing categories (all 10):** iPhone H264 SDR, iPhone HEVC SDR,
+iPhone portrait/orientation, iPhone VFR, iPhone HDR/PQ-or-Dolby, Android
+H264 SDR, Android HEVC SDR, Android VFR, Android portrait/orientation,
+Android HDR.
+
+**Exact next gate:** per D-275's own Verdict-D branch --
+request/acquire the exact missing real-phone sample set (a
+Product-Owner-level action: either the Product Owner supplies real
+device-captured files covering the 10 categories above, or authorizes a
+specific, documented acquisition path -- e.g. a named S3 prefix/manifest
+of real-device recordings). D-276 (canonical product-scope expansion)
+remains explicitly deferred and NOT automatically unblocked by this
+entry.
+
+**Product Owner decision required:** YES -- supplying or pointing to a
+real-phone sample set is a Product Owner action; this gate cannot
+manufacture that evidence.
+
+**Decision entry reference:** this entry (D-275).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-276.
+DO NOT START CALIBRATION.
