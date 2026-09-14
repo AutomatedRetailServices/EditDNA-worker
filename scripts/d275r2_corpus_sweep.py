@@ -217,10 +217,19 @@ def main():
             "hdr_status": pdict["hdr_status"], "rotation_degrees": pdict["rotation_degrees"],
             "rotation_source": pdict["rotation_source"], "duration_sec": pdict["duration_sec"],
         }, "diversity_flags": flags}, indent=2, default=str))
-        # Delete immediately after probing to conserve runner disk --
-        # Stage 2 is profile-only; re-download happens only if Stage 4
-        # selects this exact file for full qualification below.
-        os.remove(local_path)
+        # NOTE: deliberately NOT deleted here. An earlier version of this
+        # script deleted each file immediately after profiling and relied
+        # on a "re-download" for any Stage 4 candidate -- but this script
+        # has no AWS credentials of its own (they exist only in the shell
+        # scope of the workflow's download step, a separate GH Actions
+        # step whose plain `export`s do not persist to this step), so
+        # that "re-download" was never actually reachable and silently
+        # produced zero qualification results. Root-caused via the
+        # first real run (34834797093) printing an empty Stage 13 render
+        # list. Fix: keep all 14 files on disk (under 1 GB total, well
+        # within runner disk headroom) until Stage 4 selection is known,
+        # then clean up in one pass below.
+        pass
 
     with open(os.path.join(OUT_DIR, "d275r2-profiles.json"), "w") as f:
         json.dump(profiles, f, indent=2, default=str)
@@ -270,18 +279,21 @@ def main():
             json.dump({"candidates": {}, "qualification_results": [], "render_sanity_results": []}, f, indent=2, default=str)
         return
 
-    # Stage 5-10 -- re-download and fully qualify ONLY the selected
-    # candidate(s), never a duplicate re-run of an already-proven
-    # property.
+    # Stage 5-10 -- fully qualify ONLY the selected candidate(s) (the
+    # file is still present on disk from the download step above -- see
+    # the note in the Stage 2 loop for why this script never attempts a
+    # standalone "re-download"), never a duplicate re-run of an
+    # already-proven property.
     qual_results = []
     render_results = []
     unique_keys = sorted(set(candidates.values()))
-    print(f"\n=== D-275R2 re-downloading + fully qualifying {len(unique_keys)} selected candidate(s) ===")
+    print(f"\n=== D-275R2 fully qualifying {len(unique_keys)} selected candidate(s) ===")
     for key in unique_keys:
         local_name = REMAINING_14[key]
         local_path = os.path.join(SAMPLES_DIR, local_name)
         if not os.path.exists(local_path):
-            qual_results.append({"key": key, "error": "candidate_file_not_available_for_redownload_in_this_step"})
+            qual_results.append({"key": key, "error": "candidate_file_unexpectedly_missing_from_disk"})
+            print(f"CANDIDATE_FILE_MISSING: {key}")
             continue
         categories = [c for c, k in candidates.items() if k == key]
         print(f"\n--- qualifying {key} (categories: {categories}) ---")
@@ -298,6 +310,14 @@ def main():
 
     print("\n=== D-275R2 Stage 13 -- final-render sanity on newly-qualified samples ===")
     print(json.dumps(render_results, indent=2, default=str))
+
+    # Cleanup: remove any un-selected downloaded files still on disk
+    # (disk hygiene only, not a correctness requirement on an ephemeral
+    # runner).
+    for local_name in REMAINING_14.values():
+        p = os.path.join(SAMPLES_DIR, local_name)
+        if os.path.exists(p):
+            os.remove(p)
 
     with open(os.path.join(OUT_DIR, "d275r2-qualification-results.json"), "w") as f:
         json.dump({"candidates": candidates, "qualification_results": qual_results,
