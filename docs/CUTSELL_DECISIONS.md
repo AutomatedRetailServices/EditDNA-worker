@@ -75517,3 +75517,225 @@ Then STOP.
 DO NOT TOUCH cutsell/mobile-v1-clean.
 DO NOT IMPLEMENT NEXT GATE.
 DO NOT START CALIBRATION.
+
+
+## D-279 — V1 Manual Timeline Asset Ingest / Persistence API Contract
+
+**Objective.** Post D-278, close the gap D-278's own recommendation
+named: every D-278 test had to hand-construct an already-resolved,
+already-qualified `ResolvedTimelineAsset` -- there was no durable,
+authorized notion of "this asset_id belongs to this user/project, is
+qualified, and is safe to place on a timeline." Design/build the
+backend asset and persistence contract that lets a future mobile UI
+safely say "add this clip as B-roll" or "use this recorded audio as
+voice-over" by `asset_id` alone -- never a raw filesystem path or
+arbitrary S3 key -- and that turns an authorized, qualified asset into
+a D-278 `ResolvedTimelineAsset` through one secure resolver. Offline
+backend contract + pure types only -- no mobile UI, no microphone
+capture, no AI B-roll ranking/suggestion, no calibration.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `8efcaab` (exact expected
+match, D-278), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-278 re-read. All 11 listed
+`cutsell_worker/*.py` files and the `cutsell_app/` directory confirmed
+to exist; `uploads.py`, `project_store.py`, `render_versions.py`,
+`exports.py`, `project_tracking.py`, `tenant_safe_delivery.py` (in
+depth), `auth_middleware.py`, and `multipart_routes.py` inspected for
+reuse. None of the existing files were edited by this gate -- `tenant_
+safe_delivery.is_etag_valid_sha256_proxy` is imported and reused
+directly; nothing else is imported from production code besides
+`timeline_composition` (D-277) and `timeline_composition_executor`
+(D-278) themselves.
+
+### What was built
+
+New `cutsell_worker/timeline_asset_registry.py` (~430 lines). Pure
+types and pure functions only -- no I/O, no S3, no Redis, no ffmpeg,
+no microphone, no mobile UI, no AI ranking (confirmed by a source-
+inspection test: no `open(`/`subprocess`/`boto3`/`requests.`/
+`socket.`/`os.remove`/`os.path.exists` literal appears anywhere in the
+module, and it never imports `best_take_authority`, `deterministic_
+best_take_authority`, `selection_freeze`, `boundary_engine`, `render`,
+`visual_finishing`, or `audio_finishing_executor`).
+
+**Ownership -- reused, never reinvented.** `AssetOwnershipScope`
+(`user_id` + `project_id`, non-empty-validated frozen dataclass) is the
+asset-shaped sibling of D-269's own `DeliveryOwnershipScope` doctrine
+-- deliberately NOT that same type, because `DeliveryOwnershipScope`'s
+mandatory non-empty `job_id` does not honestly describe an asset that
+is uploaded once and referenced by many later timeline revisions.
+`authorize_asset_access`/`assert_asset_access` mirror D-269's own
+`authorize_delivery_access`/`assert_delivery_access` full-scope-
+equality rule and `requesting=None`-means-no-authenticated-principal
+convention exactly. `tenant_safe_delivery.is_etag_valid_sha256_proxy`
+is imported and reused DIRECTLY (never redefined) inside
+`validate_content_sha256_source`, which unconditionally refuses a
+`content_sha256` value the caller flags as `derived_from_etag=True` --
+the concrete, testable form of "do not equate an object ETag with
+SHA-256" for this registry.
+
+**V1 project-scoped-only policy (recorded, not hidden):** cross-
+project asset reuse is refused structurally by `AssetOwnershipScope`
+full-equality (user_id AND project_id must both match) rather than by
+a separate special-case check at each call site -- proven by test
+(`test_resolve_wrong_project_is_asset_not_owned_no_cross_project_
+reuse`).
+
+**Registry types:** `TimelineAssetRole` (PRIMARY_SOURCE/SUPPLEMENTAL_
+BROLL/VOICE_OVER), `TimelineMediaKind` (VIDEO/AUDIO), `TimelineAsset
+QualificationStatus` (UPLOADED/QUALIFYING/READY/REJECTED/FAILED/
+DELETED), `TimelineMediaAsset` (frozen dataclass: asset_id, ownership,
+role, media_kind, source_media_identity, storage_reference,
+duration_sec, has_audio, qualification_status, optional content_
+sha256/technical_metadata_reference/replaces_asset_id/created_at;
+non-empty/positive-duration validated in `__post_init__`).
+
+**Error vocabulary (fixed, closed set, confirmed by test):**
+`ASSET_NOT_FOUND`, `ASSET_NOT_OWNED`, `ASSET_NOT_READY`, `ASSET_MEDIA_
+UNSUPPORTED`, `ASSET_HAS_NO_AUDIO`, `TIMELINE_REVISION_CONFLICT`,
+`TIMELINE_INVALID`, `ASSET_REFERENCED` -- distinct from the success
+vocabulary (`ASSET_RESOLVED`/`ASSET_DELETE_SUCCEEDED`/`TIMELINE_SAVE_
+SUCCEEDED`/`TIMELINE_EXPORT_RESOLVED`).
+
+**The secure resolver -- the concrete architectural link the directive
+named:** `resolve_timeline_asset(requesting, asset, local_path,
+required_media_kind, required_audio_mode=None) -> AssetResolutionResult`.
+Pure: `local_path` is supplied by the caller's own already-completed
+materialization step (download/cache); this function never touches a
+filesystem or network itself. Checks, in order: existence (a DELETED
+asset resolves identically to a missing one, so deletion is never
+distinguishable from never-having-existed to an unauthorized/stale
+caller) -> ownership (full-scope equality) -> READY status -> media-
+kind match -> `USE_BROLL_AUDIO` has-audio requirement -> non-blank
+local_path -> success, producing a real `timeline_composition_
+executor.ResolvedTimelineAsset`. This closes "MOBILE/API -> ... ->
+D-278 ResolvedTimelineAsset -> composition executor" exactly as the
+directive's own desired architecture states it.
+
+**Registry-aware timeline validation:** `validate_timeline_against_
+registry(requesting, composition, assets_by_id)` -- the layer D-277's
+own `validate_composition` structurally cannot perform (it only ever
+sees a `TimelineAssetReference`, never ownership or qualification
+state). Runs before a save/export: every referenced asset_id must
+exist, be owned by the same requesting scope, be READY, and (for a
+`USE_BROLL_AUDIO` B-roll placement) actually have audio -- the has-
+audio pre-validation belongs at timeline-save time, distinct from
+D-278's own graceful silent-fallback for an asset unexpectedly silent
+at execution time.
+
+**Asset delete vs. placement delete:** `is_asset_referenced` +
+`delete_timeline_asset(requesting, asset, referencing_compositions)`.
+An unreferenced asset deletes cleanly (marked DELETED, never removed
+from history); a referenced asset is blocked (`ASSET_REFERENCED`).
+Confirmed structurally that D-277's own `timeline_composition.py`
+never imports this module -- a placement-delete operation
+(`delete_broll`/`delete_voice_over`) only ever removes the one
+reference and never cascades into the asset library. `replace_broll`
+proven (by test) to leave the OLD asset's own record completely
+untouched in the library.
+
+**Voice-over re-record semantics:** `rerecord_voice_over_asset` always
+mints a NEW `asset_id` (rejects reuse of the same id), sets `replaces_
+asset_id` to the prior recording's id, and never mutates the previous
+asset's own bytes/record -- so a timeline revision that still names the
+OLD asset_id keeps resolving to the exact audio it was saved against.
+
+**Persistence + optimistic concurrency:** `TimelinePersistenceRecord`
+(frozen; `__post_init__` re-derives and cross-checks its own `timeline_
+revision_identity` against `tc.derive_revision_identity(composition)`,
+so a record can never carry a revision identity that disagrees with
+its own composition). `save_timeline_revision(ownership, composition,
+current_record, expected_revision_identity)`: validates via D-277's
+own `validate_composition` first (`TIMELINE_INVALID`), then -- only
+when a `current_record` already exists -- requires ownership agreement
+and an exact `expected_revision_identity` match before accepting the
+save, rejecting a stale write with `TIMELINE_REVISION_CONFLICT` rather
+than silently overwriting a concurrent edit. A brand-new timeline
+never conflicts. Reopen-roundtrip proven by test (save -> read back ->
+save again unchanged -> same revision identity).
+
+**Export reproducibility:** `resolve_timeline_export(requesting,
+record, expected_revision_identity)` refuses to resolve any revision
+other than the EXACT one the caller named, even if the project's
+persisted record has since moved on -- proven by test.
+
+**Client-safe response + listing:** `client_safe_asset_view` excludes
+`storage_reference` and `technical_metadata_reference` (proven by
+test); `list_project_assets` filters to the requesting scope's own,
+non-deleted assets by construction (cross-user AND cross-project
+isolation both fall out of the same equality check, never two separate
+mechanisms that could drift).
+
+**Client-duration / server-authority:** `reconcile_asset_duration`
+always returns the server-probed value regardless of what a client
+reports -- proven by test with a wildly mismatched client value.
+
+### Test evidence
+
+New `tests/test_cutsell_d279_timeline_asset_registry.py`, 53 tests, 0
+I/O, 0 ffmpeg -- pure-type/pure-function coverage of the ownership
+model, asset construction/projection, the secure resolver (valid/
+missing/deleted/wrong-user/wrong-project/not-ready/wrong-media-kind/
+has-audio-vs-no-audio for both `USE_BROLL_AUDIO` and `KEEP_PRIMARY_
+VOICE`/blank-path), registry-aware timeline validation (valid/missing/
+wrong-owner/not-ready/silent-asset-USE_BROLL_AUDIO), asset-delete vs.
+placement-delete (referenced-block/unreferenced-ok/missing/wrong-
+owner/replace-preserves-old-asset), voice-over re-record (new-identity/
+reject-same-id), persistence + optimistic concurrency (identity match/
+mismatch-rejected-at-construction/first-save-never-conflicts/invalid-
+composition-rejected/stale-revision-rejected/correct-revision-accepted/
+wrong-owner-rejected/reopen-roundtrip), export reproducibility (exact-
+match/stale-rejected/wrong-owner/missing-record), and 3 structural
+source-inspection checks (no forbidden imports, no I/O primitives,
+closed error vocabulary).
+
+### Verification run
+
+- New test file: **53 passed**, 0 failed (0.56s -- pure functions, no
+  ffmpeg).
+- `compileall` over `cutsell_worker/`, `tests/`, `scripts/`: clean.
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8333 passed, 10 skipped, 13 subtests passed, 0
+  failed** -- exactly D-278's own 8280-test baseline plus this gate's
+  53 new tests, confirming zero regression anywhere else in the suite.
+
+### Verdict
+
+**A -- V1 MANUAL TIMELINE ASSET INGEST/PERSISTENCE CONTRACT DEFINED --
+SECURE RESOLVER PROVEN AGAINST D-278'S OWN `ResolvedTimelineAsset` --
+READY FOR PERSISTENCE WIRING / MOBILE-ASSET-INTEGRATION LAYER.** Every
+named architectural link (MOBILE/API -> upload -> qualification ->
+TimelineAsset record -> timeline references asset_id -> secure
+resolver -> ResolvedTimelineAsset -> composition executor) now has a
+concrete, tested contract type or function at every seam except the
+literal upload/qualification I/O itself, which this gate deliberately
+never performs (Stage: pure types and pure functions only). Ownership
+is reused from D-269's own doctrine rather than reinvented; the ETag-
+is-never-SHA-256 doctrine is reused directly, not restated as new,
+unverified code.
+
+**Exact next gate:** a real persistence-wiring integration (Redis-
+backed `TimelineMediaAsset`/`TimelinePersistenceRecord` stores mirroring
+`project_store.py`'s own established pattern, real presigned-upload
+reuse from `uploads.py`, and FastAPI routes mirroring `multipart_
+routes.py`'s own translate-exception convention) OR the Faceless/
+Product visual-mode foundation D-278 already confirmed needs neither
+this nor any other manual-timeline component. Not implemented or
+authorized by this entry -- a Product Owner sequencing call.
+
+**Product Owner decision required:** YES -- which of the two named
+next-gate candidates (persistence wiring vs. Faceless/Product visual-
+mode foundation, or both in parallel) to authorize next; the mobile UI
+integration itself on `cutsell/mobile-v1-clean`/PR #25 comes only after
+whichever of those is chosen.
+
+**Decision entry reference:** this entry (D-279).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-280.
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT START CALIBRATION.
