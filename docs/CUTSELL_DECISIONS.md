@@ -73648,3 +73648,174 @@ Then STOP.
 DO NOT IMPLEMENT D-274E.
 DO NOT ACTIVATE LIVE AUTO-NORMALIZATION.
 DO NOT LAUNCH RAW.
+
+
+## D-274E — Output Format Technical QC (offline implementation + synthetic qualification)
+
+**Objective.** Post D-274D. D-274D completed EXECUTION support for every
+currently-defined D-274A normalization action. This gate builds the ONE
+canonical technical QC authority that answers, for any media artifact:
+"does this file actually match the required media contract?" -- for
+both a normalized source and a final render. Offline only: no RAW/
+Modal/RunPod/provider/paid compute, no live auto-normalization
+activation, no new normalization transform, no new codec support, no
+HDR policy change, no renderer/Pacing/Boundary/Freeze/Audio-Join/Audio-
+Finishing/Visual-Finishing/Delivery change.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `fcb57cf` (exact expected
+match, D-274D), clean tree -- confirmed before this gate began.
+
+### Stage 1-2 -- one QC owner, two contracts
+
+New module `cutsell_worker/output_format_qc.py`: the ONE place output-
+format verification logic lives. `ExpectedMediaFormatContract` (pure,
+immutable data -- no callables, structurally equal by field values) with
+two canonical instances: `NORMALIZED_SOURCE_CONTRACT_V1` (D-273/D-274A's
+own canon) and `FINAL_RENDER_OUTPUT_CONTRACT_V1` (audited from `render.
+py`'s own real ffmpeg commands, never invented). `verify_output_format`
+is the one entry point -- a pure function of an already-probed `Source
+MediaProfile` and a contract; it never calls ffprobe/ffmpeg itself, never
+mutates media (Stage 31/32, verified by AST-level source inspection in
+this gate's own tests).
+
+### Stage 4/23 -- FINAL_RENDER_OUTPUT_CONTRACT_V1, audited then proven
+
+`render.py`'s own real commands: `-c:v libx264` (H264), `-c:a aac -ar
+48000` with a stereo `anullsrc` fallback (AUDIO REQUIRED -- the fallback
+guarantees a stream even for a silent segment, unlike the normalized-
+source contract's own OPTIONAL policy), `RENDER_FPS_DEFAULT = 30`,
+`render_preview(width=1080, height=1920, ...)`. A real `render_preview`
+call in this gate's own qualification (never assumed) confirmed: pixel
+format is genuinely `yuv420p`/8-bit even from a `yuv444p` source
+(ffmpeg's own filter-to-encoder negotiation -- no explicit `-pix_fmt`
+flag exists in `render.py`), rotation metadata is always absent post-
+render, and the configured 1080x1920 canvas is exactly what the file
+reports.
+
+**A real, honestly-disclosed gap** (Stage 23): `render.py` writes NO
+explicit `-color_primaries`/`-color_trc`/`-colorspace`/`-color_range`
+output flags anywhere. The real D-271 profiler run against a real render
+reports `color_primaries=None, color_transfer=None, color_space=None,
+color_range=None, hdr_status=UNKNOWN`. `FINAL_RENDER_OUTPUT_CONTRACT_V1`
+still DECLARES the true canonical BT709/SDR requirement as REQUIRED
+(never softened to quietly match the current gap), so `verify_output_
+format` against the real render output honestly reports overall
+`PARTIAL` -- missing REQUIRED evidence (a tag that was never written),
+never a fabricated `PASS`, and correctly distinguished from a genuine
+contract VIOLATION (`FAIL`), which this gate's own negative fixtures
+(a still-PQ-tagged file, a wrong-primaries file) prove the same checks
+correctly do detect.
+
+### Stage 3/5-18 -- check vocabulary, requirement levels, status logic
+
+21 named checks (`CONTAINER` through `TIMELINE_START`); each contract
+declares its own `required_checks`/`optional_checks` partition rather
+than a single shared list (Stage 8) -- e.g. audio is REQUIRED for the
+final-render contract, OPTIONAL for the normalized-source contract
+(D-273's own "no mandatory source-layer audio normalization for V1").
+Overall status: `UNKNOWN` only on a genuine `PROBE_STATUS_FAILED` (a
+`PROBE_STATUS_PARTIAL` probe still carries real, checkable per-field
+evidence and is NOT treated as wholly unreliable -- caught and fixed
+within this same gate before this gate's own tests, using two real
+malformed fixtures, a WEBM saved with a `.mp4` name and an audio-only
+file, whose genuine probe status is `PARTIAL`, not `FAILED`); `FAIL`
+when any REQUIRED check reports a proven violation; `PARTIAL` when no
+REQUIRED check failed but at least one REQUIRED check's evidence was
+genuinely absent; `PASS` only when every REQUIRED check passed outright.
+
+### Stage 19/20/21 -- D-274D executor integration
+
+`source_normalization_executor.py`'s `execute_source_normalization` now
+ALSO consults `verify_output_format` against `NORMALIZED_SOURCE_
+CONTRACT_V1` after the mandatory D-271 re-probe/D-272 re-evaluation.
+Only a genuine format-QC `FAIL` (a proven violation) turns an otherwise-
+D-272-ACCEPTed normalization into `NORMALIZATION_VERIFICATION_FAILED`
+-- reusing the EXISTING outcome category (Stage 20's own "never invent a
+new one"). A format-QC `PARTIAL`/`UNKNOWN` (missing, not violated,
+evidence -- e.g. every rotation/VFR/timeline/HEVC-only normalization,
+which never had reason to write explicit BT709 color tags) does NOT
+retroactively fail an already-legitimate D-272 ACCEPT: this was a
+deliberate design decision, verified empirically before implementation
+(a real rotation-only normalized output was probed and found to
+correctly land at format-QC `PARTIAL`, never `FAIL`), specifically to
+avoid regressing every already-successful D-274B/C/D normalization path.
+No second normalization pass is ever triggered by a format-QC failure
+(`MAX_NORMALIZATION_ATTEMPTS` stays 1, unchanged, Stage 21).
+
+### Self-resolving guards
+
+None required -- this gate's own executor change is purely additive
+(a new diagnostics field plus a narrowing of `NORMALIZATION_SUCCEEDED`
+that, by design and by empirical proof, never fires on any already-
+legitimate case). All 366 D-266-through-D-274E targeted tests, run
+together, remained green without modification to any pre-existing test.
+
+### Verification run
+
+- New `tests/test_cutsell_d274e_output_format_qc.py`: **42 passed** --
+  QC owner/version/immutable contracts (4), positive normalized-source
+  fixtures including a real D-274D HDR-normalized output and a genuine
+  VFR-normalized output (3), 9 negative fixtures each failing the
+  correct named check (wrong container/codec/pixel-format/bit-depth/
+  HDR-remaining/wrong-primaries/multi-video-stream/missing-video/still-
+  VFR), partial-evidence behavior (3), audio policy (2), the real
+  `render_preview` final-render contract proof including the honest gap
+  (3), the D-274D executor integration including the forced-FAIL-after-
+  ACCEPT path and the one-pass-firewall interaction (4), path/filename
+  independence and no-filesystem-touch (3), security (2), an 8-file
+  closed-track firewall.
+- D-274B/C/C-A/D's own test files: re-verified green together with this
+  gate's own file, **366 passed, 0 failed**.
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- Full `tests/` suite, excluding the 3 documented pre-existing baseline
+  exceptions: **8122 passed, 10 skipped, 0 failed.**
+- `worker_job.py`, `render.py`, `post_render_media_qc.py`, `live_render_
+  qc.py`, `source_normalization_plan.py` confirmed untouched (closed-
+  track firewall + source-scan).
+
+### Canonical status update
+
+NORMALIZED-SOURCE FORMAT QC = CLOSED and now live-integrated into the
+D-274D executor's own success gate. FINAL-RENDER FORMAT QC = BUILT AND
+PROVEN AGAINST A REAL RENDER, but NOT wired into any live render/
+delivery call site (`live_render_qc.py`/`export_job.py` untouched --
+Stage 22's own "prefer build/prove first, activate later"). ONE real,
+disclosed final-render contract gap remains: `render.py` writes no
+explicit BT709 color-metadata output tags, so a real render today
+reports format-QC `PARTIAL` (not `PASS`) against `FINAL_RENDER_OUTPUT_
+CONTRACT_V1`. No renderer code was changed by this gate.
+
+### Verdict
+
+**B -- NORMALIZED-SOURCE FORMAT QC PROVEN -- ONE FINAL-RENDER FORMAT
+CONTRACT GAP REMAINS.** The normalized-source half of this gate's own
+objective is fully closed: `verify_output_format` against `NORMALIZED_
+SOURCE_CONTRACT_V1` is proven end-to-end (real positive fixtures
+including genuine D-274D HDR/VFR outputs, real negative fixtures each
+failing the correct check, real partial-evidence handling) and is now
+live-integrated into the D-274D executor's own success gate as an
+additive safety net. The final-render half is fully built and proven
+against a REAL `render_preview` output, but that real output does not
+reach `PASS` against the true canonical contract -- `render.py` never
+writes explicit color-metadata tags. This is not a QC-module defect
+(the module correctly, honestly reports `PARTIAL` on real missing
+evidence rather than fabricating `PASS`); it is a genuine renderer gap
+this gate's own explicit "NO RENDERER BEHAVIOR CHANGE" banner forbade
+fixing here.
+
+**Exact next gate:** D-274E-A -- Final Render Format Contract
+Remediation (add explicit `-color_primaries bt709 -color_trc bt709
+-colorspace bt709 -color_range tv` output flags to `render.py`, then
+re-verify `FINAL_RENDER_OUTPUT_CONTRACT_V1` reaches real `PASS`) -- not
+implemented, not decided by this entry; a Product Owner authorization
+call (a renderer behavior change).
+
+**Decision entry reference:** this entry (D-274E).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT GATE.
+DO NOT ACTIVATE LIVE AUTO-NORMALIZATION.
+DO NOT LAUNCH RAW.

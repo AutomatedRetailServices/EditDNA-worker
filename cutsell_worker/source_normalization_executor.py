@@ -46,6 +46,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import output_format_qc as ofq
 from . import production_runtime_capability as prc
 from . import source_format_policy as sfp
 from . import source_media_profile as smp
@@ -768,9 +769,37 @@ def execute_source_normalization(
 
     # --- Stage 18/19/21/35 -- verification -----------------------------------
     verification = snp.verify_normalized_source(normalized_profile, normalized_decision)
-    outcome = snp.verification_outcome(verification)
+    d272_outcome = snp.verification_outcome(verification)
+
+    # D-274E Stage 19/20 -- D-272 ACCEPT alone is no longer sufficient: the
+    # canonical output-format QC authority (`output_format_qc.py`, the ONE
+    # place format verification logic lives -- Stage 1) must ALSO be
+    # consulted against `NORMALIZED_SOURCE_CONTRACT_V1`. Only a genuine QC
+    # `FAIL` (a proven contract VIOLATION, e.g. remaining HDR, wrong pixel
+    # format, wrong container) turns an otherwise-ACCEPTed normalization
+    # into `NORMALIZATION_VERIFICATION_FAILED` -- reusing D-274A's own
+    # existing outcome category (Stage 20's own "never invent a new one").
+    # A QC `PARTIAL`/`UNKNOWN` (missing, not violated, evidence -- e.g. a
+    # rotation/VFR/timeline/HEVC-only normalization that never had reason
+    # to write explicit BT709 color tags) does NOT retroactively fail an
+    # otherwise-legitimate D-272 ACCEPT: D-272 remains the sole authority
+    # for what "normalization is complete" means; this is an ADDITIVE
+    # safety net for genuine violations, never a stricter re-litigation of
+    # every already-passing D-274B/C/D normalization path (Stage 21's own
+    # "no second normalization pass" implies this must never regress a
+    # today-successful case, only catch a real one D-272 itself missed).
+    format_qc_result = ofq.verify_output_format(normalized_profile, ofq.NORMALIZED_SOURCE_CONTRACT_V1)
+    diagnostics["format_qc_status"] = format_qc_result.status
+    diagnostics["format_qc_failed_checks"] = list(format_qc_result.failed_checks)
+    diagnostics["format_qc_unknown_checks"] = list(format_qc_result.unknown_checks)
+
+    if d272_outcome == snp.NORMALIZATION_SUCCEEDED and format_qc_result.status == ofq.STATUS_FAIL:
+        outcome = snp.NORMALIZATION_VERIFICATION_FAILED
+        diagnostics["execution_status"] = "FORMAT_QC_FAILED_AFTER_D272_ACCEPT"
+    else:
+        outcome = d272_outcome
+        diagnostics["execution_status"] = "SUCCESS" if outcome == snp.NORMALIZATION_SUCCEEDED else "VERIFICATION_FAILED"
     diagnostics["verification_status"] = outcome
-    diagnostics["execution_status"] = "SUCCESS" if outcome == snp.NORMALIZATION_SUCCEEDED else "VERIFICATION_FAILED"
 
     return NormalizationExecutionResult(
         outcome=outcome,
