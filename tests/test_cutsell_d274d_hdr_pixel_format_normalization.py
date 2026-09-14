@@ -449,14 +449,20 @@ def test_worker_runtime_capability_carries_tonemap_fields_through_establishment(
         wrc._reset_for_testing()
 
 
-def test_worker_job_untouched_by_this_gate():
-    """No live auto-normalization activation banner: worker_job.py must
-    carry zero new reference to the tonemap seam this gate builds."""
+def test_worker_job_now_legitimately_uses_tonemap_seam_via_d274f():
+    """No live auto-normalization activation banner: worker_job.py carried
+    zero reference to the tonemap seam this gate builds -- true at the
+    time. D-274F (a later, separately-authorized, Product-Owner-
+    authorized gate: "live auto-normalization activation") is exactly the
+    gate that legitimately calls `get_worker_tonemap_available()` (Stage
+    8's own "use real worker tonemap capability truth") before building a
+    normalization plan for a PQ/HLG source (docs/CUTSELL_DECISIONS.md
+    D-274F). Renamed + rewritten as a self-resolving guard rather than
+    left failing or silently deleted."""
     import inspect
     from cutsell_worker import worker_job
     source = inspect.getsource(worker_job)
-    assert "get_worker_tonemap_available" not in source
-    assert "bridge_to_tonemap_available" not in source
+    assert "get_worker_tonemap_available" in source
 
 
 # =============================================================================
@@ -514,16 +520,15 @@ def test_tonemap_filter_segment_has_no_user_controlled_interpolation():
 # =============================================================================
 
 @pytest.mark.parametrize("relative_path", [
-    # D-274E-A (a later, separately-authorized, Product-Owner-authorized
-    # gate: "final render color metadata remediation only") legitimately
-    # adds four canonical BT.709 output metadata flags to render.py's own
-    # encode commands -- self-resolving guard, same pattern this file's
-    # own worker_job.py entry documents below.
+    # D-274F (a later, separately-authorized, Product-Owner-authorized
+    # gate: "live auto-normalization activation") legitimately wires the
+    # real probe/policy/plan/executor/format-QC chain into `worker_job.py`
+    # itself -- self-resolving guard, removed from this list for that
+    # reason (docs/CUTSELL_DECISIONS.md D-274F has the full disclosure).
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     "cutsell_worker/source_normalization_plan.py",
     "cutsell_worker/render_delivery.py",
-    "cutsell_worker/worker_job.py",
     "rq_worker.py",
     "entrypoint.sh",
 ])

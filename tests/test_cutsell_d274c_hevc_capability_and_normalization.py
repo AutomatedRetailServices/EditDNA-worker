@@ -589,19 +589,22 @@ def test_timeout_seam_still_unset_by_default():
     assert exe.NORMALIZATION_FFMPEG_TIMEOUT_SEC is None
 
 
-def test_no_live_activation_worker_job_untouched():
-    """D-274C's own scope: worker_job.py is inspected, never modified, by
-    THIS gate -- confirmed via source-scan for any new normalization-
-    executor reference (D-274C-A, a later separately-authorized gate,
-    legitimately wires a capability-bridge reference into worker_job.py;
-    that gate's own test file re-asserts what IS authorized there -- this
-    assertion only ever concerned D-274C's own scope, never normalization
-    execution)."""
+def test_no_live_activation_worker_job_now_legitimately_wired_via_d274f():
+    """D-274C's own scope: worker_job.py was inspected, never modified, by
+    THIS gate -- true at the time (D-274C-A, a later separately-
+    authorized gate, legitimately wired a capability-bridge reference
+    into worker_job.py; that gate's own test file re-asserted what WAS
+    authorized there). D-274F (a still-later, separately-authorized,
+    Product-Owner-authorized gate: "live auto-normalization activation")
+    is exactly the gate that legitimately wires the normalization
+    EXECUTOR itself into worker_job.py (docs/CUTSELL_DECISIONS.md
+    D-274F). Renamed + rewritten as a self-resolving guard rather than
+    left failing or silently deleted."""
     import inspect
     from cutsell_worker import worker_job
     source = inspect.getsource(worker_job)
-    assert "source_normalization_executor" not in source
-    assert "execute_source_normalization" not in source
+    assert "source_normalization_executor" in source
+    assert "execute_source_normalization" in source
 
 
 def test_rq_worker_and_entrypoint_untouched():

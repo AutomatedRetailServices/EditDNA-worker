@@ -667,12 +667,17 @@ def test_diagnostics_never_carry_secrets(rendered_output_mp4):
     # gate: "final render color metadata remediation only") legitimately
     # adds four canonical BT.709 output metadata flags to render.py's own
     # encode commands -- self-resolving guard, same pattern as this
-    # file's own precedents elsewhere in the D-274 lineage.
+    # file's own precedents elsewhere in the D-274 lineage. D-274F (a
+    # later, separately-authorized, Product-Owner-authorized gate: "live
+    # auto-normalization activation") legitimately wires this module's
+    # own `verify_output_format`/`STATUS_PASS`/`NORMALIZED_SOURCE_
+    # CONTRACT_V1` into `worker_job.py` itself -- also removed below for
+    # that reason (docs/CUTSELL_DECISIONS.md D-274E-A and D-274F have the
+    # full disclosure).
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     "cutsell_worker/source_normalization_plan.py",
     "cutsell_worker/render_delivery.py",
-    "cutsell_worker/worker_job.py",
     "cutsell_worker/post_render_media_qc.py",
     "cutsell_worker/live_render_qc.py",
 ])
@@ -688,9 +693,17 @@ def test_closed_track_files_unmodified_by_this_gate(relative_path):
     assert result.stdout.strip() == "", f"{relative_path} was modified by D-274E: {result.stdout}"
 
 
-def test_worker_job_never_references_output_format_qc():
+def test_worker_job_now_legitimately_references_output_format_qc_via_d274f():
+    """D-274E's own original assertion here documented that THIS gate
+    never wired `output_format_qc` into `worker_job.py` -- true at the
+    time. D-274F (a later, separately-authorized, Product-Owner-
+    authorized gate: "live auto-normalization activation") is exactly the
+    gate that legitimately does so, requiring real `STATUS_PASS` from
+    `verify_output_format` before ever substituting a normalized source
+    path (docs/CUTSELL_DECISIONS.md D-274F). Renamed + rewritten as a
+    self-resolving guard rather than left failing or silently deleted."""
     import inspect
     from cutsell_worker import worker_job
     source = inspect.getsource(worker_job)
-    assert "output_format_qc" not in source
-    assert "verify_output_format" not in source
+    assert "output_format_qc" in source
+    assert "STATUS_PASS" in source

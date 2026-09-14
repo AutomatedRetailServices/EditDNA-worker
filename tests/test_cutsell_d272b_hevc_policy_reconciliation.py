@@ -351,9 +351,17 @@ def test_11b_hevc_live_gate_established_normalize_required(wired_worker_job, hev
     """D-274C-A's own live proof, end-to-end through the REAL `run_flow_b_
     job`: once capability establishment genuinely succeeds (simulated
     here at the test level, mirroring this whole session's own established
-    'structural proof' pattern), a real HEVC source now correctly blocks
-    with NORMALIZE_REQUIRED/VIDEO_REQUIRES_NORMALIZATION -- still NEVER
-    reaching `process_local_sources` (no live auto-normalization)."""
+    'structural proof' pattern), a real HEVC source's NORMALIZE_REQUIRED
+    decision is unchanged -- still NEVER bypassing to `process_local_
+    sources`. D-274F (a later, separately-authorized, Product-Owner-
+    authorized gate: "live auto-normalization activation") legitimately
+    changes what happens NEXT: this gate's own resolution seam now
+    attempts normalization (plan executable, since capability is
+    established) -- but `run_flow_b_job` never overrides the still-absent
+    canonical normalization timeout, so the executor's own timeout seam
+    is what ultimately blocks the job, with the NEW `VIDEO_NORMALIZATION_
+    TIMEOUT_POLICY_REQUIRED` code. Renamed assertion updated as a self-
+    resolving guard (docs/CUTSELL_DECISIONS.md D-274F)."""
     from cutsell_worker import production_runtime_capability as prc
     from cutsell_worker import worker_runtime_capability as wrc
     established = prc.ProductionRuntimeCapability(
@@ -366,15 +374,20 @@ def test_11b_hevc_live_gate_established_normalize_required(wired_worker_job, hev
         worker_job.run_flow_b_job(_payload(hevc_mp4))
     assert wired_worker_job["process_local_sources"] == 0
     assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
-    assert excinfo.value.primary_error_code == "VIDEO_REQUIRES_NORMALIZATION"
+    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
 
 
 @pytestmark_ffmpeg
 def test_11b_hevc_live_gate_structural_proof_with_confirmed_capability(monkeypatch, wired_worker_job, hevc_mp4):
     """Stage 7's own structural claim: IF a real capability source were
     wired into the live gate (simulated here, not today's default),
-    confirmed HEVC blocks as NORMALIZE_REQUIRED before process_local_
-    sources, never bypassing to ACCEPT."""
+    confirmed HEVC's NORMALIZE_REQUIRED decision is unchanged, never
+    bypassing to ACCEPT. D-274F (a later, separately-authorized, Product-
+    Owner-authorized gate: "live auto-normalization activation")
+    legitimately changes what happens NEXT -- see this file's own
+    `test_11b_hevc_live_gate_established_normalize_required` above for
+    the full explanation; same self-resolving-guard update applied here
+    (docs/CUTSELL_DECISIONS.md D-274F)."""
     real_policy = worker_job.evaluate_source_format_policy
 
     def _confirmed(profile, **kwargs):
@@ -386,7 +399,7 @@ def test_11b_hevc_live_gate_structural_proof_with_confirmed_capability(monkeypat
         worker_job.run_flow_b_job(_payload(hevc_mp4))
     assert wired_worker_job["process_local_sources"] == 0
     assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
-    assert excinfo.value.primary_error_code == sfp.USER_FACING_VIDEO_REQUIRES_NORMALIZATION
+    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
 
 
 # ---------------------------------------------------------------------------

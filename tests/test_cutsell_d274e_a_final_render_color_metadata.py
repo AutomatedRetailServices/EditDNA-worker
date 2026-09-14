@@ -357,11 +357,15 @@ def test_output_bytes_differ_from_pre_remediation_shape_but_identity_does_not(sd
 # =============================================================================
 
 @pytest.mark.parametrize("relative_path", [
+    # D-274F (a later, separately-authorized, Product-Owner-authorized
+    # gate: "live auto-normalization activation") legitimately wires the
+    # real probe/policy/plan/executor/format-QC chain into `worker_job.py`
+    # itself -- self-resolving guard, removed from this list for that
+    # reason (docs/CUTSELL_DECISIONS.md D-274F has the full disclosure).
     "cutsell_worker/source_normalization_executor.py",
     "cutsell_worker/source_normalization_plan.py",
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
-    "cutsell_worker/worker_job.py",
     "cutsell_worker/output_format_qc.py",
     "cutsell_worker/live_render_qc.py",
     "cutsell_worker/render_delivery.py",

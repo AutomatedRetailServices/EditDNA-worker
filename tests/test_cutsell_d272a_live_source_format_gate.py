@@ -472,7 +472,21 @@ def test_mkv_container_live_reject_blocks_before_downstream(wired_worker_job, mk
 
 
 @pytestmark_ffmpeg
-def test_rotation_live_normalize_required_blocks_before_downstream(wired_worker_job, monkeypatch, h264_mp4):
+def test_rotation_live_normalize_required_now_attempts_normalization_then_blocks_on_timeout_policy(wired_worker_job, monkeypatch, h264_mp4):
+    """D-272A's own original assertion here documented the PRE-D-274F
+    terminal state: NORMALIZE_REQUIRED blocked immediately with
+    `VIDEO_REQUIRES_NORMALIZATION`, no normalization attempt. D-274F (a
+    later, separately-authorized, Product-Owner-authorized gate: "live
+    auto-normalization activation") legitimately changes this: the source
+    now enters `resolve_sources_for_editorial_entry`'s own NORMALIZE_
+    REQUIRED branch, builds a plan, and attempts normalization -- but
+    since `run_flow_b_job` (the real production call site) never
+    overrides the still-absent canonical normalization timeout (Stage
+    10), the executor's own timeout seam is what ultimately blocks this
+    job, with the NEW `VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED`
+    code -- never bypassing to `process_local_sources` either way.
+    Renamed + rewritten as a self-resolving guard rather than left
+    failing or silently deleted (docs/CUTSELL_DECISIONS.md D-274F)."""
     # A real, valid fixture so the pre-existing, unrelated `probe_media`
     # call earlier in the loop succeeds -- only D-271's own probe is
     # replaced with a parser-controlled rotated profile (Stage 15: proves
@@ -481,7 +495,8 @@ def test_rotation_live_normalize_required_blocks_before_downstream(wired_worker_
     with pytest.raises(worker_job.SourceFormatGateBlocked) as excinfo:
         worker_job.run_flow_b_job(_payload(uri=h264_mp4))
     assert wired_worker_job["process_local_sources"] == 0
-    assert excinfo.value.primary_error_code == sfp.USER_FACING_VIDEO_REQUIRES_NORMALIZATION
+    assert excinfo.value.blocked_sources[0]["decision"] == sfp.DECISION_NORMALIZE_REQUIRED
+    assert excinfo.value.primary_error_code == worker_job.USER_FACING_VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED
 
 
 @pytestmark_ffmpeg
@@ -556,9 +571,19 @@ def test_worker_job_source_never_mutated_by_gate(monkeypatch, tmp_path):
 
 
 def test_worker_job_source_no_transcode_normalization_language():
+    """D-274F (a later, separately-authorized, Product-Owner-authorized
+    gate: "live auto-normalization activation") legitimately calls the
+    already-existing `worker_runtime_capability.get_worker_tonemap_
+    available()` CAPABILITY CHECK from `worker_job.py` -- narrowed the
+    banned `"tonemap"` substring to the actual ffmpeg FILTER-invocation
+    form `"tonemap="` (e.g. `tonemap=hable`, as it genuinely appears in
+    `source_normalization_executor.py`'s own filter chain), which still
+    never appears in `worker_job.py` and still catches a real accidental
+    filter-string duplication -- self-resolving guard, docs/CUTSELL_
+    DECISIONS.md D-274F has the full disclosure."""
     source = _source_without_docstrings("cutsell_worker/worker_job.py")
     for banned in ("ffmpeg.input(", "-vf", '"-c:v"', "scale=", "pad=", "hflip", "vflip",
-                   "tonemap", "let ffmpeg try"):
+                   "tonemap=", "let ffmpeg try"):
         assert banned not in source
 
 

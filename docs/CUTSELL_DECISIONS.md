@@ -74035,3 +74035,256 @@ Then STOP.
 DO NOT IMPLEMENT D-274F.
 DO NOT ACTIVATE LIVE AUTO-NORMALIZATION.
 DO NOT LAUNCH RAW.
+
+
+
+## D-274F — Live Auto-Normalization Activation
+
+**Objective.** Post D-274E-A. Product-Owner-authorized: activate
+`NORMALIZE_REQUIRED -> AUTO-NORMALIZE -> VERIFY -> CONTINUE` at the real
+Flow-B job entry point (`worker_job.py::run_flow_b_job`), reusing D-271
+(probe), D-272 (policy), D-274A (plan), D-274B/C/D (executor), and D-274E
+(format QC) exactly as they stand -- no new normalization capability, no
+new codec support, no new HDR/color/format-QC policy, no retry loop, no
+renderer behavior change.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `b971666` (exact expected
+match, D-274E-A), clean tree -- confirmed before this gate began.
+
+### Stage 1-20 -- the live resolution seam
+
+New `worker_job.resolve_sources_for_editorial_entry()`: for every
+already-downloaded local source, probes (D-271), evaluates policy
+(D-272), and then:
+
+- **ACCEPT** -> original path, zero normalization calls (byte-identical
+  to pre-D-274F behavior).
+- **NORMALIZE_REQUIRED** -> builds a D-274A plan (real runtime/tonemap
+  capability evidence via `worker_runtime_capability.get_worker_runtime_
+  capability_input()` / `get_worker_tonemap_available()`), and -- only if
+  the plan is executable -- calls the D-274B/C/D executor EXACTLY once
+  (`attempt_count=0`, no retry). The executor's own mandatory D-271
+  re-probe + D-272 re-evaluation + D-274E format-QC run internally
+  (unchanged); this gate's own resolution seam ADDITIONALLY requires the
+  format QC to reach real `STATUS_PASS` (stricter than the executor's own
+  internal success gate, which treats a non-`FAIL` result as sufficient
+  so it never regresses a pre-D-274F rotation/VFR-only success path) --
+  only then is the normalized path substituted into the job's own
+  `local_paths`, which every downstream consumer (ASR, attempts/retries,
+  BestTake, P1/P2, Boundary, Pacing, render, and the existing timeline-
+  asset/filmstrip/waveform generation) then sees exclusively (no mixed
+  timeline).
+- **REJECT / INSUFFICIENT_EVIDENCE** -> never attempts normalization;
+  blocks the whole job exactly as before D-274F.
+
+Source order and every source's own key are preserved unconditionally;
+no source is ever silently dropped. `evaluate_source_format_gate`'s own
+pre-existing return shape is byte-identical (proven by direct equality
+test) -- the new `resolve_sources_for_editorial_entry` is a strict
+superset, not a replacement, of that pre-existing behavior.
+
+### Stage 10/41 -- the timeout policy seam (the one genuine open gap)
+
+Re-audited the full repository: NO canonical normalization/media-
+operation timeout has been added anywhere since D-274B's own original
+audit (`sne.NORMALIZATION_FFMPEG_TIMEOUT_SEC` is still `None`; the only
+post-D-274B timeout reference anywhere is the renderer's own unrelated
+1200s constant, never reused here). Per Stage 10's own explicit
+instruction, no number was invented: `run_flow_b_job` (the real
+production call site) calls `resolve_sources_for_editorial_entry` WITHOUT
+ever passing `normalization_timeout_sec` (confirmed by source-inspection
+test), so every real NORMALIZE_REQUIRED source in production today
+resolves to the executor's own pre-existing `PRODUCT_OWNER_NORMALIZATION_
+TIMEOUT_REQUIRED` seam, mapped to a new, bounded user-facing code:
+`VIDEO_NORMALIZATION_TIMEOUT_POLICY_REQUIRED`. Test code (never
+production code) injects a small, disclosed, bounded override
+(`normalization_timeout_sec=30.0`) to prove the entire remaining chain
+end-to-end -- exactly Stage 41's own explicit instruction.
+
+### Stage 18 -- user-facing error mapping
+
+Four new, bounded, all-caps codes added alongside D-272's own existing
+`RUNTIME_CODEC_SUPPORT_UNVERIFIED` (reused directly, never re-declared):
+`VIDEO_NORMALIZATION_FAILED`, `VIDEO_NORMALIZATION_UNSUPPORTED`,
+`VIDEO_NORMALIZATION_VERIFICATION_FAILED`, `VIDEO_NORMALIZATION_TIMEOUT_
+POLICY_REQUIRED`. A successful auto-normalization carries no user-facing
+error at all. `_normalization_user_facing_error_code()` maps every
+plan/executor terminal state to exactly one of these, never inventing
+polished copy.
+
+### Stages 24-32 -- real local live proofs
+
+With a bounded test timeout override, each of the following was proven
+end-to-end through the REAL resolution seam (and, for the H264-ACCEPT
+and one NORMALIZE_REQUIRED case, through the REAL `run_flow_b_job` itself
+with every non-format collaborator mocked, mirroring D-272A's own `wired_
+worker_job` pattern):
+
+- H264 SDR ACCEPT (zero normalization calls, real and via `run_flow_b_
+  job`), no-audio ACCEPT.
+- Rotation (Stage 25's own disclosed evidence level: parser-controlled
+  rotation profile, since this sandbox's ffmpeg build cannot attach a
+  readable rotation tag -- the SAME limitation D-271's own `test_
+  rotation_fixture_generation_not_available_locally` already documented;
+  real ffmpeg rotate + real re-probe + real format QC afterward).
+- Genuine VFR (concat-demuxer two-rate fixture), genuine non-zero
+  timeline offset (composed with a parser-controlled rotation trigger,
+  since D-274A's own Stage 25 scope makes `timeline_action` ADDITIVE
+  only -- never independently promoting an ACCEPT source; a timeline-
+  offset-only source is genuine `ACCEPT` under D-272, exactly as
+  designed).
+- Genuine HEVC (real libx265 fixture, simulated ESTABLISHED worker
+  capability) -> H264 output.
+- Genuine PQ and HLG (real 10-bit HDR-tagged fixtures, simulated
+  ESTABLISHED tonemap capability) -> SDR BT.709 output.
+- Genuine 10-bit SDR -> 8-bit yuv420p output.
+- A realistic composed case (rotation + VFR together) -> exactly ONE
+  normalization generation (one executor call, proven via a call-
+  counting spy).
+
+Every one of these reached real `STATUS_PASS` against `NORMALIZED_
+SOURCE_CONTRACT_V1`.
+
+### Stages 9/33-40 -- blocked-before-executor + no-provider-on-failure
+
+Dolby Vision and HDR_OTHER never reach the executor (zero ffmpeg calls,
+proven via a call-counting spy) -- remain fail-closed exactly as D-274A's
+own plan builder already enforces. HEVC-capability-unverified and
+tonemap-capability-unavailable sources are correctly blocked BEFORE the
+executor (the former resolves to `INSUFFICIENT_EVIDENCE` at the POLICY
+layer itself, never even reaching a plan). A normalization subprocess
+failure, a still-blocked post-normalization D-272 re-evaluation, and a
+format-QC result that is not `PASS` (even when the executor's own
+internal outcome is `NORMALIZATION_SUCCEEDED`, e.g. a genuine `PARTIAL`)
+all correctly block the whole job -- never a fallback to the original
+source, never a second attempt (`MAX_NORMALIZATION_ATTEMPTS == 1`, and a
+dedicated spy proves the executor is called at most once per source no
+matter how many times it fails).
+
+### Stage 38's own disclosed, honest fail-closed property
+
+`NORMALIZED_SOURCE_CONTRACT_V1` marks HDR/color-metadata checks
+`REQUIRED`; a rotation/VFR/timeline/HEVC/10-bit-only normalization never
+writes NEW color tags of its own (by design, D-274D Stage 8's own "do not
+mislabel non-HDR outputs") -- it only PRESERVES whatever tags the source
+already carried. Empirically confirmed both ways: a source built with
+realistic BT.709/SDR tags (mirroring what virtually every real phone/
+camera-shot video already carries natively) correctly reaches format-QC
+`PASS` after such a normalization; a source genuinely built with NO color
+tags at all correctly reaches `PARTIAL` (missing evidence, not a
+violation) and is therefore correctly BLOCKED by this gate's own strict
+PASS-only AND-requirement -- a deliberate, disclosed, conservative
+fail-closed property (`test_untagged_source_conservatively_blocks_not_a_
+false_pass`), never a defect this gate is authorized to relax.
+
+### Multi-source, ordering, diagnostics, cleanup
+
+Multi-source jobs resolve each source independently and deterministically
+(all-ACCEPT, one-normalizes-one-ACCEPT with source order/keys preserved,
+one-hard-reject-blocks-the-whole-job) -- proven with two sources sharing
+one underlying fixture path, resolved to different outcomes by call
+order. New, additive `source_normalization_diagnostics` job-result field
+(never a filesystem path, ffmpeg command, or credential -- proven via a
+JSON-serialization scan) carries the exact Stage 16 fields (original
+policy decision, normalization-required flag, plan identity, plan
+actions, normalization outcome, normalized SHA, reprobe status,
+re-evaluated D-272 decision, format QC status, resolved source kind).
+The pre-existing `source_format_diagnostics` field is untouched (proven
+by direct equality against `evaluate_source_format_gate`'s own
+unmodified output). The job's own existing `tempfile.TemporaryDirectory`
+is reused as the normalization output directory (no new publication
+mechanism, no S3 upload, no global cache) -- proven to be fully removed,
+normalized artifact included, once the job's `with` block exits.
+
+### Regression firewall, self-resolving guards
+
+`worker_job.py` source-inspected: never re-implements a filtergraph
+string, a codec flag, or a direct `subprocess` call of its own (D-271/
+D-272/D-274A/executor/D-274E remain the sole authorities). Thirteen
+pre-existing production files this gate touches nothing in
+(`render.py`, `media_overlay_render.py`, `render_delivery.py`,
+`live_render_qc.py`, `post_render_media_qc.py`, `source_normalization_
+executor.py`, `source_normalization_plan.py`, `source_format_policy.py`,
+`source_media_profile.py`, `output_format_qc.py`, `worker_runtime_
+capability.py`, `production_runtime_capability.py`, `flow_b.py`) are all
+confirmed byte-identical to HEAD.
+
+This gate IS the first legitimately authorized to modify `worker_job.py`
+itself, so nine older gates' own closed-track firewall tests that
+predate this activation needed updating -- all via the established
+self-resolving-guard pattern (rename + rewrite with a docstring citing
+D-274F, never left failing or silently deleted): three fixed-SHA
+parametrize-list entries removed (D-274D `a37f4ae`, D-274E-A `de3bb99`,
+D-274E `de3bb99`); three "worker_job.py never imports/references X"
+assertions flipped to "now legitimately does" (D-274C-A's normalization-
+executor reference, D-274C's own re-assertion of the same, D-274D's
+tonemap-seam reference, D-274E's own `output_format_qc` reference); two
+genuine pre-D-274F behavioral assertions (D-272A's and D-272B's own
+"NORMALIZE_REQUIRED blocks immediately with `VIDEO_REQUIRES_
+NORMALIZATION`") rewritten to assert the new, honest terminal state
+(still blocks, still never reaches `process_local_sources`, now via the
+timeout-policy code); and one narrow substring collision fixed (D-272A's
+own banned-token list included the bare word `"tonemap"`, which
+incidentally matches the legitimate capability-check identifier
+`get_worker_tonemap_available` -- narrowed to the actual ffmpeg filter-
+invocation form `"tonemap="`, which still never appears in `worker_job.
+py` and still catches a real accidental filter-string duplication).
+
+### Verification run
+
+- New `tests/test_cutsell_d274f_live_auto_normalization_activation.py`:
+  **62 passed** -- ACCEPT paths (2), REJECT/INSUFFICIENT never-normalize
+  (3), timeout-policy escalation (3), all successful live paths (8, one
+  parametrized x2 for PQ/HLG), blocked-before-executor (4), executor-
+  failure/strict-PASS-AND states (4), one-pass/no-retry (2), multi-source
+  (4), downstream-substitution/no-mixed-timeline/cleanup (3),
+  diagnostics-safety (3), format-QC-authority (1), source-inspection/
+  regression-firewall (5), and four real end-to-end `run_flow_b_job`
+  proofs (ACCEPT, REJECT, timeout-blocked, and a full normalized-path-
+  reaches-downstream success).
+- D-272/D-274/D-266/D-267/D-269/D-271 targeted cluster (including all
+  nine updated self-resolving-guard files): **958 passed, 0 failed**.
+- Render/finishing/Pacing/Boundary/Freeze/Audio-Join/delivery/
+  clean_worker/universal_clean_cut/live_render_qc cluster: **2652
+  passed, 10 skipped, 13 subtests passed, 0 failed.**
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8207 passed, 10 skipped, 13 subtests passed, 0
+  failed** (460.05s).
+
+### Canonical status update
+
+LIVE AUTO-NORMALIZATION = IMPLEMENTED BUT NOT PRODUCT-ACTIVATED: every
+piece of the chain (probe -> policy -> plan -> executor -> re-probe ->
+re-evaluate -> format QC -> substitution) is real, live-wired, and proven
+end-to-end against real synthetic media through the actual production
+call site; the ONE remaining gap before a real NORMALIZE_REQUIRED upload
+genuinely completes in production is the canonical normalization timeout
+numeric policy, which does not exist anywhere in this repository and
+this gate is explicitly forbidden from inventing.
+
+### Verdict
+
+**B -- LIVE AUTO-NORMALIZATION INTEGRATION PROVEN -- NORMALIZATION
+TIMEOUT NUMERIC POLICY REQUIRES PRODUCT OWNER DECISION.** Every stage of
+the live wiring (Stages 1-9, 11-40) is implemented, tested, and proven
+correct with zero new normalization capability, zero new codec/HDR/
+color/format-QC policy, zero editorial-pipeline change, zero regression
+across 8207 offline tests. Stage 10/41's own honest gap remains exactly
+where D-274B originally left it: no canonical normalization timeout
+exists, and this gate does not invent one.
+
+**Exact next gate:** D-274F-A -- Activate Canonical Normalization
+Timeout -- not implemented, not decided by this entry; a Product Owner
+authorization call (a concrete numeric value for `sne.NORMALIZATION_
+FFMPEG_TIMEOUT_SEC`, or an equivalent policy source `run_flow_b_job`
+would pass through).
+
+**Decision entry reference:** this entry (D-274F).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT GATE.
+DO NOT LAUNCH RAW.

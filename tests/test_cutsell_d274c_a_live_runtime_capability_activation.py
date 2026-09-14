@@ -261,11 +261,18 @@ def test_normalize_required_still_raises_source_format_gate_blocked():
     assert blocked  # still blocks -- never silently continues to executor
 
 
-def test_worker_job_never_imports_normalization_executor():
+def test_worker_job_now_legitimately_imports_normalization_executor_via_d274f():
+    """This gate's own original assertion documented that D-274C-A never
+    wired `source_normalization_executor` into `worker_job.py` -- true at
+    the time. D-274F (a later, separately-authorized, Product-Owner-
+    authorized gate: "live auto-normalization activation") is exactly the
+    gate that legitimately does so (docs/CUTSELL_DECISIONS.md D-274F).
+    Renamed + rewritten as a self-resolving guard rather than left
+    failing or silently deleted."""
     import inspect
     source = inspect.getsource(worker_job)
-    assert "source_normalization_executor" not in source
-    assert "execute_source_normalization" not in source
+    assert "source_normalization_executor" in source
+    assert "execute_source_normalization" in source
 
 
 # =============================================================================
