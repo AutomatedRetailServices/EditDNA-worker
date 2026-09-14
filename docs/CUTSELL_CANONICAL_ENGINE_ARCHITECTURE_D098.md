@@ -3267,3 +3267,258 @@ No renderer behavior changed. No media mutated. No QC PASS/FAIL authority
 changed. No threshold beyond the six values above was introduced. See
 `docs/CUTSELL_DECISIONS.md` D-249 for the full policy-state vocabulary,
 plan contract, and test evidence.
+
+
+---
+
+## 19. Canonical Product Scope Expansion — Faceless/Product/Hands/Demo
+A-Roll + V1 Manual Timeline / Voice-Over (D-276)
+
+Product-Owner-authorized canonical scope update. **Documentation only —
+no code in this repository changed as a result of this section.**
+Restates and extends Section 1's core product doctrine and Section
+15.2's consolidated foundations; invalidates nothing already closed
+(Section 17.1's FREEZE TRACK, D-275/D-275R/D-275R2's media-diversity
+closure, or any other EXISTING classification anywhere in this
+document).
+
+### 19.0 One-sentence summary
+
+> CutSell's base product is an **AI UGC editor**, not an editor of
+> talking-head footage only — it must correctly handle talking-head,
+> faceless-product, hands/product, and demo/action primary footage —
+> and its V1/Beta scope explicitly includes a creator-assisted manual
+> timeline (B-roll insertion, audio-source control, in-app voice-over),
+> while AI-automatic B-roll intelligence and advanced product/hands/demo
+> understanding are named, deferred, POST-LAUNCH capabilities.
+
+### 19.1 Canonical Update #1 — A-Roll is not synonymous with "face visible"
+
+**A-roll canonical definition:** the primary visual material belonging
+to the spoken/editorial take — never defined by whether a face is
+present.
+
+Four valid V1/V1.x primary visual forms, all canonically A-roll:
+
+| Form | Description |
+|---|---|
+| `TALKING_HEAD_A_ROLL` | creator visible speaking to camera |
+| `FACELESS_PRODUCT_A_ROLL` | creator voice is primary speech; visual shows product/hands/demonstration |
+| `PRODUCT_HANDS_A_ROLL` | hands interact with product while creator speaks |
+| `DEMO_ACTION_A_ROLL` | primary footage demonstrates product use/action |
+
+A face is **not required** for valid primary footage. Face evidence
+remains important for talking-head clips specifically; visual evidence
+becomes scene-type-dependent, not universally face-dependent.
+
+**Critical architectural consequence (binding, forward-looking):**
+`FACE_NOT_DETECTED` must never inherently mean `BAD_CLIP` /
+`INVALID_A_ROLL` / `LOW_QUALITY_TAKE` once a future visual-mode
+classifier exists. No code in this repository currently makes that
+inference either way — this is a constraint on FUTURE classifier/
+BestTake/Visual-Finishing design, recorded now so it is never built
+backwards.
+
+**Primary visual vs. B-roll (binding distinction):** product/hands/demo
+footage recorded as the creator's own complete take is
+`FACELESS PRIMARY A-ROLL`, not B-roll, merely because a product or a
+pair of hands (rather than a face) is on screen. The engine must never
+infer `product visible => B-roll`. B-roll remains its own canonical
+concept: supplemental visual footage used to COVER or ENHANCE a
+primary spoken/editorial sequence (see 19.2 below) — a separate
+timeline role, not a visual-content heuristic.
+
+### 19.2 Future visual-mode / scene taxonomy (named, not implemented)
+
+Canonical visual modes should eventually support concepts equivalent
+to: `TALKING_HEAD`, `TALKING_HEAD_WITH_PRODUCT`, `PRODUCT_HANDS`,
+`PRODUCT_ONLY`, `DEMO_ACTION`, `ENVIRONMENT`/`SUPPORTING_VISUAL`,
+`OTHER`/`UNKNOWN`. Names may be refined later. **No classifier is
+implemented by this gate or authorized by this section.**
+
+### 19.3 BestTake consequence (restates D-107 Section 9's priority
+order and D-148 Section 13.10's BestTake role — unmodified, no code
+change)
+
+BestTake's existing framework (Section 9, Section 13.10) is preserved
+in full. Visual evidence it eventually consumes becomes mode-aware,
+not replaced:
+
+- Talking-head evidence may include: face, gaze, framing, headroom,
+  speech fluency.
+- Faceless/product/demo evidence may include: speech fluency, product
+  visibility, hands/action visibility, camera stability, action
+  clarity, visual continuity, spoken-content relevance.
+
+**No BestTake code changes in D-276.**
+
+### 19.4 Visual Finishing consequence (extends the Visual Finishing
+contract referenced at Section 15/D-264 without modifying its current
+`before/after_visual_finishing.mp4` measurement-only implementation)
+
+Future Visual Finishing must separate `FACE_SAFETY` from
+`PRODUCT`/`HANDS`/`DEMO SAFETY`. For faceless footage, future relevant
+evidence includes: product bounding box, hand bounding box, product
+containment, product size, product center, edge clipping, demo-action
+visibility, crop safety, zoom safety. Face-centric measurements must
+never be required for faceless visual modes. **No detector (object,
+hand, or otherwise) is added by this gate.**
+
+### 19.5 Canonical Update #2 — V1 manual timeline / B-roll / voice-over
+
+CutSell's V1/Beta product scope includes a creator-assisted finishing
+timeline: after the AI edit is produced, the creator can manually
+refine it. Twelve canonical V1 timeline capabilities:
+
+1. **Manual B-roll insertion** — add an uploaded clip over a chosen
+   region of the main edit.
+2. **Move B-roll** — reposition the clip in the timeline.
+3. **Trim B-roll** — change in/out duration.
+4. **Replace B-roll** — swap the clip without rebuilding the edit.
+5. **Delete B-roll** — remove it.
+6. **Keep original A-roll voice** — when B-roll visually covers A-roll,
+   the original A-roll spoken audio may continue underneath (a
+   canonical audio/visual layering behavior).
+7. **Mute B-roll clip audio** — show the visual, silence its own audio.
+8. **Use B-roll clip audio** — intentionally use the clip's own audio.
+9. **Record Voice Over** — record new microphone audio directly inside
+   CutSell against a timeline region/clip.
+10. **Voice-over timeline layer** — recorded voice-over becomes an
+    explicit audio-layer asset.
+11. **Voice-over editability** — at minimum, future UI should support
+    trim / move / replace-delete / re-record.
+12. **Export composition** — final export may combine A-roll visual,
+    B-roll visual overlay/replacement, original A-roll voice, clip
+    source audio, recorded voice-over, and captions, according to
+    timeline state.
+
+**Canonical audio layer model** (concept only, no mixing policy
+implemented): `ORIGINAL_PRIMARY_VOICE`, `BROLL_SOURCE_AUDIO`,
+`RECORDED_VOICE_OVER`, `MUSIC`/optional future audio,
+`CAPTION_TRANSCRIPT_SOURCE`.
+
+**Worked example (both canonical V1 behaviors):**
+A-roll: *"I'm obsessed with this vacuum because look at what it does to
+dog hair."* B-roll: a tripod clip of the creator's feet vacuuming
+carpet.
+- Option A — talking head (0-3s, original voice) -> vacuum demo (3-7s,
+  **original talking-head voice continues underneath**) -> talking
+  head returns (7-10s).
+- Option B — talking head (0-3s) -> vacuum demo (3-7s, **B-roll muted**,
+  new recorded voice-over: *"Look at how much it gets in one pass."*)
+  -> talking head returns (7-10s).
+
+**Multiple-clips role model** (concept only, no role-assignment code):
+a V1 upload/edit session may include primary RAW/talking-head footage
+plus multiple product/demo/B-roll clips; these do not all enter the
+engine with identical semantic roles. Future systems must distinguish
+`PRIMARY_SOURCE`, `SUPPLEMENTAL_BROLL`, `MANUAL_TIMELINE_ASSET`, and
+`VOICE_OVER_ASSET`. **No role-assignment implementation in D-276.**
+
+### 19.6 V1/Beta vs. Post-Launch split (binding classification)
+
+**V1/Beta required:** manual B-roll insertion/move/trim/replace/delete;
+keep original A-roll voice under B-roll; mute B-roll audio; use B-roll
+source audio; record voice-over in-app; voice-over timeline layer;
+export composed timeline; faceless/product/hands/demo footage must not
+be rejected merely because no face exists.
+
+**Post-launch (named, explicitly deferred, must never block V1/Beta
+launch):** AI B-roll suggestions; AI B-roll auto-placement; advanced
+product/hands/demo understanding (automatic phrase<->clip semantic
+matching, automatic A-roll/B-roll/A-roll timing decisions, advanced
+action or product-proof understanding).
+
+**Smart Sales Funnel relationship** (restates Section 15.12/17.2's
+premium-layer positioning, unmodified): remains a future/premium
+intelligence layer inside the main UGC editor; may eventually combine
+commercial-beat understanding + product/hands/demo understanding +
+B-roll relevance for intelligent placement, but AI auto-B-roll is
+explicitly **not** a V1/Beta blocker — manual timeline control comes
+first.
+
+**Narration-led future assembly preserved** (restates the previously
+established future capability, unmodified): a creator providing
+narration plus footage, with CutSell later adapting/selecting/
+arranging footage around that narration, remains a distinct, more
+advanced future capability. V1 timeline voice-over does **not**
+require full automatic narration-led assembly.
+
+### 19.7 Current engine preservation (binding — nothing below is
+invalidated by this section)
+
+RAW understanding, retry/correction understanding, BestTake, P1, P2,
+Ordering, Freeze, Boundary, Pacing, Audio Join, Audio Finishing, Visual
+Finishing, Renderer, Media Diversity, Delivery — all remain valid,
+unmodified architecture. This section adds new accepted visual modes
+and creator-assisted timeline composition; it discards nothing.
+
+### 19.8 Calibration / 100-200 RAW / Human Gold implications (binding
+constraints on FUTURE gates, not authorizations)
+
+- **Calibration implication:** this canonical update must land before
+  Calibration/Stabilization, because the future corpus must not
+  represent only talking-head footage. A future calibration corpus
+  should include a deliberate mixture of talking head; talking head +
+  product; faceless product; hands + product; demo/action; talking
+  head + separate B-roll; and mixed talking-head/faceless sequences.
+  Exact percentages are explicitly NOT set by this gate.
+- **100-200 RAW implication:** the planned 100-200 new RAW sessions
+  should include English and Spanish plus visual-mode diversity, drawn
+  from mixed real UGC sessions — not a separately manufactured
+  "faceless dataset."
+- **Human Gold implication:** future Human Gold evaluation must also
+  ask whether a useful faceless demo was retained, whether product
+  framing/cropping was correct, whether primary demo footage was
+  mistaken for B-roll, whether the correct voice layer was preserved,
+  and whether coherent product-action footage was selected — new
+  benchmark dimensions, not implemented by this gate.
+
+### 19.9 Mobile lane / branch doctrine (binding, restates CLAUDE.md's
+own repository-protection rules)
+
+`cutsell/mobile-v1-clean` / PR #25 remain a separate workstream; D-276
+implements no UI and touches neither that branch nor `main`. Canonical
+mobile/product scope now includes future V1 controls for: add B-roll,
+timeline layering, audio-source choice, record voice-over, and
+trim/move/replace/delete — a scope statement only, not an
+implementation. Engine/media work continues on
+`feature/runpod-pod-on-demand`; mobile/UI work continues on
+`cutsell/mobile-v1-clean`; `main` remains the future controlled
+integration branch. No branch was merged by this gate.
+
+### 19.10 Media-diversity real-phone status (restates D-275/D-275R/
+D-275R2, unmodified)
+
+Full 18/18 confirmed-iPhone corpus profiled (D-275R2). Real evidence
+READY: H264 SDR, HEVC SDR, VFR, portrait. No systemic media defect
+found at any point across D-275/D-275R/D-275R2. No real corpus evidence
+for rotation metadata, HDR, 10-bit, landscape, or true 4K — a targeted
+pre-Beta real-device evidence checklist (one real iPhone HDR recording,
+one real iPhone landscape/rotation-oriented recording, optionally one
+real 4K recording), not an implementation defect. This checklist does
+not block D-276 and is not resolved by it.
+
+### 19.11 Recommended next implementation sequence (a recommendation
+only — NOT an authorization for any of the following)
+
+A. V1 manual timeline architecture/design.
+B. Manual B-roll + layered audio/voice-over implementation.
+C. Faceless/Product visual-mode foundation sufficient for V1 safety
+   (i.e., enough of Section 19.2/19.4's taxonomy and evidence model to
+   stop conflating "no face" with "bad clip," without yet building the
+   full future classifier/detector stack).
+D. Then Calibration/Stabilization, with the mixed-footage corpus named
+   in 19.8.
+
+AI automatic B-roll intelligence remains post-launch throughout this
+sequence. This section does not launch any of A-D.
+
+### 19.12 Confirmation: documentation only
+
+No production code, test, workflow, or mobile/UI file changed by this
+section. No renderer, BestTake, Visual Finishing, object/hand
+detector, or classifier was added or modified. No branch was merged.
+No RAW was launched. No Calibration was started. See
+`docs/CUTSELL_DECISIONS.md` D-276 for the decision-log entry and
+verdict.

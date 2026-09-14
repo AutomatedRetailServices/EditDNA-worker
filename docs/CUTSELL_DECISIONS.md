@@ -75067,3 +75067,100 @@ Then STOP.
 
 DO NOT IMPLEMENT D-276.
 DO NOT START CALIBRATION.
+
+
+## D-276 — Canonical Product-Scope Update: Faceless/Product/Hands/Demo
+A-Roll + V1 Manual B-Roll/Timeline Voice-Over
+
+**Objective.** Post D-275R2. Documentation / canonical-architecture
+gate only — Product Owner authorized two pending product-scope
+decisions for canonical inclusion: (1) A-roll is not synonymous with
+"face visible" (faceless/product/hands/demo primary footage is a
+canonical V1/V1.x visual form); (2) V1/Beta scope includes a
+creator-assisted manual timeline (B-roll insertion/edit, audio-source
+control, in-app voice-over). AI-automatic B-roll intelligence and
+advanced product/hands/demo understanding are explicitly named
+POST-LAUNCH, never a V1/Beta blocker.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `e57af73` (exact expected
+match, D-275R2), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-275R2 re-read.
+
+### What changed
+
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` gained a new
+Section 19 ("Canonical Product Scope Expansion -- Faceless/Product/
+Hands/Demo A-Roll + V1 Manual Timeline / Voice-Over (D-276)"),
+following the document's own established restate-and-extend,
+EXISTING/PARTIAL/MISSING-classification, confirmation-only pattern
+(matching Sections 11/12/16/18's own precedent). It records, in full:
+the canonical A-roll definition and its four valid visual forms; the
+binding "FACE_NOT_DETECTED != BAD_CLIP" architectural consequence for
+any FUTURE classifier; the primary-visual-vs-B-roll distinction; the
+named (not implemented) future visual-mode taxonomy; the BestTake and
+Visual Finishing consequences (both explicitly "no code change"); the
+12 canonical V1 timeline capabilities and the canonical audio layer
+model; the worked example; the multiple-clips role model; the explicit
+V1-required vs. post-launch split; the Smart Sales Funnel relationship;
+the narration-led future-assembly preservation; a restated list of
+everything the current engine keeps unmodified; the Calibration/100-
+200-RAW/Human-Gold implications (as constraints on FUTURE gates, not
+authorizations); the mobile-lane/branch doctrine restatement; a
+restatement of D-275R2's own real-iPhone media-diversity status; a
+recommended (not authorized) next implementation sequence A-D; and a
+final "documentation only" confirmation.
+
+This is the ONLY file this gate changed. No production code, test,
+workflow, or mobile/UI file was touched. `cutsell/mobile-v1-clean` and
+`main` were not touched or merged.
+
+### Section-by-section discipline check
+
+- Section 1 (core product doctrine): not edited; Section 19 restates
+  and extends it without contradiction (Section 1 never said
+  "talking-head only").
+- Section 9/13.10 (BestTake): not edited; Section 19.3 explicitly
+  states "No BestTake code changes in D-276."
+- Visual Finishing (D-264, referenced at Section 15): not edited;
+  Section 19.4 explicitly states no detector was added.
+- Section 17.1 (FREEZE TRACK = CLOSED): unaffected, not referenced for
+  modification.
+- D-275/D-275R/D-275R2 media-diversity status: restated verbatim in
+  Section 19.10, not altered.
+- CLAUDE.md's repository-protection rules (no `main` write, no PR #25
+  touch): restated in Section 19.9, both honored (neither touched).
+
+### Verdict
+
+**A -- CANONICAL PRODUCT SCOPE UPDATED -- FACELESS/PRODUCT/HANDS/DEMO
+A-ROLL OFFICIALLY INCLUDED -- V1 MANUAL B-ROLL + TIMELINE VOICE OVER
+OFFICIALLY INCLUDED -- AI B-ROLL AUTOMATION EXPLICITLY POST-LAUNCH --
+READY FOR NEXT V1 PRODUCT/ENGINE IMPLEMENTATION GATES.** No conflict
+with existing canonical architecture was found; no redesign is
+required to accommodate this scope (the existing pipeline's Selection/
+BestTake/Boundary/Renderer authorities are additive-extensible, per
+Section 19.3/19.4/19.7's own restated invariants).
+
+**Exact recommended next gate sequence** (per Section 19.11, a
+recommendation only, not an authorization): (A) V1 manual timeline
+architecture/design, (B) manual B-roll + layered audio/voice-over
+implementation, (C) faceless/product visual-mode foundation sufficient
+for V1 safety, (D) then Calibration/Stabilization with the mixed
+visual-mode corpus D-276 names. AI automatic B-roll intelligence
+remains post-launch throughout.
+
+**Product Owner decision required:** YES -- which of A-D (if any) to
+authorize next, and on what timeline relative to the D-275R2 targeted
+real-device recording checklist.
+
+**Decision entry reference:** this entry (D-276).
+
+Then STOP.
+
+DO NOT IMPLEMENT NEXT GATE.
+DO NOT START CALIBRATION.
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT TOUCH main.
