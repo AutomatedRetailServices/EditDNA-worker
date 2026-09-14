@@ -8,6 +8,27 @@ from typing import Iterable
 from .contracts import MediaOverlay, TextOverlay
 from .media_probe import probe_media
 
+# D-274E-A: canonical BT.709 SDR output color-metadata tags -- METADATA
+# ONLY, no pixel/color transformation, no filter added. `render.py`'s
+# final renderer already receives canonical SDR media from the D-274D
+# source-normalization executor; this module's own real-render-audited
+# encode commands (`build_final_overlay_command` here, and `render.py`'s
+# own concat commands, which import this same tuple to avoid a second,
+# independently-drifting copy) simply now EXPLICITLY TAG their already-
+# correct output as what it already is -- closing the D-274E-disclosed
+# gap (docs/CUTSELL_DECISIONS.md D-274E/D-274E-A) where `verify_output_
+# format` against `FINAL_RENDER_OUTPUT_CONTRACT_V1` reported `PARTIAL`
+# (missing evidence) rather than `PASS`, because no encode command
+# anywhere in this render family wrote these tags. Defined here (the
+# module `render.py` already imports FROM) rather than in `render.py`
+# itself, to avoid a circular import.
+CANONICAL_OUTPUT_COLOR_METADATA_FLAGS: tuple[str, ...] = (
+    "-color_primaries", "bt709",
+    "-color_trc", "bt709",
+    "-colorspace", "bt709",
+    "-color_range", "tv",
+)
+
 
 @dataclass(frozen=True)
 class LocalMediaOverlay:
@@ -125,6 +146,7 @@ def build_final_overlay_command(
         "-map", final_video,
         "-map", final_audio,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        *CANONICAL_OUTPUT_COLOR_METADATA_FLAGS,
         "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart",
         "-shortest",

@@ -514,7 +514,11 @@ def test_tonemap_filter_segment_has_no_user_controlled_interpolation():
 # =============================================================================
 
 @pytest.mark.parametrize("relative_path", [
-    "cutsell_worker/render.py",
+    # D-274E-A (a later, separately-authorized, Product-Owner-authorized
+    # gate: "final render color metadata remediation only") legitimately
+    # adds four canonical BT.709 output metadata flags to render.py's own
+    # encode commands -- self-resolving guard, same pattern this file's
+    # own worker_job.py entry documents below.
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     "cutsell_worker/source_normalization_plan.py",

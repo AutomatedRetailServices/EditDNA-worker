@@ -303,7 +303,12 @@ def test_underlying_probe_never_uses_shell():
 # =============================================================================
 
 @pytest.mark.parametrize("relative_path", [
-    "cutsell_worker/render.py",
+    # D-274E-A (a later, separately-authorized, Product-Owner-authorized
+    # gate: "final render color metadata remediation only") legitimately
+    # adds four canonical BT.709 output metadata flags to render.py's own
+    # encode commands -- self-resolving guard, same pattern this file's
+    # own D-274D-vs-source_normalization_executor.py precedent below
+    # already established.
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     # D-274D legitimately modifies cutsell_worker/source_normalization_

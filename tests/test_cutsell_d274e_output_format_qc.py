@@ -494,20 +494,31 @@ def test_real_render_output_matches_video_geometry_codec_fps(rendered_output_mp4
         assert check in result.passed_checks, f"{check} unexpectedly not passed: {result.warnings}"
 
 
-def test_real_render_output_honestly_reports_color_metadata_gap(rendered_output_mp4):
-    """Stage 23: the ACTUAL, current, undisclosed-workaround result --
-    render.py writes no explicit color tags, so this is PARTIAL (missing
-    evidence), never a fabricated PASS, and never silently softened to
-    match the gap."""
+def test_real_render_output_color_metadata_gap_now_closed(rendered_output_mp4):
+    """D-274E-A (a later, separately-authorized, Product-Owner-authorized
+    gate: "final render color metadata remediation only") closed the
+    exact gap this test originally documented -- self-resolving guard,
+    same pattern as this file's own D-274C/D-274D precedents. `render.py`
+    now writes explicit BT.709 output color-metadata flags on every live
+    encode path, so a real render genuinely reaches D-271-probed `HDR_
+    STATUS_SDR`/`bt709` tags and `verify_output_format` correctly, non-
+    fabricated-ly reaches real `PASS` -- see docs/CUTSELL_DECISIONS.md
+    D-274E-A for the full disclosure. This test's own original intent
+    ("never fabricate PASS from missing evidence, never silently soften
+    the contract") remains proven by `test_final_render_contract_still_
+    declares_the_true_requirement` below and by D-274E-A's own dedicated
+    negative-fixture tests (test_cutsell_d274e_a_final_render_color_
+    metadata.py)."""
     profile = smp.probe_source_media_profile(rendered_output_mp4)
-    assert profile.color_primaries is None
-    assert profile.hdr_status == smp.HDR_STATUS_UNKNOWN
+    assert profile.color_primaries == "bt709"
+    assert profile.hdr_status == smp.HDR_STATUS_SDR
     result = ofq.verify_output_format(profile, ofq.FINAL_RENDER_OUTPUT_CONTRACT_V1)
-    assert result.status == ofq.STATUS_PARTIAL
+    assert result.status == ofq.STATUS_PASS, result.warnings
     for check in (ofq.CHECK_HDR_STATUS, ofq.CHECK_COLOR_PRIMARIES, ofq.CHECK_COLOR_TRANSFER,
                   ofq.CHECK_COLOR_SPACE, ofq.CHECK_COLOR_RANGE):
-        assert check in result.unknown_checks
+        assert check in result.passed_checks
     assert result.failed_checks == ()
+    assert result.unknown_checks == ()
 
 
 def test_final_render_contract_still_declares_the_true_requirement():
@@ -652,7 +663,11 @@ def test_diagnostics_never_carry_secrets(rendered_output_mp4):
 # =============================================================================
 
 @pytest.mark.parametrize("relative_path", [
-    "cutsell_worker/render.py",
+    # D-274E-A (a later, separately-authorized, Product-Owner-authorized
+    # gate: "final render color metadata remediation only") legitimately
+    # adds four canonical BT.709 output metadata flags to render.py's own
+    # encode commands -- self-resolving guard, same pattern as this
+    # file's own precedents elsewhere in the D-274 lineage.
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     "cutsell_worker/source_normalization_plan.py",

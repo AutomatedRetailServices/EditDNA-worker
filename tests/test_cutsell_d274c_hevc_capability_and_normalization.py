@@ -621,7 +621,11 @@ def test_rq_worker_and_entrypoint_untouched():
 # =============================================================================
 
 @pytest.mark.parametrize("relative_path", [
-    "cutsell_worker/render.py",
+    # D-274E-A (a later, separately-authorized, Product-Owner-authorized
+    # gate: "final render color metadata remediation only") legitimately
+    # adds four canonical BT.709 output metadata flags to render.py's own
+    # encode commands -- self-resolving guard, same pattern as this
+    # file's own D-274C-A-vs-worker_job.py precedent immediately below.
     # D-274C-A (a later, separately-authorized gate) legitimately wires
     # worker_job.py's own evaluate_source_format_gate to a real capability
     # bridge -- self-resolving guard, same pattern as D-272B's own

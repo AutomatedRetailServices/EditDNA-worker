@@ -73819,3 +73819,219 @@ Then STOP.
 DO NOT IMPLEMENT NEXT GATE.
 DO NOT ACTIVATE LIVE AUTO-NORMALIZATION.
 DO NOT LAUNCH RAW.
+
+
+## D-274E-A — Final Render Format Contract Remediation (metadata only)
+
+**Objective.** Post D-274E. Product-Owner-authorized: final render color
+metadata remediation only. Makes the final rendered CutSell video
+explicitly advertise the canonical SDR BT.709 color contract without
+changing any pixel/color transformation, codec, preset, CRF, pixel
+format, fps, resolution, audio, or filtergraph semantics.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `de3bb99` (exact expected
+match, D-274E), clean tree -- confirmed before this gate began.
+
+### Stage 1 -- final render owner audit
+
+Two, and only two, LIVE production final-encode ffmpeg command paths
+reachable from `render_preview()` (`render.py`'s own module docstring
+explicitly confirms "Production's only two live modes remain HARD_CUT/
+TIGHT_CUT via the existing, completely unmodified `render_preview`/
+`_concat_render_command`"):
+1. `render.py::_concat_render_command()` -- the joined/final encode when
+   no overlays exist, or the intermediate "joined" file otherwise.
+2. `media_overlay_render.py::build_final_overlay_command()` -- the
+   FINAL encode when text/media overlays exist (a second ffmpeg pass on
+   top of the joined video).
+
+Two additional `-c:v libx264` sites exist in the same module but are
+NOT live: `render.py::_segment_command()` (defined but never called by
+any production code -- only referenced directly by tests, dead/legacy)
+and `render.py::_concat_render_command_with_audio_windows()` (D-214's
+own explicit docstring: "NOT live-wired... nothing in this section is
+imported or called by `render_preview`, `universal_clean_cut.py`,
+`pipeline.py`, or any other production call site"). `render_audio_join_
+treatment_preview` produces an audio-only stream (no video codec at
+all) and is out of scope entirely. Per "do not fix only one path if
+another can emit final delivery media," the two dormant sites were
+ALSO given the identical additive flags for consistency (zero risk,
+purely additive), even though they do not currently emit final delivery
+media.
+
+### Stage 2/3/4/5/8 -- the smallest metadata addition, firewalled
+
+New `media_overlay_render.CANONICAL_OUTPUT_COLOR_METADATA_FLAGS`
+constant: `-color_primaries bt709 -color_trc bt709 -colorspace bt709
+-color_range tv`. Defined in `media_overlay_render.py` (the module
+`render.py` already imports FROM, avoiding a circular import) and
+imported into `render.py`. Applied at exactly the four `-c:v libx264`
+sites named above, immediately after each site's own existing
+`-c:v/-preset/-crf` triplet. No filter (`zscale`/`tonemap`/`colorspace`/
+LUT/gamma), no codec/preset/CRF/pix_fmt/fps change, no filtergraph
+string touched -- confirmed both by direct diff inspection (the full
+`git diff` for this gate touches only the two new import lines, the one
+new constant definition, and four `*CANONICAL_OUTPUT_COLOR_METADATA_
+FLAGS,` insertions) and by a dedicated test that greps the actual diff
+for any removed filtergraph/codec token.
+
+### Stage 9/10 -- real local render proof, the main closure criterion
+
+A real local synthetic SDR H264 source through the ACTUAL
+`render_preview()` (both the no-overlay and the caption-overlay live
+paths) now genuinely carries all four tags, re-probed with the real
+D-271 profiler:
+
+```
+video_codec=H264, pixel_format=yuv420p, bit_depth=8, effective_fps=30.0,
+vfr_status=CFR, hdr_status=SDR,
+color_primaries=bt709, color_transfer=bt709, color_space=bt709, color_range=tv
+```
+
+`verify_output_format(profile, FINAL_RENDER_OUTPUT_CONTRACT_V1)` now
+reaches **real `PASS`** (17/17 checks passed, zero failed, zero
+unknown) -- the exact closure criterion this gate's own directive named
+as the main success condition, proven identically for both live encode
+paths (plain concat and the caption-overlay compositor pass), a
+multi-segment render, an `audio_volume`-adjusted segment, and a
+video-only source relying on the renderer's own `anullsrc` silent-audio
+fallback.
+
+### Stage 11/12 -- normalized-source contract unchanged, no false PASS
+
+`NORMALIZED_SOURCE_CONTRACT_V1`'s own field values are unchanged
+(confirmed by exact equality assertion). A fixture matching every other
+final-render fact (1080x1920, 30fps, H264/yuv420p/8-bit, stereo AAC)
+but carrying no color metadata at all still correctly lands at
+`PARTIAL` (not a false `PASS`) -- this gate made the real renderer emit
+real evidence, it never relaxed a required check. Four dedicated
+negative fixtures (wrong primaries/transfer/matrix/range, each holding
+the other three correct) each fail exactly and only their own named
+check.
+
+### Stage 13 -- HDR firewall
+
+A genuinely PQ-tagged 10-bit source fed directly into the renderer
+(bypassing normalization) still comes out the other end reporting
+`bt709` on the OUTPUT tags -- ffmpeg's own explicit output tagging
+always wins over whatever the input carried. This is disclosed
+explicitly as a METADATA TAG, never a claim of real tone-mapping (D-274D
+remains the sole authority for genuine PQ/HLG-to-SDR pixel
+transformation); this gate never reinterprets a bypassed-normalization
+input as correctly color-corrected.
+
+### Stage 14/15 -- render identity, output SHA
+
+`render_delivery.RENDER_CONTRACT_VERSION` stays `1` -- that module's own
+binding docstring scopes a version bump to "which fields feed RENDER_
+IDENTITY, or how"; this gate adds zero new `compute_render_identity`
+inputs (only output ENCODER metadata flags), so no bump is warranted,
+confirmed by direct inspection and by a test proving two otherwise-
+identical `compute_render_identity` calls still mint the identical
+identity. Output bytes naturally differ from any pre-remediation render
+of the same plan (expected, Stage 15) -- this module never asserts
+byte-for-byte reproducibility across code changes, only the SEMANTIC
+`render_identity`.
+
+### Stage 18 -- command safety unaffected
+
+`render_preview`'s own atomic temp->final promotion (`_finalize_render_
+output`), `shell=False`, and the 1200s `RENDER_FFMPEG_TIMEOUT_SEC`/
+`RENDER_FPS_DEFAULT=30` constants are all untouched -- confirmed by
+source inspection and by the full D-266/D-266A/D-267 regression suite
+passing unmodified.
+
+### Self-resolving guards
+
+Three older gates' own fixed-SHA closed-track firewall parametrize
+lists (`test_cutsell_d274c_a_live_runtime_capability_activation.py`
+base `13d80b8`, `test_cutsell_d274c_hevc_capability_and_normalization.
+py` base `e8f71c6`, `test_cutsell_d274d_hdr_pixel_format_normalization.
+py` base `a37f4ae`) and this session's own `test_cutsell_d274e_output_
+format_qc.py` (base `de3bb99`) all included `cutsell_worker/render.py`
+in their own "unrelated authority, byte-for-byte unchanged" lists --
+each updated to remove that entry with an explanatory comment, since
+D-274E-A is a later, separately-authorized, Product-Owner-authorized
+gate with legitimate business touching that file. `test_cutsell_d274e_
+output_format_qc.py`'s own `test_real_render_output_honestly_reports_
+color_metadata_gap` documented the EXACT gap this gate closes -- renamed
+to `test_real_render_output_color_metadata_gap_now_closed` and rewritten
+to assert real `PASS` (the gap's own closure), preserving the original
+test's "never fabricate PASS, never silently soften the contract" intent
+via the surviving `test_final_render_contract_still_declares_the_true_
+requirement` and this gate's own dedicated negative-fixture tests.
+
+Several OTHER pre-existing closed-track tests referencing `render.py`
+(in `test_cutsell_d267_render_delivery_contract.py`, `test_cutsell_
+d269_tenant_safe_remote_delivery.py`, `test_cutsell_d269a_live_tenant_
+safe_delivery.py`, `test_cutsell_d271_source_media_profile.py`,
+`test_cutsell_d272_source_format_policy.py`, `test_cutsell_d272a_live_
+source_format_gate.py`, `test_cutsell_d272b_hevc_policy_reconciliation.
+py`, `test_cutsell_d274a_source_normalization_plan.py`) use `git diff
+--stat HEAD` (the CURRENT commit, not a fixed historical SHA) as their
+own diff mechanism -- these are transient "no stray uncommitted change"
+checks that self-resolve automatically once this gate's own change is
+committed (HEAD then already includes it, so the working-tree diff
+against HEAD is empty again); confirmed by re-running the full affected
+cluster post-commit, all green, with zero test-file changes needed for
+these.
+
+### Verification run
+
+- New `tests/test_cutsell_d274e_a_final_render_color_metadata.py`: **30
+  passed** -- owner/constant audit (2), real local render proof across
+  6 render shapes (plain, caption-overlay, audio-volume, video-only-
+  with-synthesized-silence, multi-segment) all reaching real PASS (6),
+  normalized-source-contract-unchanged + no-false-PASS + 4 negative
+  color-tag fixtures (6), HDR firewall (1), render identity/version
+  audit (2), command safety (2), output-SHA documentation (1), 9-file
+  closed-track firewall (9), filtergraph/codec diff-inspection (1).
+- Pre-existing D-267/D-269/D-269A/D-271/D-272/D-272A/D-272B/D-274A/
+  D-274B/D-274C/D-274C-A/D-274D/D-274E test files: self-resolving guard
+  updates as listed above -- re-verified green together post-commit,
+  **816 passed, 0 failed**.
+- Full render/finishing/Pacing/delivery regression cluster (clean_
+  worker audio/caption/export/overlays, D-094.3, D-097.2/4/C, D-214,
+  D-215, D-233, D-252, D-253, D-262, D-263, D-266, D-266A, D-267, live_
+  render_qc, universal_clean_cut_validation_live_render_qc): **542
+  passed, 1 skipped, 0 failed.**
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): result appended below once the final run completes.
+
+### Canonical status update
+
+NORMALIZED-SOURCE FORMAT QC = CLOSED (unchanged from D-274E).
+FINAL-OUTPUT FORMAT QC = CLOSED at the offline/technical-QC level: a
+real render through the real, only-two, live encode paths now reaches
+real `PASS` against `FINAL_RENDER_OUTPUT_CONTRACT_V1`. MEDIA-DIVERSITY
+FORMAT CONTRACT = CLOSED at the offline/technical-QC level. Remaining
+before live media normalization: LIVE AUTO-NORMALIZATION ACTIVATION
+(D-274F) and REAL-PHONE QUALIFICATION -- neither implemented nor
+decided by this entry.
+
+### Verdict
+
+**A -- FINAL RENDER BT709 FORMAT CONTRACT REMEDIATED -- NORMALIZED-
+SOURCE + FINAL-OUTPUT FORMAT QC BOTH PASS -- READY FOR LIVE AUTO-
+NORMALIZATION ACTIVATION.** Both contracts this D-274 lineage was built
+to close (`NORMALIZED_SOURCE_CONTRACT_V1`, proven since D-274E, and
+`FINAL_RENDER_OUTPUT_CONTRACT_V1`, proven by this gate) now reach real
+`PASS` against real, local, synthetic fixtures through the actual
+production code paths, with zero pixel/color transformation, zero
+codec/CRF/preset/pix_fmt/fps/resolution/audio/filtergraph change, and
+zero live auto-normalization activation.
+
+**Exact next gate:** D-274F -- Live Auto-Normalization Activation -- not
+implemented, not decided by this entry; a Product Owner authorization
+call.
+
+**Decision entry reference:** this entry (D-274E-A).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-274F.
+DO NOT ACTIVATE LIVE AUTO-NORMALIZATION.
+DO NOT LAUNCH RAW.

@@ -16,6 +16,7 @@ import uuid
 
 from .contracts import TextOverlay
 from .media_overlay_render import (
+    CANONICAL_OUTPUT_COLOR_METADATA_FLAGS,
     LocalMediaOverlay,
     build_final_overlay_command,
     write_text_overlay_ass as _write_text_overlay_ass,
@@ -456,6 +457,7 @@ def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str
     common_video = [
         "-vf", video_filter,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        *CANONICAL_OUTPUT_COLOR_METADATA_FLAGS,
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
         "-movflags", "+faststart",
     ]
@@ -598,6 +600,7 @@ def _concat_render_command(
         "-filter_complex", ";".join(filters),
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        *CANONICAL_OUTPUT_COLOR_METADATA_FLAGS,
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
         "-movflags", "+faststart",
         str(output),
@@ -932,6 +935,7 @@ def _concat_render_command_with_audio_windows(
         "-filter_complex", ";".join(video_filters + audio_filters),
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        *CANONICAL_OUTPUT_COLOR_METADATA_FLAGS,
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
         "-movflags", "+faststart",
         str(output),
