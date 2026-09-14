@@ -74897,3 +74897,173 @@ Then STOP.
 DO NOT IMPLEMENT D-276.
 DO NOT START CALIBRATION.
 DO NOT LAUNCH 100-200 RAW BENCHMARK.
+
+
+## D-275R2 — Remaining Real iPhone Corpus Evidence Sweep
+
+**Objective.** Post D-275R (Verdict B, 3 open evidence gaps: rotation-
+metadata, VFR, HDR). Before requesting new device recordings, profile
+the 14 previously-unsampled real-iPhone corpus objects and run the
+same live D-274F chain on any genuinely new format-diversity evidence
+found. Discovery first; never a duplicate expensive run on an
+already-proven property.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `5eb2aa7` (exact expected
+match, D-275R), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-275R re-read.
+
+### Stage 1 -- complete 18-object manifest
+
+| object | size | sampled in D-275R? | this gate | qualification status |
+|---|---|---|---|---|
+| VIDEO-2026-07-30-09-18-03.mp4 (Video00) | 38.7 MB | YES | -- | ACCEPT (H264 SDR), render QC PASS |
+| copy_9E4975E5-...MP4 | 68.7 MB | YES | -- | NORMALIZED (HEVC SDR), QC PASS, render QC PASS |
+| copy_0C08368A-...MOV | 103 MB | YES | -- | NORMALIZED (HEVC SDR), QC PASS |
+| copy_767E1C78-...MOV | 26.6 MB | YES | -- | NORMALIZED (HEVC SDR), QC PASS |
+| 5E01F214-...MP4 (Human Gold QA-oracle) | 220 MB | no | profiled only | H264 SDR, 576x1024, CFR -- excluded from qualification (QA-ONLY) |
+| D40F1D43-...MP4 (Cut.ai QA-oracle) | 260 MB | no | profiled only | H264 SDR, 576x1024, CFR -- excluded from qualification (QA-ONLY) |
+| VIDEO-2026-07-30-09-21-35.mp4 | 22.4 MB | no | **profiled + fully qualified** | **NORMALIZE_REQUIRED (VFR) -> NORMALIZED -> ACCEPT, format QC PASS, render QC PASS** |
+| VIDEO-2026-07-30-09-24-13.mp4 | 26.7 MB | no | profiled only | LIKELY_VFR, H264 SDR (same family as the qualified VFR sample -- not re-qualified, per Stage 4's "no duplicate expensive runs") |
+| VIDEO-2026-07-30-10-22-46.mp4 | 5.7 MB | no | profiled only | LIKELY_VFR, H264 SDR (same reason) |
+| copy_0A524783-...MOV | 37.5 MB | no | profiled only | HEVC SDR, 720x1280, CFR -- already-proven property |
+| copy_2E76C007-...MP4 | 57.5 MB | no | profiled only | HEVC SDR, 720x1280, CFR -- already-proven property |
+| copy_3EC2186B-...MP4 | 44.0 MB | no | profiled only | HEVC SDR, 720x1280, CFR -- already-proven property |
+| copy_69D72849-...MOV | 93.3 MB | no | profiled only | HEVC SDR, 896x1920, CFR -- ties the prior 1920px max, not exceeded |
+| copy_7053BB2F-...MOV | 31.3 MB | no | profiled only | HEVC SDR, 720x1280, CFR -- already-proven property |
+| copy_7A0721D7-...MOV | 27.9 MB | no | profiled only | HEVC SDR, 720x1280, CFR -- already-proven property |
+| copy_82A297CA-...MOV | 31.6 MB | no | profiled only | HEVC SDR, 720x1280, CFR -- already-proven property |
+| copy_CFB5F467-...MP4 | 44.2 MB | no | profiled only | HEVC SDR, 720x1280, CFR -- already-proven property |
+| v12044gd0000...MP4 (unconfirmed provenance) | 11.9 MB | no | profiled only | H264 SDR, 576x1024, CFR -- excluded from qualification pending provenance |
+
+All 18 objects in the corpus are now profiled (100% coverage, up from
+4/18 after D-275R).
+
+### Stage 2/3 -- profiling result + format-diversity search
+
+Real, unfabricated ffprobe measurement of all 14 remaining objects
+(new `cutsell-d275r2-remaining-corpus-sweep.yml` +
+`scripts/d275r2_corpus_sweep.py`, run ids 34834797093 (profiling) and
+34835147636 (fixed qualification run)): **3 real LIKELY_VFR samples
+found** (the three `VIDEO-timestamp` siblings of Video00 itself --
+Video00's own family, ironically, since Video00 itself measured CFR).
+Zero rotation-metadata, zero HDR, zero 10-bit, zero landscape found
+across all 14. Max coded dimension across the 14: 1920px
+(copy_69D72849), tying but not exceeding the prior corpus max.
+
+### Stage 4/5 -- candidate selection + qualification
+
+One candidate selected (the first LIKELY_VFR sample,
+`VIDEO-2026-07-30-09-21-35.mp4`) -- the other two VFR siblings and
+every duplicate HEVC-SDR/H264-SDR file were correctly NOT re-qualified
+(no new property). Full live chain run via the same, unchanged
+`worker_job.resolve_sources_for_editorial_entry`:
+
+- D-271 profile: H264, 576x1024 portrait, `avg_frame_rate 29.99` vs
+  `r_frame_rate 31.58` (the real VFR signature), `vfr_status:
+  LIKELY_VFR`.
+- D-272 initial: **NORMALIZE_REQUIRED (VFR_NORMALIZATION_REQUIRED)**.
+- D-274A plan: `frame_rate: VFR_TO_CFR`, every other action `NO_ACTION`.
+- Executor: **NORMALIZATION_SUCCEEDED**, wall time 39.93s, headroom
+  **1760.07s** against the real 1800s ceiling.
+- Reprobe: `vfr_status: CFR`, `avg_frame_rate == r_frame_rate ==
+  effective_fps` (29.99094788568473, exact match) -- a clean VFR->CFR
+  conversion.
+- D-272 reevaluate: **ACCEPT**.
+- D-274E normalized-source format QC: **PASS**, zero failed checks.
+- Source preservation: original SHA-256 identical before/after.
+- A/V relation: duration identical before/after (193.325s), audio
+  untouched (AAC 44.1kHz stereo).
+- Stage 13 bounded final-render sanity: `FINAL_RENDER_OUTPUT_CONTRACT_
+  V1` == **PASS**, zero failed checks.
+
+**This closes the real VFR evidence gap D-275R left open.**
+
+### A genuine bug this gate's own first run surfaced and fixed
+
+The first real run (34834797093) found the 3 real VFR samples
+correctly but produced an EMPTY Stage 13 render-sanity result --
+root-caused via the actual run output (not predicted in advance):
+Stage 2 deleted each downloaded file immediately after profiling to
+conserve disk, and the intended "reselect the chosen candidate for
+full qualification" step had no way to get the bytes back (the Python
+script has no AWS credentials of its own; those exist only in the
+download step's own shell scope, which does not persist plain
+`export`s to a later GitHub Actions step). `qualify_one()` for the one
+selected VFR candidate was therefore silently unreachable. Fixed
+(commit `141971d`) by keeping all 14 downloaded files on disk (under
+1 GB total, well within runner headroom) until Stage 4 selection is
+known, then cleaning up in one pass. Re-run (34835147636) confirmed
+the fix: `qualify_one()` and the Stage 13 render-sanity check are now
+reached and both produced the real results above. Zero production
+code touched by this fix -- only the new, additive sweep script.
+
+### Stage 15 -- complete iPhone V1 matrix (all 18 objects now profiled)
+
+| category | status |
+|---|---|
+| H264 SDR | READY |
+| HEVC SDR | READY |
+| VFR | **READY** (newly closed this gate) |
+| rotation metadata | NO_REAL_SAMPLE (confirmed absent from the FULL 18-object corpus, not merely unsampled) |
+| HDR | NO_REAL_SAMPLE (confirmed absent from the full corpus) |
+| 10-bit | NO_REAL_SAMPLE (confirmed absent from the full corpus) |
+| portrait | READY |
+| landscape | NO_REAL_SAMPLE (confirmed absent from the full corpus) |
+| 4K / high-resolution | NO_REAL_SAMPLE (max coded dimension across all 18: 1920px; true 4K/3840px never observed) |
+
+### Stage 16 -- Product Owner exit rule applied
+
+The full 18-file corpus has now been exhaustively profiled (not
+sampled) and contains no rotation-metadata, HDR, 10-bit, landscape, or
+4K example -- these are absent from the corpus itself, not merely
+untested. VFR, which WAS present, is now fully qualified. Per Stage
+16's own explicit instruction, absent categories are not treated as
+implementation defects.
+
+### Verdict
+
+**B -- CORE REAL IPHONE CORPUS FULLY PASSES -- SPECIFIC DEVICE-CAPTURE
+MODES NOT REPRESENTED IN CORPUS.** H264 SDR, HEVC SDR, VFR, and
+portrait are all READY with real, end-to-end evidence (profile ->
+policy -> plan -> executor -> reprobe -> reevaluate -> format QC ->
+live resolution -> render QC, on real Product-Owner-confirmed iPhone
+media). Rotation-metadata, HDR, 10-bit, landscape, and true 4K are
+confirmed absent from the existing 18-object corpus -- a targeted
+recording gap, not a defect.
+
+**Smallest targeted recording checklist before Beta** (per Stage 16's
+own instruction):
+1. One real iPhone video recorded in landscape orientation (ideally
+   one where the phone's own orientation change mid-capture, or the
+   export path, preserves a genuine Display Matrix rotation tag --
+   this is the one category no corpus file, sampled or profiled,
+   has ever carried).
+2. One real iPhone HDR video (iOS "HDR Video" capture mode -- PQ or
+   HLG depending on device/settings). This capture is also very likely
+   to naturally be 10-bit HEVC, which would close that gap in the same
+   recording.
+3. (Optional, lower priority) One real iPhone 4K-quality-setting
+   recording, to exercise true high-resolution timeout/wall-time
+   headroom beyond the 1920px max seen so far.
+
+No other new recordings are required -- H264 SDR, HEVC SDR, VFR, and
+portrait are fully closed.
+
+**Exact next gate:** Product Owner decides whether items 1-2 above are
+beta-blocking or can be deferred; if satisfied with the current
+evidence, D-276 (canonical product-scope update) may proceed. Not
+decided by this entry.
+
+**Product Owner decision required:** YES -- whether to request the
+1-2 targeted recordings before Beta or proceed to D-276 with the
+current evidence.
+
+**Decision entry reference:** this entry (D-275R2).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-276.
+DO NOT START CALIBRATION.
