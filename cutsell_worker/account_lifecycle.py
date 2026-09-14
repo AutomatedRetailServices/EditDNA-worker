@@ -3,6 +3,15 @@
 Deletes project-scoped S3 media/artifacts, recoverable Redis state and optional
 durable SQL records. Account deletion revokes indexed sessions and removes every
 known project before durable user metadata is deleted.
+
+D-281 Stage 42: additively wires the D-279/D-281 manual-timeline asset
+registry's own live Redis records (`timeline_asset_registry_store.py` --
+NOT `timeline_asset_storage.py`'s unrelated filmstrip/waveform presentation
+assets, already covered by `ASSET_PREFIX` below) into project deletion, via
+`delete_project_timeline_assets`. Real durable timeline-asset media bytes
+(today: fake/local storage only, per D-281's own scope) are not deleted by
+this pass -- that is a real-storage-backend concern for whichever future
+gate wires real S3 for timeline assets.
 """
 from __future__ import annotations
 
@@ -17,6 +26,7 @@ from .feedback import FEEDBACK_PREFIX
 from .notifications import notification_key
 from .overlay_uploads import OVERLAY_PREFIX
 from .project_store import get_project, list_projects, project_index_key, project_key
+from .timeline_asset_registry_store import delete_project_timeline_assets
 from .timeline_asset_storage import ASSET_PREFIX
 from .uploads import upload_prefix
 
@@ -89,6 +99,10 @@ def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_
     pipe.zrem(project_index_key(user_id=user_id), project_id)
     pipe.execute()
 
+    # D-281 Stage 42: additive -- the manual-timeline asset registry's own
+    # live records participate in project deletion.
+    timeline_cleanup = delete_project_timeline_assets(user_id=user_id, project_id=project_id, client=redis_client)
+
     durable = {"status": "not_configured"}
     if config.database_url:
         try:
@@ -104,6 +118,7 @@ def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_
         "status": "deleted",
         "project_id": project_id,
         "s3_objects_deleted": deleted_objects,
+        "timeline_assets_deleted": timeline_cleanup["timeline_assets_deleted"],
         "durable": durable,
     }
 

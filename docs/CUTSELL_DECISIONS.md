@@ -75954,3 +75954,254 @@ Then STOP.
 DO NOT IMPLEMENT D-281.
 DO NOT TOUCH cutsell/mobile-v1-clean.
 DO NOT START CALIBRATION.
+
+
+## D-281 — Timeline Asset Persistence / API Live Wiring
+
+**Objective.** Post D-280. Wire D-279's pure `timeline_asset_registry.py`
+contract into the real backend: live persistence for `TimelineMediaAsset`
+records and `TimelinePersistenceRecord` revisions, real B-roll/VO media
+qualification (reusing D-271/D-272/D-274A/D-274B verbatim), and a real
+bridge into D-278's composition executor -- using fake/local storage,
+no real S3 mutation, no mobile UI.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `d8d3555` (exact expected
+match, D-280), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-280 re-read. All listed files
+inspected: `timeline_asset_registry.py`, `timeline_composition.py`,
+`timeline_composition_executor.py`, `project_store.py`, `uploads.py`,
+`exports.py`, `tenant_safe_delivery.py`, `source_media_profile.py`,
+`source_format_policy.py`, `output_format_qc.py`, `account_lifecycle.py`,
+`cutsell_app/project_routes.py`. `source_normalization_plan.py`/
+`source_normalization_executor.py` additionally inspected and reused
+for Stage 7/8's own normalization-reuse instruction.
+
+### A real, pre-existing naming collision found and avoided
+
+`cutsell_worker/timeline_asset_storage.py` ALREADY EXISTS in this
+codebase (Aug 29, unrelated to D-276/277/278/279) -- it persists mobile
+scrubber-UI filmstrip/waveform PRESENTATION assets under `cutsell/
+timeline-assets/`, consumed by `account_lifecycle.py`/`worker_job.py`/
+`cutsell_app/main.py`. This is a completely different feature from
+D-279's `TimelineMediaAsset` (editorial B-roll/VO placement media). The
+new live-storage module is deliberately named `timeline_asset_registry_
+store.py` -- documented in its own module docstring -- so the two are
+never confused and `timeline_asset_storage.py` is never touched.
+
+### What was built: `cutsell_worker/timeline_asset_registry_store.py`
+
+**Live persistence (Stage 1/2, additive, no duplicated truth):** new
+Redis key family (`cutsell:v1:timeline_asset:*`, `cutsell:v1:timeline_
+assets:*`, `cutsell:v1:timeline_revision:*`, `cutsell:v1:timeline_
+revision_history:*`) mirroring `project_store.py`'s own `_scope`/
+`_redis_client`/JSON-serialization convention (a private per-module
+copy, matching this codebase's established discipline) -- project
+truth itself (`project_store.py`) is never touched or duplicated.
+
+**Asset ID / ownership / project scoping (Stage 3/4/5):**
+`create_video_timeline_asset`/`create_voice_over_asset` always mint
+`asset_id = f"tla_{uuid4().hex}"` server-side -- neither function
+accepts an `asset_id` parameter at all (proven by signature-inspection
+test). Every live read/write funnels through D-279's own
+`AssetOwnershipScope` full-equality check, so cross-user AND
+cross-project access are both refused by the SAME mechanism (proven by
+test: wrong-user and wrong-project both resolve `ASSET_NOT_OWNED`).
+
+**B-roll ingest + qualification (Stage 6/7/8/9), REAL, not mocked:**
+`create_video_timeline_asset` probes the real file with D-271's own
+`probe_source_media_profile`, evaluates D-272's own `evaluate_source_
+format_policy`, and on `NORMALIZE_REQUIRED` calls D-274A/D-274B's own
+`build_source_normalization_plan`/`execute_source_normalization`
+verbatim -- never reimplemented. Only `ACCEPT`/successfully-normalized
+media reaches `READY`; `REJECT` -> `REJECTED`, `INSUFFICIENT_EVIDENCE`
+or a failed/unsupported normalization -> `FAILED`. Never `READY` on
+upload receipt alone. The ORIGINAL local source path is never mutated
+or overwritten; only the qualified (possibly normalized) media is
+persisted durably and becomes the asset's `storage_reference` (Stage 9).
+
+**Normalized asset durability (Stage 8/34, critical, proven):**
+`local_directory_persister(durable_dir)` -- the fake/local storage
+implementation this gate's own tests exercise (Stage 36: no real S3
+mutation anywhere in this module, confirmed by source-inspection test:
+no `boto3`/`put_object`/`upload_file` literal) -- copies the qualified
+media into an explicitly-supplied durable directory under a server-
+generated key; there is no silent default to a job tempdir (`durable_
+dir` must be supplied). Proven by test that a READY asset's own
+`storage_reference` differs from `local://{original_job_path}` and
+lives under the injected durable directory.
+
+**Storage key safety (Stage 35):** `_storage_key` is built entirely
+from the server's own hashed user/project scope + the server-generated
+`asset_id` -- never a user filename; `local_directory_persister`
+itself additionally refuses any storage key containing `..` or a
+leading `/` (proven by test).
+
+**VO ingest (Stage 10/11), with an honestly-recorded gap:**
+`create_voice_over_asset` validates real audio presence + known
+duration via the same D-271 profile, no microphone recording anywhere
+in this module (grepped/confirmed). Stage 11 audit: `uploads.py`'s
+existing presigned-upload allowlist covers VIDEO containers only --
+there is no audio-specific presigned-upload allowlist in this codebase
+today. This function itself works without it (it accepts an already-
+local file, this gate's own scope), but a real mobile VO-RECORDING
+presign endpoint needs `uploads.py` extended with an audio allowlist
+first -- recorded as the exact gap per Stage 11's own "if not: return
+exact gap" instruction, not silently invented.
+
+**Server-authoritative metadata (Stage 13/15):** neither ingest
+function accepts a client-declared duration/has_audio/content-sha
+anywhere; every one of those fields is always the real, server-
+measured value (proven by test). `content_sha256` is always computed
+by this module's own `_sha256_file` and validated through D-279's own
+`validate_content_sha256_source(..., derived_from_etag=False)` --
+never an S3 ETag.
+
+**Timeline revision persistence + optimistic concurrency (Stage
+14-17):** `save_timeline` first runs D-279's own `validate_timeline_
+against_registry` against the LIVE asset set (catching missing/wrong-
+owner/not-ready/silent-audio-mode violations before D-277's own
+`validate_composition` or D-279's own `save_timeline_revision` ever
+run), then delegates optimistic concurrency to D-279's own, unmodified
+`save_timeline_revision`. A brand-new project timeline never conflicts
+regardless of the caller's `expected_revision_identity` (Stage 17,
+proven by test); a stale identity -- including the exact "two clients
+read the same revision, one writes first" race -- is rejected with
+`TIMELINE_REVISION_CONFLICT` (proven by test), never silent last-write-
+wins.
+
+**Reopen + list (Stage 18/19/39):** `get_timeline`/`client_safe_
+timeline_view` return only contract version, base edit identity,
+placements (by asset_id, never a path), audio modes, VO refs, and the
+revision identity -- no storage secret anywhere (proven by test: no
+`local://`/`durable` substring survives into the client-safe JSON
+across BOTH the asset-list and timeline views). `list_timeline_assets`/
+`list_timeline_assets_client_safe` reuse D-279's own `list_project_
+assets` for scoping and D-279's own `client_safe_asset_view` for the
+response shape -- neither reimplemented.
+
+**Secure resolver, live (Stage 20):** `resolve_timeline_asset_live`
+fetches the live record, materializes its `storage_reference` via an
+injected `materialize` callable (`_default_materialize` is a pure
+passthrough for this gate's own `local://` fake-storage scheme; a real
+S3-backed wiring supplies its own download callable through the same
+seam), then calls D-279's own `resolve_timeline_asset` unmodified.
+
+**Export exact revision + D-278 bridge (Stage 21-24):**
+`export_timeline_revision` resolves the EXACT named revision via
+D-279's own `resolve_timeline_export` (a stale/wrong identity is
+refused, proven by test), resolves every referenced B-roll/VO asset_id
+into a real `ResolvedTimelineAsset` via the live resolver, then calls
+D-278's own, completely unmodified `build_timeline_render_plan`/
+`execute_timeline_composition` -- composition semantics are never
+rebuilt. Proven end-to-end with real ffmpeg media: a saved revision
+exports through the full bridge to a `CompositionExecutionResult` whose
+`format_qc_status` is `PASS`. `base_edit_asset` is accepted as a
+parameter rather than re-derived here (module docstring records this
+as the intentional scope boundary -- an existing render/project
+authority's job, not duplicated).
+
+**Bounded error mapping (Stage 41):** `map_outcome_to_http_status`
+maps every one of D-279's 8 error codes to a 4xx status; an
+unrecognized future outcome maps to 500, never a silent 200 (proven by
+test).
+
+**Project/account deletion integration (Stage 42):**
+`delete_project_timeline_assets` is imported additively into `account_
+lifecycle.py`'s existing `delete_project_data` (its own S3-prefix list,
+`_project_prefixes`, is deliberately left untouched -- this gate's
+storage is fake/local, not S3, so no new S3 prefix belongs there yet;
+the pre-existing exact-5-prefix test stays green unmodified). Account
+deletion reuses `delete_project_data` per-project already, so it
+inherits this cleanup automatically -- no separate change needed.
+Durable media BYTES (today: local files) are not deleted by this pass
+-- recorded explicitly as Stage 43's own "orphan responsibility",
+never silently swept.
+
+### Regression/placement-vs-asset-delete proofs (Stage 30/31)
+
+`delete_timeline_asset_live` reuses D-279's own `delete_timeline_asset`
+verbatim, supplying only the project's current revision as the
+referencing-compositions list. Proven end-to-end: a referenced asset's
+deletion is blocked (`ASSET_REFERENCED`); after the placement (not the
+asset) is removed from the timeline via a save, the SAME asset record
+still exists and is still `READY`; only then does deletion succeed.
+`replace_broll`'s own D-277 semantics leave the old asset's own record
+completely untouched in the registry (proven).
+
+### Test evidence (Stage 51, 36 tests, real ffmpeg fixtures)
+
+New `tests/test_cutsell_d281_timeline_asset_live_wiring.py`, 36 tests,
+all passing on first real run: READY B-roll/VO creation (2); rejected/
+insufficient-evidence/silent-VO-fails (2); wrong-user/wrong-project
+resolution denied (2); scoped listing + client-safe response (2);
+first-save/next-save/stale-conflict/concurrent-stale-race (4); reopen
+exact timeline + missing-project (2); server-authoritative duration
+(1); USE_BROLL_AUDIO-on-silent-asset rejected at save (1); missing-
+asset/non-ready-asset rejected at save (2); placement-delete-retains-
+asset + referenced-delete-blocked + unreferenced-delete-succeeds (1);
+replace-B-roll-preserves-old-asset + re-record-VO-new-identity (2);
+exact-revision-export-through-D-278-bridge-with-QC-PASS +
+stale-revision-export-rejected (2); storage-reference-never-part-of-
+identity (1); durable-reference-not-a-raw-tmp-path (1); project-
+deletion-removes-records + account-lifecycle-wiring-mocked-proof (2);
+no-raw-storage-ref-in-client-JSON + no-client-chosen-asset-id (2);
+error-mapping-covers-all-8-codes + unknown-outcome-never-succeeds (2);
+storage-key-traversal-rejected + server-generated-not-filename (2);
+structural firewall (no forbidden closed-track imports, no AI-B-roll
+code, no real S3 mutation) (3).
+
+### Verification run
+
+- New test file: **36 passed**, 0 failed (11.79s, real ffmpeg encodes
+  and real ffprobe qualification, fake/local storage only).
+- `compileall` over `cutsell_worker/`, `tests/`, `scripts/`: clean.
+- `test_cutsell_commercial_lifecycle.py` (the existing `_project_
+  prefixes`-exact-5 test): **4 passed**, unchanged.
+- Targeted regression subset (D-277/D-278/D-279/D-280 timeline/asset/
+  visual-mode, D-258/D-260/D-262 Visual Finishing, `take_judge`,
+  CleanCutBench-equivalent x2, project store): **461 passed, 9
+  skipped**, 0 failed (67.23s).
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8418 passed, 10 skipped, 13 subtests passed, 0
+  failed** (442.18s) -- exactly D-280's own 8382-test baseline plus
+  this gate's 36 new tests, confirming zero regression anywhere else
+  in the suite.
+
+### Verdict
+
+**A -- TIMELINE ASSET PERSISTENCE + LIVE API/SERVICE WIRING PROVEN --
+TENANT-SAFE PROJECT ASSETS + REVISIONED TIMELINE + D-278 EXPORT BRIDGE
+SAFE -- BACKEND READY FOR MOBILE V1 INTEGRATION**, with two explicitly-
+recorded, non-blocking scope boundaries (per Stage 40's own explicit
+permission and Stage 11's own "return exact gap" instruction rather
+than silently overbuilding or inventing):
+1. No FastAPI routes yet -- the service-level contract above IS the
+   contract Stage 40 asks for; a thin router is the next, additive step.
+2. No audio-specific presigned-upload allowlist in `uploads.py` yet --
+   VO ingest from an already-local file works today; a real mobile
+   direct-to-S3 VO-recording upload needs that allowlist added first.
+
+Neither gap blocks Verdict A: both are named, bounded, and reachable
+without redesigning anything built in this gate.
+
+**Product Owner decision required:** NO for this gate's own scope.
+
+**Exact recommended mobile gate:** per this directive's own next-gate
+instruction, return to `cutsell/mobile-v1-clean` / PR #25 for the V1
+timeline UI. First mobile gate should implement the V1 timeline UI
+CONTRACT against this now-stable backend semantics: upload B-roll,
+upload VO recording (once the `uploads.py` audio-allowlist gap above
+is closed), list assets, save timeline, reopen timeline, export exact
+revision -- exactly the six flows Stage 44's own "mobile readiness
+contract" names, all now backed by real, tested service functions.
+
+**Decision entry reference:** this entry (D-281).
+
+Then STOP.
+
+DO NOT SWITCH BRANCHES AUTOMATICALLY.
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT START CALIBRATION.
