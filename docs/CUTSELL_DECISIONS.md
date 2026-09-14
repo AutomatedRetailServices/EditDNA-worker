@@ -75164,3 +75164,158 @@ DO NOT IMPLEMENT NEXT GATE.
 DO NOT START CALIBRATION.
 DO NOT TOUCH cutsell/mobile-v1-clean.
 DO NOT TOUCH main.
+
+
+## D-277 — V1 Manual Timeline Architecture / Composition Contract
+
+**Objective.** Post D-276, sequence step A of the Product-Owner-
+authorized order (A. timeline architecture/design -> B. manual B-roll
++ layered audio/voice-over implementation -> C. faceless/product
+visual-mode foundation -> D. Calibration). Define the deterministic
+technical contract for the V1 manual timeline: the smallest set of
+immutable types and pure state-transition functions representing
+primary A-roll + manual B-roll + original primary voice + optional
+B-roll source audio + recorded voice-over, without touching the
+already-closed CutSell editorial engine.
+
+### Verification
+
+Branch `feature/runpod-pod-on-demand`, HEAD `05f76a7` (exact expected
+match, D-276), clean tree -- confirmed before this gate began.
+CLAUDE.md, `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, and
+`docs/CUTSELL_DECISIONS.md` through D-276 re-read.
+
+### What was built (Stage 47: "may implement pure immutable types and
+validators if valuable" -- exercised)
+
+New `cutsell_worker/timeline_composition.py`: pure types and pure
+functions only. No I/O, no ffmpeg, no microphone, no upload, no AI
+engine, no BestTake, no Visual Finishing, no mobile UI. Zero existing
+production module imported, touched, or referenced by it besides
+Python's own stdlib (`hashlib`, `json`, `dataclasses`, `enum`).
+
+**Types (Stage 45):** `TimelineAssetReference`, `BrollPlacement`,
+`VoiceOverPlacement`, `TimelineComposition`, `TimelineValidationResult`,
+`TimelineRevisionIdentity` -- all frozen dataclasses (Stage 15
+immutability, confirmed by test:
+`test_composition_and_placements_are_frozen_dataclasses`).
+`TimelineAudioMode` is a 3-value enum.
+
+**Canonical policy decisions made and recorded in the module's own
+docstring** (per this gate's own explicit invitations to choose and
+document):
+- **Audio-mode vocabulary (Stage 7):** exactly `KEEP_PRIMARY_VOICE`,
+  `USE_BROLL_AUDIO`, `MUTE_BROLL_AUDIO` -- no
+  `MIX_PRIMARY_AND_BROLL_AUDIO` (smallest V1 set).
+- **Voice-over audio priority (Stage 11/33):** fixed V1 default --
+  voice-over always mutes/replaces the primary voice for its own
+  region; not a per-placement choice (no `audio_mode` field exists on
+  `VoiceOverPlacement` at all -- confirmed by test
+  `test_voice_over_placement_carries_no_audio_mode_field`).
+- **B-roll-source-audio priority (Stage 12/32):** `USE_BROLL_AUDIO`
+  suppresses the primary voice for that region (no double-speech by
+  default) -- enforced by `caption_source_for_region`'s own priority
+  order (VO > `USE_BROLL_AUDIO` B-roll > primary voice).
+- **Overlap policy (Stage 23/24):** DISALLOW overlap within each of
+  the two independent layers (B-roll-vs-B-roll, VO-vs-VO); a B-roll
+  placement and a VO placement MAY coexist over the same interval
+  (independent visual/audio-priority layers) -- confirmed by tests 17,
+  17b, 17c.
+- **Bounds policy (Stage 25/26):** fail-closed -- any out-of-bounds or
+  invalid interval makes the WHOLE candidate composition invalid; no
+  implicit truncation, ever (tests 15, 15b, 16, 16b).
+- **Replace semantics (Stage 21):** the caller supplies the entire new
+  placement object explicitly; this module never guesses or coerces a
+  duration on the caller's behalf (tests 7, 7b, 13).
+
+**Ten deterministic operations (Stage 14):** `add_broll`, `move_broll`,
+`trim_broll`, `replace_broll`, `delete_broll`, `add_voice_over`,
+`move_voice_over`, `trim_voice_over`, `replace_voice_over`,
+`delete_voice_over` -- every one returns `(new_composition_or_None,
+TimelineValidationResult)`, never mutates its input, never raises.
+
+**Identity (Stage 17/18):** `compute_timeline_identity` -- a
+deterministic SHA-256-derived identity over the composition's own
+semantic fields (base edit identity, every placement's asset/interval/
+audio-mode fields, contract version), sorted before hashing so it is
+independent of caller-supplied placement order (test 20) and never
+derived from a local path (test 20b). `derive_revision_identity` keeps
+this distinct from `base_edit_identity` (Stage 18), confirmed by test
+`test_revision_identity_distinct_from_base_edit_identity`.
+
+**Caption-source seam (Stage 13/34):** `caption_source_for_region`
+returns one of `"VOICE_OVER"` / `"BROLL_SOURCE_AUDIO"` /
+`"ORIGINAL_PRIMARY_VOICE"` for a given timeline instant -- a policy
+decision, never a transcript generator (no ASR here, per Stage 34's
+own explicit boundary).
+
+**Faceless-mode agnosticism (Stage 42):** `TimelineComposition` has no
+`visual_mode`/`scene_type` field of any kind -- the timeline contract
+is structurally incapable of caring whether the primary A-roll is
+talking-head, faceless-product, hands/product, or demo-action (test
+22).
+
+### Stage 46 -- synthetic model matrix (all 22 required cases, plus 8
+additional coverage tests)
+
+New `tests/test_cutsell_d277_timeline_composition.py`, 36 tests, all
+passing, covering every one of Stage 46's 22 named cases (base-edit-
+only; keep/mute/use-B-roll-audio; move/trim/replace/delete B-roll;
+multiple non-overlapping B-rolls; VO insert/move/trim/replace/delete;
+invalid negative interval; out-of-bounds asset; overlap conflict;
+deterministic/order-independent/edit-sensitive identity; A-roll
+restored after B-roll deletion; visual-mode agnosticism) plus 8 more
+(fail-closed unknown-id operations, revision-identity distinctness,
+audio-mode-vocabulary size, VO-has-no-audio-mode-field, contract
+version, frozen-dataclass immutability, duplicate-placement-id
+rejection, B-roll/VO independent-layer coexistence).
+
+### Verification run
+
+- New test file: **36 passed**, 0 failed.
+- `compileall` over `cutsell_worker/`, `tests/`, `scripts/`: clean.
+- Full `tests/` suite (excluding the 3 documented pre-existing baseline
+  exceptions): **8243 passed, 10 skipped, 13 subtests passed, 0
+  failed** (460.49s) -- exactly D-274F-A's own 8207-test baseline plus
+  this gate's 36 new tests, confirming zero regression anywhere else in
+  the suite.
+
+### Stage 47 compliance (binding "must NOT" list)
+
+No microphone recording, no B-roll rendering, no ffmpeg invocation
+anywhere in this module, no mobile UI file touched, no upload/storage
+I/O, no AI engine/BestTake/Visual Finishing file touched. Confirmed by
+`git diff --stat` for this gate: exactly the two new files listed
+above, plus this decision-log entry.
+
+### Verdict
+
+**A -- V1 MANUAL TIMELINE ARCHITECTURE DEFINED -- B-ROLL / PRIMARY-
+VOICE / SOURCE-AUDIO / VOICE-OVER COMPOSITION CONTRACT SAFE -- READY
+FOR COMPOSITION FOUNDATION IMPLEMENTATION.** No product-audio/overlap
+policy required a Product Owner decision this gate could not itself
+make from the directive's own explicit guidance (every "recommend the
+smallest V1 policy" instruction in the directive had a concrete
+answer, all recorded above); the existing render/project model requires
+no redesign to support this contract, since the contract deliberately
+never touches render/project code at all in this gate.
+
+**Exact next gate:** D-278 -- V1 Manual B-roll + Layered Audio/Voice-
+Over Composition Foundation (sequence step B) -- likely backend/render
+primitives that consume `TimelineComposition` to actually drive a
+render; mobile UI remains a separate, later workstream. Not
+implemented or authorized by this entry.
+
+**Product Owner decision required:** NO for this gate's own scope (no
+open policy question remains); YES before D-278 is authorized to begin
+(per D-091's own continuity contract, a new implementation gate is a
+Product Owner sequencing call, consistent with how D-276 already framed
+step B as a separate, not-yet-authorized gate).
+
+**Decision entry reference:** this entry (D-277).
+
+Then STOP.
+
+DO NOT IMPLEMENT D-278.
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT START CALIBRATION.
