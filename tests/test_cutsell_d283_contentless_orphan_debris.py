@@ -77,9 +77,17 @@ def _result(kept, deleted=(), decisions=()):
 # Unit tests: _safe_contentless_alternate_debris
 # ---------------------------------------------------------------------------
 
-def test_bare_negation_orphan_with_high_confidence_alternate_label_is_removed():
+def test_bare_filler_orphan_with_high_confidence_alternate_label_is_removed():
+    # D-286 (RAW #120 audit) correction: the positive control here used to
+    # be a bare "No." -- real RAW #120 evidence proved a bare negation
+    # particle is NOT structural debris (it can be the polarity of the very
+    # next clip: "No" + "I want to sound..." = "No, I want to sound...").
+    # This rule's real target shape is a genuinely contentless, non-negating
+    # filler/false-start particle -- exercised here without any negation or
+    # numeric token, which is now an explicit guard (see
+    # test_cutsell_d286_negation_preserving_debris.py for that guard).
     previous = _take("previous", 0.0, 4.0, "We looked into the scheduling conflict last week.")
-    orphan = _take("orphan", 4.5, 5.3, "No.", complete=True)
+    orphan = _take("orphan", 4.5, 5.3, "Um.", complete=True)
     following = _take("following", 10.0, 14.0, "I want to explain what actually happened with the delivery.")
     semantic = {"orphan": ("alternate", 0.90)}
 
@@ -90,9 +98,9 @@ def test_contentless_orphan_is_removed_even_when_grammatically_complete():
     # The existing complete_idea guard (editorial_guardrails_v2.py) protects
     # SHORT-BUT-MEANINGFUL complete deliveries from the sibling rule; a
     # contentless orphan is a different shape and must not inherit that
-    # protection just because "No." parses as a complete sentence.
+    # protection just because "Um." parses as a complete sentence.
     previous = _take("previous", 0.0, 4.0, "We looked into the scheduling conflict last week.")
-    orphan = _take("orphan", 4.5, 5.3, "No.", complete=True)
+    orphan = _take("orphan", 4.5, 5.3, "Um.", complete=True)
     following = _take("following", 10.0, 14.0, "I want to explain what actually happened with the delivery.")
     semantic = {"orphan": ("alternate", 0.90)}
 
@@ -174,7 +182,7 @@ def test_different_source_asset_never_removed():
 
 def test_orphan_removed_end_to_end_through_the_integrity_pass():
     previous = _take("previous", 0.0, 4.0, "We looked into the scheduling conflict last week.")
-    orphan = _take("orphan", 4.5, 5.3, "No.")
+    orphan = _take("orphan", 4.5, 5.3, "Um.")
     following = _take("following", 10.0, 14.0, "I want to explain what actually happened with the delivery.")
     result = _result(
         (previous, orphan, following),

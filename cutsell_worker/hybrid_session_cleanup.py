@@ -47,6 +47,7 @@ from .semantic_compute_planner import (
     SemanticWorkPriority,
     build_semantic_compute_plan,
 )
+from .audio_silence import AUDIO_SILENCE_EVENT_KIND
 from .semantic_authority_observability import stable_request_hash
 from .session_boundaries import partition_takes_by_sessions
 from .temporal_editing import harmful_events_for_take
@@ -365,6 +366,41 @@ def _source_events(context: WholeVideoContext | None, source_asset_id: str):
     return ()
 
 
+# D-149 (already proven, real RAW #118 audit -- perceptual_watch_listen.py's
+# `_measured_pause_near`): a hand_motion_reset_candidate/body_reset_
+# candidate event's `confidence` is a pure kinematic magnitude score
+# (local_performance.py's own docstring), not a probability the movement is
+# a genuine recording-process reset -- a large, fast, natural hand gesture
+# during animated, continuous speech scores just as "confident" as an actual
+# reset. A genuine reset/retry is a creator stopping and restarting, which
+# virtually always has a brief measured pause around it; a real RAW #120
+# audit found a 17.98s complete, both-references-preferred realization
+# marked deterministically unusable by exactly this shape -- 7
+# hand_motion_reset_candidate events, all >= 0.92 confidence, with ZERO
+# audio_silence_interval evidence anywhere nearby (continuous unbroken
+# speech throughout). Reused here verbatim (same tolerance) rather than
+# re-derived, so RAW #118's proof applies to this authority too.
+_RESET_PAUSE_PROXIMITY_SEC = 0.50
+
+
+def _pause_corroborated_reset_count(events: Iterable, resets: Iterable) -> int:
+    """D-149: how many of `resets` have a real, measured `audio_silence_
+    interval` event within `_RESET_PAUSE_PROXIMITY_SEC` of them. A reset-
+    candidate landing mid continuous, unbroken speech is not corroborated
+    evidence of a genuine physical reset on its own -- see the module
+    comment above."""
+    silences = [event for event in events if str(event.kind) == AUDIO_SILENCE_EVENT_KIND]
+    if not silences:
+        return 0
+    count = 0
+    for event in resets:
+        lo = float(event.start) - _RESET_PAUSE_PROXIMITY_SEC
+        hi = float(event.end) + _RESET_PAUSE_PROXIMITY_SEC
+        if any(float(silence.end) >= lo and float(silence.start) <= hi for silence in silences):
+            count += 1
+    return count
+
+
 def _performance_event_summary(take: CandidateTake, context: WholeVideoContext | None) -> dict[str, int | float | bool]:
     events = tuple(
         event for event in _source_events(context, take.source_asset_id)
@@ -375,6 +411,7 @@ def _performance_event_summary(take: CandidateTake, context: WholeVideoContext |
     return {
         "strong_reset_count": len(resets),
         "strong_break_count": len(breaks),
+        "pause_corroborated_reset_count": _pause_corroborated_reset_count(events, resets),
         "max_reset_confidence": round(max((float(event.confidence) for event in resets), default=0.0), 4),
         "max_break_confidence": round(max((float(event.confidence) for event in breaks), default=0.0), 4),
         "multimodal_reset": bool(resets and breaks),
@@ -436,10 +473,18 @@ def _failed_local_evidence(
     performance = _performance_event_summary(take, context)
     reset_count = int(performance["strong_reset_count"])
     break_count = int(performance["strong_break_count"])
+    pause_corroborated_reset_count = int(performance["pause_corroborated_reset_count"])
     if reset_count >= 2 and break_count >= 1:
         reasons.append(f"multimodal_reset_cluster:{reset_count}:{break_count}")
-    elif reset_count >= 4:
-        reasons.append(f"dense_physical_reset:{reset_count}")
+    # D-285 (RAW #120 audit, reusing D-149's already-proven doctrine): the reset-count-alone path is the ONE branch
+    # with no independent break/disengagement corroboration, so it is the
+    # one branch a natural gesture during continuous speech can trip on its
+    # own. Require the resets themselves to be pause-corroborated (a real
+    # creator reset/retry almost always has a measured pause around it) --
+    # same threshold (4), just requiring the count to be made of real
+    # evidence instead of raw kinematic magnitude.
+    elif pause_corroborated_reset_count >= 4:
+        reasons.append(f"dense_physical_reset:{pause_corroborated_reset_count}")
 
     signals = take.signals
     if signals is not None:
