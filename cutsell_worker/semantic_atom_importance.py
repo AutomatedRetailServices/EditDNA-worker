@@ -91,6 +91,22 @@ _DOSE_MARKERS = (
     "tableta", "tabletas", "capsula", "cápsula", "capsulas", "cápsulas",
     "veces al dia", "veces al día", "times a day", "times daily",
 )
+# D-097.11 (Product Owner decision, real RAW #121 audit): an age is a
+# materially critical number even though it is often a bare, plausible-
+# year-range-adjacent digit -- "years old" markers deliberately distinct
+# from the bare temporal-aside markers below (a bare "en 2023"/"during
+# 2023" carries no age marker at all).
+_AGE_MARKERS = (
+    "años de edad", "año de edad", "years old", "year old",
+    "edad de", "a la edad de", "at the age of", "aged",
+)
+# D-097.11 (Product Owner decision, real RAW #121 audit): a disease/process
+# stage or phase is materially critical (changes the audience-facing
+# claim's severity/progression), distinct from "grado"/"degree" above
+# (temperature/measurement, not staging).
+_STAGE_MARKERS = (
+    "etapa", "etapas", "stage", "stages", "fase", "fases", "phase", "phases",
+)
 _CORRECTION_MARKERS = (
     "instead of", "en vez de", "en lugar de", "no fue", "actually",
     "en realidad", "realmente fue", "changed from", "cambio de",
@@ -169,6 +185,10 @@ def classify_number_atom(atom: str, source_text: str) -> AtomImportance:
         return AtomImportance(atom, "number", CRITICAL, "measurement", "deterministic")
     if _clause_has_any(source_text, _DOSE_MARKERS):
         return AtomImportance(atom, "number", CRITICAL, "dose_or_quantity", "deterministic")
+    if _clause_has_any(source_text, _AGE_MARKERS):
+        return AtomImportance(atom, "number", CRITICAL, "age", "deterministic")
+    if _clause_has_any(source_text, _STAGE_MARKERS):
+        return AtomImportance(atom, "number", CRITICAL, "stage_or_phase", "deterministic")
     if _clause_has_any(source_text, _CORRECTION_MARKERS):
         return AtomImportance(atom, "number", CRITICAL, "correction_language_present", "deterministic")
     if _clause_has_any(source_text, _CHRONOLOGY_RELATION_MARKERS):

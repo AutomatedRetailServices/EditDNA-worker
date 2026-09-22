@@ -69,6 +69,36 @@ def test_dose_is_critical():
     assert result.evidence == "dose_or_quantity"
 
 
+def test_age_is_critical():
+    # D-097.11 (Product Owner decision, real RAW #121 audit).
+    result = classify_number_atom("42", "She was 42 years old when it first happened.")
+    assert result.importance == CRITICAL
+    assert result.evidence == "age"
+
+
+def test_age_is_critical_spanish():
+    result = classify_number_atom("42", "Ella tenía 42 años de edad cuando pasó por primera vez.")
+    assert result.importance == CRITICAL
+    assert result.evidence == "age"
+
+
+def test_disease_stage_is_critical():
+    # D-097.11 (Product Owner decision, real RAW #121 audit).
+    result = classify_number_atom("3", "The doctor confirmed it was stage 3 at that point.")
+    assert result.importance == CRITICAL
+    assert result.evidence == "stage_or_phase"
+
+
+def test_a_plausible_year_next_to_an_unrelated_age_marker_elsewhere_stays_critical():
+    # The age marker gates on clause presence, not proximity to the
+    # specific atom -- a real, conservative floor (an atom this layer
+    # cannot cleanly separate from a critical marker in the same clip
+    # text stays CRITICAL, never silently downgraded).
+    result = classify_number_atom("2023", "In 2023 she was already 42 years old.")
+    assert result.importance == CRITICAL
+    assert result.evidence == "age"
+
+
 def test_bare_ambiguous_quantity_is_uncertain_and_blocks():
     # No unit, no currency, no percent, no correction, not a plausible year.
     result = classify_number_atom("7", "I tried it 7 different ways and it finally worked well.")
