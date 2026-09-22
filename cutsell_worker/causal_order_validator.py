@@ -82,28 +82,43 @@ _STRONG_DEPENDENCY_CONNECTORS: tuple[str, ...] = (
     "por lo tanto", "como resultado", "eso confirmó", "eso confirmo",
     "y eso confirmó", "y eso confirmo", "y así fue como", "y asi fue como",
     "lo cual confirmó", "lo cual confirmo",
-    # D-146 (Gate 6, Gap B): ordinary spoken narration of a finding-then-
-    # diagnosis (or any exam/finding -> conclusion) story shape very often
-    # states the conclusion DIRECTLY, with no structural transition word at
-    # all ("I was diagnosed with...", "me diagnosticaron con...") -- these
-    # are still a general grammatical/lexical connector pattern (a
-    # diagnosis-reveal phrase), not any specific disease/product/Video00
-    # fact, matching this lexicon's existing design (see module docstring
-    # Section "What evidence this uses").
-    "i was diagnosed with", "they diagnosed me with", "the diagnosis was",
-    "confirmed i had", "confirmed that i had", "turned out to be",
-    "the results showed", "the test results showed",
-    "me diagnosticaron con", "me dijeron que tenía", "me dijeron que tenia",
-    "el diagnóstico fue", "el diagnostico fue", "resultó ser", "resulto ser",
-    "los resultados mostraron", "el resultado fue",
 )
 
+# D-147 (Gate 6 correction, real RAW #118 audit): D-146 originally added the
+# direct diagnosis-reveal phrases below to `_STRONG_DEPENDENCY_CONNECTORS`.
+# That was wrong. Every STRONG connector above is a phrase that is
+# GRAMMATICALLY ANAPHORIC -- "therefore", "that's why", "eso confirmó" only
+# parse at all if SOMETHING PRECEDING supplied their referent, which is
+# exactly why treating the nearest earlier same-source clip as that referent
+# is safe, deterministic evidence needing no arbiter. "I was diagnosed
+# with X" / "me diagnosticaron con X" carries no such grammatical
+# requirement -- it is a complete, self-contained statement that reads fine
+# with no antecedent at all, and can just as easily be the next fact in an
+# unrelated sequence as a real consequence of the immediately preceding
+# clip. Scored STRONG, it deterministically manufactured a false causal
+# dependency on WHATEVER same-source clip happened to sit within
+# `_MAX_SOURCE_GAP_SEC` beforehand, related or not (see
+# tests/test_cutsell_d147_causal_connector_strength_correction.py's
+# `test_diagnosis_phrase_near_an_unrelated_clip_never_creates_a_strong_dependency`).
+# These phrases keep their general, non-Video00 justification -- direct
+# diagnosis-reveal narration is a real, common story shape -- but belong
+# among the WEAK connectors: real dependency here needs the bounded
+# `CausalOrderArbiter` to actually read both clips and confirm a semantic
+# link, not a deterministic prefix match alone. Since no live arbiter is
+# wired in yet, this is a documented no-op in production today (matching
+# every other weak hit) rather than a live false-positive source.
 _WEAK_DEPENDENCY_CONNECTORS: tuple[str, ...] = (
     "so ", "so,", "which means", "that means", "because of that",
     "because of this", "after that", "which showed",
     "entonces", "por eso", "así que", "asi que", "eso significa",
     "debido a eso", "debido a esto", "y por eso", "después de eso",
     "despues de eso", "lo que confirma", "lo que significa",
+    "i was diagnosed with", "they diagnosed me with", "the diagnosis was",
+    "confirmed i had", "confirmed that i had", "turned out to be",
+    "the results showed", "the test results showed",
+    "me diagnosticaron con", "me dijeron que tenía", "me dijeron que tenia",
+    "el diagnóstico fue", "el diagnostico fue", "resultó ser", "resulto ser",
+    "los resultados mostraron", "el resultado fue",
 )
 
 _STRONG_CONFIDENCE = 0.9

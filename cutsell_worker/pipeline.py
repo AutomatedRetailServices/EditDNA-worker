@@ -261,7 +261,7 @@ from .semantic_authority_observability import (
     semantic_authority_gate_diagnostics,
 )
 from .temporal_editing import refine_takes_with_temporal_context
-from .whole_video_analysis import WholeVideoContext, confirmed_recording_behavior_events
+from .whole_video_analysis import WholeVideoContext, confirmed_recording_behavior_events, measured_silence_intervals
 
 
 def _group_id(project_id: str, key: str) -> str:
@@ -1635,6 +1635,11 @@ def build_flow_b_draft(
     # a weaker lexical link than its existing rules require -- optional and
     # purely additive; see `take_grouping.multimodal_corroborated_retry`.
     confirmed_recording_evidence = confirmed_recording_behavior_events(whole_video_context)
+    # D-150 (Gate 6 correction, real RAW #118 audit): same bridge pattern as
+    # `confirmed_recording_evidence` immediately above, for measured source
+    # silence instead of confirmed multimodal markers -- see
+    # `take_grouping.measured_pause_bridged_retry`'s own module comment.
+    measured_silence_evidence = measured_silence_intervals(whole_video_context)
     # D-158: real Watch+Listen evidence only ever reaches the authority when
     # the capability flag is ON (default OFF -- pre-D-158 behavior);
     # `reconcile_semantic_idea_equivalence` itself also gates on the same
@@ -1666,6 +1671,7 @@ def build_flow_b_draft(
         protected_ids=composite_split_ids,
         confirmed_recording_evidence=confirmed_recording_evidence,
         watch_listen_spans_by_id=watch_listen_spans_by_id,
+        measured_silence_evidence=measured_silence_evidence,
     )
 
     # D-058 Phase 1: one final cohesion-validation pass -- see

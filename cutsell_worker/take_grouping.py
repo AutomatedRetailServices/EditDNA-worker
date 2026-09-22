@@ -231,6 +231,84 @@ def incomplete_attempt_completed_by_retry(
     return None
 
 
+# D-150 (Gate 6 correction, real RAW #118 audit): a real, code-verified gap
+# `incomplete_attempt_completed_by_retry` structurally cannot close. A real
+# abandoned opening can share its first few words with its later completion
+# and then diverge into COMPLETELY DIFFERENT VOCABULARY THE REST OF THE WAY
+# -- the creator restarted with a different noun/phrasing choice throughout,
+# not just at the opening. `incomplete_attempt_completed_by_retry`'s own
+# `minimum_shared_content` gate (content overlap BEYOND the opening) then
+# never fires, by construction, no matter how its `minimum_tokens` floor is
+# tuned -- there is no lexical overlap left to find. This is exactly the
+# risk D-097.12's own module comment already named and refused to solve
+# lexically: "the SAME gastritis pair vs an unrelated 'Tuve problemas de
+# estómago ... no hay que preguntar.' aside shares the identical 2-word
+# opening and ZERO further content, and must not merge" -- an opening-only
+# match is NOT enough evidence on its own, full stop.
+#
+# The general, non-lexical evidence that tells the two cases apart: a real
+# abandoned-then-completed attempt has NOTHING ELSE said in between -- the
+# creator paused, then continued. An unrelated aside sharing only a generic
+# opener instead has ITS OWN speech content occupying that time. Already-
+# measured source silence (`audio_silence.py`, real ffmpeg evidence, the
+# same signal `attempt_reconstruction.py`'s own `_measured_pause_at_
+# transition` and `perceptual_watch_listen.py`'s `_measured_pause_near`
+# already trust) that covers MOST of the gap between the two takes is
+# structural proof of "paused, then continued" -- proof an unrelated aside
+# with real content in between could never produce, since its own words
+# would occupy that time instead of silence. Deliberately conservative:
+# still requires the SAME 2-word opening match (not run on totally
+# unrelated pairs), completeness asymmetry, and a high silence-coverage
+# floor over the WHOLE gap, not just a moment somewhere inside it.
+_PAUSE_BRIDGED_RETRY_OPENING_TOKENS = 2
+_PAUSE_BRIDGED_RETRY_MAXIMUM_GAP_SEC = 20.0
+_PAUSE_BRIDGED_RETRY_MIN_SILENCE_COVERAGE = 0.60
+
+
+def measured_pause_bridged_retry(
+    left: CandidateTake,
+    right: CandidateTake,
+    silence_intervals: Mapping[str, Tuple[Tuple[float, float], ...]] | None,
+    *,
+    opening_tokens: int = _PAUSE_BRIDGED_RETRY_OPENING_TOKENS,
+    maximum_gap_sec: float = _PAUSE_BRIDGED_RETRY_MAXIMUM_GAP_SEC,
+    min_silence_coverage: float = _PAUSE_BRIDGED_RETRY_MIN_SILENCE_COVERAGE,
+) -> str | None:
+    """Return `"measured_pause_bridged_retry"` when an earlier, incomplete
+    take shares its opening with a later, complete take AND the gap between
+    them is almost entirely measured silence, or `None`. See the module
+    comment above for the three-gate rationale. `silence_intervals` empty
+    or `None` returns `None` immediately -- zero behavior change when no
+    measured-silence evidence is supplied."""
+    if not silence_intervals:
+        return None
+    if left.source_asset_id != right.source_asset_id:
+        return None
+    events = silence_intervals.get(left.source_asset_id)
+    if not events:
+        return None
+    earlier, later = (left, right) if left.start <= right.start else (right, left)
+    if earlier.complete_idea or not later.complete_idea:
+        return None  # completeness asymmetry -- same safe shape every rule in this family requires
+    gap = max(0.0, float(later.start) - float(earlier.end))
+    if gap <= 0.0 or gap > maximum_gap_sec:
+        return None
+    earlier_tokens = _natural_tokens(earlier.text)
+    later_tokens = _natural_tokens(later.text)
+    if min(len(earlier_tokens), len(later_tokens)) < opening_tokens:
+        return None
+    if earlier_tokens[:opening_tokens] != later_tokens[:opening_tokens]:
+        return None  # still requires the same-opener signal -- never runs on unrelated pairs
+    silence_covered = 0.0
+    for s_start, s_end in events:
+        overlap = min(float(s_end), float(later.start)) - max(float(s_start), float(earlier.end))
+        if overlap > 0.0:
+            silence_covered += overlap
+    if (silence_covered / gap) < min_silence_coverage:
+        return None
+    return "measured_pause_bridged_retry"
+
+
 def group_takes(
     takes: Iterable[CandidateTake],
     *,
@@ -321,7 +399,23 @@ _MULTIMODAL_CORROBORATION_MAXIMUM_GAP_SEC = 10.0
 # least one more word of grammatical scaffolding, so a bare 1-2 token
 # interjection ("uh", "no wait") still never reaches this rule.
 _MULTIMODAL_CORROBORATION_MINIMUM_TOKENS = 3
-_MULTIMODAL_CORROBORATION_MINIMUM_SHARED_CONTENT = 1
+# D-147 (Gate 6 correction, real RAW #118 audit): raised 1 -> 2. A SINGLE
+# shared content word carries no distinguishing power at all once the
+# eligibility/token floors were generalized to short false starts (D-144):
+# a genuinely unrelated short fragment that happens to share exactly one
+# incidental word with a long, topically distant later clip ("I had
+# meetings" / "the schedule had many meetings planned for next quarter")
+# scores IDENTICALLY on both `minimum_shared_content` and
+# `minimum_overlap_ratio` (ratio is computed against the SMALLER side, so
+# one match out of one possible word is always ratio=1.0) to a genuine
+# short false start that shares its one meaningful word with its real
+# completion -- there is no lexical signal that tells the two apart, and a
+# confirmed event at the boundary alone is not enough (that is gate 3's
+# job, not gate 1's). Requiring at least TWO independent shared content
+# words makes a coincidental match require two independent coincidences,
+# not one -- consistent with WHEN UNCERTAIN, KEEP (do not merge on
+# ambiguous lexical evidence, even with multimodal corroboration).
+_MULTIMODAL_CORROBORATION_MINIMUM_SHARED_CONTENT = 2
 _MULTIMODAL_CORROBORATION_MINIMUM_OVERLAP_RATIO = 0.25
 _MULTIMODAL_CORROBORATION_EVENT_BEFORE_SEC = 1.0
 _MULTIMODAL_CORROBORATION_EVENT_AFTER_SEC = 2.0

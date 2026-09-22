@@ -13,6 +13,16 @@ eligible for comparison when it is itself an incomplete delivery (an already-
 general, non-lexical field every `CandidateTake` carries).
 
 Generic fixtures only -- no Video00 wording, timestamps, or clip ids.
+
+D-147 correction (Gate 6, real RAW #118 audit): the original version of this
+file used a false start sharing only ONE content word with its completion.
+That was itself a false-positive risk -- see
+`test_negative_control_a_single_coincidental_shared_word_never_corroborates`
+below, which reproduces (with generic text) the real audit's finding that a
+single incidental shared word plus a nearby confirmed event is indistinguishable
+from a genuine retry using lexical evidence alone. The positive fixtures below
+now share TWO real content words, matching the raised
+`_MULTIMODAL_CORROBORATION_MINIMUM_SHARED_CONTENT` floor (1 -> 2).
 """
 from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.take_grouping import multimodal_corroborated_retry
@@ -24,11 +34,12 @@ def _take(clip_id, start, end, text, *, complete, source="src"):
 
 
 # The false start: three words, grammatically incomplete (no terminal
-# punctuation), sharing only ONE real content word ("problems") with its
-# later, fully-reworded completion -- different phrasing throughout, exactly
-# the "different nouns/opening wording" shape the task describes.
-SHORT_FALSE_START = "I had problems"
-LATER_COMPLETE = "there were ongoing problems with the machine that caused repeated total failures"
+# punctuation), sharing TWO real content words with its later, differently-
+# worded completion -- still a short false start (semantic_key word count
+# <= 3, exactly the class the eligibility fix admits), just not reduced to a
+# single coincidental word.
+SHORT_FALSE_START = "I felt awful"
+LATER_COMPLETE = "I still felt pretty awful about the whole situation afterward"
 
 CONFIRMED_EVENTS = {"src": (("wrong_take", 4.5, 5.0),)}
 
@@ -99,3 +110,29 @@ def test_negative_control_bare_one_or_two_token_interjection_still_never_corrobo
     interjection = _take("interjection", 0.0, 1.0, "no wait", complete=False)
     later = _take("realization", 6.0, 12.0, LATER_COMPLETE, complete=True)
     assert multimodal_corroborated_retry(interjection, later, CONFIRMED_EVENTS) is None
+
+
+def test_negative_control_a_single_coincidental_shared_word_never_corroborates():
+    """D-147 (real RAW #118 audit finding): a short, unrelated fragment that
+    happens to share exactly ONE incidental content word with a long, topically
+    distant later clip -- PLUS a confirmed event at the boundary -- must never
+    merge. Before the fix (minimum_shared_content=1), this scored identically
+    to a genuine short false start on every gate (a single word out of one
+    possible always scores ratio=1.0): there was no lexical signal separating
+    an accidental one-word echo from a real retry. Two unrelated topics merely
+    mentioning the same one word (here: "meetings") is not evidence of a
+    retry -- it is evidence of nothing more than that one shared word."""
+    unrelated_short = _take("unrelated_short", 0.0, 4.0, "I had meetings", complete=False)
+    unrelated_long = _take(
+        "unrelated_long", 6.0, 12.0,
+        "the schedule had many meetings planned for next quarter",
+        complete=True,
+    )
+    assert multimodal_corroborated_retry(unrelated_short, unrelated_long, CONFIRMED_EVENTS) is None
+
+    merged, diag = reconcile_semantic_idea_equivalence(
+        (("unrelated_short",), ("unrelated_long",)), (unrelated_short, unrelated_long), None,
+        confirmed_recording_evidence=CONFIRMED_EVENTS,
+    )
+    assert merged == (("unrelated_short",), ("unrelated_long",))
+    assert diag["status"] == "not_requested"

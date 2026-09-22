@@ -22,6 +22,7 @@ from .take_grouping import (
     _safe_short_prefix_retry,
     group_takes,
     incomplete_attempt_completed_by_retry,
+    measured_pause_bridged_retry,
     multimodal_corroborated_retry,
     retry_similarity,
     same_opening_restart,
@@ -914,6 +915,7 @@ def reconcile_semantic_idea_equivalence(
     protected_ids: frozenset[str] = frozenset(),
     confirmed_recording_evidence: Mapping[str, Tuple[Tuple[str, float, float], ...]] | None = None,
     watch_listen_spans_by_id: Mapping[str, object] | None = None,
+    measured_silence_evidence: Mapping[str, Tuple[Tuple[float, float], ...]] | None = None,
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """Merge groups the lexical layer left separate only when a narrow
     semantic arbiter is confident they are recording attempts of the same
@@ -1023,6 +1025,18 @@ def reconcile_semantic_idea_equivalence(
             restart_kind = "safe_short_prefix_retry"
         if restart_kind is None:
             restart_kind = incomplete_attempt_completed_by_retry(left_take, right_take)
+        # D-150 (Gate 6 correction, real RAW #118 audit): tried only once
+        # the lexical rules above decline -- a deterministic rule in its own
+        # right (not a corroboration of a weaker lexical link), so it runs
+        # BEFORE the multimodal corroboration fallback below, not after. See
+        # `take_grouping.measured_pause_bridged_retry`'s own module comment
+        # for why this is the general fix for a real audited gap: an
+        # abandoned opening whose completion uses completely different
+        # vocabulary the rest of the way (no lexical overlap left for
+        # `incomplete_attempt_completed_by_retry` to find), bridged only by
+        # a measured silent gap, not by any confirmed multimodal marker.
+        if restart_kind is None and measured_silence_evidence:
+            restart_kind = measured_pause_bridged_retry(left_take, right_take, measured_silence_evidence)
         # D-100 (D-099 Gap #1, bounded encargo): only tried once every
         # existing lexical rule above has already declined this pair --
         # confirmed multimodal evidence CORROBORATES a weaker lexical link

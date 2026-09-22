@@ -171,3 +171,36 @@ def confirmed_recording_behavior_events(
         if matched:
             result[source.source_asset_id] = matched
     return result
+
+
+_AUDIO_SILENCE_EVENT_KIND = "audio_silence_interval"  # audio_silence.AUDIO_SILENCE_EVENT_KIND
+
+
+def measured_silence_intervals(
+    context: "WholeVideoContext | None",
+    *,
+    minimum_confidence: float = 0.80,
+) -> dict[str, Tuple[Tuple[float, float], ...]]:
+    """D-150 (Gate 6 correction, real RAW #118 audit): a narrow, read-only
+    view of the already-measured source silence intervals
+    (`audio_silence.py`, real ffmpeg `silencedetect` evidence -- the same
+    `AUDIO_SILENCE_EVENT_KIND` `attempt_reconstruction.py`'s own
+    `_measured_pause_at_transition` and `perceptual_watch_listen.py`'s
+    `_measured_pause_near` already trust), keyed by `source_asset_id`, as
+    plain `(start, end)` tuples -- mirrors `confirmed_recording_behavior_
+    events`'s exact shape/rationale so `take_grouping.py` (a pure lexical
+    module) can receive this corroborating evidence without depending on
+    this module or on `WholeVideoContext` itself. Purely additive; never
+    used to change what `whole_video_context` itself is."""
+    if context is None:
+        return {}
+    result: dict[str, Tuple[Tuple[float, float], ...]] = {}
+    for source in context.sources:
+        matched = tuple(
+            (event.start, event.end)
+            for event in source.events
+            if event.kind == _AUDIO_SILENCE_EVENT_KIND and float(event.confidence) >= minimum_confidence
+        )
+        if matched:
+            result[source.source_asset_id] = matched
+    return result

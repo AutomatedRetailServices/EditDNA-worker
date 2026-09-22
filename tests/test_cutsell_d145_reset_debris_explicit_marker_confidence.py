@@ -59,11 +59,16 @@ def test_explicit_marker_at_edge_is_uncertain_not_an_unconditional_fail():
     assert report.findings[0].routes_to == pwl.ROUTE_BOUNDARY
 
 
-def test_visual_motion_candidate_at_edge_remains_a_hard_fail():
-    """Regression guard: this fix must never soften the strong-evidence
-    kinds -- unchanged from before."""
+def test_visual_motion_candidate_at_edge_with_a_measured_pause_nearby_remains_a_hard_fail():
+    """Regression guard, updated for D-149: a visual/motion candidate
+    co-occurring with a REAL measured pause (the genuine reset/retry
+    signature) still remains a hard FAIL -- this fix narrows, never
+    eliminates, the strong-evidence path. See
+    test_cutsell_d149_reset_candidate_pause_discrimination.py for the
+    full pause-vs-continuous-speech discrimination this correction adds."""
     diag = _diag([
         {"kind": "hand_motion_reset_candidate", "start": 10.05, "end": 10.30, "confidence": 0.93},
+        {"kind": "audio_silence_interval", "start": 10.00, "end": 10.40, "confidence": 1.0},
     ])
     report = pwl._reset_debris_at_edges(_draft(diag), (_seg("a", 10.0, 15.0),), [(0.0, 5.0)])
     assert report.status == pwl.EVALUATED_FAIL
@@ -72,11 +77,13 @@ def test_visual_motion_candidate_at_edge_remains_a_hard_fail():
 
 def test_mixed_evidence_capability_status_stays_fail_when_any_hard_evidence_present():
     """A capability run carrying BOTH an explicit marker (now UNCERTAIN) and
-    a visual candidate (still FAIL) must still block as EVALUATED_FAIL --
-    the softening of one finding never silently drops the other."""
+    a visual candidate WITH a measured pause nearby (still FAIL) must still
+    block as EVALUATED_FAIL -- the softening of one finding never silently
+    drops the other."""
     diag = _diag([
         {"kind": "wrong_take", "start": 10.05, "end": 10.30, "confidence": 0.93},
         {"kind": "body_reset_candidate", "start": 14.80, "end": 15.05, "confidence": 0.95},
+        {"kind": "audio_silence_interval", "start": 14.75, "end": 15.10, "confidence": 1.0},
     ])
     report = pwl._reset_debris_at_edges(_draft(diag), (_seg("a", 10.0, 15.0),), [(0.0, 5.0)])
     assert report.status == pwl.EVALUATED_FAIL

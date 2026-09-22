@@ -58,8 +58,13 @@ def test_a_trim_never_lengthens_or_empties_a_segment_and_matches_fragments():
 
 
 def test_reset_debris_after_the_rendered_exit_is_not_a_finding():
+    # D-149: a visual/motion candidate needs a real measured pause nearby to
+    # stay a hard FAIL (see test_cutsell_d149_reset_candidate_pause_
+    # discrimination.py) -- included here so this pre-existing as-rendered/
+    # entry-exit test keeps exercising the FAIL path it was written for.
     diag = {"whole_video_context": {"sources": [{"source_asset_id": "src", "events": [
         {"kind": "hand_motion_reset_candidate", "start": 22.869, "end": 22.935, "confidence": 1.0},
+        {"kind": "audio_silence_interval", "start": 22.40, "end": 22.86, "confidence": 1.0},
     ]}]}}
     pre_tighten = (_seg("a", 13.78, 23.28),)
     defect_shape = pwl._reset_debris_at_edges(_draft(diag), pre_tighten, [(0.0, 9.5)])
@@ -70,8 +75,10 @@ def test_reset_debris_after_the_rendered_exit_is_not_a_finding():
 
 
 def test_reset_debris_inside_the_rendered_exit_is_still_a_finding():
+    # D-149: same measured-pause requirement as above.
     diag = {"whole_video_context": {"sources": [{"source_asset_id": "src", "events": [
         {"kind": "hand_motion_reset_candidate", "start": 52.671, "end": 52.738, "confidence": 1.0},
+        {"kind": "audio_silence_interval", "start": 52.20, "end": 52.65, "confidence": 1.0},
     ]}]}}
     rendered, applied = segments_as_rendered((_seg("a", 48.97, 52.75),), [])
     assert applied == 0

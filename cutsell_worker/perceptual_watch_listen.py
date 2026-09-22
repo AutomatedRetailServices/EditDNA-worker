@@ -1,4 +1,5 @@
-"""D-097 §4 -- perceptual System Watch+Listen reviewer v1 (advisory, routing only).
+"""D-097 §4 -- perceptual System Watch+Listen reviewer v1 (routing, blocking
+on EVALUATED_FAIL only).
 
 D-096 root cause #5: the technical post-render QC catches silence / black /
 frozen frames / join clicks and nothing perceptual, so every visual or
@@ -14,11 +15,23 @@ Contract (PO adjustment §4):
   never become PASS, and the review as a whole is PASS only when EVERY
   capability is EVALUATED_PASS -- so v1, which still carries
   NOT_IMPLEMENTED capabilities, can never auto-PASS a candidate;
-- `gate_mode` is "advisory_v1": the technical QC remains the blocking
-  delivery gate until the Product Owner approves this gate's acceptance
-  criteria (D-096 Part 12 Step 4, escalation A). Until then a technically
-  clean candidate is reported as DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN,
-  never as an approved preview;
+- D-153 (Gate 6 correction, real RAW #118 audit, explicit Product Owner
+  acceptance criterion): `gate_mode` is now
+  `GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY`. `blocks_delivery` (both on
+  `PerceptualReview` and in `as_dict()`) is True exactly when at least one
+  capability that was ACTUALLY EVALUATED reports EVALUATED_FAIL -- the same
+  condition `overall_status` already uses to report `REVIEW_FAIL`, and the
+  same condition `benchmarks/clean_raw_gate.py` already independently
+  checked (`perceptual_status == "FAIL"`) before this correction, so this
+  is naming an existing downstream behavior honestly, not introducing a new
+  one. A capability that is UNCERTAIN, ERROR, or still NOT_IMPLEMENTED
+  NEVER blocks delivery on its own -- with 4 of 8 capabilities still
+  NOT_IMPLEMENTED, requiring the full review to reach REVIEW_PASS before
+  delivery would mean no candidate could ever deliver until every one of
+  them ships, which is not what "block on a real defect" means. `status`
+  itself is unchanged and still never silently PASSes while any capability
+  is NOT_IMPLEMENTED/UNCERTAIN/ERROR -- this only changes what BLOCKS
+  delivery, never what counts as a clean review;
 - measurements are made on the REAL rendered MP4 where the capability
   allows (dead air, cut-adjacent speech energy); capabilities that map
   source evidence (A-5 reset events) or transcript onto the render timeline
@@ -31,10 +44,11 @@ from dataclasses import asdict, dataclass, field
 import math
 from typing import Iterable, Mapping, Sequence
 
+from .audio_silence import AUDIO_SILENCE_EVENT_KIND
 from .take_grouping import retry_similarity
 
 SCHEMA_VERSION = "cutsell.perceptual_watch_listen.v1"
-GATE_MODE_ADVISORY_V1 = "advisory_v1"
+GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY = "blocking_v1_evaluated_fail_only"
 
 EVALUATED_PASS = "EVALUATED_PASS"
 EVALUATED_FAIL = "EVALUATED_FAIL"
@@ -63,6 +77,18 @@ CUT_ENERGY_WINDOW_SEC = 0.06
 CUT_ENERGY_SPEECH_DBFS = -22.0
 EDGE_DEBRIS_WINDOW_SEC = 0.35
 EDGE_DEBRIS_MIN_CONFIDENCE = 0.85
+# D-149 (Gate 6 correction, real RAW #118 audit): a real audit found the
+# actual 14 findings on a real render were ALL `hand_motion_reset_candidate`
+# -- normal expressive gesture and microphone repositioning while speaking,
+# not recording-process resets. `local_performance.py`'s own docstring is
+# explicit that this event kind is pure kinematic measurement ("abrupt
+# changes are emitted as `*_candidate` events so semantic/retry context
+# remains authoritative") -- its `confidence` field is `0.52 + hand_delta*
+# 2.4 + b.motion`, a MAGNITUDE score, not a probability the movement is a
+# genuine reset. A large, fast, natural hand gesture during animated speech
+# scores just as "confident" as an actual reset; `EDGE_DEBRIS_MIN_CONFIDENCE`
+# cannot tell them apart on its own. See this constant's use below.
+RESET_CANDIDATE_PAUSE_PROXIMITY_SEC = 0.50
 REPEATED_CONTENT_SIMILARITY = 0.72
 _RESET_KINDS = frozenset({
     "body_reset_candidate", "hand_motion_reset_candidate",
@@ -130,6 +156,14 @@ class PerceptualReview:
     def findings(self) -> tuple[PerceptualFinding, ...]:
         return tuple(f for c in self.capabilities for f in c.findings)
 
+    @property
+    def blocks_delivery(self) -> bool:
+        """D-153: True exactly when a capability that was ACTUALLY
+        EVALUATED reports EVALUATED_FAIL -- never for UNCERTAIN, ERROR, or
+        a still-NOT_IMPLEMENTED capability. See the module docstring's
+        D-153 section for the full rationale."""
+        return any(c.status == EVALUATED_FAIL for c in self.capabilities)
+
     def as_dict(self) -> dict:
         routing: dict[str, int] = {}
         for finding in self.findings:
@@ -138,7 +172,7 @@ class PerceptualReview:
             "schema_version": self.schema_version,
             "status": self.status,
             "gate_mode": self.gate_mode,
-            "blocking": False,
+            "blocking": self.blocks_delivery,
             "human_watch_listen_required": True,
             "capabilities": [asdict(c) for c in self.capabilities],
             "capability_status_counts": {
@@ -231,6 +265,28 @@ def _events_for_source(diagnostics: Mapping, source_asset_id: str) -> tuple[dict
     return None
 
 
+def _measured_pause_near(
+    events: Sequence[dict], e_start: float, e_end: float, *, tolerance_sec: float,
+) -> bool:
+    """D-149: real, already-measured source silence (`audio_silence.py`'s
+    `AUDIO_SILENCE_EVENT_KIND`, ffmpeg `silencedetect` -- the same
+    `mp4_measured`-grade signal `_dead_air_on_mp4` above already trusts)
+    overlapping `[e_start, e_end]` within `tolerance_sec` on either side.
+    A genuine recording-process reset/retry is a creator stopping and
+    restarting -- that pattern virtually always has at least a brief pause
+    around it. Continuous, unbroken speech through the exact moment of an
+    abrupt hand/body/face measurement is the signature of natural
+    expressive gesture or a mid-sentence mic adjustment instead."""
+    lo, hi = e_start - tolerance_sec, e_end + tolerance_sec
+    for event in events:
+        if str(event.get("kind") or "").strip().lower() != AUDIO_SILENCE_EVENT_KIND:
+            continue
+        p_start, p_end = float(event.get("start") or 0.0), float(event.get("end") or 0.0)
+        if p_end >= lo and p_start <= hi:
+            return True
+    return False
+
+
 def _reset_debris_at_edges(draft, segments: Sequence, output_windows: Sequence[tuple[float, float]]) -> CapabilityReport:
     name = "reset_debris_at_edges_source_evidence"
     diagnostics = dict(getattr(draft, "diagnostics", None) or {})
@@ -254,18 +310,31 @@ def _reset_debris_at_edges(draft, segments: Sequence, output_windows: Sequence[t
             edge = "entry" if at_entry else "exit"
             out_start = win_start if at_entry else max(win_start, win_end - EDGE_DEBRIS_WINDOW_SEC)
             out_end = min(win_end, win_start + EDGE_DEBRIS_WINDOW_SEC) if at_entry else win_end
-            # D-145: an explicit recording-process-break marker at this edge
-            # is unverified evidence of visible residue (this capability
-            # never decodes rendered frames) -- it stays a reported,
-            # BoundaryEngine-routed finding, but UNCERTAIN, not a confirmed
-            # FAIL. A visual/motion reset candidate is stronger, more
-            # specific evidence and remains a hard FAIL, unchanged.
-            severity = "UNCERTAIN" if kind in _RESET_EXPLICIT_MARKER_KINDS else "FAIL"
+            detail = {"clip_id": segment.clip_id, "edge": edge, "event_kind": kind,
+                      "confidence": round(float(event.get("confidence") or 0.0), 3),
+                      "source_start": round(e_start, 3), "source_end": round(e_end, 3)}
+            if kind in _RESET_EXPLICIT_MARKER_KINDS:
+                # D-145: an explicit recording-process-break marker at this
+                # edge is unverified evidence of visible residue (this
+                # capability never decodes rendered frames) -- it stays a
+                # reported, BoundaryEngine-routed finding, but UNCERTAIN,
+                # never a confirmed FAIL.
+                severity = "UNCERTAIN"
+            else:
+                # D-149: a visual/motion reset CANDIDATE's `confidence` is a
+                # kinematic magnitude score, not a genuine-reset probability
+                # -- see `_measured_pause_near`'s docstring. Only a
+                # candidate co-occurring with a REAL measured pause keeps
+                # its hard FAIL; one landing mid continuous, unbroken speech
+                # is far more consistent with natural expressive gesture or
+                # a mic adjustment and downgrades to UNCERTAIN instead.
+                pause_nearby = _measured_pause_near(
+                    events, e_start, e_end, tolerance_sec=RESET_CANDIDATE_PAUSE_PROXIMITY_SEC,
+                )
+                detail["measured_pause_nearby"] = pause_nearby
+                severity = "FAIL" if pause_nearby else "UNCERTAIN"
             findings.append(PerceptualFinding(
-                name, RESET_DEBRIS_AT_EDGE, out_start, out_end, severity, ROUTE_BOUNDARY,
-                {"clip_id": segment.clip_id, "edge": edge, "event_kind": kind,
-                 "confidence": round(float(event.get("confidence") or 0.0), 3),
-                 "source_start": round(e_start, 3), "source_end": round(e_end, 3)},
+                name, RESET_DEBRIS_AT_EDGE, out_start, out_end, severity, ROUTE_BOUNDARY, detail,
             ))
     if not evidence_seen:
         return CapabilityReport(name, UNCERTAIN, "source_evidence_mapped", note="no local performance evidence available for the rendered sources")
@@ -320,11 +389,11 @@ def review_rendered_candidate(
         _repeated_audience_content(draft, segments, output_windows),
         *(CapabilityReport(cap, NOT_IMPLEMENTED, "none", note=why) for cap, why in NOT_IMPLEMENTED_CAPABILITIES),
     ]
-    return PerceptualReview(status=overall_status(capabilities), gate_mode=GATE_MODE_ADVISORY_V1, capabilities=tuple(capabilities))
+    return PerceptualReview(status=overall_status(capabilities), gate_mode=GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY, capabilities=tuple(capabilities))
 
 
 def error_review(reason: str) -> PerceptualReview:
     return PerceptualReview(
-        status=REVIEW_UNCERTAIN, gate_mode=GATE_MODE_ADVISORY_V1,
+        status=REVIEW_UNCERTAIN, gate_mode=GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY,
         capabilities=(CapabilityReport("reviewer", ERROR, "none", note=str(reason)[:200]),),
     )

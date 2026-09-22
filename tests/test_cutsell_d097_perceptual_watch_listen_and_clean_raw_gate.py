@@ -49,8 +49,13 @@ def test_review_fails_on_any_evaluated_fail_and_passes_only_when_all_pass():
 # --- capabilities without media --------------------------------------------------------
 
 def test_reset_debris_at_entry_is_routed_to_boundary_and_absent_evidence_is_uncertain():
+    # D-149: a visual/motion candidate needs a real measured pause nearby to
+    # stay a hard FAIL (see test_cutsell_d149_reset_candidate_pause_
+    # discrimination.py) -- included here so this pre-existing routing/
+    # method/absent-evidence test keeps exercising the FAIL path.
     diag = {"whole_video_context": {"sources": [{"source_asset_id": "src", "events": [
         {"kind": "hand_motion_reset_candidate", "start": 10.05, "end": 10.30, "confidence": 0.93},
+        {"kind": "audio_silence_interval", "start": 10.00, "end": 10.40, "confidence": 1.0},
         {"kind": "hand_motion_reset_candidate", "start": 12.00, "end": 12.20, "confidence": 0.93},  # interior: not an edge
     ]}]}}
     report = pwl._reset_debris_at_edges(_draft([], diag), (_seg("a", 10.0, 15.0),), [(0.0, 5.0)])
@@ -104,7 +109,10 @@ def test_review_measures_dead_air_on_the_real_mp4_and_routes_it(tone_gap_tone):
     assert dead_air.findings[0].kind == pwl.INTERIOR_DEAD_AIR and dead_air.findings[0].routes_to == pwl.ROUTE_BOUNDARY
     assert review.status == pwl.REVIEW_FAIL
     payload = review.as_dict()
-    assert payload["gate_mode"] == pwl.GATE_MODE_ADVISORY_V1 and payload["blocking"] is False
+    # D-153: a real EVALUATED_FAIL (measured dead air, not NOT_IMPLEMENTED)
+    # now blocks delivery -- gate_mode reports the blocking mode honestly.
+    assert payload["gate_mode"] == pwl.GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY
+    assert payload["blocking"] is True and review.blocks_delivery is True
     assert payload["human_watch_listen_required"] is True
     assert payload["capability_status_counts"][pwl.NOT_IMPLEMENTED] == len(pwl.NOT_IMPLEMENTED_CAPABILITIES)
     assert payload["routing"][pwl.ROUTE_BOUNDARY] >= 1
@@ -156,7 +164,7 @@ def _result(**overrides):
                         "hybrid_editorial_chunks": [{"diagnostics": [{"protected_polarity_fragments": [{"clip_id": "p"}]}]}]},
         "live_render_qc": {"status": "PASS", "deliverable": True, "delivery_status": "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=UNCERTAIN",
                            "attempts": [{"status": "PASS", "findings": [], "renderer_trailing_trims": [{"trim_sec": 0.4}], "dead_air_reconciliation": []}]},
-        "perceptual_watch_listen": {"status": "UNCERTAIN", "gate_mode": "advisory_v1", "capability_status_counts": {"NOT_IMPLEMENTED": 4}, "routing": {}},
+        "perceptual_watch_listen": {"status": "UNCERTAIN", "gate_mode": "blocking_v1_evaluated_fail_only", "capability_status_counts": {"NOT_IMPLEMENTED": 4}, "routing": {}},
     }
     base.update(overrides)
     return base
