@@ -131,6 +131,61 @@ def _restart_content(tokens: tuple[str, ...]) -> set[str]:
     return {token for token in tokens if len(token) >= 3 and token not in _RESTART_STOP}
 
 
+# D-156 (RAW #119 audit): an incomplete take can be completed by a retry
+# that re-conjugates or re-inflects the SAME word rather than repeating it
+# verbatim -- "me mando." (he/she sent me, singular) completed by "me
+# mandaron a hacer sonografia..." (they sent me, plural) shares zero exact
+# tokens on "mando"/"mandaron" even though it is the same verb, so the
+# shared-content-word floors below (which exist to require real, non-
+# coincidental topical overlap beyond a shared opener) never fire on the
+# most literal shape of self-correction: fixing subject/verb agreement or
+# number while continuing the same idea. Exact-token equality is too
+# strict for this; a bare fixed-length prefix match is too loose (an
+# unrelated pair like "contest"/"context" shares 5 of "contest"'s 7
+# characters purely by coincidence). The conservative middle: two content
+# words of real length (>= 5 chars, so a short/common word can never
+# supply this alone) whose shared PREFIX covers at least 80% of the
+# shorter word's length are treated as the same underlying word --
+# "mando"/"mandaron" share 4 of "mando"'s 5 characters (80%, the boundary
+# itself); "contest"/"context" share only 5 of 7 (71%, below it). This is
+# a general inflection-tolerance rule, not Video00 vocabulary -- it fires
+# identically on any language/topic whose retries fix agreement, tense or
+# number on an otherwise-unchanged word.
+_STEM_MATCH_MIN_TOKEN_LEN = 5
+_STEM_MATCH_PREFIX_RATIO = 0.80
+
+
+def _content_words_match(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    if len(left) < _STEM_MATCH_MIN_TOKEN_LEN or len(right) < _STEM_MATCH_MIN_TOKEN_LEN:
+        return False
+    shorter = min(len(left), len(right))
+    prefix_len = 0
+    for a, b in zip(left, right):
+        if a != b:
+            break
+        prefix_len += 1
+    return (prefix_len / shorter) >= _STEM_MATCH_PREFIX_RATIO
+
+
+def _shared_content_count(left: set[str], right: set[str]) -> int:
+    """Stem-aware shared-word count between two content-word sets (see
+    `_content_words_match`). Each right-side word is credited at most once,
+    even if it stem-matches more than one left-side word."""
+    matched_right: set[str] = set()
+    count = 0
+    for word in left:
+        for other in right:
+            if other in matched_right:
+                continue
+            if _content_words_match(word, other):
+                matched_right.add(other)
+                count += 1
+                break
+    return count
+
+
 def same_opening_restart(
     left: CandidateTake,
     right: CandidateTake,
@@ -157,12 +212,12 @@ def same_opening_restart(
     right_rest = _restart_content(right_tokens[opening_tokens:])
     if not left_rest or not right_rest:
         return None
-    shared = left_rest & right_rest
+    shared_count = _shared_content_count(left_rest, right_rest)
     smaller = min(len(left_rest), len(right_rest))
-    if len(shared) >= minimum_shared_content and len(shared) / smaller >= minimum_remainder_overlap:
+    if shared_count >= minimum_shared_content and shared_count / smaller >= minimum_remainder_overlap:
         return "same_opening_restart"
     short, long = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
-    if shared and len(short) * 2 <= len(long):
+    if shared_count and len(short) * 2 <= len(long):
         return "same_opening_abandoned_start"
     return None
 
@@ -226,7 +281,7 @@ def incomplete_attempt_completed_by_retry(
         return None
     earlier_rest = _restart_content(earlier_tokens[opening_tokens:])
     later_rest = _restart_content(later_tokens[opening_tokens:])
-    if len(earlier_rest & later_rest) >= minimum_shared_content:
+    if _shared_content_count(earlier_rest, later_rest) >= minimum_shared_content:
         return "incomplete_attempt_completed_by_retry"
     return None
 
@@ -483,9 +538,9 @@ def multimodal_corroborated_retry(
     later_content = _restart_content(later_tokens)
     if not earlier_content or not later_content:
         return None
-    shared = earlier_content & later_content
+    shared_count = _shared_content_count(earlier_content, later_content)
     smaller = min(len(earlier_content), len(later_content))
-    if len(shared) < minimum_shared_content or len(shared) / smaller < minimum_overlap_ratio:
+    if shared_count < minimum_shared_content or shared_count / smaller < minimum_overlap_ratio:
         return None  # gate 1: no real shared topic -- protects unrelated pairs
     found = _confirmed_event_at_boundary(
         events,
