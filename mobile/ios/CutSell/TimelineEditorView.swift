@@ -66,6 +66,7 @@ struct TimelineEditorView: View {
     @State private var isPlaying = false
     @State private var showBrollPicker = false
     @State private var showVoiceOverPicker = false
+    @State private var showCaptions = false
     @State private var justMutatedMainVideo = false
     @State private var canRedoMainVideo = false
 
@@ -191,6 +192,12 @@ struct TimelineEditorView: View {
             if (model.timelineAssetLibrary?.readyBroll ?? []).isEmpty {
                 Button("No ready B-roll available", role: .cancel) {}
             }
+        }
+        .sheet(isPresented: $showCaptions) {
+            CaptionsView(
+                model: model,
+                initialClipID: selection?.track == .mainVideo ? selection?.itemID : nil
+            )
         }
     }
 
@@ -333,6 +340,16 @@ struct TimelineEditorView: View {
                 Label("Redo", systemImage: "arrow.uturn.forward")
             }
             .disabled(!canRedoMainVideo)
+
+            // Entry point into the real Mobile V1 Captions UI gate --
+            // never a decorative button. Reuses the same real draft
+            // captions authority CaptionsView is built on.
+            Button {
+                showCaptions = true
+            } label: {
+                Label("Captions", systemImage: "captions.bubble")
+            }
+            .accessibilityIdentifier("timeline.captionsButton")
 
             Spacer()
 
