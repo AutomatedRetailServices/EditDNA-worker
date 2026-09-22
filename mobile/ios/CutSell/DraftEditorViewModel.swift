@@ -139,15 +139,105 @@ final class DraftEditorViewModel: ObservableObject {
 
     /// Imports an already-existing local video file as a new
     /// SUPPLEMENTAL_BROLL asset via the real D-282A upload+registration
-    /// routes (`OverlayImportManager`) -- never a fabricated capture/import
+    /// routes (`BrollImportManager`) -- never a fabricated capture/import
     /// path. Same confirmed-before-refresh discipline as
     /// `importVoiceOverAudio`.
-    func importOverlayVideo(fileURL: URL) async {
+    func importBrollVideo(fileURL: URL) async {
         do {
-            _ = try await OverlayImportManager.shared.importVideo(
+            _ = try await BrollImportManager.shared.importVideo(
                 fileURL: fileURL, projectID: project.projectID, session: session, api: api
             )
             await refreshTimelineAssetLibrary()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Overlay (real, positioned/scaled media overlay -- D-091
+    // corrective gate). This is a GENUINELY DIFFERENT feature from B-roll
+    // above: `media_overlays` lives on the canonical `draft` dict (the
+    // SAME system `selected`/`alternates`/`text_overlays` already use),
+    // mutated via `/v1/overlays/add|update|remove`
+    // (`cutsell_worker/overlay_edits.py`, confirmed real and ACTIVE:
+    // `export_job.py` reads `draft.media_overlays`, downloads each
+    // overlay's media, and passes it to `render.render_preview`, which
+    // invokes `media_overlay_render.build_final_overlay_command` -- a real
+    // ffmpeg `overlay=x=...:y=...` filter with scale (`width`), a timed
+    // `enable` window, and `mute_audio`-gated audio mixing). Uses the SAME
+    // `edit(path:body:)` + `autosave(_:)` pattern already established for
+    // Main Video split/remove/swap -- never the D-282A TimelineComposition
+    // PUT-with-revision pattern, since overlays are not part of that
+    // system. Undo/Redo therefore reuse the SAME real `/draft/undo` /
+    // `/draft/redo` authority as Main Video (`undo()`/`redo()` above),
+    // never a second Undo mechanism.
+
+    func addMediaOverlay(
+        kind: String, uri: String, start: Double, end: Double,
+        x: Double = 0.5, y: Double = 0.5, width: Double = 0.4,
+        sourceStart: Double = 0.0, sourceEnd: Double? = nil, muteAudio: Bool = true
+    ) async {
+        guard let snapshot else { return }
+        var body: [String: JSONValue] = [
+            "draft": snapshot.draft,
+            "project_id": .string(project.projectID),
+            "user_id": .string(session.userID),
+            "kind": .string(kind),
+            "uri": .string(uri),
+            "start": .number(start),
+            "end": .number(end),
+            "x": .number(x),
+            "y": .number(y),
+            "width": .number(width),
+            "source_start": .number(sourceStart),
+            "mute_audio": .bool(muteAudio),
+        ]
+        if let sourceEnd { body["source_end"] = .number(sourceEnd) }
+        let edited = await edit(path: "/v1/overlays/add", body: .object(body))
+        if let edited { await autosave(edited) }
+    }
+
+    func updateMediaOverlay(
+        overlayID: String, start: Double? = nil, end: Double? = nil,
+        x: Double? = nil, y: Double? = nil, width: Double? = nil, muteAudio: Bool? = nil
+    ) async {
+        guard let snapshot else { return }
+        var body: [String: JSONValue] = [
+            "draft": snapshot.draft,
+            "overlay_id": .string(overlayID),
+        ]
+        if let start { body["start"] = .number(start) }
+        if let end { body["end"] = .number(end) }
+        if let x { body["x"] = .number(x) }
+        if let y { body["y"] = .number(y) }
+        if let width { body["width"] = .number(width) }
+        if let muteAudio { body["mute_audio"] = .bool(muteAudio) }
+        let edited = await edit(path: "/v1/overlays/update", body: .object(body))
+        if let edited { await autosave(edited) }
+    }
+
+    func removeMediaOverlay(overlayID: String) async {
+        guard let snapshot else { return }
+        let edited = await edit(path: "/v1/overlays/remove", body: .object([
+            "draft": snapshot.draft,
+            "overlay_id": .string(overlayID),
+        ]))
+        if let edited { await autosave(edited) }
+    }
+
+    /// Imports an already-existing local photo/video file via the real,
+    /// ACTIVE `OverlayUploadManager` (`POST /v1/overlays/uploads/presign`
+    /// -> real S3 multipart upload), then immediately places it on the
+    /// timeline via `addMediaOverlay` -- `/v1/overlays/add` has no
+    /// separate "register only" step (unlike D-282A's B-roll/voice-over
+    /// two-phase upload+registration), so Import and Add are one real
+    /// action here.
+    func importOverlayMedia(fileURL: URL) async {
+        do {
+            let presign = try await OverlayUploadManager.shared.upload(
+                fileURL: fileURL, projectID: project.projectID, session: session
+            )
+            let end = timelineDuration
+            await addMediaOverlay(kind: presign.kind, uri: presign.uri, start: max(0, end - 3), end: max(0.5, end))
         } catch {
             errorMessage = error.localizedDescription
         }

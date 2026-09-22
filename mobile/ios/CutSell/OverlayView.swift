@@ -1,155 +1,113 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Mobile V1 Overlay UI gate. Connects ONLY to real, already-existing
-/// backend authority -- never an invented route, a simulated position/
-/// scale/rotation/opacity/keyframe control, or a fabricated capture
-/// capability.
+/// Mobile V1 Overlay UI -- the GENUINE, positioned/scaled overlay feature
+/// (corrective build: a prior gate mistakenly built this screen against
+/// `BrollPlacement`, a full-frame visual replacement with no position or
+/// scale -- that code now lives, honestly renamed, in `BrollView.swift`).
 ///
-/// Real authority used here:
-/// - `TimelineAssetRegistryClient.list` (`GET /timeline-assets`) for the
-///   asset library; `readyBroll` is D-279's own real READY/
-///   SUPPLEMENTAL_BROLL/VIDEO filter.
-/// - `OverlayImportManager.importVideo` (`POST /timeline-uploads` with
-///   media_class="video" then `POST /timeline-assets` with
-///   role="SUPPLEMENTAL_BROLL", media_kind="VIDEO") to import an EXISTING
-///   local video file as a new asset. Ingestion is synchronous
-///   (`create_video_timeline_asset` probes real source-media profile and
-///   returns READY/REJECTED/FAILED immediately) -- never a fabricated
-///   polling/QUALIFYING step. Only VIDEO is supported -- `TimelineMediaKind`
-///   has no IMAGE case, so a still-image overlay has no real backend
-///   authority and is never offered here.
-/// - `model.addBrollPlacement` / `.removeBrollPlacement` /
-///   `.splitBrollPlacement` / `.setBrollAudioMode` (all real D-282A
-///   `PUT /timeline` mutations).
-/// - `model.canUndoTimelineMutation` / `.undoLastTimelineMutation()` (the
-///   same real captured-pre-mutation-snapshot Undo already used for
-///   Voice-over placements -- Overlay shares the identical authority).
+/// Real, ACTIVE authority confirmed by direct audit before writing this
+/// file:
+/// - `cutsell_worker/overlay_edits.py`'s `add_media_overlay` /
+///   `update_media_overlay` / `remove_media_overlay` -- pure functions on
+///   the canonical `draft` dict's `media_overlays` list, called by
+///   `cutsell_app/overlay_routes.py`'s real, registered
+///   `POST /v1/overlays/add|update|remove` routes (router included in
+///   `cutsell_app/main.py`).
+/// - Real S3 upload: `OverlayUploadManager.swift`'s existing
+///   `upload(fileURL:projectID:session:)` -> `POST /v1/overlays/uploads/
+///   presign` -> `cutsell_worker/overlay_uploads.py::
+///   create_overlay_presigned_upload` (real, scoped S3 prefix, photo/video
+///   extension detection).
+/// - Real persistence + canonical draft connection: `media_overlays` is
+///   parsed into the canonical `DraftTimeline`/`MediaOverlay` contract by
+///   `cutsell_worker/serde.py`'s `_media_overlay_from_dict`
+///   (`cutsell_worker/contracts.py::MediaOverlay`), the SAME parsing path
+///   `selected`/`alternates`/`text_overlays` already use.
+/// - Real, ACTIVE renderer wiring (the decisive confirmation this is not
+///   legacy/disconnected): `cutsell_worker/export_job.py` reads
+///   `draft.media_overlays`, downloads each overlay's media, and passes
+///   `LocalMediaOverlay` values into `render.render_preview(media_overlays:)`,
+///   which invokes `media_overlay_render.build_final_overlay_command` --
+///   a real ffmpeg `overlay=x='W*x-w/2':y='H*y-h/2'` filter (genuine
+///   position), `scale=pixel_width` (genuine scale from `width`), a timed
+///   `enable=between(t,start,end)` window, and `mute_audio`-gated audio
+///   mixing for video-kind overlays. This is a real, shipped capability,
+///   not a documented-but-unused field.
+/// - Mutation pattern: `/v1/overlays/*` returns a mutated `draft` dict,
+///   exactly like `/v1/draft-edits/*` -- so this screen reuses the SAME
+///   `edit(path:body:)` + `autosave(_:)` + `/draft/undo`/`/draft/redo`
+///   authority Main Video already uses (`model.addMediaOverlay` /
+///   `.updateMediaOverlay` / `.removeMediaOverlay` / `.undo()` /
+///   `.redo()`), never the D-282A TimelineComposition mechanism B-roll/
+///   Voice-over use.
 ///
-/// PENDING / honestly unsupported (documented here, never simulated):
-/// - Live capture/recording of overlay video: not implemented anywhere in
-///   this codebase. Import (an already-existing local video file) is the
-///   only real "add new overlay media" capability today.
-/// - Position, scale, rotation, opacity, keyframes: `BrollPlacementModel`
-///   (`cutsell_app/timeline_routes.py`) carries exactly `placement_id,
-///   asset_id, timeline_start_sec, timeline_end_sec, source_in_sec,
-///   source_out_sec, audio_mode` -- no position/scale/rotation/opacity/
-///   keyframe field at all. `timeline_composition.py`'s own
-///   `BrollPlacement` dataclass confirms this: it is a full-frame visual
-///   replacement over `[timeline_start_sec, timeline_end_sec)`, never a
-///   positioned/scaled/rotated layer. (A DIFFERENT, older draft-based
-///   "media overlay" system -- `cutsell_app/overlay_routes.py`'s
-///   `add_media_overlay`, with real x/y/width fields -- does exist in this
-///   codebase, but it operates on the separate `draft` dict, not this
-///   D-279/D-282A `TimelineComposition` Overlay/B-roll track; mixing the
-///   two would misrepresent which system this control surface actually
-///   edits.) Every control below for these is shown, honestly disabled,
-///   never wired to a fake mutation.
-/// - `audio_mode` IS real and mutable (`setBrollAudioMode`): one of three
-///   backend-accepted values. Note found during audit:
-///   `timeline_composition_executor.py`'s own comment states
-///   "KEEP_PRIMARY_VOICE and MUTE_BROLL_AUDIO both leave the primary voice
-///   as-is" in the current renderer -- only USE_BROLL_AUDIO currently
-///   changes the rendered audio outcome. All three are still shown (the
-///   backend validates and stores all three), never narrowed to two on
-///   this view's own authority.
+/// Real, per-overlay editable fields (all present on `MediaOverlay`):
+/// position (x/y), scale (width), start/end timing, and mute_audio (video
+/// kind only). Rotation, opacity, and keyframes have NO field anywhere in
+/// `MediaOverlay`/`add_media_overlay`/`update_media_overlay` -- shown
+/// honestly disabled, never simulated.
 struct OverlayView: View {
     @ObservedObject var model: DraftEditorViewModel
-    let initialPlacementID: String?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPlacementID: String?
-    @State private var splitTime: Double = 0
+    @State private var selectedOverlayID: String?
     @State private var isImporting = false
     @State private var justMutated = false
+    @State private var canRedo = false
 
     private enum OverlayStage { case empty, importing, ready, error }
 
-    private var placements: [BrollPlacement] {
-        model.timelineComposition?.brollPlacements ?? []
-    }
-
-    private var readyAssets: [TimelineMediaAsset] {
-        model.timelineAssetLibrary?.readyBroll ?? []
-    }
+    private var overlays: [[String: JSONValue]] { model.mediaOverlays }
 
     private var stage: OverlayStage {
         if model.errorMessage != nil { return .error }
-        if model.isSavingTimeline { return .importing }
-        if placements.isEmpty && readyAssets.isEmpty { return .empty }
+        if model.isSaving { return .importing }
+        if overlays.isEmpty { return .empty }
         return .ready
     }
 
-    private var selectedPlacement: BrollPlacement? {
-        guard let selectedPlacementID else { return nil }
-        return placements.first { $0.placementID == selectedPlacementID }
+    private var selectedOverlay: [String: JSONValue]? {
+        guard let selectedOverlayID else { return nil }
+        return overlays.first { $0["overlay_id"]?.stringValue == selectedOverlayID }
     }
 
-    private var canUndo: Bool { model.canUndoTimelineMutation || justMutated }
+    private var canUndo: Bool { justMutated }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    stageRow
-                }
+                Section { stageRow }
 
                 Section("Import") {
-                    // Real capability, independent of any timeline
-                    // placement precondition: registering a new asset via
-                    // /timeline-uploads + /timeline-assets never requires a
-                    // base edit asset -- only PLACING one on the timeline
-                    // does (see "Add existing to timeline" below). Never a
-                    // live capture -- see the file doc for why recording
-                    // has no real authority yet.
                     Button {
                         isImporting = true
                     } label: {
-                        Label("Import overlay video", systemImage: "video.badge.plus")
+                        Label("Import photo or video overlay", systemImage: "rectangle.badge.plus")
                     }
                     .accessibilityIdentifier("overlay.importButton")
 
-                    Text("Only video is supported -- there is no real backend authority for a still-image overlay on this track.")
+                    Text("Uploads the file and places it on the timeline in one real step -- /v1/overlays/add has no separate registration phase.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Add existing to timeline") {
-                    if readyAssets.isEmpty {
-                        Text("No ready overlay video yet.")
+                Section("Overlays") {
+                    if overlays.isEmpty {
+                        Text("No overlay added yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(readyAssets) { asset in
-                            Button("\(Int(asset.durationSec))s overlay") {
-                                Task { await addToTimeline(asset) }
-                            }
-                            .disabled(model.baseEditAssetID == nil)
-                        }
-                        if model.baseEditAssetID == nil {
-                            Text("Placing overlay on the timeline needs this project's primary source registered first.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Overlay track") {
-                    if placements.isEmpty {
-                        Text("No overlay placed on the timeline yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(placements) { placement in
+                        ForEach(overlays, id: \.overlayRowID) { overlay in
                             Button {
-                                selectedPlacementID = placement.placementID
-                                syncSplitTime()
+                                selectedOverlayID = overlay["overlay_id"]?.stringValue
                             } label: {
                                 HStack {
-                                    Text(assetLabel(for: placement))
+                                    Text((overlay["kind"]?.stringValue ?? "overlay").capitalized)
                                     Spacer()
-                                    Text(String(format: "%.1fs–%.1fs", placement.timelineStartSec, placement.timelineEndSec))
+                                    Text(String(format: "%.1fs–%.1fs", overlay["start"]?.doubleValue ?? 0, overlay["end"]?.doubleValue ?? 0))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    if placement.placementID == selectedPlacementID {
+                                    if overlay["overlay_id"]?.stringValue == selectedOverlayID {
                                         Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
                                     }
                                 }
@@ -159,81 +117,41 @@ struct OverlayView: View {
                     }
                 }
 
-                if let selectedPlacement {
-                    Section("Split selected placement") {
-                        Slider(
-                            value: $splitTime,
-                            in: selectedPlacement.timelineStartSec...selectedPlacement.timelineEndSec
-                        )
-                        .accessibilityLabel("Split point")
-                        .accessibilityValue("\(String(format: "%.1f", splitTime)) seconds")
+                if let selectedOverlay {
+                    editSection(for: selectedOverlay)
 
-                        HStack(spacing: 14) {
-                            Button {
-                                Task { await performSplit() }
-                            } label: {
-                                Label("Split", systemImage: "scissors")
-                            }
-                            .disabled(!canSplitAtSplitTime(selectedPlacement))
-
-                            Button(role: .destructive) {
-                                Task { await performDelete() }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                            .accessibilityIdentifier("overlay.deleteButton")
+                    Section("Rotation, opacity & keyframes (not yet supported)") {
+                        HStack {
+                            Text("Rotation")
+                            Spacer()
+                            Slider(value: .constant(0.0), in: -180...180).disabled(true)
                         }
-                        .buttonStyle(.bordered)
+                        HStack {
+                            Text("Opacity")
+                            Spacer()
+                            Slider(value: .constant(1.0), in: 0...1).disabled(true)
+                        }
+                        HStack {
+                            Text("Keyframes")
+                            Spacer()
+                            Button("Add keyframe") {}
+                                .disabled(true)
+                        }
+                        Text("The real overlay contract (MediaOverlay) has no rotation, opacity, or keyframe field -- these controls are shown disabled rather than simulated.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("overlay.rotationOpacityKeyframeUnsupported")
+                    }
+
+                    Section {
+                        Button(role: .destructive) {
+                            Task { await performDelete(overlayID: selectedOverlay["overlay_id"]?.stringValue) }
+                        } label: {
+                            Label("Delete overlay", systemImage: "trash")
+                        }
+                        .accessibilityIdentifier("overlay.deleteButton")
                         .frame(minHeight: 44)
                     }
-
-                    // Real, backend-accepted mutation -- the only editable
-                    // field on a B-roll placement besides timing.
-                    Section("Audio mode") {
-                        Picker("Audio mode", selection: audioModeBinding(for: selectedPlacement)) {
-                            Text("Keep primary voice").tag(TimelineAudioMode.keepPrimaryVoice)
-                            Text("Use overlay's own audio").tag(TimelineAudioMode.useBrollAudio)
-                            Text("Mute overlay audio").tag(TimelineAudioMode.muteBrollAudio)
-                        }
-                        .pickerStyle(.menu)
-                        .accessibilityIdentifier("overlay.audioModePicker")
-                    }
-                }
-
-                // Position/scale/rotation/opacity/keyframes -- honestly
-                // disabled: no real backend field exists for any of these
-                // on a B-roll placement (see the file doc).
-                Section("Position, scale & effects (not yet supported)") {
-                    HStack {
-                        Text("Position")
-                        Spacer()
-                        Text("Full-frame").foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("Scale")
-                        Spacer()
-                        Slider(value: .constant(1.0), in: 0.1...1).disabled(true)
-                    }
-                    HStack {
-                        Text("Rotation")
-                        Spacer()
-                        Slider(value: .constant(0.0), in: -180...180).disabled(true)
-                    }
-                    HStack {
-                        Text("Opacity")
-                        Spacer()
-                        Slider(value: .constant(1.0), in: 0...1).disabled(true)
-                    }
-                    HStack {
-                        Text("Keyframes")
-                        Spacer()
-                        Button("Add keyframe") {}
-                            .disabled(true)
-                    }
-                    Text("The current backend contract carries no position, scale, rotation, opacity, or keyframe field for overlay placements -- these controls are shown disabled rather than simulated.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("overlay.transformControlsUnsupported")
                 }
 
                 Section {
@@ -244,6 +162,14 @@ struct OverlayView: View {
                     }
                     .disabled(!canUndo)
                     .frame(minHeight: 44)
+
+                    Button {
+                        Task { await performRedo() }
+                    } label: {
+                        Label("Redo", systemImage: "arrow.uturn.forward")
+                    }
+                    .disabled(!canRedo)
+                    .frame(minHeight: 44)
                 }
             }
             .navigationTitle("Overlay")
@@ -251,11 +177,7 @@ struct OverlayView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             }
-            .onAppear {
-                selectedPlacementID = initialPlacementID ?? placements.first?.placementID
-                syncSplitTime()
-            }
-            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.movie]) { result in
+            .fileImporter(isPresented: $isImporting, allowedContentTypes: [.image, .movie]) { result in
                 switch result {
                 case .success(let url):
                     Task { await performImport(url) }
@@ -270,11 +192,58 @@ struct OverlayView: View {
         }
     }
 
+    /// Position (x/y) and scale (width) are real, backend-accepted fields
+    /// on `MediaOverlay` -- normalized 0...1 (x/y) and 0.1...1.0 (width),
+    /// matching `overlay_edits.py::_validate` exactly. `mute_audio` is
+    /// real but only meaningful for a video-kind overlay (`_validate`
+    /// itself has no photo/video distinction for it, but the renderer only
+    /// ever mixes audio for `kind == "video"`).
+    ///
+    /// `CommitSlider` below only calls the real backend mutation once the
+    /// drag ends (`onEditingChanged(false)`), never on every drag frame --
+    /// a continuous per-frame `/v1/overlays/update` call would both storm
+    /// the network and race against the draft's own optimistic-concurrency
+    /// `expected_revision` check.
+    @ViewBuilder
+    private func editSection(for overlay: [String: JSONValue]) -> some View {
+        let overlayID = overlay["overlay_id"]?.stringValue ?? ""
+        let kind = overlay["kind"]?.stringValue ?? "photo"
+        Section("Position & scale") {
+            CommitSlider(label: "X", value: overlay["x"]?.doubleValue ?? 0.5, range: 0...1, accessibilityID: "overlay.xSlider") { newValue in
+                justMutated = false
+                await model.updateMediaOverlay(overlayID: overlayID, x: newValue)
+                justMutated = true
+            }
+            CommitSlider(label: "Y", value: overlay["y"]?.doubleValue ?? 0.5, range: 0...1, accessibilityID: "overlay.ySlider") { newValue in
+                justMutated = false
+                await model.updateMediaOverlay(overlayID: overlayID, y: newValue)
+                justMutated = true
+            }
+            CommitSlider(label: "Scale", value: overlay["width"]?.doubleValue ?? 0.4, range: 0.1...1.0, accessibilityID: "overlay.scaleSlider") { newValue in
+                justMutated = false
+                await model.updateMediaOverlay(overlayID: overlayID, width: newValue)
+                justMutated = true
+            }
+        }
+        if kind == "video" {
+            Section("Audio") {
+                Toggle("Mute overlay audio", isOn: Binding(
+                    get: { overlay["mute_audio"]?.boolValue ?? true },
+                    set: { newValue in
+                        justMutated = false
+                        Task { await model.updateMediaOverlay(overlayID: overlayID, muteAudio: newValue); justMutated = true }
+                    }
+                ))
+                .accessibilityIdentifier("overlay.muteAudioToggle")
+            }
+        }
+    }
+
     @ViewBuilder
     private var stageRow: some View {
         switch stage {
         case .empty:
-            Label("No overlay yet", systemImage: "photo.on.rectangle")
+            Label("No overlay yet", systemImage: "rectangle.on.rectangle")
                 .foregroundStyle(.secondary)
         case .importing:
             HStack(spacing: 8) {
@@ -290,72 +259,67 @@ struct OverlayView: View {
         }
     }
 
-    private func assetLabel(for placement: BrollPlacement) -> String {
-        readyAssets.first { $0.assetID == placement.assetID } != nil ? "Overlay" : "Overlay (unavailable)"
-    }
-
-    private func syncSplitTime() {
-        guard let selectedPlacement else { return }
-        splitTime = (selectedPlacement.timelineStartSec + selectedPlacement.timelineEndSec) / 2
-    }
-
-    private func canSplitAtSplitTime(_ placement: BrollPlacement) -> Bool {
-        splitTime > placement.timelineStartSec + 0.05 && splitTime < placement.timelineEndSec - 0.05
-    }
-
-    private func audioModeBinding(for placement: BrollPlacement) -> Binding<TimelineAudioMode> {
-        Binding(
-            get: { placement.audioMode },
-            set: { newMode in Task { await performSetAudioMode(id: placement.placementID, mode: newMode) } }
-        )
-    }
-
-    private func addToTimeline(_ asset: TimelineMediaAsset) async {
-        let end = (model.timelineComposition?.timelineDurationSec ?? 0) + asset.durationSec
-        let start = model.timelineComposition?.timelineDurationSec ?? 0
-        justMutated = false
-        await model.addBrollPlacement(
-            assetID: asset.assetID, start: start, end: end, sourceIn: 0, sourceOut: asset.durationSec
-        )
-        justMutated = true
-    }
-
-    private func performSplit() async {
-        guard let id = selectedPlacementID, let placement = selectedPlacement, canSplitAtSplitTime(placement) else { return }
-        justMutated = false
-        await model.splitBrollPlacement(id: id, at: splitTime)
-        justMutated = true
-    }
-
-    private func performDelete() async {
-        guard let id = selectedPlacementID else { return }
-        justMutated = false
-        await model.removeBrollPlacement(id: id)
-        justMutated = true
-        selectedPlacementID = nil
-    }
-
-    private func performSetAudioMode(id: String, mode: TimelineAudioMode) async {
-        justMutated = false
-        await model.setBrollAudioMode(id: id, mode: mode)
-        justMutated = true
-    }
-
     private func performImport(_ url: URL) async {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-        await model.importOverlayVideo(fileURL: url)
+        justMutated = false
+        await model.importOverlayMedia(fileURL: url)
+        justMutated = true
+        canRedo = false
     }
 
-    /// Same honest, scoped Undo pattern already established for Main Video,
-    /// Captions, and Voice-over: `undoLastTimelineMutation()` only clears
-    /// its captured snapshot on a confirmed successful re-save -- a failed
-    /// revert leaves the snapshot intact so the user can retry, never
-    /// inferred from `await` alone.
+    private func performDelete(overlayID: String?) async {
+        guard let overlayID else { return }
+        justMutated = false
+        await model.removeMediaOverlay(overlayID: overlayID)
+        justMutated = true
+        canRedo = false
+        selectedOverlayID = nil
+    }
+
+    /// Reuses the SAME real `/draft/undo` authority as Main Video --
+    /// overlays live on the same canonical draft, so this is genuinely the
+    /// same revision chain, never a second/fabricated Undo mechanism.
     private func performUndo() async {
-        if model.canUndoTimelineMutation {
-            await model.undoLastTimelineMutation()
-            justMutated = false
+        guard justMutated else { return }
+        let succeeded = await model.undo()
+        justMutated = false
+        if succeeded { canRedo = true }
+    }
+
+    private func performRedo() async {
+        guard canRedo else { return }
+        let succeeded = await model.redo()
+        if succeeded { canRedo = false }
+    }
+}
+
+private extension Dictionary where Key == String, Value == JSONValue {
+    var overlayRowID: String { self["overlay_id"]?.stringValue ?? UUID().uuidString }
+}
+
+/// A slider that tracks a local, smoothly-draggable value but only invokes
+/// `onCommit` once, when the drag ends -- never on every intermediate
+/// frame. `value` re-syncs the local state whenever the underlying overlay
+/// value changes externally (e.g. after a real backend confirmation).
+private struct CommitSlider: View {
+    let label: String
+    let value: Double
+    let range: ClosedRange<Double>
+    let accessibilityID: String
+    let onCommit: (Double) async -> Void
+
+    @State private var localValue: Double = 0
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Slider(value: $localValue, in: range, onEditingChanged: { editing in
+                if !editing { Task { await onCommit(localValue) } }
+            })
+            .accessibilityIdentifier(accessibilityID)
         }
+        .onAppear { localValue = value }
+        .onChange(of: value) { _, newValue in localValue = newValue }
     }
 }

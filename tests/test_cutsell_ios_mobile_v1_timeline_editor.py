@@ -21,16 +21,16 @@ VISUAL_TIMELINE = ROOT / "mobile/ios/CutSell/VisualTimelineView.swift"
 
 
 # ---------------------------------------------------------------------------
-# 1. Three-track order: Main Video, Voice-over, Overlay
+# 1. Three-track order: Main Video, Voice-over, B-roll
 # ---------------------------------------------------------------------------
 
-def test_three_track_order_main_video_voiceover_overlay():
+def test_three_track_order_main_video_voiceover_broll():
     source = TIMELINE_EDITOR.read_text()
     assert "enum TimelineTrackKind" in source
     main_idx = source.index("case mainVideo")
     vo_idx = source.index("voiceOver", main_idx)
-    overlay_idx = source.index("overlay", vo_idx)
-    assert main_idx < vo_idx < overlay_idx
+    broll_idx = source.index("broll", vo_idx)
+    assert main_idx < vo_idx < broll_idx
 
 
 def test_tracks_rendered_via_allCases_not_hand_ordered_duplicate_list():
@@ -197,46 +197,55 @@ def test_base_edit_asset_resolution_is_honest_never_invented():
     source = VIEW_MODEL.read_text()
     assert "var baseEditAssetID: String? { timelineAssetLibrary?.readyPrimarySources.first?.assetID }" in source
     editor_source = TIMELINE_EDITOR.read_text()
-    # canAddOverlayOrVoiceOver still gates the honest disclosure text and
+    # canAddBrollOrVoiceOver still gates the honest disclosure text and
     # each dedicated view's own "Add existing to timeline" action -- it no
     # longer gates either track's entry ("+") button, since Import
-    # (registering a new asset) has no such precondition (see OverlayView.swift
+    # (registering a new asset) has no such precondition (see BrollView.swift
     # and VoiceOverView.swift).
-    assert "canAddOverlayOrVoiceOver" in editor_source
-    assert ".disabled(model.baseEditAssetID == nil)" in (TIMELINE_EDITOR.parent / "OverlayView.swift").read_text()
+    assert "canAddBrollOrVoiceOver" in editor_source
+    assert ".disabled(model.baseEditAssetID == nil)" in (TIMELINE_EDITOR.parent / "BrollView.swift").read_text()
 
 
 # ---------------------------------------------------------------------------
-# 7. Voice-over / Overlay placement add flow -- only READY assets, real save
+# 7. Voice-over / B-roll placement add flow -- only READY assets, real save
 # ---------------------------------------------------------------------------
 
-def test_add_voiceover_and_overlay_call_real_composition_mutations():
-    # Both Voice-over's and Overlay's real "add existing to timeline"
+def test_add_voiceover_and_broll_call_real_composition_mutations():
+    # Both Voice-over's and B-roll's real "add existing to timeline"
     # mutations now live in their own dedicated views (see
     # test_cutsell_ios_mobile_v1_voiceover_ui.py and
-    # test_cutsell_ios_mobile_v1_overlay_ui.py) -- TimelineEditorView only
+    # test_cutsell_ios_mobile_v1_broll_ui.py) -- TimelineEditorView only
     # opens those real, non-decorative entry points.
     source = TIMELINE_EDITOR.read_text()
-    assert "OverlayView(" in source
+    assert "BrollView(" in source
     assert "VoiceOverView(" in source
-    overlay_view_source = (TIMELINE_EDITOR.parent / "OverlayView.swift").read_text()
-    assert "model.addBrollPlacement(" in overlay_view_source
+    broll_view_source = (TIMELINE_EDITOR.parent / "BrollView.swift").read_text()
+    assert "model.addBrollPlacement(" in broll_view_source
     voiceover_view_source = (TIMELINE_EDITOR.parent / "VoiceOverView.swift").read_text()
     assert "model.addVoiceOverPlacement(" in voiceover_view_source
 
 
-def test_add_button_only_appears_at_end_of_voiceover_and_overlay_tracks_not_main_video():
+def test_add_button_only_appears_at_end_of_voiceover_and_broll_tracks_not_main_video():
     source = TIMELINE_EDITOR.read_text()
-    # Both Overlay's and Voice-over's "+" now open their own dedicated
+    # Both B-roll's and Voice-over's "+" now open their own dedicated
     # sheet instead of an inline confirmationDialog -- both are still
     # real, non-decorative entry points, never absent for either
     # non-Main-Video track.
-    assert "if track == .overlay {" in source
+    assert "if track == .broll {" in source
     assert "else if track == .voiceOver {" in source
     track_row_idx = source.index("private func trackRow(_ track: TimelineTrackKind)")
     body_end = source.index("\n    // MARK: - Actions", track_row_idx)
     body = source[track_row_idx:body_end]
     assert body.count('Image(systemName: "plus")') == 2
+
+
+def test_real_overlay_entry_point_exists_separately_from_broll():
+    # The corrective addition: the genuine positioned/scaled Overlay
+    # feature (/v1/overlays/*) gets its own real action-bar entry point,
+    # distinct from B-roll's timeline-track entry point.
+    source = TIMELINE_EDITOR.read_text()
+    assert "OverlayView(model: model)" in source
+    assert (TIMELINE_EDITOR.parent / "OverlayView.swift").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -321,8 +330,11 @@ def test_new_editor_is_additively_wired_into_draft_editor_view():
 
 # ---------------------------------------------------------------------------
 # 9. Redo -- real authority only (Main Video's existing /draft/redo), never
-#    a simulated redo for Overlay/Voice-over (no such backend authority
-#    exists for those placements).
+#    a simulated redo for B-roll/Voice-over (no such backend authority
+#    exists for those D-282A placements). The real Overlay feature DOES
+#    share this same /draft/redo authority, but via its own Redo button
+#    inside OverlayView.swift, never through this shared canRedoMainVideo
+#    flag.
 # ---------------------------------------------------------------------------
 
 def test_redo_button_is_gated_on_a_dedicated_real_authority_flag():
@@ -400,19 +412,19 @@ def test_timeline_row_cell_renders_previewframes_as_a_real_filmstrip():
     assert "if !displayFrames.isEmpty" in cell_body
 
 
-def test_filmstrip_is_never_rendered_for_voiceover_or_overlay_rows():
-    # Voice-over/Overlay TimelineRowItems never populate previewFrames --
+def test_filmstrip_is_never_rendered_for_voiceover_or_broll_rows():
+    # Voice-over/B-roll TimelineRowItems never populate previewFrames --
     # only mainVideoItems does, so the shared cell only ever shows a
     # filmstrip for Main Video, honestly reflecting that no comparable
     # preview catalog exists for those two tracks in this gate's scope.
     source = TIMELINE_EDITOR.read_text()
     vo_idx = source.index("private var voiceOverItems")
-    overlay_idx = source.index("private var overlayItems")
-    vo_block = source[vo_idx:overlay_idx]
-    overlay_end = source.index("private func items(for track:")
-    overlay_block = source[overlay_idx:overlay_end]
+    broll_idx = source.index("private var brollItems")
+    vo_block = source[vo_idx:broll_idx]
+    broll_end = source.index("private func items(for track:")
+    broll_block = source[broll_idx:broll_end]
     assert "previewFrames" not in vo_block
-    assert "previewFrames" not in overlay_block
+    assert "previewFrames" not in broll_block
 
 
 # ---------------------------------------------------------------------------
