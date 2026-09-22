@@ -427,8 +427,13 @@ final class DraftEditorViewModel: ObservableObject {
         if let edited { await autosave(edited) }
     }
 
-    func undo() async {
-        guard let snapshot else { return }
+    /// Returns whether the real `/draft/undo` call actually succeeded --
+    /// callers (e.g. TimelineEditorView's Redo gating) must never infer
+    /// success merely from `await` returning; a caught error here means
+    /// `snapshot` was left exactly as it was and this returns `false`.
+    @discardableResult
+    func undo() async -> Bool {
+        guard let snapshot else { return false }
         do {
             self.snapshot = try await api.request(
                 "/v1/projects/\(project.projectID)/draft/undo",
@@ -438,11 +443,17 @@ final class DraftEditorViewModel: ObservableObject {
                     "expected_revision": .number(Double(snapshot.revision))
                 ])
             )
-        } catch { errorMessage = error.localizedDescription }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 
-    func redo() async {
-        guard let snapshot else { return }
+    /// Same honest success/failure contract as `undo()` -- see above.
+    @discardableResult
+    func redo() async -> Bool {
+        guard let snapshot else { return false }
         do {
             self.snapshot = try await api.request(
                 "/v1/projects/\(project.projectID)/draft/redo",
@@ -452,7 +463,11 @@ final class DraftEditorViewModel: ObservableObject {
                     "expected_revision": .number(Double(snapshot.revision))
                 ])
             )
-        } catch { errorMessage = error.localizedDescription }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 
     func export() async {

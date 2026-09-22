@@ -452,3 +452,131 @@ def test_isavingtimeline_flag_is_cleared_on_both_success_and_failure_paths():
     # Defer or an explicit reset on both branches -- never left stuck true
     # after a failed save (which would honestly-but-permanently block UI).
     assert "isSavingTimeline = false" in save_fn_body or "defer" in save_fn_body
+
+
+# ---------------------------------------------------------------------------
+# 13. Redo may ONLY be enabled once /draft/undo has actually confirmed
+#     success -- never inferred just because `await model.undo()` returned.
+#     undo()/redo() must expose a real typed success signal (never Void),
+#     grounded in whether the API call actually threw.
+# ---------------------------------------------------------------------------
+
+def test_undo_and_redo_expose_a_real_typed_success_result_not_void():
+    vm_source = VIEW_MODEL.read_text()
+    assert "func undo() async -> Bool" in vm_source
+    assert "func redo() async -> Bool" in vm_source
+    # @discardableResult so the pre-existing toolbar buttons in
+    # DraftEditorView.swift (which never inspected a return value) keep
+    # compiling -- never a second, parallel undo/redo authority.
+    undo_idx = vm_source.index("func undo() async -> Bool")
+    assert "@discardableResult" in vm_source[max(0, undo_idx - 120):undo_idx]
+    redo_idx = vm_source.index("func redo() async -> Bool")
+    assert "@discardableResult" in vm_source[max(0, redo_idx - 120):redo_idx]
+
+
+def test_undo_returns_true_only_on_confirmed_success_false_on_caught_error():
+    vm_source = VIEW_MODEL.read_text()
+    undo_idx = vm_source.index("func undo() async -> Bool")
+    redo_idx = vm_source.index("func redo() async -> Bool")
+    undo_body = vm_source[undo_idx:redo_idx]
+    # Success path: the real snapshot assignment is followed by `return true`.
+    assign_idx = undo_body.index("self.snapshot = try await api.request(")
+    return_true_idx = undo_body.index("return true", assign_idx)
+    catch_idx = undo_body.index("} catch {")
+    assert assign_idx < return_true_idx < catch_idx
+    # Failure path: the catch block sets errorMessage AND returns false --
+    # never silently swallowed as a bare `catch { errorMessage = ... }`.
+    catch_body = undo_body[catch_idx:]
+    assert "errorMessage = error.localizedDescription" in catch_body
+    assert "return false" in catch_body
+
+
+def test_redo_returns_true_only_on_confirmed_success_false_on_caught_error():
+    vm_source = VIEW_MODEL.read_text()
+    redo_idx = vm_source.index("func redo() async -> Bool")
+    redo_body = vm_source[redo_idx:redo_idx + 700]
+    assign_idx = redo_body.index("self.snapshot = try await api.request(")
+    return_true_idx = redo_body.index("return true", assign_idx)
+    catch_idx = redo_body.index("} catch {")
+    assert assign_idx < return_true_idx < catch_idx
+    catch_body = redo_body[catch_idx:]
+    assert "errorMessage = error.localizedDescription" in catch_body
+    assert "return false" in catch_body
+
+
+def test_successful_undo_enables_redo():
+    source = TIMELINE_EDITOR.read_text()
+    undo_idx = source.index("private func performUndo() async")
+    redo_idx = source.index("private func performRedo() async")
+    body = source[undo_idx:redo_idx]
+    assert "let undoSucceeded = await model.undo()" in body
+    succeeded_idx = body.index("if undoSucceeded {")
+    enable_idx = body.index("canRedoMainVideo = true", succeeded_idx)
+    close_idx = body.index("}", enable_idx)
+    # canRedoMainVideo = true must be INSIDE the success branch, not a
+    # sibling statement that runs unconditionally after the await.
+    assert succeeded_idx < enable_idx < close_idx
+
+
+def test_failed_undo_does_not_enable_redo():
+    source = TIMELINE_EDITOR.read_text()
+    undo_idx = source.index("private func performUndo() async")
+    redo_idx = source.index("private func performRedo() async")
+    body = source[undo_idx:redo_idx]
+    # canRedoMainVideo = true appears exactly once, and only inside the
+    # `if undoSucceeded` branch -- never as an unconditional statement
+    # that would run even when undo() returned false.
+    assert body.count("canRedoMainVideo = true") == 1
+    unconditional_after_await = body.split("let undoSucceeded = await model.undo()")[1]
+    # The very next non-blank statement after the await must be the
+    # bookkeeping reset, not an unconditional redo-enable.
+    next_lines = [ln.strip() for ln in unconditional_after_await.splitlines() if ln.strip()]
+    assert next_lines[0] == "justMutatedMainVideo = false"
+    assert next_lines[1].startswith("if undoSucceeded")
+
+
+def test_successful_redo_consumes_the_pending_state():
+    source = TIMELINE_EDITOR.read_text()
+    redo_idx = source.index("private func performRedo() async")
+    body = source[redo_idx:]
+    assert "let redoSucceeded = await model.redo()" in body
+    succeeded_idx = body.index("if redoSucceeded {")
+    consume_idx = body.index("canRedoMainVideo = false", succeeded_idx)
+    close_idx = body.index("}", consume_idx)
+    assert succeeded_idx < consume_idx < close_idx
+
+
+def test_failed_redo_preserves_honest_state_and_surfaces_the_real_error():
+    source = TIMELINE_EDITOR.read_text()
+    redo_idx = source.index("private func performRedo() async")
+    body = source[redo_idx:]
+    # canRedoMainVideo = false appears exactly once, only inside the
+    # success branch -- a failed redo must leave the pending-redo state
+    # exactly as it was (still real, still redoable), never silently
+    # cleared as if it had been consumed.
+    assert body.count("canRedoMainVideo = false") == 1
+    assert "if redoSucceeded {" in body
+    # The real error path (model.redo()'s own catch -> errorMessage) is
+    # the ONLY error-surfacing mechanism -- this view never introduces a
+    # second, parallel error channel.
+    editor_source = TIMELINE_EDITOR.read_text()
+    assert "errorMessage" not in editor_source.split("private func performRedo() async")[1].split("\n}")[0]
+    vm_source = VIEW_MODEL.read_text()
+    redo_fn_idx = vm_source.index("func redo() async -> Bool")
+    assert "errorMessage = error.localizedDescription" in vm_source[redo_fn_idx:redo_fn_idx + 700]
+
+
+def test_a_new_mutation_still_invalidates_redo_under_the_typed_result_contract():
+    # Regression guard: the typed-result fix must not have disturbed the
+    # existing invalidation wiring (new selection / new split / new
+    # delete all still reset canRedoMainVideo to false).
+    source = TIMELINE_EDITOR.read_text()
+    tap_idx = source.index("selection = TimelineSelection(track: track, itemID: item.id)")
+    tap_block = source[tap_idx:tap_idx + 200]
+    assert "canRedoMainVideo = false" in tap_block
+    split_idx = source.index("await model.split(clipID: selection.itemID, at: playheadTime)")
+    split_block = source[split_idx:split_idx + 160]
+    assert "canRedoMainVideo = false" in split_block
+    remove_idx = source.index("await model.remove(clipID: selection.itemID)")
+    remove_block = source[remove_idx:remove_idx + 160]
+    assert "canRedoMainVideo = false" in remove_block

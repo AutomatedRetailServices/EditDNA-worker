@@ -386,20 +386,31 @@ struct TimelineEditorView: View {
         if model.canUndoTimelineMutation {
             await model.undoLastTimelineMutation()
         } else if justMutatedMainVideo {
-            await model.undo()
+            // Redo may ONLY be enabled once /draft/undo has actually
+            // confirmed success -- never inferred just because `await`
+            // returned. A failed undo leaves no restorable state, so
+            // canRedoMainVideo must stay exactly as it was (false).
+            let undoSucceeded = await model.undo()
             justMutatedMainVideo = false
-            canRedoMainVideo = true
+            if undoSucceeded {
+                canRedoMainVideo = true
+            }
         }
     }
 
     /// Real authority only: reverses the Main Video undo just performed
     /// from this view via the SAME existing `/draft/redo` endpoint --
     /// never available for Overlay/Voice-over, which have no redo
-    /// authority at all.
+    /// authority at all. Only a CONFIRMED successful redo consumes the
+    /// pending state; a failed redo leaves canRedoMainVideo honestly
+    /// unchanged (the undone state is still real and still redoable) and
+    /// the real error surfaces via model.errorMessage's existing alert.
     private func performRedo() async {
         guard canRedoMainVideo else { return }
-        await model.redo()
-        canRedoMainVideo = false
+        let redoSucceeded = await model.redo()
+        if redoSucceeded {
+            canRedoMainVideo = false
+        }
     }
 }
 
