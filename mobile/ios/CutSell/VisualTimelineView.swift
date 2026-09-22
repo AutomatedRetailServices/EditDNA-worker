@@ -6,7 +6,7 @@ struct VisualTimelineView: View {
     @State private var zoom: CGFloat = 1.0
 
     private var assetCatalog: [String: SourceTimelineAssets] {
-        TimelineAssetCatalog.build(from: model.snapshot)
+        SourcePreviewAssetCatalog.build(from: model.snapshot)
     }
 
     var body: some View {

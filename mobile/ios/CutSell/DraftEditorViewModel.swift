@@ -6,6 +6,7 @@ final class DraftEditorViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isSaving = false
     @Published var exportJob: JobStatus?
+    @Published private(set) var timelineAssetLibrary: TimelineAssetLibrary?
     @Published var errorMessage: String?
 
     let project: Project
@@ -56,10 +57,19 @@ final class DraftEditorViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            snapshot = try await api.request(
+            async let draftRequest: DraftSnapshot = api.request(
                 "/v1/projects/\(project.projectID)/draft",
                 query: [URLQueryItem(name: "user_id", value: session.userID)]
             )
+            async let assetRequest = TimelineAssetRegistryClient.list(
+                projectID: project.projectID,
+                userID: session.userID,
+                api: api
+            )
+            let loadedDraft = try await draftRequest
+            snapshot = loadedDraft
+            let loadedAssets = try await assetRequest
+            timelineAssetLibrary = loadedAssets
         } catch {
             errorMessage = error.localizedDescription
         }

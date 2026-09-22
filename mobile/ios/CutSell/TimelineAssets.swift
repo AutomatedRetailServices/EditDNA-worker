@@ -1,6 +1,103 @@
 import Foundation
 import SwiftUI
 
+enum TimelineAssetRole: String, Codable, CaseIterable {
+    case primarySource = "PRIMARY_SOURCE"
+    case supplementalBroll = "SUPPLEMENTAL_BROLL"
+    case voiceOver = "VOICE_OVER"
+}
+
+enum TimelineMediaKind: String, Codable {
+    case video = "VIDEO"
+    case audio = "AUDIO"
+}
+
+enum TimelineAssetQualificationStatus: String, Codable {
+    case uploaded = "UPLOADED"
+    case qualifying = "QUALIFYING"
+    case ready = "READY"
+    case rejected = "REJECTED"
+    case failed = "FAILED"
+    case deleted = "DELETED"
+}
+
+struct TimelineMediaAsset: Codable, Identifiable, Hashable {
+    let assetID: String
+    let role: TimelineAssetRole
+    let mediaKind: TimelineMediaKind
+    let durationSec: Double
+    let hasAudio: Bool
+    let qualificationStatus: TimelineAssetQualificationStatus
+    let replacesAssetID: String?
+    let createdAt: String?
+
+    var id: String { assetID }
+    var isReady: Bool { qualificationStatus == .ready }
+
+    enum CodingKeys: String, CodingKey {
+        case assetID = "asset_id"
+        case role
+        case mediaKind = "media_kind"
+        case durationSec = "duration_sec"
+        case hasAudio = "has_audio"
+        case qualificationStatus = "qualification_status"
+        case replacesAssetID = "replaces_asset_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct TimelineAssetListResponse: Codable, Hashable {
+    let projectID: String
+    let assets: [TimelineMediaAsset]
+
+    enum CodingKeys: String, CodingKey {
+        case projectID = "project_id"
+        case assets
+    }
+}
+
+struct TimelineAssetLibrary: Hashable {
+    let projectID: String
+    let assets: [TimelineMediaAsset]
+
+    var readyBroll: [TimelineMediaAsset] {
+        assets.filter { $0.isReady && $0.role == .supplementalBroll && $0.mediaKind == .video }
+    }
+
+    var readyVoiceOvers: [TimelineMediaAsset] {
+        assets.filter { $0.isReady && $0.role == .voiceOver && $0.mediaKind == .audio }
+    }
+
+    var readyPrimarySources: [TimelineMediaAsset] {
+        assets.filter { $0.isReady && $0.role == .primarySource && $0.mediaKind == .video }
+    }
+}
+
+enum TimelineAssetRegistryClient {
+    static func list(
+        projectID: String,
+        userID: String,
+        api: APIClient = .shared
+    ) async throws -> TimelineAssetLibrary {
+        let response: TimelineAssetListResponse = try await api.request(
+            "/v1/projects/\(projectID)/timeline-assets",
+            query: [URLQueryItem(name: "user_id", value: userID)]
+        )
+        guard response.projectID == projectID else { throw TimelineAssetRegistryError.projectMismatch }
+        return TimelineAssetLibrary(projectID: response.projectID, assets: response.assets)
+    }
+}
+
+enum TimelineAssetRegistryError: LocalizedError {
+    case projectMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .projectMismatch: "CutSell returned timeline assets for a different project."
+        }
+    }
+}
+
 struct TimelineFrame: Identifiable, Hashable {
     let time: Double
     let url: URL
@@ -13,7 +110,9 @@ struct SourceTimelineAssets: Hashable {
     let waveformURL: URL?
 }
 
-enum TimelineAssetCatalog {
+/// Preview-only filmstrip/waveform material embedded in a draft snapshot.
+/// This is intentionally distinct from D-279's editable asset registry.
+enum SourcePreviewAssetCatalog {
     static func build(from snapshot: DraftSnapshot?) -> [String: SourceTimelineAssets] {
         guard let snapshot else { return [:] }
         var output: [String: SourceTimelineAssets] = [:]

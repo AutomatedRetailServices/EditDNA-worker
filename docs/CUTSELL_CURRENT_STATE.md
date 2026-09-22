@@ -76,12 +76,36 @@ Verified state at `86a058d2`:
   contracts are now available on this branch, ready for the mobile Timeline
   UI implementation gate, but that implementation has not started.
 
-**Exact next product gate:** wire D-279's formal timeline asset registry
-contract into the existing `TimelineAssets.swift` consumer (the one D-27x
-contract closest to something the iOS app already partially does — informal
-filmstrip/waveform consumption — and additive/backend-only, so it doesn't
-require resolving D-278's audio/voice-over UX or D-280's visual-mode safety
-semantics first).
+## Mobile D-279 iOS registry integration checkpoint (current working gate)
+
+D-279's formal timeline asset registry is now wired into the existing native
+Swift consumer without conflating it with the older draft-embedded preview
+artifacts:
+
+- `TimelineAssets.swift` now defines typed, client-safe D-279 asset roles,
+  media kinds, qualification states and list-response models matching the
+  hardened `GET /v1/projects/{project_id}/timeline-assets` contract;
+- the client requests that list with the authenticated project/user scope and
+  rejects a response whose `project_id` does not match the requested project;
+- only `READY` assets enter the editable B-roll, voice-over and primary-source
+  role catalogs;
+- raw storage references and technical metadata references remain server-only;
+- the prior draft `filmstrip`/waveform reader is now named
+  `SourcePreviewAssetCatalog`, making its preview-only authority explicit;
+- `DraftEditorViewModel.load()` loads the existing draft and the formal asset
+  registry together, preserving the current editor while making the registry
+  available for the Mobile V1 Timeline UI gate.
+
+Directed verification: **135 passed** across the new iOS source-contract tests,
+D-279 registry tests, D-281 live-wiring tests and D-282 bridge tests. A real
+Swift/Xcode Simulator build remains required on the macOS CI runner before this
+checkpoint is accepted.
+
+**Exact next product gate after Xcode CI:** bind the ready role catalogs to the
+canonical Figma editor track/add-sheet interactions (Main video / Voice-over /
+Overlay), while keeping upload creation, placement mutation and keyframes as
+their own explicitly tested contract steps rather than simulating unsupported
+runtime behavior.
 
 ## Current focus
 
