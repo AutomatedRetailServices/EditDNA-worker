@@ -178,9 +178,20 @@ def test_story_validator_no_longer_blocks_freeze_on_the_certified_retry():
     assert row["blocking"] is False
     assert row["content_loss_suppressed_by"] == PROOF_METHOD_PRE_GROUP_SEMANTIC_PRESERVATION
     assert diag["freeze_blocked"] is False
-    # without the proof the same shape still blocks: the fix is the discovery, not a policy change
-    blocked = apply_final_story_coherence_validation(draft)
-    assert next(f for f in blocked.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"] if f["clip_id"] == "c_retry")["blocking"] is True
+    # D-097.11 (Product Owner decision, real RAW #121 audit): without the
+    # proof, this exact shape (the retry's only missing critical atom is
+    # the incidental year "2021") is now credited by the deterministic
+    # contextual-atom coverage check instead -- it never depends on the
+    # proof/arbiter chain for a purely-contextual-atom shape. See
+    # test_cutsell_d097_11_contextual_atom_coverage_credit.py for that
+    # mechanism's own dedicated positive/negative controls.
+    unproved = apply_final_story_coherence_validation(draft)
+    unproved_row = next(
+        f for f in unproved.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"]
+        if f["clip_id"] == "c_retry"
+    )
+    assert unproved_row["blocking"] is False
+    assert unproved_row["content_loss_suppressed_by"] == "contextual_atom_excluded_coverage_credit"
 
 
 # --- StoryValidator: the same arbiter question grouping would have asked ------
@@ -217,15 +228,34 @@ def test_validator_credits_a_pre_group_restart_only_through_the_arbiter():
     assert validated.diagnostics["final_story_coherence_validation"]["freeze_blocked"] is False
 
 
-def test_validator_stays_blocked_without_an_arbiter_or_on_a_different_idea_verdict():
+def test_validator_credits_without_an_arbiter_but_never_overrides_an_explicit_rejection():
+    # D-097.11 (Product Owner decision, real RAW #121 audit): this fixture's
+    # only missing critical atom is the incidental year "2021" -- purely
+    # CONTEXTUAL, so with NO arbiter at all it is now credited
+    # deterministically (no more waiting on a lucky arbiter verdict).
     draft = _restart_draft()
-    blocked = apply_final_story_coherence_validation(draft)
-    assert next(f for f in blocked.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"] if f["clip_id"] == "c_retry")["blocking"] is True
+    no_arbiter = apply_final_story_coherence_validation(draft)
+    no_arbiter_row = next(
+        f for f in no_arbiter.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"]
+        if f["clip_id"] == "c_retry"
+    )
+    assert no_arbiter_row["blocking"] is False
+    assert no_arbiter_row["content_loss_suppressed_by"] == "contextual_atom_excluded_coverage_credit"
+
+    # An arbiter that EXPLICITLY answers "not the same idea" is real
+    # semantic evidence contradicting the coverage heuristic's own coarse
+    # lexical proxy -- the deterministic credit never second-guesses it.
     different = apply_final_story_coherence_validation(draft, semantic_equivalence_arbiter=_SameIdeaArbiter(same_idea=False, confidence=0.9))
     row = next(f for f in different.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"] if f["clip_id"] == "c_retry")
     assert row["blocking"] is True and row["pre_group_restart_consultations"][0]["same_idea"] is False
+
+    # A low-confidence (but not explicitly negative) arbiter verdict is not
+    # a rejection -- the independent deterministic coverage credit still
+    # applies.
     low = apply_final_story_coherence_validation(draft, semantic_equivalence_arbiter=_SameIdeaArbiter(confidence=0.7))
-    assert next(f for f in low.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"] if f["clip_id"] == "c_retry")["blocking"] is True
+    low_row = next(f for f in low.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"] if f["clip_id"] == "c_retry")
+    assert low_row["blocking"] is False
+    assert low_row["content_loss_suppressed_by"] == "contextual_atom_excluded_coverage_credit"
 
 
 def test_validator_never_consults_the_arbiter_without_restart_adjacency():
@@ -233,8 +263,20 @@ def test_validator_never_consults_the_arbiter_without_restart_adjacency():
     far = _clip("c_delivery", DELIVERY, selected=True, start=40.0, end=50.0, attempt_id="att_2")
     arbiter = _SameIdeaArbiter()
     validated = apply_final_story_coherence_validation(_draft([far], [retry]), semantic_equivalence_arbiter=arbiter)
+    # The restart-adjacency gate (D-097.A: same source, <= 8s, shared
+    # opening) is specific to the ARBITER-based discovery path -- these
+    # clips are 35s apart, so the arbiter is correctly never consulted for
+    # it, unchanged by D-097.11.
     assert arbiter.requests == []
-    assert next(f for f in validated.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"] if f["clip_id"] == "c_retry")["blocking"] is True
+    # D-097.11 (Product Owner decision, real RAW #121 audit): the
+    # deterministic contextual-atom coverage credit is clip-local (this
+    # clip's own text vs. the whole kept timeline) and does not depend on
+    # restart adjacency at all -- this fixture's only missing critical atom
+    # is still the purely CONTEXTUAL incidental year, so it is credited
+    # regardless of distance from any neighbour.
+    row = next(f for f in validated.diagnostics["final_story_coherence_validation"]["lost_semantic_atoms"] if f["clip_id"] == "c_retry")
+    assert row["blocking"] is False
+    assert row["content_loss_suppressed_by"] == "contextual_atom_excluded_coverage_credit"
 
 
 def test_a_critical_atom_is_never_credited_by_the_restart_arbiter():
