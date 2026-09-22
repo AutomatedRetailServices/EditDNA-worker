@@ -206,14 +206,29 @@ def test_base_edit_asset_resolution_is_honest_never_invented():
 # ---------------------------------------------------------------------------
 
 def test_add_voiceover_and_overlay_call_real_composition_mutations():
+    # Overlay's "add" flow is still inline here; Voice-over's real "add
+    # existing to timeline" mutation now lives in the dedicated
+    # VoiceOverView (see test_cutsell_ios_mobile_v1_voiceover_ui.py) --
+    # TimelineEditorView only opens that real, non-decorative entry point.
     source = TIMELINE_EDITOR.read_text()
-    assert "model.addVoiceOverPlacement(" in source
     assert "model.addBrollPlacement(" in source
+    assert "VoiceOverView(" in source
+    voiceover_view_source = (TIMELINE_EDITOR.parent / "VoiceOverView.swift").read_text()
+    assert "model.addVoiceOverPlacement(" in voiceover_view_source
 
 
 def test_add_button_only_appears_at_end_of_voiceover_and_overlay_tracks_not_main_video():
     source = TIMELINE_EDITOR.read_text()
-    assert 'if track != .mainVideo {' in source
+    # Overlay keeps its own inline "+" (confirmationDialog); Voice-over's
+    # "+" now opens the dedicated VoiceOverView sheet instead -- both are
+    # still real, non-decorative entry points, never absent for either
+    # non-Main-Video track.
+    assert "if track == .overlay {" in source
+    assert "else if track == .voiceOver {" in source
+    track_row_idx = source.index("private func trackRow(_ track: TimelineTrackKind)")
+    body_end = source.index("\n    // MARK: - Actions", track_row_idx)
+    body = source[track_row_idx:body_end]
+    assert body.count('Image(systemName: "plus")') == 2
 
 
 # ---------------------------------------------------------------------------

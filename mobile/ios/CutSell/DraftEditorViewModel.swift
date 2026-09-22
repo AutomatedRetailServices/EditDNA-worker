@@ -108,15 +108,49 @@ final class DraftEditorViewModel: ObservableObject {
         }
     }
 
+    /// Same real `TimelineAssetRegistryClient.list` call `saveTimelineComposition`
+    /// already runs inline after a confirmed mutation, factored out so a new
+    /// asset import (which never itself mutates the timeline composition) can
+    /// refresh the library too -- never a second/invented listing authority.
+    func refreshTimelineAssetLibrary() async {
+        if let loadedAssets = try? await TimelineAssetRegistryClient.list(
+            projectID: project.projectID, userID: session.userID, api: api
+        ) {
+            timelineAssetLibrary = loadedAssets
+        }
+    }
+
+    /// Imports an already-existing local audio file as a new VOICE_OVER
+    /// asset via the real D-282A upload+registration routes
+    /// (`VoiceOverImportManager`) -- never a live microphone capture (no
+    /// such authority exists). Refreshes the asset library only after the
+    /// backend has actually confirmed the new asset; a failed import only
+    /// ever sets `errorMessage`, never fakes a new READY asset.
+    func importVoiceOverAudio(fileURL: URL) async {
+        do {
+            _ = try await VoiceOverImportManager.shared.importAudio(
+                fileURL: fileURL, projectID: project.projectID, session: session, api: api
+            )
+            await refreshTimelineAssetLibrary()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Returns whether the real PUT actually succeeded -- callers (e.g.
+    /// `undoLastTimelineMutation`) must never infer success merely because
+    /// `await` returned; a caught error here means `timelineComposition`
+    /// was left exactly as it was and this returns `false`.
+    @discardableResult
     private func saveTimelineComposition(
         brollPlacements: [BrollPlacement],
         voiceOverPlacements: [VoiceOverPlacement],
         timelineDurationSec: Double,
         capturePreviousForUndo: Bool
-    ) async {
+    ) async -> Bool {
         guard let baseEditAssetID else {
             errorMessage = "No primary source asset is registered for this project yet -- overlay and voice-over placement need one first."
-            return
+            return false
         }
         isSavingTimeline = true
         defer { isSavingTimeline = false }
@@ -138,11 +172,13 @@ final class DraftEditorViewModel: ObservableObject {
                 projectID: project.projectID, userID: session.userID, api: api
             )
             if let loadedAssets { timelineAssetLibrary = loadedAssets }
+            return true
         } catch {
             // D-282A: never show a mutation as saved before backend
             // confirmation -- `timelineComposition` is left exactly as it
             // was before this attempt.
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -249,14 +285,19 @@ final class DraftEditorViewModel: ObservableObject {
     /// Reverts to the composition captured just before the last
     /// delete/split -- re-saved through the SAME real PUT operation
     /// (never a fabricated client-only undo). A failed revert surfaces
-    /// the real backend error; it never pretends to have undone anything.
+    /// the real backend error and leaves the captured snapshot intact (so
+    /// the user can retry) -- it never pretends to have undone anything,
+    /// and never silently discards the one recorded undo opportunity on a
+    /// failed attempt.
     func undoLastTimelineMutation() async {
         guard let previous = lastCompositionBeforeMutation else { return }
-        lastCompositionBeforeMutation = nil
-        await saveTimelineComposition(
+        let succeeded = await saveTimelineComposition(
             brollPlacements: previous.brollPlacements, voiceOverPlacements: previous.voiceOverPlacements,
             timelineDurationSec: previous.timelineDurationSec, capturePreviousForUndo: false
         )
+        if succeeded {
+            lastCompositionBeforeMutation = nil
+        }
     }
 
     func swap(selectedClipID: String, replacementClipID: String) async {

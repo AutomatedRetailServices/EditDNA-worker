@@ -65,7 +65,7 @@ struct TimelineEditorView: View {
     @State private var isExpanded = false
     @State private var isPlaying = false
     @State private var showBrollPicker = false
-    @State private var showVoiceOverPicker = false
+    @State private var showVoiceOverView = false
     @State private var showCaptions = false
     @State private var justMutatedMainVideo = false
     @State private var canRedoMainVideo = false
@@ -163,20 +163,11 @@ struct TimelineEditorView: View {
             actionBar
         }
         .padding(.horizontal)
-        .confirmationDialog("Add Voice-over", isPresented: $showVoiceOverPicker, titleVisibility: .visible) {
-            ForEach(model.timelineAssetLibrary?.readyVoiceOvers ?? []) { asset in
-                Button("\(Int(asset.durationSec))s voice-over") {
-                    Task {
-                        await model.addVoiceOverPlacement(
-                            assetID: asset.assetID, start: totalDuration, end: totalDuration + asset.durationSec,
-                            sourceIn: 0, sourceOut: asset.durationSec
-                        )
-                    }
-                }
-            }
-            if (model.timelineAssetLibrary?.readyVoiceOvers ?? []).isEmpty {
-                Button("No ready voice-overs available", role: .cancel) {}
-            }
+        .sheet(isPresented: $showVoiceOverView) {
+            VoiceOverView(
+                model: model,
+                initialPlacementID: selection?.track == .voiceOver ? selection?.itemID : nil
+            )
         }
         .confirmationDialog("Add Overlay", isPresented: $showBrollPicker, titleVisibility: .visible) {
             ForEach(model.timelineAssetLibrary?.readyBroll ?? []) { asset in
@@ -289,9 +280,9 @@ struct TimelineEditorView: View {
                     }
                 }
 
-                if track != .mainVideo {
+                if track == .overlay {
                     Button {
-                        if track == .voiceOver { showVoiceOverPicker = true } else { showBrollPicker = true }
+                        showBrollPicker = true
                     } label: {
                         Image(systemName: "plus")
                             .frame(width: 44, height: 56)
@@ -299,6 +290,22 @@ struct TimelineEditorView: View {
                     }
                     .disabled(!canAddOverlayOrVoiceOver)
                     .accessibilityLabel("Add \(track.title.lowercased())")
+                } else if track == .voiceOver {
+                    // Real, non-decorative entry point into the dedicated
+                    // Voice-over UI gate -- never gated on
+                    // canAddOverlayOrVoiceOver, since Import (registering a
+                    // new asset) has no such precondition; VoiceOverView
+                    // itself honestly gates only the timeline-placement
+                    // actions that do.
+                    Button {
+                        showVoiceOverView = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .frame(width: 44, height: 56)
+                            .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .accessibilityLabel("Add voice-over")
+                    .accessibilityIdentifier("timeline.voiceOverButton")
                 }
             }
         }
