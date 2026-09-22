@@ -28,6 +28,13 @@ struct Project: Codable, Identifiable, Hashable {
 
     var id: String { projectID }
 
+    /// States a project passes through before its draft is editable --
+    /// the single source of truth `ProjectDetailView`'s routing and the
+    /// Edits "Drafts"/"Ready" tab filters both reuse (never duplicated).
+    static let processingStates: Set<String> = [
+        "processing", "uploaded", "preparing", "transcribing", "analyzing", "composing",
+    ]
+
     enum CodingKeys: String, CodingKey {
         case projectID = "project_id"
         case userID = "user_id"

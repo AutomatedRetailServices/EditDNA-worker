@@ -9,6 +9,21 @@ final class DraftEditorViewModel: ObservableObject {
     @Published private(set) var timelineAssetLibrary: TimelineAssetLibrary?
     @Published var errorMessage: String?
 
+    // D-282A Overlay/Voice-over composition (Main Video stays on the
+    // pre-existing `draft`/`draft-edits` system above -- see
+    // TimelineComposition.swift's own module docstring).
+    @Published private(set) var timelineComposition: TimelineComposition?
+    @Published private(set) var isSavingTimeline = false
+    private var lastCompositionBeforeMutation: TimelineComposition?
+    var canUndoTimelineMutation: Bool { lastCompositionBeforeMutation != nil }
+
+    /// The FIRST real `PRIMARY_SOURCE` asset already registered for this
+    /// project, if any -- D-282A's own `base_edit_asset_id` authority.
+    /// Honestly `nil` (never invented) when no such asset exists yet, in
+    /// which case Overlay/Voice-over placement is correctly disabled --
+    /// this gate does not build a new PRIMARY_SOURCE ingestion flow.
+    var baseEditAssetID: String? { timelineAssetLibrary?.readyPrimarySources.first?.assetID }
+
     let project: Project
     private let api = APIClient.shared
     private let session: CutSellSession
@@ -73,6 +88,175 @@ final class DraftEditorViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+        await refreshTimelineComposition()
+    }
+
+    /// D-282A Stage 6: "refresh the snapshot and library after a confirmed
+    /// mutation" -- also called on initial load. A project with no saved
+    /// Overlay/Voice-over timeline yet is a legitimate, honest empty state
+    /// (`TimelineCompositionError.noTimelineSaved`, from the route's real
+    /// 404), never surfaced as an error alert.
+    func refreshTimelineComposition() async {
+        do {
+            timelineComposition = try await TimelineCompositionClient.get(
+                projectID: project.projectID, userID: session.userID, api: api
+            )
+        } catch is TimelineCompositionError {
+            timelineComposition = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveTimelineComposition(
+        brollPlacements: [BrollPlacement],
+        voiceOverPlacements: [VoiceOverPlacement],
+        timelineDurationSec: Double,
+        capturePreviousForUndo: Bool
+    ) async {
+        guard let baseEditAssetID else {
+            errorMessage = "No primary source asset is registered for this project yet -- overlay and voice-over placement need one first."
+            return
+        }
+        isSavingTimeline = true
+        defer { isSavingTimeline = false }
+        let previous = timelineComposition
+        do {
+            _ = try await TimelineCompositionClient.save(
+                projectID: project.projectID,
+                userID: session.userID,
+                baseEditAssetID: baseEditAssetID,
+                timelineDurationSec: max(0.01, timelineDurationSec),
+                brollPlacements: brollPlacements,
+                voiceOverPlacements: voiceOverPlacements,
+                expectedRevisionIdentity: previous?.timelineRevisionIdentity,
+                api: api
+            )
+            if capturePreviousForUndo { lastCompositionBeforeMutation = previous }
+            await refreshTimelineComposition()
+            let loadedAssets = try? await TimelineAssetRegistryClient.list(
+                projectID: project.projectID, userID: session.userID, api: api
+            )
+            if let loadedAssets { timelineAssetLibrary = loadedAssets }
+        } catch {
+            // D-282A: never show a mutation as saved before backend
+            // confirmation -- `timelineComposition` is left exactly as it
+            // was before this attempt.
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private var currentBrollPlacements: [BrollPlacement] { timelineComposition?.brollPlacements ?? [] }
+    private var currentVoiceOverPlacements: [VoiceOverPlacement] { timelineComposition?.voiceOverPlacements ?? [] }
+    private var currentTimelineDuration: Double {
+        max(
+            timelineComposition?.timelineDurationSec ?? 0,
+            (currentBrollPlacements.map(\.timelineEndSec) + currentVoiceOverPlacements.map(\.timelineEndSec)).max() ?? 1
+        )
+    }
+
+    func addBrollPlacement(assetID: String, start: Double, end: Double, sourceIn: Double, sourceOut: Double) async {
+        var placements = currentBrollPlacements
+        placements.append(BrollPlacement(
+            placementID: "broll_\(UUID().uuidString.prefix(8))", assetID: assetID,
+            timelineStartSec: start, timelineEndSec: end,
+            sourceInSec: sourceIn, sourceOutSec: sourceOut, audioMode: .keepPrimaryVoice
+        ))
+        await saveTimelineComposition(
+            brollPlacements: placements, voiceOverPlacements: currentVoiceOverPlacements,
+            timelineDurationSec: max(currentTimelineDuration, end), capturePreviousForUndo: false
+        )
+    }
+
+    func addVoiceOverPlacement(assetID: String, start: Double, end: Double, sourceIn: Double, sourceOut: Double) async {
+        var placements = currentVoiceOverPlacements
+        placements.append(VoiceOverPlacement(
+            placementID: "vo_\(UUID().uuidString.prefix(8))", assetID: assetID,
+            timelineStartSec: start, timelineEndSec: end,
+            sourceInSec: sourceIn, sourceOutSec: sourceOut, transcriptReference: nil
+        ))
+        await saveTimelineComposition(
+            brollPlacements: currentBrollPlacements, voiceOverPlacements: placements,
+            timelineDurationSec: max(currentTimelineDuration, end), capturePreviousForUndo: false
+        )
+    }
+
+    func removeBrollPlacement(id: String) async {
+        let placements = currentBrollPlacements.filter { $0.placementID != id }
+        await saveTimelineComposition(
+            brollPlacements: placements, voiceOverPlacements: currentVoiceOverPlacements,
+            timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true
+        )
+    }
+
+    func removeVoiceOverPlacement(id: String) async {
+        let placements = currentVoiceOverPlacements.filter { $0.placementID != id }
+        await saveTimelineComposition(
+            brollPlacements: currentBrollPlacements, voiceOverPlacements: placements,
+            timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true
+        )
+    }
+
+    /// Split affects ONLY the selected placement, at the playhead time --
+    /// client-computed into two placements, saved through the SAME real
+    /// PUT operation (never a new backend authority).
+    func splitBrollPlacement(id: String, at playheadTime: Double) async {
+        var placements = currentBrollPlacements
+        guard let index = placements.firstIndex(where: { $0.placementID == id }) else { return }
+        let original = placements[index]
+        guard playheadTime > original.timelineStartSec + 0.05, playheadTime < original.timelineEndSec - 0.05 else { return }
+        let sourceSplit = original.sourceInSec + (playheadTime - original.timelineStartSec)
+        let first = BrollPlacement(
+            placementID: original.placementID, assetID: original.assetID,
+            timelineStartSec: original.timelineStartSec, timelineEndSec: playheadTime,
+            sourceInSec: original.sourceInSec, sourceOutSec: sourceSplit, audioMode: original.audioMode
+        )
+        let second = BrollPlacement(
+            placementID: "broll_\(UUID().uuidString.prefix(8))", assetID: original.assetID,
+            timelineStartSec: playheadTime, timelineEndSec: original.timelineEndSec,
+            sourceInSec: sourceSplit, sourceOutSec: original.sourceOutSec, audioMode: original.audioMode
+        )
+        placements.replaceSubrange(index...index, with: [first, second])
+        await saveTimelineComposition(
+            brollPlacements: placements, voiceOverPlacements: currentVoiceOverPlacements,
+            timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true
+        )
+    }
+
+    func splitVoiceOverPlacement(id: String, at playheadTime: Double) async {
+        var placements = currentVoiceOverPlacements
+        guard let index = placements.firstIndex(where: { $0.placementID == id }) else { return }
+        let original = placements[index]
+        guard playheadTime > original.timelineStartSec + 0.05, playheadTime < original.timelineEndSec - 0.05 else { return }
+        let sourceSplit = original.sourceInSec + (playheadTime - original.timelineStartSec)
+        let first = VoiceOverPlacement(
+            placementID: original.placementID, assetID: original.assetID,
+            timelineStartSec: original.timelineStartSec, timelineEndSec: playheadTime,
+            sourceInSec: original.sourceInSec, sourceOutSec: sourceSplit, transcriptReference: original.transcriptReference
+        )
+        let second = VoiceOverPlacement(
+            placementID: "vo_\(UUID().uuidString.prefix(8))", assetID: original.assetID,
+            timelineStartSec: playheadTime, timelineEndSec: original.timelineEndSec,
+            sourceInSec: sourceSplit, sourceOutSec: original.sourceOutSec, transcriptReference: nil
+        )
+        placements.replaceSubrange(index...index, with: [first, second])
+        await saveTimelineComposition(
+            brollPlacements: currentBrollPlacements, voiceOverPlacements: placements,
+            timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true
+        )
+    }
+
+    /// Reverts to the composition captured just before the last
+    /// delete/split -- re-saved through the SAME real PUT operation
+    /// (never a fabricated client-only undo). A failed revert surfaces
+    /// the real backend error; it never pretends to have undone anything.
+    func undoLastTimelineMutation() async {
+        guard let previous = lastCompositionBeforeMutation else { return }
+        lastCompositionBeforeMutation = nil
+        await saveTimelineComposition(
+            brollPlacements: previous.brollPlacements, voiceOverPlacements: previous.voiceOverPlacements,
+            timelineDurationSec: previous.timelineDurationSec, capturePreviousForUndo: false
+        )
     }
 
     func swap(selectedClipID: String, replacementClipID: String) async {

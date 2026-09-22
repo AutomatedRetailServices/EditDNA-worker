@@ -1,5 +1,14 @@
 import SwiftUI
 
+/// D-129 mobile UI decision: Edits has exactly these three tabs -- no
+/// "Processing" tab/folder. Processing is a transient operational state
+/// (still visible under "All" while it runs), never a place a user files
+/// work into.
+enum EditsTab: String, CaseIterable, Identifiable, Hashable {
+    case all = "All", ready = "Ready", drafts = "Drafts"
+    var id: String { rawValue }
+}
+
 struct ProjectsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notificationCenter: NotificationCenterModel
@@ -10,6 +19,20 @@ struct ProjectsView: View {
     @State private var projectPendingDelete: Project?
     @State private var showingDeleteAccount = false
     @State private var errorMessage: String?
+    @State private var selectedTab: EditsTab = .all
+
+    private var visibleProjects: [Project] {
+        switch selectedTab {
+        case .all:
+            return appState.projects
+        case .ready:
+            return appState.projects.filter { $0.state == "draft_ready" }
+        case .drafts:
+            return appState.projects.filter {
+                !Project.processingStates.contains($0.state) && $0.state != "draft_ready"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -38,15 +61,32 @@ struct ProjectsView: View {
                     }
                 }
 
+                Section {
+                    Picker("Edits", selection: $selectedTab) {
+                        ForEach(EditsTab.allCases) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets())
+                    .padding(.vertical, 4)
+                    .accessibilityIdentifier("editsTabPicker")
+                }
+                .listRowSeparator(.hidden)
+
                 Section(pendingCuts.isEmpty ? "Projects" : "Your projects") {
-                    if appState.projects.isEmpty {
+                    if visibleProjects.isEmpty {
                         ContentUnavailableView(
-                            "No cuts yet",
+                            selectedTab == .all ? "No cuts yet" : "No \(selectedTab.rawValue.lowercased()) edits",
                             systemImage: "scissors",
-                            description: Text("Upload raw product footage and CutSell will build your first draft.")
+                            description: Text(
+                                selectedTab == .all
+                                    ? "Upload raw product footage and CutSell will build your first draft."
+                                    : "Nothing here yet."
+                            )
                         )
                     } else {
-                        ForEach(appState.projects) { project in
+                        ForEach(visibleProjects) { project in
                             NavigationLink(value: project) {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(project.title).font(.headline)
@@ -242,10 +282,9 @@ struct ProjectDetailView: View {
 
     var body: some View {
         Group {
-            switch project.state {
-            case "processing", "uploaded", "preparing", "transcribing", "analyzing", "composing":
+            if Project.processingStates.contains(project.state) {
                 ProcessingView(project: project)
-            default:
+            } else {
                 DraftEditorView(project: project)
             }
         }
