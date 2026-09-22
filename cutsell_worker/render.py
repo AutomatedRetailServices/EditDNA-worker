@@ -409,7 +409,15 @@ def _srt_timestamp(seconds: float) -> str:
 
 
 def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
-    text = str(segment.caption_text or "").replace("\x00", "").strip()
+    text = str(segment.caption_text or "").replace("\x00", "")
+    # Collapse ALL whitespace -- including embedded newlines/carriage
+    # returns -- into single spaces before this becomes SRT cue body text.
+    # This design only ever intends exactly one cue per clip; an
+    # unsanitized embedded blank line in caller-supplied caption text would
+    # otherwise be interpreted as an SRT cue separator, letting caption
+    # text inject a second, attacker-controlled subtitle cue (arbitrary
+    # timestamp + text) into the file actually handed to ffmpeg.
+    text = " ".join(text.split())
     if not text:
         return None
     text = text[:500]
