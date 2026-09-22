@@ -51,6 +51,10 @@ private struct TimelineRowItem: Identifiable {
     let startSec: Double
     let endSec: Double
     let label: String
+    /// Main Video only -- reuses the SAME real preview catalog
+    /// `VisualTimelineView` already builds from the draft snapshot
+    /// (`SourcePreviewAssetCatalog`); never a second/invented source.
+    var previewFrames: [TimelineFrame] = []
 }
 
 struct TimelineEditorView: View {
@@ -63,6 +67,7 @@ struct TimelineEditorView: View {
     @State private var showBrollPicker = false
     @State private var showVoiceOverPicker = false
     @State private var justMutatedMainVideo = false
+    @State private var canRedoMainVideo = false
 
     private let pixelsPerSecond: CGFloat = 42
     private let collapsedHeight: CGFloat = 200
@@ -72,12 +77,23 @@ struct TimelineEditorView: View {
         max(1, model.timelineDuration, model.timelineComposition?.timelineDurationSec ?? 0)
     }
 
+    /// Reuses `VisualTimelineView`'s own real preview catalog verbatim --
+    /// never a second filmstrip/waveform source.
+    private var assetCatalog: [String: SourceTimelineAssets] {
+        SourcePreviewAssetCatalog.build(from: model.snapshot)
+    }
+
     private var mainVideoItems: [TimelineRowItem] {
         model.selectedClips.map { clip in
             let start = clip["start"]?.doubleValue ?? 0
             let end = clip["end"]?.doubleValue ?? start + 1
             let label = clip["caption_text"]?.stringValue ?? clip["text"]?.stringValue ?? "Clip"
-            return TimelineRowItem(id: clip["clip_id"]?.stringValue ?? UUID().uuidString, track: .mainVideo, startSec: start, endSec: end, label: label)
+            let sourceAssets = assetCatalog[clip["source_asset_id"]?.stringValue ?? ""]
+            let frames = (sourceAssets?.frames ?? []).filter { $0.time >= start && $0.time <= end }
+            return TimelineRowItem(
+                id: clip["clip_id"]?.stringValue ?? UUID().uuidString, track: .mainVideo,
+                startSec: start, endSec: end, label: label, previewFrames: frames
+            )
         }
     }
 
@@ -209,6 +225,8 @@ struct TimelineEditorView: View {
                 .foregroundStyle(.secondary)
 
             Slider(value: $playheadTime, in: 0...totalDuration)
+                .accessibilityLabel("Playhead")
+                .accessibilityValue("\(String(format: "%.1f", playheadTime)) seconds of \(String(format: "%.1f", totalDuration))")
 
             if model.isSavingTimeline {
                 ProgressView().controlSize(.small)
@@ -260,6 +278,7 @@ struct TimelineEditorView: View {
                     .onTapGesture {
                         selection = TimelineSelection(track: track, itemID: item.id)
                         justMutatedMainVideo = false
+                        canRedoMainVideo = false
                     }
                 }
 
@@ -303,6 +322,18 @@ struct TimelineEditorView: View {
             }
             .disabled(!canUndo)
 
+            // Redo only ever has real backend authority for Main Video
+            // (`/v1/projects/{id}/draft/redo`, reused verbatim); there is
+            // no equivalent redo authority for Overlay/Voice-over
+            // placements, so this control is never enabled for them --
+            // never a simulated redo.
+            Button {
+                Task { await performRedo() }
+            } label: {
+                Label("Redo", systemImage: "arrow.uturn.forward")
+            }
+            .disabled(!canRedoMainVideo)
+
             Spacer()
 
             // D-129 Overlay-pacing entry point: this gate only exposes the
@@ -319,6 +350,7 @@ struct TimelineEditorView: View {
         }
         .buttonStyle(.bordered)
         .labelStyle(.iconOnly)
+        .frame(minHeight: 44)
     }
 
     private func performSplit() async {
@@ -327,6 +359,7 @@ struct TimelineEditorView: View {
         case .mainVideo:
             await model.split(clipID: selection.itemID, at: playheadTime)
             justMutatedMainVideo = true
+            canRedoMainVideo = false
         case .voiceOver:
             await model.splitVoiceOverPlacement(id: selection.itemID, at: playheadTime)
         case .overlay:
@@ -340,6 +373,7 @@ struct TimelineEditorView: View {
         case .mainVideo:
             await model.remove(clipID: selection.itemID)
             justMutatedMainVideo = true
+            canRedoMainVideo = false
         case .voiceOver:
             await model.removeVoiceOverPlacement(id: selection.itemID)
         case .overlay:
@@ -354,7 +388,18 @@ struct TimelineEditorView: View {
         } else if justMutatedMainVideo {
             await model.undo()
             justMutatedMainVideo = false
+            canRedoMainVideo = true
         }
+    }
+
+    /// Real authority only: reverses the Main Video undo just performed
+    /// from this view via the SAME existing `/draft/redo` endpoint --
+    /// never available for Overlay/Voice-over, which have no redo
+    /// authority at all.
+    private func performRedo() async {
+        guard canRedoMainVideo else { return }
+        await model.redo()
+        canRedoMainVideo = false
     }
 }
 
@@ -365,15 +410,41 @@ private struct TimelineRowCell: View {
 
     private var width: CGFloat { max(28, CGFloat(item.endSec - item.startSec) * pixelsPerSecond) }
 
+    /// Downsamples the same way `VisualTimelineView`'s `TimelineClipCell`
+    /// does -- never renders more frames than the cell has room for.
+    private var displayFrames: [TimelineFrame] {
+        guard !item.previewFrames.isEmpty else { return [] }
+        let maxFrames = max(2, min(8, Int(width / 22)))
+        guard item.previewFrames.count > maxFrames else { return item.previewFrames }
+        let stride = max(1, item.previewFrames.count / maxFrames)
+        return Swift.stride(from: 0, to: item.previewFrames.count, by: stride).prefix(maxFrames).map { item.previewFrames[$0] }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            RoundedRectangle(cornerRadius: 7)
-                .fill(.secondary.opacity(0.15))
-                .frame(width: width, height: 40)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+            ZStack {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(.secondary.opacity(0.15))
+                if !displayFrames.isEmpty {
+                    HStack(spacing: 1) {
+                        ForEach(displayFrames) { frame in
+                            AsyncImage(url: frame.url) { image in
+                                image.resizable().scaledToFill()
+                            } placeholder: {
+                                Rectangle().fill(.secondary.opacity(0.15))
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
                 }
+            }
+            .frame(width: width, height: 40)
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+            }
             Text(item.label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)

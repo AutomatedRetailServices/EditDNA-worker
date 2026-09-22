@@ -294,3 +294,161 @@ def test_new_editor_is_additively_wired_into_draft_editor_view():
     editor_idx = source.index("TimelineEditorView(model: model)")
     visual_idx = source.index("VisualTimelineView(model: model)")
     assert editor_idx < visual_idx
+
+
+# ---------------------------------------------------------------------------
+# 9. Redo -- real authority only (Main Video's existing /draft/redo), never
+#    a simulated redo for Overlay/Voice-over (no such backend authority
+#    exists for those placements).
+# ---------------------------------------------------------------------------
+
+def test_redo_button_is_gated_on_a_dedicated_real_authority_flag():
+    source = TIMELINE_EDITOR.read_text()
+    assert "@State private var canRedoMainVideo = false" in source
+    assert 'Label("Redo", systemImage: "arrow.uturn.forward")' in source
+    assert ".disabled(!canRedoMainVideo)" in source
+
+
+def test_redo_dispatches_only_to_main_videos_real_redo_authority():
+    source = TIMELINE_EDITOR.read_text()
+    assert "private func performRedo() async" in source
+    redo_idx = source.index("private func performRedo() async")
+    body_end = source.index("\n}", redo_idx)
+    body = source[redo_idx:body_end]
+    assert "guard canRedoMainVideo else { return }" in body
+    assert "await model.redo()" in body
+    # No Overlay/Voice-over redo call anywhere -- that authority doesn't exist.
+    assert "removeBrollPlacement" not in body
+    assert "removeVoiceOverPlacement" not in body
+
+
+def test_canredo_flag_is_only_ever_set_true_after_a_real_main_video_undo():
+    source = TIMELINE_EDITOR.read_text()
+    undo_idx = source.index("private func performUndo() async")
+    redo_idx = source.index("private func performRedo() async")
+    undo_body = source[undo_idx:redo_idx]
+    assert "canRedoMainVideo = true" in undo_body
+    assert "await model.undo()" in undo_body
+
+
+def test_canredo_flag_is_invalidated_by_any_new_mutation_or_selection():
+    source = TIMELINE_EDITOR.read_text()
+    # New selection invalidates a pending redo.
+    tap_idx = source.index("selection = TimelineSelection(track: track, itemID: item.id)")
+    tap_block = source[tap_idx:tap_idx + 200]
+    assert "canRedoMainVideo = false" in tap_block
+    # A fresh split/delete on Main Video also invalidates it.
+    split_idx = source.index("await model.split(clipID: selection.itemID, at: playheadTime)")
+    split_block = source[split_idx:split_idx + 160]
+    assert "canRedoMainVideo = false" in split_block
+    remove_idx = source.index("await model.remove(clipID: selection.itemID)")
+    remove_block = source[remove_idx:remove_idx + 160]
+    assert "canRedoMainVideo = false" in remove_block
+
+
+# ---------------------------------------------------------------------------
+# 10. Main Video filmstrip reuse -- "Conserva filmstrip/waveform cuando
+#     estén disponibles" -- the SAME real preview catalog VisualTimelineView
+#     already builds, never a second/invented source, never fabricated data.
+# ---------------------------------------------------------------------------
+
+def test_main_video_reuses_the_same_real_preview_catalog_as_visual_timeline():
+    source = TIMELINE_EDITOR.read_text()
+    assert "SourcePreviewAssetCatalog.build(from: model.snapshot)" in source
+    visual_source = VISUAL_TIMELINE.read_text()
+    assert "SourcePreviewAssetCatalog.build(from:" in visual_source
+
+
+def test_main_video_items_carry_previewframes_filtered_to_their_own_span():
+    source = TIMELINE_EDITOR.read_text()
+    assert "var previewFrames: [TimelineFrame] = []" in source
+    assert "let frames = (sourceAssets?.frames ?? []).filter { $0.time >= start && $0.time <= end }" in source
+    assert "previewFrames: frames" in source
+
+
+def test_timeline_row_cell_renders_previewframes_as_a_real_filmstrip():
+    source = TIMELINE_EDITOR.read_text()
+    cell_idx = source.index("private struct TimelineRowCell")
+    cell_body = source[cell_idx:]
+    assert "displayFrames" in cell_body
+    assert "AsyncImage(url: frame.url)" in cell_body
+    # Falls back honestly to the plain placeholder when there is no real
+    # preview data -- never fabricates frames that don't exist.
+    assert "if !displayFrames.isEmpty" in cell_body
+
+
+def test_filmstrip_is_never_rendered_for_voiceover_or_overlay_rows():
+    # Voice-over/Overlay TimelineRowItems never populate previewFrames --
+    # only mainVideoItems does, so the shared cell only ever shows a
+    # filmstrip for Main Video, honestly reflecting that no comparable
+    # preview catalog exists for those two tracks in this gate's scope.
+    source = TIMELINE_EDITOR.read_text()
+    vo_idx = source.index("private var voiceOverItems")
+    overlay_idx = source.index("private var overlayItems")
+    vo_block = source[vo_idx:overlay_idx]
+    overlay_end = source.index("private func items(for track:")
+    overlay_block = source[overlay_idx:overlay_end]
+    assert "previewFrames" not in vo_block
+    assert "previewFrames" not in overlay_block
+
+
+# ---------------------------------------------------------------------------
+# 11. Cross-track playhead -- visible on all three tracks, drives Split
+#     gating, and is honestly labeled for accessibility.
+# ---------------------------------------------------------------------------
+
+def test_playhead_spans_all_three_tracks_and_gates_split():
+    source = TIMELINE_EDITOR.read_text()
+    assert "@State private var playheadTime: Double = 0" in source
+    assert "private var playheadLine: some View" in source
+    tracks_idx = source.index("private var timelineTracks")
+    playhead_line_idx = source.index("playheadLine", tracks_idx)
+    assert tracks_idx < playhead_line_idx
+    # It sits in the SAME ZStack as the per-track ForEach, so one line
+    # crosses all three tracks rather than each track owning its own.
+    tracks_block = source[tracks_idx:source.index("private var playheadLine:")]
+    assert "ZStack(alignment: .topLeading)" in tracks_block
+    assert "ForEach(TimelineTrackKind.allCases)" in tracks_block
+    assert "playheadLine" in tracks_block
+    # Split only ever acts on the selection AT the playhead (see also
+    # test_split_is_gated_on_selection_and_playhead_span).
+    assert "canSplitAtPlayhead" in source
+
+
+def test_playhead_slider_has_honest_accessibility_value():
+    source = TIMELINE_EDITOR.read_text()
+    slider_idx = source.index("Slider(value: $playheadTime, in: 0...totalDuration)")
+    slider_block = source[slider_idx:slider_idx + 300]
+    assert '.accessibilityLabel("Playhead")' in slider_block
+    assert ".accessibilityValue(" in slider_block
+    assert "playheadTime" in slider_block and "totalDuration" in slider_block
+
+
+# ---------------------------------------------------------------------------
+# 12. Backend error must never leave the UI claiming a save that didn't
+#     happen -- the honest failure path for the D-282A composition mutations.
+# ---------------------------------------------------------------------------
+
+def test_backend_error_on_save_never_produces_a_false_saved_state():
+    vm_source = VIEW_MODEL.read_text()
+    save_fn_idx = vm_source.index("private func saveTimelineComposition")
+    next_fn_idx = vm_source.index("\n    func ", save_fn_idx)
+    save_fn_body = vm_source[save_fn_idx:next_fn_idx]
+    assert "catch" in save_fn_body
+    # The catch path only ever records the error and returns -- it must
+    # NEVER assign `timelineComposition` (that would fake a saved state).
+    catch_idx = save_fn_body.index("catch")
+    catch_block = save_fn_body[catch_idx:]
+    assert "timelineComposition =" not in catch_block
+    assert "errorMessage" in catch_block
+
+
+def test_isavingtimeline_flag_is_cleared_on_both_success_and_failure_paths():
+    vm_source = VIEW_MODEL.read_text()
+    assert "isSavingTimeline = true" in vm_source
+    save_fn_idx = vm_source.index("private func saveTimelineComposition")
+    next_fn_idx = vm_source.index("\n    func ", save_fn_idx)
+    save_fn_body = vm_source[save_fn_idx:next_fn_idx]
+    # Defer or an explicit reset on both branches -- never left stuck true
+    # after a failed save (which would honestly-but-permanently block UI).
+    assert "isSavingTimeline = false" in save_fn_body or "defer" in save_fn_body
