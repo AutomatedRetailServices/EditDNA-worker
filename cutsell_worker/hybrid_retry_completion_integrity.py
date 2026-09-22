@@ -137,6 +137,48 @@ def _safe_failed_retry(take, peers, semantic, context):
     return best[-1]
 
 
+def _safe_contentless_alternate_debris(take, previous, following, semantic):
+    """D-283 (RAW #119 audit): a real orphan recording-process fragment
+    made entirely of function words / short particles (a bare "No.") has
+    NO content tokens at all under `_content()` (every token is either a
+    stopword or shorter than the 4-character content floor). `_coverage()`
+    starts from `own = _content(take.text)` and short-circuits to 0.0 the
+    moment `own` is empty, so `_safe_short_alternate_debris`'s coverage
+    and shared-content gates can never fire on this shape, regardless of
+    duration/confidence/adjacency -- it is not that the evidence is weak,
+    it is that there is structurally no content to measure overlap on.
+
+    This is a separate, narrower rule for exactly that contentless shape.
+    It cannot lean on content-overlap corroboration (there is none), so it
+    leans harder on the semantic judge's own "alternate" label (a higher
+    confidence floor than the content-bearing sibling rule: 0.85 vs 0.74)
+    plus the same structural adjacency/duration/single-source evidence
+    `_safe_short_alternate_debris` already requires. Deliberately NOT
+    gated by `complete_idea` the way `_safe_short_alternate_debris` is
+    protected in `editorial_guardrails_v2.py`: that guard exists so a
+    short-but-MEANINGFUL complete delivery is never treated as debris
+    merely for being short, but "No." is grammatically complete AND
+    editorially empty -- completeness says nothing about whether a
+    contentless utterance carries information. "Contentless" is purely
+    token-length/stopword-derived, never a fixed vocabulary list -- fires
+    identically on any language's short negations, fillers or particles.
+    """
+    label, confidence = semantic.get(take.clip_id, ("", 0.0))
+    if label != "alternate" or confidence < 0.85:
+        return False
+    if _content(take.text):
+        return False  # has real content -- the sibling rule above owns this shape
+    if take.duration_sec > 3.0:
+        return False
+    if previous is None or following is None:
+        return False
+    if _gap(previous, take) > 15.0 or _gap(take, following) > 15.0:
+        return False
+    if previous.source_asset_id != take.source_asset_id or following.source_asset_id != take.source_asset_id:
+        return False
+    return True
+
+
 def _safe_short_alternate_debris(take, previous, following, semantic):
     label, confidence = semantic.get(take.clip_id, ("", 0.0))
     content = _content(take.text)
@@ -289,6 +331,10 @@ def apply_hybrid_retry_completion_integrity(result, source_takes, context=None):
         if _safe_short_alternate_debris(take, previous, following, semantic):
             removed_ids.add(take.clip_id)
             diagnostics.append({"clip_id": take.clip_id, "reason": "semantic_short_alternate_covered_by_neighbors"})
+            continue
+        if _safe_contentless_alternate_debris(take, previous, following, semantic):
+            removed_ids.add(take.clip_id)
+            diagnostics.append({"clip_id": take.clip_id, "reason": "semantic_contentless_alternate_orphan"})
             continue
         winner = _safe_full_alternate_retry(take, tuple(kept), index, semantic, context)
         if winner is not None:

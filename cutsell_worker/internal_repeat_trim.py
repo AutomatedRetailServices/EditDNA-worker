@@ -79,8 +79,30 @@ def _following_take(
     return following
 
 
-def _trailing_repeat_start(take: CandidateTake) -> tuple[int, int] | None:
-    """Return ``(trim_start_index, repeat_width)`` for a repeated trailing phrase."""
+def _trailing_repeat_start(take: CandidateTake) -> tuple[int, int, bool] | None:
+    """Return ``(trim_start_index, repeat_width, is_exact_tail)`` for a
+    repeated phrase whose second occurrence is the tail (or almost the
+    tail -- unchanged from before), OR is followed only by a further
+    PARTIAL re-recitation of the SAME phrase.
+
+    D-284 (RAW #119 audit): a real internal-restart candidate is not
+    always a clean two-cycle repeat that ends exactly at the take's
+    physical boundary -- a creator can restart the same short phrase a
+    THIRD time and simply run out of usable delivery mid-cycle (the take
+    just ends there). The original tail-only gate (`len(tokens) - (second
+    + width) > 1`) structurally could not see that shape: it required the
+    second occurrence to BE the true end, so a take with one clean cycle,
+    one repeated cycle, and a truncated third cycle was never trimmed at
+    all. The generalization keeps the exact same two safety properties
+    the original gate had -- (1) it still requires the SAME phrase,
+    verbatim, to reoccur (never fires on ordinary topic-adjacent
+    repetition); (2) it still never discards real, non-repeated content:
+    the remainder after the second occurrence must be EMPTY (the original
+    shape) or a token-for-token PREFIX of the same phrase (a partial third
+    cycle) -- any genuinely new/different remainder content still declines
+    the rule exactly as before, since it will not match the phrase's own
+    prefix.
+    """
     tokens = _tokens(take)
     if len(tokens) < 10:
         return None
@@ -93,9 +115,9 @@ def _trailing_repeat_start(take: CandidateTake) -> tuple[int, int] | None:
             for second in range(first + width, len(tokens) - width + 1):
                 if tokens[second : second + width] != phrase:
                     continue
-                # The repeated occurrence must be the tail or almost the tail. This is
-                # the structure of a restart leak, not ordinary repetition in a story.
-                if len(tokens) - (second + width) > 1:
+                remainder = tokens[second + width :]
+                is_exact_tail = len(remainder) <= 1
+                if not is_exact_tail and remainder != phrase[: len(remainder)]:
                     continue
                 trim_start = second
                 back = second - 1
@@ -104,7 +126,7 @@ def _trailing_repeat_start(take: CandidateTake) -> tuple[int, int] | None:
                     back -= 1
                 if trim_start < 4:
                     continue
-                return trim_start, width
+                return trim_start, width, is_exact_tail
     return None
 
 
@@ -122,7 +144,7 @@ def trim_internal_repeated_restarts(
         if found is None or not take.words:
             output.append(take)
             continue
-        trim_index, repeat_width = found
+        trim_index, repeat_width, is_exact_tail = found
         words = tuple(take.words)
         if trim_index >= len(words):
             output.append(take)
@@ -156,7 +178,10 @@ def trim_internal_repeated_restarts(
         output.append(child)
         diagnostics.append({
             "clip_id": take.clip_id,
-            "reason": "internal_trailing_repeated_restart_trim",
+            "reason": (
+                "internal_trailing_repeated_restart_trim" if is_exact_tail
+                else "internal_repeated_restart_trim_partial_remainder"
+            ),
             "original_text": take.text,
             "kept_text": text,
             "repeat_width": repeat_width,
