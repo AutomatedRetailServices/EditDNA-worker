@@ -306,7 +306,21 @@ def group_takes(
 #      this specific transition is not evidence about THIS pair.
 _MULTIMODAL_CORROBORATION_KINDS = frozenset({"wrong_take", "retry_setup"})
 _MULTIMODAL_CORROBORATION_MAXIMUM_GAP_SEC = 10.0
-_MULTIMODAL_CORROBORATION_MINIMUM_TOKENS = 4
+# D-144 (Gate 6, Gap A): a false start is short by definition -- the
+# creator caught themselves and stopped -- so a floor higher than the
+# three DOCUMENTED safety gates above actually need excludes exactly the
+# shortest, most classic false-start shape (a 3-token abandoned opening)
+# from this authority's own bounded backstop before any of those three
+# gates gets a chance to run. The real protection against a tiny/noise
+# fragment is already gate 1 below (a real shared CONTENT token, length
+# >=3, ratio >=0.25) plus gate 2 (completeness asymmetry) plus gate 3 (a
+# CONFIRMED event at this exact boundary) -- three independent, unrelated
+# coincidences a stray short fragment is very unlikely to satisfy by
+# accident. Lowered from 4 to 3 (not further): 3 is the minimum that can
+# still carry one qualifying `_restart_content` token (>=3 chars) plus at
+# least one more word of grammatical scaffolding, so a bare 1-2 token
+# interjection ("uh", "no wait") still never reaches this rule.
+_MULTIMODAL_CORROBORATION_MINIMUM_TOKENS = 3
 _MULTIMODAL_CORROBORATION_MINIMUM_SHARED_CONTENT = 1
 _MULTIMODAL_CORROBORATION_MINIMUM_OVERLAP_RATIO = 0.25
 _MULTIMODAL_CORROBORATION_EVENT_BEFORE_SEC = 1.0

@@ -693,6 +693,24 @@ def _absorb_interstitial_retry_debris(
     return tuple(normalized), changed
 
 
+def _pair_side_eligible(take: CandidateTake) -> bool:
+    """A take with 3 words or fewer normally carries too little evidence to
+    be worth proposing as a cross-group candidate (D-097.9's own budget/
+    noise concern). But a false start is short by definition -- the creator
+    caught themselves and stopped -- so a blanket word-count floor silently
+    forecloses the whole short-false-start family of retries (D-097.12,
+    D-100) before any matching rule ever sees the pair. `complete_idea` is
+    already a general, non-lexical signal every `CandidateTake` carries:
+    a short but GRAMMATICALLY INCOMPLETE take (a plausible abandoned
+    opening) stays eligible; a short but already-COMPLETE fragment (a
+    filler aside, an acknowledgement) is excluded exactly as before -- this
+    does not widen eligibility for the case the floor was actually meant to
+    guard against."""
+    if len(semantic_key(take.text).split()) > 3:
+        return True
+    return not take.complete_idea
+
+
 def _cross_group_candidate_pairs(
     groups: Tuple[Tuple[str, ...], ...],
     take_map: dict[str, CandidateTake],
@@ -707,11 +725,11 @@ def _cross_group_candidate_pairs(
                 continue
             for left_id in left_group:
                 left_take = take_map.get(left_id)
-                if left_take is None or len(semantic_key(left_take.text).split()) <= 3:
+                if left_take is None or not _pair_side_eligible(left_take):
                     continue
                 for right_id in right_group:
                     right_take = take_map.get(right_id)
-                    if right_take is None or len(semantic_key(right_take.text).split()) <= 3:
+                    if right_take is None or not _pair_side_eligible(right_take):
                         continue
                     if left_take.source_asset_id != right_take.source_asset_id:
                         continue

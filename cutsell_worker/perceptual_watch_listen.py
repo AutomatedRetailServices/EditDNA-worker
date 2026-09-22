@@ -69,6 +69,27 @@ _RESET_KINDS = frozenset({
     "camera_disengagement_candidate", "facial_expression_shift_candidate",
     "retry_setup", "false_start", "wrong_take", "breaking_character",
 })
+# D-145 (Gate 6, Gap C): `_RESET_KINDS` mixes two structurally different
+# evidence classes. `_RESET_VISUAL_CANDIDATE_KINDS` is specific, positive
+# evidence of a physical artifact (a stumble, a hand/body reset, a camera
+# bump) -- if it bleeds into the kept window, it is genuinely likely to be
+# visible debris, so it stays a hard FAIL. `_RESET_EXPLICIT_MARKER_KINDS`
+# is the SAME evidence class `attempt_reconstruction.py`'s own
+# `_EXPLICIT_ATTEMPT_BREAK_KINDS` already treats elsewhere as the reason a
+# cut boundary was correctly placed at that exact point -- a marker sitting
+# inside the 0.35s edge window is at least as consistent with "this is
+# exactly why the cut is here, and the timestamp has ordinary measurement
+# slop" as it is with "residue leaked into the render", and this capability
+# never decodes a rendered frame to tell the two apart (see its own `note`
+# below). Reporting it as an unconditional FAIL misrepresents an unverified
+# inference as a confirmed defect.
+_RESET_VISUAL_CANDIDATE_KINDS = frozenset({
+    "body_reset_candidate", "hand_motion_reset_candidate",
+    "camera_disengagement_candidate", "facial_expression_shift_candidate",
+})
+_RESET_EXPLICIT_MARKER_KINDS = frozenset({
+    "retry_setup", "false_start", "wrong_take", "breaking_character",
+})
 
 NOT_IMPLEMENTED_CAPABILITIES: tuple[tuple[str, str], ...] = (
     ("facial_expression_post_line", "needs face/expression estimation on decoded frames"),
@@ -233,15 +254,28 @@ def _reset_debris_at_edges(draft, segments: Sequence, output_windows: Sequence[t
             edge = "entry" if at_entry else "exit"
             out_start = win_start if at_entry else max(win_start, win_end - EDGE_DEBRIS_WINDOW_SEC)
             out_end = min(win_end, win_start + EDGE_DEBRIS_WINDOW_SEC) if at_entry else win_end
+            # D-145: an explicit recording-process-break marker at this edge
+            # is unverified evidence of visible residue (this capability
+            # never decodes rendered frames) -- it stays a reported,
+            # BoundaryEngine-routed finding, but UNCERTAIN, not a confirmed
+            # FAIL. A visual/motion reset candidate is stronger, more
+            # specific evidence and remains a hard FAIL, unchanged.
+            severity = "UNCERTAIN" if kind in _RESET_EXPLICIT_MARKER_KINDS else "FAIL"
             findings.append(PerceptualFinding(
-                name, RESET_DEBRIS_AT_EDGE, out_start, out_end, "FAIL", ROUTE_BOUNDARY,
+                name, RESET_DEBRIS_AT_EDGE, out_start, out_end, severity, ROUTE_BOUNDARY,
                 {"clip_id": segment.clip_id, "edge": edge, "event_kind": kind,
                  "confidence": round(float(event.get("confidence") or 0.0), 3),
                  "source_start": round(e_start, 3), "source_end": round(e_end, 3)},
             ))
     if not evidence_seen:
         return CapabilityReport(name, UNCERTAIN, "source_evidence_mapped", note="no local performance evidence available for the rendered sources")
-    return CapabilityReport(name, EVALUATED_FAIL if findings else EVALUATED_PASS, "source_evidence_mapped", tuple(findings),
+    if any(f.severity == "FAIL" for f in findings):
+        status = EVALUATED_FAIL
+    elif findings:
+        status = UNCERTAIN
+    else:
+        status = EVALUATED_PASS
+    return CapabilityReport(name, status, "source_evidence_mapped", tuple(findings),
                             note="A-5 reset/break events mapped onto the render timeline; not re-measured on decoded frames")
 
 

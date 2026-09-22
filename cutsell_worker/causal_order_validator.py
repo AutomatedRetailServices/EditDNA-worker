@@ -82,6 +82,20 @@ _STRONG_DEPENDENCY_CONNECTORS: tuple[str, ...] = (
     "por lo tanto", "como resultado", "eso confirmó", "eso confirmo",
     "y eso confirmó", "y eso confirmo", "y así fue como", "y asi fue como",
     "lo cual confirmó", "lo cual confirmo",
+    # D-146 (Gate 6, Gap B): ordinary spoken narration of a finding-then-
+    # diagnosis (or any exam/finding -> conclusion) story shape very often
+    # states the conclusion DIRECTLY, with no structural transition word at
+    # all ("I was diagnosed with...", "me diagnosticaron con...") -- these
+    # are still a general grammatical/lexical connector pattern (a
+    # diagnosis-reveal phrase), not any specific disease/product/Video00
+    # fact, matching this lexicon's existing design (see module docstring
+    # Section "What evidence this uses").
+    "i was diagnosed with", "they diagnosed me with", "the diagnosis was",
+    "confirmed i had", "confirmed that i had", "turned out to be",
+    "the results showed", "the test results showed",
+    "me diagnosticaron con", "me dijeron que tenía", "me dijeron que tenia",
+    "el diagnóstico fue", "el diagnostico fue", "resultó ser", "resulto ser",
+    "los resultados mostraron", "el resultado fue",
 )
 
 _WEAK_DEPENDENCY_CONNECTORS: tuple[str, ...] = (
