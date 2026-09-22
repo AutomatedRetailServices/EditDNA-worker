@@ -1,5 +1,5 @@
-"""D-097 §4 -- perceptual System Watch+Listen reviewer v1 (routing, blocking
-on EVALUATED_FAIL only).
+"""D-097 §4 -- perceptual System Watch+Listen reviewer v1 (routing, explicit
+4-state delivery gate).
 
 D-096 root cause #5: the technical post-render QC catches silence / black /
 frozen frames / join clicks and nothing perceptual, so every visual or
@@ -15,23 +15,48 @@ Contract (PO adjustment §4):
   never become PASS, and the review as a whole is PASS only when EVERY
   capability is EVALUATED_PASS -- so v1, which still carries
   NOT_IMPLEMENTED capabilities, can never auto-PASS a candidate;
-- D-153 (Gate 6 correction, real RAW #118 audit, explicit Product Owner
-  acceptance criterion): `gate_mode` is now
-  `GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY`. `blocks_delivery` (both on
-  `PerceptualReview` and in `as_dict()`) is True exactly when at least one
-  capability that was ACTUALLY EVALUATED reports EVALUATED_FAIL -- the same
-  condition `overall_status` already uses to report `REVIEW_FAIL`, and the
-  same condition `benchmarks/clean_raw_gate.py` already independently
-  checked (`perceptual_status == "FAIL"`) before this correction, so this
-  is naming an existing downstream behavior honestly, not introducing a new
-  one. A capability that is UNCERTAIN, ERROR, or still NOT_IMPLEMENTED
-  NEVER blocks delivery on its own -- with 4 of 8 capabilities still
-  NOT_IMPLEMENTED, requiring the full review to reach REVIEW_PASS before
-  delivery would mean no candidate could ever deliver until every one of
-  them ships, which is not what "block on a real defect" means. `status`
-  itself is unchanged and still never silently PASSes while any capability
-  is NOT_IMPLEMENTED/UNCERTAIN/ERROR -- this only changes what BLOCKS
-  delivery, never what counts as a clean review;
+- D-154 (Gate 6 second correction, real RAW #118 audit, explicit Product
+  Owner acceptance criterion, replacing D-153's binary `blocks_delivery`
+  with an explicit 4-state status): `PerceptualReview.watch_listen_status`
+  (and `as_dict()["watch_listen_status"]`) is always exactly one of
+  `WATCH_LISTEN_BLOCKED` / `WATCH_LISTEN_HUMAN_REVIEW_REQUIRED` /
+  `WATCH_LISTEN_SYSTEM_PASS` / `WATCH_LISTEN_HUMAN_APPROVED`:
+    * `EVALUATED_FAIL` on any capability -> `BLOCKED` (a confirmed
+      perceptual defect; the same condition `overall_status` already uses
+      for `REVIEW_FAIL`, and the same condition `benchmarks/
+      clean_raw_gate.py` already independently checked before this
+      correction -- naming an existing downstream behavior honestly).
+    * `ERROR` on any capability -> `BLOCKED` too (an error means the
+      measurement itself did not run -- there is no reliable evidence at
+      all for that capability, which is at least as unsafe as a confirmed
+      FAIL, never merely "uncertain"). D-153 wrongly treated ERROR the
+      same as UNCERTAIN/NOT_IMPLEMENTED; corrected here.
+    * `UNCERTAIN` or `NOT_IMPLEMENTED` (with nothing BLOCKED) ->
+      `HUMAN_REVIEW_REQUIRED`: the render is NOT deleted or withheld from
+      a human reviewer (this module never mutates the render either way --
+      "diagnoses and routes" holds unchanged), but `SYSTEM_PASS`,
+      "Ready", and automatic delivery are withheld. With 4 of 8
+      capabilities still NOT_IMPLEMENTED today, this is the ordinary
+      status for a real review, not an edge case.
+    * `SYSTEM_PASS` only when EVERY capability in the v1 acceptance set is
+      implemented, evaluated, AND EVALUATED_PASS -- i.e. nothing BLOCKED
+      and nothing needs human review. This exists so a future version with
+      every capability actually implemented can reach it; v1's 4
+      NOT_IMPLEMENTED capabilities mean no real v1 review reaches it yet,
+      which is intentional, not a bug to route around.
+    * `HUMAN_APPROVED` is NEVER computed by this module -- it requires an
+      explicit human decision this code has no way to observe on its own.
+      `apply_human_watch_listen_approval()` below takes that external
+      decision as an explicit argument and is the only way to reach it,
+      and only ever promotes from `HUMAN_REVIEW_REQUIRED` or
+      `SYSTEM_PASS` -- a `BLOCKED` review is a root-authority defect to
+      fix or a render to re-attempt, never something a human "approves
+      away" through this gate (this module's own "never mutates" contract
+      would otherwise be laundered through human sign-off instead of a
+      real fix).
+  Technical QC and System Watch+Listen remain two separate gates -- this
+  status is perceptual-only and never substitutes for the technical QC's
+  own PASS/FAIL;
 - measurements are made on the REAL rendered MP4 where the capability
   allows (dead air, cut-adjacent speech energy); capabilities that map
   source evidence (A-5 reset events) or transcript onto the render timeline
@@ -48,7 +73,18 @@ from .audio_silence import AUDIO_SILENCE_EVENT_KIND
 from .take_grouping import retry_similarity
 
 SCHEMA_VERSION = "cutsell.perceptual_watch_listen.v1"
-GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY = "blocking_v1_evaluated_fail_only"
+GATE_MODE_STATE_MACHINE_V1 = "state_machine_v1_blocked_human_review_system_pass"
+
+# D-154: the explicit 4-state System Watch+Listen delivery status. See the
+# module docstring's D-154 section for the full precedence/rationale.
+WATCH_LISTEN_BLOCKED = "BLOCKED"
+WATCH_LISTEN_HUMAN_REVIEW_REQUIRED = "HUMAN_REVIEW_REQUIRED"
+WATCH_LISTEN_SYSTEM_PASS = "SYSTEM_PASS"
+WATCH_LISTEN_HUMAN_APPROVED = "HUMAN_APPROVED"
+WATCH_LISTEN_STATUSES = (
+    WATCH_LISTEN_BLOCKED, WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
+    WATCH_LISTEN_SYSTEM_PASS, WATCH_LISTEN_HUMAN_APPROVED,
+)
 
 EVALUATED_PASS = "EVALUATED_PASS"
 EVALUATED_FAIL = "EVALUATED_FAIL"
@@ -157,12 +193,34 @@ class PerceptualReview:
         return tuple(f for c in self.capabilities for f in c.findings)
 
     @property
+    def watch_listen_status(self) -> str:
+        """D-154: the explicit, primary delivery-gating status -- always
+        exactly one of `WATCH_LISTEN_BLOCKED` / `WATCH_LISTEN_HUMAN_
+        REVIEW_REQUIRED` / `WATCH_LISTEN_SYSTEM_PASS`. Never `WATCH_LISTEN_
+        HUMAN_APPROVED` -- this computation has no way to observe a human
+        decision; see `apply_human_watch_listen_approval()` for that.
+        Precedence: BLOCKED (EVALUATED_FAIL or ERROR on any capability)
+        outranks HUMAN_REVIEW_REQUIRED (UNCERTAIN or NOT_IMPLEMENTED on any
+        capability, nothing BLOCKED) outranks SYSTEM_PASS (every capability
+        EVALUATED_PASS). See the module docstring's D-154 section for the
+        full rationale, especially why ERROR is BLOCKED, not merely
+        uncertain -- an error means the measurement itself never ran."""
+        if any(c.status in (EVALUATED_FAIL, ERROR) for c in self.capabilities):
+            return WATCH_LISTEN_BLOCKED
+        if any(c.status in (UNCERTAIN, NOT_IMPLEMENTED) for c in self.capabilities):
+            return WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
+        return WATCH_LISTEN_SYSTEM_PASS
+
+    @property
     def blocks_delivery(self) -> bool:
-        """D-153: True exactly when a capability that was ACTUALLY
-        EVALUATED reports EVALUATED_FAIL -- never for UNCERTAIN, ERROR, or
-        a still-NOT_IMPLEMENTED capability. See the module docstring's
-        D-153 section for the full rationale."""
-        return any(c.status == EVALUATED_FAIL for c in self.capabilities)
+        """D-153/D-154: a convenience boolean derived from `watch_listen_
+        status` (True only for BLOCKED) -- kept for callers that only need
+        a yes/no answer, but `watch_listen_status` is the primary,
+        authoritative signal; never rely on this boolean alone to
+        distinguish BLOCKED from HUMAN_REVIEW_REQUIRED, which both matter
+        for very different reasons (a confirmed defect to fix vs. evidence
+        a human still needs to look at)."""
+        return self.watch_listen_status == WATCH_LISTEN_BLOCKED
 
     def as_dict(self) -> dict:
         routing: dict[str, int] = {}
@@ -172,8 +230,9 @@ class PerceptualReview:
             "schema_version": self.schema_version,
             "status": self.status,
             "gate_mode": self.gate_mode,
+            "watch_listen_status": self.watch_listen_status,
             "blocking": self.blocks_delivery,
-            "human_watch_listen_required": True,
+            "human_watch_listen_required": self.watch_listen_status != WATCH_LISTEN_HUMAN_APPROVED,
             "capabilities": [asdict(c) for c in self.capabilities],
             "capability_status_counts": {
                 s: sum(1 for c in self.capabilities if c.status == s)
@@ -182,6 +241,25 @@ class PerceptualReview:
             "finding_count": len(self.findings),
             "routing": routing,
         }
+
+
+def apply_human_watch_listen_approval(review: PerceptualReview, *, approved: bool) -> str:
+    """D-154: the final HUMAN WATCH + LISTEN gate in the D-095 ladder
+    (`... -> perceptual SYSTEM WATCH + LISTEN -> HUMAN WATCH + LISTEN`).
+    Takes the human reviewer's explicit decision as an argument -- this
+    module has no other way to observe one. Returns `WATCH_LISTEN_HUMAN_
+    APPROVED` only when `approved` is True AND the review's own automated
+    `watch_listen_status` is `HUMAN_REVIEW_REQUIRED` or `SYSTEM_PASS`;
+    otherwise returns the review's unchanged automated status. A `BLOCKED`
+    review is deliberately NEVER promotable here, approved or not -- a
+    confirmed EVALUATED_FAIL/ERROR is a root-authority fix or a render
+    re-attempt, never something a human sign-off launders through this
+    gate (this module's own "diagnoses and routes, never mutates"
+    contract)."""
+    automated = review.watch_listen_status
+    if approved and automated in (WATCH_LISTEN_HUMAN_REVIEW_REQUIRED, WATCH_LISTEN_SYSTEM_PASS):
+        return WATCH_LISTEN_HUMAN_APPROVED
+    return automated
 
 
 def overall_status(capabilities: Iterable[CapabilityReport]) -> str:
@@ -389,11 +467,11 @@ def review_rendered_candidate(
         _repeated_audience_content(draft, segments, output_windows),
         *(CapabilityReport(cap, NOT_IMPLEMENTED, "none", note=why) for cap, why in NOT_IMPLEMENTED_CAPABILITIES),
     ]
-    return PerceptualReview(status=overall_status(capabilities), gate_mode=GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY, capabilities=tuple(capabilities))
+    return PerceptualReview(status=overall_status(capabilities), gate_mode=GATE_MODE_STATE_MACHINE_V1, capabilities=tuple(capabilities))
 
 
 def error_review(reason: str) -> PerceptualReview:
     return PerceptualReview(
-        status=REVIEW_UNCERTAIN, gate_mode=GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY,
+        status=REVIEW_UNCERTAIN, gate_mode=GATE_MODE_STATE_MACHINE_V1,
         capabilities=(CapabilityReport("reviewer", ERROR, "none", note=str(reason)[:200]),),
     )

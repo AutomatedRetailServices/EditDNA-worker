@@ -169,8 +169,8 @@ def evaluate_clean_raw_gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
         "note": (
             "CLEAN RAW is the first ladder rung after RAW; PASS requires technical QC PASS, a complete story, "
             "no interior dead air, no perceptual FAIL, and (from the ladder) no failed/redundant/restored material, "
-            "no missing delivery and <= 1.0 s loose edges. Perceptual UNCERTAIN (including a still-NOT_IMPLEMENTED "
-            "capability) is not blocking in blocking_v1_evaluated_fail_only but keeps HUMAN WATCH+LISTEN required."
+            "no missing delivery and <= 1.0 s loose edges. Perceptual UNCERTAIN or NOT_IMPLEMENTED alone reports "
+            "watch_listen_status=HUMAN_REVIEW_REQUIRED, not BLOCKED, but still keeps HUMAN WATCH+LISTEN required."
         ),
     }
 

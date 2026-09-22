@@ -109,9 +109,10 @@ def test_review_measures_dead_air_on_the_real_mp4_and_routes_it(tone_gap_tone):
     assert dead_air.findings[0].kind == pwl.INTERIOR_DEAD_AIR and dead_air.findings[0].routes_to == pwl.ROUTE_BOUNDARY
     assert review.status == pwl.REVIEW_FAIL
     payload = review.as_dict()
-    # D-153: a real EVALUATED_FAIL (measured dead air, not NOT_IMPLEMENTED)
-    # now blocks delivery -- gate_mode reports the blocking mode honestly.
-    assert payload["gate_mode"] == pwl.GATE_MODE_BLOCKING_V1_EVALUATED_FAIL_ONLY
+    # D-154: a real EVALUATED_FAIL (measured dead air, not NOT_IMPLEMENTED)
+    # is BLOCKED -- gate_mode/watch_listen_status report this honestly.
+    assert payload["gate_mode"] == pwl.GATE_MODE_STATE_MACHINE_V1
+    assert payload["watch_listen_status"] == pwl.WATCH_LISTEN_BLOCKED
     assert payload["blocking"] is True and review.blocks_delivery is True
     assert payload["human_watch_listen_required"] is True
     assert payload["capability_status_counts"][pwl.NOT_IMPLEMENTED] == len(pwl.NOT_IMPLEMENTED_CAPABILITIES)
@@ -164,7 +165,7 @@ def _result(**overrides):
                         "hybrid_editorial_chunks": [{"diagnostics": [{"protected_polarity_fragments": [{"clip_id": "p"}]}]}]},
         "live_render_qc": {"status": "PASS", "deliverable": True, "delivery_status": "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=UNCERTAIN",
                            "attempts": [{"status": "PASS", "findings": [], "renderer_trailing_trims": [{"trim_sec": 0.4}], "dead_air_reconciliation": []}]},
-        "perceptual_watch_listen": {"status": "UNCERTAIN", "gate_mode": "blocking_v1_evaluated_fail_only", "capability_status_counts": {"NOT_IMPLEMENTED": 4}, "routing": {}},
+        "perceptual_watch_listen": {"status": "UNCERTAIN", "gate_mode": "state_machine_v1_blocked_human_review_system_pass", "capability_status_counts": {"NOT_IMPLEMENTED": 4}, "routing": {}},
     }
     base.update(overrides)
     return base
