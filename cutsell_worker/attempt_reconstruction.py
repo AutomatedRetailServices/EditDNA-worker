@@ -15,10 +15,11 @@ from dataclasses import replace
 import re
 from typing import Iterable, Mapping, Tuple
 
-from .canonical_identity import mint_attempt_id
+from .canonical_identity import mint_attempt_id, mint_source_span_id
 from .contracts import CandidateTake, MediaSignals
 from .session_boundaries import infer_session_boundaries
 from .source_identity import stable_clip_id
+from .take_segmentation import _looks_complete_idea
 from .whole_video_analysis import TemporalEvent, WholeVideoContext
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
@@ -259,6 +260,114 @@ def _attempt_boundary_reason(
 _AUDIO_SILENCE_KIND = "audio_silence_interval"  # audio_silence.AUDIO_SILENCE_EVENT_KIND; same string take_judge reads
 
 
+def _split_take_at_internal_measured_pauses(
+    take: CandidateTake,
+    context: WholeVideoContext | None,
+    *,
+    min_pause_sec: float,
+) -> tuple[tuple[CandidateTake, ...], tuple[dict, ...]]:
+    """Recover attempt boundaries hidden inside one ASR candidate."""
+    words = tuple(take.words)
+    if len(words) < 2 or context is None:
+        return (take,), ()
+
+    qualifying: list[tuple[float, int, TemporalEvent]] = []
+    for event in _source_events(context, take.source_asset_id):
+        if _kind(event.kind) != _AUDIO_SILENCE_KIND or float(event.confidence) < 0.80:
+            continue
+        pause_start = max(float(event.start), float(take.start))
+        pause_end = min(float(event.end), float(take.end))
+        if pause_end - pause_start < min_pause_sec:
+            continue
+        for index in range(1, len(words)):
+            left_end = float(words[index - 1].end)
+            right_start = float(words[index].start)
+            overlap = min(pause_end, right_start) - max(pause_start, left_end)
+            if overlap <= 0.0:
+                continue
+            left_text = " ".join(str(word.text or "").strip() for word in words[:index]).strip()
+            right_text = " ".join(str(word.text or "").strip() for word in words[index:]).strip()
+            if len(_content_tokens(left_text)) < _SUBSPAN_MIN_CONTENT_TOKENS:
+                continue
+            if len(_content_tokens(right_text)) < _SUBSPAN_MIN_CONTENT_TOKENS:
+                continue
+            qualifying.append((overlap, index, event))
+
+    if not qualifying:
+        return (take,), ()
+
+    best_by_index: dict[int, tuple[float, TemporalEvent]] = {}
+    for overlap, index, event in qualifying:
+        current = best_by_index.get(index)
+        if current is None or overlap > current[0]:
+            best_by_index[index] = (overlap, event)
+
+    cut_indices = sorted(best_by_index)
+    ranges = list(zip((0, *cut_indices), (*cut_indices, len(words))))
+    children: list[CandidateTake] = []
+    for start_index, end_index in ranges:
+        child_words = words[start_index:end_index]
+        text = " ".join(str(word.text or "").strip() for word in child_words).strip()
+        start = max(float(take.start), float(child_words[0].start))
+        end = min(float(take.end), float(child_words[-1].end))
+        signals = replace(take.signals, start=start, end=end) if take.signals is not None else None
+        indices = (
+            tuple(take.word_indices[start_index:end_index])
+            if len(take.word_indices) == len(words)
+            else ()
+        )
+        children.append(CandidateTake(
+            clip_id=stable_clip_id(take.source_asset_id, start, end, text),
+            source_asset_id=take.source_asset_id,
+            source_order=take.source_order,
+            start=start,
+            end=end,
+            text=text,
+            words=child_words,
+            signals=signals,
+            complete_idea=_looks_complete_idea(text, end - start),
+            source_span_id=mint_source_span_id(take.source_asset_id, start, end, text),
+            word_indices=indices,
+        ))
+
+    audit = tuple({
+        "authority": "attempt_reconstruction_internal_measured_pause",
+        "decision": "split_hidden_attempt_boundary",
+        "parent_clip_id": take.clip_id,
+        "after_clip_id": children[position].clip_id,
+        "before_clip_id": children[position + 1].clip_id,
+        "at": round((children[position].end + children[position + 1].start) / 2.0, 3),
+        "measured_pause_sec": round(
+            min(float(best_by_index[index][1].end), float(take.end))
+            - max(float(best_by_index[index][1].start), float(take.start)),
+            3,
+        ),
+    } for position, index in enumerate(cut_indices))
+    return tuple(children), audit
+
+
+def split_internal_measured_pause_candidates(
+    takes: Iterable[CandidateTake],
+    context: WholeVideoContext | None,
+    *,
+    min_pause_sec: float = 1.20,
+) -> tuple[tuple[CandidateTake, ...], tuple[dict, ...]]:
+    """Expand fused ASR candidates without deleting or selecting speech.
+
+    This is public so the Flow B preservation pass can use the identical
+    candidate identities that reconstruction recorded in its diagnostics.
+    """
+    expanded: list[CandidateTake] = []
+    audit: list[dict] = []
+    for take in takes:
+        children, rows = _split_take_at_internal_measured_pauses(
+            take, context, min_pause_sec=min_pause_sec,
+        )
+        expanded.extend(children)
+        audit.extend(rows)
+    return tuple(expanded), tuple(audit)
+
+
 def _measured_pause_at_transition(
     context: WholeVideoContext | None,
     left: CandidateTake,
@@ -490,8 +599,14 @@ def reconstruct_delivery_attempts(
     docstring above. These are additive only; every attempt the merge logic
     itself produces is still returned unchanged.
     """
+    original = tuple(takes)
+    expanded, internal_pause_splits = split_internal_measured_pause_candidates(
+        original,
+        context,
+        min_pause_sec=max_continuation_gap_sec,
+    )
     ordered = tuple(sorted(
-        takes,
+        expanded,
         key=lambda take: (take.source_order, take.start, take.end, take.clip_id),
     ))
     if not ordered:
@@ -501,6 +616,7 @@ def reconstruct_delivery_attempts(
             "merged_fragment_count": 0,
             "boundaries": [],
             "attempts": [],
+            "internal_measured_pause_splits": [],
         }
 
     buckets: list[list[CandidateTake]] = []
@@ -547,7 +663,8 @@ def reconstruct_delivery_attempts(
         max_continuation_gap_sec=max_continuation_gap_sec,
     )
     diagnostics = {
-        "input_take_count": len(ordered),
+        "input_take_count": len(original),
+        "expanded_take_count": len(ordered),
         "attempt_count": len(attempts),
         "merged_fragment_count": max(0, len(ordered) - len(attempts)),
         "boundaries": boundaries[:300],
@@ -568,6 +685,7 @@ def reconstruct_delivery_attempts(
         # empty whenever no bucket contains a qualifying internal gap, so
         # this key is a no-op for every currently-passing fixture.
         "preserved_borderline_subspans": preserved_audit[:300],
+        "internal_measured_pause_splits": list(internal_pause_splits[:300]),
     }
     return attempts, diagnostics
 

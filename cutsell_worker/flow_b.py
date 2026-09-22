@@ -8,7 +8,11 @@ import tempfile
 from typing import Callable, Mapping
 
 from .asr import ASRProvider
-from .attempt_reconstruction import preserved_subspan_candidates, reconstruct_delivery_attempts
+from .attempt_reconstruction import (
+    preserved_subspan_candidates,
+    reconstruct_delivery_attempts,
+    split_internal_measured_pause_candidates,
+)
 from .canonical_asr_evidence import build_canonical_asr_evidence, normalize_transcript_segments
 from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
@@ -369,8 +373,11 @@ def process_local_sources(
     # final KEEP. See preserved_subspan_candidates()'s own docstring for
     # why this is a separate call rather than folded into
     # reconstruct_delivery_attempts's own return value.
+    expanded_pre_attempt_takes, _ = split_internal_measured_pause_candidates(
+        pre_attempt_takes, whole_context,
+    )
     preserved_subspans, preserved_subspan_audit = preserved_subspan_candidates(
-        pre_attempt_takes, attempt_reconstruction_diagnostics,
+        expanded_pre_attempt_takes, attempt_reconstruction_diagnostics,
     )
     if preserved_subspans:
         takes = takes + preserved_subspans
