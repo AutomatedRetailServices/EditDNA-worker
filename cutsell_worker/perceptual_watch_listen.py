@@ -194,8 +194,9 @@ class PerceptualReview:
 
     @property
     def watch_listen_status(self) -> str:
-        """D-154: the explicit, primary delivery-gating status -- always
-        exactly one of `WATCH_LISTEN_BLOCKED` / `WATCH_LISTEN_HUMAN_
+        """D-154 (corrected by D-155 -- independent audit, empty-
+        capabilities gap): the explicit, primary delivery-gating status --
+        always exactly one of `WATCH_LISTEN_BLOCKED` / `WATCH_LISTEN_HUMAN_
         REVIEW_REQUIRED` / `WATCH_LISTEN_SYSTEM_PASS`. Never `WATCH_LISTEN_
         HUMAN_APPROVED` -- this computation has no way to observe a human
         decision; see `apply_human_watch_listen_approval()` for that.
@@ -204,7 +205,17 @@ class PerceptualReview:
         capability, nothing BLOCKED) outranks SYSTEM_PASS (every capability
         EVALUATED_PASS). See the module docstring's D-154 section for the
         full rationale, especially why ERROR is BLOCKED, not merely
-        uncertain -- an error means the measurement itself never ran."""
+        uncertain -- an error means the measurement itself never ran.
+
+        D-155: a review with NO capabilities at all (nothing was ever
+        evaluated) must never fall through to SYSTEM_PASS -- `all(...)` over
+        an empty sequence is vacuously True, which would otherwise silently
+        treat "no measurement happened" as "everything passed". `status`
+        (`overall_status`) already avoids this trap by requiring the
+        `statuses` list to be non-empty; this property now matches that
+        same fail-safe direction explicitly."""
+        if not self.capabilities:
+            return WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
         if any(c.status in (EVALUATED_FAIL, ERROR) for c in self.capabilities):
             return WATCH_LISTEN_BLOCKED
         if any(c.status in (UNCERTAIN, NOT_IMPLEMENTED) for c in self.capabilities):
@@ -212,15 +223,28 @@ class PerceptualReview:
         return WATCH_LISTEN_SYSTEM_PASS
 
     @property
-    def blocks_delivery(self) -> bool:
-        """D-153/D-154: a convenience boolean derived from `watch_listen_
-        status` (True only for BLOCKED) -- kept for callers that only need
-        a yes/no answer, but `watch_listen_status` is the primary,
-        authoritative signal; never rely on this boolean alone to
-        distinguish BLOCKED from HUMAN_REVIEW_REQUIRED, which both matter
-        for very different reasons (a confirmed defect to fix vs. evidence
-        a human still needs to look at)."""
+    def has_confirmed_blocking_defect(self) -> bool:
+        """D-155 (independent audit correction, replacing D-154's
+        ambiguously-named `blocks_delivery`): True only for
+        `WATCH_LISTEN_BLOCKED` -- a confirmed EVALUATED_FAIL/ERROR defect.
+        This is deliberately NOT the inverse of `allows_automatic_delivery`
+        below: `HUMAN_REVIEW_REQUIRED` is neither a confirmed defect nor
+        something that may auto-deliver -- collapsing the two into one
+        boolean is exactly the bug an independent audit found (a
+        downstream gate read a `blocks_delivery=False` for HUMAN_REVIEW_
+        REQUIRED as "safe to pass"). Always check `watch_listen_status`
+        directly, or both booleans together, never this one alone."""
         return self.watch_listen_status == WATCH_LISTEN_BLOCKED
+
+    @property
+    def allows_automatic_delivery(self) -> bool:
+        """D-155: True only for `SYSTEM_PASS` or `HUMAN_APPROVED` -- the
+        only two statuses where automatic delivery/"Ready" is permitted.
+        False for BOTH `BLOCKED` and `HUMAN_REVIEW_REQUIRED` -- a caller
+        that only checks `has_confirmed_blocking_defect is False` and
+        treats that as "safe to deliver" reproduces the exact bug this
+        property exists to prevent."""
+        return self.watch_listen_status in (WATCH_LISTEN_SYSTEM_PASS, WATCH_LISTEN_HUMAN_APPROVED)
 
     def as_dict(self) -> dict:
         routing: dict[str, int] = {}
@@ -231,7 +255,8 @@ class PerceptualReview:
             "status": self.status,
             "gate_mode": self.gate_mode,
             "watch_listen_status": self.watch_listen_status,
-            "blocking": self.blocks_delivery,
+            "has_confirmed_blocking_defect": self.has_confirmed_blocking_defect,
+            "allows_automatic_delivery": self.allows_automatic_delivery,
             "human_watch_listen_required": self.watch_listen_status != WATCH_LISTEN_HUMAN_APPROVED,
             "capabilities": [asdict(c) for c in self.capabilities],
             "capability_status_counts": {

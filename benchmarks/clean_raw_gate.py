@@ -20,6 +20,8 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from cutsell_worker import perceptual_watch_listen as pwl
+
 SCHEMA_VERSION = "cutsell.clean_raw_gate.v1"
 GATE_PASS = "PASS"
 GATE_FAIL = "FAIL"
@@ -95,6 +97,13 @@ def compute_clean_raw_metrics(result: Mapping[str, Any], ladder: Mapping[str, An
         "hybrid_budget_refused_chunk_count": int(diagnostics.get("hybrid_editorial_budget_exhausted_chunk_count") or 0),
         "hybrid_requested_chunk_count": int(diagnostics.get("hybrid_editorial_requested_chunk_count") or 0),
         "perceptual_status": perceptual.get("status"),
+        # D-155 (independent audit of D-154: watch_listen_status was computed
+        # on PerceptualReview but never propagated into this gate's own
+        # metrics -- the legacy `perceptual_status` alone cannot distinguish
+        # HUMAN_REVIEW_REQUIRED from a clean SYSTEM_PASS, so a review still
+        # awaiting human eyes could read as gate-clean).
+        "perceptual_watch_listen_status": perceptual.get("watch_listen_status"),
+        "perceptual_human_approved": perceptual.get("watch_listen_status") == pwl.WATCH_LISTEN_HUMAN_APPROVED,
         "perceptual_artifact_kind": perceptual.get("artifact_kind"),
         "perceptual_gate_mode": perceptual.get("gate_mode"),
         "perceptual_capability_status_counts": perceptual.get("capability_status_counts") or {},
@@ -136,7 +145,26 @@ def evaluate_clean_raw_gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
         blocking.append(f"story:{metrics.get('story_completeness')}")
     if metrics.get("interior_dead_air_findings_last_attempt"):
         blocking.append(f"interior_dead_air:{metrics['interior_dead_air_findings_last_attempt']}")
-    if metrics.get("perceptual_status") is None:
+    # D-155: primarily branch on the explicit 4-state watch_listen_status
+    # (BLOCKED/HUMAN_REVIEW_REQUIRED/SYSTEM_PASS/HUMAN_APPROVED). Only when
+    # that field is entirely absent (a result.json produced before D-154)
+    # fall back to the legacy `perceptual_status` PASS/FAIL/UNCERTAIN check.
+    watch_listen_status = metrics.get("perceptual_watch_listen_status")
+    if watch_listen_status is not None:
+        if watch_listen_status == pwl.WATCH_LISTEN_BLOCKED:
+            blocking.append("perceptual:BLOCKED")
+        elif watch_listen_status == pwl.WATCH_LISTEN_HUMAN_REVIEW_REQUIRED:
+            # Never PASS: the MP4 is kept as a deliverable candidate, but the
+            # gate must report an incomplete/review-pending state, not GATE_PASS.
+            missing.append("perceptual_watch_listen:HUMAN_REVIEW_REQUIRED")
+        elif watch_listen_status == pwl.WATCH_LISTEN_SYSTEM_PASS:
+            pass
+        elif watch_listen_status == pwl.WATCH_LISTEN_HUMAN_APPROVED:
+            # Explicit human approval recorded; never re-derived automatically.
+            pass
+        else:
+            missing.append(f"perceptual_watch_listen:unrecognized_status:{watch_listen_status}")
+    elif metrics.get("perceptual_status") is None:
         missing.append("perceptual_watch_listen")
     elif metrics.get("perceptual_status") == "FAIL":
         blocking.append("perceptual:FAIL")
@@ -168,9 +196,12 @@ def evaluate_clean_raw_gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
         "missing_evidence": missing,
         "note": (
             "CLEAN RAW is the first ladder rung after RAW; PASS requires technical QC PASS, a complete story, "
-            "no interior dead air, no perceptual FAIL, and (from the ladder) no failed/redundant/restored material, "
-            "no missing delivery and <= 1.0 s loose edges. Perceptual UNCERTAIN or NOT_IMPLEMENTED alone reports "
-            "watch_listen_status=HUMAN_REVIEW_REQUIRED, not BLOCKED, but still keeps HUMAN WATCH+LISTEN required."
+            "no interior dead air, and (from the ladder) no failed/redundant/restored material, no missing "
+            "delivery and <= 1.0 s loose edges. Perceptual watch_listen_status=BLOCKED (EVALUATED_FAIL or ERROR "
+            "on any capability) fails the gate; HUMAN_REVIEW_REQUIRED (UNCERTAIN or NOT_IMPLEMENTED, nothing "
+            "BLOCKED) never reaches PASS -- the MP4 is kept as a deliverable candidate but the gate reports "
+            "INCOMPLETE_EVIDENCE pending a human watch/listen; only SYSTEM_PASS or an explicit HUMAN_APPROVED "
+            "clears the perceptual portion of this gate (D-155)."
         ),
     }
 
@@ -195,7 +226,9 @@ def format_report(report: Mapping[str, Any]) -> str:
         f"audio_entry={metrics.get('boundary_audio_entry_trim_count')} audio_exit={metrics.get('boundary_audio_exit_trim_count')} "
         f"renderer_trailing_trims={metrics.get('renderer_trailing_trim_count')} ({metrics.get('renderer_trailing_trim_seconds')} s)",
         f"  polarity: rejoins={metrics.get('polarity_rejoin_count')} protected_fragments={metrics.get('protected_polarity_fragment_count')}",
-        f"  perceptual: {metrics.get('perceptual_status')} ({metrics.get('perceptual_gate_mode')}) capabilities={metrics.get('perceptual_capability_status_counts')} routing={metrics.get('perceptual_routing')}",
+        f"  perceptual: status={metrics.get('perceptual_status')} watch_listen_status={metrics.get('perceptual_watch_listen_status')} "
+        f"human_approved={metrics.get('perceptual_human_approved')} ({metrics.get('perceptual_gate_mode')}) "
+        f"capabilities={metrics.get('perceptual_capability_status_counts')} routing={metrics.get('perceptual_routing')}",
     ]
     if "level1_region_count" in metrics:
         lines.append(

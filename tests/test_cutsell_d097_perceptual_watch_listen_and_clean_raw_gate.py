@@ -113,7 +113,8 @@ def test_review_measures_dead_air_on_the_real_mp4_and_routes_it(tone_gap_tone):
     # is BLOCKED -- gate_mode/watch_listen_status report this honestly.
     assert payload["gate_mode"] == pwl.GATE_MODE_STATE_MACHINE_V1
     assert payload["watch_listen_status"] == pwl.WATCH_LISTEN_BLOCKED
-    assert payload["blocking"] is True and review.blocks_delivery is True
+    assert payload["has_confirmed_blocking_defect"] is True and review.has_confirmed_blocking_defect is True
+    assert payload["allows_automatic_delivery"] is False and review.allows_automatic_delivery is False
     assert payload["human_watch_listen_required"] is True
     assert payload["capability_status_counts"][pwl.NOT_IMPLEMENTED] == len(pwl.NOT_IMPLEMENTED_CAPABILITIES)
     assert payload["routing"][pwl.ROUTE_BOUNDARY] >= 1

@@ -48,10 +48,12 @@ def _review(*capabilities):
 def test_evaluated_fail_is_blocked():
     review = _review(_report(pwl.EVALUATED_FAIL))
     assert review.watch_listen_status == pwl.WATCH_LISTEN_BLOCKED
-    assert review.blocks_delivery is True
+    assert review.has_confirmed_blocking_defect is True
+    assert review.allows_automatic_delivery is False
     payload = review.as_dict()
     assert payload["watch_listen_status"] == pwl.WATCH_LISTEN_BLOCKED
-    assert payload["blocking"] is True
+    assert payload["has_confirmed_blocking_defect"] is True
+    assert payload["allows_automatic_delivery"] is False
 
 
 def test_evaluated_fail_still_blocks_alongside_not_implemented_capabilities():
@@ -75,7 +77,8 @@ def test_error_is_blocked_not_merely_uncertain():
     as unsafe as a confirmed FAIL, never merely "uncertain"."""
     review = _review(_report(pwl.ERROR))
     assert review.watch_listen_status == pwl.WATCH_LISTEN_BLOCKED
-    assert review.blocks_delivery is True
+    assert review.has_confirmed_blocking_defect is True
+    assert review.allows_automatic_delivery is False
 
 
 def test_error_alongside_evaluated_pass_still_blocks():
@@ -90,10 +93,12 @@ def test_error_alongside_evaluated_pass_still_blocks():
 def test_uncertain_alone_requires_human_review_not_blocked():
     review = _review(_report(pwl.UNCERTAIN))
     assert review.watch_listen_status == pwl.WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
-    assert review.blocks_delivery is False
+    assert review.has_confirmed_blocking_defect is False
+    assert review.allows_automatic_delivery is False
     payload = review.as_dict()
     assert payload["watch_listen_status"] == pwl.WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
-    assert payload["blocking"] is False
+    assert payload["has_confirmed_blocking_defect"] is False
+    assert payload["allows_automatic_delivery"] is False
     assert payload["human_watch_listen_required"] is True
 
 
@@ -112,7 +117,8 @@ def test_not_implemented_alone_requires_human_review_not_blocked():
         _report(pwl.NOT_IMPLEMENTED), _report(pwl.NOT_IMPLEMENTED),
     )
     assert review.watch_listen_status == pwl.WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
-    assert review.blocks_delivery is False
+    assert review.has_confirmed_blocking_defect is False
+    assert review.allows_automatic_delivery is False
     # `status` is still honestly non-PASS -- this never changes what
     # counts as a clean review, only what blocks delivery vs. what merely
     # requires a human to look.
@@ -127,7 +133,8 @@ def test_not_implemented_alone_requires_human_review_not_blocked():
 def test_all_capabilities_evaluated_pass_reaches_system_pass():
     review = _review(_report(pwl.EVALUATED_PASS), _report(pwl.EVALUATED_PASS))
     assert review.watch_listen_status == pwl.WATCH_LISTEN_SYSTEM_PASS
-    assert review.blocks_delivery is False
+    assert review.has_confirmed_blocking_defect is False
+    assert review.allows_automatic_delivery is True
     assert review.status == pwl.REVIEW_PASS
 
 
@@ -166,3 +173,16 @@ def test_watch_listen_statuses_tuple_names_all_four_states():
         pwl.WATCH_LISTEN_BLOCKED, pwl.WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
         pwl.WATCH_LISTEN_SYSTEM_PASS, pwl.WATCH_LISTEN_HUMAN_APPROVED,
     }
+
+
+# ---------------------------------------------------------------------------
+# D-155 (independent audit): a review with zero capabilities must never
+# read as SYSTEM_PASS -- "a review without capabilities cannot become
+# SYSTEM_PASS" -- there is no evidence to grant automatic delivery on.
+# ---------------------------------------------------------------------------
+
+def test_empty_capabilities_requires_human_review_never_system_pass():
+    review = _review()
+    assert review.watch_listen_status == pwl.WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
+    assert review.has_confirmed_blocking_defect is False
+    assert review.allows_automatic_delivery is False
