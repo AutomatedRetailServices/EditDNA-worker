@@ -863,11 +863,58 @@ def _lost_semantic_atoms(
         if not (missing_critical or content_loss):
             continue
 
+        # D-097.11 (Product Owner decision, real RAW #121 audit): classified
+        # HERE, before the content_loss suppression chain below, so the
+        # deterministic contextual-atom credit immediately below can use it.
+        # Moving this computation earlier changes no existing behavior --
+        # `classify_*`/`resolve_uncertain_with_arbiter` depend only on
+        # `missing_critical`/`text`, never on `content_loss` or suppression
+        # state.
+        classifications = [
+            classify_negation_atom(atom) if atom in own_negations else classify_number_atom(atom, text)
+            for atom in missing_critical
+        ]
+        classifications = resolve_uncertain_with_arbiter(
+            classifications, source_text=text, kept_text=kept_text,
+            arbiter=semantic_atom_importance_arbiter,
+        )
+
         # D-061 Phase 1: same-idea paraphrase credit -- only ever suppresses
         # the broader content_loss signal above, never touches
         # missing_critical/classifications (see docstring paragraph above).
         suppressed_reason = None
         restart_consultations: list[dict] = []
+        if content_loss and classifications and all(c.importance == ATOM_CONTEXTUAL for c in classifications):
+            # D-097.11 (Product Owner decision, real RAW #121 audit): a real
+            # run blocked Freeze over a discarded clip whose winning
+            # realization already preserves the same event/diagnosis/
+            # consequence -- the ONLY reason the coarse whole-video
+            # content_loss check still flagged it is that its missing_
+            # content token count includes the atom(s) already independently
+            # classified CONTEXTUAL (an incidental year, never a materially
+            # critical number/date -- see semantic_atom_importance.py's own
+            # CRITICAL/CONTEXTUAL split, which a genuinely critical date
+            # (measurement/dose/price/percentage/age/stage, or one carrying
+            # correction/chronology-relation language) never receives).
+            # Deterministic, general, and conservative: it fires only when
+            # EVERY missing critical atom on this clip is CONTEXTUAL (a
+            # single CRITICAL or UNCERTAIN atom keeps blocking exactly as
+            # before -- this never masks a genuine fact/measurement/
+            # correction/chronology loss), and even then only credits the
+            # clip if excluding those specific already-safe atoms from the
+            # SAME whole-video missing-content count is enough to clear the
+            # SAME 0.45 coverage floor the original check uses -- substantial
+            # OTHER missing content (unrelated to any contextual atom) still
+            # blocks. No arbiter call: this never depends on `_pre_group_
+            # restart_credit`'s run-to-run non-deterministic verdict for
+            # this specific shape, directly answering the Product Owner's
+            # own determinism requirement.
+            contextual_atoms = {c.atom for c in classifications}
+            adjusted_missing_content = [token for token in missing_content if token not in contextual_atoms]
+            adjusted_coverage = 1.0 - (len(adjusted_missing_content) / max(1, len(own_content) or 1))
+            if len(adjusted_missing_content) < 4 or adjusted_coverage >= 0.45:
+                content_loss = False
+                suppressed_reason = "contextual_atom_excluded_coverage_credit"
         if content_loss:
             group = clip_id_to_group.get(clip.clip_id)
             if group is not None:
@@ -897,14 +944,6 @@ def _lost_semantic_atoms(
                         content_loss = False
                         suppressed_reason = PRE_GROUP_RESTART_SEMANTIC_EQUIVALENCE
 
-        classifications = [
-            classify_negation_atom(atom) if atom in own_negations else classify_number_atom(atom, text)
-            for atom in missing_critical
-        ]
-        classifications = resolve_uncertain_with_arbiter(
-            classifications, source_text=text, kept_text=kept_text,
-            arbiter=semantic_atom_importance_arbiter,
-        )
         blocking = content_loss or any(blocks_freeze(c.importance) for c in classifications)
 
         # D-076: a verified SEMANTIC_PRESERVATION_PROOF from the Unified
