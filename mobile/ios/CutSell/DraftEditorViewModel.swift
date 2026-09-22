@@ -137,6 +137,22 @@ final class DraftEditorViewModel: ObservableObject {
         }
     }
 
+    /// Imports an already-existing local video file as a new
+    /// SUPPLEMENTAL_BROLL asset via the real D-282A upload+registration
+    /// routes (`OverlayImportManager`) -- never a fabricated capture/import
+    /// path. Same confirmed-before-refresh discipline as
+    /// `importVoiceOverAudio`.
+    func importOverlayVideo(fileURL: URL) async {
+        do {
+            _ = try await OverlayImportManager.shared.importVideo(
+                fileURL: fileURL, projectID: project.projectID, session: session, api: api
+            )
+            await refreshTimelineAssetLibrary()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Returns whether the real PUT actually succeeded -- callers (e.g.
     /// `undoLastTimelineMutation`) must never infer success merely because
     /// `await` returned; a caught error here means `timelineComposition`
@@ -253,6 +269,27 @@ final class DraftEditorViewModel: ObservableObject {
             sourceInSec: sourceSplit, sourceOutSec: original.sourceOutSec, audioMode: original.audioMode
         )
         placements.replaceSubrange(index...index, with: [first, second])
+        await saveTimelineComposition(
+            brollPlacements: placements, voiceOverPlacements: currentVoiceOverPlacements,
+            timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true
+        )
+    }
+
+    /// The ONLY real, backend-accepted editable field on a B-roll
+    /// placement besides timing: `BrollPlacementModel.audio_mode`
+    /// (`cutsell_app/timeline_routes.py`), one of the three real
+    /// `TimelineAudioMode` values. Position, scale, rotation, opacity, and
+    /// keyframes have no field anywhere on `BrollPlacement` -- never
+    /// exposed as a real mutation.
+    func setBrollAudioMode(id: String, mode: TimelineAudioMode) async {
+        var placements = currentBrollPlacements
+        guard let index = placements.firstIndex(where: { $0.placementID == id }) else { return }
+        let original = placements[index]
+        placements[index] = BrollPlacement(
+            placementID: original.placementID, assetID: original.assetID,
+            timelineStartSec: original.timelineStartSec, timelineEndSec: original.timelineEndSec,
+            sourceInSec: original.sourceInSec, sourceOutSec: original.sourceOutSec, audioMode: mode
+        )
         await saveTimelineComposition(
             brollPlacements: placements, voiceOverPlacements: currentVoiceOverPlacements,
             timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true

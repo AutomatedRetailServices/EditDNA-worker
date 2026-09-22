@@ -197,8 +197,13 @@ def test_base_edit_asset_resolution_is_honest_never_invented():
     source = VIEW_MODEL.read_text()
     assert "var baseEditAssetID: String? { timelineAssetLibrary?.readyPrimarySources.first?.assetID }" in source
     editor_source = TIMELINE_EDITOR.read_text()
+    # canAddOverlayOrVoiceOver still gates the honest disclosure text and
+    # each dedicated view's own "Add existing to timeline" action -- it no
+    # longer gates either track's entry ("+") button, since Import
+    # (registering a new asset) has no such precondition (see OverlayView.swift
+    # and VoiceOverView.swift).
     assert "canAddOverlayOrVoiceOver" in editor_source
-    assert ".disabled(!canAddOverlayOrVoiceOver)" in editor_source
+    assert ".disabled(model.baseEditAssetID == nil)" in (TIMELINE_EDITOR.parent / "OverlayView.swift").read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -206,22 +211,25 @@ def test_base_edit_asset_resolution_is_honest_never_invented():
 # ---------------------------------------------------------------------------
 
 def test_add_voiceover_and_overlay_call_real_composition_mutations():
-    # Overlay's "add" flow is still inline here; Voice-over's real "add
-    # existing to timeline" mutation now lives in the dedicated
-    # VoiceOverView (see test_cutsell_ios_mobile_v1_voiceover_ui.py) --
-    # TimelineEditorView only opens that real, non-decorative entry point.
+    # Both Voice-over's and Overlay's real "add existing to timeline"
+    # mutations now live in their own dedicated views (see
+    # test_cutsell_ios_mobile_v1_voiceover_ui.py and
+    # test_cutsell_ios_mobile_v1_overlay_ui.py) -- TimelineEditorView only
+    # opens those real, non-decorative entry points.
     source = TIMELINE_EDITOR.read_text()
-    assert "model.addBrollPlacement(" in source
+    assert "OverlayView(" in source
     assert "VoiceOverView(" in source
+    overlay_view_source = (TIMELINE_EDITOR.parent / "OverlayView.swift").read_text()
+    assert "model.addBrollPlacement(" in overlay_view_source
     voiceover_view_source = (TIMELINE_EDITOR.parent / "VoiceOverView.swift").read_text()
     assert "model.addVoiceOverPlacement(" in voiceover_view_source
 
 
 def test_add_button_only_appears_at_end_of_voiceover_and_overlay_tracks_not_main_video():
     source = TIMELINE_EDITOR.read_text()
-    # Overlay keeps its own inline "+" (confirmationDialog); Voice-over's
-    # "+" now opens the dedicated VoiceOverView sheet instead -- both are
-    # still real, non-decorative entry points, never absent for either
+    # Both Overlay's and Voice-over's "+" now open their own dedicated
+    # sheet instead of an inline confirmationDialog -- both are still
+    # real, non-decorative entry points, never absent for either
     # non-Main-Video track.
     assert "if track == .overlay {" in source
     assert "else if track == .voiceOver {" in source

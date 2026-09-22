@@ -64,7 +64,7 @@ struct TimelineEditorView: View {
     @State private var playheadTime: Double = 0
     @State private var isExpanded = false
     @State private var isPlaying = false
-    @State private var showBrollPicker = false
+    @State private var showOverlayView = false
     @State private var showVoiceOverView = false
     @State private var showCaptions = false
     @State private var justMutatedMainVideo = false
@@ -169,20 +169,11 @@ struct TimelineEditorView: View {
                 initialPlacementID: selection?.track == .voiceOver ? selection?.itemID : nil
             )
         }
-        .confirmationDialog("Add Overlay", isPresented: $showBrollPicker, titleVisibility: .visible) {
-            ForEach(model.timelineAssetLibrary?.readyBroll ?? []) { asset in
-                Button("\(Int(asset.durationSec))s B-roll") {
-                    Task {
-                        await model.addBrollPlacement(
-                            assetID: asset.assetID, start: totalDuration, end: totalDuration + asset.durationSec,
-                            sourceIn: 0, sourceOut: asset.durationSec
-                        )
-                    }
-                }
-            }
-            if (model.timelineAssetLibrary?.readyBroll ?? []).isEmpty {
-                Button("No ready B-roll available", role: .cancel) {}
-            }
+        .sheet(isPresented: $showOverlayView) {
+            OverlayView(
+                model: model,
+                initialPlacementID: selection?.track == .overlay ? selection?.itemID : nil
+            )
         }
         .sheet(isPresented: $showCaptions) {
             CaptionsView(
@@ -281,15 +272,21 @@ struct TimelineEditorView: View {
                 }
 
                 if track == .overlay {
+                    // Real, non-decorative entry point into the dedicated
+                    // Overlay UI gate -- never gated on
+                    // canAddOverlayOrVoiceOver, since Import (registering a
+                    // new asset) has no such precondition; OverlayView
+                    // itself honestly gates only the timeline-placement
+                    // actions that do.
                     Button {
-                        showBrollPicker = true
+                        showOverlayView = true
                     } label: {
                         Image(systemName: "plus")
                             .frame(width: 44, height: 56)
                             .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                     }
-                    .disabled(!canAddOverlayOrVoiceOver)
                     .accessibilityLabel("Add \(track.title.lowercased())")
+                    .accessibilityIdentifier("timeline.overlayButton")
                 } else if track == .voiceOver {
                     // Real, non-decorative entry point into the dedicated
                     // Voice-over UI gate -- never gated on
