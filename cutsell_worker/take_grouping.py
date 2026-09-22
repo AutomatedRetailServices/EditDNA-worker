@@ -286,6 +286,78 @@ def incomplete_attempt_completed_by_retry(
     return None
 
 
+# D-287 (RAW #120 audit): a real, code-verified gap `incomplete_attempt_
+# completed_by_retry` structurally cannot close either. Its own precondition
+# (`earlier.complete_idea` must be False) relies entirely on `take_
+# segmentation._looks_complete_idea`, which grades completeness from
+# PUNCTUATION alone (`_ends_sentence`): any text ending in '.'/'!'/'?' is
+# `complete_idea=True`, full stop, with no assessment of whether its CONTENT
+# is specific enough to stand as a finished editorial idea. "Ahí fue cuando
+# me mandó." is grammatically terminated (so `complete_idea=True`) but
+# editorially VAGUE -- it never says what the creator was sent to do -- and
+# is immediately completed by "Ahí fue cuando me mandaron a hacer sonografía
+# de tiroides y otras sonografías." sharing the same opening. Both clips
+# graded complete_idea=True, so `incomplete_attempt_completed_by_retry`'s
+# own gate declines the pair before its (already-fixed, D-156) shared-
+# content step is ever reached -- confirmed on the real RAW #120 JSON: the
+# two clips carry different `take_group_id`s and never even compete for
+# Best Take.
+#
+# This is deliberately NOT a change to `_looks_complete_idea` itself (used
+# pervasively across the whole pipeline; loosening it here would be a
+# blast-radius change far outside this defect). Instead, a narrowly-scoped
+# sibling rule for exactly this shape, with a SAFETY BAR STRICTER than
+# `incomplete_attempt_completed_by_retry`'s own `minimum_shared_content>=2`
+# floor: FULL content coverage of the vague side, not just two shared
+# words. This is the direct answer to the D-156 audit concern (a lexical/
+# stem coincidence must never fuse two COMPLETE realizations with UNEQUAL
+# coverage, e.g. a long distinct conclusion folded into an unrelated short
+# microclip that merely opens similarly) -- every real content word the
+# vague delivery makes must be present in the longer one, and the longer
+# one must be materially longer, not just superficially similar.
+_VAGUE_RETRY_OPENING_TOKENS = 2
+_VAGUE_RETRY_MAXIMUM_GAP_SEC = 20.0
+_VAGUE_RETRY_MINIMUM_LENGTH_RATIO = 2.0
+
+
+def vague_retry_completed_by_detailed_retry(
+    left: CandidateTake,
+    right: CandidateTake,
+    *,
+    maximum_gap_sec: float = _VAGUE_RETRY_MAXIMUM_GAP_SEC,
+    opening_tokens: int = _VAGUE_RETRY_OPENING_TOKENS,
+    minimum_length_ratio: float = _VAGUE_RETRY_MINIMUM_LENGTH_RATIO,
+) -> str | None:
+    """Return `"vague_retry_completed_by_detailed_retry"` when an earlier,
+    punctuation-complete but editorially VAGUE take is completed by a later,
+    materially more detailed delivery sharing its opening and covering
+    EVERY real content word the vague take makes, or None. Order-
+    independent: the chronologically earlier take must be the vague one.
+    See the D-287 module comment above."""
+    if left.source_asset_id != right.source_asset_id:
+        return None
+    if _gap_between(left, right) > maximum_gap_sec:
+        return None
+    earlier, later = (left, right) if left.start <= right.start else (right, left)
+    if not earlier.complete_idea or not later.complete_idea:
+        return None
+    earlier_tokens = _natural_tokens(earlier.text)
+    later_tokens = _natural_tokens(later.text)
+    if min(len(earlier_tokens), len(later_tokens)) < opening_tokens + 1:
+        return None
+    if earlier_tokens[:opening_tokens] != later_tokens[:opening_tokens]:
+        return None
+    earlier_content = _restart_content(earlier_tokens[opening_tokens:])
+    later_content = _restart_content(later_tokens[opening_tokens:])
+    if not earlier_content:
+        return None  # nothing beyond the shared opener to prove real overlap (D-020)
+    if len(later_content) < minimum_length_ratio * len(earlier_content):
+        return None
+    if _shared_content_count(earlier_content, later_content) < len(earlier_content):
+        return None  # FULL coverage required -- a partial/coincidental overlap declines
+    return "vague_retry_completed_by_detailed_retry"
+
+
 # D-150 (Gate 6 correction, real RAW #118 audit): a real, code-verified gap
 # `incomplete_attempt_completed_by_retry` structurally cannot close. A real
 # abandoned opening can share its first few words with its later completion

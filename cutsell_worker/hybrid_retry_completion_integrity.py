@@ -168,6 +168,17 @@ def _safe_contentless_alternate_debris(take, previous, following, semantic):
         return False
     if _content(take.text):
         return False  # has real content -- the sibling rule above owns this shape
+    # D-286 (RAW #120 audit): a bare negation particle ("No.") is
+    # CONTENTLESS under `_content()` (below the 4-character floor) but is
+    # never structural debris -- it is the polarity of whatever the creator
+    # says next ("No" + "quiero sonar a conspiración..." = "No quiero sonar
+    # a conspiración..."). Removing it silently flips the composite meaning
+    # from negated to affirmed. Reuses the SAME `_critical()` negation/
+    # numeric vocabulary `_safe_short_alternate_debris` already trusts for
+    # polarity safety, not a Video00-specific word list -- fires identically
+    # on any bare negation particle in any language this vocabulary covers.
+    if _critical(take.text):
+        return False
     if take.duration_sec > 3.0:
         return False
     if previous is None or following is None:

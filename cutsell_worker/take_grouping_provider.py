@@ -27,6 +27,7 @@ from .take_grouping import (
     retry_similarity,
     same_opening_restart,
     semantic_key,
+    vague_retry_completed_by_detailed_retry,
 )
 
 
@@ -1025,6 +1026,16 @@ def reconcile_semantic_idea_equivalence(
             restart_kind = "safe_short_prefix_retry"
         if restart_kind is None:
             restart_kind = incomplete_attempt_completed_by_retry(left_take, right_take)
+        # D-287 (RAW #120 audit): tried right after the grammatically-
+        # incomplete case above declines -- the same class of deterministic,
+        # non-lexical-coincidence evidence, just for the punctuation-
+        # complete-but-vague shape `complete_idea`'s own punctuation-only
+        # grading cannot see. See `take_grouping.vague_retry_completed_by_
+        # detailed_retry`'s own module comment for the full-coverage safety
+        # bar that keeps this from ever fusing two genuinely distinct
+        # complete realizations.
+        if restart_kind is None:
+            restart_kind = vague_retry_completed_by_detailed_retry(left_take, right_take)
         # D-150 (Gate 6 correction, real RAW #118 audit): tried only once
         # the lexical rules above decline -- a deterministic rule in its own
         # right (not a corroboration of a weaker lexical link), so it runs
@@ -1806,6 +1817,10 @@ def _accept_complete_pairwise_bridge(
 
 _RESTART_EVIDENCE_KINDS = frozenset({
     "same_opening_restart", "same_opening_abandoned_start", "incomplete_attempt_completed_by_retry",
+    # D-287 (RAW #120 audit): the punctuation-complete-but-vague sibling of
+    # `incomplete_attempt_completed_by_retry` -- same deterministic-restart
+    # evidence class, so it is treated the same way for bridge cohesion.
+    "vague_retry_completed_by_detailed_retry",
     # D-100 (D-099 Gap #1): confirmed-multimodal-corroborated retry. Same
     # deterministic-evidence treatment as the lexical kinds above -- never
     # re-examined by the arbiter, subject to the same D-083 marker gate.
