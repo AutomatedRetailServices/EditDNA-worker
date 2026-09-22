@@ -1,44 +1,46 @@
 import Foundation
 import UniformTypeIdentifiers
 
-/// Mobile V1 Overlay UI gate -- real Import authority for B-roll (Overlay
-/// track) video assets, via the SAME D-282A upload+registration pipeline
-/// `VoiceOverImportManager` already proved for voice-over audio: `POST
-/// /{project_id}/timeline-uploads` (media_class="video", the same class
-/// PRIMARY_SOURCE uses -- `cutsell_app/timeline_routes.py::_media_class_for`
-/// picks "video" for any non-AUDIO/non-VOICE_OVER role) -> real S3
-/// multipart-form-data upload -> `POST /{project_id}/timeline-assets`
-/// (role="SUPPLEMENTAL_BROLL", media_kind="VIDEO") -> `ingest_broll_asset_
-/// from_upload` -> `create_video_timeline_asset`
-/// (`cutsell_worker/timeline_asset_registry_store.py`), which is fully
-/// synchronous: probes real source-media profile, runs the SAME format
-/// policy/normalization decision PRIMARY_SOURCE ingest uses, and returns
-/// READY/REJECTED/FAILED directly -- never a fabricated QUALIFYING/polling
-/// step.
+/// Mobile V1 B-roll UI gate -- real Import authority for B-roll (D-279/
+/// D-282A `TimelineComposition` `SUPPLEMENTAL_BROLL`) video assets, via the
+/// SAME D-282A upload+registration pipeline `VoiceOverImportManager`
+/// already proved for voice-over audio: `POST /{project_id}/timeline-
+/// uploads` (media_class="video", the same class PRIMARY_SOURCE uses --
+/// `cutsell_app/timeline_routes.py::_media_class_for` picks "video" for
+/// any non-AUDIO/non-VOICE_OVER role) -> real S3 multipart-form-data
+/// upload -> `POST /{project_id}/timeline-assets` (role="SUPPLEMENTAL_
+/// BROLL", media_kind="VIDEO") -> `ingest_broll_asset_from_upload` ->
+/// `create_video_timeline_asset` (`cutsell_worker/timeline_asset_registry_
+/// store.py`), which is fully synchronous: probes real source-media
+/// profile, runs the SAME format policy/normalization decision PRIMARY_
+/// SOURCE ingest uses, and returns READY/REJECTED/FAILED directly -- never
+/// a fabricated QUALIFYING/polling step.
 ///
-/// Deliberately distinct from the pre-existing, unrelated
-/// `OverlayUploadManager.swift` (`POST /v1/overlays/uploads/presign`): that
-/// is the older, draft-based "media overlay" system (`cutsell_app/
-/// overlay_routes.py`'s `add_media_overlay`/`update_media_overlay`, with
-/// real x/y/width position fields) operating on the `draft` dict directly
-/// -- a genuinely different product layer from the D-279/D-282A
-/// `TimelineComposition` Overlay/B-roll track this gate completes (see
-/// `TimelineEditorView.swift`'s own doc comment: "Voice-over and Overlay
-/// are the D-279/D-282A `TimelineComposition` placements"). Only VIDEO
-/// media is supported here -- `TimelineMediaKind` has no IMAGE case, and
+/// Deliberately distinct from `OverlayUploadManager.swift`/`OverlayView`
+/// (`POST /v1/overlays/uploads/presign`, `cutsell_app/overlay_routes.py`'s
+/// `add_media_overlay`/`update_media_overlay`, with real x/y/width
+/// position fields operating on the `draft` dict directly): that is a
+/// genuinely different, real, ACTIVE feature (confirmed wired through
+/// `export_job.py` into the live export renderer's `overlay=x=...:y=...`
+/// ffmpeg filter) -- a positioned/scaled Overlay layer, never to be
+/// confused with this file's B-roll (a full-frame visual REPLACEMENT clip,
+/// no position/scale/rotation/opacity field anywhere in its real
+/// contract). This file was previously misnamed `OverlayImportManager`;
+/// renamed to match what it actually imports. Only VIDEO media is
+/// supported here -- `TimelineMediaKind` has no IMAGE case, and
 /// `create_video_timeline_asset` requires `media_kind: VIDEO` -- a still-
-/// image overlay has no real backend authority in this system and is
+/// image B-roll clip has no real backend authority in this system and is
 /// never offered.
-enum OverlayImportError: LocalizedError {
+enum BrollImportError: LocalizedError {
     case invalidFile
     case invalidUploadURL
     case uploadFailed(Int)
 
     var errorDescription: String? {
         switch self {
-        case .invalidFile: return "The selected overlay video is unavailable."
-        case .invalidUploadURL: return "CutSell returned an invalid overlay upload URL."
-        case .uploadFailed(let code): return "Overlay upload failed (\(code))."
+        case .invalidFile: return "The selected B-roll video is unavailable."
+        case .invalidUploadURL: return "CutSell returned an invalid B-roll upload URL."
+        case .uploadFailed(let code): return "B-roll upload failed (\(code))."
         }
     }
 }
@@ -59,12 +61,12 @@ private struct TimelineUploadAuthorization: Decodable {
     }
 }
 
-actor OverlayImportManager {
-    static let shared = OverlayImportManager()
+actor BrollImportManager {
+    static let shared = BrollImportManager()
 
     func importVideo(fileURL: URL, projectID: String, session: CutSellSession, api: APIClient = .shared) async throws -> TimelineMediaAsset {
         let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
-        guard let size = values.fileSize, size > 0 else { throw OverlayImportError.invalidFile }
+        guard let size = values.fileSize, size > 0 else { throw BrollImportError.invalidFile }
         let contentType = Self.contentType(for: fileURL)
 
         struct UploadAuthorizationBody: Encodable {
@@ -94,8 +96,8 @@ actor OverlayImportManager {
     }
 
     private static func uploadBytes(fileURL: URL, contentType: String, authorization: TimelineUploadAuthorization) async throws {
-        guard let uploadURL = URL(string: authorization.uploadURL) else { throw OverlayImportError.invalidUploadURL }
-        let boundary = "CutSellOverlay-\(UUID().uuidString)"
+        guard let uploadURL = URL(string: authorization.uploadURL) else { throw BrollImportError.invalidUploadURL }
+        let boundary = "CutSellBroll-\(UUID().uuidString)"
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -112,7 +114,7 @@ actor OverlayImportManager {
         body.append("\r\n--\(boundary)--\r\n")
         let (_, response) = try await URLSession.shared.upload(for: request, from: body)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw OverlayImportError.uploadFailed((response as? HTTPURLResponse)?.statusCode ?? -1)
+            throw BrollImportError.uploadFailed((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
     }
 

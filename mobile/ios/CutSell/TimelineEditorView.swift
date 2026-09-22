@@ -3,9 +3,22 @@ import SwiftUI
 /// The canonical, three-track CutSell Editor base (Mobile V1 Timeline UI
 /// gate). Main Video stays on the pre-existing `draft`/`draft-edits`
 /// system (`DraftEditorViewModel.selectedClips`/`split`/`remove`/`undo`);
-/// Voice-over and Overlay are the D-279/D-282A `TimelineComposition`
+/// Voice-over and B-roll are the D-279/D-282A `TimelineComposition`
 /// placements (`timelineAssetLibrary.readyVoiceOvers`/`.readyBroll`
 /// only -- an asset that is not `READY` never appears here).
+///
+/// CORRECTIVE NOTE: this track was previously named/labeled "Overlay",
+/// but `BrollPlacement` is a full-frame visual replacement clip (no
+/// position/scale/rotation/opacity) -- that is B-roll, not the real,
+/// positioned/scaled Overlay feature. Renamed to `.broll`/"B-roll" to
+/// match its real contract. The GENUINE Overlay feature (`/v1/overlays/*`,
+/// real x/y/width position, confirmed wired into the active export
+/// renderer) is a separate, real, ACTIVE capability on the canonical
+/// `draft` dict -- see the "Overlay" button in `actionBar` and
+/// `OverlayView.swift`; it has no dedicated timeline track row here since
+/// its data (`media_overlays`) has no typed per-track model to render as
+/// one (same reasoning that already put Captions behind an action-bar
+/// button rather than a track row).
 ///
 /// This is a NEW, additive surface: the pre-existing `VisualTimelineView`
 /// (single-row clip inspector -- swap take, trim, per-clip caption/audio)
@@ -13,14 +26,14 @@ import SwiftUI
 /// `DraftEditorView`, since rebuilding that functionality is out of this
 /// gate's scope.
 enum TimelineTrackKind: String, CaseIterable, Identifiable, Equatable {
-    case mainVideo, voiceOver, overlay
+    case mainVideo, voiceOver, broll
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .mainVideo: return "Main Video"
         case .voiceOver: return "Voice-over"
-        case .overlay: return "Overlay"
+        case .broll: return "B-roll"
         }
     }
 
@@ -28,7 +41,7 @@ enum TimelineTrackKind: String, CaseIterable, Identifiable, Equatable {
         switch self {
         case .mainVideo: return "video"
         case .voiceOver: return "mic"
-        case .overlay: return "photo.on.rectangle"
+        case .broll: return "film.stack"
         }
     }
 }
@@ -42,7 +55,7 @@ struct TimelineSelection: Equatable {
 
 /// One item any track row can render, generalized over Main Video clips
 /// (the existing flat `[String: JSONValue]` draft representation) and
-/// Overlay/Voice-over placements (D-282A's own typed models) -- a single
+/// B-roll/Voice-over placements (D-282A's own typed models) -- a single
 /// rendering/selection surface without collapsing their different real
 /// backends into one fake shared model.
 private struct TimelineRowItem: Identifiable {
@@ -64,9 +77,10 @@ struct TimelineEditorView: View {
     @State private var playheadTime: Double = 0
     @State private var isExpanded = false
     @State private var isPlaying = false
-    @State private var showOverlayView = false
+    @State private var showBrollView = false
     @State private var showVoiceOverView = false
     @State private var showCaptions = false
+    @State private var showOverlayView = false
     @State private var justMutatedMainVideo = false
     @State private var canRedoMainVideo = false
 
@@ -109,11 +123,11 @@ struct TimelineEditorView: View {
         }
     }
 
-    private var overlayItems: [TimelineRowItem] {
+    private var brollItems: [TimelineRowItem] {
         (model.timelineComposition?.brollPlacements ?? []).map { placement in
             let asset = model.timelineAssetLibrary?.readyBroll.first { $0.assetID == placement.assetID }
             return TimelineRowItem(
-                id: placement.placementID, track: .overlay,
+                id: placement.placementID, track: .broll,
                 startSec: placement.timelineStartSec, endSec: placement.timelineEndSec,
                 label: asset != nil ? "B-roll" : "B-roll (unavailable)"
             )
@@ -124,7 +138,7 @@ struct TimelineEditorView: View {
         switch track {
         case .mainVideo: return mainVideoItems
         case .voiceOver: return voiceOverItems
-        case .overlay: return overlayItems
+        case .broll: return brollItems
         }
     }
 
@@ -143,7 +157,7 @@ struct TimelineEditorView: View {
 
     private var canDeleteSelection: Bool { selectedItem != nil }
 
-    private var canAddOverlayOrVoiceOver: Bool { model.baseEditAssetID != nil }
+    private var canAddBrollOrVoiceOver: Bool { model.baseEditAssetID != nil }
 
     private var canUndo: Bool {
         model.canUndoTimelineMutation || justMutatedMainVideo
@@ -154,8 +168,8 @@ struct TimelineEditorView: View {
             header
             transportRow
             timelineTracks
-            if !canAddOverlayOrVoiceOver {
-                Text("Overlay and Voice-over placement need this project's primary source registered first.")
+            if !canAddBrollOrVoiceOver {
+                Text("B-roll and Voice-over placement need this project's primary source registered first.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("timeline.noBaseEditAsset")
@@ -169,10 +183,10 @@ struct TimelineEditorView: View {
                 initialPlacementID: selection?.track == .voiceOver ? selection?.itemID : nil
             )
         }
-        .sheet(isPresented: $showOverlayView) {
-            OverlayView(
+        .sheet(isPresented: $showBrollView) {
+            BrollView(
                 model: model,
-                initialPlacementID: selection?.track == .overlay ? selection?.itemID : nil
+                initialPlacementID: selection?.track == .broll ? selection?.itemID : nil
             )
         }
         .sheet(isPresented: $showCaptions) {
@@ -180,6 +194,13 @@ struct TimelineEditorView: View {
                 model: model,
                 initialClipID: selection?.track == .mainVideo ? selection?.itemID : nil
             )
+        }
+        .sheet(isPresented: $showOverlayView) {
+            // The real, positioned/scaled Overlay feature -- operates on
+            // the canonical `draft` dict's `media_overlays`, not on any
+            // TimelineTrackKind track (see the type's own corrective doc
+            // comment above for why it has no track row).
+            OverlayView(model: model)
         }
     }
 
@@ -271,26 +292,26 @@ struct TimelineEditorView: View {
                     }
                 }
 
-                if track == .overlay {
+                if track == .broll {
                     // Real, non-decorative entry point into the dedicated
-                    // Overlay UI gate -- never gated on
-                    // canAddOverlayOrVoiceOver, since Import (registering a
-                    // new asset) has no such precondition; OverlayView
+                    // B-roll UI gate -- never gated on
+                    // canAddBrollOrVoiceOver, since Import (registering a
+                    // new asset) has no such precondition; BrollView
                     // itself honestly gates only the timeline-placement
                     // actions that do.
                     Button {
-                        showOverlayView = true
+                        showBrollView = true
                     } label: {
                         Image(systemName: "plus")
                             .frame(width: 44, height: 56)
                             .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                     }
                     .accessibilityLabel("Add \(track.title.lowercased())")
-                    .accessibilityIdentifier("timeline.overlayButton")
+                    .accessibilityIdentifier("timeline.brollButton")
                 } else if track == .voiceOver {
                     // Real, non-decorative entry point into the dedicated
                     // Voice-over UI gate -- never gated on
-                    // canAddOverlayOrVoiceOver, since Import (registering a
+                    // canAddBrollOrVoiceOver, since Import (registering a
                     // new asset) has no such precondition; VoiceOverView
                     // itself honestly gates only the timeline-placement
                     // actions that do.
@@ -335,9 +356,14 @@ struct TimelineEditorView: View {
 
             // Redo only ever has real backend authority for Main Video
             // (`/v1/projects/{id}/draft/redo`, reused verbatim); there is
-            // no equivalent redo authority for Overlay/Voice-over
+            // no equivalent redo authority for B-roll/Voice-over
             // placements, so this control is never enabled for them --
-            // never a simulated redo.
+            // never a simulated redo. (The real Overlay feature below DOES
+            // share this same Main Video draft/undo/redo authority, since
+            // `media_overlays` lives on the same canonical draft dict --
+            // but this view exposes Overlay's own Undo inside
+            // OverlayView.swift, mirroring Captions, rather than wiring a
+            // second track into this shared Redo button.)
             Button {
                 Task { await performRedo() }
             } label: {
@@ -355,10 +381,25 @@ struct TimelineEditorView: View {
             }
             .accessibilityIdentifier("timeline.captionsButton")
 
+            // Real, non-decorative entry point into the genuine, positioned/
+            // scaled Overlay feature (`/v1/overlays/*`, confirmed active and
+            // wired into the export renderer) -- a corrective addition:
+            // the track previously labeled "Overlay" here was actually
+            // B-roll (see BrollView.swift and the corrective note on
+            // TimelineTrackKind above).
+            Button {
+                showOverlayView = true
+            } label: {
+                Label("Overlay", systemImage: "rectangle.on.rectangle")
+            }
+            .accessibilityIdentifier("timeline.overlayButton")
+
             Spacer()
 
-            // D-129 Overlay-pacing entry point: this gate only exposes the
-            // control surface (add Overlay/Voice-over material); the
+            // D-129's user-facing "Overlap" dialogue-pacing feature
+            // (internal name `dialogue_overlap_enabled`, unrelated to this
+            // file's B-roll/Overlay naming) -- this gate only exposes the
+            // control surface (add B-roll/Voice-over/Overlay material); the
             // dialogue-overlap pacing engine itself is a separate,
             // unauthorized-in-this-gate track.
             Menu {
@@ -383,7 +424,7 @@ struct TimelineEditorView: View {
             canRedoMainVideo = false
         case .voiceOver:
             await model.splitVoiceOverPlacement(id: selection.itemID, at: playheadTime)
-        case .overlay:
+        case .broll:
             await model.splitBrollPlacement(id: selection.itemID, at: playheadTime)
         }
     }
@@ -397,7 +438,7 @@ struct TimelineEditorView: View {
             canRedoMainVideo = false
         case .voiceOver:
             await model.removeVoiceOverPlacement(id: selection.itemID)
-        case .overlay:
+        case .broll:
             await model.removeBrollPlacement(id: selection.itemID)
         }
         self.selection = nil
@@ -421,8 +462,10 @@ struct TimelineEditorView: View {
 
     /// Real authority only: reverses the Main Video undo just performed
     /// from this view via the SAME existing `/draft/redo` endpoint --
-    /// never available for Overlay/Voice-over, which have no redo
-    /// authority at all. Only a CONFIRMED successful redo consumes the
+    /// never available for B-roll/Voice-over here, which have no redo
+    /// authority at all (the real Overlay feature shares this same
+    /// `/draft/redo` authority, but via its own button in
+    /// OverlayView.swift). Only a CONFIRMED successful redo consumes the
     /// pending state; a failed redo leaves canRedoMainVideo honestly
     /// unchanged (the undone state is still real and still redoable) and
     /// the real error surfaces via model.errorMessage's existing alert.
