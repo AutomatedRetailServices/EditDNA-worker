@@ -9,7 +9,7 @@ import Foundation
 enum TimelineAudioMode: String, Codable, CaseIterable {
     case keepPrimaryVoice = "KEEP_PRIMARY_VOICE"
     case useBrollAudio = "USE_BROLL_AUDIO"
-    case muteBoth = "MUTE_BOTH"
+    case muteBrollAudio = "MUTE_BROLL_AUDIO"
 }
 
 struct BrollPlacement: Codable, Identifiable, Hashable {
