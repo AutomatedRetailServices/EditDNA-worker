@@ -11,6 +11,7 @@ from .contracts import CandidateTake
 from .providers import ProviderStatus
 from .semantic_atom_importance import _clause_has_any
 from .semantic_idea_equivalence import (
+    SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD,
     IdeaEquivalencePair,
     IdeaEquivalenceRequest,
     SemanticEquivalenceArbiter,
@@ -21,6 +22,7 @@ from .semantic_idea_equivalence import (
 from .take_grouping import (
     _safe_short_prefix_retry,
     _shared_content_count,
+    continuation_pairs,
     group_takes,
     incomplete_attempt_completed_by_retry,
     measured_pause_bridged_retry,
@@ -968,7 +970,22 @@ def reconcile_semantic_idea_equivalence(
             pair for pair in candidate_pairs
             if pair[2] not in protected_ids and pair[3] not in protected_ids
         )
-    if not candidate_pairs:
+    # D-289.1: sentence-continuation pairs -- one realization split at a
+    # mid-sentence pause (`take_grouping.sentence_continuation`, adjacency
+    # decided once in `continuation_pairs`). Deterministic recording-process
+    # evidence, outside the candidate-pair floor (a <= 3-word tail is
+    # exactly what the floor excludes) and never spent on the arbiter.
+    group_index_of = {cid: gi for gi, group in enumerate(groups) for cid in group}
+    chain_pairs = tuple(sorted(
+        (
+            pair for pair in continuation_pairs(takes)
+            if not (pair & protected_ids)
+            and all(cid in group_index_of for cid in pair)
+            and len({group_index_of[cid] for cid in pair}) == 2
+        ),
+        key=sorted,
+    ))
+    if not candidate_pairs and not chain_pairs:
         return groups, {"status": "no_eligible_pairs", "candidate_pair_count": 0, "merged_pair_count": 0}
 
     # Union-find over group indices: if any member of group A is confirmed
@@ -990,6 +1007,19 @@ def reconcile_semantic_idea_equivalence(
     audit: list[dict] = []
     distinct_addition_blocked: list[dict] = []
     merged_count = 0
+    # D-289.1: continuation merges are recorded on their own (NOT in
+    # `merges`: they are not same-idea confirmations and must never feed the
+    # D-094.F3 prior-confirmation reuse or the D-061 paraphrase credit).
+    continuation_merged: list[dict] = []
+    for pair in chain_pairs:
+        head_id, tail_id = sorted(pair, key=lambda cid: (take_map[cid].start, take_map[cid].end, cid))
+        union(group_index_of[head_id], group_index_of[tail_id])
+        merged_count += 1
+        continuation_merged.append({
+            "left_clip_id": head_id, "right_clip_id": tail_id, "confidence": 1.0,
+            "reason": "deterministic sentence continuation (one realization split at a mid-sentence pause); arbiter not consulted",
+            "accepted_by": "sentence_continuation",
+        })
     # D-158 Phase C: structured Attempt Relationship consumption of D-157's
     # Watch+Listen Understanding V1 -- OFF by default
     # (CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED), and a total no-op
@@ -1135,6 +1165,7 @@ def reconcile_semantic_idea_equivalence(
             # by both later return paths.
             return groups, {
                 "status": "not_requested", "candidate_pair_count": len(candidate_pairs), "merged_pair_count": 0,
+                "continuation_merges": [],
                 "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
                     watch_listen_enabled, watch_listen_conflict_blocked, final_relations,
                 ),
@@ -1386,6 +1417,7 @@ def reconcile_semantic_idea_equivalence(
             "pair_order_authority": _PAIR_ORDER_AUTHORITY,
             "merged_pair_count": 0,
             "restart_evidence_merges": restart_merged,
+            "continuation_merges": continuation_merged,
             "arbiter_rejected_pairs": arbiter_rejected_pairs,
             "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
             "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
@@ -1413,6 +1445,7 @@ def reconcile_semantic_idea_equivalence(
         "merged_pair_count": merged_count,
         "merges": audit,
         "restart_evidence_merges": restart_merged,
+        "continuation_merges": continuation_merged,
         "distinct_addition_blocked": distinct_addition_blocked,
         "arbiter_rejected_pairs": arbiter_rejected_pairs,
         "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
@@ -1634,16 +1667,25 @@ def _edge_sort_key(edge: _RetryEdge) -> tuple:
     return (evidence_rank, -edge.confidence, edge.left_id, edge.right_id)
 
 
-def _component_probe_text(take_map: dict[str, CandidateTake], member_ids: Tuple[str, ...]) -> str:
+def _component_probe_text(
+    take_map: dict[str, CandidateTake], member_ids: Tuple[str, ...],
+    chain_of: Mapping[str, Tuple[str, ...]] | None = None,
+) -> str:
     """D-085 Section 6: a bounded, deterministic textual stand-in for one
     whole component, used only to pose the component-level cohesion question
     -- built from up to `_BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE` member texts,
     in clip-id order (never union-bookkeeping order, so the probe text is
     identical regardless of which side of a merge happened to become the
-    union-find root)."""
-    ordered_ids = sorted(member_ids)[:_BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE]
-    texts = [take_map[cid].text for cid in ordered_ids if cid in take_map]
-    return " || ".join(texts)
+    union-find root). D-289.1: a continuation chain counts as ONE member
+    whose text is the sentence it forms (ordered by its head's clip id); a
+    component without chains is byte-identical to before."""
+    if not chain_of:
+        ordered_ids = sorted(member_ids)[:_BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE]
+        texts = [take_map[cid].text for cid in ordered_ids if cid in take_map]
+        return " || ".join(texts)
+    units = _realization_units(tuple(member_ids), chain_of)
+    ordered_units = sorted(units, key=lambda unit: unit[0])[:_BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE]
+    return " || ".join(_unit_text(unit, take_map) for unit in ordered_units)
 
 
 def _evaluate_bridge_cohesion(
@@ -1654,6 +1696,7 @@ def _evaluate_bridge_cohesion(
     take_map: dict[str, CandidateTake],
     arbiter: SemanticEquivalenceArbiter | None,
     policy: SemanticEquivalenceGatePolicy,
+    chain_of: Mapping[str, Tuple[str, ...]] | None = None,
 ) -> tuple[bool, dict]:
     """D-085 Section 5/6/7: does the FULL merged component -- not just the
     two touching clips -- still represent one shared audience-facing
@@ -1687,8 +1730,16 @@ def _evaluate_bridge_cohesion(
     # same kind of import.
     from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 
-    left_texts = [take_map[cid].text for cid in left_members if cid in take_map]
-    right_texts = [take_map[cid].text for cid in right_members if cid in take_map]
+    # D-289.1: a continuation chain (`take_grouping.sentence_continuation`)
+    # is ONE realization -- its head and tail are judged as the sentence
+    # they form, never as two fragments whose truncation flips polarity
+    # (the exact run-33969388042 shape D-094.F4 describes below, now judged
+    # whole instead of merely tolerated inside one component). Members that
+    # belong to no chain are judged individually, byte-for-byte as before.
+    left_units = _realization_units(tuple(left_members), chain_of or {})
+    right_units = _realization_units(tuple(right_members), chain_of or {})
+    left_texts = [_unit_text(unit, take_map) for unit in left_units]
+    right_texts = [_unit_text(unit, take_map) for unit in right_units]
     # D-094.F4: the bridge question is whether the LEFT component and the
     # RIGHT component can be one family -- so only CROSS-component pairs
     # may reject it. A contradiction that already lives INSIDE one component
@@ -1715,8 +1766,8 @@ def _evaluate_bridge_cohesion(
         record["reason_rejected"] = "arbiter_unavailable_fail_closed"
         return False, record
 
-    left_text = _component_probe_text(take_map, left_members)
-    right_text = _component_probe_text(take_map, right_members)
+    left_text = _component_probe_text(take_map, left_members, chain_of=chain_of)
+    right_text = _component_probe_text(take_map, right_members, chain_of=chain_of)
     request = IdeaEquivalenceRequest(pairs=(IdeaEquivalencePair(left_text=left_text, right_text=right_text),))
     result = safe_check_idea_equivalence(arbiter, request, policy)
     decision = same_idea_by_pair_index(result).get(0)
@@ -1899,159 +1950,250 @@ def _accept_restart_singleton_bridge(
     return True, record
 
 
-# D-289 (RAW #122 audit, D-288 item 5): CONTAINED RESTATEMENT of a complete
-# realization -- a singleton-attaches-to-component bridge accepted on
-# deterministic PRESERVATION evidence instead of the D-085 joined-text probe.
+# D-289 / D-289.1 (RAW #122 audit, D-288 item 5): CONTAINED RESTATEMENT of a
+# complete realization -- a bridge accepted on deterministic PRESERVATION
+# evidence instead of the D-085 joined-text probe.
 #
-# Real shape (D-094.F4's own comment above already names the same family
-# on an earlier run): the creator delivers one complete realization of a
-# proposition (the family's winner), then, seconds later, RESTATES part of
-# it in fewer words -- same number, same polarity, nothing new. The
-# pairwise arbiter confirms the restatement IS the same idea, reconcile
-# merges the two groups, and the cohesion pass then re-asks a synthetic
-# "A || B" joined-text question (`_evaluate_bridge_cohesion`) whose answer
-# is unstable for exactly this shape (D-094.2's own run 33983880111 note:
-# three pairwise confirmations, one 0.2 probe answer). The probe fails
-# closed, the restatement is split back into its own singleton family, and
-# both realizations of ONE editorial function are co-kept -- a Level-1
-# false keep the four-way ladder attributes to IdeaClusterer.
+# Real shape (run 35799404391, replayed from its own diagnostics): the
+# creator delivers one complete realization of a proposition (the family's
+# winner), then, seconds later, RESTATES part of it -- same number, same
+# polarity, nothing new -- as a head that stops on a dangling function word
+# plus a short tail that finishes the sentence (`take_grouping.sentence_
+# continuation`). The pairwise arbiter confirms the restatement IS the same
+# idea (0.85 on that run), reconcile merges the groups, and the cohesion
+# pass then re-asks a synthetic "A || B" joined-text question
+# (`_evaluate_bridge_cohesion`) whose answer declines at 0.9 for exactly
+# this shape (D-094.2's own run-33983880111 note records the same
+# instability). The probe fails closed, the restatement is split back into
+# its own family and BOTH realizations of ONE editorial function are kept
+# (a Level-2 region on the four-way ladder: Cut.ai keeps it too, Human Gold
+# removes it; the frozen selection lock never contained it).
 #
-# This path accepts the bridge only when the newcomer's editorially
-# RELEVANT information is provably preserved by a complete member of the
-# receiving component -- the D-050C1 "discard requires safety" rule, applied
-# at family-formation time so the existing family competition (BestTake /
-# ClaimCoverage) decides the winner with the newcomer INSIDE it, rather than
-# a second filter deleting a clip after Freeze. Every guard reuses an
-# already-trusted primitive; none is a new semantic authority:
+# This path accepts the bridge only when the newcomer REALIZATION's
+# editorially relevant information is provably preserved by a complete
+# realization inside the receiving component -- the D-050C1 "discard
+# requires safety" rule applied at family-formation time, so the EXISTING
+# family competition (BestTake / ClaimCoverage) decides the winner with the
+# newcomer INSIDE it; nothing deletes a clip after Freeze. Every guard reuses
+# an already-trusted primitive; none is a new semantic authority:
 #   1. the attaching edge is a SEMANTIC same-idea confirmation at
-#      >= `_BRIDGE_MIN_COHESION_CONFIDENCE` (the arbiter stays the only
-#      judge of idea identity -- this path never merges on lexical
-#      containment alone, so a same-number-different-proposition pair the
-#      arbiter declines never reaches it);
+#      >= `SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD` (0.85: D-058 Phase 2's own
+#      pairwise bar, the one D-061's lost-atom credit later applies to the
+#      SAME merge record -- so grouping and StoryValidator agree). D-289's
+#      first cut wrongly borrowed `_BRIDGE_MIN_COHESION_CONFIDENCE` (0.90),
+#      the bar for a COMPONENT-level probe answer, a different evidence
+#      class, and so declined the real run's own 0.85 edge (D-289.1). The
+#      arbiter stays the only judge of idea identity: this path never
+#      merges on lexical containment alone;
 #   2. neither side carries a distinct-addition marker (D-039/D-048: the
 #      speaker's own "otro sintoma"/"another symptom" framing is evidence of
-#      a distinct point, and a marked pair keeps D-048's own content floor
-#      as its judge -- a short restatement sharing few content words with a
-#      marked, fuller take is therefore NEVER folded by this path; this is
-#      what keeps a genuinely separate short beat that a marked take later
-#      elaborates -- the shape both editorial references keep -- apart);
-#   3. every digit value the newcomer states appears in the complete
-#      member's own raw text (`_digit_values`, the D-073 hard NUMBER gate
-#      shape) -- a changed number is a correction or a contradiction, never
-#      a restatement; a newcomer with a number the member never states adds
-#      information and is refused;
-#   4. the PRESERVATION PROOF: every claim the newcomer makes (`semantic_
-#      claims.extract_claims`, the same negation/number-aware authority
-#      ClaimCoverageBestTake trusts) is either covered by the member
-#      (`claim_is_covered`, with its own negation-flip/number-mismatch
-#      guards) or is a numeric claim whose every digit value the member
-#      states; a newcomer too short to yield a claim must instead have its
-#      whole content vocabulary covered by the member at >= `_CONTAINED_
-#      RESTATEMENT_MIN_TOKEN_COVERAGE` (stem-aware). Shared vocabulary alone
-#      is never enough -- a newcomer whose own claim the member lacks is new
-#      information (a continuation, a complementary beat, a distinct point)
-#      and falls through to D-085's probe unchanged;
-#   5. the newcomer does not out-carry the member: its content vocabulary is
-#      no larger than the member's -- the fuller take is the realization,
-#      the shorter one the restatement, never the reverse;
-#   6. the member is `complete_idea` (a restatement can only be preserved by
-#      a COMPLETE realization);
+#      a distinct point; a marked pair keeps D-048's own content floor as
+#      its judge -- this is what keeps a genuinely separate short beat that
+#      a marked take later elaborates, the shape both references keep,
+#      apart);
+#   3. every digit value the newcomer states appears in the preserving
+#      realization's own text (`_digit_values`, the D-073 hard NUMBER gate
+#      shape). A VETO only, never a proof: a newcomer stating a number the
+#      member never states adds information and is refused; equal digits
+#      prove NOTHING by themselves (D-289.1 removed D-289's "numeric
+#      restatement" shortcut -- "20 grams / 5 dollars" vs "20 months / 5
+#      repairs" share every digit and no claim);
+#   4. the PRESERVATION PROOF: every claim the newcomer realization makes
+#      (`semantic_claims.extract_claims`, the same clause-level, negation/
+#      number-aware authority ClaimCoverageBestTake trusts) must be COVERED
+#      by the preserving realization per the ONE existing coverage
+#      authority, `semantic_claims.resolve_ambiguous_coverage`: lexical
+#      coverage >= COVERAGE_THRESHOLD is covered; below AMBIGUOUS_COVERAGE_
+#      FLOOR is confidently lost; the band between is escalated to the
+#      bounded ClaimEquivalenceArbiter when one is wired (the D-058 Phase 3
+#      canary -- "estoy convencida y la ciencia lo avala" vs "comprobado
+#      cientificamente" -- is exactly this band) and fails closed (NOT
+#      covered) without one, on an exception, or on any verdict that is not
+#      explicitly True. A newcomer with no extractable claim (too short for
+#      the clause floor) must instead have its whole content vocabulary
+#      covered at >= `_CONTAINED_RESTATEMENT_MIN_TOKEN_COVERAGE` (stem-
+#      aware). Shared vocabulary alone is never enough;
+#   5. the newcomer does not out-carry the preserving realization (content
+#      vocabulary <=): the fuller take is the realization, the shorter the
+#      restatement, never the reverse;
+#   6. the preserving realization is `complete_idea` (a restatement can only
+#      be preserved by a COMPLETE realization);
 #   7. D-085's own deterministic cross-component contradiction safety net
-#      (`detect_text_contradiction`) is applied verbatim -- a negation-
-#      scoped or number-scoped conflict between ANY cross pair still rejects
-#      (this is what keeps a bare "X are Y." tail apart from a member whose
-#      corresponding clause is "I do not believe X are Y", even when the
-#      arbiter confirmed the pair);
-#   8. chronology: the newcomer STARTS AFTER the preserving member ENDS. A
-#      restatement follows what it restates; an earlier take completed by a
-#      later delivery is the abandoned-attempt shape D-097.12/D-287/D-150
-#      own -- and, for the singleton-clique form, D-094.2's default-OFF
-#      policy is a standing Product Owner decision this path never
-#      re-decides.
-# Component-to-component merges, deterministic non-restart edges and every
-# newcomer that fails a guard fall through to D-085's probe byte-for-byte;
-# the D-094.2 policy flag stays untouched and OFF. Nothing here reads a
-# Video00 phrase, id or timestamp.
+#      (`detect_text_contradiction`) is applied verbatim -- over REALIZATION
+#      texts: a continuation chain is one sentence, so its head and tail are
+#      judged joined ("only 5-10 % of cancers are hereditary" does not
+#      contradict a winner that says the same), while a bare tail read alone
+#      would falsely flip polarity (D-289.1, finding 3);
+#   8. chronology: the newcomer realization STARTS AFTER the preserving one
+#      ENDS. An earlier take completed by a later delivery is the abandoned-
+#      attempt shape D-097.12/D-287/D-150 own -- and, for the singleton-
+#      clique form, D-094.2's default-OFF policy is a standing Product Owner
+#      decision this path never re-decides.
+# A REALIZATION UNIT is one member, or one continuation chain (members
+# joined by `sentence_continuation` edges, in start order). This path
+# applies when one side of the bridge is exactly ONE unit (a lone newcomer
+# or a lone chain); component-to-component merges of two or more units on
+# both sides, deterministic non-restart edges and every newcomer that fails
+# a guard fall through to D-085's probe byte-for-byte; the D-094.2 policy
+# flag stays untouched and OFF. Nothing here reads a Video00 phrase, id or
+# timestamp.
 _CONTAINED_RESTATEMENT_MIN_TOKEN_COVERAGE = 0.8
 _DIGIT_RUN_RE = re.compile(r"\d+")
+_CONTINUATION_EDGE_KIND = "sentence_continuation"
+CONTAINED_RESTATEMENT_ACCEPTANCE = "contained_restatement_of_complete_realization"
 
 
 def _digit_values(text: str) -> frozenset[str]:
     return frozenset(_DIGIT_RUN_RE.findall(str(text or "")))
 
 
-def _extract_claims(source_clip_id: str, text: str):
-    # Deferred import: `semantic_claims` sits behind `final_sibling_grouping`
-    # in this module's import graph (same cycle-avoidance pattern as
-    # `contradiction_signal` in `_evaluate_bridge_cohesion`).
-    from .semantic_claims import extract_claims
-    return extract_claims(source_clip_id, text)
+def _continuation_chains(
+    pairs: frozenset[frozenset[str]], take_map: dict[str, CandidateTake],
+) -> tuple[Tuple[str, ...], ...]:
+    """Connected components of `pairs` (continuation edges), each ordered
+    by start time -- one chain == one realization split by the ASR/attempt
+    boundary."""
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for pair in pairs:
+        ids = sorted(pair)
+        if len(ids) != 2 or ids[0] not in take_map or ids[1] not in take_map:
+            continue
+        parent[find(ids[0])] = find(ids[1])
+    groups: dict[str, list[str]] = {}
+    for cid in parent:
+        groups.setdefault(find(cid), []).append(cid)
+    chains = [
+        tuple(sorted(members, key=lambda cid: (take_map[cid].start, take_map[cid].end, cid)))
+        for members in groups.values() if len(members) >= 2
+    ]
+    return tuple(sorted(chains))
 
 
-def _claim_is_covered(claim, candidate_text: str) -> bool:
-    from .semantic_claims import claim_is_covered
-    return claim_is_covered(claim, candidate_text)
+def _chain_of_map(chains: Tuple[Tuple[str, ...], ...]) -> dict[str, Tuple[str, ...]]:
+    return {cid: chain for chain in chains for cid in chain}
+
+
+def _realization_units(
+    members: Tuple[str, ...], chain_of: Mapping[str, Tuple[str, ...]],
+) -> tuple[Tuple[str, ...], ...]:
+    """`members` partitioned into realization units: each continuation chain
+    (restricted to members actually present) is one unit, every other member
+    its own unit. Units are ordered by their head's position in `members`."""
+    seen: set[str] = set()
+    units: list[Tuple[str, ...]] = []
+    member_set = set(members)
+    for cid in members:
+        if cid in seen:
+            continue
+        chain = chain_of.get(cid)
+        if chain is None:
+            units.append((cid,))
+            seen.add(cid)
+            continue
+        present = tuple(c for c in chain if c in member_set)
+        units.append(present)
+        seen.update(present)
+    return tuple(units)
+
+
+def _unit_text(unit: Tuple[str, ...], take_map: dict[str, CandidateTake]) -> str:
+    return " ".join(str(take_map[cid].text or "").strip() for cid in unit if cid in take_map).strip()
+
+
+def _unit_span(unit: Tuple[str, ...], take_map: dict[str, CandidateTake]) -> tuple[float, float]:
+    takes = [take_map[cid] for cid in unit if cid in take_map]
+    return min(t.start for t in takes), max(t.end for t in takes)
+
+
+def _unit_complete(unit: Tuple[str, ...], take_map: dict[str, CandidateTake]) -> bool:
+    """A single member: its own `complete_idea`. A chain: the joined sentence
+    is judged by the same segmentation rule every candidate was graded with."""
+    if len(unit) == 1:
+        return bool(take_map[unit[0]].complete_idea)
+    from .take_segmentation import _looks_complete_idea  # deferred: import-graph cycle avoidance
+
+    start, end = _unit_span(unit, take_map)
+    return _looks_complete_idea(_unit_text(unit, take_map), max(0.0, end - start))
 
 
 def _contained_restatement_member(
-    newcomer: CandidateTake, members: Tuple[str, ...], take_map: dict[str, CandidateTake],
-) -> tuple[str, dict] | None:
-    """The first complete member of `members` that provably preserves the
-    newcomer's relevant information (guards 2-6 above), with the evidence
-    row proving it, or None."""
-    if _has_distinct_addition_marker(newcomer.text):
+    newcomer_unit: Tuple[str, ...],
+    member_units: Tuple[Tuple[str, ...], ...],
+    take_map: dict[str, CandidateTake],
+    claim_equivalence_arbiter=None,
+) -> tuple[Tuple[str, ...], dict] | None:
+    """The first complete realization unit among `member_units` that
+    provably preserves the newcomer realization's information (guards 2-6
+    above), with the evidence row proving it, or None."""
+    # Deferred imports: `semantic_claims` sits behind `final_sibling_grouping`
+    # in this module's import graph (same pattern as `contradiction_signal`).
+    from .semantic_claims import AMBIGUOUS_COVERAGE_FLOOR, COVERAGE_THRESHOLD, claim_coverage, extract_claims, resolve_ambiguous_coverage
+
+    newcomer_text = _unit_text(newcomer_unit, take_map)
+    head = take_map.get(newcomer_unit[0]) if newcomer_unit else None
+    if head is None or _has_distinct_addition_marker(newcomer_text):
         return None
-    newcomer_tokens = _content_tokens(newcomer.text)
-    newcomer_digits = _digit_values(newcomer.text)
+    newcomer_tokens = _content_tokens(newcomer_text)
+    newcomer_digits = _digit_values(newcomer_text)
     if not newcomer_tokens and not newcomer_digits:
         return None
-    for member_id in members:
-        member = take_map.get(member_id)
-        if member is None or not member.complete_idea or member.source_asset_id != newcomer.source_asset_id:
+    newcomer_start, _newcomer_end = _unit_span(newcomer_unit, take_map)
+    claims = extract_claims(head.clip_id, newcomer_text)
+    for member_unit in member_units:
+        member_head = take_map.get(member_unit[0]) if member_unit else None
+        if member_head is None or member_head.source_asset_id != head.source_asset_id:
             continue
-        if newcomer.start < member.end:
-            # Guard 8: a RESTATEMENT follows the realization it restates. An
-            # earlier take that a later complete delivery completes is the
-            # abandoned-attempt shape D-097.12/D-287/D-150 own (and, for the
-            # policy-gated singleton-clique form, D-094.2's own default-OFF
-            # Product Owner decision) -- never this path.
+        if not _unit_complete(member_unit, take_map):
             continue
-        if _has_distinct_addition_marker(member.text):
+        _member_start, member_end = _unit_span(member_unit, take_map)
+        if newcomer_start < member_end:
+            # Guard 8: a RESTATEMENT follows the realization it restates.
             continue
-        member_tokens = _content_tokens(member.text)
+        member_text = _unit_text(member_unit, take_map)
+        if _has_distinct_addition_marker(member_text):
+            continue
+        member_tokens = _content_tokens(member_text)
         if len(newcomer_tokens) > len(member_tokens):
             continue
-        member_digits = _digit_values(member.text)
+        member_digits = _digit_values(member_text)
         if not newcomer_digits <= member_digits:
             continue
-        # Guard 4 -- the preservation proof itself. EVERY claim the newcomer
-        # makes (`semantic_claims.extract_claims`, the same clause-level,
-        # negation/number-aware authority ClaimCoverageBestTake trusts) must
-        # be preserved by the member: covered by `claim_is_covered` (whose
-        # own negation-flip and number-mismatch guards apply), or -- for a
-        # claim that states a number -- restated with every one of its digit
-        # values present in the member. A newcomer with no extractable
-        # claim at all (too short for the clause floor) is judged on its
-        # whole content vocabulary instead: stem-aware coverage by the
-        # member at or above `_CONTAINED_RESTATEMENT_MIN_TOKEN_COVERAGE`.
-        # Shared vocabulary alone ("...looked like an allergy") is NEVER
-        # enough -- a newcomer whose own claim the member does not carry is
-        # new information and falls through to D-085's probe.
-        claims = _extract_claims(newcomer.clip_id, newcomer.text)
-        preserved_claims: list[dict] = []
+        # Guard 4 -- the preservation proof itself, through the ONE existing
+        # coverage authority. Every claim must be covered; the first
+        # uncovered claim disqualifies this member.
+        claim_rows: list[dict] = []
+        preserved = True
+        arbiter_consulted = False
         for claim in claims:
-            claim_digits = _digit_values(claim.text)
-            if _claim_is_covered(claim, member.text):
-                preserved_claims.append({"claim_type": claim.claim_type, "preserved_by": "claim_coverage"})
-            elif claim_digits and claim_digits <= member_digits:
-                preserved_claims.append({
-                    "claim_type": claim.claim_type, "preserved_by": "numeric_restatement",
-                    "digit_values": sorted(claim_digits),
-                })
+            coverage = claim_coverage(claim, member_text)
+            if coverage >= COVERAGE_THRESHOLD:
+                resolution = "deterministic_coverage"
+            elif coverage < AMBIGUOUS_COVERAGE_FLOOR:
+                resolution = "below_ambiguous_floor"
+            elif claim_equivalence_arbiter is None:
+                resolution = "ambiguous_band_no_claim_arbiter"
             else:
-                preserved_claims = []
+                resolution = "claim_equivalence_arbiter"
+                arbiter_consulted = True
+            covered = resolve_ambiguous_coverage(
+                claim, member_text, coverage=coverage, arbiter=claim_equivalence_arbiter,
+            )
+            claim_rows.append({
+                "claim_type": claim.claim_type, "importance": claim.importance,
+                "coverage": round(float(coverage), 4), "resolution": resolution, "covered": bool(covered),
+            })
+            if not covered:
+                preserved = False
                 break
-        if claims and not preserved_claims:
+        if not preserved:
             continue
         token_coverage = (
             _shared_content_count(set(newcomer_tokens), set(member_tokens)) / len(newcomer_tokens)
@@ -2059,10 +2201,12 @@ def _contained_restatement_member(
         )
         if not claims and token_coverage < _CONTAINED_RESTATEMENT_MIN_TOKEN_COVERAGE:
             continue
-        return member_id, {
-            "preserving_member_clip_id": member_id,
+        return member_unit, {
+            "preserving_member_clip_id": member_unit[0],
+            "preserving_unit_member_ids": list(member_unit),
             "digit_values_preserved": sorted(newcomer_digits),
-            "claims_preserved": preserved_claims,
+            "claims_preserved": claim_rows,
+            "claim_arbiter_consulted": arbiter_consulted,
             "content_token_coverage": round(token_coverage, 4),
             "newcomer_content_token_count": len(newcomer_tokens),
             "member_content_token_count": len(member_tokens),
@@ -2076,24 +2220,31 @@ def _accept_contained_restatement_singleton_bridge(
     right_members: Tuple[str, ...],
     edge: _RetryEdge,
     take_map: dict[str, CandidateTake],
+    chain_of: Mapping[str, Tuple[str, ...]] | None = None,
+    claim_equivalence_arbiter=None,
 ) -> tuple[bool, dict | None]:
-    """D-289: see the module comment above. Returns (accepted, record), or
-    (False, None) when this shape does not apply so the caller falls
-    through to the next path unchanged."""
-    if min(len(left_members), len(right_members)) != 1:
+    """D-289/D-289.1: see the module comment above. Returns (accepted,
+    record), or (False, None) when this shape does not apply so the caller
+    falls through to the next path unchanged."""
+    chain_of = chain_of or {}
+    left_units = _realization_units(left_members, chain_of)
+    right_units = _realization_units(right_members, chain_of)
+    if min(len(left_units), len(right_units)) != 1:
         return False, None
-    if edge.evidence != "semantic" or edge.confidence < _BRIDGE_MIN_COHESION_CONFIDENCE:
+    if edge.evidence != "semantic" or edge.confidence < SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD:
         return False, None
-    singleton_members, component_members = (
-        (left_members, right_members) if len(left_members) == 1 else (right_members, left_members)
+    if len(left_units) == 1:
+        newcomer_unit, component_units = left_units[0], right_units
+    else:
+        newcomer_unit, component_units = right_units[0], left_units
+    if not newcomer_unit or any(cid not in take_map for cid in newcomer_unit):
+        return False, None
+    found = _contained_restatement_member(
+        newcomer_unit, component_units, take_map, claim_equivalence_arbiter,
     )
-    newcomer = take_map.get(singleton_members[0])
-    if newcomer is None:
-        return False, None
-    found = _contained_restatement_member(newcomer, tuple(component_members), take_map)
     if found is None:
         return False, None
-    member_id, preservation = found
+    _member_unit, preservation = found
 
     record: dict = {
         "left_clip_id": edge.left_id, "right_clip_id": edge.right_id,
@@ -2103,8 +2254,9 @@ def _accept_contained_restatement_singleton_bridge(
         "left_component_members": list(left_members),
         "right_component_members": list(right_members),
         "component_cohesion_evaluated": False,
-        "accepted_by": "contained_restatement_of_complete_realization",
-        "restated_clip_id": newcomer.clip_id,
+        "accepted_by": CONTAINED_RESTATEMENT_ACCEPTANCE,
+        "restated_clip_id": newcomer_unit[0],
+        "restated_unit_member_ids": list(newcomer_unit),
         "preservation_evidence": preservation,
         "shared_proposition": None,
         "member_support": list(left_members) + list(right_members),
@@ -2113,8 +2265,9 @@ def _accept_contained_restatement_singleton_bridge(
     }
     from .contradiction_signal import detect_text_contradiction  # deferred: see _evaluate_bridge_cohesion
 
-    left_texts = [take_map[cid].text for cid in left_members if cid in take_map]
-    right_texts = [take_map[cid].text for cid in right_members if cid in take_map]
+    # Guard 7 over REALIZATION texts (a chain is judged as one sentence).
+    left_texts = [_unit_text(unit, take_map) for unit in left_units]
+    right_texts = [_unit_text(unit, take_map) for unit in right_units]
     if any(
         detect_text_contradiction(left_text, right_text).has_conflict
         for left_text in left_texts for right_text in right_texts
@@ -2157,6 +2310,7 @@ def _bridge_aware_components(
     policy: SemanticEquivalenceGatePolicy,
     edge_trace: list[dict],
     blocked_pairs: frozenset[frozenset[str]] = frozenset(),
+    claim_equivalence_arbiter=None,
 ) -> tuple[Tuple[str, ...], ...]:
     """D-085: bridge-sensitive replacement for plain union-find. Processes
     `edges` in the fixed, input-order-independent sequence `_edge_sort_key`
@@ -2225,6 +2379,18 @@ def _bridge_aware_components(
         for candidate_edge in edges
         if candidate_edge.evidence == "deterministic" and candidate_edge.reason in _RESTART_EVIDENCE_KINDS
     }
+    # D-289.1: continuation chains (one realization split at a mid-sentence
+    # pause) -- see `take_grouping.sentence_continuation`. A chain edge is
+    # deterministic, so it unions first; the chain is then ONE realization
+    # unit for the contained-restatement path below.
+    chain_of = _chain_of_map(_continuation_chains(
+        frozenset(
+            frozenset((candidate_edge.left_id, candidate_edge.right_id))
+            for candidate_edge in edges
+            if candidate_edge.evidence == "deterministic" and candidate_edge.reason == _CONTINUATION_EDGE_KIND
+        ),
+        take_map,
+    ))
 
     for edge in sorted(edges, key=_edge_sort_key):
         if edge.left_id not in parent or edge.right_id not in parent:
@@ -2263,7 +2429,13 @@ def _bridge_aware_components(
         record = None
         if min(len(left_members), len(right_members)) == 1:
             multi_members = left_members if len(left_members) >= 2 else right_members
-            restart_edge = edge.evidence == "deterministic" and edge.reason in _RESTART_EVIDENCE_KINDS
+            restart_edge = edge.evidence == "deterministic" and (
+                edge.reason in _RESTART_EVIDENCE_KINDS
+                # D-289.1: a continuation edge that only becomes a bridge
+                # because its other end already joined something is the same
+                # deterministic recording-process class -- one sentence.
+                or edge.reason == _CONTINUATION_EDGE_KIND
+            )
             confirmed_against_restart_component = (
                 edge.evidence == "semantic"
                 and edge.confidence >= _BRIDGE_MIN_COHESION_CONFIDENCE
@@ -2274,18 +2446,21 @@ def _bridge_aware_components(
                     left_members=tuple(left_members), right_members=tuple(right_members),
                     edge=edge, take_map=take_map,
                     accepted_by=(
-                        "deterministic_restart_evidence" if restart_edge
+                        ("deterministic_sentence_continuation" if edge.reason == _CONTINUATION_EDGE_KIND
+                         else "deterministic_restart_evidence") if restart_edge
                         else "semantic_confirmation_against_restart_cohesive_component"
                     ),
                 )
-        if record is None and min(len(left_members), len(right_members)) == 1:
-            # D-289: deterministic preservation evidence for a contained
-            # restatement -- see the module comment above
-            # `_accept_contained_restatement_singleton_bridge`. (False, None)
-            # when the shape does not apply: fall through unchanged.
+        if record is None:
+            # D-289/D-289.1: deterministic preservation evidence for a
+            # contained restatement (one realization unit attaching) -- see
+            # the module comment above `_accept_contained_restatement_
+            # singleton_bridge`. (False, None) when the shape does not apply:
+            # fall through unchanged.
             accepted, record = _accept_contained_restatement_singleton_bridge(
                 left_members=tuple(left_members), right_members=tuple(right_members),
-                edge=edge, take_map=take_map,
+                edge=edge, take_map=take_map, chain_of=chain_of,
+                claim_equivalence_arbiter=claim_equivalence_arbiter,
             )
         if record is None and policy.accept_complete_pairwise_singleton_bridge and min(len(left_members), len(right_members)) == 1:
             accepted, record = _accept_complete_pairwise_bridge(
@@ -2296,6 +2471,7 @@ def _bridge_aware_components(
             accepted, record = _evaluate_bridge_cohesion(
                 left_members=tuple(left_members), right_members=tuple(right_members),
                 edge=edge, take_map=take_map, arbiter=arbiter, policy=policy,
+                chain_of=chain_of,
             )
         edge_trace.append(record)
         if accepted:
@@ -2321,6 +2497,7 @@ def split_incohesive_retry_groups(
     policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
     protected_ids: frozenset[str] = frozenset(),
     prior_confirmations: Mapping[frozenset, tuple[float, str]] | None = None,
+    claim_equivalence_arbiter=None,
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """D-058 Phase 1 + D-085: require evidence of shared communicative intent
     before an already-multi-member group is trusted as one mutually-
@@ -2348,14 +2525,33 @@ def split_incohesive_retry_groups(
             "edge_trace": [], "bridge_evaluated_count": 0, "bridge_accepted_count": 0,
             "bridge_rejected_count": 0, "component_semantic_call_count": 0,
             "blocked_pair_veto_count": 0,
+            "continuation_chains": [],
         }
 
     edges_by_group: dict[int, list[_RetryEdge]] = {id(group): [] for group in multi_member_groups}
     weak_pairs: list[tuple[str, str]] = []
     weak_pair_group: dict[tuple[str, str], int] = {}
+    # D-289.1: sentence-continuation pairs (deterministic, adjacency-based,
+    # computed over ALL takes so a <= 3-word tail -- excluded from the
+    # candidate-pair floor below -- still joins its own head). Never a weak
+    # pair, never spent on the arbiter.
+    chain_pairs = frozenset(
+        pair for pair in continuation_pairs(takes) if not (pair & protected_ids)
+    )
+    continuation_chain_rows: list[list[str]] = []
     for group in multi_member_groups:
+        group_members = frozenset(group)
+        group_chain_pairs = frozenset(pair for pair in chain_pairs if pair <= group_members)
+        for pair in sorted(group_chain_pairs, key=sorted):
+            head_id, tail_id = sorted(pair, key=lambda cid: (take_map[cid].start, take_map[cid].end, cid))
+            edges_by_group[id(group)].append(
+                _RetryEdge(head_id, tail_id, "deterministic", 1.0, _CONTINUATION_EDGE_KIND)
+            )
+        continuation_chain_rows.extend(list(chain) for chain in _continuation_chains(group_chain_pairs, take_map))
         for left_id, right_id in _within_group_candidate_pairs(group, take_map, protected_ids=protected_ids):
             left_take, right_take = take_map[left_id], take_map[right_id]
+            if frozenset((left_id, right_id)) in chain_pairs:
+                continue  # already a continuation edge above
             if _provider_members_compatible(left_take, right_take):
                 edges_by_group[id(group)].append(
                     _RetryEdge(left_id, right_id, "deterministic", 1.0, "provider_members_compatible")
@@ -2518,6 +2714,7 @@ def split_incohesive_retry_groups(
             protected_ids=protected_ids, take_map=take_map,
             arbiter=arbiter, policy=policy, edge_trace=edge_trace,
             blocked_pairs=blocked_pairs,
+            claim_equivalence_arbiter=claim_equivalence_arbiter,
         )
         if len(components) <= 1:
             output_groups.append(group)
@@ -2578,6 +2775,10 @@ def split_incohesive_retry_groups(
         "bridge_rejected_count": bridge_rejected_count,
         "component_semantic_call_count": component_semantic_call_count,
         "blocked_pair_veto_count": blocked_pair_veto_count,
+        # D-289.1: continuation chains present inside the checked groups
+        # (`take_grouping.sentence_continuation`): each is ONE realization
+        # for the family competition (pipeline folds it onto its head).
+        "continuation_chains": continuation_chain_rows,
     }
 
 

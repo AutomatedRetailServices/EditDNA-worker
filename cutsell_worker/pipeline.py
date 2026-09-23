@@ -23,6 +23,13 @@ from .clean_cut import apply_clean_cut
 from .clean_cut_provider import CleanCutProvider, apply_provider_judgements, safe_clean_cut_judge
 from .contradiction_signal import any_pair_contradicts
 from .composer import compose_selected
+from .continuation_chain import (
+    CONTINUATION_MEMBER_IDS_KEY,
+    REALIZATION_TEXT_KEY,
+    bind_continuation_tails,
+    chain_tails_by_head,
+    fold_family_members,
+)
 from .composer_provider import ComposerProvider, safe_compose_order
 from .final_sibling_grouping import _content
 from .semantic_atom_importance import _clause_has_any
@@ -1446,6 +1453,7 @@ def build_flow_b_draft(
     attempt_reconstruction_diagnostics: dict | None = None,
     performance_confirmation_diagnostics: Iterable[dict] = (),
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
+    claim_equivalence_arbiter=None,
     boundary_owner: str = "pre_freeze",
     watch_listen_understandings: Iterable[WatchListenUnderstanding] = (),
     raw_understanding_maps: Iterable[RawUnderstandingMap] = (),
@@ -1696,6 +1704,10 @@ def build_flow_b_draft(
         semantic_equivalence_groups, kept, semantic_equivalence_arbiter,
         protected_ids=composite_split_ids,
         prior_confirmations=prior_confirmations,
+        # D-289.1: the same bounded claim-equivalence arbiter ClaimCoverage
+        # BestTake/StoryValidator use, for the contained-restatement
+        # preservation proof (see take_grouping_provider's D-289 comment).
+        claim_equivalence_arbiter=claim_equivalence_arbiter,
         # D-094.2: runtime-config only (default OFF); see the policy field.
         policy=SemanticEquivalenceGatePolicy(
             accept_complete_pairwise_singleton_bridge=_env_flag_enabled(
@@ -1710,6 +1722,12 @@ def build_flow_b_draft(
         ),
     }
     group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
+    # D-289.1: a sentence-continuation chain is ONE realization -- folded
+    # onto its head for the whole family competition (see
+    # continuation_chain.py's own module docstring). `chain_tails_by_head`
+    # is consulted again after `compose_selected` below so the tails follow
+    # their head into the selection.
+    chain_tails = chain_tails_by_head(cohesion_diagnostics.get("continuation_chains") or (), take_by_id)
 
     groups = []
     clip_to_group: Dict[str, str] = {}
@@ -1775,6 +1793,10 @@ def build_flow_b_draft(
     for members in group_members:
         if not members:
             continue
+        # D-289.1: fold continuation chains onto their heads BEFORE anything
+        # ranks or labels the family; `family_chain_tails` is recorded on
+        # the judge row and on the TakeGroup below.
+        members, family_chain_tails = fold_family_members(members, chain_tails, take_by_id)
         if len(members) >= 2:
             alternate_group_count += 1
         judged = safe_rank_takes(members, take_judge_provider)
@@ -1878,6 +1900,7 @@ def build_flow_b_draft(
         if no_usable_realization:
             selected_clip_id = ""
             no_usable_realization_ids.update(member.clip_id for member in members)
+            no_usable_realization_ids.update(t for tails in family_chain_tails.values() for t in tails)
         if semantic_preferred_clip_id and selected_clip_id != local_selected_clip_id:
             semantic_best_take_override_count += 1
         membership_key = "semantic:" + hashlib.sha256(
@@ -2269,7 +2292,18 @@ def build_flow_b_draft(
                 "execution_status": judged.status.status,
                 "execution_reason": judged.status.reason,
                 "ranked": [
-                    {"clip_id": item.clip_id, "score": item.score, "reason": item.reason}
+                    {
+                        "clip_id": item.clip_id, "score": item.score, "reason": item.reason,
+                        # D-289.1: a chain head carries its tails and the
+                        # complete sentence it is judged on (see
+                        # continuation_chain.py); absent on every other row.
+                        **({
+                            CONTINUATION_MEMBER_IDS_KEY: list(family_chain_tails[item.clip_id]),
+                            REALIZATION_TEXT_KEY: next(
+                                (m.text for m in members if m.clip_id == item.clip_id), None,
+                            ),
+                        } if item.clip_id in family_chain_tails else {}),
+                    }
                     for item in ranked
                 ],
                 # D-097: cleanliness evidence rows and the all-failed outcome.
@@ -2388,12 +2422,16 @@ def build_flow_b_draft(
         groups.append(TakeGroup(
             group_id=gid,
             semantic_key=membership_key,
-            candidate_ids=tuple(member.clip_id for member in members),
+            candidate_ids=tuple(member.clip_id for member in members)
+            + tuple(t for tails in family_chain_tails.values() for t in tails),
             ranked=ranked,
             selected_clip_id=selected_clip_id,
         ))
         for member in members:
             clip_to_group[member.clip_id] = gid
+        for tails in family_chain_tails.values():
+            for tail_id in tails:
+                clip_to_group[tail_id] = gid
 
     # Pass 4: only after retry families have been judged and a logical winner has been
     # chosen do we touch physical edit boundaries. Keep the logical clip IDs stable so
@@ -2412,6 +2450,8 @@ def build_flow_b_draft(
     surviving_labels = tuple(label_map[take.clip_id] for take in kept if take.clip_id in label_map)
     strategy = choose_strategy(surviving_labels, kept)
     natural_selected = compose_selected(kept, groups, surviving_labels)
+    # D-289.1: a selected chain head brings its tails (one realization).
+    natural_selected = bind_continuation_tails(natural_selected, kept, chain_tails)
 
     composition = safe_compose_order(
         composer_provider,

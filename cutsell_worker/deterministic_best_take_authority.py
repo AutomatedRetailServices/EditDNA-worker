@@ -39,6 +39,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from .continuation_chain import continuation_member_ids, rows_by_clip_id
+
 # Matches hybrid_take_judge.build_editorial_session_from_group's own existing
 # definition of "decisive": conflict_score there is 0 (no ambiguity) exactly
 # when the top-two RankedTake score gap is >= 0.30. Reused verbatim rather
@@ -112,10 +114,12 @@ def apply_deterministic_best_take_authority(draft, *, swap_enabled: bool = False
     new_selected = dict(selected_by_id)
     new_alternates = dict(alternates_by_id)
     new_discarded = dict(discarded_by_id)
+    # D-289.1: a continuation chain moves as a unit -- see continuation_chain.py.
+    rows_by_id = rows_by_clip_id(groups)
 
-    def move(clip_id: str, target: str, reason: str, extra: dict) -> None:
+    def _move_one(clip_id: str, target: str, reason: str, extra: dict) -> None:
         origin = bucket_of(clip_id)
-        if origin == target:
+        if origin == target or clip_id not in all_clips:
             return
         clip = all_clips[clip_id]
         new_selected.pop(clip_id, None)
@@ -124,6 +128,11 @@ def apply_deterministic_best_take_authority(draft, *, swap_enabled: bool = False
         updated = replace(clip, selected=(target == "select"))
         {"select": new_selected, "swap": new_alternates, "discard": new_discarded}[target][clip_id] = updated
         moves.append({"clip_id": clip_id, "from_bucket": origin, "to_bucket": target, "reason": reason, **extra})
+
+    def move(clip_id: str, target: str, reason: str, extra: dict) -> None:
+        _move_one(clip_id, target, reason, extra)
+        for tail_id in continuation_member_ids(rows_by_id.get(clip_id)):
+            _move_one(tail_id, target, reason + ":continuation_member", {**extra, "continuation_head_clip_id": clip_id})
 
     for group in groups:
         if group.get("no_usable_realization"):

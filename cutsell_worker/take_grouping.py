@@ -436,6 +436,98 @@ def measured_pause_bridged_retry(
     return "measured_pause_bridged_retry"
 
 
+# ---------------------------------------------------------------------------
+# D-289.1: SENTENCE CONTINUATION -- one delivery split by the ASR/attempt
+# boundary into a head that stops on a dangling function word and a tail
+# that finishes the sentence.
+# ---------------------------------------------------------------------------
+#
+# Real audited shape (RAW #122 conclusion cluster, D-288 audit item 5): the
+# creator restates a claim, pauses for several seconds mid-sentence after a
+# preposition+article ("... de los"), then finishes it ("... son
+# hereditarios."). The AttemptReconstructor's continuation ceiling (1.20 s)
+# correctly calls a multi-second pause a `real_speech_pause`, so the two
+# halves reach grouping as two candidates: an INCOMPLETE head (no terminal
+# punctuation, dangling ending) and a punctuation-complete 3-word tail whose
+# meaning, read alone, is the OPPOSITE of the sentence it belongs to (the
+# quantifier lives in the head). Judged separately, the tail is a
+# "complete" fragment the ranker may keep on its own -- a predicate without
+# its quantifier -- and the head's number is judged without its predicate.
+#
+# This relation is DETERMINISTIC recording-process evidence that two
+# candidates are ONE realization, never two competitors: (1) same source and
+# chronological, the tail starting within the same retry-adjacency bound the
+# restart rules already use (`_RESTART_MAXIMUM_GAP_SEC`); (2) the head is
+# grammatically incomplete: not `complete_idea`, no terminal punctuation,
+# and its LAST natural token is a function word that cannot end a sentence
+# (`_DANGLING_FUNCTION_WORDS`: articles, prepositions, conjunctions, the
+# relative "que"/"that"); (3) the tail begins in lower case -- the ASR's own
+# sentence-case signal that no new sentence started -- and carries at least
+# one natural token. The CALLER must also establish adjacency (no other
+# candidate of the same source between them); this function judges the pair
+# alone. A same-opening restart, a marker-introduced new point, a capitalised
+# new sentence or a punctuation-complete head are never a continuation. No
+# Video00 phrase, id or timestamp is read here.
+_DANGLING_FUNCTION_WORDS = frozenset({
+    # Spanish articles / prepositions / conjunctions / relatives
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al", "a", "en",
+    "con", "por", "para", "sin", "sobre", "entre", "hacia", "hasta", "desde", "que", "y",
+    "e", "o", "u", "ni", "como", "cuando", "donde", "mi", "mis", "tu", "tus", "su", "sus",
+    "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas", "lo", "le", "les", "se",
+    # English articles / prepositions / conjunctions / relatives
+    "the", "an", "of", "to", "in", "on", "at", "for", "with", "from", "by", "into", "onto",
+    "and", "or", "nor", "but", "that", "which", "who", "whose", "than", "as", "my", "your",
+    "our", "their", "his", "her", "its", "this", "these", "those",
+})
+_CONTINUATION_TERMINAL_PUNCT_RE = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
+_CONTINUATION_MAXIMUM_GAP_SEC = _RESTART_MAXIMUM_GAP_SEC
+
+
+def sentence_continuation(left: CandidateTake, right: CandidateTake) -> bool:
+    """True when `right` deterministically finishes the sentence `left`
+    stopped in the middle of -- see the module comment above. Adjacency
+    (no same-source candidate between the two) is the caller's check."""
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    if right.start < left.end - 0.03:
+        return False
+    if right.start - left.end > _CONTINUATION_MAXIMUM_GAP_SEC:
+        return False
+    if left.complete_idea:
+        return False
+    left_text = str(left.text or "").rstrip()
+    if not left_text or _CONTINUATION_TERMINAL_PUNCT_RE.search(left_text):
+        return False
+    left_tokens = _natural_tokens(left_text)
+    if not left_tokens or left_tokens[-1] not in _DANGLING_FUNCTION_WORDS:
+        return False
+    right_text = str(right.text or "").lstrip()
+    first_alpha = next((ch for ch in right_text if ch.isalpha()), None)
+    if first_alpha is None or not first_alpha.islower():
+        return False
+    if not _natural_tokens(right_text):
+        return False
+    return True
+
+
+def continuation_pairs(takes: Iterable[CandidateTake]) -> frozenset[frozenset[str]]:
+    """Every ADJACENT same-source candidate pair (consecutive in start order,
+    nothing of that source between them) that `sentence_continuation`
+    accepts, keyed order-insensitively. The one place adjacency is decided,
+    so reconcile and the cohesion pass can never disagree about which pairs
+    form a continuation chain."""
+    by_source: dict[str, list[CandidateTake]] = {}
+    for take in takes:
+        by_source.setdefault(take.source_asset_id, []).append(take)
+    pairs: set[frozenset[str]] = set()
+    for members in by_source.values():
+        ordered = sorted(members, key=lambda t: (t.start, t.end, t.clip_id))
+        for left, right in zip(ordered, ordered[1:]):
+            if sentence_continuation(left, right):
+                pairs.add(frozenset((left.clip_id, right.clip_id)))
+    return frozenset(pairs)
+
+
 def group_takes(
     takes: Iterable[CandidateTake],
     *,

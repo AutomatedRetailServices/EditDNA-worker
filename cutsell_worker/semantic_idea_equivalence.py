@@ -67,6 +67,20 @@ class SemanticEquivalenceArbiter(Protocol):
     def check(self, request: IdeaEquivalenceRequest) -> IdeaEquivalenceResult: ...
 
 
+# The ONE bar at which a PAIRWISE same-idea verdict from this arbiter is
+# trusted to carry a discard-side consequence: D-058 Phase 2's own floor
+# (`realization_resolver._HIGH_CONFIDENCE_SEMANTIC_WINNER_THRESHOLD`, the
+# same 0.85 `pipeline._semantic_best_take` requires before it overrides a
+# local pick), reused by D-061's lost-atom paraphrase credit and (D-289.1)
+# by IdeaClusterer's contained-restatement acceptance. Kept in this module so
+# grouping and StoryValidator can never disagree about what "high-confidence
+# same idea" means for one and the same merge record. Distinct from
+# `take_grouping_provider._BRIDGE_MIN_COHESION_CONFIDENCE` (0.90), which is
+# the bar for a COMPONENT-level joined-text probe answer, a different
+# evidence class.
+SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD = 0.85
+
+
 @dataclass(frozen=True)
 class SemanticEquivalenceGatePolicy:
     """Batch/cost bounds. Values match hybrid_editorial.HybridGatePolicy's

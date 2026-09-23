@@ -192,7 +192,9 @@ from .semantic_claims import (
     extract_claims,
     resolve_ambiguous_coverage,
 )
+from .continuation_chain import evaluation_clip
 from .semantic_idea_equivalence import (
+    SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD,
     IdeaEquivalencePair,
     IdeaEquivalenceRequest,
     SemanticEquivalenceArbiter,
@@ -548,7 +550,7 @@ def _missing_idea_coverage(draft) -> list[dict]:
 # behavior is completely unchanged for that class of clip. A genuinely
 # additive fact inside the same idea group also clears nothing (no pairwise
 # arbiter record confirms it) and remains blocking, unchanged.
-_SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD = 0.85  # matches D-058 Phase 2's own bar
+_SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD = SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD  # D-058 Phase 2's own bar, shared (D-289.1)
 
 
 def _clip_id_to_group_members(groups) -> dict[str, tuple[str, tuple[str, ...]]]:
@@ -1132,7 +1134,13 @@ def _lost_critical_claims(
     for group in groups:
         ranked = list(group.get("ranked") or ())
         member_ids = [str(row.get("clip_id") or "") for row in ranked]
-        members = [(cid, all_clips[cid]) for cid in member_ids if cid in all_clips]
+        # D-289.1: a continuation-chain head is judged on its complete
+        # sentence (`realization_text`), never the truncated head alone.
+        rows_by_id = {str(row.get("clip_id") or ""): row for row in (group.get("ranked") or ())}
+        members = [
+            (cid, evaluation_clip(rows_by_id.get(cid), all_clips[cid]))
+            for cid in member_ids if cid in all_clips
+        ]
         if len(members) < 2:
             continue
         winners = [cid for cid, _clip in members if cid in selected_ids]

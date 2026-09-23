@@ -102,6 +102,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from .continuation_chain import continuation_member_ids, evaluation_clip, rows_by_clip_id
 from .contradiction_signal import any_pair_contradicts
 from .final_sibling_grouping import _content, _numbers
 from .semantic_atom_importance import _TEMPORAL_ASIDE_MARKERS, _clause_has_any, _looks_like_year
@@ -604,7 +605,13 @@ def apply_claim_coverage_best_take(
     dominance_resolutions: list[dict] = []
     hindsight_alignment_diagnostics: list[dict] = []
 
-    def move(clip_id: str, target: str) -> None:
+    # D-289.1: a continuation chain is judged on its complete sentence and
+    # moves as a unit -- see continuation_chain.py.
+    rows_by_id = rows_by_clip_id(groups)
+
+    def _move_one(clip_id: str, target: str) -> None:
+        if clip_id not in all_clips:
+            return
         clip = all_clips[clip_id]
         new_selected.pop(clip_id, None)
         new_alternates.pop(clip_id, None)
@@ -612,11 +619,20 @@ def apply_claim_coverage_best_take(
         {"select": new_selected, "swap": new_alternates, "discard": new_discarded}[target][clip_id] = \
             replace(clip, selected=(target == "select"))
 
+    def move(clip_id: str, target: str) -> None:
+        _move_one(clip_id, target)
+        for tail_id in continuation_member_ids(rows_by_id.get(clip_id)):
+            _move_one(tail_id, target)
+
     for group in groups:
         group_id = group.get("group_id")
         ranked = list(group.get("ranked") or ())
         member_ids = [str(row.get("clip_id") or "") for row in ranked]
-        members = [(cid, all_clips[cid]) for cid in member_ids if cid in all_clips]
+        members = [
+            (cid, evaluation_clip(rows_by_id.get(cid), all_clips[cid]))
+            for cid in member_ids if cid in all_clips
+        ]
+        evaluation_by_id = dict(members)
         if len(members) < 2:
             continue
 
@@ -660,7 +676,7 @@ def apply_claim_coverage_best_take(
             # behavior" (no forced pick, family left exactly as it was).
             continue
         winner_id = current_winners[0]
-        winner_clip = all_clips[winner_id]
+        winner_clip = evaluation_by_id[winner_id]
 
         critical_claims = _group_critical_claims(members, clause_role_arbiter=clause_role_arbiter)
         if not critical_claims:
@@ -701,7 +717,7 @@ def apply_claim_coverage_best_take(
                 candidate_clip_id=full_coverage_candidate,
                 other_coverers=other_coverers,
                 winner_clip=winner_clip,
-                candidate_clip=all_clips[full_coverage_candidate],
+                candidate_clip=evaluation_by_id[full_coverage_candidate],
             ):
                 # Suppressed: every missing claim was incidental and
                 # source-exclusive, so the current winner is left exactly

@@ -168,6 +168,9 @@ def process_universal_clean_cut_sources(
         whole_video_provider=whole_video_provider,
         editorial_judge=editorial_judge,
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+        # D-289.1: grouping's contained-restatement proof consults the same
+        # bounded claim-equivalence arbiter the stages below already use.
+        claim_equivalence_arbiter=claim_equivalence_arbiter,
         progress=progress,
         # D-097.C/E: physical edge/interior cleanup runs ONCE, after Freeze,
         # on the final KEEP set (boundary_engine_pass.py) -- the draft-time
