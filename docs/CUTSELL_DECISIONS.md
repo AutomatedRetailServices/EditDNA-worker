@@ -76951,3 +76951,186 @@ DO NOT SWITCH BRANCHES.
 DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
+
+## D-288.2 — Second Structural Correction to D-288/D-288.1 (offline
+implementation, same isolated branch `audit/watch-listen-delivery-
+authority`, off verified HEAD
+`02275abedd6c88e360fd33e62def4205347bd649`)
+
+**NOT integrated into `cutsell/mobile-v1-clean`. NOT merged. `main` and
+PR #25 (OPEN/DRAFT/UNMERGED) untouched. iOS work untouched. No RAW
+dispatched. `perceptual_repair_cycle.py` remains disconnected from every
+live caller.**
+
+**Objective.** Product Owner review of D-288.1 found the approval flow
+still had three real blockers before integration could even be proposed.
+All three closed here; `perceptual_repair_cycle.py` was deliberately NOT
+touched behaviorally -- only its own two newly-identified pending issues
+were documented, per explicit instruction not to declare it ready to
+activate.
+
+1. **REVOCATION.** `pending_watch_listen_review.apply_human_approval
+   (approved=False)` set `approval_status=REJECTED` but left `watch_
+   listen_status` at whatever it already was -- if a PRIOR call had
+   already promoted it to `HUMAN_APPROVED`, a later rejection left that
+   field unchanged, and `export_job.resume_delivery_after_approval`
+   checked only `watch_listen_status`, so an approve -> reject sequence
+   still delivered. Fixed at the root, not with a second ad hoc check:
+   `PendingWatchListenRecord` gained a NEW, immutable `automated_watch_
+   listen_status` field, set once at `persist_pending_review` time to
+   the ORIGINAL automated perceptual verdict and never mutated again --
+   distinct from the CURRENT, mutable `watch_listen_status`. A rejection
+   now explicitly reverts `watch_listen_status` back to `automated_watch_
+   listen_status`, so a contradictory state (`REJECTED` approval sitting
+   next to a `HUMAN_APPROVED` status) can no longer exist. `resume_
+   delivery_after_approval` still gates on both `watch_listen_status ==
+   HUMAN_APPROVED` AND `approval_status == APPROVED` together -- a
+   revoked record fails that check and delivers nothing. Mandatory test
+   (`test_approve_then_reject_then_resume_delivers_nothing`) proves the
+   exact sequence the audit named: approve -> reject -> resume raises
+   `PendingReviewError`, zero bytes uploaded to the tenant-safe prefix.
+   A follow-on test proves re-approval after a revocation still works
+   (the record is not poisoned, only its current status is corrected).
+2. **REAL AUTHENTICATED ENTRY.** D-288.1's approval/resume functions
+   were correct in isolation but had no real caller -- "authenticated
+   flow" was asserted from helper-level tests alone, exactly the claim
+   the audit rejected. Fixed with real, wired handlers, never a second
+   auth primitive: new `cutsell_app/pending_review_routes.py` (`GET
+   .../pending-review`, `POST .../pending-review/decision`, `POST
+   .../pending-review/resume-delivery`), registered in `main.py`,
+   deriving `requesting` EXCLUSIVELY from `request.state.auth_user_id`
+   -- the value the REAL `AuthScopeMiddleware` sets from a verified
+   bearer session -- never from a path/query/body id or label, matching
+   the existing pattern `main.py`'s own `get_job`/`cancel_processing_
+   job` already establish. The decision request body has no `approver`/
+   `user_id` field at all; the approver is always the authenticated
+   caller. Separately, `assert_delivery_access`'s own pre-existing
+   `requesting is None -> requesting=record_ownership` bypass (a
+   deliberate D-269A behavior for the trusted same-job worker context)
+   was confirmed correct and left UNCHANGED there -- but `apply_human_
+   approval`, `resume_delivery_after_approval`, and a new `get_pending_
+   review_for_authenticated_caller` had each been copying that same
+   bypass pattern inappropriately for a LATER, externally-triggered
+   operation. Fixed by removing the `None` default from all three and
+   adding an explicit `_require_authenticated_requesting` guard (raises
+   before any record is even loaded) -- enforced at TWO independent
+   layers: the HTTP boundary (401 before a route body ever runs) and
+   again inside `pending_watch_listen_review.py`'s own functions,
+   neither layer trusting the other to be the only place the check
+   exists. Proven over REAL HTTP (`TestClient` + the real middleware,
+   never a bare function call) in new `test_cutsell_d288_pending_review_
+   http_routes.py`: no session -> 401 on all three endpoints; a
+   mismatched authenticated user -> 404, never another user's record;
+   an `approver` field smuggled into the body is silently dropped
+   (schema has no such field); a `user_id` field smuggled into the body
+   is separately rejected by `AuthScopeMiddleware`'s OWN pre-existing
+   cross-check, 403, before this router's own code ever runs (a second,
+   independent proof "never a substitute id" holds at more than one
+   layer); reject-then-resume over real HTTP delivers nothing (422, zero
+   uploaded bytes); a stale/tampered decision body is rejected (422).
+3. **FULL FINALIZATION, NO DUPLICATION.** `resume_delivery_after_
+   approval` uploaded the approved bytes but never registered a render
+   version, finished the project, or notified -- and had no protection
+   against a repeated call re-doing any of that. Fixed by extracting the
+   exact finalization block `run_export_job` already performs on a
+   same-job delivery (`add_render_version` + `safe_update_project
+   (state="finished")` + `_safe_notify(kind="render_finished")`) into a
+   single shared `_finalize_successful_delivery` function, now called by
+   BOTH paths -- one implementation, never a second guess. Idempotency:
+   `PendingWatchListenRecord` gained a `resumed_delivery_result` field,
+   written once on the FIRST successful resume; a repeated resume call
+   returns that SAME stored dict without calling `_finalize_successful_
+   delivery` again (`add_render_version` mints a new UUID and `_safe_
+   notify` fires a new event on every call, so re-running either on a
+   repeat request would be a real duplicate, not a harmless no-op --
+   unlike the S3 upload itself, which is naturally idempotent because
+   `build_tenant_safe_export_key` is deterministic). Proven by two new
+   tests: `test_resumed_delivery_registers_render_version_and_finishes_
+   project` (asserts the shared function's calls via monkeypatched call-
+   tracking) and `test_resume_is_idempotent_no_duplicate_version_or_
+   notification` (asserts a second resume call does not re-invoke `add_
+   render_version`/`_safe_notify`). A separate `test_resume_refuses_a_
+   modified_pending_artifact` proves a tampered private object (bytes
+   changed after approval) is caught by the pre-existing hash re-verify
+   before any of this finalization runs at all.
+
+**`perceptual_repair_cycle.py`: two new pending issues documented, no
+behavior changed, remains disconnected.** Per explicit instruction, this
+module's own logic was NOT touched. Its module docstring now records two
+additional gaps found on top of D-288.1's three preconditions, both still
+open:
+(a) `run_perceptual_repair_cycle` reconstructs `current_segments` for the
+next loop iteration from `segments_as_rendered(new_segments, renderer_
+trims)` alone -- it never reads or cross-checks `qc_result.attempts[-1].
+input_boundary_state`, `live_render_qc.RenderAttemptRecord`'s own
+authoritative snapshot of the exact segment state that attempt actually
+verified as PASS; a divergence between the two would let this module
+re-review a segment reconstruction of its own making rather than the
+state the technical QC pass it just trusted actually verified.
+(b) no per-attempt content identity (`output_sha256`/render identity)
+binds a review to the exact bytes it evaluated; `current_output_path`
+can be the same path across repair attempts (the renderer overwrites it
+in place), so a caller that persists a review keyed by that path could
+later associate an earlier review with bytes a later attempt has since
+overwritten. Latent, not exploited today (this module has no live
+caller), but it must close before this cycle is ever wired to persist or
+hand a review across a process boundary. **This module is NOT ready to
+activate.**
+
+**Report claims corrected (D-288.1's own text superseded by this
+entry):** D-288.1 correctly reported the render/pending-review
+persistence fix as complete -- that stands, confirmed unchanged and
+re-verified here. It did NOT claim the approval flow was authenticated
+end-to-end, but any reading of its item 2 as having proven a real
+authenticated caller would be WRONG -- that item built the correct
+primitives (`apply_human_approval`, ownership scope reuse) but wired
+them to no real handler; "flujo autenticado" is only true as of THIS
+entry, with real HTTP-level tests, not helper-level tests alone.
+
+### Verification run
+
+- New/expanded test files: `test_cutsell_d288_pending_review_and_
+  approval.py` (25, up from 14 -- 11 new: revocation, re-approval after
+  revocation, `requesting=None` rejection on all three entry points,
+  `get_pending_review_for_authenticated_caller` success/denial,
+  finalization-reuse call-tracking, idempotent-resume, tampered-artifact
+  refusal, and the full export -> approve -> resume -> finished
+  walkthrough). `test_cutsell_d288_pending_review_http_routes.py` (10,
+  new): the same three blockers proven over real HTTP through the real
+  `AuthScopeMiddleware`, not a bare function call.
+- `compileall` over the touched files (`pending_watch_listen_review.py`,
+  `export_job.py`, `pending_review_routes.py`, `main.py`, `perceptual_
+  repair_cycle.py`): clean.
+- `perceptual_repair_cycle.py` confirmed to still have zero callers
+  outside its own test file (`grep` over `cutsell_worker/`, `cutsell_
+  app/`) -- disconnection unchanged by this entry.
+- Targeted regression (both D-288.2 test files plus `test_cutsell_d288_
+  perceptual_repair_cycle.py`, `test_cutsell_clean_worker_export.py`,
+  `test_cutsell_clean_worker_auth.py`): 61 passed, 0 failed.
+- Full `tests/` suite (excluding the one pre-existing, unrelated broken
+  collection file `test_semantic_stitch.py`): IN PROGRESS at the time
+  this entry was written; result to be recorded in a follow-up commit,
+  same two-step pattern D-288.1 itself used.
+
+### Verdict
+
+**CODE FIXED. TESTS PASS (61/61 targeted; full-suite result pending, see
+above). CI GREEN: not run (no CI dispatch in this gate).** RAW COMPLETE:
+N/A. ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
+
+**Product Owner decision required:** YES, unchanged in kind from D-288/
+D-288.1: (a) integrating this branch; (b) live-wiring `perceptual_repair_
+cycle.py` (still disconnected, now with two additional documented pending
+issues beyond the three D-288.1 preconditions, none of them closed here);
+(c) any policy change for duplications/prosody named in the original
+audit.
+
+**Exact next step:** await the full-suite result (follow-up commit), then
+Product Owner review of this diff before any integration.
+
+Then STOP.
+
+DO NOT SWITCH BRANCHES.
+DO NOT MERGE.
+DO NOT REBASE.
+DO NOT TOUCH cutsell/mobile-v1-clean.

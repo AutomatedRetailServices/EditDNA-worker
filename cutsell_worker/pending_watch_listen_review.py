@@ -117,13 +117,35 @@ class PendingWatchListenRecord:
     plan_id: str
     plan_version: int
     pending_s3_uri: str
-    watch_listen_status: str
+    # D-288.2 (correction): the ORIGINAL, real automated perceptual verdict
+    # at persist time -- set ONCE here and NEVER mutated afterward by
+    # `apply_human_approval`. `watch_listen_status` below is the CURRENT
+    # EFFECTIVE status a human decision can move; a REJECTION (including a
+    # revocation of a prior APPROVAL) always reverts `watch_listen_status`
+    # back to THIS field, never leaves it stuck at HUMAN_APPROVED. See the
+    # module's own D-288.2 section for the exact bug this closes.
+    automated_watch_listen_status: str = ""
+    watch_listen_status: str = ""
     perceptual_review: dict = field(default_factory=dict)
     created_at: float = 0.0
+    # D-288.2 (blocker 3): carried from the original render so a LATER
+    # resumed delivery can reuse the exact same finalization (render-
+    # version registration) the same-job path uses, without needing the
+    # original in-memory `draft` object (which no longer exists by the
+    # time a human approves this later).
+    selected_count: int = 0
+    text_overlay_count: int = 0
+    media_overlay_count: int = 0
     approval_status: str = APPROVAL_STATUS_NONE
     approver: str | None = None
     approved_at: float | None = None
     resumed_delivery_at: float | None = None
+    # D-288.2 (finalization idempotency): set ONCE, the first time `export_
+    # job.resume_delivery_after_approval` successfully finalizes delivery
+    # for this record. A repeated resume call for an already-resumed
+    # record returns THIS stored result instead of re-registering a render
+    # version or re-firing a "finished" notification.
+    resumed_delivery_result: dict | None = None
 
     @property
     def ownership(self) -> "tsd.DeliveryOwnershipScope":
@@ -154,6 +176,9 @@ def persist_pending_review(
     client=None,
     s3_client=None,
     store_export_fn=None,
+    selected_count: int = 0,
+    text_overlay_count: int = 0,
+    media_overlay_count: int = 0,
 ) -> PendingWatchListenRecord:
     """Finding 1: uploads the ACTUAL rendered file to a PRIVATE location
     and records recoverable metadata, so it survives the caller's own
@@ -195,9 +220,13 @@ def persist_pending_review(
         render_identity=render_identity, output_sha256=output_sha256,
         plan_id=plan_id, plan_version=int(plan_version),
         pending_s3_uri=stored["export_uri"],
+        automated_watch_listen_status=watch_listen_status,
         watch_listen_status=watch_listen_status,
         perceptual_review=dict(perceptual_review or {}),
         created_at=time.time(),
+        selected_count=int(selected_count),
+        text_overlay_count=int(text_overlay_count),
+        media_overlay_count=int(media_overlay_count),
     )
     target = _redis_client(client)
     target.set(
@@ -225,12 +254,45 @@ def _save(record: PendingWatchListenRecord, *, client=None) -> None:
     )
 
 
+def _require_authenticated_requesting(requesting: "tsd.DeliveryOwnershipScope | None") -> "tsd.DeliveryOwnershipScope":
+    """D-288.2 (finding 2 correction): `tenant_safe_delivery.assert_
+    delivery_access` itself silently BYPASSES its own check when
+    `requesting is None` (a deliberate, documented legacy behavior for a
+    genuinely auth-disabled local/test context elsewhere in this
+    codebase). This module's own operations -- querying, approving, and
+    resuming delivery of a pending review -- are never allowed that
+    bypass: `requesting=None` is rejected outright, here, before
+    `assert_delivery_access` is ever reached, so this gate can never be
+    silently skipped regardless of what that shared helper's own contract
+    allows for other callers."""
+    if requesting is None:
+        raise PendingReviewError("requesting_identity_required_no_none_bypass")
+    return requesting
+
+
+def get_pending_review_for_authenticated_caller(
+    *, user_id: str, project_id: str, job_id: str, requesting: "tsd.DeliveryOwnershipScope | None", client=None,
+) -> PendingWatchListenRecord | None:
+    """Finding 2: "consulta/revisión privada" -- the ONE real, authenticated
+    entry point for READING a pending review (its perceptual findings,
+    current status). `requesting` must be a real, authenticated identity
+    (never `None`, never derived from the `user_id`/`project_id`/`job_id`
+    being looked up -- those are the RESOURCE being addressed, not the
+    caller's own identity) and must match the record's own ownership."""
+    _require_authenticated_requesting(requesting)
+    record = load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
+    if record is None:
+        return None
+    tsd.assert_delivery_access(requesting=requesting, record_ownership=record.ownership)
+    return record
+
+
 def apply_human_approval(
     *,
     user_id: str,
     project_id: str,
     job_id: str,
-    requesting: "tsd.DeliveryOwnershipScope",
+    requesting: "tsd.DeliveryOwnershipScope | None",
     approved: bool,
     approver: str,
     expected_render_identity: str,
@@ -242,10 +304,27 @@ def apply_human_approval(
     """Finding 2: the ONE real approval entry point. See module docstring
     for the exact fail-closed contract. Returns the updated record on
     success; raises `PendingReviewError`/`PermissionError` naming the
-    exact reason on any rejection -- never a silent no-op."""
+    exact reason on any rejection -- never a silent no-op.
+
+    `requesting` MUST be a real, authenticated identity resolved by the
+    caller's own auth layer (in production, `cutsell_app.pending_review_
+    routes`'s handlers resolve it from `request.state.auth_user_id`,
+    itself set by `AuthScopeMiddleware` from a verified bearer session --
+    never from a request body/query field). `None` is rejected outright
+    (`_require_authenticated_requesting`), never silently bypassed.
+
+    `approver` MUST likewise be the caller's own resolved authenticated
+    identity, never a client-supplied free-text label -- this function
+    cannot itself verify that (it has no access to the request), which is
+    exactly why "no declares flujo autenticado basándote únicamente en
+    pruebas de helpers" requires the REAL route handler (not this
+    function's own unit tests) to be the thing that actually enforces it;
+    see `cutsell_app/pending_review_routes.py`."""
     from .perceptual_watch_listen import (
         WATCH_LISTEN_BLOCKED, WATCH_LISTEN_HUMAN_APPROVED, WATCH_LISTEN_HUMAN_REVIEW_REQUIRED, WATCH_LISTEN_SYSTEM_PASS,
     )
+
+    _require_authenticated_requesting(requesting)
 
     record = load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
     if record is None:
@@ -277,8 +356,21 @@ def apply_human_approval(
         raise PendingReviewError("approval_bound_to_different_artifact_or_plan")
 
     if not approved:
+        # D-288.2 (blocker 1, the revocation bug): a rejection -- whether
+        # this is a first-time decline of a HUMAN_REVIEW_REQUIRED record
+        # or a REVOCATION of a PRIOR approval -- always reverts `watch_
+        # listen_status` back to the record's own immutable `automated_
+        # watch_listen_status`. Before this fix, rejecting an ALREADY-
+        # APPROVED record left `watch_listen_status` unchanged at HUMAN_
+        # APPROVED (only `approval_status` moved to REJECTED), which
+        # `resume_delivery_after_approval`'s own single-field check would
+        # have silently accepted as still-deliverable.
         updated = dataclasses.replace(
-            record, approval_status=APPROVAL_STATUS_REJECTED, approver=approver_clean, approved_at=time.time(),
+            record,
+            watch_listen_status=record.automated_watch_listen_status,
+            approval_status=APPROVAL_STATUS_REJECTED,
+            approver=approver_clean,
+            approved_at=time.time(),
         )
         _save(updated, client=client)
         return updated

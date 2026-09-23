@@ -193,6 +193,12 @@ def _tenant_safe_deliver(
             # upload path below) -- never a second, independent reference.
             store_export_fn=store_export,
             client=pending_review_redis_client,
+            # D-288.2 (blocker 3): carried so a LATER resumed delivery can
+            # reuse the exact same finalization this job's own same-job
+            # path uses, without needing this `draft` object again.
+            selected_count=len(draft.selected) if draft is not None else 0,
+            text_overlay_count=len(getattr(draft, "text_overlays", ()) or ()) if draft is not None else 0,
+            media_overlay_count=len(getattr(draft, "media_overlays", ()) or ()) if draft is not None else 0,
         )
         raise PendingHumanWatchListenReview(pending_record)
 
@@ -328,37 +334,64 @@ def resume_delivery_after_approval(
     user_id: str,
     project_id: str,
     job_id: str,
-    requesting: "tsd.DeliveryOwnershipScope | None" = None,
+    requesting: "tsd.DeliveryOwnershipScope | None",
     client=None,
     s3_client=None,
 ) -> dict:
-    """D-288 (finding 2): "reanudación de entrega" -- given a pending
-    review record that has ALREADY been approved via `pending_watch_
-    listen_review.apply_human_approval` (this function performs NO
-    approval logic itself and re-derives nothing about that decision; it
-    only trusts the persisted record's own `watch_listen_status`, which
-    `apply_human_approval` is the ONE place that can ever set to
-    `WATCH_LISTEN_HUMAN_APPROVED` -- see that function's own fail-closed
-    contract), downloads the private pending artifact and completes the
-    SAME tenant-safe upload/verify/evaluate seam `_tenant_safe_deliver`
-    uses for a same-job delivery (`_upload_verify_and_finalize_delivery`
-    -- one implementation, not a second guess). Verifies the downloaded
-    bytes still hash to the record's own `output_sha256` before ever
-    uploading them as the tenant-safe object -- the private pending
-    object is never trusted blindly just because it was found at the
-    expected key."""
+    """D-288.2 (finding 2, blockers 1 and 3): "reanudación de entrega" --
+    given a pending review record that has ALREADY been approved via
+    `pending_watch_listen_review.apply_human_approval` (this function
+    performs NO approval logic itself and re-derives nothing about that
+    decision; it only trusts the persisted record's own `watch_listen_
+    status` AND `approval_status`, which `apply_human_approval` is the
+    ONE place that can ever set), downloads the private pending artifact
+    and completes the SAME tenant-safe upload/verify/evaluate/finalize
+    seam `run_export_job`'s own same-job path uses -- one implementation,
+    never a second guess, so a resumed delivery reaches the exact same
+    finished state (registered render version, project `state="finished"`,
+    a real `render_finished` notification).
+
+    `requesting` is REQUIRED (no default, `None` explicitly rejected by
+    `pending_watch_listen_review._require_authenticated_requesting`) --
+    this is a LATER, separate operation triggered by a real human's own
+    authenticated request, never the trusted same-job worker context
+    `_tenant_safe_deliver`'s own `requesting=None -> requesting=ownership`
+    default is deliberately scoped to (see that function's own docstring
+    for why that default is safe there and not here). Never derive it
+    from `user_id`/`project_id`/`job_id` -- those name the RESOURCE being
+    acted on, not the caller's own identity; the real route handler
+    (`cutsell_app/pending_review_routes.py`) resolves `requesting` from
+    `request.state.auth_user_id`, never from a request body/query field.
+
+    Idempotent (blocker 3, "evita duplicados al repetir la petición"): a
+    record whose `resumed_delivery_result` is already set (a PRIOR
+    successful resume) returns that STORED result directly -- no re-
+    upload, no second render-version registration, no duplicate
+    notification."""
+    pwl._require_authenticated_requesting(requesting)
+
     from .perceptual_watch_listen import WATCH_LISTEN_HUMAN_APPROVED
 
     ownership = tsd.DeliveryOwnershipScope(user_id=user_id, project_id=project_id, job_id=job_id)
-    if requesting is None:
-        requesting = ownership
 
     record = pwl.load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
     if record is None:
         raise pwl.PendingReviewError("no_pending_review_found")
     tsd.assert_delivery_access(requesting=requesting, record_ownership=record.ownership)
-    if record.watch_listen_status != WATCH_LISTEN_HUMAN_APPROVED:
-        raise pwl.PendingReviewError(f"pending_review_not_approved:{record.watch_listen_status}")
+
+    if record.resumed_delivery_result is not None:
+        return dict(record.resumed_delivery_result)
+
+    # D-288.2 (blocker 1): BOTH fields must agree -- never trust `watch_
+    # listen_status` alone (the exact single-field check the revocation
+    # bug slipped through). A record whose approval was later revoked has
+    # `watch_listen_status` reverted (by `apply_human_approval`'s own
+    # fix) but this redundant check means even a hypothetical future bug
+    # in that revert would still be caught here, never silently deliver.
+    if record.watch_listen_status != WATCH_LISTEN_HUMAN_APPROVED or record.approval_status != pwl.APPROVAL_STATUS_APPROVED:
+        raise pwl.PendingReviewError(
+            f"pending_review_not_approved:{record.watch_listen_status}:{record.approval_status}"
+        )
 
     with tempfile.TemporaryDirectory(prefix="cutsell-resume-delivery-") as directory:
         local_path = str(Path(directory) / "cutsell-resume-export.mp4")
@@ -390,15 +423,109 @@ def resume_delivery_after_approval(
             )
             raise TenantSafeDeliveryBlocked(blocked)
 
-        result = _upload_verify_and_finalize_delivery(
+        delivery = _upload_verify_and_finalize_delivery(
             local_path=local_path, ownership=ownership, requesting=requesting,
             render_identity=record.render_identity, local_delivery=local_delivery,
             project_id=project_id, user_id=user_id, job_id=job_id,
             watch_listen_status=record.watch_listen_status,
         )
 
-        pwl._save(dataclasses.replace(record, resumed_delivery_at=time.time()), client=client)
-        return result
+        # D-288.2 (blocker 3): reuse the SAME finalization the same-job
+        # path uses -- render version registered, project "finished",
+        # real notification fired. Job-start timestamp is unknown here
+        # (this is not itself a fresh render job); `None` is `project_
+        # store.update_project`'s own documented "no ordering evidence,
+        # allow through" sentinel, not a fabricated value.
+        finalized = _finalize_successful_delivery(
+            user_id=user_id, project_id=project_id, job_id=job_id, job_started_at=None,
+            delivery=delivery, selected_count=record.selected_count,
+            text_overlay_count=record.text_overlay_count, media_overlay_count=record.media_overlay_count,
+        )
+
+        pwl._save(
+            dataclasses.replace(record, resumed_delivery_at=time.time(), resumed_delivery_result=finalized),
+            client=client,
+        )
+        return finalized
+
+
+def _finalize_successful_delivery(
+    *,
+    user_id: str,
+    project_id: str,
+    job_id: str,
+    job_started_at: float | None,
+    delivery: dict,
+    selected_count: int,
+    text_overlay_count: int,
+    media_overlay_count: int,
+) -> dict:
+    """D-288.2 (blocker 3): the ONE finalization sequence for ANY
+    successfully, verifiably delivered candidate -- registers the render
+    version, moves the project to `state="finished"`, and fires the
+    `render_finished` notification. Shared by `run_export_job`'s own
+    same-job delivery and `resume_delivery_after_approval`'s later-job
+    resumed delivery -- one implementation, never a second guess, so a
+    resumed delivery reaches the EXACT SAME finished state a same-job
+    delivery does (registered render version, "finished" project state,
+    a real notification an approving human/mobile client can observe)."""
+    version_payload: dict = {}
+    version = None
+    try:
+        version = add_render_version(
+            user_id=user_id,
+            project_id=project_id,
+            export_uri=delivery["export_uri"],
+            size_bytes=delivery["size_bytes"],
+            selected_count=selected_count,
+            text_overlay_count=text_overlay_count,
+            media_overlay_count=media_overlay_count,
+        )
+        version_payload = {
+            "render_version_status": "saved",
+            "render_version_id": version["render_version_id"],
+        }
+    except Exception as exc:
+        version_payload = {
+            "render_version_status": "degraded",
+            "render_version_reason": exc.__class__.__name__,
+        }
+
+    project_tracking = safe_update_project(
+        user_id=user_id,
+        project_id=project_id,
+        state="finished",
+        latest_job_id=job_id,
+        latest_job_started_at=job_started_at,
+        render_version=(
+            {
+                "render_version_id": version["render_version_id"],
+                "created_at": version["created_at"],
+                "size_bytes": version["size_bytes"],
+            }
+            if version else None
+        ),
+    )
+    notification = _safe_notify(
+        user_id=user_id,
+        project_id=project_id,
+        kind="render_finished",
+        payload={
+            "job_id": job_id,
+            "render_version_id": version["render_version_id"] if version else None,
+        },
+    )
+    return {
+        "project_id": project_id,
+        "state": "finished",
+        "selected_count": selected_count,
+        "text_overlay_count": text_overlay_count,
+        "media_overlay_count": media_overlay_count,
+        "project_tracking": project_tracking,
+        "notification": notification,
+        **version_payload,
+        **delivery,
+    }
 
 
 def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | None = None) -> dict:
@@ -526,62 +653,15 @@ def run_export_job(payload: dict) -> dict:
                 output_path=output, plan=plan, draft=draft, local_paths=local_paths, qc_result=qc_result,
                 project_id=project_id, user_id=user_id, job_id=job_id,
             )
-            version_payload = {}
-            version = None
-            try:
-                version = add_render_version(
-                    user_id=user_id,
-                    project_id=project_id,
-                    export_uri=delivery["export_uri"],
-                    size_bytes=delivery["size_bytes"],
-                    selected_count=len(draft.selected),
-                    text_overlay_count=len(draft.text_overlays),
-                    media_overlay_count=len(draft.media_overlays),
-                )
-                version_payload = {
-                    "render_version_status": "saved",
-                    "render_version_id": version["render_version_id"],
-                }
-            except Exception as exc:
-                version_payload = {
-                    "render_version_status": "degraded",
-                    "render_version_reason": exc.__class__.__name__,
-                }
-
-            project_tracking = safe_update_project(
-                user_id=user_id,
-                project_id=project_id,
-                state="finished",
-                latest_job_id=job_id,
-                latest_job_started_at=job_started_at,
-                render_version=(
-                    {
-                        "render_version_id": version["render_version_id"],
-                        "created_at": version["created_at"],
-                        "size_bytes": version["size_bytes"],
-                    }
-                    if version else None
-                ),
-            )
-            notification = _safe_notify(
-                user_id=user_id,
-                project_id=project_id,
-                kind="render_finished",
-                payload={
-                    "job_id": job_id,
-                    "render_version_id": version["render_version_id"] if version else None,
-                },
+            finalized = _finalize_successful_delivery(
+                user_id=user_id, project_id=project_id, job_id=job_id, job_started_at=job_started_at,
+                delivery=delivery, selected_count=len(draft.selected),
+                text_overlay_count=len(draft.text_overlays), media_overlay_count=len(draft.media_overlays),
             )
             publish("finished", 100)
             return {
-                "project_id": project_id,
-                "state": "finished",
-                "selected_count": len(draft.selected),
-                "text_overlay_count": len(draft.text_overlays),
-                "media_overlay_count": len(draft.media_overlays),
+                **finalized,
                 "project_tracking_start": tracking_start,
-                "project_tracking": project_tracking,
-                "notification": notification,
                 # D-030: the delivered candidate's exact plan identity and
                 # post-render QC/repair history.
                 "post_render_qc_status": qc_result.status,
@@ -589,8 +669,6 @@ def run_export_job(payload: dict) -> dict:
                 "plan_version": qc_result.plan_version,
                 "semantic_hash": qc_result.semantic_hash,
                 "render_attempt_count": len(qc_result.attempts),
-                **version_payload,
-                **delivery,
             }
     except PendingHumanWatchListenReview as exc:
         # D-288 (finding 1): a technically-clean candidate held for human

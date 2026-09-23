@@ -15,6 +15,7 @@ from cutsell_app.job_retry_routes import router as job_retry_router
 from cutsell_app.multipart_routes import router as multipart_router
 from cutsell_app.notification_routes import router as notification_router
 from cutsell_app.overlay_routes import router as overlay_router
+from cutsell_app.pending_review_routes import router as pending_review_router
 from cutsell_app.project_routes import router as project_router
 from cutsell_app.render_version_routes import router as render_version_router
 from cutsell_app.text_routes import router as text_router
@@ -64,6 +65,7 @@ app.include_router(job_retry_router)
 app.include_router(feedback_router)
 app.include_router(batch_router)
 app.include_router(notification_router)
+app.include_router(pending_review_router)
 
 
 class UploadPresignRequest(BaseModel):

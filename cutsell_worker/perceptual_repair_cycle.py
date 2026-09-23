@@ -110,9 +110,59 @@ of them delegated to `repair_segment_for_finding`'s own internal checks:
    segment_for_finding`'s internal (trailing-edge-only, silence-based,
    not word-based) protection as sufficient on its own.
 
+## STILL DISCONNECTED (D-288.2 audit) -- two more pending issues found on
+## top of the D-288 preconditions above; this module remains NOT ready to
+## activate
+
+1. **`run_perceptual_repair_cycle` ignores the technical QC's own
+   `input_boundary_state` when reconstructing segments for the next
+   review.** After a repair is applied and re-rendered (line ~484 below),
+   this function rebuilds `current_segments` for the NEXT loop iteration
+   from `segments_as_rendered(new_segments, renderer_trims)` alone --
+   `renderer_trims` being only the renderer's OWN additional trailing
+   trims off `qc_result.attempts[-1]`. It never reads or cross-checks
+   `qc_result.attempts[-1].input_boundary_state` (`live_render_qc.
+   RenderAttemptRecord`'s own authoritative snapshot, via `_segment_
+   state(...)`, of the exact segment boundaries that attempt actually
+   verified as PASS). If `render_and_technical_qc`'s internal state ever
+   diverges from "`new_segments` plus `renderer_trailing_trims`" alone --
+   any further internal reconciliation not fully surfaced through
+   `renderer_trailing_trims` -- this module would silently re-review a
+   segment reconstruction of its OWN making, not the segment state the
+   technical QC pass it just trusted actually verified. The module
+   docstring's earlier finding-4 note ("never review a new file with
+   stale, pre-render timings") only guards against reviewing PRE-render
+   timings; it does not guard against this drift from the QC's own
+   POST-render source of truth.
+2. **No per-attempt content identity binds a review to the exact file it
+   was run against, so a later overwrite can inherit an earlier review.**
+   `current_output_path` can be the very same path across repair attempts
+   (the renderer overwrites that path in place on each re-render this
+   loop triggers), and this module computes no `output_sha256`/render-
+   identity per attempt to check "the file `perceptual_review()` was just
+   run against" against "the file a downstream record still describes."
+   Within THIS module's own loop that is safe today only because every
+   iteration re-reviews before deciding anything (finding 4's own
+   in-loop guarantee still holds). But nothing here prevents a caller
+   that persists a review keyed by this same `output_path` (e.g. a
+   `pending_watch_listen_review.PendingWatchListenRecord`, whose own
+   `output_sha256` IS verified before delivery, but only against the
+   file present AT VERIFICATION time) from later associating that
+   earlier review with bytes this cycle has since overwritten with a
+   different attempt's render. This module has no live caller today, so
+   the gap is latent, not exploited -- but it must be closed (a hash
+   check per attempt, not just at final delivery) before this cycle is
+   ever wired to persist or hand off a review across a process boundary.
+
+Both gaps are independent of, and in addition to, the three D-288
+preconditions above (`_disambiguate_target`, `_is_confirmed_repairable_
+defect`, `_word_floor_respects_repair`). Neither is fixed here. This
+module must NOT be declared ready to activate while either remains open.
+
 Live-wiring this into `export_job.py`/`universal_clean_cut_validation.py`
-remains a SEPARATE, not-yet-authorized gate even after these preconditions
--- see the D-288 decision log entry.
+remains a SEPARATE, not-yet-authorized gate even after ALL of the above
+preconditions and pending issues are closed -- see the D-288 decision log
+entry.
 """
 from __future__ import annotations
 
