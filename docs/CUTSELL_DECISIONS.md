@@ -77108,14 +77108,21 @@ entry, with real HTTP-level tests, not helper-level tests alone.
   perceptual_repair_cycle.py`, `test_cutsell_clean_worker_export.py`,
   `test_cutsell_clean_worker_auth.py`): 61 passed, 0 failed.
 - Full `tests/` suite (excluding the one pre-existing, unrelated broken
-  collection file `test_semantic_stitch.py`): IN PROGRESS at the time
-  this entry was written; result to be recorded in a follow-up commit,
-  same two-step pattern D-288.1 itself used.
+  collection file `test_semantic_stitch.py`): **8822 passed, 10 skipped,
+  13 subtests passed, 5 failed** (385.11s) -- the identical 5 failures
+  D-288 and D-288.1 already verified pre-existing/unrelated
+  (`test_hybrid_story_guard_incomplete_retry.py`'s one test, `test_
+  video00_modal_hybrid_semantic_parity.py`'s four), 21 more passing than
+  D-288.1's own 8801 baseline, exactly the 21 new D-288.2 tests (11 in
+  `test_cutsell_d288_pending_review_and_approval.py`, 10 in `test_
+  cutsell_d288_pending_review_http_routes.py`), zero new failures
+  anywhere in the suite.
 
 ### Verdict
 
-**CODE FIXED. TESTS PASS (61/61 targeted; full-suite result pending, see
-above). CI GREEN: not run (no CI dispatch in this gate).** RAW COMPLETE:
+**CODE FIXED. TESTS PASS (8822/8827 relevant, the other 5 confirmed
+pre-existing and unrelated, same as D-288/D-288.1's own baseline). CI
+GREEN: not run (no CI dispatch in this gate).** RAW COMPLETE:
 N/A. ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
 
 **Product Owner decision required:** YES, unchanged in kind from D-288/
@@ -77125,8 +77132,8 @@ issues beyond the three D-288.1 preconditions, none of them closed here);
 (c) any policy change for duplications/prosody named in the original
 audit.
 
-**Exact next step:** await the full-suite result (follow-up commit), then
-Product Owner review of this diff before any integration.
+**Exact next step:** Product Owner review of this diff before any
+integration.
 
 Then STOP.
 
