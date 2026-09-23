@@ -675,7 +675,22 @@ def assess_authoritative_membership(
                     failures.append(f"realization_not_selected:{decision.winner_realization_id}")
                 # Section 6: the surviving members must BE the resolver's
                 # winner -- never a different winner represented silently.
-                if winning and set(winning) != set(winner_clip_ids):
+                # D-291.2: compared at the REALIZATION level. A winner
+                # realization may span several selected clips (a
+                # continuation chain: head + tail, one `realization_id`,
+                # `parent_realization_id` on the tail) while the family row
+                # lists only its head, so clip-set equality would call the
+                # chain's own head "a different winner". Every surviving
+                # member must belong to the winner realization (by its
+                # realization ids) and be one of that realization's selected
+                # clips; the realization's other clips are its own body.
+                winning_rids = frozenset().union(
+                    *(rids_for_member.get(cid) or frozenset() for cid in winning)
+                ) if winning else frozenset()
+                if winning and (
+                    winning_rids - {decision.winner_realization_id}
+                    or not set(winning) <= set(winner_clip_ids)
+                ):
                     failures.append(
                         "selected_members_differ_from_authoritative_winner:" + ",".join(winning)
                     )

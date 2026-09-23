@@ -79574,3 +79574,106 @@ tests). Evaluating the CTA with the real timings needs the JSON's
   local winner.
 - The pimples/acne/CTA outcomes on real media stay unproven until the RAW
   #125 artifacts are readable or a new authorized run exists.
+
+## D-291.3 — RAW #125 verified with its own JSON: the chain fix holds on real labels, scores and timings; the CanonicalEditPlan needed the same unit rule; report corrected
+
+**Scope:** isolated branch `fix/video00-stable-editorial-oracle`. Offline
+only. No RAW, no integration, no baseline/canon/`main` change, no
+tie-break change, no flag. Evidence: the complete RAW #125 result JSON
+(`project_id = video00-modal-35921819172-1`, 49 top-level keys, 78
+diagnostics keys, `source_media_sha256` b37059b1…, `timed_asr_replay_
+evidence` with 54 segments / 623 words), attached by the Product Owner
+and read in full.
+
+### Correction of the D-291.1 report (OBSERVED in the JSON)
+- RAW #125 **blocked Freeze**: `deliverable = false`, `delivery_status =
+  NOT_DELIVERABLE_not_attempted`, `stage_status.freeze_blocked_pending_
+  coherence_review = true`, `final_edit_reviewer = FAIL`, and `final_
+  boundary_authority`, `boundary_engine_pass`, `human_boundary_polish` and
+  `selection_boundary_contract` all `not_applicable_freeze_blocked_by_
+  coherence_validation`. **`final_boundary_authority` did NOT execute**; my
+  earlier inference from the ladder's `freeze_plan_id` that a plan had been
+  frozen was wrong (the plan id is minted by CanonicalEditPlan before the
+  reviewer verdict). The CTA repetition in RAW #125 is therefore NOT a
+  trimmer outcome at all.
+- The block's cause: FinalEditReviewer `IDEA_COVERAGE_LOST` for the acne
+  family `tg_0a05f64b667ea7e455` ("every_member_of_this_idea_was_
+  discarded") plus a `REAL_CONTENT_LOSS` lost atom for the earlier
+  attempt, both downstream of the Resolver keeping "resorcina." alone --
+  the D-291.2 defect.
+- D-291 **did execute** in RAW #125: once, for the gynecologist family
+  `tg_e9e75c976c6b4b3194` (the only `ABSTAIN_CONFLICT`): a real family-
+  scoped session (`hc_19a132f5629b25b623`, 4 candidates, provider google
+  gemini-3.5-flash-lite) answered earlier take `failed` 0.80 / later take
+  `alternate` 0.85 -> `no_single_family_winner`, unresolved; the ladder
+  then still selected the later take (matches Gold). The pimples family
+  never had a window conflict in this run.
+
+### The acne family's real inputs (OBSERVED)
+Members: earlier attempt `clip_6281…` (166.56–182.36 s, window labels
+`failed` 0.95 / 0.99), head `clip_b8b3…` (185.24–189.84 s, `failed` 0.90 in
+both windows, `kept_fail_open`), tail `clip_d4a1…` ("resorcina.", 191.14–
+191.74 s; chunk 2 `winner` 0.90, chunk 3 `failed` 0.88 with a mechanical
+micro-delete that the chain binding later restored); `continuation_chains`
+= [[b8b3, d4a1], [4ab2, 0946]]; family-scoped candidates `6281 failed 0.99`,
+`b8b3 failed 0.90`; BestTake selected the chain head (`delivery_tie_break_
+among_survivors`, scores 0.7414 vs 0.2858); the Resolver's acne idea
+(`idea_cc0481a7…`) discarded `real_…b8b3` -- the head.
+
+### Faithful replay from the JSON (scratchpad `replay125.py`)
+Candidates = the 36 clip rows with the run's own timed words; window labels
+replayed by exact window membership (7 sessions, all recorded, including
+the D-291 confirmation session); pair answers = the 9 recorded merges + 8
+rejections (+ chain-joined text variants), the recorded component probe,
+and the ONE recorded claim-arbiter consultation (the percentage claim
+covered by the conclusion); DeliveryScores = the recorded judge-row scores;
+whole-video context = the recorded 322 events (70 measured silences);
+`CUTSELL_UNIFIED_REALIZATION_RESOLVER=AUTHORITATIVE` (the run's mode).
+**Zero deviations** (every judge window, pair and score recorded).
+- **Committed tree `a53459dd` (before D-291.2):** the tail carries its
+  own realization id; Freeze BLOCKED with `missing_idea_coverage` for the
+  acne family -- the exact RAW #125 outcome, reproduced.
+- **Fixed tree:** the acne chain is one realization (tail `parent_
+  realization_id` = head's), kept; the stomach idea resolves to the
+  gastritis take as in RAW; the percentage restatement folds out as in
+  RAW; **Freeze NOT blocked, reviewer PASS, contract verified,
+  `final_boundary_authority` executed**, final selection = RAW #125's 20
+  clips + the acne head (+ one physical split fragment of an unrelated
+  clip); and the **CTA is trimmed with the run's real timings**: W ends
+  "Así que cuídate." (312.90–313.50), A intervenes (8.06 s), C "Por eso
+  cuídate," (357.09–357.71, comma + 0.46 s pause) -> `trim_reopened_
+  closing_restatement`, new start 358.17 at "aliméntate", CTA = "aliméntate
+  bien, hidrátate y haces ejercicio.", conclusion untouched.
+
+### Second unit consumer found by the replay (fixed)
+`canonical_edit_plan` structural validation compared the family's
+surviving members (the row lists only the chain HEAD) with the winner
+realization's selected clips (head + tail) by clip-set equality, so the
+correct outcome read as `selected_members_differ_from_authoritative_
+winner` -> `DUPLICATE_IDEA`/`UNRESOLVED_RETRY` -> Freeze blocked. It now
+compares at the realization level: every surviving member must belong to
+the winner realization and be one of its selected clips; the realization's
+other clips are its own body. A selected member outside the winner
+realization is still rejected (control). No other consumer diverged.
+
+### Tests added to `tests/test_cutsell_d291_2_continuation_realization_unit.py` (11 total)
+RAW #125's own acne labels and DeliveryScores through the pipeline and the
+AUTHORITATIVE universal path: Freeze not blocked, reviewer PASS, contract
+verified, chain kept in order, plan structural validation passed with
+`authoritative_resolved_clip_ids = {H, T}`, boundary authority reached;
+plan unit test (multi-clip winner accepted, stranger rejected); the CTA
+with RAW #125's real word timings trimmed at 358.17 with the conclusion
+untouched.
+
+### Verification (working tree = this commit)
+- compileall OK; affected suites (canonical plan, D-025, D-050*, D-087,
+  D-090, D-092, D-097*, D-289*, D-291*, hybrid pipeline, universal clean
+  cut): **640 passed**; the D-291.2 file **11 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`): **9085 passed, 10 skipped, 13 subtests
+  passed, 5 failed** (349.10 s) -- exactly the 5 pre-existing/unrelated
+  failures every D-288.x–D-291.x entry verified; zero new failures; both
+  baseline manifests and the selection lock byte-identical.
+
+**Not proven:** the rendered MP4 and run-to-run consistency. The next
+step is the real-video run the Product Owner authorizes.

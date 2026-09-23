@@ -302,3 +302,134 @@ def test_full_path_to_freeze_keeps_the_acne_sentence_and_reaches_final_boundary_
     assert {r.get("clip_id") for r in rows if r.get("clip_id")} >= {"H", "T"}
     assert "final_boundary_reopened_closing_trim_count" in diag
     assert result.stage_status.get("final_edit_reviewer") == "PASS"
+
+
+# --- E. RAW #125 (project video00-modal-35921819172-1): the run's OWN labels, scores and timings ---
+#
+# The three sections below use values copied from RAW #125's result JSON
+# (window labels of the acne family, DeliveryScores, and the timed ASR words
+# of the closing clips). They are QA fixtures, never production inputs.
+
+RAW125_ACNE_LABELS = {"F0": ("failed", 0.99), "H": ("failed", 0.9), "T": ("alternate", 0.7), "X": ("winner", 0.9), "Y": ("winner", 0.95)}
+RAW125_ACNE_SCORES = {"H": 0.7414, "F0": 0.2858}  # judge row `ranked` scores of tg_0a05f64b667ea7e455
+
+
+def test_raw125_real_labels_and_scores_keep_the_acne_chain_and_reach_freeze_in_authoritative_mode(monkeypatch):
+    from cutsell_worker.contracts import RankedTake
+    from cutsell_worker.resolver_mode import ENV_VAR_NAME, RESOLVER_MODE_AUTHORITATIVE
+    from cutsell_worker.take_judge import rank_takes
+    from cutsell_worker.take_judge_provider import TakeJudgeProviderResult
+    from cutsell_worker.providers import ProviderStatus
+
+    class RecordedScores:
+        def rank(self, takes):
+            base = {r.clip_id: r for r in rank_takes(takes)}
+            ranked = sorted((RankedTake(t.clip_id, RAW125_ACNE_SCORES.get(t.clip_id, base[t.clip_id].score), "raw125_recorded") for t in takes),
+                            key=lambda r: (-r.score, r.clip_id))
+            return TakeJudgeProviderResult(tuple(ranked), ProviderStatus("raw125_recorded", True, True, "applied"))
+
+    monkeypatch.setenv(ENV_VAR_NAME, RESOLVER_MODE_AUTHORITATIVE)
+    takes = _takes()
+    pipeline_result = build_flow_b_draft(_request(), takes, editorial_judge=FakeJudge(RAW125_ACNE_LABELS),
+                                         semantic_equivalence_arbiter=_arbiter(), take_judge_provider=RecordedScores())
+    row = next(g for g in pipeline_result.draft.diagnostics["take_judge_groups"] if {x["clip_id"] for x in g["ranked"]} & {"H", "F0"})
+    assert row["selected_clip_id"] == "H" and [x["clip_id"] for x in row["ranked"]] == ["H", "F0"]
+    monkeypatch.setattr(universal, "process_local_sources", lambda request, local_paths, **kw: pipeline_result)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
+    result = universal.process_universal_clean_cut_sources(
+        object(), {"src": "/nonexistent.mp4"}, asr_provider=_FakeASR(takes), selection_reasoner=None,
+    )
+    diag = result.draft.diagnostics
+    assert diag["realization_resolver_authority"]["mode"] == "AUTHORITATIVE"
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is False, diag.get("final_edit_reviewer")
+    assert result.stage_status["final_edit_reviewer"] == "PASS"
+    assert diag["selection_boundary_contract"]["status"] == "verified"
+    final = _ids(result.draft.selected)
+    assert "H" in final and "T" in final and final.index("T") == final.index("H") + 1 and "F0" not in final
+    plan_idea = next(i for i in diag["canonical_edit_plan"]["ideas"] if "H" in (i.get("winning_clip_ids") or []))
+    assert plan_idea.get("structural_validation_passed") is True, plan_idea
+    assert set(plan_idea.get("authoritative_resolved_clip_ids") or []) == {"H", "T"}
+    assert result.stage_status["final_boundary_authority"] == "complete_idea_word_lock_overlap_guard_before_freeze"
+
+
+def test_plan_structural_validation_accepts_a_multi_clip_winner_realization_and_still_rejects_a_stranger():
+    from cutsell_worker.canonical_edit_plan import AuthoritativeIdeaDecision, AuthoritativePlanSource, build_canonical_edit_plan
+    from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy
+    from cutsell_worker.realization_resolver import SEMANTICALLY_RESOLVED
+
+    idea = "idea_acne_unit"
+
+    def clip(cid, text, start, end, *, selected, rid, parent=None):
+        return DraftClip(clip_id=cid, source_asset_id="src", source_order=0, start=start, end=end, text=text,
+                         caption_text=text, selected=selected, realization_id=rid, parent_realization_id=parent,
+                         semantic_idea_id=idea, retry_family_id=idea, complete_idea=True)
+
+    head = clip("H", H_TEXT, 185.24, 189.84, selected=True, rid="real_chain")
+    tail = clip("T", T_TEXT, 191.14, 191.74, selected=True, rid="real_chain", parent="real_chain")
+    f0 = clip("F0", F0_TEXT, 171.34, 181.34, selected=False, rid="real_f0")
+    group = {"group_id": "g_acne", "ranked": [
+        {"clip_id": "H", "score": 0.74, "reason": "watch_listen_baseline", "continuation_member_ids": ["T"], "realization_text": CHAIN_TEXT},
+        {"clip_id": "F0", "score": 0.29, "reason": "watch_listen_baseline"},
+    ]}
+
+    def draft(selected, discarded):
+        return DraftTimeline(schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+                             selected=tuple(selected), alternates=(), discarded=tuple(discarded),
+                             diagnostics={"take_judge_groups": [group], "hybrid_editorial_chunks": [],
+                                          "final_story_coherence_validation": {"freeze_blocked": False, "lost_semantic_atoms": [], "contradiction_findings": []}})
+
+    decision = AuthoritativeIdeaDecision(semantic_idea_id=idea, decision_status="RESOLVED_WINNER", winner_realization_id="real_chain",
+                                         composite_realization_ids=(), candidate_realization_ids=("real_chain", "real_f0"),
+                                         covered_canonical_claim_ids=(), missing_critical_claim_ids=(), decision_reason="single_realization_full_critical_coverage")
+    source = AuthoritativePlanSource(status=SEMANTICALLY_RESOLVED, decisions={idea: decision})
+    plan = build_canonical_edit_plan(draft((head, tail), (f0,)), authoritative_source=source)
+    unit = next(i for i in plan.ideas if i.idea_id == "g_acne")
+    assert unit.structural_validation_passed is True and unit.structural_validation_failures == ()
+    # control: a selected family member that is NOT the winner realization is still rejected
+    plan2 = build_canonical_edit_plan(draft((head, tail, replace(f0, selected=True)), ()), authoritative_source=source)
+    unit2 = next(i for i in plan.ideas if i.idea_id == "g_acne") and next(i for i in plan2.ideas if i.idea_id == "g_acne")
+    assert unit2.structural_validation_passed is False
+    assert any(f.startswith("selected_members_differ_from_authoritative_winner") for f in unit2.structural_validation_failures)
+
+
+# RAW #125 timed ASR words of the closing clips (the run's own `timed_asr_replay_evidence`).
+RAW125_W_TAIL_WORDS = (("Mayormente", 309.98, 310.58), ("son", 310.58, 311.12), ("nuestras", 311.12, 311.42), ("elecciones", 311.42, 311.9),
+                       ("de", 311.9, 312.18), ("vida.", 312.18, 312.38), ("Así", 312.58, 312.68), ("que", 312.68, 312.9), ("cuídate.", 312.9, 313.5))
+RAW125_A_EDGE_WORDS = (("Soy", 319.38, 319.9), ("la", 319.9, 320.12), ("primera", 320.12, 320.34), ("sufre", 325.88, 326.18), ("de", 326.18, 326.34), ("la", 326.34, 326.48), ("tiroides.", 326.48, 327.44))
+RAW125_C_WORDS = (("Por", 356.21, 356.85), ("eso", 356.85, 357.09), ("cuídate,", 357.09, 357.71), ("aliméntate", 358.17, 358.71), ("bien,", 358.71, 359.15),
+                  ("hidrátate", 359.49, 360.09), ("y", 360.09, 360.57), ("haces", 360.57, 360.81), ("ejercicio.", 360.81, 361.65))
+
+
+def test_raw125_cta_with_the_runs_real_word_timings_is_trimmed_at_alimentate_once_the_boundary_authority_runs():
+    from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy
+    from cutsell_worker.final_boundary_authority import enforce_complete_idea_boundaries
+
+    def words(rows):
+        return tuple(Word(text=t, start=s, end=e) for t, s, e in rows)
+
+    def clip(cid, start, end, rows):
+        w = words(rows)
+        text = " ".join(x.text for x in w)
+        return DraftClip(clip_id=cid, source_asset_id="src", source_order=0, start=start, end=end, text=text, caption_text=text, words=w)
+
+    W = clip("W", 309.98, 313.5, RAW125_W_TAIL_WORDS)   # the conclusion's closing sentence(s)
+    A = clip("A", 319.38, 327.44, RAW125_A_EDGE_WORDS)  # the family-history aside (8.06 s) in between
+    C = clip("C", 356.21, 361.65, RAW125_C_WORDS)
+    source_words = tuple(sorted((*W.words, *A.words, *C.words), key=lambda w: w.start))
+
+    class ASR:
+        def transcribe(self, path, *, source_asset_id, language_hint=None):
+            return (TranscriptSegment(source_asset_id=source_asset_id, start=source_words[0].start, end=source_words[-1].end,
+                                      text=" ".join(w.text for w in source_words), words=source_words),)
+
+    draft = DraftTimeline(schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING, selected=(W, A, C), alternates=(), discarded=(), diagnostics={})
+    result = ProcessingResult(schema_version=SCHEMA_VERSION, project_id="p", state=JobState.DRAFT_READY, draft=draft, stage_status={})
+    out = enforce_complete_idea_boundaries(result, {"src": "/nonexistent.mp4"}, asr_provider=ASR())
+    diag = out.draft.diagnostics
+    assert diag["final_boundary_reopened_closing_trim_count"] == 1 and diag["final_boundary_reopened_closing_refusal_count"] == 0
+    row = next(r for r in diag["final_boundary_authority"] if r.get("action") == "trim_reopened_closing_restatement")
+    assert (row["left_clip_id"], row["right_clip_id"], row["repeated_tokens"], row["intervening_clip_count"]) == ("W", "C", ["cuídate"], 1)
+    assert row["first_remaining_word"] == "aliméntate" and row["result_start"] == pytest.approx(358.17, abs=1e-3)
+    cta = out.draft.selected[2]
+    assert cta.text == "aliméntate bien, hidrátate y haces ejercicio." and cta.start == pytest.approx(358.17, abs=1e-3)
+    assert out.draft.selected[0].text.endswith("Así que cuídate.")  # the conclusion is never touched

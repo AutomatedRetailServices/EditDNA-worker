@@ -589,3 +589,15 @@ Recorded, not fixed: the Resolver's id-order tie when the family's winner
 label agrees with the local winner (no Ledger evidence). The RAW #125
 attachment did not reach the container; the CTA on real ASR timings is
 still unevaluated. No RAW launched.
+
+### D-291.3 — RAW #125 JSON read; report corrected; chain fix verified on real data
+
+RAW #125 blocked Freeze (`IDEA_COVERAGE_LOST` on the acne family after the
+Resolver kept "resorcina." alone); `final_boundary_authority` never ran; D-291
+executed once (gynecologist family, no single winner). A zero-deviation replay
+from the run's own labels, scores, answers, events and timed words reproduces
+the block on the pre-fix tree and, on the fixed tree (D-291.2 + the
+CanonicalEditPlan realization-level validation), reaches Freeze, keeps the
+acne chain, resolves stomach and percentage as RAW did, runs the boundary
+authority and trims the CTA at "aliméntate" with the real timings. Ready for
+the real-video run; nothing rendered is proven yet.
