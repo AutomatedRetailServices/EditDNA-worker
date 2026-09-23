@@ -105,10 +105,14 @@ class RecordedAnswersArbiter:
     exact `cohesion_confidence` 0.9 the run logged); every other probe
     confirms so the rest of a family keeps its real shape."""
 
-    def __init__(self, table, *, declined_probe_texts=(), probe_confidence=0.9):
+    def __init__(self, table, *, declined_probe_texts=(), probe_confidence=0.9, omit_unlisted=False):
         self.table = {frozenset(k): v for k, v in table.items()}
         self.declined = tuple(declined_probe_texts)
         self.probe_confidence = probe_confidence
+        # D-289.5: a pair the run never asked (outside its ranked pair budget)
+        # is OMITTED from the result -- the engine's own fail-open "no
+        # verdict" -- instead of being answered False.
+        self.omit_unlisted = omit_unlisted
         self.asked = []
 
     def check(self, request):
@@ -122,7 +126,10 @@ class RecordedAnswersArbiter:
                 else:
                     out.append(IdeaEquivalenceDecision(i, True, 0.95, "component probe confirmed"))
                 continue
-            same, conf, reason = self.table.get(frozenset((pair.left_text, pair.right_text)), (False, 0.0, "unconfigured"))
+            key = frozenset((pair.left_text, pair.right_text))
+            if self.omit_unlisted and key not in self.table:
+                continue
+            same, conf, reason = self.table.get(key, (False, 0.0, "unconfigured"))
             out.append(IdeaEquivalenceDecision(i, same, conf, reason))
         return IdeaEquivalenceResult(tuple(out), "fake", "fake", True, True, 50, 10)
 

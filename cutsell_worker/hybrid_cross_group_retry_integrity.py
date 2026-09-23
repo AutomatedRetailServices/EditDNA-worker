@@ -296,6 +296,41 @@ def _continuation_unit_take(members: tuple[CandidateTake, ...]) -> CandidateTake
     )
 
 
+def _unit_realization_preserved(
+    unit_text: str, covering_peers: tuple[CandidateTake, ...],
+) -> tuple[bool, list[dict]]:
+    """D-289.5: is the unit's COMPLETE realization preserved by the peers
+    that lexically cover it? Every claim `semantic_claims.extract_claims`
+    finds in the joined sentence must be `claim_is_covered` (the same
+    negation-flip / number-mismatch / causal-inversion-aware coverage the
+    ClaimCoverage authorities trust) by one covering peer's text or by the
+    peers' joined text. A unit that yields no claim (too short for the
+    clause floor) falls back to the lexical verdict already taken. Returns
+    (preserved, per-claim rows)."""
+    # Deferred import: semantic_claims sits behind take_grouping_provider in
+    # the import graph.
+    from .semantic_claims import claim_coverage, claim_is_covered, extract_claims
+
+    claims = extract_claims("continuation_unit", unit_text)
+    if not claims:
+        return True, []
+    peer_texts = [str(p.text or "") for p in covering_peers]
+    joined = " ".join(peer_texts).strip()
+    candidates = [t for t in peer_texts if t] + ([joined] if len(peer_texts) > 1 and joined else [])
+    rows: list[dict] = []
+    preserved = True
+    for claim in claims:
+        best = max((claim_coverage(claim, text) for text in candidates), default=0.0)
+        covered = any(claim_is_covered(claim, text) for text in candidates)
+        rows.append({
+            "claim_type": claim.claim_type, "importance": claim.importance,
+            "best_coverage": round(float(best), 4), "covered": bool(covered), "text": claim.text,
+        })
+        if not covered:
+            preserved = False
+    return preserved, rows
+
+
 def collapse_cross_group_semantic_retries(
     kept: Iterable[CandidateTake],
     semantic_decisions: Iterable[tuple[str, str, float]],
@@ -355,6 +390,31 @@ def collapse_cross_group_semantic_retries(
                     **evidence,
                 })
                 continue
+            # D-289.5: chain membership proves nothing about REPLACEABILITY.
+            # Lexical token coverage is the ordinary per-candidate rule; a
+            # unit's COMPLETE realization must additionally be preserved per
+            # the existing claim authority (`semantic_claims.extract_claims`
+            # + `claim_is_covered`, with its own negation-flip / number /
+            # causal-inversion guards) by the very peers that cover it. Not
+            # demonstrated -> the unit is kept whole for grouping, where the
+            # family competition (and its bounded arbiter) decides. No
+            # threshold is adjusted; no arbiter is consulted at this seam.
+            covering_ids = [str(cid) for cid in (evidence.get("peer_clip_ids") or ()) if cid]
+            covering_peers = tuple(t for t in peers if t.clip_id in covering_ids)
+            preserved, preservation = _unit_realization_preserved(judged.text, covering_peers)
+            unit_evidence["continuation_unit_claims"] = preservation
+            if not preserved:
+                diagnostics.append({
+                    "clip_id": candidate.clip_id,
+                    "reason": "continuation_unit_realization_not_preserved_kept_for_grouping",
+                    "semantic_label": label,
+                    "semantic_confidence": round(confidence, 4),
+                    "text": candidate.text,
+                    "removal_applied": False,
+                    **unit_evidence,
+                    **evidence,
+                })
+                continue
         else:
             unit_members = (candidate,)
             unit_evidence = {}
@@ -372,20 +432,30 @@ def collapse_cross_group_semantic_retries(
             if evidence.get("coverage_mode") == "single_authoritative_peer"
             else None
         )
-        if proposed_peer_id and is_rejected_replacement(
-            session_diagnostics_tuple, candidate.clip_id, proposed_peer_id
-        ):
-            diagnostics.append({
-                "clip_id": candidate.clip_id,
-                "reason": "prior_replacement_rejection_respected",
-                "proposed_winner_clip_id": proposed_peer_id,
-                "prior_replacement_rejection_found": True,
-                "prior_replacement_rejection_reason": SEQUENCE_IDENTITY_BELOW_THRESHOLD,
-                "removal_applied": False,
-                "semantic_label": label,
-                "semantic_confidence": round(confidence, 4),
-                "text": candidate.text,
-            })
+        # D-289.5: the recorded rejection is checked for EVERY member the
+        # removal would take (a chain's head AND its tails), not only the
+        # candidate that carries the label -- one rejected (member, peer)
+        # pair protects the whole unit, and the real reason is recorded.
+        rejected_member = next(
+            (member.clip_id for member in unit_members
+             if proposed_peer_id and is_rejected_replacement(session_diagnostics_tuple, member.clip_id, proposed_peer_id)),
+            None,
+        )
+        if rejected_member is not None:
+            for member in unit_members:
+                diagnostics.append({
+                    "clip_id": member.clip_id,
+                    "reason": "prior_replacement_rejection_respected",
+                    "proposed_winner_clip_id": proposed_peer_id,
+                    "prior_replacement_rejection_found": True,
+                    "prior_replacement_rejection_reason": SEQUENCE_IDENTITY_BELOW_THRESHOLD,
+                    "prior_replacement_rejection_member_clip_id": rejected_member,
+                    "removal_applied": False,
+                    "semantic_label": label,
+                    "semantic_confidence": round(confidence, 4),
+                    "text": member.text,
+                    **unit_evidence,
+                })
             continue
 
         for member in unit_members:
