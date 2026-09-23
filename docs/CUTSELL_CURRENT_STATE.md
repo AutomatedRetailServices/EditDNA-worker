@@ -81,7 +81,13 @@ Verified state at `781a8634`:
   fused "por esono" claim; W-R was never asked; T removed as alternate 0.85),
   guards the joint removal per member and by realization preservation, and
   shows the replay removes that blocker while the restatement R+T remains a
-  Level-2 co-keep pending a W-R verdict no run has recorded.
+  Level-2 co-keep pending a W-R verdict no run has recorded. D-289.6 judges
+  the unit's relation at sentence granularity (an inverted causality is no
+  longer "covered"), corrects D-289.5's replay fake (an omitted pair had
+  invalidated the whole arbiter batch), shows the run's W-R pair was deferred
+  by the per-group pair cap, and traces why even a confirming W-R verdict is
+  vetoed by the contradiction primitive on this transcript -- so no RAW is
+  proposed to obtain that answer.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

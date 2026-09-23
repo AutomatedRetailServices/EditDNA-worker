@@ -78150,3 +78150,91 @@ the complete sentence R+T -- only a RAW that reaches them can record them;
 the pair-budget order that left W-R outside the 14 asked pairs is a
 separate observation, not changed here. **Exact next step:** Product Owner
 review; no integration, no RAW, no baseline change.
+
+## D-289.6 — Relational context in the unit preservation gate; honest
+replay of the unasked W-R pair (same isolated branch, off `aa986e3e`;
+offline only)
+
+**NOT integrated. No RAW. `main`/PR #25/canon/baselines untouched. Freeze
+not weakened. Per-member protection (D-289.5) and the `_split_into_clauses`
+fix (D-289.4) kept unchanged.**
+
+### Open finding closed — the relation, not only its clauses
+Reproduced the Product Owner's example: H "Anxiety occurs because of the" +
+T "severe stress." vs W "Severe stress occurs because of anxiety." (H failed
+0.9, T alternate 0.9, W winner 0.95). D-289.5's gate judged the unit's
+clause-level claims -- "Anxiety occurs" and "because of the severe stress."
+-- and each covered 1.0, so the unit was removed although W inverts the
+causality. Root cause: D-040's clause split serves claim-LOCAL coverage but
+severs a relation at its connector, and `claim_coverage`'s causal-inversion
+guard can only see an inversion when the claim holds BOTH halves (the whole
+sentence scores 0.05, as the Product Owner observed). Fix, with the
+existing authority only: `extract_claims(..., split_clauses=False)` (new
+keyword, default True -- every other consumer byte-identical) yields the
+sentence-level claim, and `_unit_realization_preserved` judges every
+sentence the clause split divided at BOTH granularities; all must be
+covered. No threshold changed, no example-specific exception. Verified:
+inverted causality -> `continuation_unit_realization_not_preserved_kept_
+for_grouping` with the sentence row at 0.05; a replacement that preserves
+the same causality ("Anxiety occurs because of severe stress at work, most
+days." / "Anxiety occurs due to the severe stress.") -> removed whole with
+every row covered; the earlier "Stress occurs ..." example and the generic
+covered unit unchanged; default `extract_claims` unchanged.
+
+### Replay corrections (`tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py`, 28 tests)
+- **D-289.5's fake was wrong and is corrected here.** It OMITTED the
+  requested W-R pair; `validate_idea_equivalence_result` rejects a batch
+  missing a requested pair, so `safe_check_idea_equivalence` failed the
+  whole batch open (`provider: ValueError:... omitted a pair`) and NONE of
+  the recorded answers (W-A rejected, R-C rejected, P-A confirmed) were
+  applied in that replay -- the selection happened to coincide. The fake
+  now answers a pair with no recorded verdict with an explicit, labelled
+  decline (`not_recorded_on_raw_123__fake_decline`); the replay asserts the
+  batch is valid (`provider: fake`) and that the two recorded rejections
+  are the only non-labelled ones.
+- **"Never requested" vs "requested and declined by the fake" are now
+  separate assertions.** Recorded: W-R is not among the run's 14 asked
+  pairs. In the cluster-only replay there are 5 candidate pairs, all within
+  budget, W-R IS requested and the fake declines it (its own choice, not a
+  record). The replay therefore diverges from the run on W-R by
+  construction and says so; the `assert ... or True` is gone.
+- **Why the run did not ask W-R -- demonstrated as far as the record
+  allows, not attributed to the budget alone.** Both sides were eligible
+  (`_pair_side_eligible`; T with 3 complete words never is) and the groups
+  sit 8 s apart, so W-R was a candidate pair. The 14 asked pairs include
+  TWO pairs of group {W, P} (P-A 1.0991, W-A 0.7454) = `_PAIR_BUDGET_PER_
+  GROUP_CAP` (2, D-097.9); `_rank_candidate_pairs_with_marks` defers every
+  further pair of a group at its cap behind all first-pass pairs, and an
+  offline score for W-R with the final texts (0.60) is ABOVE the 14th asked
+  score (0.26) -- so the raw budget does not explain the absence, the
+  per-group cap does. The run recorded only the asked pairs' scores, so
+  the deferral is inferred from the recorded usage plus the cap rule, not
+  observed. The cap rule itself is exercised on the real function.
+
+### The path that would consult W against R+T, and the vetoes that still stop it
+1. the pre-grouping cleanup must keep the unit R+T -- now true (its
+   realization is not preserved by W: CRITICAL claim 0.05);
+2. IdeaClusterer must ASK W-R (the per-group cap deferred it on RAW #123)
+   AND the arbiter must confirm it;
+3. with a confirming W-R verdict (a labelled HYPOTHESIS in the test),
+   reconcile merges {W, R, T}; in the cohesion pass the W-R edge is a
+   bridge into the chain and reaches the contained-restatement path, whose
+   guard 7 (`detect_text_contradiction`, sentence-scoped negation) reads
+   W's "no creo ... son hereditarios" against the unit -- and against R
+   alone -- as a polarity conflict and refuses BEFORE any probe or claim
+   arbiter; the D-085 probe applies the same net first and refuses too.
+   Result: {W}, {R, T} as before; `claims.asked == []`.
+**Consequence:** repeating the run cannot record the W vs R+T claim-arbiter
+answer while the transcript keeps this shape: even if the pair-cap
+happened to admit W-R and the arbiter confirmed it, the deterministic
+contradiction primitive (residual R-289.4a) stops the path. No RAW is
+proposed on that basis.
+
+### Verification (committed tree)
+PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+
+**Pending:** residual R-289.4a (the contradiction primitive's negation scope
+over a comma-run sentence) is the standing veto; the per-group pair cap's
+interaction with a restatement of the cap-saturated group is an observation
+for the Product Owner, not changed here. **Exact next step:** Product Owner
+review; no integration, no RAW, no baseline change.
