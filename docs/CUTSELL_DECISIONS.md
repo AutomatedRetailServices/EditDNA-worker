@@ -79313,6 +79313,22 @@ consistent, evidenced answer that contradicts both oracles) and the D-290
 acceptance checks will say so; if it abstains the D-289.10 block stays.
 No MP4 improvement is claimed.
 
+### Verification (committed tree `2944d795`)
+- compileall OK; targeted authority set (D-291 file 18, D-289.10, hybrid
+  pipeline, D-146/D-149/D-150, D-183/D-184/D-191, D-122/D-123/D-128,
+  D-094, D-052, D-101, D-180, D-290/290.1, editorial acceptance, run
+  evidence compare, every `test_cutsell_d289_*.py`, `test_cutsell_hybrid_
+  *.py`): **792 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on the working tree: **9072 passed, 10
+  skipped, 13 subtests passed, 7 failed** (365.43 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x–D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4) plus the 2 working-tree-only `git diff HEAD`
+  guards on `pipeline.py` (D-169 `test_30`, D-239L `test_32`), which pass
+  on the COMMITTED tree with the D-174 guards (**133 passed**); zero new
+  failures; both baseline manifests and the selection lock byte-identical.
+
 ### 7. The one RAW that would test it (NOT launched)
 SHA: the commit carrying this entry on `fix/video00-stable-editorial-
 oracle`. Parameters: RAW #123/#124's (`pacing_v2_diagnostics_enabled=1`),
