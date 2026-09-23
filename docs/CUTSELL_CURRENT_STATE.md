@@ -61,10 +61,13 @@ Verified state at `781a8634`:
   not by a rendered artifact;
 - the D-288 audit's item 5 (two duplicate-realization survivals on RAW #122,
   run 35799404391 at `f012beed`) is addressed OFFLINE on the isolated branch
-  `fix/editorial-realization-closure` (D-289: contained-restatement closure at
-  retry-family formation, IdeaClusterer only; case 1 escalated as a product
-  decision because Gold, Cut.ai and the locked baseline all KEEP the pimples
-  fragments) — NOT integrated, NOT proven on a RAW.
+  `fix/editorial-realization-closure` (D-289 + D-289.1: contained-restatement
+  closure at retry-family formation with a faithful RAW #122 replay --
+  continuation chains as one realization, preservation through the claim-
+  coverage authority, the existing 0.85 pairwise bar; case 1 escalated as a
+  product decision because Gold, Cut.ai and the locked baseline all KEEP the
+  pimples fragments) — NOT integrated, NOT proven on a RAW; the RAW #122
+  selection change depends on a claim-arbiter verdict the run never recorded.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

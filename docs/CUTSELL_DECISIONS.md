@@ -77640,3 +77640,168 @@ hybrid_semantic_parity` x4); 8841 + 18 new, zero new failures.
 **Exact next step:** Product Owner review of the escalation (case 1) and
 of this entry. This phase ends BEFORE any integration or RAW. DO NOT
 MERGE. DO NOT TOUCH `cutsell/mobile-v1-clean`/`main`/PR #25.
+
+## D-289.1 — Faithful RAW #122 closure: continuation chains, coverage-
+authority preservation proof, pairwise same-idea bar (isolated branch
+`fix/editorial-realization-closure`, off `f8271137`; offline only)
+
+**NOT integrated. No RAW. `main`/PR #25/iOS untouched. `perceptual_
+repair_cycle.py` remains disconnected. No baseline file changed.**
+
+The Product Owner reviewed D-289 against the run's own result JSON
+(Modal RAW 35799404391 at `f012beed`) and found three defects. Each is
+reproduced first, then corrected through an existing authority. D-289's
+claims that this entry corrects are listed at the end.
+
+### The recorded evidence D-289 had misread
+
+From `diagnostics.semantic_idea_equivalence` / `distinct_idea_grouping_
+safety` / `hybrid_editorial_chunks` / `take_judge_groups` of the run:
+- reconcile merged the conclusion winner W (295.52-313.50) with the aside
+  A (319.38-327.44) and the incomplete restatement R (327.78-334.24) on
+  pairwise verdicts **W-A 0.9, W-R 0.85, A-R 0.80** (not 0.9 as D-289's
+  fixture assumed from the D-056.5-era answer);
+- the cohesion pass evaluated both bridges into {W, A} with the D-085
+  joined-text probe; the arbiter **declined at 0.9** (`component_
+  cohesion_declined`) -> R split back out, kept; W won {W, A} by
+  `critical_coverage_dominance` on hybrid labels W winner 0.95 / A
+  alternate 0.8 (R failed 0.9, T keep 0.8);
+- the strict prefix P (342.90-346.52) was **hybrid-deleted before
+  grouping** (`hybrid_cross_group_retry_integrity`, covered 1.0 by W) and
+  was never a family member -- D-289's fixture wrongly placed it there;
+- the tail T "cánceres son hereditarios." (340.18-342.58) is R's own
+  sentence continuation across a 5.94 s `real_speech_pause` boundary;
+  with 3 words it sat below the candidate-pair floor, never reached the
+  arbiter, was its own singleton family and was kept -- a predicate
+  without its quantifier, whose meaning read alone is the OPPOSITE of the
+  sentence it belongs to;
+- the claim-equivalence arbiter was **never asked** about R vs W on this
+  run (R never entered W's family): the JSON holds no recorded verdict for
+  the D-058 Phase 3 canary ("estoy convencida y la ciencia lo avala" ~
+  "está comprobado científicamente").
+
+### Finding 1 — evidence class of the confidence bar
+
+D-289 required `_BRIDGE_MIN_COHESION_CONFIDENCE` (0.90) on the attaching
+edge. That constant is the bar for a COMPONENT-level probe answer; the
+attaching edge is a PAIRWISE verdict, for which the engine already has one
+bar: D-058 Phase 2's 0.85 (`realization_resolver._HIGH_CONFIDENCE_
+SEMANTIC_WINNER_THRESHOLD`, the same floor `pipeline._semantic_best_take`
+requires), reused by D-061's lost-atom paraphrase credit on the very same
+merge record. Correction: `semantic_idea_equivalence.SAME_IDEA_HIGH_
+CONFIDENCE_THRESHOLD = 0.85`, now the single source for D-061's credit
+and for this path -- grouping and StoryValidator can no longer disagree
+about one merge record. Not a lowered threshold: the wrong constant was
+replaced by the existing one for that evidence class; the decisive
+evidence remains the preservation proof, never the pairwise number (D-085
+doctrine kept). Reproduced: with the 0.90 bar the run's own edge returns
+(False, None) and the probe declines as recorded; with 0.85 the same edge
+is judged on its proof.
+
+### Finding 2 — "same digits = preserved" removed
+
+Reproduced: member "The device weighs 20 grams and costs 5 dollars." vs
+newcomer "The warranty lasts 20 months and covers 5 repairs." --
+`claim_is_covered` is False (0.0 overlap) and D-289's `numeric_
+restatement` accepted it on equal digits. Correction: the ONLY
+preservation authority is `semantic_claims.resolve_ambiguous_coverage`
+(coverage >= 0.6 covered; < 0.10 confidently lost, no arbiter; the band
+between escalated to the bounded `ClaimEquivalenceArbiter`, failing
+closed without one, on an exception or on any verdict that is not
+explicitly True). Digit containment stays as a VETO only (a newcomer
+stating a number the member lacks is refused before any arbiter call).
+The claim arbiter is threaded `universal_clean_cut -> build_flow_b_draft
+-> split_incohesive_retry_groups -> _bridge_aware_components` -- the same
+instance ClaimCoverageBestTake and StoryValidator already use; every
+consultation is recorded on the trace row (`claims_preserved[].resolution`
+in {deterministic_coverage, claim_equivalence_arbiter, ambiguous_band_no_
+claim_arbiter, below_ambiguous_floor}, `claim_arbiter_consulted`).
+
+### Finding 3 — the realization is the complete sentence
+
+New deterministic relation `take_grouping.sentence_continuation(head,
+tail)`: same source, chronological, tail within the existing retry-
+adjacency bound (`_RESTART_MAXIMUM_GAP_SEC`, 8 s), head not
+`complete_idea` with no terminal punctuation and a LAST natural token that
+cannot end a sentence (`_DANGLING_FUNCTION_WORDS`: articles, prepositions,
+conjunctions, relatives, ES+EN), tail starting in lower case (the ASR's
+sentence-case signal); adjacency (nothing of that source between them) is
+decided once in `continuation_pairs`. A capitalised tail, a complete head,
+a non-dangling ending, a gap beyond the bound or an intervening take are
+never a continuation. Consumers, all existing authorities extended:
+- **IdeaClusterer/reconcile**: a continuation pass merges the chain's
+  groups deterministically (`continuation_merges`, kept OUT of `merges`
+  so it never feeds D-094.F3 reuse or D-061 credit);
+- **cohesion pass**: a `sentence_continuation` edge (deterministic, built
+  over all members so a <= 3-word tail still joins its head), unioned
+  first; chains reported as `continuation_chains`; a chain is ONE
+  realization unit for the contained-restatement path (joined text for the
+  proof, `restated_unit_member_ids`), for its contradiction net and for
+  the D-085 probe (`_evaluate_bridge_cohesion` and `_component_probe_text`
+  judge unit texts: the run-33969388042 truncated-fragment contradiction
+  D-094.F4 merely tolerated is now judged as the sentence it is);
+- **family competition** (`continuation_chain.py`): the pipeline folds
+  each chain onto its head for ranking, labels and `_semantic_best_take`
+  (joined text, span, words, re-graded completeness), records
+  `continuation_member_ids` + `realization_text` on the head's judge row,
+  lists the tails in the `TakeGroup`, and binds the tails of a selected
+  head after `compose_selected`; the deterministic BestTake authority and
+  ClaimCoverageBestTake move a row's tails with its head; ClaimCoverage and
+  StoryValidator's lost-critical-claims ledger evaluate the head's
+  `realization_text`. DraftClip `text`/`caption_text` are never rewritten.
+  A chain therefore wins or loses as a unit; a tail is never kept alone.
+
+### Before / after on the recorded evidence (`tests/test_cutsell_d289_contained_realization_closure.py`, 32 tests)
+
+- **BEFORE** (pre-fix engine, recorded answers): merges W-A 0.9 / W-R
+  0.85 / A-R 0.8; both bridges `component_cohesion_declined` at 0.9;
+  families {W, A}, {R}, {T}; kept {H, W, R, T, C}; A discarded; W by
+  `single_semantic_winner` -- the run's selection.
+- **AFTER, claim arbiter CONFIRMING the canary (hypothesis, not a recorded
+  verdict)**: continuation merge (R, T); family {W, A, R, T}; the W-R 0.85
+  bridge accepted `contained_restatement_of_complete_realization` with
+  unit [R, T], proof {preserving W; digits ["10","5"]; one CRITICAL
+  MEASUREMENT claim, coverage 0.5556, resolution
+  `claim_equivalence_arbiter`, covered}; the arbiter was asked the
+  COMPLETE sentence vs W; no probe spent; kept {H, W, C}; discarded {A, R,
+  T} (T moved with R); no contradiction/missing-idea/blocking finding;
+  `freeze_blocked` False.
+- **AFTER, claim arbiter ABSENT or DECLINING**: the proof fails closed, the
+  probe is asked and declines as recorded (0.9); family {W, A}; the chain
+  {R, T} is its own family; kept {H, W, R, T, C} -- the run's selection,
+  except that R and T are now one unit (never the tail alone).
+- **Finding 3 generic**: with no complete winner in reach the chain wins
+  its family as a unit (R then T, in order); a lone tail without its head
+  is still refused by the contradiction net.
+- Finding 2 reproductions; generic negative controls (unique number,
+  uncovered continuation, shared vocabulary, marker, chronology, fuller
+  newcomer, incomplete member, below-bar edge, two-units-per-side keeps
+  the probe, dispatch order, no-Video00 scan over both production
+  blocks); case 1 (pimples) unchanged; D-289's first fixture kept as
+  HISTORICAL; the continuation relation's own positive/negative controls.
+
+### What this does NOT prove
+- The selection change on RAW #122 depends on a claim-arbiter verdict
+  that was never recorded. Live, the arbiter is wired (google) and the
+  D-058 Phase 3 forensic classifies this exact pair as a genuine
+  paraphrase, but the after-state is a replay under a hypothesis until a
+  RAW records the verdict -- it is not claimed as proven.
+- Case 1 (pimples) remains escalation A as in D-289.
+- No RAW, no integration; the rendered product is unchanged.
+
+### D-289 statements corrected by this entry
+- "recorded verdict 0.9 for (W, R)" -> the run's verdict is 0.85 (0.9 is
+  the D-056.5-era answer); "the winner's group also holds its own strict
+  prefix" -> P was hybrid-deleted before grouping; the family was {W, A}.
+- "numeric restatement" as a preservation method -> removed.
+- "2.4 s bare tail stays kept (guard 7 + <= 3-token ineligibility)" ->
+  the tail is R's continuation; it now follows R's outcome (finding 3).
+- D-289's "TESTS PASS" numbers stand for its own file; this entry's
+  verification is recorded below.
+
+### Verification (committed tree)
+PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+
+**Exact next step:** Product Owner review. This phase ends BEFORE any
+integration or RAW. DO NOT MERGE. DO NOT TOUCH `cutsell/mobile-v1-clean`/
+`main`/PR #25.
