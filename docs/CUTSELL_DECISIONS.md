@@ -77418,3 +77418,30 @@ DO NOT SWITCH BRANCHES.
 DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
+
+## D-288.4.1 — Keyless notifications inserted atomically too (same
+isolated branch, off `8ae482bad`)
+
+**NOT integrated. `main`/PR #25/iOS untouched. No RAW. `perceptual_
+repair_cycle.py` untouched.**
+
+Review of D-288.4 caught the one write it left as a Python-side read-
+modify-write: `notifications.publish_notification` WITHOUT an
+`idempotency_key` still did GET -> insert -> SET, so a keyless
+`draft_ready` that had read the list could overwrite a `render_finished`
+inserted atomically in between -- reproduced first as `test_repro_8_a_
+keyless_notification_write_never_overwrites_a_concurrent_atomic_insert`
+(failing on `8ae482ba`: only `draft_ready` survived). Fixed: every
+notification now goes through `redis_atomic_list.append_if_absent`; a
+keyless one matches on its own freshly minted, unique `notification_id`
+(never already present, so a plain atomic append). All D-288.4
+corrections preserved.
+
+**Verification:** repro 8 fails on `8ae482ba`, passes after; D-288
+cluster + clean_worker notifications/render_versions/export/perceptual
+gate: 69 passed, 0 failed; repro 5/8 stable across 10 repeats; full
+suite recorded in the follow-up commit.
+
+**Exact next step:** Product Owner review before any integration. Then
+STOP. DO NOT SWITCH BRANCHES. DO NOT MERGE. DO NOT REBASE. DO NOT TOUCH
+cutsell/mobile-v1-clean.

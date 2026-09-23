@@ -57,23 +57,19 @@ def publish_notification(
         "payload": dict(payload or {}),
         "idempotency_key": idempotency_key,
     }
-    if idempotency_key:
-        # D-288.4: ONE atomic check-and-append -- two concurrent callers
-        # for the same `(kind, idempotency_key)` both receive the single
-        # stored notification (and its one id).
-        return append_if_absent(
-            target, key, match={"kind": normalized, "idempotency_key": idempotency_key},
-            record=record, max_len=MAX_NOTIFICATIONS,
-        )
-    raw = target.get(key)
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
-    items = json.loads(raw) if raw else []
-    if not isinstance(items, list):
-        items = []
-    items.insert(0, record)
-    target.set(key, json.dumps(items[:MAX_NOTIFICATIONS], ensure_ascii=False))
-    return record
+    # D-288.4/D-288.4.1: EVERY insert is one atomic check-and-append.
+    # With an `idempotency_key`, two concurrent callers for the same
+    # `(kind, idempotency_key)` receive the single stored notification
+    # (and its one id). Without one, the freshly minted, unique
+    # `notification_id` is the match field -- it can never already exist,
+    # so this is a plain atomic append: a keyless write can no longer read
+    # the list, lose to a concurrent atomic insert, and overwrite it with
+    # its own stale copy (the D-288.4 keyless path still did exactly that).
+    match = (
+        {"kind": normalized, "idempotency_key": idempotency_key}
+        if idempotency_key else {"notification_id": record["notification_id"]}
+    )
+    return append_if_absent(target, key, match=match, record=record, max_len=MAX_NOTIFICATIONS)
 
 
 def list_notifications(*, user_id: str, limit: int = 30, client=None) -> list[dict]:

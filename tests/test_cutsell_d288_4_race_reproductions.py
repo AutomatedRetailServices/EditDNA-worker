@@ -17,7 +17,10 @@ timing. Test names carry the review's own numbering:
    project's own history;
 7. a pending-review link issued for render A must still show A's bytes
    after render B (same job, same render identity, different bytes) is
-   generated.
+   generated;
+8. (D-288.4.1) a keyless notification write must never overwrite a
+   concurrent atomic insert -- every notification is appended
+   atomically, keyed by its own unique `notification_id`.
 
 No Video00 fact/id anywhere below.
 """
@@ -322,3 +325,39 @@ def test_repro_7_a_pending_link_issued_for_a_still_shows_a_after_b_is_generated(
     assert fake_s3.objects[key_a]["body"] == b"render-A-bytes"  # the link for A still shows A
     assert b.pending_s3_uri != a.pending_s3_uri
     assert a.output_sha256 in a.pending_s3_uri and b.output_sha256 in b.pending_s3_uri
+
+
+# 8 ---------------------------------------------------------------------------
+
+def test_repro_8_a_keyless_notification_write_never_overwrites_a_concurrent_atomic_insert(fake_redis):
+    """`draft_ready` (no idempotency_key) reads the list -> `render_
+    finished` inserts itself atomically -> `draft_ready` writes. Both
+    must remain stored. The D-288.4 keyless path was still a Python-side
+    GET -> insert -> SET, so its stale SET erased the concurrent insert;
+    now every notification is appended atomically (unique `notification_
+    id` as the match field), so there is no Python-side write left for
+    the hook to interleave with at all."""
+    key = notif.notification_key(USER)
+    seen = {"python_side_sets": 0}
+
+    def _insert_render_finished_between_read_and_write(written_key):
+        if written_key == key:
+            seen["python_side_sets"] += 1
+            notif.publish_notification(
+                user_id=USER, project_id=PROJECT, kind="render_finished", payload={},
+                idempotency_key="render_x", client=fake_redis,
+            )
+    fake_redis.set_hook = _insert_render_finished_between_read_and_write
+
+    notif.publish_notification(user_id=USER, project_id=PROJECT, kind="draft_ready", payload={}, client=fake_redis)
+    if seen["python_side_sets"] == 0:
+        # Fixed path: nothing to interleave with -- insert it afterwards
+        # so the "both remain stored" assertion is exercised either way.
+        notif.publish_notification(
+            user_id=USER, project_id=PROJECT, kind="render_finished", payload={},
+            idempotency_key="render_x", client=fake_redis,
+        )
+
+    kinds = sorted(n["kind"] for n in notif.list_notifications(user_id=USER, client=fake_redis))
+    assert kinds == ["draft_ready", "render_finished"]
+    assert seen["python_side_sets"] == 0  # the keyless write is atomic too, never a read-modify-write
