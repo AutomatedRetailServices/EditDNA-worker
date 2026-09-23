@@ -78033,7 +78033,20 @@ introduced point, a capitalised sentence and a distant tail are not units).
   keeps both members for grouping with a traceable row.
 
 ### Verification (committed tree)
-PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+- compileall OK; `tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py`:
+  **16 passed**; `tests/test_cutsell_d289_contained_realization_closure.py`:
+  **38 passed** (D-289.2 controls intact); the suites touching the clause
+  splitter and the cross-group rule (semantic claims, D-040/D-058 P3/D-061
+  P3/D-063/D-065/D-066 claim coverage, D-112/D-113 replacement verdicts,
+  composite resolver, benchmark 49, D-097.6, focused Gold blocks, selection-
+  phase guards, round-9 regressions, trigger coverage, universal clean cut,
+  golden full mode, CleanCutBench evaluation + parity): **260 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on committed tree `832f8923`: **8895 passed,
+  10 skipped, 13 subtests passed, 5 failed** (380.04 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x/D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4); zero new failures; `benchmarks/` unchanged.
 
 **Exact next step:** Product Owner review. Not integrated; no RAW without
 authorization. The RAW #123 package (full log + real diagnostics) is still
