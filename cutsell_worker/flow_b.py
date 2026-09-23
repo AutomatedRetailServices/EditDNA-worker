@@ -91,6 +91,7 @@ def process_local_sources(
     editorial_judge: EditorialJudge | None = None,
     editorial_mode: str | None = None,
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
+    claim_equivalence_arbiter=None,
     progress: ProgressCallback | None = None,
     boundary_owner: str = "pre_freeze",
 ) -> ProcessingResult:
@@ -490,6 +491,10 @@ def process_local_sources(
         attempt_reconstruction_diagnostics=attempt_reconstruction_diagnostics,
         performance_confirmation_diagnostics=confirmation_diagnostics,
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+        # D-289.2: the SAME bounded claim-equivalence arbiter object the
+        # Universal Clean Cut stages use, forwarded unchanged to grouping
+        # (pipeline.build_flow_b_draft -> split_incohesive_retry_groups).
+        claim_equivalence_arbiter=claim_equivalence_arbiter,
         boundary_owner=boundary_owner,
         watch_listen_understandings=watch_listen_understandings,
         # D-200 (docs/CUTSELL_DECISIONS.md D-200): the SAME already-computed

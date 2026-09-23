@@ -61,7 +61,7 @@ Verified state at `781a8634`:
   not by a rendered artifact;
 - the D-288 audit's item 5 (two duplicate-realization survivals on RAW #122,
   run 35799404391 at `f012beed`) is addressed OFFLINE on the isolated branch
-  `fix/editorial-realization-closure` (D-289 + D-289.1: contained-restatement
+  `fix/editorial-realization-closure` (D-289 + D-289.1 + D-289.2: contained-restatement
   closure at retry-family formation with a faithful RAW #122 replay --
   continuation chains as one realization, preservation through the claim-
   coverage authority, the existing 0.85 pairwise bar; case 1 escalated as a

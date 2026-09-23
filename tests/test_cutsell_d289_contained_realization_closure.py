@@ -251,9 +251,11 @@ def _disable_continuation(monkeypatch):
 # A. RAW #122 -- faithful fixture from the run's own result JSON
 # =============================================================================
 
+# Verbatim `selected[].text` of clip_7a89... in the run's result JSON (D-289.2:
+# D-289.1's literal had dropped "carácter" and the full stop before "Así").
 WINNER = ("Esta es mi experiencia. Soy la única en mi familia que tiene este tipo de cáncer. Por eso no creo y está "
-          "comprobado científicamente que los cánceres son hereditarios. Más bien solo un 5 -10 % son de hereditario. "
-          "Mayormente son nuestras elecciones de vida así que cuídate.")
+          "comprobado científicamente que los cánceres son hereditarios. Más bien solo un 5 -10 % son de carácter "
+          "hereditario. Mayormente son nuestras elecciones de vida. Así que cuídate.")
 ASIDE = ("Soy la primera en mi familia con este tipo de cáncer. Nadie en mi familia tiene un carcinoma papilar en la "
          "tiroides ni sufre de la tiroides.")
 RESTATEMENT = "Así que estoy convencida y la ciencia lo avala que solo un 5 -10 % de los"
@@ -731,3 +733,133 @@ def test_chain_folding_presents_the_sentence_and_binding_moves_the_tail_with_its
     assert evaluated.text == head.text + " " + tail.text and evaluated.end == tail.end and evaluated.complete_idea
     assert bind_continuation_tails([head], [head, tail, other], tails) == (head, tail)
     assert bind_continuation_tails([other], [head, tail, other], tails) == (other,)
+
+
+def test_continuation_relation_rejects_a_same_opening_restart():
+    """An incomplete attempt followed by its own complete repetition is a
+    RETRY (D-097.A restart evidence): the two must compete, never fuse.
+    The head here ends on a dangling word and the retry starts lower case,
+    so only the restart guard keeps them apart."""
+    head = _take("R", 10.0, 14.0, "so I am convinced that only 5 to 10 percent of the", complete=False)
+    retry = _take("N", 15.0, 20.0, "so I am convinced that only 5 to 10 percent of the cancers are hereditary.")
+    assert take_grouping.same_opening_restart(head, retry) is not None
+    assert not sentence_continuation(head, retry)
+    assert continuation_pairs((head, retry)) == frozenset()
+    short_retry = _take("N", 15.0, 18.0, "so I am convinced they are hereditary.")  # two-token restart evidence only
+    assert not sentence_continuation(head, short_retry)
+
+
+def test_continuation_relation_rejects_a_tail_that_introduces_another_point():
+    head = _take("R", 10.0, 14.0, "the formula is gentle and it is made for the", complete=False)
+    other_point = _take("N", 15.0, 18.0, "another thing: our packaging is recyclable")
+    assert not sentence_continuation(head, other_point)
+    plain = _take("N", 15.0, 18.0, "sensitive skin of the face.")
+    assert sentence_continuation(head, plain)
+
+
+def test_continuation_relation_tests_the_last_word_of_the_whole_head_not_a_truncated_token():
+    """`_natural_tokens`/`semantic_key` keep only 18 tokens; a long head
+    whose 18th token happens to be a function word must NOT be judged on
+    it, and a long head that really ends on one must."""
+    words = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen"
+    assert len(take_grouping._natural_tokens(words + " of nineteen twenty done")) == 18  # the truncation being guarded
+    truncated_dangling = _take("R", 0.0, 9.0, words + " of nineteen twenty done", complete=False)
+    tail = _take("T", 10.0, 11.5, "more words here")
+    assert not sentence_continuation(truncated_dangling, tail)
+    really_dangling = _take("R", 0.0, 9.0, words + " eighteen nineteen twenty of the", complete=False)
+    assert sentence_continuation(really_dangling, tail)
+
+
+def test_distinct_addition_markers_are_one_list_shared_by_grouping_and_the_provider():
+    assert tgp._DISTINCT_ADDITION_MARKERS is take_grouping._DISTINCT_ADDITION_MARKERS
+    assert tgp._has_distinct_addition_marker is take_grouping._has_distinct_addition_marker
+
+
+# =============================================================================
+# G. The claim arbiter reaches grouping through the REAL entry points
+# =============================================================================
+
+def _fake_asr_and_request(tmp_path, monkeypatch):
+    from cutsell_worker.contracts import ProcessingRequest, SourceAsset, TranscriptSegment, Word
+    from cutsell_worker.media_probe import MediaProbe
+
+    class _ASR:
+        def transcribe(self, path, *, source_asset_id, language_hint=None):
+            return (
+                TranscriptSegment(
+                    source_asset_id=source_asset_id, start=0.0, end=2.2,
+                    text="This serum changed my skin completely.",
+                    words=(Word("This", 0.0, 0.2), Word("serum", 0.25, 0.5), Word("changed", 0.55, 0.8),
+                           Word("my", 0.85, 1.0), Word("skin", 1.05, 1.3), Word("completely.", 1.35, 1.7)),
+                ),
+                TranscriptSegment(
+                    source_asset_id=source_asset_id, start=3.0, end=5.0,
+                    text="This serum changed my skin in a month.",
+                    words=(Word("This", 3.0, 3.2), Word("serum", 3.25, 3.5), Word("changed", 3.55, 3.8),
+                           Word("my", 3.85, 4.0), Word("skin", 4.05, 4.3), Word("in", 4.35, 4.5),
+                           Word("a", 4.55, 4.6), Word("month.", 4.65, 4.9)),
+                ),
+            )
+
+    source = SourceAsset(
+        source_asset_id="src_one", project_id="project-1", user_id="user-1",
+        original_name="raw.mov", source_order=0, duration_sec=6.0, uri="s3://bucket/raw.mov",
+    )
+    media = tmp_path / "raw.mov"
+    media.write_bytes(b"fake")
+    monkeypatch.setattr(
+        "cutsell_worker.flow_b.probe_media",
+        lambda _path: MediaProbe(duration_sec=6.0, width=1080, height=1920, fps=30.0, has_audio=True),
+    )
+    request = ProcessingRequest(project_id="project-1", user_id="user-1", sources=(source,), language_hint="en")
+    return _ASR(), request, {source.source_asset_id: str(media)}
+
+
+def _record_grouping_arbiter(monkeypatch):
+    seen = []
+    real = pipeline_module.split_incohesive_retry_groups
+
+    def recording(*args, **kwargs):
+        seen.append(kwargs.get("claim_equivalence_arbiter"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "split_incohesive_retry_groups", recording)
+    return seen
+
+
+def test_wiring_flow_b_forwards_the_same_claim_arbiter_object_to_grouping(tmp_path, monkeypatch):
+    """`flow_b.process_local_sources` (the real function, only the ASR and
+    the media probe simulated) accepts `claim_equivalence_arbiter` and
+    forwards the SAME object to `pipeline.build_flow_b_draft`, which hands
+    it to `split_incohesive_retry_groups`. D-289.1 passed it from
+    universal_clean_cut but flow_b did not accept it (TypeError)."""
+    from cutsell_worker.flow_b import process_local_sources
+
+    asr, request, paths = _fake_asr_and_request(tmp_path, monkeypatch)
+    seen = _record_grouping_arbiter(monkeypatch)
+    sentinel = ClaimArbiter(True)
+    result = process_local_sources(
+        request, paths, asr_provider=asr, editorial_mode="clean_cut", claim_equivalence_arbiter=sentinel,
+    )
+    assert result.draft is not None
+    assert seen and all(a is sentinel for a in seen)
+    # omitted -> None (every pre-D-289.2 caller unchanged)
+    seen.clear()
+    process_local_sources(request, paths, asr_provider=asr, editorial_mode="clean_cut")
+    assert seen and all(a is None for a in seen)
+
+
+def test_wiring_universal_clean_cut_forwards_the_same_claim_arbiter_object_to_grouping(tmp_path, monkeypatch):
+    """The whole real path `process_universal_clean_cut_sources ->
+    process_local_sources -> build_flow_b_draft -> split_incohesive_retry_
+    groups` with only the external providers simulated."""
+    from cutsell_worker.universal_clean_cut import process_universal_clean_cut_sources
+
+    asr, request, paths = _fake_asr_and_request(tmp_path, monkeypatch)
+    seen = _record_grouping_arbiter(monkeypatch)
+    sentinel = ClaimArbiter(True)
+    result = process_universal_clean_cut_sources(
+        request, paths, asr_provider=asr, claim_equivalence_arbiter=sentinel,
+    )
+    assert result.draft is not None
+    assert seen and all(a is sentinel for a in seen)

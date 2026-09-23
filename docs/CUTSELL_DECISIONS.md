@@ -77818,3 +77818,54 @@ never a continuation. Consumers, all existing authorities extended:
 **Exact next step:** Product Owner review. This phase ends BEFORE any
 integration or RAW. DO NOT MERGE. DO NOT TOUCH `cutsell/mobile-v1-clean`/
 `main`/PR #25.
+
+## D-289.2 — Verified findings on D-289.1: arbiter wiring through flow_b,
+continuation guards, exact replay literal (same isolated branch, off
+`86b7207c`; offline only)
+
+**NOT integrated. No RAW. `main`/PR #25/iOS untouched. `perceptual_
+repair_cycle.py` remains disconnected. No baseline file changed.** The
+D-289.1 corrections of numeric coverage (preservation only through
+`resolve_ambiguous_coverage`) and of the pairwise bar (0.85 shared) are
+kept unchanged.
+
+1. **Claim arbiter wiring completed.** D-289.1 passed `claim_equivalence_
+   arbiter` from `universal_clean_cut` but the real entry it calls,
+   `flow_b.process_local_sources`, did not accept it (TypeError on the
+   live path; the universal tests mock that entry). `process_local_
+   sources` now takes the optional parameter and forwards the SAME object
+   to `pipeline.build_flow_b_draft`, which hands it to `split_incohesive_
+   retry_groups`. Verified with the real functions and only the external
+   providers simulated (a fake ASR and a fake media probe): `process_
+   local_sources(..., claim_equivalence_arbiter=obj)` and `process_
+   universal_clean_cut_sources(..., claim_equivalence_arbiter=obj)` both
+   reach grouping with `obj` itself (identity asserted on every call);
+   omitted -> None for every pre-existing caller (`validation.py`,
+   `worker_job.py` unchanged).
+2. **`sentence_continuation` guards.** (a) A tail that RESTARTS the head's
+   own sentence is a retry, never a continuation: rejected when
+   `same_opening_restart` fires or when the two texts share their first
+   two tokens (the reconstructor's own restart evidence) -- an incomplete
+   attempt and its complete repetition now compete instead of fusing.
+   (b) A tail opening with a distinct-addition marker ("another thing:
+   our packaging is recyclable") announces a different point and is
+   rejected; `_DISTINCT_ADDITION_MARKERS`/`_has_distinct_addition_marker`
+   moved to `take_grouping.py` (one list, re-exported unchanged by the
+   provider) so the relation can consult them without an import cycle.
+   (c) The dangling-word test now reads the LAST word of the WHOLE head
+   text (`_full_text_tokens`); `_natural_tokens`/`semantic_key` keep only
+   18 tokens and could judge a middle word of a long head. Negative
+   controls for all three shapes added; the real R+T positive is kept
+   through grouping, selection and discard as a unit.
+3. **Replay literal.** The winner text in the QA fixture is now the
+   verbatim `selected[].text` of the run ("... son de carácter
+   hereditario. Mayormente son nuestras elecciones de vida. Así que
+   cuídate."); the other five fixture texts already matched the JSON.
+   The recorded outcomes are unchanged: the R+T claim's coverage against
+   the winner stays 0.5556 (ambiguous band), the before/after selections
+   and all traces are identical to D-289.1's.
+
+### Verification (committed tree)
+VERIFICATION_PLACEHOLDER
+
+**Exact next step:** Product Owner review. No integration, no RAW.

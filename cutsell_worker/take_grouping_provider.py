@@ -20,6 +20,8 @@ from .semantic_idea_equivalence import (
     same_idea_by_pair_index,
 )
 from .take_grouping import (
+    _DISTINCT_ADDITION_MARKERS,
+    _has_distinct_addition_marker,
     _safe_short_prefix_retry,
     _shared_content_count,
     continuation_pairs,
@@ -85,17 +87,8 @@ def _watch_listen_relation_discovery():
 # refinement of this one. "on top of that"/"an additional"/"one more thing"
 # already cover the same general "additive framing" category without that
 # collision risk.
-_DISTINCT_ADDITION_MARKERS = (
-    "otro sintoma", "otro síntoma", "otra cosa", "otro problema", "otro punto",
-    "otra situacion", "otra situación", "otro detalle", "otro aspecto",
-    "another symptom", "another issue", "another problem", "another thing",
-    "a different issue", "a different problem", "an additional", "one more thing",
-    "on top of that",
-)
-
-
-def _has_distinct_addition_marker(text: str) -> bool:
-    return _clause_has_any(text, _DISTINCT_ADDITION_MARKERS)
+# `_DISTINCT_ADDITION_MARKERS` / `_has_distinct_addition_marker` now live in
+# take_grouping.py (D-289.2) and are re-exported here unchanged.
 
 
 # D-048 FIX 1: minimal local content-token machinery, mirroring

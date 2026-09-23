@@ -11,6 +11,7 @@ from difflib import SequenceMatcher
 from typing import Dict, Iterable, Mapping, Tuple
 
 from .contracts import CandidateTake
+from .semantic_atom_importance import _clause_has_any
 
 _CONTRACTION_SUFFIXES = frozenset({"m", "re", "ve", "ll", "d", "s", "t"})
 
@@ -468,6 +469,33 @@ def measured_pause_bridged_retry(
 # alone. A same-opening restart, a marker-introduced new point, a capitalised
 # new sentence or a punctuation-complete head are never a continuation. No
 # Video00 phrase, id or timestamp is read here.
+# D-039/D-048's distinct-addition markers (moved here from
+# take_grouping_provider.py, which re-exports them unchanged, so this module
+# can consult them without an import cycle -- D-289.2).
+_DISTINCT_ADDITION_MARKERS = (
+    "otro sintoma", "otro síntoma", "otra cosa", "otro problema", "otro punto",
+    "otra situacion", "otra situación", "otro detalle", "otro aspecto",
+    "another symptom", "another issue", "another problem", "another thing",
+    "a different issue", "a different problem", "an additional", "one more thing",
+    "on top of that",
+)
+
+
+def _has_distinct_addition_marker(text: str) -> bool:
+    return _clause_has_any(text, _DISTINCT_ADDITION_MARKERS)
+
+
+_FULL_TEXT_TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
+
+
+def _full_text_tokens(text: str) -> tuple[str, ...]:
+    """Every token of the WHOLE text (casefolded). `semantic_key`/`_natural_
+    tokens` deliberately keep only the first 18 tokens for retry
+    similarity; a last-word test must never read a truncated middle word
+    (D-289.2)."""
+    return tuple(_FULL_TEXT_TOKEN_RE.findall(str(text or "").casefold()))
+
+
 _DANGLING_FUNCTION_WORDS = frozenset({
     # Spanish articles / prepositions / conjunctions / relatives
     "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al", "a", "en",
@@ -498,14 +526,29 @@ def sentence_continuation(left: CandidateTake, right: CandidateTake) -> bool:
     left_text = str(left.text or "").rstrip()
     if not left_text or _CONTINUATION_TERMINAL_PUNCT_RE.search(left_text):
         return False
-    left_tokens = _natural_tokens(left_text)
+    # The LAST word of the WHOLE head text (never `_natural_tokens`' 18-token
+    # prefix, which would test a middle word of a long head -- D-289.2).
+    left_tokens = _full_text_tokens(left_text)
     if not left_tokens or left_tokens[-1] not in _DANGLING_FUNCTION_WORDS:
         return False
     right_text = str(right.text or "").lstrip()
     first_alpha = next((ch for ch in right_text if ch.isalpha()), None)
     if first_alpha is None or not first_alpha.islower():
         return False
-    if not _natural_tokens(right_text):
+    right_tokens = _full_text_tokens(right_text)
+    if not right_tokens:
+        return False
+    # D-289.2 guards: a tail that RESTARTS the head's own sentence is a retry
+    # (D-097.A's `same_opening_restart` / the reconstructor's own two-token
+    # restart evidence), never the head's continuation -- the incomplete
+    # attempt and its complete repetition must compete, not fuse; and a tail
+    # that opens with a distinct-addition marker (D-039/D-048) announces a
+    # different point, never the end of the head's sentence.
+    if same_opening_restart(left, right) is not None:
+        return False
+    if len(left_tokens) >= 2 and len(right_tokens) >= 2 and left_tokens[:2] == right_tokens[:2]:
+        return False
+    if _has_distinct_addition_marker(right_text):
         return False
     return True
 
