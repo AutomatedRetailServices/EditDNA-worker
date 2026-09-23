@@ -22,7 +22,64 @@ relied upon for the active Clean Cut Core V1 behavior.
 """
 from __future__ import annotations
 
+import time
+from contextvars import ContextVar
 from typing import Any, Mapping
+
+# D-288 (audit finding, `docs/CUTSELL_DECISIONS.md`): this module installs
+# an ACTIVE monkeypatch at package import (`install_editorial_slot_
+# resolution`, called once from `cutsell_worker/__init__.py`), but never
+# wrote `diagnostics["editorial_slot_resolution"]` -- the exact key
+# `active_path_identity.py`'s own `EditorialSlotResolution` presence probe
+# reads. The probe therefore always read "absent", even though the policy
+# genuinely fires on every real semantic-equivalence request. Four states
+# a caller must never conflate:
+#   1. POLICY INSTALLED -- this module's own install function ran at
+#      import. Always true once imported; proves nothing about any ONE
+#      run, so it is never reported as per-execution evidence.
+#   2. REQUEST BUILT -- a real wire payload was constructed WITH the
+#      policy text actually spliced in. THIS is what `_POLICY_INJECTION_
+#      EVIDENCE` below proves, recorded once per real call.
+#   3. CALL EXECUTED -- the arbiter's `.check()` actually sent that
+#      payload over the network. NOT observed here: this module only
+#      wraps request CONSTRUCTION, never the network call, so it never
+#      claims more than build-time evidence proves.
+#   4. DECISION APPLIED -- the arbiter's returned verdict was actually
+#      used to merge/reject a candidate pair. Recorded independently, by
+#      `take_grouping_provider.py`'s own `distinct_idea_grouping_safety`
+#      diagnostics (`arbiter_confirmed_pairs`/`edge_trace`/
+#      `arbiter_rejected_pairs`) -- never fabricated or duplicated here.
+#
+# A `ContextVar`, not a module-level list/counter: the SAME per-execution
+# side-channel pattern this codebase already establishes for exactly this
+# class of problem (`hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN`,
+# `hybrid_composite_best_take._COMPOSITE_SPLIT_IDS`) -- isolated per
+# thread/task, so concurrent jobs in the same worker process can never mix
+# their evidence together ("evita contadores globales que mezclen
+# trabajos"). Read-and-cleared once by `collect_and_clear_editorial_slot_
+# resolution_evidence` below, the same read-and-clear discipline those
+# precedents use.
+_POLICY_INJECTION_EVIDENCE: "ContextVar[tuple[dict[str, Any], ...]]" = ContextVar(
+    "_EDITORIAL_SLOT_RESOLUTION_POLICY_INJECTION_EVIDENCE", default=(),
+)
+
+
+def collect_and_clear_editorial_slot_resolution_evidence() -> tuple[dict[str, Any], ...]:
+    """Read-and-clear THIS execution's own real request-built evidence. See
+    the module-level D-288 comment above for the exact 4-state distinction
+    this evidence does (and does not) prove."""
+    evidence = _POLICY_INJECTION_EVIDENCE.get()
+    _POLICY_INJECTION_EVIDENCE.set(())
+    return evidence
+
+
+def _record_policy_injection_evidence(*, policy_injected: bool, text_length: int) -> None:
+    _POLICY_INJECTION_EVIDENCE.set(_POLICY_INJECTION_EVIDENCE.get() + ({
+        "stage": "request_built",
+        "policy_injected": policy_injected,
+        "text_length": text_length,
+        "recorded_at": time.time(),
+    },))
 
 
 _SLOT_RULES = (
@@ -66,17 +123,24 @@ def _inject_semantic_equivalence_policy(payload: Mapping[str, Any]) -> dict[str,
     out = dict(payload)
     contents = [dict(item) for item in (out.get("contents") or ())]
     if not contents:
+        _record_policy_injection_evidence(policy_injected=False, text_length=0)
         return out
     first = contents[0]
     parts = [dict(item) for item in (first.get("parts") or ())]
     if not parts:
+        _record_policy_injection_evidence(policy_injected=False, text_length=0)
         return out
     text = str(parts[0].get("text") or "")
-    if _SEMANTIC_EQUIVALENCE_POLICY not in text:
+    injected = _SEMANTIC_EQUIVALENCE_POLICY not in text
+    if injected:
         parts[0]["text"] = _SEMANTIC_EQUIVALENCE_POLICY + text
     first["parts"] = parts
     contents[0] = first
     out["contents"] = contents
+    # D-288: real, per-call evidence that THIS execution actually built a
+    # request with the policy text present -- never a global counter, see
+    # this module's own D-288 comment block above.
+    _record_policy_injection_evidence(policy_injected=injected, text_length=len(str(parts[0].get("text") or "")))
     return out
 
 

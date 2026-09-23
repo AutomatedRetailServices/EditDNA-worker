@@ -76559,3 +76559,196 @@ DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
 DO NOT START CALIBRATION.
+
+## D-288 — Watch+Listen Delivery Authority + Bounded Perceptual Repair
+Cycle + EditorialSlotResolution Observability (offline implementation,
+isolated branch `audit/watch-listen-delivery-authority` off verified
+`cutsell/mobile-v1-clean` HEAD `f012beed1b2f8513b7af5346fc4fccfb055bf3ef`
+== RAW #122's own `build_git_sha`)
+
+**NOT integrated into `cutsell/mobile-v1-clean`. NOT merged. `main` and
+PR #25 (OPEN/DRAFT/UNMERGED) untouched. No RAW dispatched.**
+
+**Objective.** Follow-on to the editorial-authority + Watch+Listen-closure
+AUDIT (same session, no separate D-number -- pure diagnosis, zero code
+changed). That audit demonstrated, with real RAW #122 evidence: (1)
+`perceptual_watch_listen.PerceptualReview.watch_listen_status` (D-154/
+D-155's own already-correct typed 4-state authority) was computed
+correctly every run but never read by the delivery chain -- `universal_
+clean_cut_validation._live_render_qc_diagnostics` built `delivery_status`
+from the COARSE `PerceptualReview.status` instead, and `human_watch_
+listen_required` was hardcoded `True` regardless of the real verdict; (2)
+the REAL production export path, `export_job.run_export_job` /
+`_tenant_safe_deliver`, never called the perceptual reviewer AT ALL -- a
+technical post-render QC PASS alone was sufficient to mark a project
+"finished" and hand back a real `download_url`, confirmed by direct
+reading of the file (no import of `perceptual_watch_listen` anywhere in
+it); (3) a perceptual finding's `routes_to` label was read in exactly one
+place in the whole codebase (a summary counter) -- no real repair
+execution was ever wired to it; (4) `editorial_slot_resolution_install.py`
+(D-042) installs an active policy injection on every run but never wrote
+`diagnostics["editorial_slot_resolution"]`, so `active_path_identity.py`'s
+own presence probe always read it absent even though the mechanism is
+real and active; (5) real RAW #122 diagnostics (`distinct_idea_grouping_
+safety.edge_trace`, `content_divergence_blocked`, `pacing_v2.prosodic_
+unavailable_count=24/24`) precisely traced two duplicate-realization
+survivals to specific, already-documented, DELIBERATE safety mechanisms
+(D-048's content-divergence veto; the component-level bridge-cohesion
+probe's own known joined-text-probe instability) and confirmed the
+Pacing V2 prosodic-evidence gap already honestly documented in `pacing_
+v2_live_diagnostics_integration.py`'s own module docstring.
+
+**Authorization (Product Owner, this session).** Implement and test items
+1-4 on an isolated branch; for item 5 (duplications/prosody), demonstrate
+the cause and the concrete correction WITHOUT changing selection/grouping/
+ranking policy in this gate (`D-094.2`'s `accept_complete_pairwise_
+singleton_bridge` default-OFF is itself a prior, explicit Product Owner
+decision under D-091 stop condition B -- not overridden here).
+
+**Implemented (code + tests, all offline, no RAW).**
+
+1. **`render_delivery.py`** (additive/opt-in, byte-identical for every
+   caller that does not pass `watch_listen_status` -- D-267's own 65-test
+   suite green unchanged): new `watch_listen_status` field on
+   `RenderDeliveryRecord` (default `None` = gate unapplied); `build_
+   render_delivery_record(..., watch_listen_status=...)` gates READY_FOR_
+   UPLOAD/DELIVERY_READY on it -- `WATCH_LISTEN_BLOCKED` -> `DELIVERY_
+   BLOCKED` (never promotable, no human approval can skip it); anything
+   else that is not SYSTEM_PASS/HUMAN_APPROVED -> new `DELIVERY_STATUS_
+   WATCH_LISTEN_PENDING` ("PENDING_HUMAN_WATCH_LISTEN": file real/hashed/
+   technically clean, available for inspection, never auto-delivered).
+   New `WatchListenApproval` dataclass + `resolve_watch_listen_status_for_
+   delivery`: HUMAN_APPROVED requires an approval bound to the EXACT
+   current `render_identity` AND `output_sha256` (D-267's own documented
+   non-determinism: two encodes of the identical plan can legitimately
+   hash differently) -- a stale approval from a different render/hash
+   never promotes; BLOCKED is never promotable regardless of approval.
+   `render_delivery_diagnostics` now separates `file_available_for_
+   inspection` from `approved_for_delivery`.
+2. **`export_job.py`** (the real production export path): `_tenant_safe_
+   deliver` now runs the perceptual reviewer (`universal_clean_cut_
+   validation.perceptual_review_for_rendered_candidate`, a new public
+   delegation to the SAME `_perceptual_review` the RAW harness already
+   uses -- no second implementation) on the actual rendered file once
+   technical QC has PASSed, and threads the real `watch_listen_status`
+   into `build_render_delivery_record`. A BLOCKED/PENDING verdict now
+   raises the EXISTING `TenantSafeDeliveryBlocked` (never reaches `store_
+   export`/upload) with the perceptual review attached for observability;
+   a new dedicated `except TenantSafeDeliveryBlocked` branch in `run_
+   export_job` reports `delivery_status`/`watch_listen_status` distinctly
+   from a genuine render/hash/upload failure. `draft`/`local_paths`/
+   `qc_result` are optional (default `None`) so the pre-existing D-269A
+   remote/ownership/upload test suite (a different concern) is unaffected
+   -- `run_export_job` (the real caller) always supplies real values.
+3. **`universal_clean_cut_validation._live_render_qc_diagnostics`**: now
+   reads `watch_listen_status` (the real typed authority) instead of the
+   coarse `status` field; a `WATCH_LISTEN_BLOCKED` verdict is reported as
+   `NOT_DELIVERABLE_WATCH_LISTEN_BLOCKED`, never `DELIVERABLE_PENDING_...`
+   (which previously read as "just needs sign-off" for what could be a
+   confirmed defect); `human_watch_listen_required` is now the real
+   computed value, never a hardcoded `True`.
+4. **`perceptual_repair_cycle.py`** (new module, offline foundation --
+   NOT yet live-wired into `export_job.py`/`universal_clean_cut_
+   validation.py`; same two-phase pattern this codebase already uses,
+   D-269 foundation -> D-269A live activation as a separate gate): the
+   bounded cycle `finding -> authority -> safe repair -> render -> technical
+   QC -> Watch+Listen`. `routes_to=BoundaryEngine` (physical) findings
+   reuse `live_boundary_repair.repair_segment_for_finding` UNMODIFIED (no
+   adapter needed -- `PerceptualFinding` already carries the `.start`/
+   `.end`/`.kind` fields that function reads), inheriting its hard-floor/
+   no-mid-segment-repair/no-over-trim safety properties automatically; a
+   repair is re-rendered and re-QC'd (caller-injected, dependency-
+   injected render/QC and perceptual-review callables -- no second render
+   implementation) before the cycle re-reviews; bounded by `max_attempts`;
+   any failure to find/apply/reverify a safe repair stops at BLOCKED with
+   an explicit reason, never silently trimmed. `routes_to=BestTakeResolver`
+   (semantic) findings get NO automatic repair, by deliberate design,
+   mirroring `repair_loop.py`'s own honest-scope doctrine for DUPLICATE_
+   IDEA/UNRESOLVED_RETRY -- `NEEDS_SEMANTIC_REVIEW`, content never
+   silently removed post-Freeze. `build_semantic_repair_plan` is the
+   CONTRACT for returning a human/PO-authorized corrected draft to
+   Selection: reuses `repair_loop.py`'s own `build_canonical_edit_plan` +
+   `plan_version + 1` pattern (never a new versioning scheme); it never
+   decides which clip to drop and never re-Freezes on its own -- the
+   caller must still run a fresh Selection Freeze review on the result.
+   An `ERROR` capability (measurement never ran, no findings) is BLOCKED
+   with an explicit `error_capability_no_repair_target` reason, never
+   silently skipped or treated as a repairable finding.
+5. **`editorial_slot_resolution_install.py` / `active_path_identity.py`**:
+   real per-execution evidence (a `ContextVar`, the same side-channel
+   pattern already established elsewhere in this codebase -- e.g. `hybrid_
+   session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN` -- never a global counter
+   that would mix concurrent jobs) that a real wire request was built with
+   the policy text spliced in, read-and-cleared once per run. Explicitly
+   bounded: proves REQUEST BUILT only, never CALL EXECUTED (no network
+   observation exists here) or DECISION APPLIED (that evidence already
+   exists independently in `distinct_idea_grouping_safety`'s own `arbiter_
+   confirmed_pairs`/`edge_trace`, never duplicated). `active_path_
+   identity.component_markers` overlays this evidence onto a READ-ONLY
+   COPY of `diagnostics` (never mutates the caller's dict; never
+   overwrites a real future writer of the same key) before probing, so
+   the `EditorialSlotResolution` marker now correctly reads present on a
+   run where the policy genuinely fired, and correctly stays absent when
+   it did not.
+
+**NOT implemented in this gate (explicitly, per authorization).**
+Item 5's duplications/prosody policy changes: `D-094.2`'s `accept_
+complete_pairwise_singleton_bridge` stays at its existing Product-Owner-
+set default (OFF); no change to `take_grouping_provider.py`'s pair
+formation/ranking/bridge-cohesion logic; no change to `_within_group_
+arbiter_confirmation_diverges`/D-048's own divergence veto; no change to
+Pacing V2's prosodic-evidence transport. See the audit's own findings
+(same session) for the exact demonstrated cause of each and the concrete,
+not-yet-authorized correction for each.
+
+### Verification run
+
+- New test files (5): `test_cutsell_d288_watch_listen_delivery_
+  authority.py` (17), `test_cutsell_d288_export_job_perceptual_gate.py`
+  (6), `test_cutsell_d288_perceptual_repair_cycle.py` (9), `test_cutsell_
+  d288_editorial_slot_resolution_observability.py` (7) -- 39 new tests,
+  0 failed.
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- Targeted regression (D-267/D-269A/D-097/live_render_qc/repair_loop/
+  canonical_edit_plan/perceptual_watch_listen/universal_clean_cut_
+  validation): 195 passed, 0 failed -- including the two D-269A self-
+  guard "unrelated authorities unchanged" firewall rows updated for
+  `render_delivery.py` (removed from that firewall list, self-resolving-
+  guard comment added, same established pattern as the pre-existing
+  uploads.py/main.py precedent in the same file) and the perceptual-
+  watch-listen-status logic fix in `resolve_watch_listen_status_for_
+  delivery` caught by its OWN new test suite before being reported here
+  (an initial promotable-states condition inversion; fixed, re-verified).
+- Full `tests/` suite (excluding the one pre-existing, unrelated broken
+  collection file `test_semantic_stitch.py` -- a module-level `print`
+  calling `score_take()` with a missing argument at IMPORT time, `git
+  diff --stat HEAD` empty for that file, confirmed pre-existing and
+  untouched by this gate): PENDING -- see follow-up note below; the
+  targeted regression above already covers every file this gate modified
+  or added.
+
+### Verdict
+
+**CODE FIXED. TARGETED TESTS PASS. Full-suite CI-equivalent run in
+progress at time of writing (background, ~7-8 min per this repo's own
+D-282A precedent) -- result to be appended once complete.** RAW COMPLETE:
+N/A (no RAW in this gate, per explicit instruction). ARCHITECTURE PASS:
+N/A. HUMAN WATCH+LISTEN PASS: N/A.
+
+**Product Owner decision required:** YES, before any of the following:
+(a) integrating this branch into `cutsell/mobile-v1-clean`; (b) live-
+wiring `perceptual_repair_cycle.py` into `export_job.py`/`universal_
+clean_cut_validation.py` (a separate, D-269-style "foundation now, live
+activation as its own gate" follow-on); (c) any policy change for item 5
+(duplications/prosody) named above and in the same-session audit.
+
+**Exact next step:** await the full-suite result, then Product Owner
+review of this diff before any integration.
+
+Then STOP.
+
+DO NOT SWITCH BRANCHES.
+DO NOT MERGE.
+DO NOT REBASE.
+DO NOT TOUCH cutsell/mobile-v1-clean.
+DO NOT PUSH.

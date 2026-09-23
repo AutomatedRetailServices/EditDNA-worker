@@ -72,6 +72,17 @@ if TYPE_CHECKING:  # pragma: no cover -- type-only, avoids a hard runtime
     from .live_render_qc import LiveRenderQCResult
     from .render_plan import RenderSegment
 
+# D-288: reused verbatim, never re-derived -- the ONE typed perceptual
+# authority (`perceptual_watch_listen.PerceptualReview.watch_listen_status`,
+# D-154/D-155). A plain string import (four constants), no circular
+# dependency: `perceptual_watch_listen.py` never imports this module.
+from .perceptual_watch_listen import (
+    WATCH_LISTEN_BLOCKED,
+    WATCH_LISTEN_HUMAN_APPROVED,
+    WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
+    WATCH_LISTEN_SYSTEM_PASS,
+)
+
 # --- Stage 11: renderer contract version -----------------------------------
 # Bumped only when a change to THIS module's own identity-computation
 # contract (which fields feed RENDER_IDENTITY, or how) would otherwise
@@ -94,6 +105,15 @@ DELIVERY_STATUS_UPLOAD_IN_PROGRESS = "UPLOAD_IN_PROGRESS"
 DELIVERY_STATUS_UPLOAD_FAILED = "UPLOAD_FAILED"
 DELIVERY_STATUS_DELIVERY_READY = "DELIVERY_READY"
 DELIVERY_STATUS_DELIVERY_BLOCKED = "DELIVERY_BLOCKED"
+# D-288: the render/QC/hash gate above is satisfied but the perceptual
+# System Watch+Listen verdict is HUMAN_REVIEW_REQUIRED -- the file is real,
+# hashed, and technically clean (available for inspection) but never
+# reaches READY_FOR_UPLOAD/DELIVERY_READY without an explicit, artifact-
+# bound human approval (see WatchListenApproval below). Distinct from
+# DELIVERY_STATUS_DELIVERY_BLOCKED (perceptual BLOCKED, or any other
+# blocker): BLOCKED can never become ready no matter what; PENDING can,
+# but only via a real, traceable approval of this exact artifact.
+DELIVERY_STATUS_WATCH_LISTEN_PENDING = "PENDING_HUMAN_WATCH_LISTEN"
 DELIVERY_STATUS_UNKNOWN = "UNKNOWN"
 
 RENDER_EXECUTION_STATUS_SUCCEEDED = "SUCCEEDED"
@@ -266,6 +286,18 @@ class RenderDeliveryRecord:
 
     created_at: float
 
+    # D-288: the perceptual System Watch+Listen verdict this record's
+    # `delivery_status` gate was computed against -- `None` means "no
+    # perceptual verdict was ever supplied to this build call" (every
+    # pre-D-288 caller, additive/opt-in exactly like D-235X's own `dict |
+    # None = None` precedent elsewhere in this codebase), which leaves the
+    # perceptual gate UNAPPLIED -- byte-identical pre-D-288 delivery_status
+    # behavior. A caller that DOES supply a real status (even HUMAN_REVIEW_
+    # REQUIRED) opts into the D-288 gate in `build_render_delivery_record`
+    # below; only `WATCH_LISTEN_SYSTEM_PASS`/`WATCH_LISTEN_HUMAN_APPROVED`
+    # can then reach DELIVERY_READY/READY_FOR_UPLOAD.
+    watch_listen_status: str | None = None
+
     errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     provenance: dict = field(default_factory=dict)
@@ -311,6 +343,7 @@ def build_render_delivery_record(
     project_id: str | None = None,
     job_id: str | None = None,
     provenance: dict | None = None,
+    watch_listen_status: str | None = None,
 ) -> RenderDeliveryRecord:
     """D-267 Stage 4/5/6/7/9: builds one `RenderDeliveryRecord`, computing
     `output_sha256`/`output_size_bytes` from the real file at `final_path`
@@ -323,7 +356,19 @@ def build_render_delivery_record(
     successfully computed, technical QC PASSed, and (only when
     `require_upload=True`) the upload step succeeded (Stage 6/7 -- a
     local-only render with `require_upload=False` stops at
-    `READY_FOR_UPLOAD`, never fakes `DELIVERY_READY`)."""
+    `READY_FOR_UPLOAD`, never fakes `DELIVERY_READY`).
+
+    `watch_listen_status` (D-288, additive/opt-in -- see the field's own
+    docstring on `RenderDeliveryRecord`): `None` (every pre-D-288 caller)
+    leaves this gate unapplied, byte-identical to pre-D-288 behavior. A
+    caller that supplies a real perceptual verdict opts into it: technical
+    QC PASS alone can no longer reach READY_FOR_UPLOAD/DELIVERY_READY --
+    WATCH_LISTEN_BLOCKED maps to DELIVERY_BLOCKED (never promotable, D-288
+    "no aprobación humana puede saltar BLOCKED"), anything else that is not
+    SYSTEM_PASS/HUMAN_APPROVED (HUMAN_REVIEW_REQUIRED, or an unrecognized
+    value -- fails closed the same way, never treated as PASS) maps to the
+    new PENDING_HUMAN_WATCH_LISTEN status: the file is real, hashed, and
+    technically clean (available for inspection) but not auto-deliverable."""
     errors: list[str] = []
     output_sha256: str | None = None
     output_size_bytes: int | None = None
@@ -355,6 +400,14 @@ def build_render_delivery_record(
             if technical_qc_status != TECHNICAL_QC_STATUS_PASS:
                 status = DELIVERY_STATUS_QC_FAILED
                 errors.append(f"technical_qc_not_pass:{technical_qc_status}")
+            elif watch_listen_status is not None and watch_listen_status not in (
+                WATCH_LISTEN_SYSTEM_PASS, WATCH_LISTEN_HUMAN_APPROVED,
+            ):
+                if watch_listen_status == WATCH_LISTEN_BLOCKED:
+                    status = DELIVERY_STATUS_DELIVERY_BLOCKED
+                    errors.append("watch_listen_blocked")
+                else:
+                    status = DELIVERY_STATUS_WATCH_LISTEN_PENDING
             elif not require_upload:
                 status = DELIVERY_STATUS_READY_FOR_UPLOAD  # Stage 7: local-only case
             elif upload_status == UPLOAD_STATUS_SUCCEEDED:
@@ -387,6 +440,7 @@ def build_render_delivery_record(
         remote_sha256_verified=bool(remote_sha256_verified),
         project_id=project_id,
         job_id=job_id,
+        watch_listen_status=watch_listen_status,
     )
 
 
@@ -439,6 +493,79 @@ def with_upload_result(
 
 
 # =============================================================================
+# D-288 -- traceable, artifact-bound human Watch+Listen approval
+# =============================================================================
+
+@dataclass(frozen=True)
+class WatchListenApproval:
+    """D-288: an explicit human decision to approve exactly ONE rendered
+    artifact for delivery, bound to that artifact's own `render_identity`
+    AND `output_sha256` -- never merely "the last review that ran" or "this
+    project's latest approval". `output_sha256` is included (not just
+    `render_identity`) because D-267's own documented finding (this
+    module's docstring, Stage 13) is that two separate encodes of the
+    IDENTICAL plan can legitimately produce DIFFERENT `output_sha256`
+    values -- an approval must bind to the exact bytes a human actually
+    watched, not merely the plan that produced them. Carries no PII beyond
+    a caller-supplied `approver` label; this module never authenticates it,
+    that is the caller's own auth layer's job."""
+
+    render_identity: str
+    output_sha256: str
+    approved: bool
+    approver: str
+    approved_at: float
+    note: str = ""
+
+
+def resolve_watch_listen_status_for_delivery(
+    automated_status: str,
+    *,
+    approval: WatchListenApproval | None,
+    current_render_identity: str,
+    current_output_sha256: str | None,
+) -> tuple[str, dict]:
+    """D-288: the ONE place a caller may promote an automated perceptual
+    verdict to `WATCH_LISTEN_HUMAN_APPROVED` for delivery purposes. Mirrors
+    `perceptual_watch_listen.apply_human_watch_listen_approval`'s own
+    contract (a confirmed BLOCKED defect is never promotable -- "a root-
+    authority defect to fix or a render to re-attempt, never something a
+    human approves away") but additionally requires the approval to be
+    bound to the EXACT current artifact: a stale approval recorded against
+    a DIFFERENT `render_identity`/`output_sha256` (a prior render, a
+    different edit, or a re-encode of the same plan that legitimately
+    hashed differently) never promotes THIS candidate -- the caller must
+    obtain a fresh approval. Returns `(status, diagnostics)`; `diagnostics`
+    always explains why promotion did or did not happen, never silently."""
+    if approval is None:
+        return automated_status, {"human_approval_applied": False, "reason": "no_approval_recorded"}
+    if automated_status == WATCH_LISTEN_BLOCKED:
+        return automated_status, {"human_approval_applied": False, "reason": "blocked_never_promotable"}
+    if not approval.approved:
+        return automated_status, {"human_approval_applied": False, "reason": "approval_recorded_as_rejected"}
+    if approval.render_identity != current_render_identity or (
+        (approval.output_sha256 or None) != (current_output_sha256 or None)
+    ):
+        return automated_status, {
+            "human_approval_applied": False,
+            "reason": "approval_bound_to_different_artifact",
+            "approval_render_identity": approval.render_identity,
+            "current_render_identity": current_render_identity,
+        }
+    if automated_status not in (WATCH_LISTEN_HUMAN_REVIEW_REQUIRED, WATCH_LISTEN_SYSTEM_PASS):
+        return automated_status, {
+            "human_approval_applied": False,
+            "reason": f"automated_status_not_promotable:{automated_status}",
+        }
+    return WATCH_LISTEN_HUMAN_APPROVED, {
+        "human_approval_applied": True,
+        "reason": "approved_for_exact_artifact",
+        "approver": approval.approver,
+        "approved_at": approval.approved_at,
+    }
+
+
+# =============================================================================
 # Stage 20 -- observability diagnostics (no secrets: none exist on this record)
 # =============================================================================
 
@@ -460,6 +587,16 @@ def render_delivery_diagnostics(record: RenderDeliveryRecord) -> dict:
         "hash_status": hash_status,
         "upload_status": record.upload_status,
         "delivery_status": record.delivery_status,
+        # D-288: "archivo disponible" (technical_qc_status PASS + hash OK)
+        # is deliberately reported SEPARATELY from "aprobado para entrega"
+        # (delivery_status reaching DELIVERY_READY/READY_FOR_UPLOAD, which
+        # now also requires watch_listen_status to clear -- see
+        # `build_render_delivery_record`'s own D-288 gate).
+        "file_available_for_inspection": bool(record.output_sha256) and record.technical_qc_status == TECHNICAL_QC_STATUS_PASS,
+        "watch_listen_status": record.watch_listen_status,
+        "approved_for_delivery": record.delivery_status in (
+            DELIVERY_STATUS_DELIVERY_READY, DELIVERY_STATUS_READY_FOR_UPLOAD,
+        ),
         "output_size_bytes": record.output_size_bytes,
         "output_sha256": record.output_sha256,
         "errors": list(record.errors),

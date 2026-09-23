@@ -12,12 +12,14 @@ from .live_render_qc import PostRenderQCFailure, render_with_post_render_qc
 from .media_overlay_render import LocalMediaOverlay
 from .notifications import publish_notification
 from .overlay_uploads import validate_overlay_uri
+from .perceptual_watch_listen import WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
 from .project_tracking import safe_update_project
 from .render import RENDER_FPS_DEFAULT
 from .render_plan import build_render_plan
 from .render_versions import add_render_version
 from .serde import draft_from_dict
 from .storage import download_source
+from .universal_clean_cut_validation import perceptual_review_for_rendered_candidate
 from .uploads import validate_product_source_uri
 
 # D-269A Stage 2/4: the SAME output geometry `render.render_preview`'s own
@@ -40,9 +42,16 @@ class TenantSafeDeliveryBlocked(RuntimeError):
     notification), reusing all existing failure bookkeeping rather than
     duplicating it."""
 
-    def __init__(self, record: "tsd.TenantSafeDeliveryRecord"):
+    def __init__(self, record: "tsd.TenantSafeDeliveryRecord", *, perceptual_review: dict | None = None):
         super().__init__(f"tenant_safe_delivery_blocked:{record.delivery_status}")
         self.record = record
+        # D-288: the perceptual System Watch+Listen review that produced
+        # this block (when the block was watch-listen-caused) -- carried
+        # separately from `record` so a caller/notification can distinguish
+        # "this candidate never technically rendered/uploaded" from "this
+        # candidate rendered fine but is perceptually BLOCKED/HUMAN_REVIEW_
+        # REQUIRED", never conflating the two under one generic failure.
+        self.perceptual_review = perceptual_review
 
 
 def _job_started_epoch(job) -> float | None:
@@ -75,6 +84,9 @@ def _tenant_safe_deliver(
     project_id: str,
     user_id: str,
     job_id: str,
+    draft=None,
+    local_paths: dict | None = None,
+    qc_result=None,
     requesting: "tsd.DeliveryOwnershipScope | None" = None,
 ) -> dict:
     """D-269A: the live activation seam -- binds the actual rendered/QC-
@@ -100,6 +112,34 @@ def _tenant_safe_deliver(
     render_identity = rd.compute_render_identity(
         tuple(plan), width=_RENDER_WIDTH, height=_RENDER_HEIGHT, fps=RENDER_FPS_DEFAULT,
     )
+
+    # D-288: run the perceptual System Watch+Listen review on the ACTUAL
+    # rendered file before this candidate can reach DELIVERY_READY. Before
+    # this fix, `run_export_job` never called `perceptual_watch_listen`
+    # (or anything in `universal_clean_cut_validation.py`) at all -- a
+    # technical-QC PASS alone was sufficient for this job to mark the
+    # project "finished" and hand back a real `download_url`. Never raises
+    # (`review_rendered_candidate`'s own "never raises" contract, an
+    # internal exception is reported as capability ERROR); an ERROR
+    # capability resolves `watch_listen_status` to BLOCKED (D-154/D-155),
+    # never silently skipped or treated as PASS.
+    #
+    # `draft is None` is the pre-D-288 calling convention (this function's
+    # own lower-level test coverage exercises ONLY the D-269A remote/
+    # ownership/upload contract and never supplies one) -- the D-288 gate
+    # is additive/opt-in exactly like `build_render_delivery_record`'s own
+    # `watch_listen_status=None` contract, so it is left UNAPPLIED for such
+    # a caller rather than fabricating a verdict with no real review input.
+    # The REAL caller, `run_export_job` below, always supplies a real
+    # `draft`/`local_paths`/`qc_result`, so the production path is always
+    # gated.
+    if draft is None:
+        perceptual = None
+        watch_listen_status = None
+    else:
+        perceptual = perceptual_review_for_rendered_candidate(output_path, draft, local_paths or {}, qc_result)
+        watch_listen_status = (perceptual or {}).get("watch_listen_status") or WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
+
     local_delivery = rd.build_render_delivery_record(
         render_identity=render_identity,
         render_execution_status=rd.RENDER_EXECUTION_STATUS_SUCCEEDED,
@@ -109,15 +149,19 @@ def _tenant_safe_deliver(
         upload_status=rd.UPLOAD_STATUS_NOT_ATTEMPTED,
         project_id=project_id,
         job_id=job_id,
+        watch_listen_status=watch_listen_status,
     )
     if local_delivery.delivery_status != rd.DELIVERY_STATUS_READY_FOR_UPLOAD:
-        # D-267's own render/hash/QC gate already found a blocker -- never
-        # re-derived, never overridden here, only wrapped as a tenant-
-        # safe-delivery block so the caller has one exception type.
+        # D-267's own render/hash/QC gate (or, as of D-288, the perceptual
+        # watch-listen gate) already found a blocker -- never re-derived,
+        # never overridden here, only wrapped as a tenant-safe-delivery
+        # block so the caller has one exception type. `perceptual_review`
+        # is attached so the caller can tell a watch-listen hold apart from
+        # a genuine render/hash/upload failure.
         blocked = tsd.evaluate_tenant_safe_delivery(
             ownership=ownership, expected_render_identity=render_identity, delivery=local_delivery,
         )
-        raise TenantSafeDeliveryBlocked(blocked)
+        raise TenantSafeDeliveryBlocked(blocked, perceptual_review=perceptual)
 
     tenant_key = tsd.build_tenant_safe_export_key(ownership=ownership, render_identity=render_identity)
     stored = store_export(
@@ -172,6 +216,9 @@ def _tenant_safe_deliver(
 
     result = {
         "delivery_status": record.delivery_status,
+        # D-288: real value, real trace -- this candidate reached delivery
+        # only because `watch_listen_status` cleared the D-288 gate above.
+        "watch_listen_status": watch_listen_status,
         "render_identity": render_identity,
         "output_sha256": uploaded_delivery.output_sha256,
         "remote_reference": stored.get("export_uri"),
@@ -315,7 +362,8 @@ def run_export_job(payload: dict) -> dict:
             if not job_id:
                 raise ValueError("tenant_safe_delivery_requires_job_id")
             delivery = _tenant_safe_deliver(
-                output_path=output, plan=plan, project_id=project_id, user_id=user_id, job_id=job_id,
+                output_path=output, plan=plan, draft=draft, local_paths=local_paths, qc_result=qc_result,
+                project_id=project_id, user_id=user_id, job_id=job_id,
             )
             version_payload = {}
             version = None
@@ -407,6 +455,39 @@ def run_export_job(payload: dict) -> dict:
                 "plan_version": exc.result.plan_version,
                 "semantic_hash": exc.result.semantic_hash,
                 "render_attempt_count": len(exc.result.attempts),
+            },
+        )
+        raise
+    except TenantSafeDeliveryBlocked as exc:
+        # D-288: never delivered -- distinct from PostRenderQCFailure above
+        # (that candidate never even reached a passing technical QC) and
+        # from the generic Exception branch below (an infra/upload/hash
+        # failure). This branch specifically covers a technically-PASSing
+        # render that the D-288 watch-listen gate (or D-269's own remote/
+        # upload verification) refused to mark ready -- the notification
+        # payload carries `watch_listen_status`/`delivery_status` so this
+        # is never silently indistinguishable from a genuine render
+        # failure, per this gate's own "distingue el repair loop editorial
+        # previo a Freeze, el técnico y el perceptual posterior al render"
+        # requirement.
+        safe_update_project(
+            user_id=user_id,
+            project_id=project_id,
+            state="failed",
+            latest_job_id=job_id,
+            latest_job_started_at=job_started_at,
+        )
+        perceptual = exc.perceptual_review or {}
+        _safe_notify(
+            user_id=user_id,
+            project_id=project_id,
+            kind="render_failed",
+            payload={
+                "job_id": job_id,
+                "error": exc.__class__.__name__,
+                "delivery_status": exc.record.delivery_status,
+                "watch_listen_status": perceptual.get("watch_listen_status"),
+                "watch_listen_gated": perceptual.get("watch_listen_status") is not None,
             },
         )
         raise

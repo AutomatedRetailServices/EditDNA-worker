@@ -27,7 +27,13 @@ from .contracts import ProcessingRequest, SourceAsset
 from .live_boundary_repair import segment_output_windows
 from .live_render_qc import LiveRenderQCResult, render_with_post_render_qc
 from .media_probe import probe_media
-from .perceptual_watch_listen import error_review, review_rendered_candidate
+from .perceptual_watch_listen import (
+    WATCH_LISTEN_BLOCKED,
+    WATCH_LISTEN_HUMAN_APPROVED,
+    WATCH_LISTEN_SYSTEM_PASS,
+    error_review,
+    review_rendered_candidate,
+)
 from .render_plan import build_render_plan
 from .source_identity import stable_source_id
 from .storage import download_source
@@ -163,10 +169,30 @@ def _perceptual_review(
     return review
 
 
+def perceptual_review_for_rendered_candidate(
+    output_path: str, draft, local_paths: Mapping[str, str], qc_result,
+) -> dict[str, Any] | None:
+    """D-288: public entry point for `_perceptual_review`, for a caller with
+    an already-PASSed technical QC candidate (e.g. `export_job.run_export_
+    job`, the real mobile export path) rather than the RAW validation
+    harness's own preview-path/skipped-reason bookkeeping. Before D-288,
+    `export_job.py` never called `perceptual_watch_listen.review_rendered_
+    candidate` (or anything in this module) at all -- a technically-PASSing
+    render reached `state="finished"`/a real `download_url` with ZERO
+    perceptual review, confirmed/demonstrated finding of this gate's own
+    audit, not merely a suspicion. Same review mechanics as `_perceptual_
+    review`, not a second implementation -- `output_path` is passed as both
+    `preview_path` and `rendered_path` since a caller here only ever invokes
+    this once technical QC has already reached PASS (the file at
+    `output_path` is therefore always the real, valid final candidate)."""
+    return _perceptual_review(output_path, draft, local_paths, qc_result, rendered_path=output_path)
+
+
 def _live_render_qc_diagnostics(
     qc_result: LiveRenderQCResult | None, *, skipped_reason: str | None,
     story_completeness: str = "complete",
     perceptual_status: str | None = None,
+    watch_listen_status: str | None = None,
 ) -> dict[str, Any]:
     """`story_completeness` (D-097.B): when the engine marked the run
     story-incomplete (a family with no usable realization was dropped by
@@ -174,17 +200,34 @@ def _live_render_qc_diagnostics(
     passed -- it is kept as a clearly-marked diagnostic artifact for
     review, never presented as a clean complete story.
 
-    `perceptual_status` (D-097 §4): the advisory System Watch+Listen verdict.
-    A technically deliverable candidate is reported as
-    DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN with that status attached --
-    never as an approved preview -- until the perceptual gate is approved as
-    blocking and passes."""
+    `perceptual_status` (D-097 §4, kept for backward-compatible diagnostics
+    only): the COARSE `PerceptualReview.status` (PASS/FAIL/UNCERTAIN) --
+    human-readable, never itself a gating value.
+
+    `watch_listen_status` (D-288, corrects a real defect this exact field
+    audit found on RAW #122's own evidence: this function used to build
+    `delivery_status`'s string suffix from `perceptual_status` above, which
+    is `PerceptualReview.status` -- the COARSE 3-state PASS/FAIL/UNCERTAIN
+    field -- not `PerceptualReview.watch_listen_status`, the real typed
+    4-state authority (D-154/D-155: BLOCKED/HUMAN_REVIEW_REQUIRED/
+    SYSTEM_PASS/HUMAN_APPROVED) already computed and already present in the
+    SAME review dict at `perceptual_watch_listen.as_dict()["watch_listen_
+    status"]`. `human_watch_listen_required` was also always hardcoded
+    `True` regardless of the real verdict. Both are fixed here: `deliverable`
+    stays governed ONLY by technical QC + story completeness (D-036 item 7
+    is unchanged -- "archivo disponible para inspección" is a technical-only
+    question), but `delivery_status`/`human_watch_listen_required` now read
+    the real typed status, and a `WATCH_LISTEN_BLOCKED` verdict is reported
+    as `NOT_DELIVERABLE_WATCH_LISTEN_BLOCKED` -- never `DELIVERABLE_PENDING_
+    ...`, which previously implied "just needs sign-off" for what could be a
+    confirmed perceptual defect."""
     if qc_result is None:
         return {
             "status": "not_attempted",
             "reason": skipped_reason,
             "deliverable": False,
             "delivery_status": "NOT_DELIVERABLE_not_attempted",
+            "watch_listen_status": None,
             "output_path": None,
             "plan_id": None,
             "plan_version": None,
@@ -196,6 +239,14 @@ def _live_render_qc_diagnostics(
     deliverable = bool(qc_result.deliverable) and not story_incomplete
     if qc_result.deliverable and story_incomplete:
         delivery_status = f"NOT_DELIVERABLE_INCOMPLETE_STORY_REVIEW:{story_completeness}"
+    elif deliverable and watch_listen_status == WATCH_LISTEN_BLOCKED:
+        # D-288: a confirmed perceptual defect is never reported as merely
+        # "pending" -- "archivo disponible para inspección" still holds
+        # (deliverable/output_path are unchanged), but the delivery_status
+        # string itself must not read as "just needs sign-off".
+        delivery_status = f"NOT_DELIVERABLE_WATCH_LISTEN_BLOCKED:perceptual={perceptual_status}"
+    elif deliverable and watch_listen_status is not None:
+        delivery_status = f"DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:watch_listen={watch_listen_status}"
     elif deliverable and perceptual_status is not None:
         delivery_status = f"DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual={perceptual_status}"
     else:
@@ -211,7 +262,12 @@ def _live_render_qc_diagnostics(
         "delivery_status": delivery_status,
         "story_completeness": story_completeness,
         "perceptual_review_status": perceptual_status,
-        "human_watch_listen_required": True,
+        "watch_listen_status": watch_listen_status,
+        # D-288: real value, not a hardcoded constant -- False once the
+        # typed status is SYSTEM_PASS or HUMAN_APPROVED.
+        "human_watch_listen_required": watch_listen_status not in (
+            WATCH_LISTEN_SYSTEM_PASS, WATCH_LISTEN_HUMAN_APPROVED,
+        ),
         "output_path": qc_result.output_path,
         "plan_id": qc_result.plan_id,
         "plan_version": qc_result.plan_version,
@@ -346,6 +402,10 @@ def run_single_universal_clean_cut_validation(
             live_render_qc_result, skipped_reason=preview_skipped_reason,
             story_completeness=str(result.stage_status.get("story_completeness") or "complete"),
             perceptual_status=(perceptual or {}).get("status") if perceptual else None,
+            # D-288: the real typed 4-state authority, not the coarse
+            # PASS/FAIL/UNCERTAIN `status` field -- see this function's own
+            # D-288 docstring for the exact defect this closes.
+            watch_listen_status=(perceptual or {}).get("watch_listen_status") if perceptual else None,
         ),
         # D-097 §4: perceptual System Watch+Listen v1 (advisory, routing only).
         "perceptual_watch_listen": perceptual,

@@ -24,6 +24,8 @@ import platform
 from pathlib import Path
 from typing import Any, Mapping
 
+from .editorial_slot_resolution_install import collect_and_clear_editorial_slot_resolution_evidence
+
 SCHEMA_VERSION = "cutsell.active_path_identity.v1"
 
 # (component label, D-reference, how the result proves it ran).
@@ -95,10 +97,40 @@ def _present(section: Mapping[str, Any] | None, path: tuple[str, ...]) -> bool:
     return True
 
 
+def _diagnostics_with_editorial_slot_resolution_evidence(
+    diagnostics: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """D-288: overlay THIS execution's own real editorial-slot-resolution
+    request-built evidence (a per-run `ContextVar`, never a global counter
+    -- see `editorial_slot_resolution_install.py`'s own D-288 comment) onto
+    a READ-ONLY COPY of `diagnostics`, never mutating the caller's real
+    dict. Only ever ADDS the key -- if a real per-run writer for it exists
+    in the future, that writer's own value (present in `diagnostics`
+    already) always wins, never overwritten here. Absent evidence (no
+    request was ever built this run -- e.g. the arbiter was never invoked)
+    correctly leaves the probe reading "absent", exactly as intended; this
+    never fabricates presence."""
+    if not isinstance(diagnostics, Mapping) or "editorial_slot_resolution" in diagnostics:
+        return diagnostics
+    evidence = collect_and_clear_editorial_slot_resolution_evidence()
+    if not evidence:
+        return diagnostics
+    overlaid = dict(diagnostics)
+    overlaid["editorial_slot_resolution"] = {
+        "schema_version": "cutsell.editorial_slot_resolution_evidence.v1",
+        "policy_installed": True,
+        "request_built_count": len(evidence),
+        "requests": list(evidence),
+    }
+    return overlaid
+
+
 def component_markers(result: Mapping[str, Any]) -> list[dict[str, Any]]:
     sections = {
         "stage_status": result.get("stage_status") if isinstance(result, Mapping) else None,
-        "diagnostics": result.get("diagnostics") if isinstance(result, Mapping) else None,
+        "diagnostics": _diagnostics_with_editorial_slot_resolution_evidence(
+            result.get("diagnostics") if isinstance(result, Mapping) else None
+        ),
     }
     rows = []
     for label, reference, section_name, path in _COMPONENT_PROBES:

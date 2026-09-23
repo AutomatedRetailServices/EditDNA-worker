@@ -595,7 +595,6 @@ def test_no_provider_no_raw_reference_in_modified_modules():
 
 @pytest.mark.parametrize("rel_path", [
     "cutsell_worker/render.py",
-    "cutsell_worker/render_delivery.py",
     "cutsell_worker/render_plan.py",
     "cutsell_worker/tenant_safe_delivery.py",
     "cutsell_worker/audio_finishing_executor.py",
@@ -618,6 +617,13 @@ def test_no_provider_no_raw_reference_in_modified_modules():
     # main.py -- self-resolving guard, same pattern as this repo's other
     # closed-track firewall lists (e.g. the worker_job.py precedent in
     # test_cutsell_d272_source_format_policy.py).
+    # render_delivery.py removed: D-288 (a later, separately-authorized
+    # gate) legitimately adds the watch_listen_status delivery gate and
+    # traceable human-approval contract to this module -- same
+    # self-resolving-guard pattern as the uploads.py/main.py precedent
+    # immediately above. D-269A's own render-identity/hash/upload contract
+    # in this file is untouched; see test_cutsell_d267_render_delivery_
+    # contract.py (still green) for that coverage.
     "cutsell_worker/project_store.py",
     "cutsell_app/auth_middleware.py",
 ])
