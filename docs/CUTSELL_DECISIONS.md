@@ -79545,6 +79545,20 @@ rule fires on RAW #124's texts when the ASR carries a break (D-289.11
 tests). Evaluating the CTA with the real timings needs the JSON's
 `timed_asr_replay_evidence` (D-290) -- the exact field to attach.
 
+### Verification (committed tree `56284759`)
+- compileall OK; targeted authority set (D-289.*, D-291, D-050*, D-073,
+  D-087, D-088, D-090, D-092, D-097*, hybrid pipeline, universal clean cut,
+  ledger/resolver/canonical-plan/coherence suites): **712 passed**; the new
+  file **8 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on the working tree: **9080 passed, 10
+  skipped, 13 subtests passed, 7 failed** (351.16 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x–D-291.x entry verified
+  plus the 2 working-tree-only `git diff HEAD` guards on `pipeline.py`
+  (D-169 `test_30`, D-239L `test_32`), which pass on the COMMITTED tree
+  with the D-174 guards (**133 passed**); zero new failures; both baseline
+  manifests and the selection lock byte-identical.
+
 ### Pending limits (recorded, not fixed here)
 - **Resolver tie when the family's winner label agrees with the local
   winner:** the Ledger records `SEMANTIC_WINNER_OVERRIDE` only when
