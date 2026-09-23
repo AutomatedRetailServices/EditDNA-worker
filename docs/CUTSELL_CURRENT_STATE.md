@@ -98,7 +98,14 @@ Verified state at `781a8634`:
   7's veto disappears, the path consults the existing claim arbiter on R+T's
   claim (0.5556, ambiguous band), and the outcome still depends on three
   unrecorded real answers (W-R pairwise, the claim verdict, the D-085 probe
-  if declined) -- no RAW proposed; not integrated; no baseline change.
+  if declined) -- not integrated; no baseline change. D-289.8 closes the
+  regression that segmentation introduced (a negated matrix clause "no es
+  cierto que ..." was cut from its complement at a temporal connector): the
+  shared splitter keeps a span whole when its left side ends on a
+  complementizer/function word or a belief verb, so claims and scope keep
+  the negation with what it negates; full regression 8956 passed, the same
+  5 pre-existing failures. One Product-Owner-authorized Modal RAW on that
+  head follows (D-289.9).
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

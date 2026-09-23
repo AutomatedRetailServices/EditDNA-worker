@@ -78423,3 +78423,74 @@ the claim verdict on R+T vs W; the D-085 probe if declined) and the
 per-group cap observation (D-289.6) remain Product Owner territory. **Exact
 next step:** Product Owner review; no integration, no RAW, no baseline
 change.
+
+## D-289.8 — A negation keeps its complement across a clause connector
+(regression introduced by D-289.7's segmentation; same isolated branch, off
+`97955e27`; offline first)
+
+**NOT integrated. `main`/PR #25/canon/baselines untouched. Freeze not
+weakened. No threshold changed. No phrase-specific exception. D-289.7's
+one-unit-per-side bridge orientation verified by the Product Owner and
+kept.**
+
+### Regression (reported by the Product Owner; reproduced before editing)
+Reference "Desaparecen los síntomas." vs candidate "No es científicamente
+cierto que después de recibir tratamiento desaparecen los síntomas."
+(English control: "The symptoms disappeared." vs "It is definitely not true
+that after regular treatment the symptoms disappeared."): before D-289.7
+contradiction True / coverage 0.05; after D-289.7 contradiction False /
+coverage 1.0. The shared segmenter cut the sentence at the temporal
+connector ("después de"/"after") into "No es científicamente cierto que" and
+"después de recibir tratamiento desaparecen los síntomas": the negated
+matrix clause was separated from the proposition it negates, and the
+complement read as an assertion.
+
+### Fix -- in the shared logic
+`semantic_claims._leaves_open_dependency(left)`: the text before a
+candidate connector is NOT a self-standing proposition when it ends on a
+word that requires its complement to follow -- a dangling function word
+(`take_grouping._DANGLING_FUNCTION_WORDS`: the complementizers "que"/
+"that", prepositions, articles, conjunctions -- the sentence-continuation
+relation's own vocabulary, reused verbatim) or a belief/perception verb
+awaiting what is believed (`_BELIEF_PERCEPTION_MARKERS`: "no creo", "I do
+not think"). `_split_into_clauses` treats such a connector like one whose
+side fails D-040's content floor: it keeps looking for a later connector
+and otherwise leaves the whole span as ONE unit. Because claims
+(`extract_claims`) and scope (`proposition_units` -> `claim_coverage` and
+`contradiction_signal`) are cut by the same splitter, the negated sentence
+is one NEGATION claim and one scope unit everywhere. When the two sides
+cannot be shown independent, the full scope is kept.
+
+### Verified (`tests/test_cutsell_d289_7_proposition_scope_negation.py`,
+section G, 12 new tests -- 50 in the file)
+- both reported cases: one unit, contradiction True, coverage 0.05, not
+  covered even with a confirming claim arbiter; the same dependency through
+  a belief verb without complementizer ("Honestamente no creo después de
+  ..."/"I honestly do not believe after ...") and the negation inside the
+  temporal clause ("Después de recibir tratamiento, no desaparecen ...");
+- the positive matrix with the same complement ("Es científicamente cierto
+  que después de ...") is covered and compatible;
+- independent propositions still split and an unrelated negation stays
+  out ("No es cierto que sea caro el tratamiento, pero después del
+  tratamiento desaparecen los síntomas." -> 2 units, no conflict, covered);
+- RAW #123 comma/period invariance unchanged (no conflict, 0.5556, W123
+  still 4 units); true negation flips, numeric differences and complete
+  causal relations unchanged (sections C/D still green).
+
+### Verification (committed tree `c390d88c`)
+- compileall OK; the affected set (D-289.7 file 50, D-289.4 28, D-289 38,
+  semantic-claims/D-056.3/D-056.5/D-058/D-059/D-066/D-082/D-085/D-094.2/
+  D-097.9/D-101/D-108/D-287/claim-coverage and every test file that
+  exercises `extract_claims`/`_split_into_clauses`): **687 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`): **8956 passed, 10 skipped, 13 subtests
+  passed, 5 failed** (377.10 s) -- exactly the 5 pre-existing/unrelated
+  failures every D-288.x/D-289.x entry verified (`test_hybrid_story_guard_
+  incomplete_retry` x1, `test_video00_modal_hybrid_semantic_parity` x4);
+  zero new failures; `benchmarks/` unchanged; `cutsell/mobile-v1-clean` and
+  `main` untouched.
+
+**Next (authorized by the Product Owner):** ONE Modal RAW run on this
+committed head with RAW #123's parameters, replacing the run that had been
+proposed on `95d0b02c` (never executed: the workflow history shows no run
+after 35866604610 and none active). Its record follows as D-289.9.
