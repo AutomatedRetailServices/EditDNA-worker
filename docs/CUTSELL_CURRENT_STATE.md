@@ -66,8 +66,11 @@ Verified state at `781a8634`:
   continuation chains as one realization, preservation through the claim-
   coverage authority, the existing 0.85 pairwise bar; case 1 escalated as a
   product decision because Gold, Cut.ai and the locked baseline all KEEP the
-  pimples fragments) — NOT integrated, NOT proven on a RAW; the RAW #122
-  selection change depends on a claim-arbiter verdict the run never recorded.
+  pimples fragments) — NOT integrated; RAW #123 (run 35866604610 on
+  `0b1572a8`, D-289.3) produced NO MP4 and its result JSON could not be read
+  from this environment (artifact host blocked, invalid S3 keys): the aside
+  was kept ungrouped, the restatement head kept exactly as on RAW #122 and
+  its tail removed before grouping — D-289.x is NOT validated on video.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

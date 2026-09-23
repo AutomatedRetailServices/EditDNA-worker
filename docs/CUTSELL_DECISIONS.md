@@ -77880,3 +77880,82 @@ kept unchanged.
   hybrid_semantic_parity` x4); zero new failures; `benchmarks/` unchanged.
 
 **Exact next step:** Product Owner review. No integration, no RAW.
+
+## D-289.3 — RAW #123 (one authorized Modal run on
+`fix/editorial-realization-closure@0b1572a8`): checkpoint record
+
+**NOT integrated. Not relaunched. `main`/PR #25/canon/baselines untouched.
+No RunPod. `perceptual_repair_cycle.py` remains disconnected.**
+
+- Run: `cutsell-video00-modal-raw.yml` run 35866604610 (workflow run
+  #123), workflow_dispatch on branch `fix/editorial-realization-closure`,
+  head `0b1572a8d59262c37672f427f082599f92060fbd` (verified equal to the
+  reviewed remote SHA before dispatch; the run's `head_sha` matches; the
+  `benchmark_id` is `video00-modal-35866604610-1`). Inputs: RAW #122's
+  effective parameters reconstructed from its own result JSON (every
+  optional overlay OFF, hybrid ceiling unset, canonical Video00 source)
+  plus `pacing_v2_diagnostics_enabled=1`. No other Modal run was in
+  progress at dispatch (only stale queued CI runs on an old branch).
+- Outcome: job completed in 7.5 min, conclusion FAILURE. Steps: Modal
+  benchmark, artifact download, active-path identity, diagnostics dump,
+  D-235G/J/D-237I/D-239F/O extractions, Video00 architecture, the 18-check
+  Human Gold regression QA and the quality ladder all SUCCESS; "Verify
+  frozen Selection lock" FAILURE (as on RAW #122); the three Pacing V2
+  steps (D-218R/D-221/D-225) FAILURE because `diagnostics.pacing_v2` and
+  `pacing_v2_handle_aware` are MISSING from the serialized result -- the
+  step's own reading: the flag was not set, or Freeze was blocked before
+  the pacing seam, or a real regression. The flag WAS passed on this
+  dispatch (and was PRESENT on RAW #122 with the same input), and the
+  run's step env shows `PREVIEW_URI` EMPTY where RAW #122 had
+  `.../preview.mp4`; the human-review artifact is 541 MB vs 578 MB on RAW
+  #122 (about one Video00 output MP4 smaller). **No MP4 was uploaded by
+  this run.** Why (Freeze blocked / QC refusal / crash after the plan) is
+  NOT established here: see the limitation below.
+- **Limitation (access, not engine):** from this container the artifact
+  host (`productionresultssa*.blob.core.windows.net`) is blocked by the
+  egress policy (CONNECT 403), the GitHub job-log endpoint redirects
+  there, the web raw-log URL returns 403, the AWS keys in the environment
+  are invalid (`InvalidAccessKeyId`), and the MCP log reader caps at the
+  last 5000 lines. Therefore the engine `result.json` (with the
+  `distinct_idea_grouping_safety.edge_trace` row that would hold the
+  claim-arbiter consultation for W vs the complete sentence R+T), the
+  full diagnostics dump, the Freeze/lock/QA reports and any MP4 could not
+  be read. **The real arbiter consultation and answer are therefore NOT
+  recorded here and the replay hypothesis is NOT substituted for them.**
+  Video and audio could not be verified. The Product Owner can download
+  `cutsell-video00-modal-human-review` (result.json + media) and
+  `cutsell-video00-modal-validator-reports` from the run page.
+- What the last 5000 log lines DO show (the full quality-ladder region
+  map from 59.41 s to the end, 112 regions, plus the D-200.4 clip
+  listing with `freeze_plan_id plan_aeeb7bd0c6baf3d5` -- a CanonicalEditPlan
+  was built):
+  * conclusion cluster, RAW #123 vs RAW #122: W (295.3-314.62, this run's
+    ASR: "Esta es mi experiencia, soy la única ... 5 o 10 % ...") kept as
+    family winner (family {W, P}: the strict prefix P was a family member
+    and discarded this time, not hybrid-deleted); the aside A (319.74-
+    327.7) KEPT UNGROUPED (on RAW #122 it was in W's family and discarded:
+    a 7.95 s Level-2 regression); the restatement head R (327.7-334.24,
+    "así que estoy convencida y la ciencia lo avala, que solo un 5 o 10 %
+    de los") KEPT UNGROUPED exactly as on RAW #122 (Level 2, 6.54 s); the
+    tail T ("cánceres son hereditarios.", ~335-342) DISCARDED, ungrouped,
+    with no idea role -- i.e. removed before grouping, so the D-289.x
+    continuation chain never saw it and the D-289.x bridge path could not
+    have engaged for R+T. R now stands alone with its dangling ending.
+    Cluster ladder mass: Level 1 1.49 s -> 1.32 s; Level 2 10.5 s -> 15.85 s.
+  * pimples cluster unchanged: the two fragments consensus-keep, the
+    monolith consensus-delete (family loser), the marked winner kept.
+  * `render_correlation`/`render_found`/`rendered_coverage` are null on
+    every clip row (no rendered segments, consistent with no MP4).
+- Reading: the transcript differs from RAW #122 (ASR run-to-run
+  variance: punctuation, "5 o 10" vs "5 -10", lowercase "así"), the
+  family shape differs (A no longer merged with W, P inside the family),
+  and T was removed upstream of grouping. Whether the pairwise arbiter
+  confirmed W-R this run, whether the corrected path was reached, and
+  what the claim arbiter answered are all in the unreachable JSON. **No
+  editorial success is claimed. D-289.x is NOT validated on video by this
+  run, and the run regressed the aside and produced no deliverable.**
+
+**Exact next step:** Product Owner retrieves the two artifacts (or grants
+this environment egress to the artifact host / valid S3 credentials) so
+the JSON can be read and the arbiter consultation recorded; no relaunch
+without authorization.
