@@ -76,7 +76,12 @@ Verified state at `781a8634`:
   CRITICAL claim read as lost; the cross-group cleanup now judges a
   continuation chain as one unit and never removes a tail alone); the
   contradiction primitive's negation scope over RAW #123's comma-run winner
-  is recorded as residual R-289.4a.
+  is recorded as residual R-289.4a. D-289.5 replays RAW #123 from the Product
+  Owner's emitted-diagnostics package (the single Freeze blocker was the
+  fused "por esono" claim; W-R was never asked; T removed as alternate 0.85),
+  guards the joint removal per member and by realization preservation, and
+  shows the replay removes that blocker while the restatement R+T remains a
+  Level-2 co-keep pending a W-R verdict no run has recorded.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

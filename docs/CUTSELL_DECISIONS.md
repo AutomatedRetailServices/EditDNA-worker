@@ -78051,3 +78051,94 @@ introduced point, a capitalised sentence and a distant tail are not units).
 **Exact next step:** Product Owner review. Not integrated; no RAW without
 authorization. The RAW #123 package (full log + real diagnostics) is still
 needed to replace the stated label assumptions with the recorded ones.
+
+## D-289.5 — Joint removal guarded per member and by realization
+preservation; faithful RAW #123 replay from the Product Owner's package
+(same isolated branch, off `f3584f86`; offline only)
+
+**NOT integrated. No RAW. `main`/PR #25/canon/baselines untouched. Freeze
+not weakened. `_split_into_clauses` fix (D-289.4) kept unchanged.**
+
+### What the package (`raw123-emitted-diagnostics.json`, JSON blocks the complete job log emitted) establishes
+- Identity: workflow head = worker build SHA `0b1572a8...`, package
+  fingerprint match; `deliverable: false`, `delivery_status: NOT_
+  DELIVERABLE_not_attempted`, `reason: freeze_blocked_no_render`; 18/18
+  regression checks passed; ladder selection seconds L1 18.97 / L2 26.05 /
+  L3 313.10 (Cut.ai keep 167.8 s, CutSell keep 166.0 s, Gold 141.7 s).
+- The ONE Freeze blocker: `lost_critical_claims` = W's own claim "por esono
+  creo y está comprobado científicamente ... más bien, solo un 5 o 10 %
+  ...", MEASUREMENT/CRITICAL, coverage 0.05 against W itself; repair loop
+  `no_repair_strategy_exists_for_this_finding_kind` -> NEEDS_HUMAN_REVIEW.
+  Exactly the D-289.4 cause-1 defect; with the fix the same claim self-
+  covers (verified on the verbatim winner text, which carries "más bien,"
+  with a comma that D-289.4's reconstruction lacked).
+- Hybrid windows overlap on W/A/R: chunk 4 R `alternate 0.75`; chunk 5 R
+  `failed 0.8`, T `alternate 0.85`, A `failed 0.85`, P `failed 0.85`, W
+  `winner 0.95`, C `winner 0.9`. Per-clip resolution (`_decision_priority`:
+  failed > winner > alternate > keep): **R failed 0.8, T alternate 0.85**,
+  A failed 0.85 -- replacing D-289.4's stated assumptions.
+- Cross-group pass: T removed (alternate 0.85, 3 content tokens, coverage
+  1.0 by W, `single_authoritative_peer`) and P removed (failed 0.85,
+  coverage 1.0); P soft-restored (`weak_failed_semantics_without_
+  destructive_authority`) and lost W's family by `delivery_tie_break_among_
+  survivors`.
+- IdeaClusterer: **W-A rejected 0.85** ("The left adds lifestyle claims and
+  advice not present in the right."), R-C rejected 0.9, P-A confirmed 0.95;
+  **W-R never asked** (14 of 74 candidate pairs in budget); the P-A bridge
+  into {W, P} refused by the contradiction net; families {W, P}, {A}, {R},
+  {C}; no continuation chain (T was already gone). So D-289.x's bridge path
+  never had a W-R verdict to act on; the claim-arbiter consultation for W
+  vs R+T did not happen and is NOT recorded anywhere.
+
+### Finding 1 — per-member rejection protection
+`collapse_cross_group_semantic_retries` checked `is_rejected_replacement`
+only for the head, then removed every member. Now a recorded `SEQUENCE_
+IDENTITY_BELOW_THRESHOLD` rejection for ANY member of the unit against the
+proposed peer blocks the whole removal; each member's row carries the real
+reason (`prior_replacement_rejection_respected`, `prior_replacement_
+rejection_reason`, `prior_replacement_rejection_member_clip_id`, the
+proposed peer, the unit). Directional and pair-exact as before: (T, other)
+or (W, T) protects nothing; (H, W) still protects (pre-existing behaviour).
+Reproduced with a (T, W) rejection row in the guard's own row shape.
+
+### Finding 2 — chain membership is not proof of replaceability
+Reproduced the Product Owner's example: H "Stress occurs because of the" +
+T "severe recurring symptoms." vs W "Severe recurring symptoms occur because
+of stress." -- the lexical rule covered the unit at 0.8 and D-289.4 removed
+H+T although W inverts the causality. Now, after the lexical rule says
+covered, the unit's COMPLETE realization must be preserved per the existing
+claim authority (`semantic_claims.extract_claims` + `claim_is_covered`, with
+its negation-flip / number-mismatch / causal-inversion guards) by the very
+peers that cover it (each covering peer's text, and their joined text in
+the multi-peer mode). Not demonstrated -> nothing removed, row
+`continuation_unit_realization_not_preserved_kept_for_grouping` with the
+lexical verdict and every claim's best coverage, and the unit reaches
+grouping whole. No threshold adjusted; no arbiter at this seam. On the
+example the claim "Stress occurs" best-covers 0.5 -> kept for grouping. A
+unit the winner genuinely preserves is still removed whole; a text below
+the claim extractor's clause floor falls back to the lexical verdict.
+
+### Faithful replay (tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py, 32 tests)
+From before the cleanup with the package's texts, resolved labels and
+arbiter answers (W-R omitted as never asked): the corrected cleanup keeps
+the unit R+T -- lexically covered 0.5556 by W but its CRITICAL claim
+best-covers 0.05 (the winner's "no creo ... son hereditarios" negation
+scope) -- and removes P; grouping never asks W-R, so R+T stays whole as its
+own family; W wins its family; A stays its own family (W-A rejected); no
+orphan tail, no dangling head; W's own CRITICAL claim is no longer a lost
+claim of itself and `freeze_blocked` is False in the replay. **What this
+demonstrates:** the recorded Freeze blocker is removed and the orphan is
+impossible. **What it does not:** the restatement R+T is still KEPT next to
+the winner (a Level-2 co-keep, the RAW #122 shape); removing it would need a
+W-R same-idea verdict the run never requested plus a claim-arbiter answer
+for the D-058 canary, neither of which exists on record. P's soft-restore
+(a separate authority) is not replayed; on the run it lost W's family.
+
+### Verification (committed tree)
+PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+
+**Pending:** the W-R pairwise verdict and the claim-arbiter answer for W vs
+the complete sentence R+T -- only a RAW that reaches them can record them;
+the pair-budget order that left W-R outside the 14 asked pairs is a
+separate observation, not changed here. **Exact next step:** Product Owner
+review; no integration, no RAW, no baseline change.
