@@ -77449,3 +77449,187 @@ passed, 10 skipped, 13 subtests passed, 5 failed** (356.55s) -- the same
 **Exact next step:** Product Owner review before any integration. Then
 STOP. DO NOT SWITCH BRANCHES. DO NOT MERGE. DO NOT REBASE. DO NOT TOUCH
 cutsell/mobile-v1-clean.
+
+## D-288.5 — Controlled integration of D-288 → D-288.4.1 into
+`cutsell/mobile-v1-clean` (checkpoint record; no engine change)
+
+**Product-Owner-authorized.** `audit/watch-listen-delivery-authority`
+`781a86346c106b1aab31674605d1cf4c32a5819c` fast-forwarded onto canon
+`f012beed1b2f8513b7af5346fc4fccfb055bf3ef` (exactly 13 commits, plain push,
+no force/rebase/merge-commit). Full method and safety record in
+`docs/CUTSELL_CURRENT_STATE.md`, "Watch+Listen delivery-authority
+integration checkpoint". Summary: all four expected states and a clean
+worktree verified; every workflow trigger parsed against the whole diff;
+the one paid trigger (`cutsell-video00-raw-v5-auto-microtrim.yml`, id
+342360588) disabled by API before the push (recorded `active` →
+`disabled_manually`) and restored to `active` after it — no YAML touched,
+no RAW triggered (148 → 148 runs); Clean Worker CI and iOS CI both PASS on
+`781a8634`; `main` `2fb13e5a` untouched; PR #25 OPEN/DRAFT/UNMERGED.
+`perceptual_repair_cycle.py` remains disconnected.
+
+Recorded on `fix/editorial-realization-closure` (this branch, created from
+that canonical head) so the checkpoint lands with the next integration
+without a separate docs-only push to canon.
+
+## D-289 — Contained-restatement closure at retry-family formation
+(isolated branch `fix/editorial-realization-closure`, off canonical
+`781a86346c106b1aab31674605d1cf4c32a5819c`; offline only)
+
+**NOT integrated. No RAW. `main`/PR #25/iOS untouched. `perceptual_
+repair_cycle.py` remains disconnected. No baseline file changed.**
+
+**Objective (Product Owner):** correct redundant realizations BEFORE
+Selection Freeze through the existing authorities -- realizations that
+serve the same editorial function must COMPETE; before one is discarded
+its relevant information must be proven preserved in the chosen one;
+negations, numbers and critical statements are conserved; sharing a topic
+never proves redundancy; no post-Freeze filter; grouping protections kept;
+no global bypass or threshold widening without evidence.
+
+### Evidence (RAW #122 = Modal run 35799404391 at `f012beed`, four-way ladder region map)
+
+**Case 2 -- conclusion + redundant percentage/heredity formulation.**
+The complete conclusion (kept winner, 295.52-313.50, states the 5-10 %
+figure, the "no creo ... hereditarios" negation and the lifestyle claim)
+is co-kept with a later, incomplete restatement (327.78-334.24, 6.46 s:
+"convinced ... science backs it ... only 5-10 % of the") and a bare tail
+(340.18-342.58, 3 tokens: "... are hereditary."). Ladder: restatement =
+`gold_removes_cutai_keeps` **LEVEL 2** (Cut.ai keeps it too, Gold removes
+it); tail = LEVEL 2 with a 0.52 s LEVEL-1 slice attributed
+`IdeaClusterer/RetryFamilyFormation` ("never grouped with the winner
+although their content overlaps"). The selection-lock baseline
+(`benchmarks/video00_selection_lock.json`, run 33126865755, 23 segments)
+contains the winner and the CTA and does NOT contain the restatement or
+the tail -- the fix moves CutSell toward the locked baseline and Gold, and
+is a LEVEL-2 item the Product Owner explicitly asked for (not a Level-1
+fix-first item).
+
+Mechanism (verified against the live code, reproduced offline through the
+real chain): the pairwise arbiter confirms (winner, restatement) as the
+same idea at 0.9 → `reconcile_semantic_idea_equivalence` merges the two
+lexical groups (the winner's group also holds its own strict prefix, so
+the restatement's edge is a singleton→component BRIDGE) →
+`split_incohesive_retry_groups` re-asks the synthetic joined-text ("A ||
+B") probe of `_evaluate_bridge_cohesion`, whose answer is unstable for
+this shape (D-094.2's own run-33983880111 note) → the probe declines, the
+restatement is split back into its own singleton family, and both
+realizations of one editorial function are kept. The D-094.2 pairwise
+singleton-bridge path exists but is a default-OFF policy (Product Owner
+decision) and requires a COMPLETE newcomer; the restatement is incomplete.
+
+**Case 1 -- pimples/allergy fragments next to a realization "already
+containing" them.** The Product Owner's premise is CONTRADICTED by every
+editorial reference the repo holds: the two fragments ("También me salían
+espinillas." 192.44-194.78; "Era como un rush, una alergia." 195.12-
+197.52) are `consensus_keep` **LEVEL 3** (Cut.ai AND Human Gold keep them;
+only a 0.51 s boundary tail is Level 1); the fuller marked take ("Otro
+síntoma era que me salían espinillas ...", 213.34-222.98) is kept by both
+references as well (8.0 s consensus keep; a 1.27 s tail is Level 1); the
+15.22 s incomplete monolith between them is `consensus_delete` and CutSell
+already discards it as the loser of family `tg_bf0c…`. The locked
+baseline requires the three micro fragments AND the later winner
+(`video00_regression_qa.json`: `pimples_micro_1..3_present`,
+`pimples_bad_monolith_absent`, `pimples_later_winner_present`,
+`pimples_micro_order`), and D-109 records the deletion of these fragments
+as a FALSE DELETE. The existing guard that keeps the fragments apart from
+the marked take is D-048's distinct-addition marker veto (shared content 4
+< floor 6, "Otro síntoma" framing = distinct point). **No engine change
+was made for case 1**; the new path explicitly honours the marker veto
+(guard 2) and `test_case1_marked_fuller_take_never_folds_the_kept_short_
+fragments` locks the reference-conforming outcome (fragments kept,
+monolith discarded, fragments never in one family with the marked take).
+→ **Escalation A (product decision):** removing the fragments would move
+CutSell AWAY from Human Gold, Cut.ai and the locked baseline; it is not an
+engine defect and is not authorized by evidence.
+
+### Change (one authority extended: IdeaClusterer, `take_grouping_provider.py`)
+
+`_accept_contained_restatement_singleton_bridge` + `_contained_
+restatement_member`, dispatched inside `_bridge_aware_components` AFTER
+D-097.A's restart-singleton path and BEFORE the D-094.2 policy path (which
+stays OFF). A singleton→component bridge is accepted on deterministic
+PRESERVATION evidence -- no synthetic joined-text probe is spent -- only
+when ALL of:
+1. the attaching edge is a SEMANTIC same-idea confirmation ≥ 0.90 (the
+   arbiter stays the sole judge of idea identity; lexical containment
+   alone never merges);
+2. no distinct-addition marker on either side (D-039/D-048 veto kept);
+3. every digit value of the newcomer appears in the complete member
+   (D-073 NUMBER gate shape: a changed number is never a restatement);
+4. PRESERVATION PROOF: every newcomer claim (`semantic_claims.extract_
+   claims`) is `claim_is_covered` by the member (own negation-flip/number
+   guards) or is a numeric claim whose digits the member states; a
+   newcomer with no extractable claim needs ≥ 0.8 stem-aware content
+   coverage -- shared vocabulary alone never suffices;
+5. the newcomer does not out-carry the member (content vocabulary ≤);
+6. the member is `complete_idea`;
+7. D-085's cross-component `detect_text_contradiction` safety net applies
+   verbatim (a negation/number-scoped conflict rejects);
+8. chronology: the newcomer starts after the preserving member ends (an
+   earlier abandoned attempt completed later is D-097.12/D-287/D-150's
+   shape, never this path).
+Every other bridge falls through to D-085 byte-for-byte. The trace row
+carries `accepted_by = contained_restatement_of_complete_realization`,
+`restated_clip_id` and `preservation_evidence` (preserving member, digit
+values preserved, claims preserved with method, token coverage). With the
+restatement INSIDE the family, the existing competition decides: the
+deterministic BestTake ranks, `apply_claim_coverage_best_take` (D-063
+CRITICAL_COVERAGE_DOMINANCE with the bounded claim-equivalence arbiter
+resolving the D-058 canary "estoy convencida y la ciencia lo avala" ≈
+"comprobado científicamente") hands the family to the complete
+realization, and StoryValidator's lost-atom ledger credits the discard
+from the reconcile stage's own merge record (D-061, no new call) --
+`missing_critical_atoms = []`, the percentage is not lost. No clip is
+removed after Freeze; the D-094.2 flag, D-048 floors and every threshold
+are unchanged; no Video00 id/phrase/timestamp is read by production code
+(the test scans the production block for them).
+
+### Validation (`tests/test_cutsell_d289_contained_realization_closure.py`, 18 tests)
+
+- **Repro before** (new path switched off, real chain, recorded
+  verdicts): W-R merged by reconcile, `component_cohesion_declined`, R
+  split to its own singleton family, both kept.
+- **After**: one family {W, P, R}; bridge accepted with proof (`W`,
+  digits ["10","5"], MEASUREMENT_QUANTITY preserved by numeric
+  restatement, no probe spent); kept {H, W, C}, discarded {P, R}; no
+  contradiction/missing-idea finding; R's ledger row non-blocking,
+  `content_loss_suppressed_by = same_idea_semantic_equivalence`. The
+  pair-only variant (no prefix) needs no bridge and resolves identically.
+- **Without the recorded claim verdict** ("WHEN UNCERTAIN, KEEP"): the
+  family is NOT silently resolved -- W and P both stay, and R's CRITICAL
+  percentage claim is a blocking `lost_critical_claims` row owned by
+  BestTakeResolver; grouping never weakens that net.
+- **Bare tail** "cánceres son hereditarios.": refused by guard 7 even with
+  a confirming verdict (its polarity opposes the winner's negated
+  clause) -- a documented residual (also ≤ 3 tokens, pair-ineligible).
+- **Case 1** locked as above.
+- **Generic negative controls**: unique numeric fact (30 % vs 5-10 %),
+  contradiction, necessary continuation, shared-vocabulary-only,
+  marker on either side, wrong chronology, fuller newcomer, incomplete
+  member, confidence below floor → never this path; numeric restatement
+  → folded with proof; dispatch order (restart credit first, D-094.2
+  policy still OFF); no-Video00-material scan.
+
+Regression: compileall OK; grouping/bench/competition/coherence suites
+(CleanCutBench evaluation suite, D-048/D-058/D-061/D-083/D-085/D-094.2/
+D-097.A/D-097.8/D-097.9/D-100/D-101/D-108/D-144/D-149/D-150/D-158/D-166/
+D-168/D-169/D-200.4b/D-235G/D-287, take-grouping provider, universal
+clean cut, golden full mode, editorial-slot composites, minimum
+sufficient set, trigger coverage, ...): **722 passed, 0 failed**. Full
+`tests/` result recorded in the commit that closes this entry.
+
+### Residuals (recorded, not fixed here)
+- The 2.4 s bare tail stays kept (guard 7 + ≤ 3-token pair ineligibility);
+  the ladder marks it Level 2 with a 0.52 s Level-1 slice.
+- D-101 RC#2 (prefix ties the winner in the deterministic ranker) is
+  pre-existing; it is resolved only when the claim arbiter resolves the
+  canary (it did on RAW #122's recorded answers). Without that verdict the
+  family keeps both and blocks visibly.
+- RAW #122's diagnostics head (`take_grouping_provider` edge trace) could
+  not be downloaded (artifact host blocked by the egress policy); the
+  mechanism was reproduced from the ladder region map, the saved semantic
+  answers and the live code, not from that JSON.
+
+**Exact next step:** Product Owner review of the escalation (case 1) and
+of this entry. This phase ends BEFORE any integration or RAW. DO NOT
+MERGE. DO NOT TOUCH `cutsell/mobile-v1-clean`/`main`/PR #25.

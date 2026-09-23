@@ -13,7 +13,60 @@ This file is the operational checkpoint. Update it whenever the active benchmark
 - Base SHA remains `2fb13e5aa228e8e525b942a9b49182032b797e61`
 - PR #24 remains historical/reference backup and must stay untouched.
 
-## Mobile backend integration checkpoint — D-277 through D-282A (current)
+## Watch+Listen delivery-authority integration checkpoint — D-288 through D-288.4.1 (current)
+
+**Canonical HEAD:** `781a86346c106b1aab31674605d1cf4c32a5819c`
+
+`cutsell/mobile-v1-clean` now contains the full D-288 → D-288.4.1 chain
+(typed `watch_listen_status` delivery gate on the real export path; persistent,
+recoverable HUMAN_REVIEW_REQUIRED pending reviews in private S3 + Redis; the
+real authenticated pending-review HTTP handlers — query, media preview,
+decision, resume — deriving identity only from the verified session; atomic,
+versioned pending-record transitions with the publish claim taken BEFORE any
+external effect; atomic render-version/notification reuse via one Redis Lua
+primitive; sha-keyed immutable reviewed MP4 objects; the original job's
+`job_started_at` preserved through a resumed delivery; the disconnected
+`perceptual_repair_cycle.py` foundation with its documented preconditions and
+pending issues; and the job-scoped EditorialSlotResolution observability),
+brought in from `audit/watch-listen-delivery-authority` in a controlled,
+Product-Owner-authorized integration gate.
+
+Integration method and safety record:
+- fast-forward only (`f012beed..781a8634`, exactly 13 commits, plain push of the
+  exact SHA) — no rebase, no merge commit, no cherry-pick, no force push;
+- all four expected states (canon `f012beed`, audit `781a8634`, `main`
+  `2fb13e5a`, PR #25 OPEN/DRAFT/UNMERGED) and a clean worktree were verified
+  before, and the three remote SHAs re-validated by `ls-remote` immediately
+  before, the push;
+- every workflow trigger was parsed against the whole 13-commit diff: only
+  the unpaid PR CI and the paid `cutsell-video00-raw-v5-auto-microtrim.yml`
+  (push to canon, path `universal_clean_cut_validation.py`) would fire; the
+  latter (workflow id 342360588) was disabled by API before the push (prior
+  state recorded `active` → verified `disabled_manually`), no YAML modified,
+  and restored to exactly `active` after the push — its run count stayed at
+  148 with no run for `781a8634`, i.e. **no paid RAW was triggered**;
+- `main` remains untouched at `2fb13e5aa228e8e525b942a9b49182032b797e61`;
+- PR #25 remains OPEN / DRAFT / UNMERGED (head advanced 2263 → 2276 commits).
+
+Verified state at `781a8634`:
+- **CutSell Clean Worker CI — PASS** (run 35850126074);
+- **CutSell iOS CI — PASS** (run 35850126075);
+- existing `mobile/ios/` work untouched; no selection/grouping/ranking policy or
+  baseline changed by the integrated range;
+- `perceptual_repair_cycle.py` has zero live callers — NOT activated.
+
+**Not yet true, do not assume otherwise:**
+- no RAW has been run on this head; the delivery-authority chain is proven
+  offline (8841 passed, the same 5 pre-existing unrelated failures) and by CI,
+  not by a rendered artifact;
+- the D-288 audit's item 5 (two duplicate-realization survivals on RAW #122,
+  run 35799404391 at `f012beed`) is addressed OFFLINE on the isolated branch
+  `fix/editorial-realization-closure` (D-289: contained-restatement closure at
+  retry-family formation, IdeaClusterer only; case 1 escalated as a product
+  decision because Gold, Cut.ai and the locked baseline all KEEP the pimples
+  fragments) — NOT integrated, NOT proven on a RAW.
+
+## Mobile backend integration checkpoint — D-277 through D-282A
 
 **Canonical HEAD:** `86a058d20567078af918d7f8dc8d02da84a85417`
 

@@ -20,6 +20,7 @@ from .semantic_idea_equivalence import (
 )
 from .take_grouping import (
     _safe_short_prefix_retry,
+    _shared_content_count,
     group_takes,
     incomplete_attempt_completed_by_retry,
     measured_pause_bridged_retry,
@@ -1898,6 +1899,233 @@ def _accept_restart_singleton_bridge(
     return True, record
 
 
+# D-289 (RAW #122 audit, D-288 item 5): CONTAINED RESTATEMENT of a complete
+# realization -- a singleton-attaches-to-component bridge accepted on
+# deterministic PRESERVATION evidence instead of the D-085 joined-text probe.
+#
+# Real shape (D-094.F4's own comment above already names the same family
+# on an earlier run): the creator delivers one complete realization of a
+# proposition (the family's winner), then, seconds later, RESTATES part of
+# it in fewer words -- same number, same polarity, nothing new. The
+# pairwise arbiter confirms the restatement IS the same idea, reconcile
+# merges the two groups, and the cohesion pass then re-asks a synthetic
+# "A || B" joined-text question (`_evaluate_bridge_cohesion`) whose answer
+# is unstable for exactly this shape (D-094.2's own run 33983880111 note:
+# three pairwise confirmations, one 0.2 probe answer). The probe fails
+# closed, the restatement is split back into its own singleton family, and
+# both realizations of ONE editorial function are co-kept -- a Level-1
+# false keep the four-way ladder attributes to IdeaClusterer.
+#
+# This path accepts the bridge only when the newcomer's editorially
+# RELEVANT information is provably preserved by a complete member of the
+# receiving component -- the D-050C1 "discard requires safety" rule, applied
+# at family-formation time so the existing family competition (BestTake /
+# ClaimCoverage) decides the winner with the newcomer INSIDE it, rather than
+# a second filter deleting a clip after Freeze. Every guard reuses an
+# already-trusted primitive; none is a new semantic authority:
+#   1. the attaching edge is a SEMANTIC same-idea confirmation at
+#      >= `_BRIDGE_MIN_COHESION_CONFIDENCE` (the arbiter stays the only
+#      judge of idea identity -- this path never merges on lexical
+#      containment alone, so a same-number-different-proposition pair the
+#      arbiter declines never reaches it);
+#   2. neither side carries a distinct-addition marker (D-039/D-048: the
+#      speaker's own "otro sintoma"/"another symptom" framing is evidence of
+#      a distinct point, and a marked pair keeps D-048's own content floor
+#      as its judge -- a short restatement sharing few content words with a
+#      marked, fuller take is therefore NEVER folded by this path; this is
+#      what keeps a genuinely separate short beat that a marked take later
+#      elaborates -- the shape both editorial references keep -- apart);
+#   3. every digit value the newcomer states appears in the complete
+#      member's own raw text (`_digit_values`, the D-073 hard NUMBER gate
+#      shape) -- a changed number is a correction or a contradiction, never
+#      a restatement; a newcomer with a number the member never states adds
+#      information and is refused;
+#   4. the PRESERVATION PROOF: every claim the newcomer makes (`semantic_
+#      claims.extract_claims`, the same negation/number-aware authority
+#      ClaimCoverageBestTake trusts) is either covered by the member
+#      (`claim_is_covered`, with its own negation-flip/number-mismatch
+#      guards) or is a numeric claim whose every digit value the member
+#      states; a newcomer too short to yield a claim must instead have its
+#      whole content vocabulary covered by the member at >= `_CONTAINED_
+#      RESTATEMENT_MIN_TOKEN_COVERAGE` (stem-aware). Shared vocabulary alone
+#      is never enough -- a newcomer whose own claim the member lacks is new
+#      information (a continuation, a complementary beat, a distinct point)
+#      and falls through to D-085's probe unchanged;
+#   5. the newcomer does not out-carry the member: its content vocabulary is
+#      no larger than the member's -- the fuller take is the realization,
+#      the shorter one the restatement, never the reverse;
+#   6. the member is `complete_idea` (a restatement can only be preserved by
+#      a COMPLETE realization);
+#   7. D-085's own deterministic cross-component contradiction safety net
+#      (`detect_text_contradiction`) is applied verbatim -- a negation-
+#      scoped or number-scoped conflict between ANY cross pair still rejects
+#      (this is what keeps a bare "X are Y." tail apart from a member whose
+#      corresponding clause is "I do not believe X are Y", even when the
+#      arbiter confirmed the pair);
+#   8. chronology: the newcomer STARTS AFTER the preserving member ENDS. A
+#      restatement follows what it restates; an earlier take completed by a
+#      later delivery is the abandoned-attempt shape D-097.12/D-287/D-150
+#      own -- and, for the singleton-clique form, D-094.2's default-OFF
+#      policy is a standing Product Owner decision this path never
+#      re-decides.
+# Component-to-component merges, deterministic non-restart edges and every
+# newcomer that fails a guard fall through to D-085's probe byte-for-byte;
+# the D-094.2 policy flag stays untouched and OFF. Nothing here reads a
+# Video00 phrase, id or timestamp.
+_CONTAINED_RESTATEMENT_MIN_TOKEN_COVERAGE = 0.8
+_DIGIT_RUN_RE = re.compile(r"\d+")
+
+
+def _digit_values(text: str) -> frozenset[str]:
+    return frozenset(_DIGIT_RUN_RE.findall(str(text or "")))
+
+
+def _extract_claims(source_clip_id: str, text: str):
+    # Deferred import: `semantic_claims` sits behind `final_sibling_grouping`
+    # in this module's import graph (same cycle-avoidance pattern as
+    # `contradiction_signal` in `_evaluate_bridge_cohesion`).
+    from .semantic_claims import extract_claims
+    return extract_claims(source_clip_id, text)
+
+
+def _claim_is_covered(claim, candidate_text: str) -> bool:
+    from .semantic_claims import claim_is_covered
+    return claim_is_covered(claim, candidate_text)
+
+
+def _contained_restatement_member(
+    newcomer: CandidateTake, members: Tuple[str, ...], take_map: dict[str, CandidateTake],
+) -> tuple[str, dict] | None:
+    """The first complete member of `members` that provably preserves the
+    newcomer's relevant information (guards 2-6 above), with the evidence
+    row proving it, or None."""
+    if _has_distinct_addition_marker(newcomer.text):
+        return None
+    newcomer_tokens = _content_tokens(newcomer.text)
+    newcomer_digits = _digit_values(newcomer.text)
+    if not newcomer_tokens and not newcomer_digits:
+        return None
+    for member_id in members:
+        member = take_map.get(member_id)
+        if member is None or not member.complete_idea or member.source_asset_id != newcomer.source_asset_id:
+            continue
+        if newcomer.start < member.end:
+            # Guard 8: a RESTATEMENT follows the realization it restates. An
+            # earlier take that a later complete delivery completes is the
+            # abandoned-attempt shape D-097.12/D-287/D-150 own (and, for the
+            # policy-gated singleton-clique form, D-094.2's own default-OFF
+            # Product Owner decision) -- never this path.
+            continue
+        if _has_distinct_addition_marker(member.text):
+            continue
+        member_tokens = _content_tokens(member.text)
+        if len(newcomer_tokens) > len(member_tokens):
+            continue
+        member_digits = _digit_values(member.text)
+        if not newcomer_digits <= member_digits:
+            continue
+        # Guard 4 -- the preservation proof itself. EVERY claim the newcomer
+        # makes (`semantic_claims.extract_claims`, the same clause-level,
+        # negation/number-aware authority ClaimCoverageBestTake trusts) must
+        # be preserved by the member: covered by `claim_is_covered` (whose
+        # own negation-flip and number-mismatch guards apply), or -- for a
+        # claim that states a number -- restated with every one of its digit
+        # values present in the member. A newcomer with no extractable
+        # claim at all (too short for the clause floor) is judged on its
+        # whole content vocabulary instead: stem-aware coverage by the
+        # member at or above `_CONTAINED_RESTATEMENT_MIN_TOKEN_COVERAGE`.
+        # Shared vocabulary alone ("...looked like an allergy") is NEVER
+        # enough -- a newcomer whose own claim the member does not carry is
+        # new information and falls through to D-085's probe.
+        claims = _extract_claims(newcomer.clip_id, newcomer.text)
+        preserved_claims: list[dict] = []
+        for claim in claims:
+            claim_digits = _digit_values(claim.text)
+            if _claim_is_covered(claim, member.text):
+                preserved_claims.append({"claim_type": claim.claim_type, "preserved_by": "claim_coverage"})
+            elif claim_digits and claim_digits <= member_digits:
+                preserved_claims.append({
+                    "claim_type": claim.claim_type, "preserved_by": "numeric_restatement",
+                    "digit_values": sorted(claim_digits),
+                })
+            else:
+                preserved_claims = []
+                break
+        if claims and not preserved_claims:
+            continue
+        token_coverage = (
+            _shared_content_count(set(newcomer_tokens), set(member_tokens)) / len(newcomer_tokens)
+            if newcomer_tokens else 1.0
+        )
+        if not claims and token_coverage < _CONTAINED_RESTATEMENT_MIN_TOKEN_COVERAGE:
+            continue
+        return member_id, {
+            "preserving_member_clip_id": member_id,
+            "digit_values_preserved": sorted(newcomer_digits),
+            "claims_preserved": preserved_claims,
+            "content_token_coverage": round(token_coverage, 4),
+            "newcomer_content_token_count": len(newcomer_tokens),
+            "member_content_token_count": len(member_tokens),
+        }
+    return None
+
+
+def _accept_contained_restatement_singleton_bridge(
+    *,
+    left_members: Tuple[str, ...],
+    right_members: Tuple[str, ...],
+    edge: _RetryEdge,
+    take_map: dict[str, CandidateTake],
+) -> tuple[bool, dict | None]:
+    """D-289: see the module comment above. Returns (accepted, record), or
+    (False, None) when this shape does not apply so the caller falls
+    through to the next path unchanged."""
+    if min(len(left_members), len(right_members)) != 1:
+        return False, None
+    if edge.evidence != "semantic" or edge.confidence < _BRIDGE_MIN_COHESION_CONFIDENCE:
+        return False, None
+    singleton_members, component_members = (
+        (left_members, right_members) if len(left_members) == 1 else (right_members, left_members)
+    )
+    newcomer = take_map.get(singleton_members[0])
+    if newcomer is None:
+        return False, None
+    found = _contained_restatement_member(newcomer, tuple(component_members), take_map)
+    if found is None:
+        return False, None
+    member_id, preservation = found
+
+    record: dict = {
+        "left_clip_id": edge.left_id, "right_clip_id": edge.right_id,
+        "evidence": edge.evidence,
+        "triggering_confidence": round(edge.confidence, 4),
+        "triggering_reason": edge.reason, "bridge_sensitive": True,
+        "left_component_members": list(left_members),
+        "right_component_members": list(right_members),
+        "component_cohesion_evaluated": False,
+        "accepted_by": "contained_restatement_of_complete_realization",
+        "restated_clip_id": newcomer.clip_id,
+        "preservation_evidence": preservation,
+        "shared_proposition": None,
+        "member_support": list(left_members) + list(right_members),
+        "distinct_required_facts": [],
+        "accepted": False,
+    }
+    from .contradiction_signal import detect_text_contradiction  # deferred: see _evaluate_bridge_cohesion
+
+    left_texts = [take_map[cid].text for cid in left_members if cid in take_map]
+    right_texts = [take_map[cid].text for cid in right_members if cid in take_map]
+    if any(
+        detect_text_contradiction(left_text, right_text).has_conflict
+        for left_text in left_texts for right_text in right_texts
+    ):
+        record["distinct_required_facts"] = ["cross_component_contradiction"]
+        record["reason_rejected"] = "cross_component_contradiction"
+        return False, record
+    record["accepted"] = True
+    return True, record
+
+
 def _cross_component_blocked_pair(
     left_members: Tuple[str, ...],
     right_members: Tuple[str, ...],
@@ -2050,6 +2278,15 @@ def _bridge_aware_components(
                         else "semantic_confirmation_against_restart_cohesive_component"
                     ),
                 )
+        if record is None and min(len(left_members), len(right_members)) == 1:
+            # D-289: deterministic preservation evidence for a contained
+            # restatement -- see the module comment above
+            # `_accept_contained_restatement_singleton_bridge`. (False, None)
+            # when the shape does not apply: fall through unchanged.
+            accepted, record = _accept_contained_restatement_singleton_bridge(
+                left_members=tuple(left_members), right_members=tuple(right_members),
+                edge=edge, take_map=take_map,
+            )
         if record is None and policy.accept_complete_pairwise_singleton_bridge and min(len(left_members), len(right_members)) == 1:
             accepted, record = _accept_complete_pairwise_bridge(
                 left_members=tuple(left_members), right_members=tuple(right_members),
