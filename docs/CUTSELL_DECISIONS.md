@@ -77387,14 +77387,20 @@ resolving-guard note this file already uses for `render_delivery.py`.
   HEAD` firewall entries addressed above.
 - `perceptual_repair_cycle.py`: zero callers outside its own test file,
   unchanged.
-- Full `tests/` suite: IN PROGRESS at the time this entry was written
-  (run against the committed tree, never a dirty one); result recorded in
-  a follow-up commit, same two-step pattern as D-288.1/.2/.3.
+- Full `tests/` suite (excluding the one pre-existing broken collection
+  file `test_semantic_stitch.py`), run against the committed tree
+  `378b0734`: **8840 passed, 10 skipped, 13 subtests passed, 5 failed**
+  (370.45s) -- the identical 5 failures every D-288.x entry has verified
+  pre-existing/unrelated (`test_hybrid_story_guard_incomplete_retry.py`'s
+  one, `test_video00_modal_hybrid_semantic_parity.py`'s four); 8835 + 7
+  new reproductions - 2 firewall parametrizations = 8840, zero new
+  failures.
 
 ### Verdict
 
-**CODE FIXED. TESTS PASS (targeted; full-suite result pending). CI
-GREEN: not run (no CI dispatch in this gate).** RAW COMPLETE: N/A.
+**CODE FIXED. TESTS PASS (8840/8845 relevant, the other 5 confirmed
+pre-existing and unrelated, same baseline as D-288/.1/.2/.3). CI GREEN:
+not run (no CI dispatch in this gate).** RAW COMPLETE: N/A.
 ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
 
 **Product Owner decision required:** YES, unchanged in kind: (a)
@@ -77403,8 +77409,8 @@ integrating this branch; (b) live-wiring `perceptual_repair_cycle.py`
 (c) any policy change for duplications/prosody named in the original
 audit.
 
-**Exact next step:** await the full-suite result (follow-up commit), then
-Product Owner review of this diff before any integration.
+**Exact next step:** Product Owner review of this diff before any
+integration.
 
 Then STOP.
 
