@@ -76723,17 +76723,32 @@ not-yet-authorized correction for each.
   collection file `test_semantic_stitch.py` -- a module-level `print`
   calling `score_take()` with a missing argument at IMPORT time, `git
   diff --stat HEAD` empty for that file, confirmed pre-existing and
-  untouched by this gate): PENDING -- see follow-up note below; the
-  targeted regression above already covers every file this gate modified
-  or added.
+  untouched by this gate): first run surfaced 23 failures. 18 were this
+  gate's own collateral -- 12 other gate files' (D-269/D-271/D-272/
+  D-272A/D-272B/D-274A/D-274C/D-274C-A/D-274D/D-274E/D-274E-A/D-274F)
+  own "unrelated authorities unchanged"/"closed track files unmodified"
+  self-guard lists also named `render_delivery.py`/`export_job.py` (same
+  self-resolving-guard fix already applied to `test_cutsell_d269a_...`
+  in the first commit, now applied to all 12 -- 694/694 green), plus
+  `test_cutsell_clean_worker_export.py`'s fake `qc_result` missing the
+  `.deliverable` attribute the new perceptual-review call reads (fixed:
+  added it, stubbed the reviewer to SYSTEM_PASS since that test's fake
+  rendered "file" is non-decodable literal bytes and its own purpose is
+  unrelated to perceptual review). The remaining 5 (`test_hybrid_story_
+  guard_incomplete_retry.py`'s one test, `test_video00_modal_hybrid_
+  semantic_parity.py`'s four) were verified PRE-EXISTING at the original
+  branch HEAD via a disposable `git worktree` checkout of `f012beed...`
+  itself -- identical 5 failures reproduce there; neither file was ever
+  touched by this branch. Second full run: **8769 passed, 10 skipped, 13
+  subtests passed, 5 failed (all 5 pre-existing/unrelated, confirmed
+  above)** (380.95s).
 
 ### Verdict
 
-**CODE FIXED. TARGETED TESTS PASS. Full-suite CI-equivalent run in
-progress at time of writing (background, ~7-8 min per this repo's own
-D-282A precedent) -- result to be appended once complete.** RAW COMPLETE:
-N/A (no RAW in this gate, per explicit instruction). ARCHITECTURE PASS:
-N/A. HUMAN WATCH+LISTEN PASS: N/A.
+**CODE FIXED. TESTS PASS (8769/8774 relevant, the other 5 confirmed
+pre-existing and unrelated). CI GREEN: not run (no CI dispatch in this
+gate).** RAW COMPLETE: N/A (no RAW in this gate, per explicit
+instruction). ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
 
 **Product Owner decision required:** YES, before any of the following:
 (a) integrating this branch into `cutsell/mobile-v1-clean`; (b) live-
@@ -76742,8 +76757,9 @@ clean_cut_validation.py` (a separate, D-269-style "foundation now, live
 activation as its own gate" follow-on); (c) any policy change for item 5
 (duplications/prosody) named above and in the same-session audit.
 
-**Exact next step:** await the full-suite result, then Product Owner
-review of this diff before any integration.
+**Exact next step:** Product Owner review of this diff (branch `audit/
+watch-listen-delivery-authority`, pushed to origin, not integrated) before
+any integration.
 
 Then STOP.
 
@@ -76751,4 +76767,3 @@ DO NOT SWITCH BRANCHES.
 DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
-DO NOT PUSH.
