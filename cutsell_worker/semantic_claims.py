@@ -462,6 +462,7 @@ def _claim_id(source_clip_id: str, text: str) -> str:
 
 def extract_claims(
     source_clip_id: str, text: str, *, clause_role_arbiter: "ClauseRoleArbiter | None" = None,
+    split_clauses: bool = True,
 ) -> tuple[Claim, ...]:
     """Split `text` into clause-level claims: each sentence first splits on
     genuine connectors (`_split_into_clauses` -- D-040) into a CORE clause
@@ -480,10 +481,15 @@ def extract_claims(
     marker-less fallback) -- see `resolve_ambiguous_clause_role`'s own
     docstring for exactly when and how it can change the result; defaults
     to `None` (unwired), the same honest-gap pattern as every other bounded
-    arbiter in this module."""
+    arbiter in this module.
+
+    `split_clauses=False` (D-289.6) keeps each sentence as ONE claim -- the
+    granularity at which `claim_coverage`'s causal-inversion guard can see
+    both sides of a connector. Default True: byte-identical to every
+    existing caller."""
     claims: list[Claim] = []
     for sentence in _split_sentences(text):
-        sentence_clauses = _split_into_clauses(sentence)
+        sentence_clauses = _split_into_clauses(sentence) if split_clauses else (sentence,)
         for clause_index, clause in enumerate(sentence_clauses):
             tokens = _content(clause)
             if len(tokens) < 2:

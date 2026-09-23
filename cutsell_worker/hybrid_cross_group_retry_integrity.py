@@ -311,23 +311,38 @@ def _unit_realization_preserved(
     # the import graph.
     from .semantic_claims import claim_coverage, claim_is_covered, extract_claims
 
-    claims = extract_claims("continuation_unit", unit_text)
-    if not claims:
+    clause_claims = extract_claims("continuation_unit", unit_text)
+    if not clause_claims:
         return True, []
+    # D-289.6: D-040's clause split serves claim-LOCAL coverage, but it
+    # severs a relation at its connector -- "Anxiety occurs" and "because of
+    # the severe stress." are each "covered" by a peer that says the
+    # opposite ("Severe stress occurs because of anxiety."). The same
+    # coverage authority judges the RELATION when it sees the whole sentence
+    # (its causal-inversion guard needs both halves), so every sentence the
+    # clause split divided is ALSO judged as one sentence-level claim. Both
+    # granularities must be covered; the split is not changed for anyone
+    # else.
+    sentence_claims = tuple(
+        claim for claim in extract_claims("continuation_unit", unit_text, split_clauses=False)
+        if sum(1 for c in clause_claims if c.text in claim.text) > 1
+    )
     peer_texts = [str(p.text or "") for p in covering_peers]
     joined = " ".join(peer_texts).strip()
     candidates = [t for t in peer_texts if t] + ([joined] if len(peer_texts) > 1 and joined else [])
     rows: list[dict] = []
     preserved = True
-    for claim in claims:
-        best = max((claim_coverage(claim, text) for text in candidates), default=0.0)
-        covered = any(claim_is_covered(claim, text) for text in candidates)
-        rows.append({
-            "claim_type": claim.claim_type, "importance": claim.importance,
-            "best_coverage": round(float(best), 4), "covered": bool(covered), "text": claim.text,
-        })
-        if not covered:
-            preserved = False
+    for granularity, claims in (("clause", clause_claims), ("sentence", sentence_claims)):
+        for claim in claims:
+            best = max((claim_coverage(claim, text) for text in candidates), default=0.0)
+            covered = any(claim_is_covered(claim, text) for text in candidates)
+            rows.append({
+                "granularity": granularity,
+                "claim_type": claim.claim_type, "importance": claim.importance,
+                "best_coverage": round(float(best), 4), "covered": bool(covered), "text": claim.text,
+            })
+            if not covered:
+                preserved = False
     return preserved, rows
 
 

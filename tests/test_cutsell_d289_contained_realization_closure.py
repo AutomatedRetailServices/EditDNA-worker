@@ -105,14 +105,18 @@ class RecordedAnswersArbiter:
     exact `cohesion_confidence` 0.9 the run logged); every other probe
     confirms so the rest of a family keeps its real shape."""
 
-    def __init__(self, table, *, declined_probe_texts=(), probe_confidence=0.9, omit_unlisted=False):
+    def __init__(self, table, *, declined_probe_texts=(), probe_confidence=0.9,
+                 unlisted_reason="unconfigured"):
         self.table = {frozenset(k): v for k, v in table.items()}
         self.declined = tuple(declined_probe_texts)
         self.probe_confidence = probe_confidence
-        # D-289.5: a pair the run never asked (outside its ranked pair budget)
-        # is OMITTED from the result -- the engine's own fail-open "no
-        # verdict" -- instead of being answered False.
-        self.omit_unlisted = omit_unlisted
+        # D-289.6: a requested pair that has NO recorded verdict is answered
+        # with an explicit, labelled decline (same_idea=False, 0.0,
+        # `unlisted_reason`) -- never omitted: `validate_idea_equivalence_
+        # result` rejects a batch missing a requested pair, which would
+        # silently drop EVERY recorded answer in that batch (the D-289.5
+        # replay's `omit_unlisted` did exactly that).
+        self.unlisted_reason = unlisted_reason
         self.asked = []
 
     def check(self, request):
@@ -127,9 +131,7 @@ class RecordedAnswersArbiter:
                     out.append(IdeaEquivalenceDecision(i, True, 0.95, "component probe confirmed"))
                 continue
             key = frozenset((pair.left_text, pair.right_text))
-            if self.omit_unlisted and key not in self.table:
-                continue
-            same, conf, reason = self.table.get(key, (False, 0.0, "unconfigured"))
+            same, conf, reason = self.table.get(key, (False, 0.0, self.unlisted_reason))
             out.append(IdeaEquivalenceDecision(i, same, conf, reason))
         return IdeaEquivalenceResult(tuple(out), "fake", "fake", True, True, 50, 10)
 

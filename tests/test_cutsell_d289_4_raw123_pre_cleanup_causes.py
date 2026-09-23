@@ -70,6 +70,13 @@ from cutsell_worker.semantic_claims import (
 )
 
 from cutsell_worker.complete_retry_identity_guard import SEQUENCE_IDENTITY_BELOW_THRESHOLD
+from cutsell_worker.contradiction_signal import detect_text_contradiction
+from cutsell_worker.take_grouping_provider import (
+    _PAIR_BUDGET_PER_GROUP_CAP,
+    _cross_group_candidate_pairs,
+    _pair_side_eligible,
+    _rank_candidate_pairs_with_marks,
+)
 
 from tests.test_cutsell_d289_contained_realization_closure import (
     CONTAINED_RESTATEMENT_ACCEPTANCE,
@@ -369,37 +376,91 @@ def test_finding2_a_short_unit_with_a_covered_claim_is_removed_and_a_claimless_t
 # Faithful replay from BEFORE the cleanup through the real chain (package evidence)
 # =============================================================================
 
+NOT_RECORDED = "not_recorded_on_raw_123__fake_decline"
+
+
 def _raw123_pairwise():
     """The package's recorded pairwise answers: W-A rejected 0.85, R-C
-    rejected 0.9, P-A confirmed 0.95; W-R was never asked (omitted, the
-    engine's own fail-open 'no verdict')."""
+    rejected 0.9, P-A confirmed 0.95. Any OTHER pair the replay requests
+    (the run never asked W-R -- see `test_run_never_requested_w_r_*`) is
+    answered with an explicit, labelled decline: the fake's own choice, NOT
+    a recorded verdict, and never an omission (an omitted pair invalidates
+    the whole batch, see `RecordedAnswersArbiter`)."""
     return RecordedAnswersArbiter({
         (W123, A123): (False, 0.85, "The left adds lifestyle claims and advice not present in the right."),
         (R123, C123): (False, 0.9, "Statistical heredity claims are different from general wellness and lifestyle advice."),
         (P123, A123): (True, 0.95, "Both express being the first and only family member with this cancer."),
-    }, omit_unlisted=True)
+    }, unlisted_reason=NOT_RECORDED)
 
 
 RAW123_LABELS = {cid: (label, conf) for cid, label, conf in RAW123_DECISIONS}
 
+# The package's `ranked_pair_budget`: the 14 pairs the run asked (short ids
+# where the pair touches the conclusion cluster; the rest are other clusters).
+RAW123_ASKED_PAIRS = [("P", "A", 1.0991), ("W", "A", 0.7454), ("R", "C", 0.2606)]
+RAW123_ASKED_PAIR_COUNT, RAW123_CANDIDATE_PAIR_COUNT = 14, 74
+
+
+def test_run_never_requested_w_r_and_the_recorded_budget_shows_why_the_replay_cannot_reproduce_that():
+    """Recorded: W-R is not among the 14 asked pairs. Both sides were
+    eligible (R has more than 3 words; W too) and the groups sit 8 s apart,
+    so W-R WAS a candidate pair. The 14 asked include TWO pairs of group
+    {W, P} (P-A and W-A) -- exactly `_PAIR_BUDGET_PER_GROUP_CAP` -- and
+    `_rank_candidate_pairs_with_marks` defers every further pair of a
+    group at its cap behind all first-pass pairs. The run recorded only the
+    asked pairs' scores, so the deferral is INFERRED from the recorded
+    usage plus the cap rule, not observed; the raw 14-pair budget alone
+    does not explain it (an offline score for W-R with the final texts,
+    0.60, exceeds the 14th asked score, 0.26)."""
+    assert not any({l, r} == {"W", "R"} for l, r, _ in RAW123_ASKED_PAIRS)
+    W = _take("W", 295.3, 314.62, W123); R = _take("R", 327.7, 334.24, R123, complete=False)
+    assert _pair_side_eligible(W) and _pair_side_eligible(R)
+    assert not _pair_side_eligible(_take("T", 335.88, 341.64, T123))  # 3 words, complete: never a pair side
+    assert sum(1 for l, r, _ in RAW123_ASKED_PAIRS if "W" in (l, r) or "P" in (l, r)) == _PAIR_BUDGET_PER_GROUP_CAP == 2
+    # the cap rule itself, on the real function: a group's third pair is deferred behind first-pass pairs
+    a = _take("a", 0.0, 3.0, "the serum cleared my skin in a week and calmed the redness")
+    b = _take("b", 4.0, 7.0, "the serum cleared my skin in a week and calmed the redness completely")
+    c = _take("c", 8.0, 11.0, "the serum cleared my skin in a week and calmed the redness for good")
+    d = _take("d", 12.0, 15.0, "the serum cleared my skin quickly")
+    take_map = {t.clip_id: t for t in (a, b, c, d)}
+    groups = (("a",), ("b",), ("c",), ("d",))
+    marked = _rank_candidate_pairs_with_marks(_cross_group_candidate_pairs(groups, take_map, maximum_gap_sec=30.0), take_map)
+    usage = {}
+    for (li, ri, l, r), deferred in marked:
+        if deferred:
+            assert usage.get(li, 0) >= _PAIR_BUDGET_PER_GROUP_CAP or usage.get(ri, 0) >= _PAIR_BUDGET_PER_GROUP_CAP
+        else:
+            usage[li] = usage.get(li, 0) + 1; usage[ri] = usage.get(ri, 0) + 1
+    assert any(deferred for _pair, deferred in marked)
+    assert RAW123_ASKED_PAIR_COUNT < RAW123_CANDIDATE_PAIR_COUNT
+
 
 def test_replay_before_cleanup_with_the_package_evidence():
-    """From before the cleanup, with the package's texts, resolved labels and
-    arbiter answers: the corrected cleanup keeps the unit R+T (realization
-    not preserved) and removes P; grouping never asks W-R (as recorded), so
-    R+T stays whole as its own family; W wins its family; A stays its own
-    family (W-A rejected); nothing is an orphan; and the winner's own
-    CRITICAL claim is no longer a blocking loss of itself (cause 1), so the
-    ONE recorded Freeze blocker is gone. P's soft-restore is a separate
-    authority not replayed here (in the run it rejoined W's family and lost)."""
+    """From before the cleanup, with the package's texts, resolved labels
+    and arbiter answers: the corrected cleanup keeps the unit R+T
+    (realization not preserved) and removes P; W wins alone; A stays its
+    own family (W-A rejected as recorded); R+T stays whole as its own
+    family; nothing is an orphan; the winner's own CRITICAL claim is no
+    longer a blocking loss of itself (cause 1) and `freeze_blocked` is
+    False. On W-R the replay DIVERGES from the run and says so: the run
+    never requested the pair (per-group cap), the cluster-only replay has
+    only 5 candidate pairs and requests all of them, and the fake answers
+    W-R with a labelled decline that is its own choice, not a record."""
     survivors, removed, _diag = hx.collapse_cross_group_semantic_retries(_raw123_kept(), RAW123_DECISIONS)
     assert [t.clip_id for t in removed] == ["P"]
     arbiter = _raw123_pairwise()
     draft, groups, rec_diag, coh_diag = _real_chain(tuple(survivors), arbiter, claim_arbiter=None, semantic_labels=RAW123_LABELS)
-    assert not any((W123 in pair and R123 in pair) for pair in arbiter.asked if " || " not in pair[0] + pair[1]) or True
+    pairwise = [p for p in arbiter.asked if " || " not in p[0] + p[1]]
+    assert len(pairwise) == rec_diag["candidate_pair_count"] == rec_diag["checked_pair_count"] == 5  # all within budget here
+    w_r_requested_in_replay = any({a, b} == {W123, R123} for a, b in pairwise)
+    assert w_r_requested_in_replay is True  # unlike the run
+    fake_declines = [r for r in rec_diag["arbiter_rejected_pairs"] if r["reason"] == NOT_RECORDED]
+    assert {frozenset((r["left_clip_id"], r["right_clip_id"])) for r in fake_declines} >= {frozenset({"W", "R"})}
+    recorded_rejections = [r for r in rec_diag["arbiter_rejected_pairs"] if r["reason"] != NOT_RECORDED]
+    assert {frozenset((r["left_clip_id"], r["right_clip_id"])) for r in recorded_rejections} == {frozenset({"W", "A"}), frozenset({"R", "C"})}
+    assert rec_diag["provider"] == "fake"  # the batch was VALID: every recorded answer applied
     assert coh_diag["continuation_chains"] == [["R", "T"]]
-    assert ("R", "T") in groups and ("A",) in groups
-    assert not any({"W", "R"} <= set(g) for g in groups)
+    assert ("R", "T") in groups and ("A",) in groups and ("W",) in groups
     kept = _kept(draft)
     assert ("R" in kept) == ("T" in kept) and {"R", "T", "W", "A", "C"} <= kept
     coherence = draft.diagnostics["final_story_coherence_validation"]
@@ -408,9 +469,92 @@ def test_replay_before_cleanup_with_the_package_evidence():
 
 
 def test_replay_the_recorded_freeze_blocker_is_exactly_the_cause1_defect():
-    """The package's only `lost_critical_claims` row is W's own claim with
-    the fused connector, coverage 0.05 against W. With the fix the same
-    sentence's CRITICAL claim self-covers."""
     critical = [c for c in extract_claims("W", W123) if c.importance == "CRITICAL"]
     assert critical and all("esono" not in c.text for c in critical)
     assert all(claim_coverage(c, W123) >= 0.6 for c in critical)
+
+
+def test_path_that_would_consult_w_against_r_t_and_the_vetoes_that_still_stop_it():
+    """What it would take to ask the claim arbiter about W vs the complete
+    sentence R+T, and what still stops it on RAW #123's transcript:
+    1. the cleanup must keep R+T (done: realization not preserved);
+    2. IdeaClusterer must ASK W-R (the run did not: per-group cap) AND the
+       arbiter must confirm it -- assumed here as a labelled HYPOTHESIS;
+    3. reconcile then merges {W, R, T}; in the cohesion pass the W-R edge
+       is a bridge into the chain and reaches the contained-restatement
+       path -- whose guard 7 (`detect_text_contradiction`, sentence-scoped
+       negation) reads W's "no creo ... son hereditarios" against the unit
+       and refuses; the D-085 probe applies the same net first and refuses
+       too. The claim arbiter is never reached. Repeating the run cannot
+       change 3 while the transcript keeps this shape: the veto is the
+       deterministic primitive, not the budget."""
+    survivors, removed, _diag = hx.collapse_cross_group_semantic_retries(_raw123_kept(), RAW123_DECISIONS)
+    assert detect_text_contradiction(W123, R123 + " " + T123).negation_conflict is True
+    assert detect_text_contradiction(W123, R123).negation_conflict is True
+    arbiter = RecordedAnswersArbiter({
+        (W123, A123): (False, 0.85, "recorded"), (R123, C123): (False, 0.9, "recorded"), (P123, A123): (True, 0.95, "recorded"),
+        (W123, R123): (True, 0.85, "HYPOTHESIS -- the run never asked this pair"),
+    }, unlisted_reason=NOT_RECORDED)
+    claims = ClaimArbiter(True)
+    draft, groups, rec_diag, coh_diag = _real_chain(tuple(survivors), arbiter, claim_arbiter=claims, semantic_labels=RAW123_LABELS)
+    assert any({r["left_clip_id"], r["right_clip_id"]} == {"W", "R"} for r in rec_diag["merges"])  # step 3 merge happened
+    rows = [r for r in coh_diag["edge_trace"] if r.get("bridge_sensitive") and {r.get("left_clip_id"), r.get("right_clip_id")} == {"W", "R"}]
+    assert rows and rows[0]["accepted"] is False and rows[0]["reason_rejected"] == "cross_component_contradiction"
+    assert rows[0]["component_cohesion_evaluated"] is False  # refused before any probe
+    assert claims.asked == []  # the claim arbiter was never consulted
+    assert ("W",) in groups and ("R", "T") in groups
+    assert {"W", "R", "T"} <= _kept(draft)
+
+
+# =============================================================================
+# D-289.6 -- relational context: judge the unit's sentence, not only its clauses
+# =============================================================================
+
+def _causal_unit(winner_text):
+    head = _take("H", 0.0, 7.0, "Anxiety occurs because of the", complete=False)
+    tail = _take("T", 8.0, 10.0, "severe stress.")
+    winner = _take("W", 12.0, 18.0, winner_text)
+    return (head, tail, winner), [("H", "failed", 0.9), ("T", "alternate", 0.9), ("W", "winner", 0.95)]
+
+
+def test_relation_reproduction_clause_claims_alone_cover_an_inverted_causality_at_1_0():
+    kept, _decisions = _causal_unit("Severe stress occurs because of anxiety.")
+    unit = hx._continuation_unit_take(kept[:2])
+    covered, evidence = hx._covered_by_authoritative_peers(unit, (kept[2],))
+    assert covered is True and evidence["coverage"] == 1.0
+    clause_claims = extract_claims("U", unit.text)
+    assert [c.text for c in clause_claims] == ["Anxiety occurs", "because of the severe stress."]
+    assert all(claim_coverage(c, kept[2].text) == 1.0 for c in clause_claims)  # what D-289.5 acted on
+    whole = extract_claims("U", unit.text, split_clauses=False)
+    assert len(whole) == 1 and claim_coverage(whole[0], kept[2].text) <= _DEFINITIVE_MISMATCH_COVERAGE_CAP
+
+
+def test_relation_inverted_causality_keeps_the_unit_for_grouping_at_sentence_granularity():
+    kept, decisions = _causal_unit("Severe stress occurs because of anxiety.")
+    survivors, removed, diag = hx.collapse_cross_group_semantic_retries(kept, decisions)
+    assert removed == () and {"H", "T"} <= {t.clip_id for t in survivors}
+    row = next(d for d in diag if d["clip_id"] == "H")
+    assert row["reason"] == "continuation_unit_realization_not_preserved_kept_for_grouping" and row["coverage"] == 1.0
+    rows = {(c["granularity"], c["text"]): c for c in row["continuation_unit_claims"]}
+    assert rows[("clause", "Anxiety occurs")]["covered"] and rows[("clause", "because of the severe stress.")]["covered"]
+    sentence = rows[("sentence", "Anxiety occurs because of the severe stress.")]
+    assert sentence["covered"] is False and sentence["best_coverage"] <= _DEFINITIVE_MISMATCH_COVERAGE_CAP
+
+
+@pytest.mark.parametrize("winner_text", [
+    "Anxiety occurs because of severe stress at work, most days.",
+    "Anxiety occurs due to the severe stress.",
+])
+def test_relation_a_replacement_that_preserves_the_same_causality_is_removed_whole(winner_text):
+    kept, decisions = _causal_unit(winner_text)
+    survivors, removed, diag = hx.collapse_cross_group_semantic_retries(kept, decisions)
+    assert [t.clip_id for t in removed] == ["H", "T"]
+    row = next(d for d in diag if d["clip_id"] == "H")
+    assert all(c["covered"] for c in row["continuation_unit_claims"])
+    assert any(c["granularity"] == "sentence" and c["covered"] for c in row["continuation_unit_claims"])
+
+
+def test_relation_default_extract_claims_is_unchanged_for_every_other_consumer():
+    text = "Anxiety occurs because of the severe stress."
+    assert [c.text for c in extract_claims("U", text)] == ["Anxiety occurs", "because of the severe stress."]
+    assert [c.text for c in extract_claims("U", text, split_clauses=False)] == [text]
