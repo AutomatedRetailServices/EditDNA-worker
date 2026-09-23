@@ -76921,14 +76921,19 @@ still missing at the time of that claim.
   cluster: 96 passed, 0 failed.
 - Full `tests/` suite (excluding the one pre-existing, unrelated broken
   collection file `test_semantic_stitch.py`, confirmed pre-existing in
-  D-288's own verification): PENDING -- background run in progress at
-  time of writing; result to be appended once complete.
+  D-288's own verification): **8801 passed, 10 skipped, 13 subtests
+  passed, 5 failed** (384.05s) -- the identical 5 failures D-288 already
+  verified pre-existing/unrelated via a disposable `git worktree`
+  checkout of the original `f012beed...` HEAD (`test_hybrid_story_
+  guard_incomplete_retry.py`'s one test, `test_video00_modal_hybrid_
+  semantic_parity.py`'s four), zero new failures anywhere in the suite.
 
 ### Verdict
 
-**CODE FIXED. TARGETED + BROADER TESTS PASS (352/352 across the runs
-above). Full-suite confirmation in progress.** RAW COMPLETE: N/A.
-ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
+**CODE FIXED. TESTS PASS (8801/8806 relevant, the other 5 confirmed
+pre-existing and unrelated, same as D-288's own baseline). CI GREEN: not
+run (no CI dispatch in this gate).** RAW COMPLETE: N/A. ARCHITECTURE
+PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
 
 **Product Owner decision required:** YES, unchanged from D-288: (a)
 integrating this branch; (b) live-wiring `perceptual_repair_cycle.py`
