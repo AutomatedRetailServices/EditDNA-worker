@@ -46,6 +46,7 @@ from cutsell_worker.perceptual_watch_listen import (
     WATCH_LISTEN_SYSTEM_PASS,
 )
 from cutsell_worker.render_plan import RenderSegment
+from tests.fake_atomic_redis import FakeAtomicRedis
 
 
 # =============================================================================
@@ -88,51 +89,9 @@ class FakeS3Client:
         return "https://x.invalid/presigned"
 
 
-class FakeRedis:
-    """D-288.3: thread-safe (a `threading.Lock` guards every access) so
-    this fake can back a genuine multi-thread concurrency proof, exactly
-    like this repo's own `test_cutsell_d288_editorial_slot_resolution_
-    observability.py` precedent. `eval` implements the SAME atomic
-    check-and-write semantics as `pending_watch_listen_review._CAS_LUA`
-    (get -> decode -> compare `version` -> set), executed under the same
-    lock as every other access, so it is a real, race-free CAS primitive
-    for this fake -- not a simulation of one."""
-
-    def __init__(self):
-        self.data: dict[str, str] = {}
-        self._lock = threading.Lock()
-
-    def get(self, key):
-        with self._lock:
-            return self.data.get(key)
-
-    def set(self, key, value, **_kwargs):
-        with self._lock:
-            self.data[key] = value
-        return True
-
-    def eval(self, script, numkeys, *keys_and_args):
-        key = keys_and_args[0]
-        expected_version = keys_and_args[1]
-        new_value = keys_and_args[2]
-        with self._lock:
-            current = self.data.get(key)
-            if current is None:
-                return "missing"
-            decoded = json.loads(current)
-            if str(decoded.get("version")) != str(expected_version):
-                return "conflict"
-            self.data[key] = new_value
-            return "ok"
-
-    def zadd(self, key, mapping):
-        # Only `project_store.update_project` needs this (its own index
-        # write) -- the stale-job-guard test below exercises the REAL
-        # `project_store`/`render_versions` modules against this same fake.
-        with self._lock:
-            bucket = self.data.setdefault(f"__zset__{key}", {})
-            bucket.update(mapping)
-        return len(mapping)
+# D-288.4: one shared fake whose `eval` emulates every production Lua
+# script by identity (CAS + append-if-absent), thread-safe.
+FakeRedis = FakeAtomicRedis
 
 
 @pytest.fixture
@@ -398,7 +357,7 @@ def test_full_walkthrough_export_to_finished_via_authenticated_approval(tmp_path
 # =============================================================================
 
 def _persist_record(fake_redis, fake_s3, *, watch_listen_status=WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
-                     render_identity="render_aaaa", output_sha256="sha-aaaa",
+                     render_identity="render_aaaa", output_sha256="a" * 64,  # D-288.4: hex, it is now a key segment
                      plan_id="plan_1", plan_version=1, user_id="user-1", project_id="proj-1", job_id="job-1",
                      local_path=None):
     return pwl.persist_pending_review(
@@ -991,7 +950,10 @@ def test_interruption_after_finalize_then_retry_never_duplicates(tmp_path, wire_
 
     def _crashing_cas_save(*args, **kwargs):
         calls["n"] += 1
-        if calls["n"] == 1:
+        # D-288.4: inside resume the 1st `_cas_save` is the publish CLAIM
+        # (before any external effect); the 2nd is the DELIVERED commit
+        # after finalize -- the crash is simulated THERE.
+        if calls["n"] == 2:
             raise RuntimeError("simulated_process_crash")
         return real_cas_save(*args, **kwargs)
     monkeypatch.setattr(pwl, "_cas_save", _crashing_cas_save)
@@ -1110,11 +1072,17 @@ def test_approve_deliver_then_reject_then_resume_returns_the_same_already_delive
     assert rejected.approval_status == "REJECTED"
     assert rejected.resumed_delivery_result == delivered  # the past delivery is not erased by a later rejection
 
-    resumed_again = export_job.resume_delivery_after_approval(
-        user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr", requesting=requesting,
-        client=fake_redis, s3_client=wire_real_store_export,
-    )
-    assert resumed_again == delivered  # the SAME already-delivered result -- nothing new delivered
+    # D-288.4 (review of D-288.3): the CURRENT approval is checked BEFORE
+    # any cached result is returned -- a new resume request after the
+    # rejection is REFUSED, the delivered history stays on the record.
+    with pytest.raises(pwl.PendingReviewError, match="pending_review_not_approved"):
+        export_job.resume_delivery_after_approval(
+            user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr", requesting=requesting,
+            client=fake_redis, s3_client=wire_real_store_export,
+        )
+    reloaded = pwl.load_pending_review(user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr", client=fake_redis)
+    assert reloaded.resumed_delivery_result == delivered
+    assert reloaded.delivery_state == pwl.DELIVERY_STATE_DELIVERED
 
     versions = rv.list_render_versions(user_id="user-dtr", project_id="proj-dtr", client=fake_redis)
     assert len(versions) == 1  # a late rejection never triggers a duplicate/second delivery

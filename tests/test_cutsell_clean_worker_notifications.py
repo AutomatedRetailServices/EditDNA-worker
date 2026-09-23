@@ -3,16 +3,10 @@ from fastapi.testclient import TestClient
 import cutsell_app.main as api
 import cutsell_app.notification_routes as routes
 import cutsell_worker.notifications as notifications
+from tests.fake_atomic_redis import FakeAtomicRedis
 
 
-class FakeRedis:
-    def __init__(self):
-        self.data = {}
-    def get(self, key):
-        return self.data.get(key)
-    def set(self, key, value):
-        self.data[key] = value
-        return True
+FakeRedis = FakeAtomicRedis  # D-288.4: `publish_notification` is now atomic (Lua)
 
 
 def test_notification_outbox_is_user_scoped_and_bounded():

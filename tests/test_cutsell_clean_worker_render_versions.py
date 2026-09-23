@@ -5,16 +5,10 @@ from fastapi.testclient import TestClient
 import cutsell_app.main as api
 import cutsell_app.render_version_routes as routes
 import cutsell_worker.render_versions as versions
+from tests.fake_atomic_redis import FakeAtomicRedis
 
 
-class FakeRedis:
-    def __init__(self):
-        self.data = {}
-    def get(self, key):
-        return self.data.get(key)
-    def set(self, key, value):
-        self.data[key] = value
-        return True
+FakeRedis = FakeAtomicRedis  # D-288.4: `add_render_version` is now atomic (Lua)
 
 
 class FakeS3:

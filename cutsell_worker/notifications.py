@@ -7,6 +7,7 @@ import json
 from uuid import uuid4
 
 from .config import load_runtime_config
+from .redis_atomic_list import append_if_absent
 
 MAX_NOTIFICATIONS = 100
 ALLOWED_KINDS = {"draft_ready", "render_finished", "processing_failed", "render_failed"}
@@ -48,16 +49,6 @@ def publish_notification(
         raise ValueError("unsupported notification kind")
     target = _redis_client(client)
     key = notification_key(user_id)
-    raw = target.get(key)
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
-    items = json.loads(raw) if raw else []
-    if not isinstance(items, list):
-        items = []
-    if idempotency_key:
-        for existing in items:
-            if existing.get("kind") == normalized and existing.get("idempotency_key") == idempotency_key:
-                return existing
     record = {
         "notification_id": f"ntf_{uuid4().hex}",
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -66,6 +57,20 @@ def publish_notification(
         "payload": dict(payload or {}),
         "idempotency_key": idempotency_key,
     }
+    if idempotency_key:
+        # D-288.4: ONE atomic check-and-append -- two concurrent callers
+        # for the same `(kind, idempotency_key)` both receive the single
+        # stored notification (and its one id).
+        return append_if_absent(
+            target, key, match={"kind": normalized, "idempotency_key": idempotency_key},
+            record=record, max_len=MAX_NOTIFICATIONS,
+        )
+    raw = target.get(key)
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    items = json.loads(raw) if raw else []
+    if not isinstance(items, list):
+        items = []
     items.insert(0, record)
     target.set(key, json.dumps(items[:MAX_NOTIFICATIONS], ensure_ascii=False))
     return record

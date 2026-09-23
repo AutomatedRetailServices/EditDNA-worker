@@ -89,6 +89,32 @@ retry after a mid-flight interruption safe, and with `job_started_at`
 (now carried on this record from the ORIGINAL job, never `None`) to keep
 a late approval of a since-superseded job from regressing the project's
 current result.
+
+## D-288.4 -- the claim comes BEFORE the effects (third correction pass)
+
+Review of D-288.3 showed its atomic commit still came AFTER the tenant-
+safe upload and finalize -- a revocation landing after resume's last
+read was only detected once the effects had happened, and the cached
+`resumed_delivery_result` was returned without checking whether the
+approval still stood. Closed here:
+
+- **`delivery_state`** (`NONE` -> `PUBLISHING` -> `DELIVERED`): `claim_
+  delivery_publication` is a versioned CAS taken off a fresh read
+  IMMEDIATELY BEFORE the first external effect; a revocation that landed
+  after that read makes the claim fail, so nothing is published. While
+  `PUBLISHING` is held, `apply_human_approval` REFUSES a rejection
+  (`PendingReviewConflict`), so the two can never interleave; `commit_
+  delivered` closes the window.
+- **Current approval is checked before any cached result is returned**:
+  aprobar -> entregar -> rechazar -> reanudar refuses the new request
+  (`pending_review_not_approved`) while the delivered history stays on
+  the record.
+- **Atomic version/notification reuse** lives in `redis_atomic_list`
+  (used by `render_versions`/`notifications`), and `project_store.update_
+  project` no longer appends the same `render_version_id` twice.
+- **Immutable reviewed bytes**: the pending object key now carries the
+  exact `output_sha256`, so render B can never overwrite render A's
+  object even when both share a render identity.
 """
 from __future__ import annotations
 
@@ -113,6 +139,16 @@ PENDING_REVIEW_PREFIX = "cutsell/pending-review/"
 APPROVAL_STATUS_NONE = "NONE"
 APPROVAL_STATUS_APPROVED = "APPROVED"
 APPROVAL_STATUS_REJECTED = "REJECTED"
+
+# D-288.4: the publication state machine, separate from the human
+# approval state. NONE -> PUBLISHING (the atomic claim `resume_delivery_
+# after_approval` takes BEFORE any external effect) -> DELIVERED (the
+# atomic commit after finalize). A rejection is refused while PUBLISHING
+# (the publish is already committed to), recorded as history once
+# DELIVERED, and always blocks any NEW resume request.
+DELIVERY_STATE_NONE = "NONE"
+DELIVERY_STATE_PUBLISHING = "PUBLISHING"
+DELIVERY_STATE_DELIVERED = "DELIVERED"
 
 
 class PendingReviewError(ValueError):
@@ -207,6 +243,9 @@ class PendingWatchListenRecord:
     # silently regress a project whose "latest" pointer already moved on
     # to a newer job).
     job_started_at: float | None = None
+    # D-288.4 (blocker 1): publication state, see `DELIVERY_STATE_*`.
+    delivery_state: str = DELIVERY_STATE_NONE
+    publishing_claimed_at: float | None = None
 
     @property
     def ownership(self) -> "tsd.DeliveryOwnershipScope":
@@ -260,8 +299,13 @@ def persist_pending_review(
         raise PendingReviewError("persist_requires_non_empty_render_identity_and_output_sha256")
     upload = store_export_fn or store_export
     ownership = tsd.DeliveryOwnershipScope(user_id=user_id, project_id=project_id, job_id=job_id)
+    # D-288.4 (blocker 3): the exact bytes' own hash is part of the key,
+    # so a later render for the same job/render identity with different
+    # bytes lands at a DIFFERENT object -- the reviewed MP4 is immutable
+    # and a link already issued for it keeps showing it.
     pending_key = tsd.build_tenant_safe_export_key(
         ownership=ownership, render_identity=render_identity, prefix=PENDING_REVIEW_PREFIX,
+        content_sha256=output_sha256,
     )
     upload_kwargs: dict[str, Any] = {
         "project_id": project_id, "user_id": user_id, "object_key": pending_key,
@@ -353,6 +397,49 @@ def _cas_save(
     if isinstance(result, bytes):
         result = result.decode("utf-8")
     return new_record if result == "ok" else None
+
+
+def is_approved_for_delivery(record: PendingWatchListenRecord) -> bool:
+    """D-288.2/D-288.4: BOTH the current watch-listen status AND the
+    approval status must agree -- never one field alone."""
+    from .perceptual_watch_listen import WATCH_LISTEN_HUMAN_APPROVED
+    return (
+        record.watch_listen_status == WATCH_LISTEN_HUMAN_APPROVED
+        and record.approval_status == APPROVAL_STATUS_APPROVED
+    )
+
+
+def claim_delivery_publication(record: PendingWatchListenRecord, *, client=None) -> PendingWatchListenRecord | None:
+    """D-288.4 (blocker 1): the atomic transition that must succeed BEFORE
+    any external effect of a resumed delivery (tenant-safe upload, render
+    version, notification). Only an approved record in `NONE` (first
+    attempt) or `PUBLISHING` (a retry after an interrupted attempt -- the
+    effects downstream are idempotent by render identity) can be claimed;
+    the write is a versioned `_cas_save` off the caller's own fresh read,
+    so a revocation that landed after that read makes the claim fail
+    (`None`) instead of being raced. Once PUBLISHING is held, `apply_
+    human_approval` refuses a rejection until the commit lands."""
+    if not is_approved_for_delivery(record):
+        return None
+    if record.delivery_state not in (DELIVERY_STATE_NONE, DELIVERY_STATE_PUBLISHING):
+        return None
+    return _cas_save(
+        dataclasses.replace(record, delivery_state=DELIVERY_STATE_PUBLISHING, publishing_claimed_at=time.time()),
+        expected_version=record.version, client=client,
+    )
+
+
+def commit_delivered(record: PendingWatchListenRecord, result: dict, *, client=None) -> PendingWatchListenRecord | None:
+    """D-288.4: PUBLISHING -> DELIVERED with the finalized result stored
+    (the history a later rejection preserves). Versioned like every other
+    write; `None` on a conflict."""
+    return _cas_save(
+        dataclasses.replace(
+            record, delivery_state=DELIVERY_STATE_DELIVERED,
+            resumed_delivery_at=time.time(), resumed_delivery_result=dict(result),
+        ),
+        expected_version=record.version, client=client,
+    )
 
 
 def _require_authenticated_requesting(requesting: "tsd.DeliveryOwnershipScope | None") -> "tsd.DeliveryOwnershipScope":
@@ -518,6 +605,13 @@ def apply_human_approval(
         )
         if not artifact_matches:
             raise PendingReviewError("approval_bound_to_different_artifact_or_plan")
+
+        if not approved and record.delivery_state == DELIVERY_STATE_PUBLISHING:
+            # D-288.4 (blocker 1): the publish claim is already held --
+            # external effects are in flight or done. Refuse, never race
+            # them; once the publisher commits (DELIVERED) a rejection is
+            # accepted as history and blocks every later resume.
+            raise PendingReviewConflict("delivery_in_progress_revocation_refused")
 
         if not approved:
             # D-288.2 (blocker 1, the revocation bug): a rejection --

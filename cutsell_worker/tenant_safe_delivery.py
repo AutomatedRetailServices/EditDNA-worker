@@ -115,9 +115,15 @@ def build_tenant_safe_export_key(
     ownership: DeliveryOwnershipScope,
     render_identity: str,
     prefix: str = DEFAULT_TENANT_SAFE_EXPORT_PREFIX,
+    content_sha256: str | None = None,
 ) -> str:
     """D-269 Stage 4/5/6/7: a deterministic, server-side-only remote key
-    binding user + project + job + render identity. Deliberately NOT
+    binding user + project + job + render identity. `content_sha256`
+    (D-288.4, pending-review objects only) appends the exact rendered
+    bytes' own hash as one more segment, so two encodes that share a
+    render identity but differ in bytes (D-267's own documented non-
+    determinism) can never overwrite each other -- a review link issued
+    for A keeps showing A after B is generated. Deliberately NOT
     `uuid4()`-based (Stage 4: "Do not rely solely on uuid4") -- every
     segment is derived from trusted server-side identity (Stage 4's own
     "generated from trusted server-side identities"), never a raw user-
@@ -131,12 +137,14 @@ def build_tenant_safe_export_key(
     """
     if not render_identity or not render_identity.startswith("render_"):
         raise ValueError("render_identity must be a compute_render_identity() value")
-    segments = (
+    segments = [
         _validate_key_segment(_scope_component(ownership.user_id)),
         _validate_key_segment(_scope_component(ownership.project_id)),
         _validate_key_segment(_scope_component(ownership.job_id)),
         _validate_key_segment(render_identity),
-    )
+    ]
+    if content_sha256 is not None:
+        segments.append(_validate_key_segment(str(content_sha256)))
     normalized_prefix = prefix if prefix.endswith("/") else f"{prefix}/"
     if ".." in normalized_prefix or normalized_prefix.startswith("/") or "\\" in normalized_prefix:
         raise ValueError("prefix must be a safe relative path")

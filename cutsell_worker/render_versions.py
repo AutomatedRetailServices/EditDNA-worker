@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from .config import load_runtime_config
+from .redis_atomic_list import append_if_absent
 
 MAX_RENDER_VERSIONS = 20
 
@@ -58,24 +59,21 @@ def add_render_version(
     media_overlay_count: int = 0,
     client=None,
 ) -> dict[str, Any]:
-    """D-288.3: idempotent BY `export_uri`. `export_uri` is derived from a
-    deterministic tenant-safe key (`tenant_safe_delivery.build_tenant_
-    safe_export_key`, one key per `render_identity`+ownership) -- so two
-    calls for the SAME delivered render always carry the identical
-    `export_uri`. A caller retrying after an interruption (e.g. `export_
-    job.resume_delivery_after_approval` recovering from a crash between a
-    successful finalize and its own final bookkeeping write) must be able
-    to call this again safely: if a version with this EXACT `export_uri`
-    already exists for this project, that existing entry is returned
-    unchanged rather than a duplicate being appended."""
+    """D-288.3/D-288.4: idempotent BY `export_uri`, atomically. `export_
+    uri` is derived from a deterministic tenant-safe key (`tenant_safe_
+    delivery.build_tenant_safe_export_key`, one key per `render_identity`
+    +ownership) -- so two calls for the SAME delivered render always carry
+    the identical `export_uri`. A caller retrying after an interruption
+    (e.g. `export_job.resume_delivery_after_approval` recovering from a
+    crash between a successful finalize and its own final bookkeeping
+    write), or two concurrent callers, must all receive the ONE stored
+    entry: the check-and-append is a single atomic Redis operation
+    (`redis_atomic_list.append_if_absent`), never a Python-side read-
+    modify-write."""
     if not str(export_uri).startswith("s3://"):
         raise ValueError("render version requires S3 export URI")
     target = _redis_client(client)
     key = render_versions_key(user_id=user_id, project_id=project_id)
-    history = _decode(target.get(key))
-    for existing in history:
-        if existing.get("export_uri") == str(export_uri):
-            return existing
     record = {
         "render_version_id": f"rv_{uuid4().hex}",
         "project_id": project_id,
@@ -87,9 +85,13 @@ def add_render_version(
         "text_overlay_count": max(0, int(text_overlay_count)),
         "media_overlay_count": max(0, int(media_overlay_count)),
     }
-    history.insert(0, record)
-    target.set(key, json.dumps(history[:MAX_RENDER_VERSIONS], ensure_ascii=False))
-    return record
+    # D-288.4: ONE atomic check-and-append -- two concurrent callers for
+    # the same `export_uri` both receive the single stored entry (and its
+    # one id); the D-288.3 Python-side GET -> scan -> SET could hand each
+    # of them a different id.
+    return append_if_absent(
+        target, key, match={"export_uri": str(export_uri)}, record=record, max_len=MAX_RENDER_VERSIONS,
+    )
 
 
 def list_render_versions(*, user_id: str, project_id: str, client=None) -> list[dict[str, Any]]:

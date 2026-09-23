@@ -164,7 +164,15 @@ def update_project(
         current["title"] = str(title).strip()[:120] or current.get("title") or "Untitled Cut"
     if render_version is not None:
         versions = list(current.get("render_versions") or ())
-        versions.append(dict(render_version))
+        incoming = dict(render_version)
+        # D-288.4: `render_versions.add_render_version` now hands every
+        # concurrent/retried caller the SAME `render_version_id`, so a
+        # retried finalize must not append it here a second time.
+        incoming_id = incoming.get("render_version_id")
+        if incoming_id is None or all(
+            not isinstance(item, dict) or item.get("render_version_id") != incoming_id for item in versions
+        ):
+            versions.append(incoming)
         current["render_versions"] = versions[-20:]
     current["updated_at"] = _now()
     target.set(key, json.dumps(current, ensure_ascii=False))

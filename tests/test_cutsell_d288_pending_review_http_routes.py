@@ -29,6 +29,7 @@ from cutsell_worker import pending_watch_listen_review as pwl
 from cutsell_worker import render_delivery as rd
 from cutsell_worker import tenant_safe_delivery as tsd
 from cutsell_worker.perceptual_watch_listen import WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
+from tests.fake_atomic_redis import FakeAtomicRedis
 
 
 class FakeS3Client:
@@ -54,35 +55,7 @@ class FakeS3Client:
         return "https://x.invalid/presigned"
 
 
-class FakeRedis:
-    """D-288.3: `eval` implements the SAME atomic check-and-write
-    semantics as `pending_watch_listen_review._CAS_LUA` (get -> decode ->
-    compare `version` -> set) -- required now that `apply_human_approval`/
-    `resume_delivery_after_approval` use `_cas_save` instead of a blind
-    `set`."""
-
-    def __init__(self):
-        self.data: dict[str, str] = {}
-
-    def get(self, key):
-        return self.data.get(key)
-
-    def set(self, key, value, **_kwargs):
-        self.data[key] = value
-        return True
-
-    def eval(self, script, numkeys, *keys_and_args):
-        key = keys_and_args[0]
-        expected_version = keys_and_args[1]
-        new_value = keys_and_args[2]
-        current = self.data.get(key)
-        if current is None:
-            return "missing"
-        decoded = json.loads(current)
-        if str(decoded.get("version")) != str(expected_version):
-            return "conflict"
-        self.data[key] = new_value
-        return "ok"
+FakeRedis = FakeAtomicRedis  # D-288.4: shared CAS + append-if-absent emulation
 
 
 @pytest.fixture

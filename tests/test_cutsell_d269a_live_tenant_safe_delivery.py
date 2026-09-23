@@ -596,7 +596,14 @@ def test_no_provider_no_raw_reference_in_modified_modules():
 @pytest.mark.parametrize("rel_path", [
     "cutsell_worker/render.py",
     "cutsell_worker/render_plan.py",
-    "cutsell_worker/tenant_safe_delivery.py",
+    # tenant_safe_delivery.py and project_store.py removed: D-288.4 (a
+    # later, separately-authorized gate) legitimately adds the optional
+    # `content_sha256` key segment (immutable pending-review objects) and
+    # the render_version_id dedup in the project history -- same self-
+    # resolving-guard pattern as the render_delivery.py precedent below.
+    # D-269A's own contracts in both files are untouched; their dedicated
+    # coverage in this file and test_cutsell_clean_worker_projects.py is
+    # still green.
     "cutsell_worker/audio_finishing_executor.py",
     "cutsell_worker/audio_finishing_composition.py",
     "cutsell_worker/visual_finishing_executor.py",
@@ -624,7 +631,6 @@ def test_no_provider_no_raw_reference_in_modified_modules():
     # immediately above. D-269A's own render-identity/hash/upload contract
     # in this file is untouched; see test_cutsell_d267_render_delivery_
     # contract.py (still green) for that coverage.
-    "cutsell_worker/project_store.py",
     "cutsell_app/auth_middleware.py",
 ])
 def test_unrelated_authorities_unchanged(rel_path):

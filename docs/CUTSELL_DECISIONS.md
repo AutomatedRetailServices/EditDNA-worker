@@ -77298,3 +77298,117 @@ DO NOT SWITCH BRANCHES.
 DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
+
+## D-288.4 — Fourth Structural Correction to D-288.x (offline
+implementation, same isolated branch `audit/watch-listen-delivery-
+authority`, off verified HEAD
+`89796e9fef1c47688e2288a669b53947c4ff6277`)
+
+**NOT integrated into `cutsell/mobile-v1-clean`. NOT merged. `main` and
+PR #25 (OPEN/DRAFT/UNMERGED) untouched. iOS work untouched. No RAW
+dispatched. `perceptual_repair_cycle.py` untouched (still zero callers
+outside its own test file).**
+
+**Objective.** Product Owner review of D-288.3 found that its atomic
+commit still came AFTER the external effects, that its version/
+notification reuse was not itself atomic, and that the reviewed MP4 was
+not immutable. Per the review's own instruction, every race was
+REPRODUCED FIRST as a failing test against `89796e9f` (new `tests/test_
+cutsell_d288_4_race_reproductions.py`, 7 tests: 5 failed on that head
+for exactly the named reasons, 2 -- the concurrent-write pair -- only
+started failing once their barrier was moved from before the read to
+INSIDE the write, which is where the D-288.3 read-modify-write actually
+raced), then closed:
+
+1. **Approval vigente BEFORE the cache; the claim BEFORE the effects.**
+   `resume_delivery_after_approval` now checks the CURRENT approval
+   before returning any cached `resumed_delivery_result` -- aprobar ->
+   entregar -> rechazar -> reanudar REFUSES the new request (`pending_
+   review_not_approved`) while the delivered history stays on the record
+   (the D-288.3 test that asserted the opposite is corrected). A new
+   `delivery_state` machine (`NONE -> PUBLISHING -> DELIVERED`, `pending_
+   watch_listen_review.claim_delivery_publication` / `commit_delivered`)
+   makes the publish claim a versioned CAS off a fresh read taken
+   IMMEDIATELY BEFORE the tenant-safe upload: a revocation landing after
+   resume's last read fails the claim and nothing is published; a
+   revocation attempted while PUBLISHING is held is REFUSED (`Pending
+   ReviewConflict: delivery_in_progress_revocation_refused`) so the two
+   can never interleave -- the D-288.3 post-upload CAS was too late and
+   is gone. A concurrent resume may re-claim from PUBLISHING (a retry
+   after an interruption looks identical) because every downstream
+   effect is idempotent; the commit loop rereads and converges on the
+   other party's stored result instead of erroring.
+2. **Atomic version/notification reuse; no duplicate in the project
+   history.** New `cutsell_worker/redis_atomic_list.py` (`APPEND_IF_
+   ABSENT_LUA`, one Redis Lua round trip, built-in `cjson`) replaces the
+   Python-side GET -> scan -> SET in `render_versions.add_render_version`
+   and `notifications.publish_notification`: two concurrent callers for
+   the same render receive the SAME stored id, preserved in storage.
+   `project_store.update_project` no longer appends a `render_version_
+   id` it already holds, so a retried finalize leaves ONE entry in the
+   project's own `render_versions`.
+3. **Immutable reviewed MP4.** `tenant_safe_delivery.build_tenant_safe_
+   export_key` gained an optional `content_sha256` segment (validated by
+   the same fail-closed charset check as every other segment); `persist_
+   pending_review` uses it, so render B (same job, same render identity,
+   different bytes -- D-267's own documented non-determinism) lands at a
+   DIFFERENT object and a preview link already issued for A keeps
+   showing A. Default `None` keeps every existing key byte-identical.
+
+**Tests.** `tests/fake_atomic_redis.py`: one shared, thread-safe fake
+whose `eval` emulates each production Lua script BY IDENTITY (unknown
+script -> assertion, never a guess), with `get_hook`/`set_hook` to force
+interleavings between a read and the write that follows it; the four
+per-file get/set fakes that now need `eval` (`d288 approval`, `d288 http
+routes`, `clean_worker notifications`, `clean_worker render_versions`)
+alias it. `test_cutsell_d288_4_race_reproductions.py` (7): the numbered
+races above, incl. two real-OS-thread proofs and the A/B link test.
+`test_cutsell_d288_pending_review_and_approval.py`: the reject-after-
+delivery expectation corrected; the interruption test now crashes at
+the DELIVERED commit (the 2nd `_cas_save` inside resume -- the 1st is
+the publish claim) and its retry re-claims from PUBLISHING; the record
+placeholder sha is now hex (it is a key segment). `test_cutsell_d269a_
+live_tenant_safe_delivery.py`: `tenant_safe_delivery.py`/`project_store.
+py` dropped from its `git diff HEAD` firewall list with the same self-
+resolving-guard note this file already uses for `render_delivery.py`.
+
+### Verification run
+
+- Reproductions on `89796e9f` (pre-fix): 5 failed / 2 passed; after
+  moving the concurrent-write barrier inside the write: 7 fail. Post-fix:
+  7/7 pass; the seven race/concurrency tests run stable across 15
+  repeats.
+- `compileall` over `cutsell_worker/`, `cutsell_app/`, new tests: clean.
+- D-288 cluster + clean_worker notifications/render_versions/projects/
+  export/perceptual gate: 70 passed, 0 failed.
+- Targeted regression (`test_cutsell_d267*`, `d269*`, `d097*`, all
+  `d288*`, clean_worker export/render_versions/notifications/projects/
+  auth/batch): 526 passed; the 2 failures were the dirty-tree `git diff
+  HEAD` firewall entries addressed above.
+- `perceptual_repair_cycle.py`: zero callers outside its own test file,
+  unchanged.
+- Full `tests/` suite: IN PROGRESS at the time this entry was written
+  (run against the committed tree, never a dirty one); result recorded in
+  a follow-up commit, same two-step pattern as D-288.1/.2/.3.
+
+### Verdict
+
+**CODE FIXED. TESTS PASS (targeted; full-suite result pending). CI
+GREEN: not run (no CI dispatch in this gate).** RAW COMPLETE: N/A.
+ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
+
+**Product Owner decision required:** YES, unchanged in kind: (a)
+integrating this branch; (b) live-wiring `perceptual_repair_cycle.py`
+(still disconnected, its D-288.2-documented pending issues untouched);
+(c) any policy change for duplications/prosody named in the original
+audit.
+
+**Exact next step:** await the full-suite result (follow-up commit), then
+Product Owner review of this diff before any integration.
+
+Then STOP.
+
+DO NOT SWITCH BRANCHES.
+DO NOT MERGE.
+DO NOT REBASE.
+DO NOT TOUCH cutsell/mobile-v1-clean.
