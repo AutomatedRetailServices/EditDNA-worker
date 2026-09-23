@@ -78231,7 +78231,15 @@ contradiction primitive (residual R-289.4a) stops the path. No RAW is
 proposed on that basis.
 
 ### Verification (committed tree)
-PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+- compileall OK; `tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py`:
+  **28 passed**; `tests/test_cutsell_d289_contained_realization_closure.py`:
+  **38 passed** (D-289.2 controls intact);
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on committed tree `da15c580`: **8907 passed,
+  10 skipped, 13 subtests passed, 5 failed** (373.51 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x/D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4); zero new failures; `benchmarks/` unchanged.
 
 **Pending:** residual R-289.4a (the contradiction primitive's negation scope
 over a comma-run sentence) is the standing veto; the per-group pair cap's
