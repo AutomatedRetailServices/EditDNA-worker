@@ -262,6 +262,7 @@ from .case_b_performance_evidence import (
     case_b_performance_evidence_diagnostics,
 )
 from .multimodal_besttake_fallback import detect_class_b_trigger, fallback_trigger_diagnostics
+from .family_conflict_confirmation import confirm_family_winner_conflict
 from .semantic_authority_observability import (
     AUTHORITY_ABSTAIN_CONFLICT,
     AUTHORITY_ALLOWED,
@@ -1877,6 +1878,10 @@ def build_flow_b_draft(
         _prosodic_audio_samples_cache[source_asset_id] = audio
         return audio, False, audio is not None
 
+    # D-291: at most MAX_CONFIRMATIONS_PER_RUN family-scoped confirmation
+    # requests per video; the counter is shared by every family below.
+    _family_confirmation_counter: dict = {"used": 0}
+    _ordered_takes_for_context = tuple(sorted(take_by_id.values(), key=lambda t: (float(t.start), float(t.end), t.clip_id)))
     for members in group_members:
         if not members:
             continue
@@ -1980,6 +1985,39 @@ def build_flow_b_draft(
         complete_window_winner_conflict = _complete_window_winner_conflict(
             members, family_semantic_authority_observability, semantic_authority_gate,
         )
+        # D-291 (docs/CUTSELL_DECISIONS.md D-291): when D-150 abstained
+        # because the family-complete windows DISAGREE, ask the SAME
+        # editorial judge ONE bounded family-scoped question (layer 5 of the
+        # D-062.2 hierarchy -- arbiter confirmation -- before any delivery
+        # tie-break or review block). A CONFIRMED single-winner answer
+        # replaces the conflicted family labels and lifts the gate for this
+        # family; the unchanged ladder below still applies every safety
+        # check to it. Any other answer leaves the D-289.10 path untouched.
+        family_conflict_confirmation = confirm_family_winner_conflict(
+            members,
+            semantic_authority_gate_status=semantic_authority_gate["semantic_authority_gate_status"],
+            meaning_sufficient_ids=_meaning_sufficient_member_ids(members, hybrid_semantic_delete_recommended),
+            editorial_judge=editorial_judge,
+            whole_video_context=whole_video_context,
+            ordered_takes=_ordered_takes_for_context,
+            run_counter=_family_confirmation_counter,
+        )
+        effective_gate_status = semantic_authority_gate["semantic_authority_gate_status"]
+        effective_conflict_ids = frozenset(complete_window_winner_conflict["conflicting_clip_ids"])
+        if family_conflict_confirmation.resolved:
+            family_semantic_decisions = {**family_semantic_decisions, **family_conflict_confirmation.decisions}
+            effective_gate_status = AUTHORITY_ALLOWED
+            effective_conflict_ids = frozenset()
+            semantic_label_source = {
+                **(semantic_label_source or {}),
+                "family_conflict_confirmation_applied": True,
+                "family_conflict_confirmation_labels": {
+                    cid: list(pair) for cid, pair in family_conflict_confirmation.decisions.items()
+                },
+            }
+            complete_window_winner_conflict["resolved_by_family_confirmation"] = family_conflict_confirmation.winner_clip_id
+        semantic_authority_gate["semantic_authority_gate_status_effective"] = effective_gate_status
+        semantic_authority_gate["family_conflict_confirmation_applied"] = bool(family_conflict_confirmation.resolved)
         selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
             family_semantic_decisions,
@@ -1988,9 +2026,9 @@ def build_flow_b_draft(
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
             case_b_evidence_by_id=case_b_evidence_objects,
-            semantic_comparative_authority=semantic_authority_gate["semantic_authority_gate_status"],
+            semantic_comparative_authority=effective_gate_status,
             terminal_confidence_out=_terminal_confidence_out,
-            complete_window_winner_conflict_ids=frozenset(complete_window_winner_conflict["conflicting_clip_ids"]),
+            complete_window_winner_conflict_ids=effective_conflict_ids,
         )
         complete_window_winner_conflict["routed"] = semantic_best_take_reason == "unresolved_semantic_winner_conflict"
         _terminal_besttake_confidence_result = _terminal_confidence_out.get("terminal_besttake_confidence")
@@ -2432,6 +2470,9 @@ def build_flow_b_draft(
                 # CONFLICT_EVIDENCE for the Resolver's existing conflict
                 # branch.
                 "complete_window_winner_conflict": complete_window_winner_conflict,
+                # D-291: the family-scoped confirmation request/answer (or
+                # why none was attempted) for this family.
+                "family_conflict_confirmation": dict(family_conflict_confirmation.row),
                 "member_usability": {
                     member.clip_id: {
                         "delete_recommended": bool(hybrid_semantic_delete_recommended.get(member.clip_id, False)),

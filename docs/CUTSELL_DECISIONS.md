@@ -79174,3 +79174,159 @@ for this clean full run. A read-only in-memory comparison of the committed
 `cf68ca5` producer against `dbdbc65`, with identical generic synthetic audio,
 also reproduced old DOMINANT/preferred-b versus new INSUFFICIENT/no preference.
 Verification recording is documentation-only; no code changed after the run.
+
+## D-291 — Family-scoped arbiter confirmation when the family-complete windows disagree (RAW #118/#124 pimples)
+
+**Scope:** isolated branch `fix/video00-stable-editorial-oracle` off
+`59b0a188` (D-290/D-290.1). Offline only. No RAW/Modal/RunPod/provider call.
+No prosodic flag enabled; Freeze, word safety, D-101/D-103/D-123 vetoes,
+D-289.10's stop, D-290's acceptance checks, baselines and `cutsell/
+mobile-v1-clean`/`main`/PR #25 untouched. `perceptual_repair_cycle.py`
+stays disconnected.
+
+### 1. The two defect classes, distinguished on the recorded runs
+- **Realizations that never competed.** RAW #115 (35707498803) kept the
+  pimples monolith M and the later take L in DIFFERENT retry families
+  (D-290's finding). Its full result JSON is not in this container: the
+  exact evidence needed is `selected[].take_group_id`/`retry_family_id` for
+  M and L, `diagnostics.semantic_idea_equivalence` (the pair verdicts /
+  declines for the M–L pair) and `diagnostics.distinct_idea_grouping_safety
+  .edge_trace` from that run. Without them the family-formation path
+  cannot be replayed; NOT reproduced here, NOT attributed to code. The
+  three later runs (#118, #122, #124) all formed the family (tg_b461…,
+  tg_bf0c…, tg_33b4…), so the formation defect is not present on the
+  current code with those inputs. The first short attempt A1 ("También me
+  salían espinillas. Era como un rush, una alergia.") sits OUTSIDE the
+  family in every run -- and both Cut.ai and Human Gold KEEP A1 together
+  with L (four-way ladder: `consensus_keep` 192.44–197.52 s), so A1's
+  non-competition is the oracle's answer, not a defect.
+- **Grouped realizations whose winner depended on contradictory labels or
+  an insufficient tie-break.** Reproduced from the recorded window rows
+  (`hybrid_editorial_chunks`, member lists + per-clip labels):
+
+  | Run | chunk 3 (family mid-window, A1 before it) | chunk 4 (family at window start) | D-150 | ladder |
+  |---|---|---|---|---|
+  | #118 | M winner 0.95 / L alternate 0.75 | M keep 0.90 / L alternate 0.70 (no winner) | ABSTAIN_CONFLICT | DeliveryScore M 0.667 vs L 0.621, NON_DECISIVE → **M** |
+  | #122 | L winner 0.92 / M alternate 0.85 | L winner 0.90 / M alternate 0.75 | AUTHORITATIVE | fast path → **L** |
+  | #124 | M winner 0.92 / L alternate 0.80 | L winner 0.95 / M alternate 0.80 | ABSTAIN_CONFLICT | (pre-D-289.10) DeliveryScore → **M**; (D-289.10) `unresolved_semantic_winner_conflict` → REVIEW_REQUIRED block |
+
+  Windows are 10 candidates wide with stride 5; the family straddles the
+  overlap, so it is judged twice in two contexts. The provider (Gemini
+  flash-lite, temperature 0.0 -- `hybrid_google.py`) answered differently
+  per window and per run on near-identical texts; the DeliveryScorer
+  ranked M above L identically in every run (0.6671 / 0.6210); Cut.ai and
+  Human Gold both keep L and drop M. D-122 CASE B counts (hand-motion
+  events) differ between runs (#118: L 5 vs M 9; #122: no count
+  difference) -- exactly the gesture-count evidence D-290.1 refuses as
+  proof of a failed take, so no deterministic discriminator exists in the
+  recorded data. The run-to-run flips are therefore DATA (model answers),
+  not code; the CODE defect is what the engine does with a conflicted
+  layer-5 answer.
+
+### 2. First wrong decision point and its authority
+`pipeline.py` per-family loop: D-150's gate correctly abstains
+(`ABSTAIN_CONFLICT`), and the engine then either hands the decision to
+layer 7's raw numeric tie-break (#118, and #124 before D-289.10) or blocks
+at layer 11 (#124 after D-289.10). The D-062.2 hierarchy places *semantic
+arbiter confirmation* (layer 5) before both: a conflicted arbiter answer is
+not "irreducible, evidence-symmetric ambiguity" while the same bounded
+arbiter can still be asked the family-level question it was never asked.
+The existing v1 rule for a `failed` label's later retake
+(`_later_semantic_retry_replacement`) does not apply (M was never labelled
+failed); the D-128/D-139 multimodal arbiter is offline-eval-only and never
+live; D-191's bounded finalist is the prosodic path (quarantined by
+D-290.1, and not enabled here).
+
+### 3. The correction (smallest, general, in the existing authority)
+`cutsell_worker/family_conflict_confirmation.py::confirm_family_winner_
+conflict`, called from the per-family loop right after D-289.10's
+`_complete_window_winner_conflict` and before `_semantic_best_take`:
+- trigger: `len(members) >= 2` AND D-150 status `ABSTAIN_CONFLICT` (covers
+  both the #124 winner-vs-winner and the #118 winner-vs-no-winner shapes;
+  #122's agreeing windows never trigger and are byte-identical);
+- ONE session for the family through the SAME `EditorialJudge`, prompt,
+  schema, temperature and `safe_editorial_judge` gate as every window:
+  exactly the family's members plus at most one already-known same-source
+  neighbour before and after (context only, their labels ignored); priced
+  and enforced by the transport's own per-edit `DollarBudgetLedger`; at
+  most `MAX_CONFIRMATIONS_PER_RUN = 4` per video; `CUTSELL_FAMILY_CONFLICT_
+  CONFIRMATION=0` disables it (default ON for this conflict class only --
+  its scope is exactly the families D-150 abstains on: 2 in RAW #124, 1 in
+  RAW #118);
+- resolved ONLY when the answer is an unambiguous family verdict: exactly
+  one member "winner" at or above the same 0.85 floor the ladder applies,
+  every other member neither "winner" nor "uncertain", the winner among the
+  family's meaning-sufficient members (D-081/D-103 signals). A CONFIRMED
+  answer replaces the conflicted family labels, the gate is lifted for that
+  family (`semantic_authority_gate_status_effective = AUTHORITATIVE`) and
+  the UNCHANGED ladder decides: the fast path still applies D-101's safety
+  veto (contradiction/number/negation, delete-recommended, incomplete,
+  missing CRITICAL claim), D-103 and D-123's CASE B gate. Any other answer
+  (uncertain, two winners, below floor, a decline, a budget refusal, an
+  omitted member) leaves D-289.10's path untouched (the block stays);
+- symmetric by construction: a confirmed M is honoured exactly like a
+  confirmed L; no "last wins", no "highest confidence wins", no clip id,
+  timestamp or phrase; the judge decides, the module bounds and records;
+- observability: judge row `family_conflict_confirmation` (session id,
+  member/context ids, request hash, requested/available/budget, every
+  decision with `context_only`, reason, winner, family labels), `semantic_
+  label_source.family_conflict_confirmation_applied/labels`, `semantic_
+  authority_gate_status_effective`, `complete_window_winner_conflict.
+  resolved_by_family_confirmation`.
+
+### 4. Effect on the other families (offline)
+Stomach (abandoned attempt), sonography opening, "No quiero…",
+conclusion, percentage restatement and CTA: none of those families had
+D-150 `ABSTAIN_CONFLICT` in the recorded runs (their windows agreed or
+were single), so the confirmation is never attempted for them and their
+paths are byte-identical (D-289.7–.11, D-290/290.1 suites re-run green).
+The second conflicted family in RAW #124 (the "Síntomas que tuve…"/
+"Síntomas que no me parecían sospechosos…" pair, chunk 2 vs chunk 3) would
+also be confirmed once; its D-101 vetoes apply the same way.
+
+### 5. Tests (`tests/test_cutsell_d291_family_conflict_confirmation.py`, 18)
+Every judge answer is a LABELLED FAKE. RAW #124 shape → attempted,
+confirmed L flows through the ladder as `single_semantic_winner`
+(DECISIVE); RAW #118 shape → attempted (D-289.10's stop does not cover it;
+without confirmation it still falls to the DeliveryScore monolith,
+recorded); RAW #122 → never asked, byte-identical; a confirmed M is
+honoured the same way; uncertain / two winners / below floor / other
+member uncertain / no winner → unresolved, D-289.10 block intact; decline,
+budget-exhausted and an omitted member → unresolved and recorded; the
+winner must be meaning-sufficient; a confirmed winner that contradicts its
+sibling is still vetoed by the unchanged ladder; env off / no judge /
+per-run cap; neighbour context bounded to one same-source take each side;
+END TO END through `build_flow_b_draft` with a labelled fake pair arbiter
+(forms the M–L family) and a window-sensitive fake judge (two overlapping
+windows disagree): the confirmation runs once, L is selected, M is
+discarded, A1 is kept; an unresolved confirmation keeps the D-289.10
+review block; the env kill-switch is byte-identical to D-289.10.
+
+### 6. What is and is not proven
+CODE FIXED / TESTS PASS. NOT proven: that the real judge, asked the
+family-scoped question, answers L for the pimples family -- the recorded
+window answers were split 2/6 M-winner vs 3/6 L-winner across three runs,
+so the real confirmation may return M, uncertain, or flip between runs;
+this decision names the mechanism and its bounds, not the provider's
+verdict. If the confirmation returns M the engine will select M (a
+consistent, evidenced answer that contradicts both oracles) and the D-290
+acceptance checks will say so; if it abstains the D-289.10 block stays.
+No MP4 improvement is claimed.
+
+### 7. The one RAW that would test it (NOT launched)
+SHA: the commit carrying this entry on `fix/video00-stable-editorial-
+oracle`. Parameters: RAW #123/#124's (`pacing_v2_diagnostics_enabled=1`),
+no prosodic flag, `CUTSELL_FAMILY_CONFLICT_CONFIRMATION` unset (default
+ON). Decision that must improve: the pimples family judge row must show
+`semantic_authority_gate_status = ABSTAIN_CONFLICT` (if the windows
+disagree again) with `family_conflict_confirmation.attempted = true`.
+SUCCESS: `resolved = true`, `winner_clip_id` = the later take, `semantic_
+best_take_reason = single_semantic_winner`, the MP4 carries A1 + L and not
+M, `benchmarks/video00_editorial_acceptance.json` `pimples_bad_monolith_
+absent`/`pimples_bad_source_absent`/`pimples_later_source_selected` PASS,
+then human Watch+Listen. FAILURE: `resolved = true` with the monolith
+(the judge disagrees with both oracles -- then the family needs media-
+level evidence, not another text consultation), or `resolved = false`
+(REVIEW_REQUIRED stays; the block is the honest state), or the windows
+agree on M (no conflict, nothing to confirm). If the windows agree on L
+the run does not exercise D-291 at all.

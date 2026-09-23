@@ -536,3 +536,24 @@ Continue automatically after each non-paid fix/status block. Stop only for:
 ## Update rule
 
 Whenever work advances to a later benchmark or major Brain checkpoint, update this file in the same development cycle instead of reconstructing state from chat history.
+
+### D-291 — family-scoped confirmation of a complete-window label conflict
+
+Same isolated branch, off `59b0a188`. The pimples family's winner flipped
+across RAW #118/#122/#124 because the two overlapping 10-candidate windows
+labelled it differently (M winner / L winner, or M winner / no winner); the
+provider answers are data, the code defect was that a conflicted layer-5
+(arbiter) answer went straight to layer 7's NON_DECISIVE DeliveryScore
+(#118, #124 before D-289.10) or layer 11's review block (#124 after). D-291
+asks the SAME editorial judge ONE bounded family-scoped question when D-150
+abstains on a conflict (family members + one known neighbour each side,
+same prompt/temperature/budget ledger, max 4 per video, `CUTSELL_FAMILY_
+CONFLICT_CONFIRMATION=0` disables) and honours only an unambiguous single-
+winner answer through the UNCHANGED ladder and its vetoes; anything else
+leaves D-289.10's block. Symmetric (a confirmed monolith is honoured too).
+Proven offline with LABELLED FAKE answers only (18 tests incl. end to end
+through `build_flow_b_draft`); the real judge's family-level verdict is
+unknown and the MP4 is not claimed improved. RAW #115's family-formation
+defect cannot be replayed without its result JSON (`take_group_id`,
+`semantic_idea_equivalence`, `distinct_idea_grouping_safety.edge_trace`).
+No RAW launched; the test RAW is specified in the decision entry.
