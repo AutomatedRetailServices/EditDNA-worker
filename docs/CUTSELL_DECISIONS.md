@@ -79346,3 +79346,101 @@ level evidence, not another text consultation), or `resolved = false`
 (REVIEW_REQUIRED stays; the block is the honest state), or the windows
 agree on M (no conflict, nothing to confirm). If the windows agree on L
 the run does not exercise D-291 at all.
+
+## D-291.1 — RAW #125 (the ONE authorized Modal run on `98a6b82b`, run 35921819172): observed selection vs. unreachable diagnostics
+
+**Run facts (OBSERVED from the GitHub run record):** dispatched 21:20:28 UTC
+on `fix/video00-stable-editorial-oracle` at `98a6b82b` (remote == local,
+clean tree, no other Modal RAW active), inputs = RAW #123/#124's
+(`pacing_v2_diagnostics_enabled=1`, no prosodic flag, D-291 at its default
+ON). Modal step succeeded (job 107387382532, 8 min, teardown confirmed);
+failed steps: frozen Selection lock (expected whenever the selection
+differs from the lock), Human Gold 18-check QA, editorial acceptance, and
+the three Pacing V2 steps (`diagnostics['pacing_v2']` absent from the
+serialized result). `PREVIEW_URI` and `DIAGNOSTIC_PREVIEW_URI` were EMPTY
+in the ladder step's env: no MP4 was downloaded by the workflow and the
+ladder reports `cutsell_rendered: null` / `render_found: null` -- whether
+the render was refused, held pending Watch+Listen review (D-288) or never
+reached is NOT known from the reachable evidence.
+
+**Evidence reachable from this container:** only the last 5,000 log lines
+(GitHub connector cap), which hold the quality ladder from 59.29 s on
+(110 regions, summary, 20 traceability rows) and the late diagnostic
+steps. The validator-reports (67 KB), run-log (2 KB) and human-review
+(541 MB) artifacts and the S3 result object are unreachable: the
+environment's network policy denies `productionresultssa*.blob.core.
+windows.net` (CONNECT 403) and the AWS key in the container is invalid.
+Therefore NOT observed: the D-291 `family_conflict_confirmation` rows,
+the hybrid window labels, the `final_boundary_authority` rows (D-289.11),
+the 18-check and acceptance reports, the Modal run summary and the MP4.
+
+**Selection (OBSERVED, ladder traceability, source seconds):**
+62.12–74.42 test a bordo; **95.52–104.32 the LATER gynecologist take**
+(family `tg_e9e75c…`, `semantic_override_applied=true`; RAW #121 kept
+the earlier 83–90 s take, Level 1); 120.03–124.63 sonography opening
+(family winner, complete sentence "Ahí fue cuando me mandaron a hacer
+sonografía…"); 128.14–134.22 nodule; 135.44–140.96 biopsy; 150.68–158.14
+symptoms; **191.14–191.74 "resorcina." stranded** (Level 1 false keep,
+Gold 0) while the acne take 185.24–189.84 is MISSING (4.26 s Level 1,
+attributed BestTakeResolver; its family `tg_0a05f6…` shows the clip as its
+own `family_winner` yet `discarded` -- an authoritative-resolution drop
+whose basis is in the unreachable diagnostics); **192.44–198.12 A1 +
+213.34–222.98 L (pimples), the monolith M 198.88–211.02 DISCARDED** with
+`retry_family = None` for both L and M -- they were NOT in one family in
+this run, so D-291 (which needs a family with a window conflict) did NOT
+decide the pimples outcome; M was removed by a non-family path (basis
+unreachable); 226.74–233.18 hair; **258.87–269.37 gastritis G only**
+(family `tg_7995bd…`, override applied; the abandoned attempt 245.39–
+251.61 and the fragment "Tuve problemas de estómago," discarded);
+269.37–270.17 "No" + 276.09–283.67 "quiero sonar a conspiración…" (still
+two clips, as in #122/#124); 295.52–313.50 conclusion W (family winner
+over the percentage restatement R, `tg_e3e895…`); **319.38–327.44 aside A
+kept** (Cut.ai keeps, Gold drops, Level 2); **R+T 327.78–342.58
+DISCARDED**; **356.21–361.65 CTA "Por eso cuídate, aliméntate bien,
+hidrátate y haces ejercicio." with the re-opened "Por eso cuídate,"
+STILL present** (356.21–358.11 `gold_removes_cutai_keeps`): the D-289.11
+trim did not change the CTA; whether it was refused (recorded reason) or
+never matched (this run's ASR wording differs: "haces" vs "haz") is in
+the unreachable `final_boundary_authority` rows. The ladder's candidate
+texts are truncated, so no closing-repetition check could be re-derived
+from the tail (an attempt to do so was discarded as invalid evidence).
+
+**Ladder (OBSERVED):** Level-1 selection 21.96 s / 23 regions (RAW #124:
+44.9 s; RAW #121, the 18/18 run: 37.09 s; RAW #122: 21.69 s), boundary
+2.597 s; by authority: BoundaryEngine 7.49 s, BestTakeResolver 6.95 s,
+AttemptReconstructor 5.01 s, IdeaClusterer 4.13 s, RealizationResolver
+0.98 s; CutSell-vs-Gold F1 0.8417 (precision 0.8137, recall 0.8717);
+`cutsell_keep` 151.78 s vs Gold 141.67 s vs Cut.ai 167.83 s.
+
+**Comparison (OBSERVED at selection level):**
+
+| item | #121 (18/18) | #122 | #124 | #125 |
+|---|---|---|---|---|
+| pimples | A1 + L, M out | A1 + L, M out | A1 + M, L out | A1 + L, M out (no family) |
+| stomach | G only | G only | abandoned attempt kept | G only |
+| gynecologist | earlier take (L1) | (before tail) | (before tail) | later take (Gold) |
+| acne | 171–181 take | 185–190 + resorcina | 185–190 + resorcina | resorcina only (L1) |
+| "No quiero" | one clip | two clips | two clips | two clips |
+| percentage R+T | kept | kept | out | out |
+| aside A | out | out | kept | kept |
+| CTA | re-opened | re-opened | re-opened | re-opened |
+| Level-1 selection s | 37.09 | 21.69 | 44.9 | 21.96 |
+
+**INFERRED (not proven):** the pimples and stomach outcomes match both
+oracles and the D-290 acceptance targets at the selection level; the
+acne drop and the stranded "resorcina." are a NEW Level-1 regression
+relative to #122/#124; D-291 most likely did not execute for any family
+(no evidence either way); the missing preview most likely means no
+deliverable MP4 (a hold or a refusal). **Nothing about the rendered
+video is demonstrated. One run proves nothing about run-to-run
+consistency.**
+
+**Exact next step (no relaunch):** obtain the run's
+`cutsell-video00-modal-validator-reports`, `cutsell-video00-modal-run-log`
+and the human-review `video00-modal.json` (+ MP4 if one exists) -- either
+by allowing `*.blob.core.windows.net` in the environment's network policy
+or by attaching them -- then read `take_judge_groups[].family_conflict_
+confirmation`, the acne family's resolver basis, the `final_boundary_
+authority` rows for the CTA, the QA/acceptance reports and the Modal
+delivery status, and record them here. No code, baseline or flag change
+was made for this entry.

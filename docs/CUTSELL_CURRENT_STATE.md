@@ -557,3 +557,19 @@ unknown and the MP4 is not claimed improved. RAW #115's family-formation
 defect cannot be replayed without its result JSON (`take_group_id`,
 `semantic_idea_equivalence`, `distinct_idea_grouping_safety.edge_trace`).
 No RAW launched; the test RAW is specified in the decision entry.
+
+### D-291.1 — RAW #125 (run 35921819172 on `98a6b82b`): selection observed, diagnostics unreachable
+
+The one authorized run completed (Modal OK, teardown confirmed) but the
+workflow downloaded no MP4 (`PREVIEW_URI` empty) and its QA/acceptance/
+pacing steps failed; only the ladder tail is reachable from this
+container (artifact host denied by the network policy, AWS key invalid).
+OBSERVED selection: pimples A1 + later take with the monolith discarded
+(but M and L were NOT in one family -- D-291 did not decide it), gastritis
+only, later gynecologist take, R+T out, aside A kept, "No"/"quiero" still
+split, CTA still re-opens with "Por eso cuídate,", the acne take dropped
+with a stranded "resorcina." (new Level-1 regression). Level-1 selection
+21.96 s (#124 44.9, #121 37.09, #122 21.69). Nothing rendered is proven;
+consistency is not proven. Next: obtain the run's artifacts (network policy
+or attachment) and record the D-291 rows, the acne resolver basis, the CTA
+boundary rows, the QA reports and the delivery status.
