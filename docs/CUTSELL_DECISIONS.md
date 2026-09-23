@@ -78118,7 +78118,7 @@ example the claim "Stress occurs" best-covers 0.5 -> kept for grouping. A
 unit the winner genuinely preserves is still removed whole; a text below
 the claim extractor's clause floor falls back to the lexical verdict.
 
-### Faithful replay (tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py, 32 tests)
+### Faithful replay (tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py, 21 tests)
 From before the cleanup with the package's texts, resolved labels and
 arbiter answers (W-R omitted as never asked): the corrected cleanup keeps
 the unit R+T -- lexically covered 0.5556 by W but its CRITICAL claim
@@ -78135,7 +78135,15 @@ for the D-058 canary, neither of which exists on record. P's soft-restore
 (a separate authority) is not replayed; on the run it lost W's family.
 
 ### Verification (committed tree)
-PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+- compileall OK; `tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py`:
+  **21 passed**; `tests/test_cutsell_d289_contained_realization_closure.py`:
+  **38 passed** (D-289.2 controls intact);
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on committed tree `c82527db`: **8900 passed,
+  10 skipped, 13 subtests passed, 5 failed** (369.25 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x/D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4); zero new failures; `benchmarks/` unchanged.
 
 **Pending:** the W-R pairwise verdict and the claim-arbiter answer for W vs
 the complete sentence R+T -- only a RAW that reaches them can record them;
