@@ -78399,4 +78399,27 @@ No RAW is proposed on this basis.
   as described.
 
 ### Verification
-See the Verification section appended below after the full run.
+- compileall OK; `tests/test_cutsell_d289_7_proposition_scope_negation.py`:
+  **38 passed**; `tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py`:
+  **28 passed**; `tests/test_cutsell_d289_contained_realization_closure.py`:
+  **38 passed**; the D-056.3/D-056.5/D-058/D-059/D-066/D-082/D-085/D-094.2/
+  D-097.9/D-101/D-108/D-287 and claim-coverage suites green (380 passed in
+  the affected set);
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on the working tree of `839ae75c`: **8942
+  passed, 10 skipped, 13 subtests passed, 8 failed** (366.45 s) -- the same
+  5 pre-existing/unrelated failures every D-288.x/D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4) plus 3 working-tree-only guards
+  (`test_semantic_claims_untouched` x2 in D-169/D-171, `test_36_language_
+  spine_zero_diff` in D-174: `git diff HEAD` on the edited files, which fail
+  only while the tree is uncommitted); re-run on the COMMITTED tree
+  `839ae75c` those three files pass (**335 passed** together with the
+  changed suites); zero new failures; `benchmarks/` unchanged;
+  `cutsell/mobile-v1-clean` and `main` untouched.
+
+**Pending:** the three unrecorded real answers named above (W-R pairwise;
+the claim verdict on R+T vs W; the D-085 probe if declined) and the
+per-group cap observation (D-289.6) remain Product Owner territory. **Exact
+next step:** Product Owner review; no integration, no RAW, no baseline
+change.
