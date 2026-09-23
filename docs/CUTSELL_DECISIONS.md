@@ -77615,8 +77615,15 @@ Regression: compileall OK; grouping/bench/competition/coherence suites
 D-097.A/D-097.8/D-097.9/D-100/D-101/D-108/D-144/D-149/D-150/D-158/D-166/
 D-168/D-169/D-200.4b/D-235G/D-287, take-grouping provider, universal
 clean cut, golden full mode, editorial-slot composites, minimum
-sufficient set, trigger coverage, ...): **722 passed, 0 failed**. Full
-`tests/` result recorded in the commit that closes this entry.
+sufficient set, trigger coverage, ...): **722 passed, 0 failed**; the
+`git diff HEAD` firewall suites (D-161/D-167/D-171/D-172/D-174/D-194/
+D-202/D-269A/D-272A/D-272B/D-274F) on the committed tree: **629 passed**;
+full `tests/` (excluding the pre-existing broken collection file
+`test_semantic_stitch.py`) on committed tree `1dd44293`: **8859 passed,
+10 skipped, 13 subtests passed, 5 failed** (360.79 s) -- the same 5
+pre-existing/unrelated failures every D-288.x entry verified
+(`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+hybrid_semantic_parity` x4); 8841 + 18 new, zero new failures.
 
 ### Residuals (recorded, not fixed here)
 - The 2.4 s bare tail stays kept (guard 7 + ≤ 3-token pair ineligibility);
