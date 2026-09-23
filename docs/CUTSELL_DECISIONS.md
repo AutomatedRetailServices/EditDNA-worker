@@ -78964,6 +78964,25 @@ both shapes and the controls, validator end to end (`cta_preserved` PASS
 while `cta_unique_closing` FAILS on the RAW #124 shape; both PASS once
 trimmed; missing segment FAILS), baseline manifest untouched.
 
+### Verification (committed tree `f51cc9df`)
+- compileall OK; targeted set (D-289.11 file 29, `test_video00_regression_
+  qa.py`, final boundary authority refresh, boundary retry tail guard,
+  selection boundary contract, D-097.C BoundaryEngine pass, polish v5,
+  D-050c3 downstream integration, every `test_cutsell_d289_*.py`, D-101):
+  **243 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on the working tree: **9004 passed, 10
+  skipped, 13 subtests passed, 6 failed** (367.86 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x/D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4) plus 1 working-tree-only `git diff HEAD`
+  guard (D-174 `test_37_38_39_boundary_pacing_render_zero_diff`, which
+  lists `final_boundary_authority.py`/`boundary_engine_pass.py`), which
+  passes on the COMMITTED tree together with the D-169/D-239L guards
+  (**133 passed**); zero new failures; `benchmarks/video00_regression_
+  qa.json` and the selection lock byte-identical; `cutsell/mobile-v1-clean`
+  and `main` untouched.
+
 **Pending limits:** (1) offline proof on recorded texts with synthetic
 word timings -- the real render needs a run the Product Owner has not
 authorized, and a real ASR must place a break (punctuation or ≥ 0.25 s)
