@@ -77866,6 +77866,17 @@ kept unchanged.
    and all traces are identical to D-289.1's.
 
 ### Verification (committed tree)
-VERIFICATION_PLACEHOLDER
+- compileall OK; `tests/test_cutsell_d289_contained_realization_closure.py`:
+  **38 passed** (32 + 4 continuation/marker controls + 2 real-path wiring
+  tests); every affected suite (grouping, competition/coherence,
+  CleanCutBench, universal clean cut, media ingest, D-050C3/D-087/D-089/
+  D-090/D-092/D-093/D-097.C/D-200/D-216 flow_b integrations, local retry
+  grouping): **699 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on committed tree `7cb1e015`: **8879 passed,
+  10 skipped, 13 subtests passed, 5 failed** (368.46 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x/D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4); zero new failures; `benchmarks/` unchanged.
 
 **Exact next step:** Product Owner review. No integration, no RAW.
