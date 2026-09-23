@@ -78656,3 +78656,171 @@ Product Owner review with the human-review artifact (QA report,
 `result.json`, MP4) attached, to (a) watch/listen the MP4, (b) confirm the
 two inferred QA failures and the hybrid labels/arbiter answers behind the
 pimples and stomach decisions, (c) decide on integration of D-289.x.
+
+## D-289.10 — RAW #124 forensic corrections: the pimples complete-window
+conflict no longer falls to DeliveryScore; the stomach restart relation no
+longer depends on the component probe; a realization-presence QA kind
+(same isolated branch, off `b6d6d7bc`; offline only; evidence = the
+Product Owner's `raw124-review-evidence` and `raw124-mp4-review` packages)
+
+**NOT integrated. No RAW. `main`/PR #25/canon/baselines/protections
+untouched. No flag activated. D-289.7's bridge orientation, D-289.8, the
+R+T removal, negations, numbers, causality and continuation chains
+preserved (their suites re-run green).**
+
+### 1. Pimples — recorded path (OBSERVED from the package)
+Family `tg_33b4976ee8dc205652` = {monolith M `clip_40fb…`, later take L
+`clip_03ea…`}. Two family-complete windows disagreed: chunk 3 (`hc_c81b…`)
+M winner 0.92 / L alternate 0.80; chunk 4 (`hc_463d…`) L winner 0.95 / M
+alternate 0.80. `family_scoped_semantic_decisions` merges per clip by
+`_decision_priority` → two "winner" labels (L 0.95, M 0.92); D-149:
+`MULTIPLE_COMPLETE_WINDOWS_DISAGREE`; D-150 gate `ABSTAIN_CONFLICT`
+(`multiple_family_complete_windows_disagree_on_comparative_winner`), fast
+path refused; the general ladder found no delete evidence, both complete,
+no CRITICAL claims, equal coverage sets, no contradiction, and fell to the
+DeliveryScorer tie-break: M 0.6671 vs L 0.621 → `delivery_tie_break_
+among_survivors`, `winner_path DELIVERYSCORE_PATH`, terminal
+`NON_DECISIVE` (`raw_score_difference_without_structured_dominance`,
+margin 0.0461). L discarded; both references keep L and reject M. On RAW
+#122 the same two windows AGREED (L winner 0.92/0.90) → `single_semantic_
+winner`. **Reproduced exactly** in `tests/test_cutsell_d289_10_raw124_
+pimples_stomach.py::test_pimples_recorded_path_*` from the recorded
+windows.
+
+**Why no existing authority intervened (answered):**
+- `label_conflict_routed=false` is D-097.B's ALL-DELETE-RECOMMENDED
+  routing (`all_delete_recommended and not no_usable_realization`) -- it
+  never described window disagreement; false here by definition.
+- The bounded finalist authority (D-191, the only consumer of a
+  NON_DECISIVE terminal state) was flag-OFF on the run (`bounded_finalist_
+  authority_state: NOT_ENABLED`, D-190/D-192 summaries `disabled`).
+- The Resolver's own `conflicting_high_confidence_semantic_winner_
+  evidence` branch (D-058 Phase 2: "never guess between two confidently-
+  recorded semantic verdicts") never saw the disagreement: the Ledger
+  records `SEMANTIC_WINNER_OVERRIDE` only when the fast path APPLIED an
+  override (`semantic_override_applied`), which a delivery tie-break never
+  does -- so the resolver read "no winner evidence" and resolved by
+  delivery score too.
+
+### Fix — with the complete-window evidence, in the existing authorities
+- `pipeline._complete_window_winner_conflict`: when the gate is
+  `ABSTAIN_CONFLICT`, the members each family-complete window labelled
+  "winner" at ≥ 0.85 (the same floor the fast path applies), read off
+  D-149's own `complete_window_outcomes`. Two or more distinct such
+  members = a recorded conflict; one window winner, a below-floor winner,
+  a partial-window conflict or an incomplete context never route.
+- `_semantic_best_take(..., complete_window_winner_conflict_ids=…)`
+  (additive; omitted = byte-identical): after every structured step (D-081
+  delete evidence, completeness, D-103, CRITICAL_COVERAGE_DOMINANCE, the
+  unique-fact and contradiction checks -- D-062.2 layers 1-5 first, D-062.1's
+  ruling) and only where the ladder would fall to the delivery tie-break,
+  two or more conflicting survivors stop it: `(local_selected, None,
+  "unresolved_semantic_winner_conflict")`, terminal CONFLICTED -- the
+  `unresolved_contradiction` shape. No "later window wins", no "higher
+  confidence wins", no text/clip exception; the selection stays on the
+  existing safe fallback (nothing is preferred).
+- Ledger: `SEMANTIC_WINNER_CONFLICT_EVIDENCE` (evidence, never a winner
+  decision -- `record_winner_evidence` does not touch the idea's current
+  winner), one record per window verdict, written only when the ladder
+  actually routed the conflict. Resolver: `_semantic_winner_confidence_by_
+  realization` reads it alongside `SEMANTIC_WINNER_OVERRIDE`, so the
+  EXISTING conflict branch fires: `REVIEW_REQUIRED` /
+  `conflicting_high_confidence_semantic_winner_evidence`, both
+  realizations retained; `apply_authoritative_realization_resolution`
+  status `REVIEW_REQUIRED` (buckets untouched); D-090
+  `_classify_family_under_authority` → `authoritative_review_required`
+  (not accepted → Freeze blocks for this idea).
+- Diagnostics: `take_judge_groups[].complete_window_winner_conflict`
+  (`routed`, `conflicting_clip_ids`, `window_evidence`); `winner_path`
+  reads OTHER_EXISTING_PATH (meaning-driven), D-183 CONFLICTED (D-191-
+  eligible if a Product Owner ever enables it). The integrity wrapper
+  forwards the new argument verbatim.
+
+**Before/after (pimples, RAW #124 windows):** before -- M selected by
+delivery (NON_DECISIVE), L discarded, Freeze passes, both references
+contradicted. After -- the family is `unresolved_semantic_winner_conflict`
+(CONFLICTED), the Resolver returns REVIEW_REQUIRED and **the render is
+blocked for this idea pending human choice** (D-062.2 layer 11/13; D-020's
+fail-closed posture). This entry does NOT choose L: with two opposite
+complete-context verdicts and no deterministic dominance, no existing
+authority can, and none was invented. RAW #122-shaped agreeing windows are
+byte-identical before and after (`single_semantic_winner`, DECISIVE).
+**Product Owner decision (A/F):** accept the block for a genuine
+complete-context conflict, or authorize the existing bounded finalist
+authority (D-191) for CONFLICTED/NON_DECISIVE families -- its verdict
+would be a NEW provider/evidence answer, which no test here simulates as
+proof.
+
+### 2. Stomach — recorded paths (OBSERVED) and the demonstrated cause
+Both runs, identical inputs: reconcile merged E (`…diagnosticaron con...`,
+incomplete) with S1 (`Tuve problemas de estómago … no hay que preguntar.`)
+by `measured_pause_bridged_retry` (confidence 1.0, "arbiter not
+consulted"), E with G (gastritis) by `incomplete_attempt_completed_by_
+retry`, and S1 with G by the pairwise arbiter (0.9). In the cohesion pass
+the E–S1 edge is a bridge (S1 into {E, G}); RAW #122's D-085 component
+probe ACCEPTED it ("Both recount experiencing stomach issues leading to a
+medical diagnosis.", 0.9) and RAW #124's DECLINED it twice
+(`component_cohesion_declined`, 0.9) → split {E, G} / {S1}, S1 kept as a
+lone candidate (5.94 s Level 1). **Reproduced** (`test_stomach_
+reproduction_*`): with the three recorded priors and a probe fake
+answering as each run, the pre-fix cohesion pass yields one family or the
+split, deciding on the probe answer alone.
+**Cause (demonstrated, not the arbiter's variance):** `pipeline.py` handed
+the cohesion pass each reconcile merge as `(confidence, reason)` only; the
+merge's `accepted_by` kind was dropped, so a DETERMINISTIC restart merge
+re-entered as a `semantic` edge (`_RetryEdge(..., "semantic", 1.0,
+reason-sentence)`), `restart_pairs` never contained it, and a bridge made
+of recording-process evidence was re-examined by a run-varying arbiter
+probe. `measured_pause_bridged_retry` was also absent from `_RESTART_
+EVIDENCE_KINDS` although reconcile already treats it as deterministic
+restart evidence (D-150 Gate 6). This is the same family D-085/D-094.2
+already met on run 33983880111 (probe 0.2 against three pairwise
+confirmations).
+**Fix:** the prior confirmation carries `accepted_by` (3-tuple; the
+2-tuple shape every earlier caller passes still works and means "kind
+unknown"); a restart-kind prior becomes `_RetryEdge(..., "deterministic",
+1.0, kind)` (`source: prior_restart_evidence`), so it feeds `restart_pairs`
+and the D-097.A restart-singleton path; `measured_pause_bridged_retry`
+joins `_RESTART_EVIDENCE_KINDS`. Protections kept and re-tested: D-108's
+blocked-pair veto (runs before any path), the D-083 divergence gate (still
+applied to every prior hit), the cross-component contradiction net inside
+`_accept_restart_singleton_bridge`; a semantic prior without a kind, an
+unknown kind, or a sub-0.90 confirmation still goes to the probe.
+**Before/after (stomach):** before -- probe-dependent; RAW #124 kept the
+abandoned attempt. After -- one family {E, S1, G} with zero probe calls
+under both probe answers; through the real chain with RAW #124's labels
+(S1 winner 0.95 in one window) and with RAW #122's, the take judge picks S1
+by critical dominance exactly as both runs recorded, the authoritative
+Resolver picks G (`single_realization_full_critical_coverage`; S1's
+"no hay que preguntar" negation is downgraded by the existing effective-
+importance rule), parks S1 and E as `retained_for_contextual_value`, and
+the pipeline's D-092 KEEP/DISCARD fold discards both -- RAW #122's
+recorded outcome, with no arbiter consultation (RAW #122 recorded 0).
+
+### 3. QA — `required_realization` (baselines untouched)
+`pimples_later_winner_present` passed on RAW #124 (17/18) because
+`required_exact` is a coverage search: 9 of the later take's 14 content
+tokens sit in the selected monolith (0.64 ≥ 0.6). `benchmarks/validate_
+video00_regression_qa.py` gains `realization_present` and the check kind
+`required_realization`: one selected row must cover 0.9 of the target's
+own tokens AND be 0.6 covered by it (the monolith: 0.64 / 0.60 → absent;
+the later take itself: present; the reverse direction keeps a longer take
+that merely contains the words from counting). Reported in its own
+bucket; `benchmarks/video00_regression_qa.json` unchanged (no baseline
+uses the kind -- adopting it is a Product Owner decision).
+
+### Tests (`tests/test_cutsell_d289_10_raw124_pimples_stomach.py`, 20)
+Recorded pimples path; why nothing intervened; after-fix routing through
+Ledger → Resolver → authority → D-090; RAW #122 windows byte-identical;
+controls (below-floor winner, partial/incomplete context, dominance first,
+contradiction first, window order and confidence irrelevance, singleton,
+omitted kwarg); stomach reproduction under both probe answers; after-fix
+zero-probe grouping (both answers) and the full downstream to G kept /
+S1+E discarded; controls (semantic prior → probe, unknown kind → probe,
+contradiction net, D-083 gate); QA: shared content vs presence, the
+validator end to end on RAW #124- and RAW #122-shaped results, baseline
+untouched. Every arbiter answer is a labelled fake; none proves the real
+outcome of a rerun.
+
+### Verification
+See the Verification section appended below after the full run.

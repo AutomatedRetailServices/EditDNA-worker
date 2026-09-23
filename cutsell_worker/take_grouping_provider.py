@@ -1870,6 +1870,14 @@ _RESTART_EVIDENCE_KINDS = frozenset({
     # deterministic-evidence treatment as the lexical kinds above -- never
     # re-examined by the arbiter, subject to the same D-083 marker gate.
     "multimodal_corroborated_retry",
+    # D-289.10 (RAW #124 stomach forensic): the measured-silence-bridged
+    # restart `reconcile_semantic_idea_equivalence` already accepts as
+    # "deterministic restart evidence; arbiter not consulted" (D-150 Gate
+    # 6). Until this entry it was missing here, so the same relation
+    # re-entered this pass as a semantic prior confirmation and was
+    # re-examined by the D-085 component probe -- RAW #122 accepted, RAW
+    # #124 declined, identical inputs otherwise.
+    "measured_pause_bridged_retry",
 })
 
 
@@ -2504,7 +2512,7 @@ def split_incohesive_retry_groups(
     *,
     policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
     protected_ids: frozenset[str] = frozenset(),
-    prior_confirmations: Mapping[frozenset, tuple[float, str]] | None = None,
+    prior_confirmations: Mapping[frozenset, tuple] | None = None,
     claim_equivalence_arbiter=None,
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """D-058 Phase 1 + D-085: require evidence of shared communicative intent
@@ -2606,17 +2614,43 @@ def split_incohesive_retry_groups(
             remaining_weak.append((left_id, right_id))
             continue
         confidence, reason = float(hit[0]), str(hit[1])
+        # D-289.10: the reconcile stage's `accepted_by` kind travels with
+        # the confirmation (a 3-tuple; the 2-tuple shape every earlier
+        # caller passes is still accepted and means "kind unknown").
+        accepted_by = str(hit[2] or "") if len(hit) > 2 and hit[2] else ""
         if _within_group_arbiter_confirmation_diverges(take_map, left_id, right_id):
             content_divergence_blocked.append({
                 "left_clip_id": left_id, "right_clip_id": right_id,
                 "confidence": round(confidence, 4), "reason": reason, "source": "prior_confirmation",
             })
             continue
-        edges_by_group[weak_pair_group[(left_id, right_id)]].append(
-            _RetryEdge(left_id, right_id, "semantic", confidence, reason)
-        )
-        row = {"left_clip_id": left_id, "right_clip_id": right_id,
-               "confidence": round(confidence, 4), "reason": reason, "source": "prior_confirmation"}
+        if accepted_by in _RESTART_EVIDENCE_KINDS:
+            # D-289.10 (RAW #124 stomach forensic): a merge the reconcile
+            # stage accepted on DETERMINISTIC restart evidence ("arbiter
+            # not consulted") is the same recording-process relation this
+            # pass's own `same_opening_restart` edges carry -- it keeps
+            # its deterministic kind here, so `restart_pairs` and the
+            # D-097.A restart-singleton path see it. Until this entry the
+            # kind was dropped (only the reason sentence travelled), the
+            # edge re-entered as a `semantic` prior and, when it became a
+            # bridge, was re-examined by the D-085 component probe -- a
+            # deterministic relation made to depend on a run-varying
+            # arbiter answer (RAW #122 accepted, RAW #124 declined the
+            # identical probe). D-108's blocked-pair veto, the D-083 gate
+            # above and the cross-component contradiction net inside
+            # `_accept_restart_singleton_bridge` all still apply.
+            edges_by_group[weak_pair_group[(left_id, right_id)]].append(
+                _RetryEdge(left_id, right_id, "deterministic", 1.0, accepted_by)
+            )
+            row = {"left_clip_id": left_id, "right_clip_id": right_id,
+                   "confidence": round(confidence, 4), "reason": reason,
+                   "source": "prior_restart_evidence", "accepted_by": accepted_by}
+        else:
+            edges_by_group[weak_pair_group[(left_id, right_id)]].append(
+                _RetryEdge(left_id, right_id, "semantic", confidence, reason)
+            )
+            row = {"left_clip_id": left_id, "right_clip_id": right_id,
+                   "confidence": round(confidence, 4), "reason": reason, "source": "prior_confirmation"}
         confirmed_pairs.append(row)
         prior_reused.append(row)
     weak_pairs = remaining_weak

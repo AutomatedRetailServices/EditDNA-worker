@@ -243,6 +243,7 @@ def install_semantic_best_take_integrity() -> None:
         case_b_evidence_by_id=None,
         semantic_comparative_authority=None,
         terminal_confidence_out=None,
+        complete_window_winner_conflict_ids=None,
     ):
         # D-082: `original` (pipeline._semantic_best_take) now takes `ranked`
         # and returns a 3-tuple (selected, preferred, reason) -- passed
@@ -278,6 +279,9 @@ def install_semantic_best_take_integrity() -> None:
             case_b_evidence_by_id=case_b_evidence_by_id,
             semantic_comparative_authority=semantic_comparative_authority,
             terminal_confidence_out=terminal_confidence_out,
+            # D-289.10: forwarded verbatim, never inspected -- same pass-
+            # through contract as `semantic_comparative_authority` above.
+            complete_window_winner_conflict_ids=complete_window_winner_conflict_ids,
         )
         if selected is None:
             # D-097.B: no usable realization -- nothing to protect or prefer.

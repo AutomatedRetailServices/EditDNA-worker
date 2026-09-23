@@ -183,6 +183,13 @@ class SemanticIdeaRecord:
 # own ad hoc string.
 DELIVERY_SCORE_WINNER = "DELIVERY_SCORE_WINNER"
 SEMANTIC_WINNER_OVERRIDE = "SEMANTIC_WINNER_OVERRIDE"
+# D-289.10: a family-complete window's own "winner" verdict for a
+# realization, recorded when independent complete windows DISAGREED and
+# the BestTake ladder therefore stopped before the delivery tie-break
+# (`unresolved_semantic_winner_conflict`). Evidence only -- it never
+# changes an idea's current winner; the Resolver's existing
+# `conflicting_high_confidence_semantic_winner_evidence` branch reads it.
+SEMANTIC_WINNER_CONFLICT_EVIDENCE = "SEMANTIC_WINNER_CONFLICT_EVIDENCE"
 CLAIM_COVERAGE_OVERRIDE = "CLAIM_COVERAGE_OVERRIDE"
 COMPOSITE_CREATED = "COMPOSITE_CREATED"
 CLIP_DISCARDED = "CLIP_DISCARDED"
@@ -341,6 +348,21 @@ class SemanticLedger:
         if semantic_idea_id is not None and semantic_idea_id in self.__ideas:
             idea = self.__ideas[semantic_idea_id]
             self.__ideas[semantic_idea_id] = replace(idea, current_winner_realization_id=realization_id)
+
+    def record_winner_evidence(
+        self, *, semantic_idea_id: str | None, realization_id: str, stage: str,
+        reason: str, evidence: Mapping[str, object] | None = None,
+    ) -> None:
+        """D-289.10: append a `SEMANTIC_WINNER_CONFLICT_EVIDENCE` record --
+        a complete window's own winner verdict for `realization_id` -- WITHOUT
+        touching the idea's `current_winner_realization_id` (unlike
+        `record_winner_decision`, this is evidence, never a decision)."""
+        self.__decisions.append(DecisionRecord(
+            order_index=self.__next_order(), stage=stage, decision_type=SEMANTIC_WINNER_CONFLICT_EVIDENCE,
+            subject_realization_id=realization_id, semantic_idea_id=semantic_idea_id,
+            previous_state=None, new_state=None,
+            reason=reason, evidence=dict(evidence or {}),
+        ))
 
     def record_discard(self, record: DiscardRecord, *, stage: str, semantic_idea_id: str | None = None) -> None:
         self.__discards.append(record)
@@ -880,6 +902,26 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                 evidence={"confidence": round(override_confidence, 4)},
                 previous_realization_id=previous_realization_id,
             )
+        # D-289.10: a complete-window winner conflict the ladder stopped on
+        # -- each window's own winner verdict is recorded as evidence for
+        # its realization, so the Resolver's existing conflicting-winner
+        # branch (never a new one) sees the disagreement the fast path
+        # abstained from. Recorded ONLY when the ladder actually routed it
+        # (`routed`), never from a merely-observed disagreement.
+        conflict = group.get("complete_window_winner_conflict") or {}
+        if isinstance(conflict, Mapping) and conflict.get("routed"):
+            for row in (conflict.get("window_evidence") or ()):
+                clip_id = str((row or {}).get("clip_id") or "")
+                if clip_id not in clip_by_id:
+                    continue
+                ledger.record_winner_evidence(
+                    semantic_idea_id=idea_id, realization_id=_clip_realization_id(clip_by_id[clip_id]),
+                    stage="pipeline_semantic_best_take", reason="complete_window_winner_conflict",
+                    evidence={
+                        "confidence": round(float(row.get("confidence") or 0.0), 4),
+                        "window_id": row.get("window_id"), "request_hash": row.get("request_hash"),
+                    },
+                )
 
     # --- Section 5/9: ClaimCoverage overrides/composites/suppressions ----
     claim_coverage_diag = diagnostics.get("claim_coverage_best_take") or {}

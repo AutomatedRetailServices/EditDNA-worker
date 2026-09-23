@@ -165,8 +165,8 @@ def _real_chain(takes, arbiter, *, claim_arbiter=None, semantic_labels=None):
     coherence. Returns (draft, groups, reconcile_diag, cohesion_diag)."""
     baseline = safe_group_takes(None, takes)
     merged, rec_diag = reconcile_semantic_idea_equivalence(baseline.groups, takes, arbiter)
-    prior = {
-        frozenset((r["left_clip_id"], r["right_clip_id"])): (float(r["confidence"]), str(r["reason"]))
+    prior = {  # D-289.10: mirrors pipeline.py -- the merge's `accepted_by` kind travels with it
+        frozenset((r["left_clip_id"], r["right_clip_id"])): (float(r["confidence"]), str(r["reason"]), str(r.get("accepted_by") or ""))
         for r in (rec_diag.get("merges") or ()) if r.get("left_clip_id") and r.get("right_clip_id")
     }
     groups, coh_diag = split_incohesive_retry_groups(

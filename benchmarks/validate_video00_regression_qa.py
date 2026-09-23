@@ -242,6 +242,50 @@ def _evaluate_meaning_preservation(check: dict, result: dict, texts: list[str]) 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
+# D-289.10: presence of THE realization, not coverage of its content. A
+# different take of the same idea shares most of the vocabulary (RAW #124:
+# the discarded later take's tokens were 9/14 = 0.64 covered by the
+# selected monolith, and the monolith's 0.60 covered by it -- both clear
+# `_PRECISE_SEARCH_MIN_COVERAGE`), so a 0.6 bar in either direction still
+# reads shared content as presence. The realization's OWN wording must be
+# (nearly) all there: 0.9 of the target's content tokens in ONE selected
+# row (ASR punctuation/casing variance survives NFKC + casefold; a take
+# that drops one distinctive word in seven does not), and that row must
+# itself be mostly the target (0.6 reverse -- a longer take that merely
+# contains the words is not the realization either).
+_REALIZATION_PRESENCE_MIN_TARGET_COVERAGE = 0.9
+
+
+def realization_present(selected_text: str, target_text: str, *, min_coverage: float | None = None) -> bool:
+    """D-289.10: True iff `selected_text` IS a realization of `target_text`
+    -- the target's content tokens are covered by the row at >=
+    `_REALIZATION_PRESENCE_MIN_TARGET_COVERAGE` (0.9) AND the row's own
+    content tokens are covered by the target at >= `min_coverage` (default
+    `_PRECISE_SEARCH_MIN_COVERAGE`, 0.6). One-directional 0.6 coverage
+    (what `required_exact` measures) is satisfied by any other take that
+    shares most of the words; the 0.9 target bar plus the reverse
+    direction is what rules that out."""
+    floor = _PRECISE_SEARCH_MIN_COVERAGE if min_coverage is None else float(min_coverage)
+    row_tokens = _content_tokens(selected_text)
+    target_tokens = _content_tokens(target_text)
+    if not row_tokens or not target_tokens:
+        return False
+    return (
+        _coverage(target_tokens, row_tokens) >= _REALIZATION_PRESENCE_MIN_TARGET_COVERAGE
+        and _coverage(row_tokens, target_tokens) >= floor
+    )
+
+
+def _find_present_realization(rows: list[tuple[str, str]], target: str) -> tuple[str, str] | None:
+    """The first selected `(clip_id, text)` row that `realization_present`
+    accepts for `target`, or None. Single rows only -- never a multi-row
+    window, which is `required_exact`'s coverage question, not presence."""
+    for clip_id, text in rows:
+        if realization_present(text, target):
+            return clip_id, text
+    return None
+
+
 def _split_sentences(text: str) -> list[str]:
     """D-148: general, language-agnostic sentence split on terminal
     punctuation -- used ONLY to expand a `required_order` manifest anchor
@@ -344,6 +388,26 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
             span = _find_semantic(texts, check.get("text"))
             if span is None:
                 failures.append({"id": check_id, "kind": kind, "reason": "missing_required_segment"})
+            else:
+                passes.append(check_id)
+            continue
+
+        if kind == "required_realization":
+            # D-289.10 (RAW #124 QA note): `required_exact` asks "is this
+            # content COVERED by the selection?" -- a token-coverage search
+            # that a DIFFERENT realization sharing most of the words can
+            # satisfy (RAW #124: the discarded later take's text was 9/13
+            # covered by the selected monolith, so the check passed while
+            # the take it names was gone). This kind asks the stricter
+            # question "is THIS realization present?": one selected row
+            # must cover the target AND be covered by it (both >=
+            # `_PRECISE_SEARCH_MIN_COVERAGE`) -- shared vocabulary in a
+            # longer or shorter different take never counts. Reported in
+            # its own bucket next to the existing kinds; the manifest
+            # decides where it is used (none of the baselines here does).
+            row = _find_present_realization(_selected_rows(result), check.get("text"))
+            if row is None:
+                failures.append({"id": check_id, "kind": kind, "reason": "realization_not_present_only_shared_content"})
             else:
                 passes.append(check_id)
             continue

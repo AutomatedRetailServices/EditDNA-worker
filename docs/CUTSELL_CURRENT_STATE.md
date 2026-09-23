@@ -118,6 +118,20 @@ Verified state at `781a8634`:
   and QA report are unreachable from the session container (artifact host
   blocked, invalid S3 keys): HUMAN WATCH+LISTEN and the QA report are
   pending Product Owner attachment. Not integrated; not relaunched.
+  D-289.10 (from the Product Owner's RAW #124 evidence packages): the
+  pimples complete-window conflict (two complete contexts choosing opposite
+  winners, D-150 ABSTAIN_CONFLICT) no longer falls to a NON_DECISIVE
+  DeliveryScore pick -- the ladder stops (`unresolved_semantic_winner_
+  conflict`, CONFLICTED), the Ledger carries each window's winner verdict
+  and the Resolver's existing conflict branch returns REVIEW_REQUIRED, which
+  blocks the render for that idea pending human choice (Product Owner
+  decision: accept the block or authorize the bounded finalist authority);
+  the stomach split is fixed at its demonstrated cause (a deterministic
+  measured-pause restart merge lost its kind on the way to the cohesion pass
+  and was re-judged by the component probe) -- one family, no probe, G kept,
+  the abandoned attempt discarded through the authoritative resolver and the
+  KEEP/DISCARD fold; the QA harness gains `required_realization` (presence
+  of the realization, not shared content); baselines untouched. No RAW.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

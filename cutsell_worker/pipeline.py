@@ -263,6 +263,7 @@ from .case_b_performance_evidence import (
 )
 from .multimodal_besttake_fallback import detect_class_b_trigger, fallback_trigger_diagnostics
 from .semantic_authority_observability import (
+    AUTHORITY_ABSTAIN_CONFLICT,
     AUTHORITY_ALLOWED,
     family_authority_diagnostics,
     semantic_authority_gate_diagnostics,
@@ -324,6 +325,48 @@ _WINNER_PATH_OTHER_EXISTING_PATH = "OTHER_EXISTING_PATH"
 _DELIVERYSCORE_DRIVEN_REASONS = frozenset({
     "delivery_tie_break_among_survivors", "local_fallback",
 })
+
+
+def _complete_window_winner_conflict(
+    members: tuple,
+    family_authority_observability: Mapping,
+    semantic_authority_gate: Mapping,
+    *,
+    winner_confidence: float = 0.85,
+) -> dict:
+    """D-289.10: the recorded complete-window winner conflict for one
+    family, read off D-149's own `complete_window_outcomes` (never a
+    second computation): for every family-complete window, the members it
+    labelled "winner" at >= `winner_confidence`. Only when D-150's gate is
+    `ABSTAIN_CONFLICT` AND two or more DISTINCT members carry such a
+    verdict is a conflict reported; a single complete winner, an
+    incomplete-context abstention, a partial-window conflict or a window
+    whose "winner" sits below the floor never routes. Pure, deterministic,
+    provider-free -- it reads verdicts already paid for."""
+    member_ids = {member.clip_id for member in members}
+    empty = {"routed": False, "conflicting_clip_ids": [], "window_evidence": []}
+    if str(semantic_authority_gate.get("semantic_authority_gate_status") or "") != AUTHORITY_ABSTAIN_CONFLICT:
+        return empty
+    evidence: list[dict] = []
+    for outcome in (family_authority_observability.get("complete_window_outcomes") or ()):
+        if not isinstance(outcome, Mapping):
+            continue
+        by_member = outcome.get("provider_outcome_by_member") or {}
+        for clip_id in (outcome.get("normalized_winner_ids") or ()):
+            if clip_id not in member_ids:
+                continue
+            verdict = by_member.get(clip_id) if isinstance(by_member, Mapping) else None
+            confidence = float((verdict or {}).get("confidence") or 0.0) if isinstance(verdict, Mapping) else 0.0
+            if confidence < winner_confidence:
+                continue
+            evidence.append({
+                "window_id": outcome.get("window_id"), "request_hash": outcome.get("request_hash"),
+                "clip_id": clip_id, "confidence": round(confidence, 4),
+            })
+    conflicting = sorted({row["clip_id"] for row in evidence})
+    if len(conflicting) < 2:
+        return empty
+    return {"routed": False, "conflicting_clip_ids": conflicting, "window_evidence": evidence}
 
 
 def _winner_path_from_reason(reason: str) -> tuple[str, bool]:
@@ -1137,8 +1180,34 @@ def _semantic_best_take(
     case_b_evidence_by_id: Mapping[str, object] | None = None,
     semantic_comparative_authority: str | None = None,
     terminal_confidence_out: dict | None = None,
+    complete_window_winner_conflict_ids: frozenset[str] | None = None,
 ) -> tuple[str | None, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
+
+    D-289.10 (RAW #124 pimples forensic; docs/CUTSELL_DECISIONS.md
+    D-289.10): `complete_window_winner_conflict_ids` is optional and
+    additive -- omitted or empty (every existing caller), this function is
+    byte-identical to pre-D-289.10 behavior. When the caller passes the
+    members that INDEPENDENT family-complete windows each labelled the
+    "winner" at or above `winner_confidence` while D-150's gate reported
+    `ABSTAIN_CONFLICT` (two complete contexts choosing OPPOSITE winners),
+    the general ladder below still runs every structured step first (D-081
+    delete evidence, completeness, D-103, CRITICAL_COVERAGE_DOMINANCE, the
+    unique-fact and contradiction checks -- D-062.2 layers 1-5) and, only
+    if two or more of those conflicting members are still survivors when
+    the ladder would otherwise fall to the DeliveryScorer tie-break (layer
+    7), it stops there: `(local_selected_clip_id, None, "unresolved_
+    semantic_winner_conflict")` with terminal confidence CONFLICTED -- the
+    same shape as `unresolved_contradiction`. The provider's recorded
+    evidence disagrees with itself; a raw delivery-score margin the
+    terminal ladder itself classifies NON_DECISIVE is not the authority
+    that may settle it (D-062.2 layer 11, and realization_resolver.py's
+    own "never guess between two confidently-recorded semantic verdicts").
+    Nothing here picks the later window, the higher confidence, or any
+    text/clip-specific exception: the selection stays on the existing safe
+    fallback and the conflict is carried to the Ledger/Resolver, where the
+    EXISTING `conflicting_high_confidence_semantic_winner_evidence` branch
+    decides REVIEW_REQUIRED.
 
     D-183 (docs/CUTSELL_DECISIONS.md D-183; post D-182 forensic):
     `terminal_confidence_out` is optional and purely additive -- omitted
@@ -1406,6 +1475,20 @@ def _semantic_best_take(
                     candidate_ids=survivors,
                 )
             return local_selected_clip_id, None, "unresolved_contradiction"
+        # Step 5.5 (D-289.10): a recorded complete-window winner CONFLICT
+        # among the survivors is structured semantic evidence that
+        # disagrees with itself -- never handed to the raw-score tie-break.
+        conflicting_survivors = [
+            cid for cid in survivors if cid in (complete_window_winner_conflict_ids or frozenset())
+        ]
+        if len(conflicting_survivors) >= 2:
+            if terminal_confidence_out is not None:
+                terminal_confidence_out["terminal_besttake_confidence"] = _terminal_confidence(
+                    _TERMINAL_CONFIDENCE_CONFLICTED, "unresolved_semantic_winner_conflict",
+                    _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_DOMINANCE,
+                    candidate_ids=survivors,
+                )
+            return local_selected_clip_id, None, "unresolved_semantic_winner_conflict"
 
     # Steps 6-9: delivery score / richness tie-break among the surviving,
     # safe candidate set -- delivery's proper role once content is
@@ -1694,9 +1777,13 @@ def build_flow_b_draft(
     # cohesion pass as prior evidence (same run, same arbiter, same pair
     # texts) so a confirmed retry pair can never be split merely because it
     # fell outside this pass's bounded re-ask.
+    # D-289.10: the reconcile stage's `accepted_by` kind (a deterministic
+    # restart-evidence merge's own kind; absent on an arbiter confirmation)
+    # travels with the confirmation so the cohesion pass keeps that edge
+    # deterministic instead of re-examining it with the component probe.
     prior_confirmations = {
         frozenset((str(row.get("left_clip_id") or ""), str(row.get("right_clip_id") or ""))):
-        (float(row.get("confidence") or 0.0), str(row.get("reason") or ""))
+        (float(row.get("confidence") or 0.0), str(row.get("reason") or ""), str(row.get("accepted_by") or ""))
         for row in (semantic_equivalence_diagnostics.get("merges") or ())
         if isinstance(row, dict) and row.get("left_clip_id") and row.get("right_clip_id")
     }
@@ -1881,6 +1968,18 @@ def build_flow_b_draft(
         # raw-score tie-break) is reached -- never a second invocation,
         # never a re-derivation that could drift from the actual decision.
         _terminal_confidence_out: dict = {}
+        # D-289.10 (RAW #124 pimples forensic): when D-150's gate abstains
+        # because independent family-complete windows DISAGREE, collect the
+        # members each such window labelled "winner" at or above the same
+        # 0.85 floor `_semantic_best_take` applies to a winner label -- the
+        # complete-context evidence itself, read off D-149's already-
+        # normalized `complete_window_outcomes` (single source of truth,
+        # never recomputed here). Two or more distinct such members is a
+        # recorded conflict the ladder must not settle by raw delivery
+        # score (see `_semantic_best_take`'s D-289.10 docstring).
+        complete_window_winner_conflict = _complete_window_winner_conflict(
+            members, family_semantic_authority_observability, semantic_authority_gate,
+        )
         selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
             family_semantic_decisions,
@@ -1891,7 +1990,9 @@ def build_flow_b_draft(
             case_b_evidence_by_id=case_b_evidence_objects,
             semantic_comparative_authority=semantic_authority_gate["semantic_authority_gate_status"],
             terminal_confidence_out=_terminal_confidence_out,
+            complete_window_winner_conflict_ids=frozenset(complete_window_winner_conflict["conflicting_clip_ids"]),
         )
+        complete_window_winner_conflict["routed"] = semantic_best_take_reason == "unresolved_semantic_winner_conflict"
         _terminal_besttake_confidence_result = _terminal_confidence_out.get("terminal_besttake_confidence")
         no_usable_realization = selected_clip_id is None
         all_delete_recommended = len(members) >= 2 and all(
@@ -2319,7 +2420,18 @@ def build_flow_b_draft(
                 # because the two were indistinguishable downstream.
                 "no_usable_realization_basis": (semantic_best_take_reason if no_usable_realization else None),
                 "all_members_delete_recommended": all_delete_recommended,
+                # D-097.B: this flag is the ALL-DELETE-RECOMMENDED routing
+                # only (every member semantically failed, a usable member
+                # competes) -- it says nothing about complete-window winner
+                # disagreement, which D-289.10 reports separately below.
                 "label_conflict_routed": bool(all_delete_recommended and not no_usable_realization),
+                # D-289.10: the complete-window winner conflict the ladder
+                # was handed (`conflicting_clip_ids`, per-window evidence)
+                # and whether it stopped the delivery tie-break (`routed`).
+                # The Ledger records `window_evidence` as SEMANTIC_WINNER_
+                # CONFLICT_EVIDENCE for the Resolver's existing conflict
+                # branch.
+                "complete_window_winner_conflict": complete_window_winner_conflict,
                 "member_usability": {
                     member.clip_id: {
                         "delete_recommended": bool(hybrid_semantic_delete_recommended.get(member.clip_id, False)),

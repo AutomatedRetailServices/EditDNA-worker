@@ -209,6 +209,7 @@ from .semantic_ledger import (
     ENGINE_RESOLVED_WINNER,
     ENGINE_REVIEW_REQUIRED,
     RealizationRecord,
+    SEMANTIC_WINNER_CONFLICT_EVIDENCE,
     SEMANTIC_WINNER_OVERRIDE,
     SemanticLedger,
 )
@@ -648,7 +649,14 @@ def _semantic_winner_confidence_by_realization(
     candidate_set = frozenset(candidate_ids)
     confidence_by_realization: dict[str, float] = {}
     for decision in ledger.decisions():
-        if decision.decision_type != SEMANTIC_WINNER_OVERRIDE:
+        # D-289.10: a complete window's own recorded winner verdict
+        # (SEMANTIC_WINNER_CONFLICT_EVIDENCE, written only when the
+        # BestTake ladder stopped on a complete-window winner conflict)
+        # is high-confidence semantic winner evidence for the SAME tier
+        # -- two of them for different realizations is exactly the
+        # "recorded evidence itself disagrees" shape this resolver's
+        # conflict branch already refuses to guess between.
+        if decision.decision_type not in (SEMANTIC_WINNER_OVERRIDE, SEMANTIC_WINNER_CONFLICT_EVIDENCE):
             continue
         if decision.semantic_idea_id != idea_id:
             continue
