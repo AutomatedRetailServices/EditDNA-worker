@@ -132,6 +132,17 @@ Verified state at `781a8634`:
   the abandoned attempt discarded through the authoritative resolver and the
   KEEP/DISCARD fold; the QA harness gains `required_realization` (presence
   of the realization, not shared content); baselines untouched. No RAW.
+  D-289.11 (from the updated MP4 review, user-reported CTA repetition): the
+  standalone CTA no longer re-opens with the words the preserved conclusion
+  closed on ("… Así que cuídate." then "Por eso cuídate, aliméntate …"):
+  the pre-Freeze boundary owner (`final_boundary_authority`) trims the
+  LATER clip's re-opened closing at its first remaining word start, bounded
+  by recency, by an ASR punctuation/pause break, by a content floor, and
+  refused for numbers/negations/distinct additions (every refusal recorded);
+  the conclusion is never edited; the QA harness gains `repeated_closing_
+  absent` plus an unconditional warning scan (presence is not uniqueness);
+  baselines untouched; offline proof on recorded texts with SYNTHETIC word
+  timings. The aside A remains an editorial review item. No RAW.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

@@ -78851,3 +78851,125 @@ does not) is an editorial review item, not changed here; (4)
 `required_realization` is available to the manifest but adopted by no
 baseline until the Product Owner decides. **Exact next step:** Product
 Owner review; no integration, no RAW, no baseline change.
+
+## D-289.11 — Re-opened closing restatement: the standalone CTA no longer
+re-opens with the words the preserved conclusion just closed on
+(same isolated branch, off `c8e906a8`; offline only; evidence = the Product
+Owner's updated `raw124-mp4-review` package, `user_correction_cta_repetition`)
+
+**NOT integrated. No RAW. `main`/PR #25/canon/baselines/protections
+untouched. Freeze and the word-safety protections are not weakened: the
+trim is PRE-Freeze, at a source word start, fail-open, with every refusal
+recorded. D-289.7/.8/.10, the R+T removal, negations, numbers, causality
+and continuation chains preserved (their suites re-run green).**
+
+### Observed (from the package; no direct audio listening by the reviewer)
+RAW #124 rendered the preserved conclusion W (`clip_89538f…`, 295.52 s →
+313.5 s source, ending "… Mayormente son nuestras elecciones de vida. Así
+que cuídate."), then the family-history aside A (`clip_cb8189…`, 319.38 s),
+then the standalone CTA C (`clip_69c7d9…`, 356.21 s, "Por eso cuídate,
+aliméntate bien, hidrátate y haz ejercicio."). The QA check `cta_preserved`
+(`required_exact`) PASSED on presence: it has no occurrence-count or
+uniqueness semantics. RAW #122 had the same closing/opening overlap with
+the restatement pair R+T between W and C. Human Gold keeps the complete
+conclusion and the CTA's advice and drops the re-opened "Por eso cuídate,"
+(its cut region 356.21–358.11 s). `word_precise_timing_available: false`
+in the package: every word timing below is SYNTHETIC and labelled so.
+
+### Why no existing authority resolved it
+- `human_boundary_polish._dedupe_repeated_tail` (v1) was written for
+  exactly this shape (docstring example "cuídate -> por eso cuídate") but
+  is DEAD in the active path: `polish_human_boundaries_v5` does not chain
+  v1–v4, and v5 is Boundary-only by construction (`enforce_selection_
+  contract` forbids any token change after Freeze). v1 also required
+  ADJACENT clips (A intervenes on RAW #124) and trimmed the EARLIER
+  clip's tail (would have left W ending on "Así que").
+- `post_selection_internal_retake_trim` handles a repeated OPENING inside
+  one clip (an internal retake), not a closing re-opened by a later clip.
+- Selection/BestTake are membership authorities: W and C are different
+  ideas (conclusion vs. CTA); neither is a retry of the other, so no
+  family competition exists to resolve. The overlap is a physical/pacing
+  fact at the seam of two KEPT deliveries -- Boundary territory -- but
+  it changes spoken tokens, so it must happen BEFORE Freeze.
+
+### Fix — in the existing pre-Freeze boundary owner
+`final_boundary_authority.enforce_complete_idea_boundaries` (the one
+pre-Freeze source-transcript boundary authority) gains
+`_trim_reopened_closings`, run after the complete-idea envelopes and the
+overlap reconciliation, before `freeze_selection_contract`:
+- for each selected clip R, look back over at most 2 intervening selected
+  clips spanning at most 10.0 s of output for a same-source, earlier,
+  non-overlapping clip L whose last word is terminal-punctuated (a
+  COMPLETE delivery);
+- R re-opens with L's closing when, after at most 2 leading DISCOURSE
+  connectives ("por eso", "así que", "entonces", "so", "and then", …;
+  never an article/determiner -- "… a biopsia." → "La biopsia confirmó …"
+  is a noun re-mention, not a repeated closing), R's next 1..6 tokens equal
+  L's last 1..6 tokens (longest match first; a lone function word never
+  counts);
+- REFUSED (recorded as `keep_reopened_closing` with the reason) when the
+  removed prefix carries a digit, a negation marker or a distinct-addition
+  marker; when the repeated phrase is not a separate phrase (no ASR
+  punctuation after it AND no measured pause ≥ 0.25 s before the next
+  word -- "Tienes que hacer ejercicio." → "Ejercicio es lo más importante"
+  stays); when the remaining delivery would open on a dangling function
+  word, has fewer than 2 content tokens, or is shorter than 0.5 s; when
+  the cut point is not strictly inside the clip; or when the rebuilt words
+  diverge from the expected remainder;
+- otherwise R is rebuilt (`_rebuild_clip`, identity preserved) to start at
+  the START of its first remaining source word; L is never edited; one
+  trim per R; diagnostics row `trim_reopened_closing_restatement`
+  (left/right ids, repeated tokens, removed tokens, removed_sec,
+  intervening count/sec, first remaining word) and the counts
+  `final_boundary_reopened_closing_trim_count` /
+  `..._refusal_count`; the ownership table in `boundary_engine_pass.py`
+  names the rule among the pre-Freeze editors.
+Result on the recorded RAW #124 texts (synthetic timings): W and A
+unchanged; C = "aliméntate bien, hidrátate y haz ejercicio." starting at
+the word "aliméntate" -- the complete conclusion, the meaningful advice and
+one coherent final CTA, with the repetition gone. RAW #122's shape
+(W → R → T → C, 8.86 s intervening) trims the same way. No clip id,
+timestamp or phrase of Video00 is read by the rule.
+
+### QA — `repeated_closing_absent` (presence is not uniqueness)
+`benchmarks/validate_video00_regression_qa.py` gains its own detector
+(`find_repeated_closings`, independent of the production rule: terminal-
+punctuated earlier row within 3 rows whose closing 1..6 tokens the later
+row re-opens with after ≤ 2 discourse connectives) and the manifest kind
+`repeated_closing_absent` (`text` = the segment; FAIL `missing_required_
+segment` when absent, FAIL `repeated_closing_reopens_required_segment`
+with the finding when it re-opens a nearby closing, PASS otherwise). Every
+selection is also scanned unconditionally and each finding is reported
+as a `repeated_closing_detected` WARNING (observability only; never
+changes `qa_pass`). On RAW #122's recorded result the scan reports exactly
+the W/C "cuídate" finding (the "biopsia" noun re-mention is not reported).
+`benchmarks/video00_regression_qa.json` is untouched: adding
+`cta_unique_closing` to the baseline is the Product Owner's one-line
+decision.
+
+### Tests (`tests/test_cutsell_d289_11_repeated_closing.py`, 29)
+RAW #124 W → A → C reproduction (trim at the word start, W/A untouched,
+identity kept, advice intact); RAW #122 W → R → T → C; adjacent; English
+full-closing restatement; longest-match preference; controls: no repeated
+phrase, number, negation, distinct-addition marker, topic re-mention
+without a break, determiner + noun re-mention, measured pause as the
+break, content floor, dangling remainder, non-terminal earlier clip,
+recency (> 10 s), lookback (3 intervening), different sources, source
+order, one trim per clip; end to end through
+`enforce_complete_idea_boundaries` with a fake ASR source transcript, then
+Freeze → BoundaryEngine pass → `enforce_selection_contract` verified on
+the trimmed stream; proof that a Freeze taken BEFORE the trim rejects it
+(the rule must stay pre-Freeze); fail-open without words; QA: detector on
+both shapes and the controls, validator end to end (`cta_preserved` PASS
+while `cta_unique_closing` FAILS on the RAW #124 shape; both PASS once
+trimmed; missing segment FAILS), baseline manifest untouched.
+
+**Pending limits:** (1) offline proof on recorded texts with synthetic
+word timings -- the real render needs a run the Product Owner has not
+authorized, and a real ASR must place a break (punctuation or ≥ 0.25 s)
+after "cuídate" for the trim to fire; if it does not, the refusal is
+recorded, the CTA is kept whole, and the QA warning still reports it; (2)
+the family-history aside A stays (Cut.ai keeps, Gold drops): editorial
+review, never automatic deletion; (3) the pimples REVIEW_REQUIRED block
+(D-289.10) is unchanged and still a Product Owner decision. **Exact next
+step:** Product Owner review; no integration, no RAW, no baseline change.

@@ -15,19 +15,58 @@ Rules:
   between adjacent selected clips;
 - preserve intentional speech-safe gaps created by boundary polish inside one logical
   clip; final idea recovery must not glue proven dead-air/reset slack back in;
-- fail open: when transcript evidence is ambiguous, retain more speech, never less.
+- fail open: when transcript evidence is ambiguous, retain more speech, never less;
+- D-289.11: when a later selected delivery RE-OPENS with the closing words of a
+  preceding complete selected delivery (e.g. ``... Así que cuídate.`` then
+  ``Por eso cuídate, aliméntate bien ...``), trim only that re-opened closing from
+  the later clip at the start of its first remaining word -- bounded by recency,
+  by ASR punctuation/pause structure at the removed phrase, by a remaining-content
+  floor, and refused outright when the removed words carry a number, a negation or
+  a distinct-addition marker. The earlier complete delivery is never touched. This
+  runs BEFORE Selection Freeze because it changes the token stream; nothing after
+  Freeze may do that (``enforce_selection_contract`` verifies).
 
 This is intentionally not a semantic composer and never changes take selection.
 """
 from __future__ import annotations
 
 from dataclasses import replace
+import re
 from typing import Mapping
 
 from .asr import ASRProvider
 from .contracts import DraftClip, ProcessingResult, Word
+from .take_grouping import _DANGLING_FUNCTION_WORDS, _DISTINCT_ADDITION_MARKERS
 
 _TERMINAL = (".", "?", "!", "…")
+
+# --- D-289.11: re-opened closing restatement (general, no Video00 content) ---
+_TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
+# Leading DISCOURSE connectives a speaker uses to re-open a sentence with the
+# words just closed on ("por eso", "así que", "entonces", "so", "and then").
+# Deliberately NOT articles/determiners: "... se mandó a biopsia." followed by
+# "La biopsia confirmó ..." is a noun re-mention carrying the story forward,
+# never a re-opened closing -- a determiner before the repeated word is a
+# refusal, not a skip.
+_REOPEN_DISCOURSE_CONNECTIVES = frozenset({
+    "por", "eso", "así", "asi", "que", "entonces", "pues", "bueno", "y", "e", "o",
+    "sea", "ahora", "también", "tambien", "además", "ademas",
+    "so", "and", "then", "therefore", "hence", "well", "okay", "ok", "now", "also",
+})
+# Tokens that never count as content (connectives + the grouping authority's
+# dangling function words) -- for the content floor and the lone-word check.
+_REOPEN_CONNECTIVE_TOKENS = _REOPEN_DISCOURSE_CONNECTIVES | _DANGLING_FUNCTION_WORDS | frozenset({"bien"})
+# Mirrors contradiction_signal._NEGATION_MARKERS (not imported: that module
+# pulls the grouping provider graph; the boundary authority stays leaf-level).
+_REOPEN_NEGATION_TOKENS = frozenset({"no", "not", "never", "nunca", "sin", "without", "nadie", "ni"})
+_REOPEN_MAX_LEADING_CONNECTIVES = 2
+_REOPEN_MAX_PHRASE_TOKENS = 6
+_REOPEN_MIN_REMAINING_CONTENT_TOKENS = 2
+_REOPEN_MAX_INTERVENING_CLIPS = 2
+_REOPEN_MAX_INTERVENING_SEC = 10.0
+_REOPEN_PHRASE_BREAK_PUNCT = (",", ";", ":", ".", "!", "?", "…")
+_REOPEN_PHRASE_BREAK_PAUSE_SEC = 0.25
+_REOPEN_MIN_REMAINING_SEC = 0.5
 
 
 def _terminal(word: Word) -> bool:
@@ -289,6 +328,151 @@ def _reconcile_same_source_overlaps(
     return output, rows
 
 
+def _word_token(word: Word) -> str:
+    found = _TOKEN_RE.findall(str(word.text or "").casefold())
+    return found[0] if found else ""
+
+
+def _tokenized_words(words: tuple[Word, ...]) -> list[tuple[str, Word]]:
+    return [(token, word) for token, word in ((_word_token(word), word) for word in words) if token]
+
+
+def _reopened_closing_match(
+    left_words: tuple[Word, ...],
+    right_words: tuple[Word, ...],
+) -> tuple[int, int] | None:
+    """Return ``(skip, width)`` when the right clip re-opens -- after at most
+    ``skip`` leading connective tokens -- with the last ``width`` (1..3)
+    tokens of the left clip's terminal-punctuated closing; else None. Longer
+    matches are tried first: more repeated words is more evidence, never less."""
+    left = _tokenized_words(left_words)
+    right = _tokenized_words(right_words)
+    if not left or not right or not _terminal(left[-1][1]):
+        return None
+    left_tokens = [token for token, _ in left]
+    right_tokens = [token for token, _ in right]
+    for skip in range(0, _REOPEN_MAX_LEADING_CONNECTIVES + 1):
+        if skip and any(token not in _REOPEN_DISCOURSE_CONNECTIVES for token in right_tokens[:skip]):
+            break
+        for width in range(_REOPEN_MAX_PHRASE_TOKENS, 0, -1):
+            if len(left_tokens) < width or len(right_tokens) < skip + width:
+                continue
+            if left_tokens[-width:] != right_tokens[skip:skip + width]:
+                continue
+            if width == 1 and left_tokens[-1] in _REOPEN_CONNECTIVE_TOKENS:
+                continue  # a lone function word is not a closing phrase
+            return skip, width
+    return None
+
+
+def _reopened_closing_refusal(right_words: tuple[Word, ...], skip: int, width: int) -> str | None:
+    """Why a matched re-opened closing must NOT be trimmed (fail open)."""
+    right = _tokenized_words(right_words)
+    removed = right[:skip + width]
+    remaining = right[skip + width:]
+    removed_tokens = [token for token, _ in removed]
+    removed_text = " ".join(str(word.text) for _, word in removed)
+    if any(any(ch.isdigit() for ch in token) for token in removed_tokens):
+        return "removed_prefix_carries_number"
+    if any(token in _REOPEN_NEGATION_TOKENS for token in removed_tokens):
+        return "removed_prefix_carries_negation"
+    lowered = f" {removed_text.casefold()} "
+    if any(marker in lowered for marker in _DISTINCT_ADDITION_MARKERS):
+        return "removed_prefix_carries_distinct_addition_marker"
+    if not remaining:
+        return "nothing_remains_after_repeated_closing"
+    last_removed = removed[-1][1]
+    first_remaining = remaining[0][1]
+    punct_break = str(last_removed.text or "").rstrip().endswith(_REOPEN_PHRASE_BREAK_PUNCT)
+    pause_break = float(first_remaining.start) - float(last_removed.end) >= _REOPEN_PHRASE_BREAK_PAUSE_SEC
+    if not (punct_break or pause_break):
+        return "repeated_closing_not_a_separate_phrase"
+    if remaining[0][0] in _DANGLING_FUNCTION_WORDS:
+        return "remaining_delivery_would_open_on_dangling_word"
+    content_left = sum(1 for token, _ in remaining if token not in _REOPEN_CONNECTIVE_TOKENS)
+    if content_left < _REOPEN_MIN_REMAINING_CONTENT_TOKENS:
+        return "remaining_delivery_below_content_floor"
+    if float(remaining[-1][1].end) - float(first_remaining.start) < _REOPEN_MIN_REMAINING_SEC:
+        return "remaining_delivery_too_short"
+    return None
+
+
+def _trim_reopened_closings(
+    selected: list[DraftClip],
+    source_map: dict[str, tuple[Word, ...]],
+) -> tuple[list[DraftClip], list[dict]]:
+    """D-289.11: trim a later selected delivery's re-opened closing phrase.
+
+    For each selected clip R, look back over at most
+    ``_REOPEN_MAX_INTERVENING_CLIPS`` earlier selected clips spanning at most
+    ``_REOPEN_MAX_INTERVENING_SEC`` of output time for a same-source, earlier,
+    non-overlapping complete delivery L whose closing 1..3 tokens R re-opens
+    with (1..6 tokens, after <= 2 leading connectives). The trim starts R at the start of
+    its first remaining source word (never inside a word); L is never edited;
+    every refusal is recorded. One trim per R at most."""
+    output = list(selected)
+    rows: list[dict] = []
+    for index in range(1, len(output)):
+        right = output[index]
+        right_words = tuple(right.words)
+        if not right_words:
+            continue
+        intervening_sec = 0.0
+        for back in range(1, _REOPEN_MAX_INTERVENING_CLIPS + 2):
+            left_index = index - back
+            if left_index < 0:
+                break
+            if back > 1:
+                mid = output[index - back + 1]
+                intervening_sec += max(0.0, float(mid.end) - float(mid.start))
+                if intervening_sec > _REOPEN_MAX_INTERVENING_SEC:
+                    break
+            left = output[left_index]
+            if left.source_asset_id != right.source_asset_id or not left.words:
+                continue
+            if float(left.end) > float(right.start) + 1e-6:
+                continue
+            match = _reopened_closing_match(tuple(left.words), right_words)
+            if match is None:
+                continue
+            skip, width = match
+            tokenized = _tokenized_words(right_words)
+            base_row = {
+                "left_clip_id": left.clip_id,
+                "right_clip_id": right.clip_id,
+                "intervening_clip_count": back - 1,
+                "intervening_sec": round(intervening_sec, 3),
+                "repeated_tokens": [token for token, _ in tokenized[skip:skip + width]],
+                "removed_leading_tokens": [token for token, _ in tokenized[:skip + width]],
+            }
+            refusal = _reopened_closing_refusal(right_words, skip, width)
+            if refusal is not None:
+                rows.append({"action": "keep_reopened_closing", "reason": refusal, **base_row})
+                break
+            first_remaining = tokenized[skip + width][1]
+            new_start = float(first_remaining.start)
+            if new_start <= float(right.start) + 1e-6 or new_start >= float(right.end) - 1e-6:
+                rows.append({"action": "keep_reopened_closing", "reason": "cut_point_outside_clip", **base_row})
+                break
+            source_words = source_map.get(right.source_asset_id) or right_words
+            rebuilt = _rebuild_clip(right, source_words, new_start, float(right.end))
+            expected = [token for token, _ in tokenized[skip + width:]]
+            if [token for token, _ in _tokenized_words(tuple(rebuilt.words))] != expected:
+                rows.append({"action": "keep_reopened_closing", "reason": "rebuilt_words_diverge_from_expected", **base_row})
+                break
+            output[index] = rebuilt
+            rows.append({
+                "action": "trim_reopened_closing_restatement",
+                "original_start": round(float(right.start), 3),
+                "result_start": round(float(rebuilt.start), 3),
+                "removed_sec": round(float(rebuilt.start) - float(right.start), 3),
+                "first_remaining_word": str(first_remaining.text),
+                **base_row,
+            })
+            break
+    return output, rows
+
+
 def enforce_complete_idea_boundaries(
     result: ProcessingResult,
     local_paths: Mapping[str, str],
@@ -321,14 +505,23 @@ def enforce_complete_idea_boundaries(
     selected, overlap_rows = _reconcile_same_source_overlaps(originals, selected, source_map)
     diagnostics.extend(overlap_rows)
 
+    # D-289.11: after the envelopes are complete and overlap-free, trim a
+    # later delivery's re-opened closing phrase (pre-Freeze token change).
+    selected, reopen_rows = _trim_reopened_closings(selected, source_map)
+    diagnostics.extend(reopen_rows)
+    reopen_trims = [row for row in reopen_rows if row.get("action") == "trim_reopened_closing_restatement"]
+
     preserved_gap_rows = [row for row in overlap_rows if row.get("action") == "preserve_polished_interior_gap"]
     diag = dict(result.draft.diagnostics or {})
     diag["final_boundary_authority"] = diagnostics[:600]
     diag["final_boundary_authority_rule"] = (
         "full_source_transcript -> complete idea envelope -> complete word lock -> "
-        "preserve proven polished interior gaps -> neighbor-original-span overlap guard -> visual slack only"
+        "preserve proven polished interior gaps -> neighbor-original-span overlap guard -> "
+        "re-opened closing restatement trim (D-289.11, word-start cut, fail open) -> visual slack only"
     )
     diag["final_boundary_overlap_reconciliation_count"] = len(overlap_rows)
     diag["final_boundary_preserved_polish_gap_count"] = len(preserved_gap_rows)
+    diag["final_boundary_reopened_closing_trim_count"] = len(reopen_trims)
+    diag["final_boundary_reopened_closing_refusal_count"] = len(reopen_rows) - len(reopen_trims)
     draft = replace(result.draft, selected=tuple(selected), diagnostics=diag)
     return replace(result, draft=draft)

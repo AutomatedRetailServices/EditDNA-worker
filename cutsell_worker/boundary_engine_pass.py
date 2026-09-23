@@ -24,7 +24,7 @@ the one owner that was missing (audio-evidenced entry/exit tightening).
 | RESET DEBRIS (micro word gaps with visual resets) | BoundaryEngine pass (performance-gap split) + `polish_human_boundaries_v5` | after Freeze | A-5 local performance events | change the token stream |
 | MICRO CONTINUITY (re-joining over-segmented same-source pieces) | `post_selection_continuity_coalescer` (pre-Freeze draft wrapper: restores the micro-gap, identities preserved -- D-097.3) and `render_plan._coalesce_contiguous_segments` (mechanical, render) | draft / render | source adjacency, no reset evidence | merge across a Boundary-authorized cut; re-minting a clip identity |
 | RENDERER MECHANICAL OPS | `render.render_preview` | render | trailing-silence tighten (recorded), 12 ms join fades, contiguous coalesce | any editorial decision |
-| PRE-FREEZE EDITORS (delivery_edge_trim, speech_safe_dead_air_guard, final_boundary_authority envelope, temporal trims) | Selection-phase candidate shaping | before Freeze | word envelopes, harmful events | be the final physical authority |
+| PRE-FREEZE EDITORS (delivery_edge_trim, speech_safe_dead_air_guard, final_boundary_authority envelope + re-opened closing restatement trim (D-289.11), temporal trims) | Selection-phase candidate shaping | before Freeze | word envelopes, harmful events; ASR punctuation/pause break at a repeated closing phrase | be the final physical authority; change the token stream after Freeze |
 
 Selection decides WHAT plays; this pass decides WHERE it starts and ends;
 the renderer only executes. Every operation below preserves the frozen

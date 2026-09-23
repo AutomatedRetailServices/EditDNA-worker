@@ -339,6 +339,100 @@ def _find_semantic(texts: list[str], target: str, *, start: int = 0) -> tuple[in
     return None
 
 
+# D-289.11 (RAW #124 MP4 review, user-reported CTA repetition): CTA
+# PRESENCE is not CTA UNIQUENESS. `required_exact`/`required_realization`
+# answer "is this segment there?"; neither notices that the preserved
+# conclusion already CLOSED on the words the standalone CTA re-opens with
+# ("... Así que cuídate." then "Por eso cuídate, aliméntate ..."). This
+# detector is QA's own (independent of the production trim in
+# `final_boundary_authority._trim_reopened_closings`): an earlier selected
+# row within a short lookback that ends a sentence with the 1..6 tokens the
+# later row opens with, after at most two leading connectives. It reports
+# the repetition; it never decides whether production was right to keep it.
+_ORDERED_TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+")
+# Discourse connectives only -- never articles/determiners: "... a biopsia."
+# then "La biopsia confirmó ..." is a noun re-mention, not a repeated closing.
+_REPEATED_CLOSING_CONNECTIVES = frozenset({
+    "por", "eso", "así", "asi", "que", "entonces", "pues", "bueno", "y", "e", "o", "sea",
+    "ahora", "también", "tambien", "además", "ademas",
+    "so", "and", "then", "therefore", "hence", "well", "okay", "ok", "now", "also",
+})
+# A lone function word is never a closing phrase (width-1 guard).
+_REPEATED_CLOSING_FUNCTION_TOKENS = _REPEATED_CLOSING_CONNECTIVES | frozenset({
+    "a", "de", "en", "el", "la", "los", "las", "un", "una", "lo", "se", "bien",
+    "the", "to", "of", "in", "on", "at", "it", "is",
+})
+_REPEATED_CLOSING_TERMINAL = (".", "!", "?", "…")
+_REPEATED_CLOSING_MAX_LOOKBACK_ROWS = 3
+_REPEATED_CLOSING_MAX_LEADING_CONNECTIVES = 2
+_REPEATED_CLOSING_MAX_PHRASE_TOKENS = 6
+
+
+def _ordered_tokens(text: str) -> list[str]:
+    return _ORDERED_TOKEN_RE.findall(_norm(text))
+
+
+def _repeated_closing_match(left_text: str, right_text: str) -> dict | None:
+    """The phrase `right_text` re-opens with that `left_text` closed on, or
+    None: `{"skip": n, "repeated_tokens": [...]}`."""
+    if not str(left_text or "").rstrip().endswith(_REPEATED_CLOSING_TERMINAL):
+        return None
+    lt = _ordered_tokens(left_text)
+    rt = _ordered_tokens(right_text)
+    if not lt or not rt:
+        return None
+    for skip in range(0, _REPEATED_CLOSING_MAX_LEADING_CONNECTIVES + 1):
+        if skip and any(token not in _REPEATED_CLOSING_CONNECTIVES for token in rt[:skip]):
+            break
+        for width in range(_REPEATED_CLOSING_MAX_PHRASE_TOKENS, 0, -1):
+            if len(lt) < width or len(rt) < skip + width:
+                continue
+            if lt[-width:] != rt[skip:skip + width]:
+                continue
+            if width == 1 and lt[-1] in _REPEATED_CLOSING_FUNCTION_TOKENS:
+                continue
+            return {"skip": skip, "repeated_tokens": list(rt[skip:skip + width])}
+    return None
+
+
+def find_repeated_closings(rows: list[tuple[str, str]], *, only_index: int | None = None) -> list[dict]:
+    """Every selected row (or only `only_index`) that re-opens with the
+    closing phrase of one of its previous `_REPEATED_CLOSING_MAX_LOOKBACK_
+    ROWS` rows -- nearest earlier row first, one finding per later row."""
+    findings: list[dict] = []
+    for index, (clip_id, text) in enumerate(rows):
+        if only_index is not None and index != only_index:
+            continue
+        for back in range(1, _REPEATED_CLOSING_MAX_LOOKBACK_ROWS + 1):
+            earlier = index - back
+            if earlier < 0:
+                break
+            match = _repeated_closing_match(rows[earlier][1], text)
+            if match is None:
+                continue
+            findings.append({
+                "earlier_clip_id": rows[earlier][0],
+                "earlier_index": earlier,
+                "later_clip_id": clip_id,
+                "later_index": index,
+                "intervening_rows": back - 1,
+                "repeated_tokens": match["repeated_tokens"],
+                "leading_connective_count": match["skip"],
+            })
+            break
+    return findings
+
+
+def _locate_target_row(rows: list[tuple[str, str]], target: str) -> int | None:
+    """Index of the selected row realizing `target` (presence first, then
+    the first row of the smallest coverage window)."""
+    for index, (_, text) in enumerate(rows):
+        if realization_present(text, target):
+            return index
+    span = _find_semantic([text for _, text in rows], target)
+    return None if span is None else span[0]
+
+
 def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
     result = _load(result_path)
     manifest = _load(manifest_path)
@@ -380,6 +474,19 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
         else:
             passes.append("selection_count_23")
 
+    # D-289.11: observability scan -- every re-opened closing in the selection
+    # is reported as a warning regardless of the manifest, so a RAW's QA log
+    # shows the repetition even where no `repeated_closing_absent` check
+    # gates it (adding that check to a baseline manifest is a Product Owner
+    # decision; this scan never changes `qa_pass`).
+    for finding in find_repeated_closings(_selected_rows(result)):
+        warnings.append({
+            "id": "repeated_closing_scan",
+            "kind": "repeated_closing_detected",
+            "reason": "observability_only_gated_by_repeated_closing_absent_check",
+            **finding,
+        })
+
     for check in manifest.get("checks") or []:
         check_id = str(check.get("id") or "unnamed")
         kind = str(check.get("kind") or "")
@@ -408,6 +515,26 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
             row = _find_present_realization(_selected_rows(result), check.get("text"))
             if row is None:
                 failures.append({"id": check_id, "kind": kind, "reason": "realization_not_present_only_shared_content"})
+            else:
+                passes.append(check_id)
+            continue
+
+        if kind == "repeated_closing_absent":
+            # D-289.11: the row realizing `text` must NOT re-open with the
+            # closing phrase of a nearby earlier selected row. Presence of
+            # the segment is a precondition, never the verdict.
+            rows = _selected_rows(result)
+            target_index = _locate_target_row(rows, check.get("text"))
+            if target_index is None:
+                failures.append({"id": check_id, "kind": kind, "reason": "missing_required_segment"})
+                continue
+            found = find_repeated_closings(rows, only_index=target_index)
+            if found:
+                failures.append({
+                    "id": check_id, "kind": kind,
+                    "reason": "repeated_closing_reopens_required_segment",
+                    "detail": found[0],
+                })
             else:
                 passes.append(check_id)
             continue
