@@ -77261,15 +77261,27 @@ be WRONG -- it was not, until this entry.
   worker_export/render_versions/notifications/projects/auth.py`): 518
   passed, 0 failed.
 - Full `tests/` suite (excluding the one pre-existing, unrelated broken
-  collection file `test_semantic_stitch.py`): IN PROGRESS at the time
-  this entry was written; result to be recorded in a follow-up commit,
-  same two-step pattern D-288.1/D-288.2 both used.
+  collection file `test_semantic_stitch.py`): **8835 passed, 10 skipped,
+  13 subtests passed, 5 failed** (377.38s) -- the identical 5 failures
+  D-288/D-288.1/D-288.2 already verified pre-existing/unrelated
+  (`test_hybrid_story_guard_incomplete_retry.py`'s one test, `test_
+  video00_modal_hybrid_semantic_parity.py`'s four), 13 more passing than
+  D-288.2's own 8822 baseline (the net of this entry's 9 new tests in
+  `test_cutsell_d288_pending_review_and_approval.py` and 4 new in `test_
+  cutsell_d288_pending_review_http_routes.py`), zero new failures. (A
+  first run of this same suite, started before this entry's changes were
+  committed, transiently showed 2 additional failures in unrelated D-171/
+  D-172 "render_unchanged" firewall tests that assert `git diff HEAD` is
+  empty for specific files -- an artifact of running against a dirty
+  working tree mid-edit, not a real regression; both pass cleanly once
+  re-run after the commit below, as this final count reflects.)
 
 ### Verdict
 
-**CODE FIXED. TESTS PASS (518/518 targeted regression; full-suite result
-pending, see above). CI GREEN: not run (no CI dispatch in this gate).**
-RAW COMPLETE: N/A. ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
+**CODE FIXED. TESTS PASS (8835/8840 relevant, the other 5 confirmed
+pre-existing and unrelated, same as D-288/D-288.1/D-288.2's own
+baseline). CI GREEN: not run (no CI dispatch in this gate).** RAW
+COMPLETE: N/A. ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
 
 **Product Owner decision required:** YES, unchanged in kind from D-288/
 D-288.1/D-288.2: (a) integrating this branch; (b) live-wiring `perceptual_
@@ -77277,8 +77289,8 @@ repair_cycle.py` (still disconnected, its D-288.2-documented pending
 issues untouched by this entry); (c) any policy change for duplications/
 prosody named in the original audit.
 
-**Exact next step:** await the full-suite result (follow-up commit), then
-Product Owner review of this diff before any integration.
+**Exact next step:** Product Owner review of this diff before any
+integration.
 
 Then STOP.
 
