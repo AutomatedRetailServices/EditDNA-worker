@@ -1,12 +1,16 @@
 """RQ export job: edited Draft Timeline -> final MP4 -> scoped S3 URL."""
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 import tempfile
+import time
 
+from . import pending_watch_listen_review as pwl
 from . import render_delivery as rd
 from . import tenant_safe_delivery as tsd
 from .draft_edits import DraftEditError
+from .editorial_slot_resolution_install import reset_editorial_slot_resolution_evidence
 from .exports import store_export
 from .live_render_qc import PostRenderQCFailure, render_with_post_render_qc
 from .media_overlay_render import LocalMediaOverlay
@@ -54,6 +58,22 @@ class TenantSafeDeliveryBlocked(RuntimeError):
         self.perceptual_review = perceptual_review
 
 
+class PendingHumanWatchListenReview(RuntimeError):
+    """D-288 (finding 1): a technically-passing candidate is held at
+    `WATCH_LISTEN_PENDING` (perceptual `HUMAN_REVIEW_REQUIRED`) -- NOT a
+    render/delivery failure. The actual rendered file has already been
+    persisted to private, recoverable storage (`pending_watch_listen_
+    review.persist_pending_review`, called BEFORE this is raised, so the
+    bytes are safely in S3 before the caller's own `TemporaryDirectory`
+    can ever close) by the time this is raised. Callers must handle this
+    SEPARATELY from `TenantSafeDeliveryBlocked` -- a pending review is a
+    recoverable, resumable state, never `state="failed"`."""
+
+    def __init__(self, record: "pwl.PendingWatchListenRecord"):
+        super().__init__(f"pending_human_watch_listen_review:{record.record_id}")
+        self.record = record
+
+
 def _job_started_epoch(job) -> float | None:
     """D-269A Stage 9/10: use the job's OWN existing, already-real start
     timestamp (RQ's `Job.started_at`, set by the worker before this
@@ -88,6 +108,7 @@ def _tenant_safe_deliver(
     local_paths: dict | None = None,
     qc_result=None,
     requesting: "tsd.DeliveryOwnershipScope | None" = None,
+    pending_review_redis_client=None,
 ) -> dict:
     """D-269A: the live activation seam -- binds the actual rendered/QC-
     passed local file to a tenant-safe remote delivery. Computes D-267's
@@ -151,21 +172,77 @@ def _tenant_safe_deliver(
         job_id=job_id,
         watch_listen_status=watch_listen_status,
     )
+    if local_delivery.delivery_status == rd.DELIVERY_STATUS_WATCH_LISTEN_PENDING:
+        # D-288 (finding 1): HUMAN_REVIEW_REQUIRED -- a technically clean
+        # candidate held for human review, NOT a failure. Persist the
+        # ACTUAL rendered file to private, recoverable storage BEFORE
+        # this function returns/raises, so it survives the caller's own
+        # `TemporaryDirectory` cleanup. `plan_id`/`plan_version` come from
+        # the SAME `qc_result` the technical loop already produced --
+        # never re-derived, never guessed.
+        pending_record = pwl.persist_pending_review(
+            local_path=output_path,
+            user_id=user_id, project_id=project_id, job_id=job_id,
+            render_identity=render_identity, output_sha256=local_delivery.output_sha256 or "",
+            plan_id=str(getattr(qc_result, "plan_id", "") or ""),
+            plan_version=int(getattr(qc_result, "plan_version", 0) or 0),
+            watch_listen_status=watch_listen_status,
+            perceptual_review=perceptual,
+            # D-288: route through THIS module's own `store_export` name
+            # (monkeypatchable by tests, exactly like the tenant-safe
+            # upload path below) -- never a second, independent reference.
+            store_export_fn=store_export,
+            client=pending_review_redis_client,
+        )
+        raise PendingHumanWatchListenReview(pending_record)
+
     if local_delivery.delivery_status != rd.DELIVERY_STATUS_READY_FOR_UPLOAD:
-        # D-267's own render/hash/QC gate (or, as of D-288, the perceptual
-        # watch-listen gate) already found a blocker -- never re-derived,
-        # never overridden here, only wrapped as a tenant-safe-delivery
-        # block so the caller has one exception type. `perceptual_review`
-        # is attached so the caller can tell a watch-listen hold apart from
-        # a genuine render/hash/upload failure.
+        # D-267's own render/hash/QC gate (or, as of D-288, a WATCH_LISTEN_
+        # BLOCKED perceptual verdict) already found a confirmed blocker --
+        # never re-derived, never overridden here, only wrapped as a
+        # tenant-safe-delivery block so the caller has one exception type.
+        # Deliberately NOT persisted to pending-review storage (unlike the
+        # PENDING branch above): a confirmed BLOCKED defect has no review
+        # value, and "BLOCKED nunca entrega" holds regardless of storage.
+        # `perceptual_review` is attached so the caller can tell a
+        # watch-listen hold apart from a genuine render/hash/upload
+        # failure.
         blocked = tsd.evaluate_tenant_safe_delivery(
             ownership=ownership, expected_render_identity=render_identity, delivery=local_delivery,
         )
         raise TenantSafeDeliveryBlocked(blocked, perceptual_review=perceptual)
 
+    return _upload_verify_and_finalize_delivery(
+        local_path=output_path, ownership=ownership, requesting=requesting,
+        render_identity=render_identity, local_delivery=local_delivery,
+        project_id=project_id, user_id=user_id, job_id=job_id,
+        watch_listen_status=watch_listen_status,
+    )
+
+
+def _upload_verify_and_finalize_delivery(
+    *,
+    local_path: str,
+    ownership: "tsd.DeliveryOwnershipScope",
+    requesting: "tsd.DeliveryOwnershipScope",
+    render_identity: str,
+    local_delivery: "rd.RenderDeliveryRecord",
+    project_id: str,
+    user_id: str,
+    job_id: str,
+    watch_listen_status: str | None,
+) -> dict:
+    """D-288: the real tenant-safe upload/verify/evaluate/result-build
+    seam, shared by `_tenant_safe_deliver` (same-job delivery) and
+    `resume_delivery_after_approval` (finding 2's "reanudación de
+    entrega" -- a LATER job resuming delivery of an already-approved
+    pending review) -- one implementation, never a second guess. The
+    caller is responsible for the D-267/D-288 local gate (`local_
+    delivery.delivery_status == READY_FOR_UPLOAD`) having already passed
+    before calling this."""
     tenant_key = tsd.build_tenant_safe_export_key(ownership=ownership, render_identity=render_identity)
     stored = store_export(
-        output_path,
+        local_path,
         project_id=project_id,
         user_id=user_id,
         object_key=tenant_key,
@@ -246,6 +323,84 @@ def _tenant_safe_deliver(
     return result
 
 
+def resume_delivery_after_approval(
+    *,
+    user_id: str,
+    project_id: str,
+    job_id: str,
+    requesting: "tsd.DeliveryOwnershipScope | None" = None,
+    client=None,
+    s3_client=None,
+) -> dict:
+    """D-288 (finding 2): "reanudación de entrega" -- given a pending
+    review record that has ALREADY been approved via `pending_watch_
+    listen_review.apply_human_approval` (this function performs NO
+    approval logic itself and re-derives nothing about that decision; it
+    only trusts the persisted record's own `watch_listen_status`, which
+    `apply_human_approval` is the ONE place that can ever set to
+    `WATCH_LISTEN_HUMAN_APPROVED` -- see that function's own fail-closed
+    contract), downloads the private pending artifact and completes the
+    SAME tenant-safe upload/verify/evaluate seam `_tenant_safe_deliver`
+    uses for a same-job delivery (`_upload_verify_and_finalize_delivery`
+    -- one implementation, not a second guess). Verifies the downloaded
+    bytes still hash to the record's own `output_sha256` before ever
+    uploading them as the tenant-safe object -- the private pending
+    object is never trusted blindly just because it was found at the
+    expected key."""
+    from .perceptual_watch_listen import WATCH_LISTEN_HUMAN_APPROVED
+
+    ownership = tsd.DeliveryOwnershipScope(user_id=user_id, project_id=project_id, job_id=job_id)
+    if requesting is None:
+        requesting = ownership
+
+    record = pwl.load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
+    if record is None:
+        raise pwl.PendingReviewError("no_pending_review_found")
+    tsd.assert_delivery_access(requesting=requesting, record_ownership=record.ownership)
+    if record.watch_listen_status != WATCH_LISTEN_HUMAN_APPROVED:
+        raise pwl.PendingReviewError(f"pending_review_not_approved:{record.watch_listen_status}")
+
+    with tempfile.TemporaryDirectory(prefix="cutsell-resume-delivery-") as directory:
+        local_path = str(Path(directory) / "cutsell-resume-export.mp4")
+        parsed_bucket, parsed_key = record.pending_s3_uri[5:].split("/", 1)
+        if s3_client is None:
+            import boto3
+            s3_client = boto3.client("s3")
+        s3_client.download_file(parsed_bucket, parsed_key, local_path)
+
+        local_delivery = rd.build_render_delivery_record(
+            render_identity=record.render_identity,
+            render_execution_status=rd.RENDER_EXECUTION_STATUS_SUCCEEDED,
+            final_path=local_path,
+            technical_qc_status=rd.TECHNICAL_QC_STATUS_PASS,
+            require_upload=True,
+            upload_status=rd.UPLOAD_STATUS_NOT_ATTEMPTED,
+            project_id=project_id,
+            job_id=job_id,
+            watch_listen_status=record.watch_listen_status,
+        )
+        if local_delivery.output_sha256 != record.output_sha256:
+            # The downloaded bytes do not match what was approved -- never
+            # deliver them. This is a hard integrity failure, not a
+            # watch-listen state; it never reaches the tenant-safe upload.
+            raise pwl.PendingReviewError("resumed_artifact_hash_mismatch")
+        if local_delivery.delivery_status != rd.DELIVERY_STATUS_READY_FOR_UPLOAD:
+            blocked = tsd.evaluate_tenant_safe_delivery(
+                ownership=ownership, expected_render_identity=record.render_identity, delivery=local_delivery,
+            )
+            raise TenantSafeDeliveryBlocked(blocked)
+
+        result = _upload_verify_and_finalize_delivery(
+            local_path=local_path, ownership=ownership, requesting=requesting,
+            render_identity=record.render_identity, local_delivery=local_delivery,
+            project_id=project_id, user_id=user_id, job_id=job_id,
+            watch_listen_status=record.watch_listen_status,
+        )
+
+        pwl._save(dataclasses.replace(record, resumed_delivery_at=time.time()), client=client)
+        return result
+
+
 def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | None = None) -> dict:
     try:
         event = publish_notification(
@@ -260,6 +415,12 @@ def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | No
 
 
 def run_export_job(payload: dict) -> dict:
+    # D-288 (finding 5): the real per-job init boundary for the
+    # EditorialSlotResolution evidence ContextVar -- see universal_clean_
+    # cut_validation.run_single_universal_clean_cut_validation's own D-288
+    # comment for why this must run before any arbiter call this job
+    # could make.
+    reset_editorial_slot_resolution_evidence()
     from rq import get_current_job
 
     job = get_current_job()
@@ -431,6 +592,45 @@ def run_export_job(payload: dict) -> dict:
                 **version_payload,
                 **delivery,
             }
+    except PendingHumanWatchListenReview as exc:
+        # D-288 (finding 1): a technically-clean candidate held for human
+        # review -- NOT a render/delivery failure. The rendered file is
+        # already safely persisted (see `PendingHumanWatchListenReview`'s
+        # own docstring); this job completes with a recoverable pending
+        # result rather than an unhandled failure, and the project state
+        # is a distinct "pending_review", never "failed".
+        safe_update_project(
+            user_id=user_id,
+            project_id=project_id,
+            state="pending_review",
+            latest_job_id=job_id,
+            latest_job_started_at=job_started_at,
+        )
+        notification = _safe_notify(
+            user_id=user_id,
+            project_id=project_id,
+            kind="render_pending_human_watch_listen",
+            payload={
+                "job_id": job_id,
+                "record_id": exc.record.record_id,
+                "watch_listen_status": exc.record.watch_listen_status,
+                "render_identity": exc.record.render_identity,
+                "plan_id": exc.record.plan_id,
+                "plan_version": exc.record.plan_version,
+            },
+        )
+        return {
+            "project_id": project_id,
+            "state": "pending_review",
+            "watch_listen_status": exc.record.watch_listen_status,
+            "pending_review_record_id": exc.record.record_id,
+            "pending_review_render_identity": exc.record.render_identity,
+            "pending_review_output_sha256": exc.record.output_sha256,
+            "pending_review_plan_id": exc.record.plan_id,
+            "pending_review_plan_version": exc.record.plan_version,
+            "project_tracking_start": tracking_start,
+            "notification": notification,
+        }
     except PostRenderQCFailure as exc:
         # Never delivered: PostRenderWatchListenQC (or the bounded physical
         # repair loop) did not reach PASS on this candidate. Record exactly

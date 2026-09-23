@@ -72,6 +72,23 @@ def wire_real_store_export(monkeypatch, fake_s3):
     return fake_s3
 
 
+class FakeRedis:
+    def __init__(self):
+        self.data: dict[str, str] = {}
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def set(self, key, value, **_kwargs):
+        self.data[key] = value
+        return True
+
+
+@pytest.fixture
+def fake_redis():
+    return FakeRedis()
+
+
 def _plan():
     return (RenderSegment(clip_id="clip-1", source_asset_id="src-1", source_path="/tmp/x.mp4", start=1.0, end=2.0, caption_text="hello"),)
 
@@ -132,16 +149,26 @@ def test_watch_listen_blocked_never_delivers(tmp_path, wire_real_store_export, m
     assert wire_real_store_export.objects == {}
 
 
-def test_watch_listen_human_review_required_never_auto_delivers(tmp_path, wire_real_store_export, monkeypatch):
+def test_watch_listen_human_review_required_never_auto_delivers(tmp_path, wire_real_store_export, fake_redis, monkeypatch):
+    """D-288 (correction, second pass): HUMAN_REVIEW_REQUIRED is NOT a
+    generic `TenantSafeDeliveryBlocked` -- it is the distinct, recoverable
+    `PendingHumanWatchListenReview`, and the file IS persisted (to the
+    private pending-review location, never the tenant-facing one)."""
     _stub_review(monkeypatch, WATCH_LISTEN_HUMAN_REVIEW_REQUIRED)
     output = _rendered_file(tmp_path)
-    with pytest.raises(export_job.TenantSafeDeliveryBlocked) as exc_info:
+    with pytest.raises(export_job.PendingHumanWatchListenReview) as exc_info:
         export_job._tenant_safe_deliver(
             output_path=output, plan=_plan(), draft=_fake_draft(), local_paths={}, qc_result=_fake_qc_result(),
             project_id="proj-1", user_id="user-1", job_id="job-1",
+            pending_review_redis_client=fake_redis,
         )
-    assert exc_info.value.record.delivery_status == rd.DELIVERY_STATUS_WATCH_LISTEN_PENDING
-    assert wire_real_store_export.objects == {}
+    record = exc_info.value.record
+    assert record.watch_listen_status == WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
+    assert record.pending_s3_uri.startswith("s3://test-bucket/cutsell/pending-review/")
+    # Persisted for real -- the object exists in the fake S3 store, under
+    # the PRIVATE prefix, never the tenant-facing "cutsell/exports/" one.
+    assert any("cutsell/pending-review/" in key for key in wire_real_store_export.objects)
+    assert not any(key.startswith("cutsell/exports/") for key in wire_real_store_export.objects)
 
 
 def test_a_perceptual_review_exception_fails_closed_never_silently_delivers(tmp_path, wire_real_store_export, monkeypatch):
@@ -164,20 +191,23 @@ def test_a_perceptual_review_exception_fails_closed_never_silently_delivers(tmp_
 # Negative (required): technical QC PASS is never a substitute for Watch+Listen
 # =============================================================================
 
-def test_technical_qc_pass_alone_no_longer_sufficient_for_delivery(tmp_path, wire_real_store_export, monkeypatch):
+def test_technical_qc_pass_alone_no_longer_sufficient_for_delivery(tmp_path, wire_real_store_export, fake_redis, monkeypatch):
     """The exact real production gap this gate closes: before D-288, a
     technical-QC-PASSed render (`technical_qc_status=PASS`, proven by this
     call reaching `_tenant_safe_deliver` at all -- `run_export_job` only
     calls it after `qc_result.status == "PASS"`) was sufficient for
     DELIVERY_READY on its own. It no longer is, once a real perceptual
-    verdict is supplied and that verdict is not SYSTEM_PASS/HUMAN_APPROVED."""
+    verdict is supplied and that verdict is not SYSTEM_PASS/HUMAN_APPROVED
+    -- it becomes a recoverable pending review instead of a delivery."""
     _stub_review(monkeypatch, WATCH_LISTEN_HUMAN_REVIEW_REQUIRED)
     output = _rendered_file(tmp_path)
-    with pytest.raises(export_job.TenantSafeDeliveryBlocked):
+    with pytest.raises(export_job.PendingHumanWatchListenReview):
         export_job._tenant_safe_deliver(
             output_path=output, plan=_plan(), draft=_fake_draft(), local_paths={}, qc_result=_fake_qc_result(),
             project_id="proj-1", user_id="user-1", job_id="job-1",
+            pending_review_redis_client=fake_redis,
         )
+    assert not any(k.startswith("cutsell/exports/") for k in wire_real_store_export.objects)
 
 
 # =============================================================================

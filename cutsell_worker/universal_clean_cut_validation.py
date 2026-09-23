@@ -24,6 +24,7 @@ from .asr import FasterWhisperASR
 from .brain_runtime import build_brain_runtime
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
+from .editorial_slot_resolution_install import reset_editorial_slot_resolution_evidence
 from .live_boundary_repair import segment_output_windows
 from .live_render_qc import LiveRenderQCResult, render_with_post_render_qc
 from .media_probe import probe_media
@@ -286,6 +287,12 @@ def run_single_universal_clean_cut_validation(
     preview_captions: bool = False,
 ) -> dict[str, Any]:
     """Run one full S3 raw through local perception plus the active Selection authority."""
+    # D-288 (finding 5): the real per-job init boundary for the
+    # EditorialSlotResolution evidence ContextVar -- must run before any
+    # arbiter call this job could make, so a PREVIOUS job's evidence (in
+    # the same warm worker thread) can never leak into this job's own
+    # `active_path_identity` block.
+    reset_editorial_slot_resolution_evidence()
     if not _is_real_video_key(key):
         raise ValueError("unsupported validation video")
 

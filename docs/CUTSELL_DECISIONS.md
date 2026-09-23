@@ -76767,3 +76767,182 @@ DO NOT SWITCH BRANCHES.
 DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
+
+## D-288.1 — Structural Correction to D-288 (offline implementation, same
+isolated branch `audit/watch-listen-delivery-authority`, off verified HEAD
+`7093c55ace9a56064d7c21254ad9460e57929e55`)
+
+**NOT integrated into `cutsell/mobile-v1-clean`. NOT merged. `main` and
+PR #25 (OPEN/DRAFT/UNMERGED) untouched. iOS work untouched. No RAW
+dispatched. `perceptual_repair_cycle.py` remains disconnected from every
+live caller.**
+
+**Objective.** Product Owner review of D-288 found six real gaps in the
+first pass, all corrected here, with D-288's own report claims fixed to
+match:
+
+1. **The render was still lost on a HUMAN_REVIEW_REQUIRED verdict.**
+   D-288's `TenantSafeDeliveryBlocked` path deleted the rendered file
+   the moment `export_job.run_export_job`'s own `TemporaryDirectory`
+   closed, and reported `state="failed"` -- indistinguishable from a
+   genuine render failure, and unrecoverable. Fixed: new `pending_watch_
+   listen_review.py` (Redis metadata + a PRIVATE, non-tenant-facing S3
+   prefix `cutsell/pending-review/`, structurally distinct from `tenant_
+   safe_delivery`'s customer-facing key -- same "S3 holds bytes, Redis
+   holds bounded metadata" split `render_versions.py` already
+   establishes). `_tenant_safe_deliver` now persists the file to that
+   private location BEFORE it can ever be raised/lost, via a NEW,
+   distinct `PendingHumanWatchListenReview` exception (never `TenantSafe
+   DeliveryBlocked`) that `run_export_job` catches separately and reports
+   as `state="pending_review"` -- never `"failed"`.
+2. **No real approval flow.** D-288's `WatchListenApproval`/`resolve_
+   watch_listen_status_for_delivery` in `render_delivery.py` was a
+   correct but disconnected, in-memory-only contract -- no
+   authentication, no persistence, nothing to bind an approval to a
+   recoverable pending record. Fixed: `pending_watch_listen_review.
+   apply_human_approval` is the real, authenticated gate -- reuses
+   `tenant_safe_delivery.DeliveryOwnershipScope`/`assert_delivery_access`
+   for auth (never a second auth primitive; empty identities already
+   rejected by that dataclass's own `__post_init__`); requires the
+   approval to name the EXACT `render_identity`, `output_sha256`,
+   `plan_id`, AND `plan_version` of the CURRENTLY persisted record (the
+   "plan final ejecutado" binding, not just the render/hash); rejects a
+   non-empty-but-blank approver string; BLOCKED is never approvable; a
+   stale approval (wrong artifact, wrong plan version, wrong job, no
+   record at all, or a mismatched requesting principal) is rejected with
+   an explicit, named reason, never a silent no-op. `export_job.
+   resume_delivery_after_approval` is the "reanudación de entrega":
+   downloads the private pending object, re-verifies its hash against
+   the approved record before ever uploading it as the tenant-safe
+   object, and completes delivery through the SAME `_upload_verify_and_
+   finalize_delivery` seam `_tenant_safe_deliver` itself uses (extracted
+   as a shared function -- one implementation, not a second guess).
+3. **`perceptual_repair_cycle.py` trusted `repair_segment_for_finding`
+   too much.** A real-code review (not assumed) found that function (a)
+   has NO word-boundary check on its leading-edge repair branch at all
+   (only the trailing-edge branch calls `tighten_trailing_silence`,
+   which is silence-based, not word-based) and (b) can, at a shared cut
+   between two adjacent segments, attribute a finding to the WRONG
+   (earlier) neighboring clip -- its "first match in list wins" loop
+   never disambiguates. Fixed with three independent preconditions,
+   enforced BEFORE that function is ever called, none delegated to its
+   own internals: (a) `_disambiguate_target` re-derives every segment/
+   edge match under the SAME tolerance and refuses on zero or more than
+   one match (a shared-cut ambiguity), and the returned repair's own
+   `clip_id` is cross-checked against that independently-derived target
+   -- a disagreement refuses rather than trusting either guess; (b) an
+   explicit allowlist (`_CONFIRMED_REPAIRABLE_KINDS`, dead air and reset/
+   break debris only) with its OWN corroboration check per kind -- a
+   reset/break "candidate" motion event with no measured pause nearby,
+   or a dead-air interval under the capability's own FAIL floor, is
+   refused even though `severity` says FAIL; a generic 0.35s edge-
+   routing window is never itself authorization; (c) `word_floor_by_
+   clip_id` is now a REQUIRED parameter (no default) -- real word-timing
+   evidence per clip that the CANDIDATE repair's own computed boundary
+   is independently re-verified against; no evidence for a clip refuses
+   outright. Still fully disconnected from every live caller.
+4. **Stale segments/reviews after a repair render.** The first pass
+   re-reviewed a freshly re-rendered file using the pre-render, repair-
+   only segment timings -- never folding in the renderer's OWN
+   additional trims (e.g. `tighten_trailing_silence`'s trailing-silence
+   tightening beyond what the repair explicitly requested), the exact
+   D-097.10 (R14) class of bug this codebase already fixed once
+   elsewhere. Fixed: `segments_as_rendered` (the SAME function `universal_
+   clean_cut_validation.py` already uses, dependency-injected here, never
+   re-implemented) is applied to the repaired segments using the fresh
+   `qc_result`'s own `attempts[-1].renderer_trailing_trims` immediately
+   after every internal render, before the next loop iteration's re-
+   review -- every iteration re-reviews the CURRENT file against the
+   CURRENT (as-rendered) segments; nothing is cached across iterations.
+5. **Observability was not actually job-scoped, and counted failures as
+   success.** (a) A plain read-and-clear `ContextVar` is not itself
+   proof of isolation between two CONCURRENT jobs sharing one worker
+   process/thread -- now proven empirically with a real multi-threaded
+   test, and a real per-job boundary (`reset_editorial_slot_resolution_
+   evidence`, called at the START of both `run_single_universal_clean_
+   cut_validation` and `run_export_job`) replaces implicit clearing on
+   read. (b) `read_editorial_slot_resolution_evidence` is now non-
+   destructive/idempotent -- `component_markers`/`build_active_path_
+   identity` can be called any number of times for the same job and
+   always agree, where the first pass's destructive read made a second
+   call incorrectly read "absent". (c) A FAILED injection attempt
+   (`policy_injected: False`) no longer counts toward the presence
+   marker -- only `policy_injected: True` rows do. (d) The raw evidence
+   rows are now written into `build_active_path_identity`'s own returned
+   `editorial_slot_resolution_evidence` field -- part of the real,
+   serialized per-job result (`serverless_handler._focused`'s own
+   `result = {**result, "active_path_identity": ...}`), not only visible
+   as a side effect of internal probing.
+6. **Missing end-to-end tests.** New `test_cutsell_d288_pending_review_
+   and_approval.py` (14 tests) proves: the render survives real
+   `TemporaryDirectory` cleanup and is recoverable after the fact; `run_
+   export_job` reports `state="pending_review"`, never `"failed"`; a
+   valid, exact-artifact-bound approval promotes to `HUMAN_APPROVED` and
+   lets `resume_delivery_after_approval` complete real delivery; a stale
+   approval (wrong render_identity/output_sha256/plan_id/plan_version, no
+   record, mismatched requesting principal, empty approver) is rejected
+   on every axis; BLOCKED is never approvable even with an otherwise-
+   valid exact-artifact approval; a rejection records a real REJECTED
+   state, never a silent no-op. `test_cutsell_d288_perceptual_repair_
+   cycle.py` (20 tests, up from 9) adds: a shared-cut-boundary ambiguity
+   refuses without ever consulting the repair authority; a direct proof
+   the neighboring clip is never touched; an unconfirmed "candidate"
+   finding never authorizes a repair; a repair that would cross either
+   the first or last aligned word is refused even though the shared
+   authority itself allowed it through; renderer trims are proven folded
+   in before the next re-review via a captured argument assertion.
+
+**Report claims corrected (D-288's own text superseded by this entry):**
+"BLOCKED/PENDING both raise `TenantSafeDeliveryBlocked`" is WRONG --
+PENDING (HUMAN_REVIEW_REQUIRED) now raises the distinct, recoverable
+`PendingHumanWatchListenReview` with the file already persisted; only
+BLOCKED still raises `TenantSafeDeliveryBlocked`, deliberately never
+persisted (no review value). Any implication that `perceptual_repair_
+cycle.py`'s reuse of `repair_segment_for_finding` was safety-complete on
+its own is WRONG -- it required the three additional preconditions in
+item 3 above; the module was, and remains, correctly kept disconnected
+from every live caller specifically because those preconditions were
+still missing at the time of that claim.
+
+### Verification run
+
+- New/expanded test files: `test_cutsell_d288_pending_review_and_
+  approval.py` (14, new), `test_cutsell_d288_perceptual_repair_cycle.py`
+  (20, up from 9), `test_cutsell_d288_editorial_slot_resolution_
+  observability.py` (14, up from 7, including a real multi-threaded
+  concurrency proof), `test_cutsell_d288_export_job_perceptual_gate.py`
+  (6, 2 corrected for the new `PendingHumanWatchListenReview` exception
+  type). 0 failed.
+- `compileall` over `cutsell_worker/`, `tests/`: clean.
+- Targeted regression (D-267/D-269A/D-097/live_render_qc/repair_loop/
+  canonical_edit_plan/editorial_slot_resolution/active_path_identity/
+  clean_worker_export, all D-288 files together): 236 passed, 0 failed.
+- Broader universal_clean_cut_validation/serverless/claim-coverage
+  cluster: 96 passed, 0 failed.
+- Full `tests/` suite (excluding the one pre-existing, unrelated broken
+  collection file `test_semantic_stitch.py`, confirmed pre-existing in
+  D-288's own verification): PENDING -- background run in progress at
+  time of writing; result to be appended once complete.
+
+### Verdict
+
+**CODE FIXED. TARGETED + BROADER TESTS PASS (352/352 across the runs
+above). Full-suite confirmation in progress.** RAW COMPLETE: N/A.
+ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
+
+**Product Owner decision required:** YES, unchanged from D-288: (a)
+integrating this branch; (b) live-wiring `perceptual_repair_cycle.py`
+(still disconnected, now with real safety preconditions built and
+tested, but live-wiring remains its own separate, not-yet-authorized
+gate); (c) any policy change for duplications/prosody named in the
+original audit.
+
+**Exact next step:** await the full-suite result, then Product Owner
+review of this diff before any integration.
+
+Then STOP.
+
+DO NOT SWITCH BRANCHES.
+DO NOT MERGE.
+DO NOT REBASE.
+DO NOT TOUCH cutsell/mobile-v1-clean.

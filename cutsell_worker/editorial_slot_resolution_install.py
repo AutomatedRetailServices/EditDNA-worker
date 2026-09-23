@@ -37,9 +37,14 @@ from typing import Any, Mapping
 #   1. POLICY INSTALLED -- this module's own install function ran at
 #      import. Always true once imported; proves nothing about any ONE
 #      run, so it is never reported as per-execution evidence.
-#   2. REQUEST BUILT -- a real wire payload was constructed WITH the
-#      policy text actually spliced in. THIS is what `_POLICY_INJECTION_
-#      EVIDENCE` below proves, recorded once per real call.
+#   2. REQUEST BUILT WITH THE POLICY PRESENT -- a real wire payload was
+#      constructed with the policy text actually verified present in it.
+#      THIS is what counts as real evidence below. A FAILED injection
+#      attempt (malformed payload, no contents/parts to splice into) is
+#      recorded too, for honest observability, but with `policy_injected:
+#      False` -- it must never itself make the presence marker read
+#      "present"; a failed attempt proves the opposite of an active
+#      policy for that one call.
 #   3. CALL EXECUTED -- the arbiter's `.check()` actually sent that
 #      payload over the network. NOT observed here: this module only
 #      wraps request CONSTRUCTION, never the network call, so it never
@@ -50,27 +55,46 @@ from typing import Any, Mapping
 #      diagnostics (`arbiter_confirmed_pairs`/`edge_trace`/
 #      `arbiter_rejected_pairs`) -- never fabricated or duplicated here.
 #
-# A `ContextVar`, not a module-level list/counter: the SAME per-execution
-# side-channel pattern this codebase already establishes for exactly this
-# class of problem (`hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN`,
-# `hybrid_composite_best_take._COMPOSITE_SPLIT_IDS`) -- isolated per
-# thread/task, so concurrent jobs in the same worker process can never mix
-# their evidence together ("evita contadores globales que mezclen
-# trabajos"). Read-and-cleared once by `collect_and_clear_editorial_slot_
-# resolution_evidence` below, the same read-and-clear discipline those
-# precedents use.
+# JOB-SCOPED, NOT READ-DESTRUCTIVE (hardened per the D-288 finding-5
+# correction): a `ContextVar` alone does not by itself PROVE isolation
+# between concurrent jobs sharing one worker process/thread -- CPython
+# gives each OS THREAD its own default Context, which this module's own
+# test suite now verifies empirically with real concurrent threads (see
+# `tests/test_cutsell_d288_editorial_slot_resolution_observability.py`),
+# but two SEQUENTIAL jobs in the SAME thread (the common case for an RQ/
+# RunPod worker reusing a warm process) would otherwise see one another's
+# evidence unless something explicitly draws a job boundary. That
+# boundary is `reset_editorial_slot_resolution_evidence()` below --
+# called ONCE at the START of each real per-job entry point (`universal_
+# clean_cut_validation.run_single_universal_clean_cut_validation`,
+# `export_job.run_export_job`) -- never implicitly, never tied to a read.
+# Reading evidence (`read_editorial_slot_resolution_evidence` below) is
+# deliberately NON-DESTRUCTIVE and idempotent: calling it any number of
+# times during or after the same job returns the SAME answer, so a QA
+# harness or a retried probe never sees "present" once and "absent" the
+# next time for the exact same run. This replaces this module's earlier
+# read-and-clear design (`collect_and_clear_...`, now removed), which
+# would have silently returned "absent" on a second call -- a probe
+# function must be safely repeatable.
 _POLICY_INJECTION_EVIDENCE: "ContextVar[tuple[dict[str, Any], ...]]" = ContextVar(
     "_EDITORIAL_SLOT_RESOLUTION_POLICY_INJECTION_EVIDENCE", default=(),
 )
 
 
-def collect_and_clear_editorial_slot_resolution_evidence() -> tuple[dict[str, Any], ...]:
-    """Read-and-clear THIS execution's own real request-built evidence. See
-    the module-level D-288 comment above for the exact 4-state distinction
-    this evidence does (and does not) prove."""
-    evidence = _POLICY_INJECTION_EVIDENCE.get()
+def reset_editorial_slot_resolution_evidence() -> None:
+    """D-288: the real per-job init/cleanup boundary. Call ONCE at the
+    START of a per-job entry point, before any arbiter call could happen
+    for that job, so a previous job's evidence (in the same warm worker
+    thread) can never leak into this job's result. Idempotent to call
+    more than once (always just clears to empty)."""
     _POLICY_INJECTION_EVIDENCE.set(())
-    return evidence
+
+
+def read_editorial_slot_resolution_evidence() -> tuple[dict[str, Any], ...]:
+    """Non-destructive, idempotent read of THIS job's own evidence so far.
+    Never clears -- only `reset_editorial_slot_resolution_evidence` does
+    that, at the next job's own start."""
+    return _POLICY_INJECTION_EVIDENCE.get()
 
 
 def _record_policy_injection_evidence(*, policy_injected: bool, text_length: int) -> None:

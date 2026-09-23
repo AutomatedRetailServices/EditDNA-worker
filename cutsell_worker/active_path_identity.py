@@ -24,7 +24,7 @@ import platform
 from pathlib import Path
 from typing import Any, Mapping
 
-from .editorial_slot_resolution_install import collect_and_clear_editorial_slot_resolution_evidence
+from .editorial_slot_resolution_install import read_editorial_slot_resolution_evidence
 
 SCHEMA_VERSION = "cutsell.active_path_identity.v1"
 
@@ -97,22 +97,33 @@ def _present(section: Mapping[str, Any] | None, path: tuple[str, ...]) -> bool:
     return True
 
 
+def _real_editorial_slot_resolution_evidence() -> tuple[dict[str, Any], ...]:
+    """D-288 (finding 5 correction): only a row where `policy_injected` is
+    actually `True` counts as evidence the policy is active -- a FAILED
+    injection attempt (malformed payload, nothing to splice into) is
+    recorded honestly by `editorial_slot_resolution_install.py` but must
+    never itself make this marker read "present"; a failed attempt proves
+    the opposite for that one call. Non-destructive: `read_editorial_
+    slot_resolution_evidence` never clears, so calling this (directly or
+    via `component_markers`/`build_active_path_identity`) any number of
+    times during or after the same job returns the SAME answer."""
+    return tuple(row for row in read_editorial_slot_resolution_evidence() if row.get("policy_injected") is True)
+
+
 def _diagnostics_with_editorial_slot_resolution_evidence(
-    diagnostics: Mapping[str, Any] | None,
+    diagnostics: Mapping[str, Any] | None, evidence: tuple[dict[str, Any], ...],
 ) -> Mapping[str, Any] | None:
-    """D-288: overlay THIS execution's own real editorial-slot-resolution
-    request-built evidence (a per-run `ContextVar`, never a global counter
-    -- see `editorial_slot_resolution_install.py`'s own D-288 comment) onto
-    a READ-ONLY COPY of `diagnostics`, never mutating the caller's real
-    dict. Only ever ADDS the key -- if a real per-run writer for it exists
-    in the future, that writer's own value (present in `diagnostics`
-    already) always wins, never overwritten here. Absent evidence (no
-    request was ever built this run -- e.g. the arbiter was never invoked)
-    correctly leaves the probe reading "absent", exactly as intended; this
-    never fabricates presence."""
+    """D-288: overlay THIS job's own real editorial-slot-resolution
+    request-built evidence onto a READ-ONLY COPY of `diagnostics`, never
+    mutating the caller's real dict. Only ever ADDS the key -- if a real
+    per-run writer for it exists in the future, that writer's own value
+    (present in `diagnostics` already) always wins, never overwritten
+    here. Absent evidence (no request was ever built this run -- e.g. the
+    arbiter was never invoked, or every attempt failed to inject) leaves
+    the probe reading "absent", exactly as intended; this never
+    fabricates presence."""
     if not isinstance(diagnostics, Mapping) or "editorial_slot_resolution" in diagnostics:
         return diagnostics
-    evidence = collect_and_clear_editorial_slot_resolution_evidence()
     if not evidence:
         return diagnostics
     overlaid = dict(diagnostics)
@@ -126,10 +137,11 @@ def _diagnostics_with_editorial_slot_resolution_evidence(
 
 
 def component_markers(result: Mapping[str, Any]) -> list[dict[str, Any]]:
+    evidence = _real_editorial_slot_resolution_evidence()
     sections = {
         "stage_status": result.get("stage_status") if isinstance(result, Mapping) else None,
         "diagnostics": _diagnostics_with_editorial_slot_resolution_evidence(
-            result.get("diagnostics") if isinstance(result, Mapping) else None
+            result.get("diagnostics") if isinstance(result, Mapping) else None, evidence,
         ),
     }
     rows = []
@@ -148,6 +160,16 @@ def build_active_path_identity(result: Mapping[str, Any], *, env: Mapping[str, s
     env = os.environ if env is None else env
     fingerprint = package_fingerprint(package_dir)
     markers = component_markers(result)
+    # D-288 (finding 5 correction): "evidencia persistida en su resultado"
+    # -- the raw per-job evidence rows (not just the boolean marker) are
+    # written directly into THIS function's own returned dict, which is
+    # itself merged into the real, serialized per-job result (see
+    # `serverless_handler._focused`'s own `result = {**result, "active_
+    # path_identity": active_path_identity, ...}`) -- never left as an
+    # internal-only probing side effect. Idempotent: `component_markers`
+    # above reads non-destructively, so calling this function twice for
+    # the same job yields the identical evidence list both times.
+    editorial_slot_resolution_evidence = list(_real_editorial_slot_resolution_evidence())
     return {
         "schema_version": SCHEMA_VERSION,
         "build_git_sha": str(env.get("CUTSELL_BUILD_GIT_SHA") or "") or None,
@@ -159,4 +181,5 @@ def build_active_path_identity(result: Mapping[str, Any], *, env: Mapping[str, s
         "component_markers": markers,
         "components_present": sum(1 for m in markers if m["present"]),
         "components_absent": [m["component"] for m in markers if not m["present"]],
+        "editorial_slot_resolution_evidence": editorial_slot_resolution_evidence,
     }
