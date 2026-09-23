@@ -340,3 +340,79 @@ def test_one_unit_each_side_without_preservation_the_path_falls_through_to_the_p
 def test_pair_budget_and_per_group_cap_are_unchanged():
     assert SemanticEquivalenceGatePolicy().max_pairs_per_request == 14
     assert _PAIR_BUDGET_PER_GROUP_CAP == 2
+
+
+# =============================================================================
+# G. D-289.8 -- a negation is never separated from its complement
+# =============================================================================
+# Regression introduced by the D-289.7 segmentation (reported by the Product
+# Owner): "No es científicamente cierto que | después de recibir tratamiento
+# desaparecen los síntomas." was cut at "después de", so the negated matrix
+# clause ("no es cierto que") lost the proposition it negates and the
+# candidate read as asserting it (contradiction False, coverage 1.0; before
+# D-289.7: True / 0.05). The shared splitter now refuses a split whose left
+# side is an unfinished clause -- it ends on a complementizer/function word
+# (`take_grouping._DANGLING_FUNCTION_WORDS`) or a belief/perception verb
+# (`_BELIEF_PERCEPTION_MARKERS`) -- and keeps the whole span as ONE unit for
+# claims and scope alike. No phrase-specific exception, no threshold change.
+
+from cutsell_worker.semantic_claims import _leaves_open_dependency  # noqa: E402
+
+
+@pytest.mark.parametrize("claim_text, candidate", [
+    ("Desaparecen los síntomas.", "No es científicamente cierto que después de recibir tratamiento desaparecen los síntomas."),
+    ("The symptoms disappeared.", "It is definitely not true that after regular treatment the symptoms disappeared."),
+    # the same dependency through a belief verb with no complementizer
+    ("Desaparecen los síntomas.", "Honestamente no creo después de recibir tratamiento desaparecen los síntomas."),
+    ("The symptoms disappeared.", "I honestly do not believe after regular treatment the symptoms disappeared."),
+    # the negation inside the temporal clause itself
+    ("Desaparecen los síntomas.", "Después de recibir tratamiento, no desaparecen los síntomas."),
+])
+def test_d289_8_a_negated_matrix_keeps_its_complement_on_both_authorities(claim_text, candidate):
+    assert len(proposition_units(candidate)) == 1
+    verdict, coverage = _both(claim_text, candidate)
+    assert verdict.negation_conflict is True
+    assert coverage <= CAP
+    assert resolve_ambiguous_coverage(_claim(claim_text), candidate, coverage=coverage, arbiter=ClaimArbiter(True)) is False
+
+
+@pytest.mark.parametrize("claim_text, candidate", [
+    ("Desaparecen los síntomas.", "Es científicamente cierto que después de recibir tratamiento desaparecen los síntomas."),
+    ("The symptoms disappeared.", "It is definitely true that after regular treatment the symptoms disappeared."),
+])
+def test_d289_8_the_positive_matrix_with_the_same_complement_is_covered_and_compatible(claim_text, candidate):
+    assert len(proposition_units(candidate)) == 1
+    verdict, coverage = _both(claim_text, candidate)
+    assert verdict.has_conflict is False and coverage >= COVERAGE_THRESHOLD
+
+
+@pytest.mark.parametrize("claim_text, candidate", [
+    ("Desaparecen los síntomas.", "No es cierto que sea caro el tratamiento, pero después del tratamiento desaparecen los síntomas."),
+    ("The symptoms disappeared.", "It is not true that the treatment was expensive, but after the treatment the symptoms disappeared."),
+])
+def test_d289_8_independent_propositions_still_split_and_the_unrelated_negation_stays_out(claim_text, candidate):
+    units = proposition_units(candidate)
+    assert len(units) == 2 and not _leaves_open_dependency(units[0])
+    verdict, coverage = _both(claim_text, candidate)
+    assert verdict.negation_conflict is False and coverage >= COVERAGE_THRESHOLD
+
+
+def test_d289_8_open_dependency_vocabulary_is_the_continuation_relation_own():
+    from cutsell_worker.take_grouping import _DANGLING_FUNCTION_WORDS
+    assert _leaves_open_dependency("No es científicamente cierto que") and "que" in _DANGLING_FUNCTION_WORDS
+    assert _leaves_open_dependency("It is definitely not true that") and "that" in _DANGLING_FUNCTION_WORDS
+    assert _leaves_open_dependency("Honestamente no creo") and _leaves_open_dependency("I honestly do not believe")
+    assert _leaves_open_dependency("") is True
+    assert not _leaves_open_dependency("No es cierto que sea caro el tratamiento,")
+    assert not _leaves_open_dependency("El producto no es caro,")
+    # claims are cut by the same rule: the negated sentence is ONE claim, never a "no es cierto que" stub
+    claims = extract_claims("c", "No es científicamente cierto que después de recibir tratamiento desaparecen los síntomas.")
+    assert [c.claim_type for c in claims] == ["NEGATION"] and claims[0].text.endswith("desaparecen los síntomas.")
+
+
+def test_d289_8_raw123_comma_period_invariance_still_holds():
+    for winner in (W123, W123_PERIOD):
+        assert detect_text_contradiction(winner, RT123).has_conflict is False
+        (claim,) = extract_claims("RT", RT123)
+        assert claim_coverage(claim, winner) == pytest.approx(0.5556, abs=1e-4)
+    assert len(proposition_units(W123)) == 4

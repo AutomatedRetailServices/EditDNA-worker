@@ -36,7 +36,7 @@ import re
 from typing import Protocol
 
 from .canonical_identity import mint_canonical_claim_id
-from .final_sibling_grouping import _content, _negations, _numbers
+from .final_sibling_grouping import _content, _negations, _numbers, _tokens
 from .semantic_atom_importance import (
     _CORRECTION_MARKERS,
     _CURRENCY_MARKERS,
@@ -45,6 +45,13 @@ from .semantic_atom_importance import (
     _PERCENT_MARKERS,
     _clause_has_any,
 )
+# D-289.8: the sentence-continuation relation's own "this text is not
+# finished" vocabulary (articles, prepositions, conjunctions, the
+# complementizers "que"/"that") -- reused verbatim for the clause splitter's
+# open-dependency check, never a second list. `take_grouping` sits below
+# this module in the import graph (it imports only contracts and
+# semantic_atom_importance), so this is cycle-free.
+from .take_grouping import _DANGLING_FUNCTION_WORDS
 
 # --- Claim types ------------------------------------------------------------
 ENTITY_RELATION = "ENTITY_RELATION"
@@ -266,6 +273,29 @@ _CLAUSE_SPLIT_RE = re.compile(
 _CLAUSE_MIN_CONTENT_TOKENS = 2
 
 
+def _leaves_open_dependency(left: str) -> bool:
+    """D-289.8: True when `left` (the text before a candidate connector) is
+    NOT a self-standing proposition -- it ends on a word that requires its
+    complement to follow: a dangling function word (the complementizers
+    "que"/"that", a preposition, an article, a conjunction -- `take_
+    grouping._DANGLING_FUNCTION_WORDS`, the sentence-continuation relation's
+    own vocabulary) or a belief/perception verb awaiting what is believed
+    (`_BELIEF_PERCEPTION_MARKERS`: "no creo", "I do not think"). "No es
+    cierto que | después de recibir tratamiento desaparecen los síntomas":
+    the negation's clause is "no es cierto que ..." and its complement is
+    everything after the connector; cutting there separates a negation
+    from the proposition it negates. When the two sides cannot be shown to
+    be independent propositions, the whole span stays one unit -- claims
+    and scope alike (WHEN UNCERTAIN, KEEP the full scope)."""
+    tokens = _tokens(left)
+    if not tokens:
+        return True
+    if tokens[-1] in _DANGLING_FUNCTION_WORDS:
+        return True
+    tail = left.casefold().rstrip().rstrip(",;:").rstrip()
+    return any(tail.endswith(marker.strip()) for marker in _BELIEF_PERCEPTION_MARKERS)
+
+
 def _split_into_clauses(text: str, *, _search_from: int = 0) -> tuple[str, ...]:
     """Split one sentence into an ordered tuple of clauses at the first
     connector that produces two substantive sides, recursing into the
@@ -278,11 +308,17 @@ def _split_into_clauses(text: str, *, _search_from: int = 0) -> tuple[str, ...]:
         return (text,)
     left = text[:match.start()].strip()
     right = text[match.start():].strip()
-    if len(_content(left)) < _CLAUSE_MIN_CONTENT_TOKENS or len(_content(right)) < _CLAUSE_MIN_CONTENT_TOKENS:
+    if (
+        len(_content(left)) < _CLAUSE_MIN_CONTENT_TOKENS
+        or len(_content(right)) < _CLAUSE_MIN_CONTENT_TOKENS
+        or _leaves_open_dependency(left)
+    ):
         # This particular connector doesn't produce a valid split (e.g. it
-        # is the sentence's own first word, or nothing substantial follows
-        # it) -- keep looking later in the string for a real one instead of
-        # giving up on splitting the sentence entirely.
+        # is the sentence's own first word, nothing substantial follows it,
+        # or the left side is an unfinished matrix clause whose complement
+        # the connector introduces -- D-289.8) -- keep looking later in the
+        # string for a real one instead of giving up on splitting the
+        # sentence entirely.
         return _split_into_clauses(text, _search_from=match.end())
     connector_len = match.end() - match.start()
     remainder = right[connector_len:]
