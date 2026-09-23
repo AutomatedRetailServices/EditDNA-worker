@@ -87,7 +87,18 @@ Verified state at `781a8634`:
   invalidated the whole arbiter batch), shows the run's W-R pair was deferred
   by the per-group pair cap, and traces why even a confirming W-R verdict is
   vetoed by the contradiction primitive on this transcript -- so no RAW is
-  proposed to obtain that answer.
+  proposed to obtain that answer. D-289.7 closes that residual (R-289.4a):
+  `claim_coverage` and `contradiction_signal` now scope negation/number by
+  PROPOSITION through one shared segmentation (`semantic_claims.proposition_
+  units`/`proposition_scope_units`; corrective-contrast connectors split;
+  relational references keep sentence scope; no connector -> fails closed as
+  before), so the comma-run winner reads identically with a comma or a
+  period; a one-unit-per-side bridge now takes the LATER unit as the
+  newcomer (guard 8). Traced offline with labelled simulated answers: guard
+  7's veto disappears, the path consults the existing claim arbiter on R+T's
+  claim (0.5556, ambiguous band), and the outcome still depends on three
+  unrecorded real answers (W-R pairwise, the claim verdict, the D-085 probe
+  if declined) -- no RAW proposed; not integrated; no baseline change.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

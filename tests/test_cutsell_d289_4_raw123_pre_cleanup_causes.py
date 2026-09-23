@@ -52,6 +52,14 @@ D-289.5 findings on the joint removal:
 Every text below is the package's own (`final KEEP sequence` / `final
 DISCARD sequence` / ladder rows). QA-only material; production code reads
 none of it.
+
+D-289.7 (residual R-289.4a): both scoping authorities now segment by
+PROPOSITION (`semantic_claims.proposition_units`), so the winner's comma-run
+sentence yields separate negated / asserted clauses; the expectations below
+that pinned the old whole-sentence scope (the fused blocking claim as ONE
+clause, the negation cap on the unit's claim, guard 7's veto of W vs R+T)
+are updated to the per-proposition outcome and the path test now records
+how far the R+T path reaches and what still depends on a real answer.
 """
 from __future__ import annotations
 
@@ -63,6 +71,7 @@ from cutsell_worker import hybrid_cross_group_retry_integrity as hx
 from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.semantic_claims import (
     AMBIGUOUS_COVERAGE_FLOOR,
+    COVERAGE_THRESHOLD,
     _DEFINITIVE_MISMATCH_COVERAGE_CAP,
     _split_into_clauses,
     claim_coverage,
@@ -92,6 +101,10 @@ def _take(cid, start, end, text, *, complete=True, source="src"):
     return CandidateTake(cid, source, 0, start, end, text, complete_idea=complete)
 
 
+def _content_free_tokens(text):
+    return set(re.findall(r"[\wáéíóúñü%]+", text.casefold()))
+
+
 # RAW #123 texts, verbatim from the package's final KEEP / DISCARD sequences
 W123 = ("Esta es mi experiencia, soy la única en mi familia que tiene este tipo de cáncer, por eso no creo y "
         "está comprobado científicamente que los cánceres son hereditarios, más bien, solo un 5 o 10 % son de "
@@ -117,8 +130,14 @@ def test_cause1_real_winner_clauses_are_contiguous_and_keep_the_negation():
     assert all(clause in W123 for clause in clauses), clauses
     assert any(clause.startswith("por eso no creo") for clause in clauses)
     assert not any("esono" in clause for clause in clauses)
-    # the package's recorded blocking claim is exactly the fused clause with the space restored
-    assert RAW123_BLOCKING_CLAIM_TEXT.replace("por esono", "por eso no") in clauses
+    # the package's recorded blocking claim (space restored) is, since D-289.7,
+    # TWO propositions -- the rejected "no creo que X" and the asserted
+    # "mas bien, solo un 5 o 10 % Y" -- joined; it is never one fused clause
+    restored = RAW123_BLOCKING_CLAIM_TEXT.replace("por esono", "por eso no")
+    negated = next(c for c in clauses if c.startswith("por eso no creo"))
+    asserted = clauses[clauses.index(negated) + 1]
+    assert asserted.startswith("más bien,") and "no" not in _content_free_tokens(asserted)
+    assert negated + " " + asserted == restored
     assert RAW123_BLOCKING_CLAIM_TEXT not in clauses
     # the winner's own CRITICAL claim covers itself -- no false loss
     critical = [c for c in extract_claims("W", W123) if c.importance == "CRITICAL"]
@@ -153,16 +172,24 @@ def test_cause1_generic_nested_connectors_reconstruct_every_clause_verbatim(sent
 
 
 def test_cause1_a_removed_negation_and_a_changed_number_are_still_detected():
-    negated = extract_claims("N", "por eso no creo que los cánceres son hereditarios, más bien solo un 5 o 10 % lo son.")
-    critical = [c for c in negated if c.importance == "CRITICAL"]
-    assert critical
+    """D-289.7: the sentence is two propositions, each its own CRITICAL
+    claim. The negated proposition detects the removed negation, the numeric
+    proposition detects the changed number -- each corruption is flagged by
+    the claim it corrupts, and no claim is flagged by a corruption of the
+    OTHER proposition (that was the whole-sentence scope this entry closes).
+    Every claim still covers itself."""
+    text = "por eso no creo que los cánceres son hereditarios, más bien solo un 5 o 10 % lo son."
+    critical = [c for c in extract_claims("N", text) if c.importance == "CRITICAL"]
+    assert [c.claim_type for c in critical] == ["NEGATION", "MEASUREMENT_QUANTITY"]
+    negation_claim, number_claim = critical
+    no_negation = "por eso creo que los cánceres son hereditarios, más bien solo un 5 o 10 % lo son."
+    other_number = "por eso no creo que los cánceres son hereditarios, más bien solo un 30 % lo son."
+    assert claim_coverage(negation_claim, no_negation) <= _DEFINITIVE_MISMATCH_COVERAGE_CAP
+    assert claim_coverage(number_claim, no_negation) >= 0.6  # its own proposition is intact
+    assert claim_coverage(number_claim, other_number) <= _DEFINITIVE_MISMATCH_COVERAGE_CAP
+    assert claim_coverage(negation_claim, other_number) >= 0.6  # its own proposition is intact
     for claim in critical:
-        # same words, negation removed -> confidently NOT covered
-        assert claim_coverage(claim, "por eso creo que los cánceres son hereditarios, más bien solo un 5 o 10 % lo son.") <= _DEFINITIVE_MISMATCH_COVERAGE_CAP
-        # same words, number changed -> confidently NOT covered
-        assert claim_coverage(claim, "por eso no creo que los cánceres son hereditarios, más bien solo un 30 % lo son.") <= _DEFINITIVE_MISMATCH_COVERAGE_CAP
-        # itself -> covered
-        assert claim_coverage(claim, "por eso no creo que los cánceres son hereditarios, más bien solo un 5 o 10 % lo son.") >= 0.6
+        assert claim_coverage(claim, text) >= 0.6
     assert _DEFINITIVE_MISMATCH_COVERAGE_CAP < AMBIGUOUS_COVERAGE_FLOOR
 
 
@@ -223,9 +250,13 @@ def test_cause2_after_the_fix_the_real_unit_is_judged_whole_and_kept_for_groupin
     gates it). Lexically the winner covers 5 of its 9 content tokens
     (0.5556, above the >6 s floor), but its complete realization is NOT
     preserved per the claim authority -- the joined sentence's CRITICAL
-    claim best-covers 0.05 against the winner (negation guard: the winner's
-    "no creo ... son hereditarios" scope) -- so nothing is removed and the
-    unit reaches grouping whole. No tail alone, no dangling head."""
+    claim best-covers 0.5556 against the winner: since D-289.7 the scope is
+    the winner's asserted proposition ("mas bien, solo un 5 o 10 % ..."),
+    no longer capped by the neighbouring "no creo" clause, and 0.5556 sits
+    below COVERAGE_THRESHOLD (0.6) in the ambiguous band; this pre-grouping
+    cleanup has no claim arbiter, so "not covered" stands and the unit
+    reaches grouping whole, where the arbiter-gated path decides. No tail
+    alone, no dangling head."""
     survivors, removed, diag = hx.collapse_cross_group_semantic_retries(_raw123_kept(), RAW123_DECISIONS)
     assert [t.clip_id for t in removed] == ["P"]
     assert {"R", "T"} <= {t.clip_id for t in survivors}
@@ -237,7 +268,7 @@ def test_cause2_after_the_fix_the_real_unit_is_judged_whole_and_kept_for_groupin
     assert row["content_token_count"] == 9 and row["coverage"] == 0.5556 and row["strongest_peer_clip_id"] == "W"
     claims = row["continuation_unit_claims"]
     assert len(claims) == 1 and claims[0]["importance"] == "CRITICAL" and claims[0]["covered"] is False
-    assert claims[0]["best_coverage"] == 0.05
+    assert AMBIGUOUS_COVERAGE_FLOOR <= claims[0]["best_coverage"] == 0.5556 < COVERAGE_THRESHOLD
     assert not any(d["clip_id"] == "T" for d in diag)  # the tail is never judged by itself
 
 
@@ -474,36 +505,72 @@ def test_replay_the_recorded_freeze_blocker_is_exactly_the_cause1_defect():
     assert all(claim_coverage(c, W123) >= 0.6 for c in critical)
 
 
-def test_path_that_would_consult_w_against_r_t_and_the_vetoes_that_still_stop_it():
-    """What it would take to ask the claim arbiter about W vs the complete
-    sentence R+T, and what still stops it on RAW #123's transcript:
-    1. the cleanup must keep R+T (done: realization not preserved);
+def test_path_that_consults_w_against_r_t_and_what_still_depends_on_a_real_answer():
+    """The path to a claim-arbiter verdict on W vs the complete sentence
+    R+T, after D-289.7, on RAW #123's own transcript:
+    1. the cleanup keeps R+T (realization not preserved: 0.5556 < 0.6);
     2. IdeaClusterer must ASK W-R (the run did not: per-group cap) AND the
-       arbiter must confirm it -- assumed here as a labelled HYPOTHESIS;
-    3. reconcile then merges {W, R, T}; in the cohesion pass the W-R edge
-       is a bridge into the chain and reaches the contained-restatement
-       path -- whose guard 7 (`detect_text_contradiction`, sentence-scoped
-       negation) reads W's "no creo ... son hereditarios" against the unit
-       and refuses; the D-085 probe applies the same net first and refuses
-       too. The claim arbiter is never reached. Repeating the run cannot
-       change 3 while the transcript keeps this shape: the veto is the
-       deterministic primitive, not the budget."""
+       pairwise arbiter must confirm it -- a labelled HYPOTHESIS here, no
+       run has recorded it;
+    3. reconcile merges {W, R, T}; in the cohesion pass the W-R edge is a
+       bridge with ONE unit on each side. Guard 7 (`detect_text_
+       contradiction`) no longer vetoes: W's negation belongs to the
+       rejected proposition, not to the shared figure (the veto that
+       disappears). The later unit R+T is the newcomer (D-289.7 orientation
+       fix; D-289 fixed the LEFT unit, W, as newcomer and guard 8 refused
+       W as a "restatement" of its own later restatement). Guards 2-3-5-6-8
+       pass on the recorded texts; guard 4 finds R+T's one CRITICAL claim at
+       0.5556 -- the ambiguous band -- and CONSULTS THE EXISTING CLAIM
+       ARBITER. That verdict is what still depends on a real answer:
+       confirmed -> {W, R, T} one family, W wins, R+T discarded, Freeze not
+       blocked; declined or no arbiter -> the path falls to the D-085 probe
+       (the component probe is a third unrecorded answer; the fake declines
+       it with the labelled reason) -> {W}, {R, T} co-kept as before.
+    Every arbiter answer in this test is SIMULATED and labelled; RAW #123
+    recorded none of the three (W-R pairwise, R+T claim vs W, component
+    probe)."""
     survivors, removed, _diag = hx.collapse_cross_group_semantic_retries(_raw123_kept(), RAW123_DECISIONS)
-    assert detect_text_contradiction(W123, R123 + " " + T123).negation_conflict is True
-    assert detect_text_contradiction(W123, R123).negation_conflict is True
-    arbiter = RecordedAnswersArbiter({
-        (W123, A123): (False, 0.85, "recorded"), (R123, C123): (False, 0.9, "recorded"), (P123, A123): (True, 0.95, "recorded"),
-        (W123, R123): (True, 0.85, "HYPOTHESIS -- the run never asked this pair"),
-    }, unlisted_reason=NOT_RECORDED)
+    assert [t.clip_id for t in removed] == ["P"]
+    # the veto that disappears -- on the unit and on R alone, comma-run transcript unchanged
+    assert detect_text_contradiction(W123, R123 + " " + T123).has_conflict is False
+    assert detect_text_contradiction(W123, R123).has_conflict is False
+
+    def _arbiter():
+        return RecordedAnswersArbiter({
+            (W123, A123): (False, 0.85, "recorded"), (R123, C123): (False, 0.9, "recorded"), (P123, A123): (True, 0.95, "recorded"),
+            (W123, R123): (True, 0.85, "HYPOTHESIS -- the run never asked this pair"),
+        }, unlisted_reason=NOT_RECORDED)
+
+    # (a) SIMULATED confirming claim verdict
     claims = ClaimArbiter(True)
-    draft, groups, rec_diag, coh_diag = _real_chain(tuple(survivors), arbiter, claim_arbiter=claims, semantic_labels=RAW123_LABELS)
-    assert any({r["left_clip_id"], r["right_clip_id"]} == {"W", "R"} for r in rec_diag["merges"])  # step 3 merge happened
+    draft, groups, rec_diag, coh_diag = _real_chain(tuple(survivors), _arbiter(), claim_arbiter=claims, semantic_labels=RAW123_LABELS)
+    assert any({r["left_clip_id"], r["right_clip_id"]} == {"W", "R"} for r in rec_diag["merges"])
     rows = [r for r in coh_diag["edge_trace"] if r.get("bridge_sensitive") and {r.get("left_clip_id"), r.get("right_clip_id")} == {"W", "R"}]
-    assert rows and rows[0]["accepted"] is False and rows[0]["reason_rejected"] == "cross_component_contradiction"
-    assert rows[0]["component_cohesion_evaluated"] is False  # refused before any probe
-    assert claims.asked == []  # the claim arbiter was never consulted
-    assert ("W",) in groups and ("R", "T") in groups
-    assert {"W", "R", "T"} <= _kept(draft)
+    assert rows and rows[0]["accepted"] is True and rows[0]["accepted_by"] == CONTAINED_RESTATEMENT_ACCEPTANCE
+    assert rows[0]["restated_unit_member_ids"] == ["R", "T"] and rows[0]["preservation_evidence"]["preserving_member_clip_id"] == "W"
+    claim_rows = rows[0]["preservation_evidence"]["claims_preserved"]
+    assert claim_rows == [{"claim_type": "MEASUREMENT_QUANTITY", "importance": "CRITICAL", "coverage": 0.5556,
+                           "resolution": "claim_equivalence_arbiter", "covered": True}]
+    assert rows[0]["preservation_evidence"]["claim_arbiter_consulted"] is True
+    assert claims.asked and claims.asked[0] == (R123 + " " + T123, W123)  # the question the path asks
+    assert ("W", "R", "T") in groups
+    assert "W" in _kept(draft) and {"R", "T"} <= _discarded(draft)
+    assert draft.diagnostics["final_story_coherence_validation"]["freeze_blocked"] is False
+
+    # (b) SIMULATED declining claim verdict, and (c) no claim arbiter wired
+    for claim_arbiter in (ClaimArbiter(False), None):
+        arbiter = _arbiter()
+        draft, groups, rec_diag, coh_diag = _real_chain(tuple(survivors), arbiter, claim_arbiter=claim_arbiter, semantic_labels=RAW123_LABELS)
+        rows = [r for r in coh_diag["edge_trace"] if r.get("bridge_sensitive") and {r.get("left_clip_id"), r.get("right_clip_id")} == {"W", "R"}]
+        assert rows and rows[0]["accepted"] is False
+        assert rows[0]["reason_rejected"] == "component_cohesion_declined"  # the D-085 probe, fake-declined
+        assert rows[0]["component_cohesion_evaluated"] is True and rows[0].get("distinct_required_facts") == []
+        assert rows[0]["cohesion_confidence"] == 0.0  # the fake's labelled decline, not a recorded verdict
+        if claim_arbiter is not None:
+            assert claim_arbiter.asked and claim_arbiter.asked[0] == (R123 + " " + T123, W123)
+        assert ("W",) in groups and ("R", "T") in groups
+        assert {"W", "R", "T"} <= _kept(draft)
+        assert draft.diagnostics["final_story_coherence_validation"]["freeze_blocked"] is False
 
 
 # =============================================================================

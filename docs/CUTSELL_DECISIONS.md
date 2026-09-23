@@ -78246,3 +78246,157 @@ over a comma-run sentence) is the standing veto; the per-group pair cap's
 interaction with a restatement of the cap-saturated group is an observation
 for the Product Owner, not changed here. **Exact next step:** Product Owner
 review; no integration, no RAW, no baseline change.
+
+## D-289.7 — Proposition scope for the two negation/number authorities
+(residual R-289.4a); one-unit-per-side bridge orientation (same isolated
+branch, off `95d0b02c`; offline only)
+
+**NOT integrated. No RAW. `main`/PR #25/canon/baselines untouched. Freeze
+not weakened. No threshold changed. No transcript rewritten. No Video00
+exception. D-289.6's corrections kept unchanged (per-member protection,
+sentence-granularity relation claims, the `_split_into_clauses` fix, the
+D-289.2 negative controls, pair budget 14 and `_PAIR_BUDGET_PER_GROUP_CAP`
+2, the anti-monopolisation tests).**
+
+### Reproduction (verified before any edit)
+On RAW #123's winning clip W (package text, verbatim), replacing ONLY the
+comma before "más bien" with a period -- identical words and figures --
+changed: `detect_text_contradiction(W, R+T)`: negation_conflict True ->
+False; `claim_coverage(R+T's CRITICAL claim, W)`: 0.05 -> 0.5556. Root
+cause, both authorities: "the sentence that corresponds to the compared
+proposition" meant the run of text between two terminal punctuation marks.
+A comma-run ASR transcript ("..., por eso no creo que X, más bien, solo un
+5 o 10 % Y, ...") held the REJECTED clause (negated) and the ASSERTED
+figure in one "sentence"; the shared number anchored the whole run and the
+rejected clause's negation was read as negating the figure. The verdict
+depended on punctuation the speaker never uttered.
+
+### Fix -- one segmentation, shared
+- `semantic_claims.proposition_units(text)`: sentences, each further
+  divided at the genuine clause connectors D-040's `_split_into_clauses`
+  already recognises (cause/effect, temporal, contrastive, relative-
+  addition) plus a new split-only class `_CORRECTIVE_CONTRAST_MARKERS`
+  ("más bien"/"mas bien"/"sino"/"mejor dicho"/"al contrario"/"rather"/
+  "instead"/"on the contrary" -- the pivot that REPLACES the clause before
+  it). Listed separately from `_CONTRASTIVE_MARKERS` because D-065/D-066's
+  negation-role eligibility gate reads that tuple and is a safety contract
+  this entry does not widen. Every unit is a contiguous substring; D-040's
+  two-content-token floor on both sides is unchanged, so a thin clause is
+  not split.
+- `semantic_claims.spans_multiple_propositions(text)` and
+  `proposition_scope_units(reference, candidate)` -- the granularity rule:
+  a reference that itself RELATES two propositions (a connector with
+  content on both sides, e.g. "Anxiety occurs because of the severe
+  stress") is judged against candidate SENTENCES (both halves of a relation
+  must stay in view -- this keeps the causal-inversion guard and every
+  relational check byte-identical to before); a single-proposition
+  reference is judged against candidate PROPOSITIONS. A leading connector
+  ("por eso no creo que ...") relates the text to something outside it and
+  does not count.
+- `semantic_claims.claim_coverage`: the relevant scope for the negation-
+  flip, number-mismatch and causal-inversion guards is
+  `proposition_scope_units(claim.text, candidate_text)`; nothing else
+  changed (same caps, same D-059 "no relevant unit -> no fabricated
+  mismatch" rule).
+- `contradiction_signal`: the private `_SENTENCE_SPLIT_RE`/`_sentences`
+  are gone; `_propositions` delegates to `proposition_units`, and
+  `_clauses_address_same_proposition` iterates
+  `proposition_scope_units(unit, other_text)`. The D-056.5 lexical bar
+  (shared number decisive; else >=2 shared tokens at >=0.5 of the smaller
+  side) and the whole-text number rule are unchanged. The two authorities
+  now read one piece of evidence through one segmentation; their decision
+  rules remain their own.
+- Same claim granularity: `extract_claims` mints claims with the same
+  splitter, so the winner's comma-run sentence yields separate NEGATION
+  ("por eso no creo ... hereditarios,") and MEASUREMENT_QUANTITY ("más
+  bien, solo un 5 o 10 % ...") claims -- each covers itself; a removed
+  negation is flagged by the negated claim, a changed number by the numeric
+  claim, and neither by the other's corruption.
+- Ambiguity preserved (fails closed exactly as before): a sentence with no
+  recognised connector ("No creo que los cánceres son hereditarios, solo un
+  5 o 10 % ... lo son") or with a clause too thin to split ("No es así, más
+  bien ...") stays ONE unit -> negation conflict stays True, coverage stays
+  capped. A terse rejection of the broader claim next to the figure ("no
+  creo que los cánceres son hereditarios, más bien solo un 5 o 10 % de los
+  cánceres lo son") still VETOES in the primitive (the negated clause shares
+  2 of its 3 content tokens with the figure -> D-056.5 bar met); RAW #123's
+  W passes that bar only because its rejected clause carries its own extra
+  content ("está comprobado científicamente": 2 of 6, 0.33 < 0.5).
+  Recorded, not tuned.
+
+### Second defect exposed by the trace and fixed (in-scope, D-091)
+`_accept_contained_restatement_singleton_bridge` with ONE realization unit
+on EACH side fixed the LEFT unit as the newcomer regardless of chronology.
+On the W-R edge W (earlier, complete) was tested as a "restatement" of its
+own later restatement R+T and guard 8 (a restatement FOLLOWS what it
+restates) refused the shape before any preservation proof, so the path fell
+to the D-085 probe. Now the LATER unit is the newcomer whichever side of
+the edge it sits on -- guard 8's own definition, not a new rule; the
+one-unit-vs-component cases are unchanged.
+
+### The R+T path after this entry (`test_path_that_consults_w_against_r_t_
+and_what_still_depends_on_a_real_answer`; every arbiter answer SIMULATED
+and labelled -- RAW #123 recorded none of the three)
+1. the cleanup keeps R+T: its CRITICAL claim best-covers 0.5556 against W
+   (was 0.05 by the negation cap) -- below COVERAGE_THRESHOLD 0.6, the
+   ambiguous band; the pre-grouping cleanup has no claim arbiter, so "not
+   covered" stands and the unit reaches grouping whole;
+2. IdeaClusterer must ASK W-R (the run did not: per-group cap, D-289.6) and
+   the pairwise arbiter must CONFIRM it -- HYPOTHESIS #1;
+3. the W-R bridge, one unit each side: **guard 7 no longer vetoes** (`has_
+   conflict` False on W vs R+T and on W vs R alone -- the veto that
+   disappears); R+T is the newcomer; guards 2-3-5-6-8 pass on the recorded
+   texts; guard 4 finds the one CRITICAL claim at 0.5556 and **CONSULTS THE
+   EXISTING CLAIM ARBITER** with exactly (R+T's sentence, W's text) --
+   HYPOTHESIS #2, the answer that still depends on a real verdict:
+   - confirmed -> `contained_restatement_of_complete_realization`, family
+     {W, R, T}, W wins (winner 0.95), R+T discarded, Freeze not blocked
+     (the claim arbiter is asked the same question again by the
+     ClaimCoverage BestTake competition -- three consultations, all
+     simulated);
+   - declined, or no claim arbiter wired -> the path falls to the D-085
+     component probe (HYPOTHESIS #3, unrecorded; the fake declines it with
+     a labelled reason) -> {W}, {R, T} co-kept, Freeze not blocked -- the
+     Level-2 state of D-289.5/D-289.6.
+**Effect on RAW #123 -- inference where the trace is missing:** the run's
+Freeze blocker (cause 1) and T's early removal (cause 2) are fixed
+offline; whether W-R would be ASKED on a rerun is still governed by the
+per-group cap (inferred from recorded usage, D-289.6), and whether the
+pairwise and claim arbiters would CONFIRM is unknown -- no run has recorded
+either answer, and this entry does not promise a rerun would obtain them.
+No RAW is proposed on this basis.
+
+### Collateral corrections (same root cause)
+- `tests/test_cutsell_d101_semantic_best_take_safety_hardening.py::test_b_
+  negative_control_4`: the long take's own CRITICAL claim ("batteries are
+  only covered for 1 year") was read as NOT covered by its own sentence
+  (the neighbouring "2 years" clause poisoned the number scope), so both
+  survivors' CRITICAL coverage sets were empty and equal and step 5's
+  contradiction sub-check fired first. With proposition scope the claim
+  covers itself, the sets are asymmetric and step 5's unique-fact sub-check
+  fires first: same selection (the safe local fallback), reason
+  `unresolved_unique_fact_asymmetry`. The test now asserts the self-coverage
+  and the truthful reason.
+- D-289.4 tests updated to per-proposition semantics (the fused blocking
+  claim is two propositions joined; the unit's claim sits at 0.5556 in the
+  ambiguous band; the path test as above).
+
+### Tests
+- NEW `tests/test_cutsell_d289_7_proposition_scope_negation.py` (38): the
+  comma/period invariance on both authorities; shared logic (one
+  segmentation imported by both, no private splitter); ES/EN controls --
+  contrast with the negation in the OTHER proposition (covered, no
+  conflict) vs ON the compared proposition (capped, conflict), correction
+  ("no es un 30 %, más bien solo un 5 %"; "not 30 percent, rather only 5
+  percent"), "sino", true negation flip, numeric differences (both
+  authorities), complete causal relations at clause and sentence level,
+  ambiguous cases that stay closed, the terse-rejection veto; the
+  granularity rule; unchanged defaults (D-040 floor, D-059 shape, D-065
+  vocabulary); the one-unit-per-side orientation on both edge directions
+  and its fall-through to the probe; budget 14 and cap 2 unchanged.
+- `tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py` (28) and
+  `tests/test_cutsell_d101_semantic_best_take_safety_hardening.py` updated
+  as described.
+
+### Verification
+See the Verification section appended below after the full run.

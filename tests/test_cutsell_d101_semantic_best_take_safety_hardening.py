@@ -217,23 +217,35 @@ def test_b_negative_control_3_same_opening_different_idea_no_subset_inferred():
 def test_b_negative_control_4_contradiction_suppresses_the_protection_longer_not_automatic():
     """`long` textually contains `short` but they disagree on a number
     (contradiction) -- the subset protection must be suppressed entirely,
-    never assume the fuller candidate is automatically the safe one. The
-    existing step-5 contradiction guard actually catches this pair first,
-    keeping the safe pre-D-101 default rather than either candidate being
-    forced to win."""
+    never assume the fuller candidate is automatically the safe one. Step 5
+    catches this pair before any delivery tie-break, keeping the safe
+    pre-D-101 default rather than either candidate being forced to win.
+
+    D-289.7: the step-5 sub-check that fires changed. Until then the long
+    take's own CRITICAL claim ("batteries are only covered for 1 year") was
+    read as NOT covered by its own sentence -- the neighbouring "2 years"
+    clause poisoned the number scope -- so both survivors' CRITICAL coverage
+    sets were (wrongly) empty and equal and the contradiction sub-check was
+    the first to fire. With proposition scope the claim covers itself, the
+    coverage sets are asymmetric (long carries a required fact short lacks)
+    and step 5's unique-fact sub-check fires first. Same selection, same
+    safe fallback, a more truthful reason."""
     short = take("short", "The warranty covers repairs for 2 years.")
     long_ = take("long", "The warranty covers repairs for 2 years but batteries are only covered for 1 year.", start=5.0)
     assert _is_incomplete_content_subset(short, long_) is True
     from cutsell_worker.contradiction_signal import any_pair_contradicts
     assert any_pair_contradicts([short.text, long_.text])
+    from cutsell_worker.semantic_claims import claim_coverage, extract_claims
+    critical = [c for c in extract_claims("long", long_.text) if c.importance == "CRITICAL"]
+    assert critical and all(claim_coverage(c, long_.text) >= 0.6 for c in critical)  # covers itself (D-289.7)
     decisions = {"short": ("keep", 0.5), "long": ("keep", 0.5)}
     selected, _p, reason = _semantic_best_take(
         (short, long_), decisions, "short", ranked(("short", 10.0), ("long", 5.0)),
     )
-    # Never automatically "long wins" -- the contradiction leaves the
-    # family at its safe, pre-existing fallback instead.
+    # Never automatically "long wins" -- step 5 leaves the family at its
+    # safe, pre-existing fallback instead.
     assert selected == "short"
-    assert reason == "unresolved_contradiction"
+    assert reason == "unresolved_unique_fact_asymmetry"
 
 
 def test_b_exclusion_helper_fails_open_never_excludes_everyone():

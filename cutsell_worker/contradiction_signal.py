@@ -52,6 +52,26 @@ complete the compared clause before trailing off elsewhere is unaffected --
 its negation token still counts, because it still co-occurs with the shared
 anchor in its own sentence.
 
+D-289.7 PROPOSITION SCOPE (residual R-289.4a, docs/CUTSELL_DECISIONS.md
+D-289.4..D-289.7): D-056.5's "sentence/clause" was in practice the run of
+text between two terminal punctuation marks. On a comma-run ASR transcript
+("..., por eso no creo que X, mas bien, solo un 5 o 10 % Y, ...") that one
+"sentence" holds both the REJECTED clause (negated) and the ASSERTED figure,
+so the shared number anchored the whole run and the rejected clause's
+negation was read as negating the figure -- while the identical words with a
+period before "mas bien" produced no conflict. The verdict depended on
+punctuation the speaker never uttered. The scope unit is now the
+PROPOSITION: `semantic_claims.proposition_units` (a sentence further divided
+at the genuine clause connectors D-040's claim extraction already uses --
+cause/effect, temporal, contrastive, relative-addition, corrective-contrast)
+and `semantic_claims.proposition_scope_units` (a relational unit is compared
+against the other text's sentences, a single proposition against its
+propositions). `semantic_claims.claim_coverage` scopes its negation/number/
+causal guards with the SAME two helpers, so the two authorities read one
+piece of evidence identically. A sentence with no recognised connector stays
+one unit: the ambiguous case keeps its whole-sentence scope and fails closed
+as before. This module keeps NO private sentence splitter for scoping.
+
 This primitive is EXTRACTED, not reinvented: it reuses
 ``final_sibling_grouping._numbers``/``_content``/``_tokens`` verbatim -- the
 exact same signals that module already requires to MATCH before it will
@@ -80,10 +100,10 @@ be solved here.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from .final_sibling_grouping import _content, _numbers, _tokens
+from .semantic_claims import proposition_scope_units, proposition_units
 
 # D-056.5: superset of final_sibling_grouping._NEGATIONS, scoped to this
 # contradiction contract only -- see module docstring for why it is not
@@ -91,16 +111,6 @@ from .final_sibling_grouping import _content, _numbers, _tokens
 # (nor) are ordinary Spanish negation markers, the same general class as
 # the existing five -- not a phrase tied to any specific video's content.
 _NEGATION_MARKERS = frozenset({"no", "not", "never", "nunca", "sin", "without", "nadie", "ni"})
-
-# Standard sentence-boundary heuristic (split after a run of terminal
-# punctuation followed by whitespace) -- general-purpose, not tied to any
-# specific language's idiom or any video's own phrasing. A text with no
-# such boundary at all (a single clause, or a fragment cut off before ever
-# reaching one) is treated as one whole "sentence" by `_sentences` below,
-# so a short, complete-but-unpunctuated utterance is never penalized for
-# lacking a period.
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
-
 
 @dataclass(frozen=True)
 class TextContradiction:
@@ -133,17 +143,17 @@ def _negation_tokens(text: str) -> frozenset[str]:
     return frozenset(token for token in _tokens(text) if token in _NEGATION_MARKERS)
 
 
-def _sentences(text: str) -> tuple[str, ...]:
-    """Splits `text` on ordinary sentence boundaries. A text with no
-    boundary at all (never reached one, or is inherently one clause) comes
-    back as a single one-element tuple containing the whole text -- so
-    "does this sentence contain the shared anchor" degrades gracefully to
-    "does the whole text contain the shared anchor" for a short or
-    unpunctuated utterance, rather than losing it entirely."""
+def _propositions(text: str) -> tuple[str, ...]:
+    """D-289.7: `text` as propositions, through the ONE shared segmentation
+    (`semantic_claims.proposition_units`). A text with no boundary at all
+    (never reached one, or inherently one clause) comes back as a single
+    one-element tuple containing the whole text -- so "does this unit
+    contain the shared anchor" degrades gracefully to "does the whole text
+    contain the shared anchor" for a short or unpunctuated utterance."""
     raw = str(text or "").strip()
     if not raw:
         return ()
-    return tuple(part for part in _SENTENCE_SPLIT_RE.split(raw) if part.strip())
+    return proposition_units(raw) or (raw,)
 
 
 # D-056.5: same two-part shape (a minimum shared-token count AND a minimum
@@ -157,18 +167,24 @@ _MIN_SHARED_CLAUSE_COVERAGE = 0.5
 
 
 def _clauses_address_same_proposition(clause: str, other_text: str) -> bool:
-    """True when `clause` (one sentence from one realization) corresponds
-    to at least one sentence of `other_text` closely enough to be "the same
+    """True when `clause` (one proposition from one realization) corresponds
+    to at least one unit of `other_text` closely enough to be "the same
     specific point" rather than a merely-adjacent or coincidentally-
     overlapping one. A shared NUMBER is decisive on its own -- an exact
     shared figure is essentially never a coincidence, and is precisely the
     anchor D-056.4's own live example shares ("5"/"10" from "5-10%" restated
     on both sides). Otherwise requires both a minimum shared-content-token
     count and a minimum coverage ratio (of the SMALLER side, so a short
-    clause fully contained in a longer one still counts)."""
+    clause fully contained in a longer one still counts).
+
+    D-289.7: `other_text`'s units come from `semantic_claims.proposition_
+    scope_units(clause, other_text)` -- propositions when `clause` states
+    one, sentences when `clause` itself relates two (both halves of a
+    relation must stay in view) -- the identical rule `claim_coverage`
+    applies to its own candidate."""
     clause_numbers = _numbers(clause)
     clause_content = _content(clause)
-    other_sentences = _sentences(other_text) or (other_text,)
+    other_sentences = proposition_scope_units(clause, other_text)
     for other_sentence in other_sentences:
         if clause_numbers and clause_numbers & _numbers(other_sentence):
             return True
@@ -199,9 +215,9 @@ def _negations_about_shared_proposition(text: str, other_text: str) -> frozenset
     presence/absence would previously have counted, never add one.
     """
     found: set[str] = set()
-    for sentence in _sentences(text) or (text,):
-        if _clauses_address_same_proposition(sentence, other_text):
-            found |= _negation_tokens(sentence)
+    for unit in _propositions(text) or (text,):
+        if _clauses_address_same_proposition(unit, other_text):
+            found |= _negation_tokens(unit)
     return frozenset(found)
 
 

@@ -2226,7 +2226,22 @@ def _accept_contained_restatement_singleton_bridge(
         return False, None
     if edge.evidence != "semantic" or edge.confidence < SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD:
         return False, None
-    if len(left_units) == 1:
+    if len(left_units) == 1 and len(right_units) == 1:
+        # D-289.7: ONE unit on each side. The newcomer is the RESTATEMENT,
+        # and a restatement follows the realization it restates (guard 8)
+        # -- so the LATER unit is the newcomer, whichever side of the edge
+        # it sits on. D-289's first cut fixed the left unit as the newcomer
+        # regardless of chronology, so an earlier complete realization was
+        # tested as a "restatement" of its own later restatement and guard 8
+        # refused the shape before any preservation proof or claim arbiter
+        # was reached (RAW #123's W vs R+T, traced offline in D-289.7).
+        left_start = _unit_span(left_units[0], take_map)[0] if all(cid in take_map for cid in left_units[0]) else 0.0
+        right_start = _unit_span(right_units[0], take_map)[0] if all(cid in take_map for cid in right_units[0]) else 0.0
+        if right_start > left_start:
+            newcomer_unit, component_units = right_units[0], left_units
+        else:
+            newcomer_unit, component_units = left_units[0], right_units
+    elif len(left_units) == 1:
         newcomer_unit, component_units = left_units[0], right_units
     else:
         newcomer_unit, component_units = right_units[0], left_units

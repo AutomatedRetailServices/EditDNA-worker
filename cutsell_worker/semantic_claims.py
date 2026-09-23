@@ -147,6 +147,19 @@ _CONTRASTIVE_MARKERS = (
 # salían", ...) and splitting on it would shatter ordinary sentence
 # structure rather than separate genuine propositions.
 _RELATIVE_ADDITION_MARKERS = ("lo que", "lo cual", "which")
+# D-289.7 (residual R-289.4a): corrective-contrast connectors -- the pivot
+# that REPLACES the clause before it with the clause after it ("no creo
+# que X, mas bien Y" / "not X, rather Y" / "no X, sino Y"). The same
+# clause-boundary class as `_CONTRASTIVE_MARKERS` ("pero"/"but"), listed
+# separately because `_classify_negation_role`'s D-065/D-066 eligibility
+# gate reads `_CONTRASTIVE_MARKERS` and is a safety contract this entry
+# does not widen: these are used for proposition segmentation
+# (`_CLAUSE_SPLIT_MARKERS` / `proposition_units`) only. General Spanish/
+# English connective vocabulary -- no Video00 phrase.
+_CORRECTIVE_CONTRAST_MARKERS = (
+    "mas bien", "más bien", "sino", "mejor dicho", "al contrario",
+    "rather", "instead", "on the contrary",
+)
 
 # D-065/D-066: general (English + Spanish) vocabulary for
 # CONTRASTIVE_HINDSIGHT_NEGATION detection only -- no Video00-specific
@@ -240,6 +253,7 @@ def _split_sentences(text: str) -> tuple[str, ...]:
 # not a demotion of the first). No Video00 phrase is hardcoded.
 _CLAUSE_SPLIT_MARKERS = (
     _CAUSE_EFFECT_MARKERS + _TEMPORAL_MARKERS + _CONTRASTIVE_MARKERS + _RELATIVE_ADDITION_MARKERS
+    + _CORRECTIVE_CONTRAST_MARKERS
 )
 _CLAUSE_SPLIT_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(m) for m in sorted(_CLAUSE_SPLIT_MARKERS, key=len, reverse=True)) + r")\b",
@@ -284,6 +298,72 @@ def _split_into_clauses(text: str, *, _search_from: int = 0) -> tuple[str, ...]:
     # contiguous substring of the sentence.
     lead = remainder[: len(remainder) - len(remainder.lstrip())]
     return (left, (right[:connector_len] + lead + further[0]).strip()) + further[1:]
+
+
+# --- D-289.7: the ONE proposition-scope segmentation -----------------------
+# Residual R-289.4a (docs/CUTSELL_DECISIONS.md D-289.4..D-289.7): both
+# `claim_coverage` (below) and `contradiction_signal.detect_text_
+# contradiction` scoped their negation/number checks to the SENTENCE that
+# corresponds to the compared proposition -- and a sentence was whatever
+# lies between two terminal punctuation marks. An ASR transcript that runs
+# several propositions together with commas ("..., por eso no creo que X,
+# mas bien, solo un 5 o 10 % Y, ...") therefore pulled a negation that
+# belongs to the REJECTED clause ("no creo que X") into the scope of the
+# ASSERTED clause ("solo un 5 o 10 % Y"), while the identical words with a
+# period before "mas bien" did not: the verdict depended on punctuation the
+# speaker never uttered. The unit of scope is the PROPOSITION: a sentence
+# further divided at the genuine clause connectors D-040's `_split_into_
+# clauses` already recognises (cause/effect, temporal, contrastive,
+# relative-addition, corrective-contrast) -- the same segmentation
+# `extract_claims` uses to mint claims, so a claim and the scope it is
+# judged against are cut by one rule. Both authorities import THESE
+# helpers; neither keeps a private sentence splitter for scoping.
+#
+# Granularity rule (`proposition_scope_units`): a reference text that
+# itself RELATES two propositions across a connector with content on both
+# sides ("Anxiety occurs because of the severe stress", a whole-sentence
+# claim) is judged against candidate SENTENCES -- a relation needs both
+# halves present to compare, and this keeps every relational check
+# (`claim_coverage`'s causal-inversion guard included) byte-identical to
+# the pre-D-289.7 behavior. A reference that states ONE proposition is
+# judged against candidate PROPOSITIONS. A sentence with no recognised
+# connector stays one unit, so a negation whose clause boundary the
+# segmenter cannot see keeps its whole-sentence scope: the ambiguous case
+# fails closed exactly as before (conflict preserved, coverage capped) --
+# the transcript is never rewritten to obtain a verdict.
+
+
+def proposition_units(text: str) -> tuple[str, ...]:
+    """`text` as an ordered tuple of propositions: every sentence
+    (`_split_sentences`) further divided at genuine clause connectors
+    (`_split_into_clauses`). Every unit is a contiguous substring of its
+    sentence; a text with no boundary at all comes back as one unit."""
+    units: list[str] = []
+    for sentence in _split_sentences(text):
+        units.extend(clause for clause in _split_into_clauses(sentence) if clause.strip())
+    return tuple(units)
+
+
+def spans_multiple_propositions(text: str) -> bool:
+    """True when `text` relates two propositions: some clause connector
+    occurs with content tokens on BOTH sides of it. A leading connector
+    ("por eso no creo que ...", "so I am convinced that ...") relates the
+    text to something OUTSIDE it and does not count."""
+    raw = str(text or "")
+    for match in _CLAUSE_SPLIT_RE.finditer(raw):
+        if _content(raw[:match.start()]) and _content(raw[match.end():]):
+            return True
+    return False
+
+
+def proposition_scope_units(reference_text: str, candidate_text: str) -> tuple[str, ...]:
+    """The units of `candidate_text` at the granularity `reference_text`
+    calls for (see the granularity rule above): sentences for a relational
+    reference, propositions otherwise. Never empty for a non-empty
+    candidate -- degrades to the whole candidate text."""
+    if spans_multiple_propositions(reference_text):
+        return _split_sentences(candidate_text) or (candidate_text,)
+    return proposition_units(candidate_text) or (candidate_text,)
 
 
 # D-065/D-066: the SAME protected-content marker vocabulary
@@ -631,9 +711,17 @@ def claim_coverage(claim: Claim, candidate_text: str) -> float:
     # general content-token test below, exactly as before, which is what
     # still lets a genuine number disagreement ("only 5 percent" vs "about
     # 10 percent of cancers") reach the number-mismatch guard at all.
+    #
+    # D-289.7: the scope unit is the PROPOSITION (`proposition_scope_units`
+    # -- the shared segmentation `contradiction_signal` also uses, see the
+    # module comment above `proposition_units`): a single-proposition claim
+    # is judged against single propositions of the candidate, so a comma-
+    # run sentence can no longer import a neighbouring clause's negation;
+    # a relational claim keeps sentence scope so both halves of the
+    # relation stay in view for the causal-inversion guard below.
     min_shared_for_relevance = min(2, len(claim.content_tokens))
     claim_numbers_for_scope = _numbers(claim.text)
-    candidate_sentences = _split_sentences(candidate_text) or (candidate_text,)
+    candidate_sentences = proposition_scope_units(claim.text, candidate_text)
     number_matched_sentences = [
         s for s in candidate_sentences
         if claim_numbers_for_scope and claim_numbers_for_scope & _numbers(s)
