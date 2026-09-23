@@ -104,8 +104,20 @@ Verified state at `781a8634`:
   shared splitter keeps a span whole when its left side ends on a
   complementizer/function word or a belief verb, so claims and scope keep
   the negation with what it negates; full regression 8956 passed, the same
-  5 pre-existing failures. One Product-Owner-authorized Modal RAW on that
-  head follows (D-289.9).
+  5 pre-existing failures. RAW #124 (run 35886004885 on `693c7b25`, D-289.9,
+  the one authorized Modal run): Freeze passed and a deliverable-candidate
+  MP4 was produced; on the ladder W and R form ONE family, W wins and the
+  restatement R+T is discarded (Level 3, matching Human Gold) -- the
+  restatement duplicate is gone from the rendered edit for the first time;
+  but the 18-check Human Gold QA FAILED (inferred: the pimples family's
+  monolith won over the later take, 20.1 s Level 1) and the abandoned
+  stomach attempt was kept ungrouped (5.9 s Level 1): Level-1 selection
+  44.9 s vs 21.69 s on RAW #122. Offline, both decisions' deterministic
+  inputs are byte-identical at RAW #122's code and this head (run-varying
+  hybrid labels/arbiter answers inferred, not proven). The MP4, result JSON
+  and QA report are unreachable from the session container (artifact host
+  blocked, invalid S3 keys): HUMAN WATCH+LISTEN and the QA report are
+  pending Product Owner attachment. Not integrated; not relaunched.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 

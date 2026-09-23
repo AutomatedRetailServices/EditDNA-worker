@@ -78494,3 +78494,165 @@ section G, 12 new tests -- 50 in the file)
 committed head with RAW #123's parameters, replacing the run that had been
 proposed on `95d0b02c` (never executed: the workflow history shows no run
 after 35866604610 and none active). Its record follows as D-289.9.
+
+## D-289.9 — RAW #124 (the ONE authorized Modal run on
+`fix/editorial-realization-closure@693c7b25`, D-289.7 + D-289.8): checkpoint
+record — FIRST MP4 with the restatement family closed; 18-check QA FAILED
+on the pimples family; image/audio NOT evaluated from this environment
+
+**NOT integrated. Not relaunched. `main`/PR #25/canon/baselines/protections
+untouched. No RunPod. `perceptual_repair_cycle.py` remains disconnected.**
+
+### Run identity (OBSERVED via the GitHub API)
+- `cutsell-video00-modal-raw.yml` run 35886004885 (workflow run #124),
+  `workflow_dispatch` on `fix/editorial-realization-closure`, head
+  `693c7b252674b95e755482da5527a1c1eed77df1` = the pushed, reviewed,
+  fully-tested commit (remote branch SHA verified equal before dispatch;
+  the run's `head_sha` matches). Inputs: RAW #123's parameters (every
+  optional overlay OFF, hybrid ceiling unset, canonical Video00 source,
+  `pacing_v2_diagnostics_enabled=1`). Before dispatch: no Modal RAW run
+  after 35866604610 existed (the run proposed on `95d0b02c` was never
+  executed) and none was in progress/queued. Dispatch HTTP 204 at
+  16:03:00Z; ONE run only. Modal benchmark step 16:03:25-16:12:21Z
+  (SUCCESS); Modal teardown confirmation SUCCESS (scale-to-zero, no
+  persistent GPU resource).
+- Job conclusion FAILURE from two steps: "Verify frozen Selection lock"
+  (FAILURE on RAW #122 and #123 too -- the legacy-selection-shaped lock,
+  D-050C3) and "Verify Human Gold regression QA (18-check manifest)"
+  (FAILURE -- was 18/18 on RAW #123 and PASS on RAW #122). Every other step
+  SUCCESS, including all three Pacing V2 steps (which failed on RAW #123
+  only because Freeze was blocked before the pacing seam).
+
+### Deliverable (OBSERVED from the run summary in the job log)
+`PREVIEW_URI = s3://<bucket>/cutsell/serverless/video00-modal-35886004885-1/
+preview.mp4`, `DIAGNOSTIC_PREVIEW_URI` empty -> the engine produced a
+DELIVERABLE-CANDIDATE MP4 (a QC-invalidated render goes to the diagnostic
+URI, never to `preview.mp4`; D-036 item 6), downloaded by the workflow as
+`artifact/video00-modal.mp4` inside the `cutsell-video00-modal-human-review`
+artifact (580,621,543 bytes; RAW #122's, which held an MP4, was 578 MB;
+RAW #123's, without one, 541 MB). Ladder durations: RAW 366.997 s, CutSell
+keep 162.38 s, CutSell RENDERED 150.867 s, Cut.ai 167.833 s, Gold 141.667 s.
+**Freeze was therefore NOT blocked** (no MP4 is rendered from a blocked
+Freeze) -- the D-289.4 blocker (the winner's own fused claim) did not
+recur.
+
+### Limitation (access, not engine) -- honestly stated
+From this container the artifact host (`productionresultssa*.blob.core.
+windows.net`) is blocked by the egress policy (CONNECT 403: every artifact
+zip and the full-log endpoint), the AWS keys in the environment are invalid
+(`InvalidClientTokenId`), and the MCP log reader caps at the LAST 5000
+lines. What could be read: the complete quality-ladder region list from
+region 48 onward, its summary and traceability, the D-204/D-209/D-218R/
+D-221/D-225 compact summaries and the run summary. What could NOT be read:
+`result.json` (edge traces, arbiter answers, BestTake reasons, hybrid
+labels), the diagnostics dump, the lock/architecture/QA reports (the
+18-check failure list), the MP4. **No image/audio evaluation of the MP4
+was possible here; HUMAN WATCH+LISTEN is pending and nothing below claims
+it.** The Product Owner can attach the human-review artifact's
+`video00-modal-regression-qa-report.json` and `video00-modal.json` to close
+the inferences marked below.
+
+### The D-289 objective on video (OBSERVED on the ladder)
+- W ("Esta es mi experiencia. Soy la única ... por eso no creo ... más bien
+  solo un 5 -10 % ...", 295.52-313.5): `consensus_keep`, LEVEL 3, rendered
+  (correlation 0.9991, rendered coverage 0.9989).
+- R ("Así que estoy convencida y la ciencia lo avala que solo un 5 -10 % de
+  los", 327.44-335.0): CutSell DISCARDED, `matches_gold_over_cutai`, LEVEL
+  3 (7.56 s). T ("cánceres son hereditarios.", 337.88-341.63): DISCARDED,
+  LEVEL 3 (3.75 s). P (342.15-345.4): discarded, LEVEL 3.
+- W's traceability row: `retry_family tg_600561ab25bea36efa`,
+  `family_members [W, R]`, `resolution RESOLVED_WINNER`, `is_composite
+  false` -> **W and R were ONE retry family and W won.** On RAW #122 R and
+  T were kept as a separate Level-2 co-keep (the D-288 audit's item 5) and
+  on RAW #123 they were removed/kept ungrouped; this is the first run on
+  which the restatement is gone from the rendered edit, matching Human
+  Gold.
+- A ("Soy la primera en mi familia ...", 319.38-327.44): kept as its own
+  family, 7.69 s LEVEL 2 (`gold_removes_cutai_keeps`) + 0.37 s LEVEL 1
+  (`ungrouped_retry_of_kept_idea`) -- unchanged from RAW #122/#123.
+- INFERENCE (trace not readable): by which path W-R merged (the
+  contained-restatement path with a claim-arbiter verdict, per D-289.7's
+  offline trace, or the D-085 component probe) and what the pairwise and
+  claim arbiters answered are NOT recorded here.
+
+### Ladder headline (OBSERVED) and the two regressions (OBSERVED regions,
+INFERRED causes)
+RAW #124 vs RAW #122 (the last rendered ladder): LEVEL-1 selection 44.9 s /
+21 regions (share of Cut.ai keep 0.2675) vs 21.69 s / 21 (0.1292); LEVEL 2
+28.11 s vs 27.78 s; CutSell-vs-Cut.ai F1 0.7466 vs 0.816; CutSell-vs-Gold
+F1 0.7395 vs 0.8132. Level-1 by authority: BestTakeResolver 26.14 s (was
+7.27), AttemptReconstructor 10.48 s (was 5.01), BoundaryEngine 9.157 s
+(was 9.337), IdeaClusterer 2.35 s (was 3.01), RealizationResolver 0.51 s
+(was 0.98). The +23.2 s is two clusters:
+1. **Pimples family (20.1 s, BestTakeResolver).** Region 198.88-211.02
+   (12.14 s) `false_keep`: family `tg_33b4976ee8dc205652` = {"También me
+   salían espinillas en esta parte de aquí detrás de la oreja y todo el
+   cuello ..." (the manifest's forbidden `pimples_bad_monolith`), "Otro
+   síntoma era que me salían espinillas como si fuera una alergia ..." (the
+   manifest's required `pimples_later_winner`)} -- the ladder's own
+   rationale: "winner clip_40fbeade34a275b69da7 is a realization both
+   references rejected"; region 213.55-221.55 (8.0 s) `missing_delivery`:
+   the later winner "lost family tg_33b4976ee8dc205652 ... while both
+   references chose this realization". On RAW #122 the same two-member
+   family (`tg_bf0c63bef65a66a812`) was won by the later winner with
+   `semantic_best_take_reason: single_semantic_winner` from the hybrid
+   labels (monolith `alternate 0.85/0.75`, later winner `winner
+   0.92/0.90`). **INFERRED 18-check failures:** `pimples_bad_monolith_
+   absent` and `pimples_later_winner_present` (both determined by exactly
+   this family); the other 16 checks' texts are consistent with the
+   observed keeps (diagnosis, nodule, hair loss, gastritis, family context,
+   CTA, the three pimples micro-fragments all kept) -- the report itself
+   was not readable.
+2. **Stomach abandoned attempt (5.94 s, AttemptReconstructor).** Region
+   245.39-251.33 `false_keep`: "Tuve problemas de estómago en una temporada,
+   en 2023, no hay que preguntar." kept as "a lone candidate both references
+   remove" with `retry_family null` -- it was NOT grouped with the gastritis
+   winner (family `tg_2cbb65e0824930f9b6`, 2 members). On RAW #122 it was
+   the third member of that family (`tg_2741792c042c675dd2`) and lost. This
+   is the D-097.11 escalation-A family ("three runs, three verdicts" from
+   the arbiter) -- its grouping depends on the run's arbiter/multimodal
+   answers, not readable here.
+**Offline attribution check (OBSERVED, `scratchpad/cmp_besttake.py` run at
+RAW #122's code `f012beed` and at `693c7b25`): byte-identical results for
+both pairs** -- claims, cross coverage, `critical_coverage_sets`,
+`resolve_critical_coverage_dominance`, `detect_text_contradiction`, and
+`_semantic_best_take` under RAW #122's labels (later winner, `single_
+semantic_winner`) and under tied labels (monolith, `delivery_tie_break_
+among_survivors`). The D-289.7/D-289.8 changes therefore do not alter any
+deterministic input of these two decisions; neither family's texts contain
+a negation/number/connector case the new segmentation touches. The
+grouping paths D-289.x added cannot produce either outcome for these
+texts either: the later pimples take carries a distinct-addition marker
+("Otro síntoma": guard 2 -> fall-through) and the gastritis winner
+out-carries the abandoned attempt (guard 5 -> fall-through), so both pairs
+reach exactly the pre-D-289 paths. **INFERENCE:** the pimples flip is
+consistent with the hybrid labels of this run not designating the later
+take as the single semantic winner (a tie falls to delivery, where the
+monolith wins locally), and the stomach keep with the IdeaClusterer's
+run-to-run answer -- run-varying provider inputs, not code this branch
+changed. This cannot be proven without the run's `result.json`.
+
+### Other observations (ladder)
+- "La biopsia confirmó que era un cáncer papilar de tiroides.": KEPT
+  (135.44-138.37 `consensus_keep`); its traceability row reads `render_found
+  False` (correlation 0.4659) exactly as on RAW #122 (0.4639) -- a
+  pre-existing alignment artefact of the ladder, not a new loss; the
+  1.98 s duplicate realization of it (`ungrouped_retry_of_kept_idea`) is
+  present on both runs.
+- The bare "No" (269.37-270.17, 0.8 s `false_keep`) and the other Level-1
+  regions >= 0.5 s (#51, #80, #85, #97, #117) are the same on both runs.
+- D-204/D-209/D-218R/D-221/D-225 compact summaries printed (diagnostics
+  present this time); not analyzed here.
+
+### Quality state (D-095 vocabulary)
+CODE FIXED; TESTS PASS; RAW COMPLETE; ARCHITECTURE PASS; MP4 PRODUCED
+(deliverable candidate, technical QC not invalidated); **REGRESSION QA
+FAIL (18-check, inferred pimples checks)**; NOT a GOLD CANDIDATE; HUMAN
+WATCH+LISTEN NOT PERFORMED (artifact unreachable from here). The
+restatement family (this branch's objective) is closed on video; the
+overall ladder is worse than RAW #122 because of two arbiter-sensitive
+families this branch did not touch. **No relaunch. Exact next step:**
+Product Owner review with the human-review artifact (QA report,
+`result.json`, MP4) attached, to (a) watch/listen the MP4, (b) confirm the
+two inferred QA failures and the hybrid labels/arbiter answers behind the
+pimples and stomach decisions, (c) decide on integration of D-289.x.
