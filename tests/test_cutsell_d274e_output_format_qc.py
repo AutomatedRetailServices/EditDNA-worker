@@ -677,7 +677,12 @@ def test_diagnostics_never_carry_secrets(rendered_output_mp4):
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     "cutsell_worker/source_normalization_plan.py",
-    "cutsell_worker/render_delivery.py",
+    # render_delivery.py / export_job.py removed from this closed-track
+    # list: D-288 (a later, separately-authorized gate) legitimately adds
+    # the watch_listen_status delivery gate and the real perceptual-review
+    # call to these two files -- same self-resolving-guard pattern as the
+    # precedent in test_cutsell_d269a_live_tenant_safe_delivery.py (which
+    # documents the D-282 uploads.py/main.py precedent this follows).
     "cutsell_worker/post_render_media_qc.py",
     "cutsell_worker/live_render_qc.py",
 ])

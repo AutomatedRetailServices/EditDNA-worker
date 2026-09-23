@@ -333,7 +333,12 @@ def test_underlying_probe_never_uses_shell():
     # guard, same pattern D-274C-A itself already applied to earlier
     # gates' own closed-track lists.
     "cutsell_worker/source_normalization_plan.py",
-    "cutsell_worker/render_delivery.py",
+    # render_delivery.py / export_job.py removed from this closed-track
+    # list: D-288 (a later, separately-authorized gate) legitimately adds
+    # the watch_listen_status delivery gate and the real perceptual-review
+    # call to these two files -- same self-resolving-guard pattern as the
+    # precedent in test_cutsell_d269a_live_tenant_safe_delivery.py (which
+    # documents the D-282 uploads.py/main.py precedent this follows).
 ])
 def test_closed_track_files_unmodified_by_this_gate(relative_path):
     result = subprocess.run(

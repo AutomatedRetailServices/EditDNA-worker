@@ -72,6 +72,19 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
     fake_plan = (RenderSegment(clip_id="clip-1", source_asset_id="src-1", source_path="/tmp/x.mp4", start=1.0, end=2.0),)
     monkeypatch.setattr(export_job, "build_render_plan", lambda draft, local_paths: fake_plan)
 
+    # D-288: this test's own fake "rendered" file is literal bytes
+    # (b"mp4"), not real decodable media -- the real perceptual reviewer
+    # would legitimately ERROR (and therefore BLOCK) on it. This test's
+    # actual purpose (proving `run_export_job` skips re-running AI on an
+    # already-edited draft) is unrelated to perceptual review, so it is
+    # stubbed to a clean SYSTEM_PASS here, exactly like this gate's own
+    # `test_cutsell_d288_export_job_perceptual_gate.py`.
+    from cutsell_worker.perceptual_watch_listen import WATCH_LISTEN_SYSTEM_PASS
+    monkeypatch.setattr(
+        export_job, "perceptual_review_for_rendered_candidate",
+        lambda output_path, draft, local_paths, qc_result: {"watch_listen_status": WATCH_LISTEN_SYSTEM_PASS, "status": "PASS"},
+    )
+
     rendered = []
     def fake_render_with_qc(draft, plan, output, *, text_overlays=(), media_overlays=(), **kwargs):
         rendered.append((plan, output, tuple(text_overlays), tuple(media_overlays)))
@@ -83,6 +96,12 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
         return SimpleNamespace(
             status="PASS", output_path=output, plan_id="plan_test",
             plan_version=1, semantic_hash="hash_test", attempts=(),
+            # D-288: `_tenant_safe_deliver` now also runs the perceptual
+            # reviewer on this qc_result, which reads `.deliverable` (the
+            # SAME property a real `LiveRenderQCResult` always exposes --
+            # D-036 item 7) -- this fake must carry it too, matching its
+            # own `status="PASS"`.
+            deliverable=True,
         )
     monkeypatch.setattr(export_job, "render_with_post_render_qc", fake_render_with_qc)
 
