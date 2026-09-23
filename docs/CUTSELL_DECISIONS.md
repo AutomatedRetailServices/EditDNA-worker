@@ -77959,3 +77959,82 @@ No RunPod. `perceptual_repair_cycle.py` remains disconnected.**
 this environment egress to the artifact host / valid S3 credentials) so
 the JSON can be read and the arbiter consultation recorded; no relaunch
 without authorization.
+
+## D-289.4 — RAW #123's two pre-grouping causes (same isolated branch, off
+`a649f8a7`; offline only)
+
+**NOT integrated. No RAW. `main`/PR #25/canon/baselines untouched. Freeze
+not weakened. `perceptual_repair_cycle.py` remains disconnected.** The
+Product Owner verified both causes on the full RAW #123 package; that
+package did NOT reach this environment (nothing newer than the RAW #122
+JSON in the uploads/attach mounts), so the replay uses RAW #123's own
+candidate texts, timings and statuses as the run's workflow log tail
+carries them (the quality-ladder region map; the winner's text beyond its
+140-character log truncation is reconstructed from RAW #122's sentence with
+RAW #123's punctuation and marked as such) and RAW #122's recorded hybrid
+labels, with the tail's `failed 0.8` the minimal assumption consistent with
+the recorded removal reason. Every assumption is stated in the tests.
+
+### Cause 1 — `semantic_claims._split_into_clauses` fused a connector into the next word
+Reproduced: the recursion re-attached the connector to the STRIPPED
+remainder, so "por eso" + "no creo ..." became "por esono creo ...". The
+clause lost its own negation marker; `claim_coverage` of that CRITICAL
+claim against the winning clip's OWN text then hit the negation-flip cap
+(0.05) -- a claim of the selected clip read as lost from the selected clip,
+a false Freeze block. Fix: the original whitespace between connector and
+remainder is preserved; every clause is again a contiguous substring of
+its sentence. Verified on the real winner (the CRITICAL clause keeps "no
+creo" and self-covers at 1.0), on generic nested connectors (ES/EN chains
+of "because/pero/although/until/así que/por eso" reconstruct verbatim up to
+whitespace) and on the safety properties that must survive: the same
+sentence with the negation removed, or with the number changed, is still
+confidently NOT covered (<= 0.05).
+
+### Cause 2 — the cross-group cleanup deleted the continuation tail alone
+Reproduced with RAW #123's texts: `collapse_cross_group_semantic_retries`
+judged T ("cánceres son hereditarios.") by itself -- 3 content tokens, all
+in the winner, coverage 1.0, `single_authoritative_peer` -- and removed it
+as `cross_group_semantic_retry_covered_by_authoritative_delivery`, leaving
+its head R ("... que solo un 5 o 10 % de los") to be kept with a dangling
+ending; grouping never saw the pair. Fix (existing relation reused, not
+re-derived): before judging any candidate, the pass detects continuation
+chains with `take_grouping.continuation_pairs` and judges a chain as ONE
+candidate -- the joined sentence, the whole span, the HEAD's own label --
+against peers that exclude the chain's members. Covered -> every member
+removed together (one losing retry, each row carrying `evaluated_as_
+continuation_unit`, `continuation_unit_member_ids`, `continuation_unit_
+text`); not covered -> nothing removed, one `continuation_unit_not_
+covered_kept_for_grouping` row, the unit reaches grouping whole. A tail is
+never evaluated by itself; nothing is restored afterwards; the head's label
+gate is unchanged (a `keep`/`winner` head protects its tail). D-289.2's
+guards keep applying inside the cleanup (a same-opening restart, a marker-
+introduced point, a capitalised sentence and a distant tail are not units).
+
+### Demonstrated effect (tests/test_cutsell_d289_4_raw123_pre_cleanup_causes.py, 16 tests)
+- Before: T removed alone (coverage 1.0 vs W), R survives dangling.
+- After, head labelled `failed 0.9` (RAW #122's label): the unit R+T is
+  judged whole -- 9 content tokens, 5 shared with W (0.5556, above the
+  >6 s direct floor 0.53), numbers 5/10 preserved -- and removed TOGETHER
+  as a covered retry; downstream (real chain, recorded verdicts) W and the
+  CTA are kept, no dangling head, no orphan tail, and W's own CRITICAL claim
+  is no longer a blocking loss of itself (cause 1).
+- After, head labelled `keep`: nothing removed; both reach grouping; the
+  chain forms; on RAW #123's own comma-run winner the D-085 contradiction
+  net (sentence-scoped negation) reads "no creo ... cánceres son
+  hereditarios" against the unit's "cánceres son hereditarios" as a
+  polarity conflict and refuses the bridge BEFORE any claim arbiter is
+  asked, under every arbiter verdict -- the unit stays whole as its own
+  family (both kept). **Residual R-289.4a:** the contradiction primitive's
+  negation scope over a run-on ASR sentence; the same texts with RAW
+  #122's sentence breaks are the accepted-bridge case D-289.2 proved. Not
+  forced here -- a separate authority (D-082's primitive), out of this
+  correction's scope.
+- The unit-not-covered control (a head with its own uncovered material)
+  keeps both members for grouping with a traceable row.
+
+### Verification (committed tree)
+PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+
+**Exact next step:** Product Owner review. Not integrated; no RAW without
+authorization. The RAW #123 package (full log + real diagnostics) is still
+needed to replace the stated label assumptions with the recorded ones.

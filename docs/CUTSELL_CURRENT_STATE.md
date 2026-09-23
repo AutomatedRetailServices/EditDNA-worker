@@ -71,6 +71,12 @@ Verified state at `781a8634`:
   from this environment (artifact host blocked, invalid S3 keys): the aside
   was kept ungrouped, the restatement head kept exactly as on RAW #122 and
   its tail removed before grouping — D-289.x is NOT validated on video.
+  D-289.4 fixes the two verified pre-grouping causes offline (clause
+  reconstruction spacing that erased a negation and made the winner's own
+  CRITICAL claim read as lost; the cross-group cleanup now judges a
+  continuation chain as one unit and never removes a tail alone); the
+  contradiction primitive's negation scope over RAW #123's comma-run winner
+  is recorded as residual R-289.4a.
 
 ## Mobile backend integration checkpoint — D-277 through D-282A
 
