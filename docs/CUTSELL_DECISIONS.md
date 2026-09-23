@@ -77440,7 +77440,11 @@ corrections preserved.
 **Verification:** repro 8 fails on `8ae482ba`, passes after; D-288
 cluster + clean_worker notifications/render_versions/export/perceptual
 gate: 69 passed, 0 failed; repro 5/8 stable across 10 repeats; full
-suite recorded in the follow-up commit.
+`tests/` suite (excluding the pre-existing broken collection file
+`test_semantic_stitch.py`) against committed tree `01259e5f`: **8841
+passed, 10 skipped, 13 subtests passed, 5 failed** (356.55s) -- the same
+5 pre-existing/unrelated failures every D-288.x entry has verified; 8840
++ 1 new reproduction, zero new failures.
 
 **Exact next step:** Product Owner review before any integration. Then
 STOP. DO NOT SWITCH BRANCHES. DO NOT MERGE. DO NOT REBASE. DO NOT TOUCH
