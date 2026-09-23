@@ -77800,7 +77800,20 @@ never a continuation. Consumers, all existing authorities extended:
   verification is recorded below.
 
 ### Verification (committed tree)
-PENDING -- full-suite run in progress at the time of this commit; recorded in the follow-up commit.
+- compileall OK; `tests/test_cutsell_d289_contained_realization_closure.py`:
+  **32 passed**; grouping suites (D-048/D-058 P1/D-061 P1/D-083/D-085/
+  D-094.2/D-094/D-097.A/D-097.8/D-097.9/D-100/D-108/D-144/D-150/D-158/
+  D-287, take-grouping provider, semantic-idea-equivalence grouping,
+  CleanCutBench evaluation suite): **312 passed**; competition/coherence/
+  clean-cut suites (universal clean cut, D-101, D-058 P3, D-061 P2/P3,
+  golden full mode, runpod local brain, minimum sufficient set, editorial-
+  slot composites, D-235G, CleanCutBench parity, ...): **363 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on committed tree `e12a6dd8`: **8873 passed,
+  10 skipped, 13 subtests passed, 5 failed** (378.50 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x/D-289 entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4); zero new failures; `benchmarks/` unchanged.
 
 **Exact next step:** Product Owner review. This phase ends BEFORE any
 integration or RAW. DO NOT MERGE. DO NOT TOUCH `cutsell/mobile-v1-clean`/
