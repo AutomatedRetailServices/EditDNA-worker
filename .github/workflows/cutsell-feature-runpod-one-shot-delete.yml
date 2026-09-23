@@ -1,0 +1,53 @@
+name: CutSell Feature RunPod One-Shot Delete
+
+on:
+  workflow_dispatch:
+    inputs:
+      pod_id:
+        description: 'Exact cutsell-staging-worker Pod ID to delete'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      POD_ID: ${{ inputs.pod_id }}
+    steps:
+      - name: Validate exact staging Pod
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${POD_ID:-}" || { echo 'Exact Pod ID required'; exit 3; }
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods.json)
+          test "$name" = "cutsell-staging-worker" || { echo 'Pod ID is not an active cutsell-staging-worker; refusing delete'; exit 4; }
+
+      - name: Terminate exact staging GPU worker and verify absence
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request DELETE \
+            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output delete-response.txt)
+          echo "RunPod delete HTTP status: $code"
+          test "$code" = "204"
+          sleep 2
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods-after.json
+          remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' pods-after.json)
+          test "$remaining" = "0" || { echo 'Staging Pod still present after cleanup'; exit 5; }
+          echo "Staging Pod deleted and verified absent: $POD_ID"

@@ -1,0 +1,215 @@
+{
+  "captured_at": "2026-08-18T10:55:50Z",
+  "original": {
+    "id": 32128678316,
+    "name": "CutSell Gold Cycle One-Shot",
+    "status": "in_progress",
+    "conclusion": null,
+    "head_sha": "472aca0af1d49333b6531b25d067ffdad601f7b2",
+    "created_at": "2026-08-18T10:49:41Z",
+    "updated_at": "2026-08-18T10:49:45Z"
+  },
+  "original_jobs": [
+    {
+      "id": 95684798661,
+      "name": "gold-cycle",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 3,
+          "name": "Build immutable worker image",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Validate paid staging prerequisites and refuse duplicate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 5,
+          "name": "Load safe RunPod template baseline",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 6,
+          "name": "Create exactly one staging GPU worker",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 7,
+          "name": "Wait for exact new RQ worker",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "number": 8,
+          "name": "Enqueue Clean Cut Gold benchmark on exact worker pool",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 9,
+          "name": "Wait for Gold benchmark",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 10,
+          "name": "Download and validate Gold artifacts",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 11,
+          "name": "Upload Gold report",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 12,
+          "name": "Upload Gold previews",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 13,
+          "name": "Always terminate and verify exact staging worker absent",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 26,
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null
+        }
+      ]
+    }
+  ],
+  "recovery": {
+    "id": 32129103228,
+    "name": "CutSell Gold Cycle Recovery",
+    "status": "in_progress",
+    "conclusion": null,
+    "head_sha": "ee8ea08c0ea0de0216d11610964651930a04ed38",
+    "created_at": "2026-08-18T10:54:47Z",
+    "updated_at": "2026-08-18T10:54:51Z"
+  },
+  "recovery_jobs": [
+    {
+      "id": 95686074320,
+      "name": "recover-gold-cycle",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 3,
+          "name": "Wait for original one-shot and gate recovery",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "number": 4,
+          "name": "Build corrected immutable worker image",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 5,
+          "name": "Refuse duplicate paid staging worker",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 6,
+          "name": "Load safe RunPod template baseline",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 7,
+          "name": "Create exactly one recovery staging GPU worker",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 8,
+          "name": "Wait for recovery RQ worker",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 9,
+          "name": "Enqueue corrected Clean Cut Gold benchmark",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 10,
+          "name": "Wait for corrected Gold benchmark",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 11,
+          "name": "Download and validate corrected Gold artifacts",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 12,
+          "name": "Upload corrected Gold report",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 13,
+          "name": "Upload corrected Gold previews",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 14,
+          "name": "Always terminate and verify exact recovery staging worker absent",
+          "status": "pending",
+          "conclusion": null
+        },
+        {
+          "number": 28,
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: cutsell-api
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.cutsell.api.txt
+    startCommand: uvicorn cutsell_app.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: REDIS_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: CUTSELL_AUTH_REQUIRED
+        value: "1"
+      - key: CUTSELL_CLEAN_CUT_JUDGE
+        value: "0"
+      - key: CUTSELL_ASR_MODEL
+        value: medium
+      - key: CUTSELL_SEMANTIC_MODEL
+        value: gpt-4o-mini
+      - key: CUTSELL_VISUAL_MODEL
+        value: gpt-4o-mini
+      - key: CUTSELL_TAKE_JUDGE_MODEL
+        value: gpt-4o-mini
+
+# GPU processing is intentionally NOT deployed as a Render background worker.
+# CutSell's RQ worker runs from Dockerfile.cutsell.worker on RunPod GPU infrastructure.
+# This prevents accidental CPU Whisper/vision processing in Render staging/production.

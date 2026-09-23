@@ -1,0 +1,453 @@
+"""Real-video validation harness for Universal Clean Cut only.
+
+D-035 (single-path rule): the preview render below goes through the exact
+same `live_render_qc.render_with_post_render_qc` the real mobile-app export
+job (`export_job.run_export_job`) uses -- there is no separate
+"Video00RenderQC"/"AppRenderQC" implementation. This benchmark harness only
+supplies validation-specific storage/output handling (a local preview path
+instead of an uploaded export); the semantic/physical editing behavior --
+render, PostRenderWatchListenQC, bounded physical repair, re-render -- is
+one shared production-grade service. See docs/CUTSELL_DECISIONS.md D-035.
+"""
+from __future__ import annotations
+
+import os
+
+import dataclasses
+from dataclasses import replace
+from pathlib import Path, PurePosixPath
+import tempfile
+import time
+from typing import Any
+
+from .asr import FasterWhisperASR
+from .brain_runtime import build_brain_runtime
+from .config import load_runtime_config
+from .contracts import ProcessingRequest, SourceAsset
+from .editorial_slot_resolution_install import reset_editorial_slot_resolution_evidence
+from .live_boundary_repair import segment_output_windows
+from .live_render_qc import LiveRenderQCResult, render_with_post_render_qc
+from .media_probe import probe_media
+from .perceptual_watch_listen import (
+    WATCH_LISTEN_BLOCKED,
+    WATCH_LISTEN_HUMAN_APPROVED,
+    WATCH_LISTEN_SYSTEM_PASS,
+    error_review,
+    review_rendered_candidate,
+)
+from .render_plan import build_render_plan
+from .source_identity import stable_source_id
+from .storage import download_source
+from .universal_clean_cut import process_universal_clean_cut_sources
+from .validation import _is_real_video_key
+
+
+def _render_validation_preview(
+    draft,
+    local_paths,
+    *,
+    preview_output: str | None,
+    preview_captions: bool,
+    freeze_blocked: bool = False,
+) -> tuple[str | None, str | None, LiveRenderQCResult | None]:
+    """Render the validation preview through the SAME live render/QC service
+    the real export job uses (D-030/D-035): Boundary (already applied to
+    `draft.selected` upstream, before this is ever called) -> render actual
+    MP4 -> PostRenderWatchListenQC on that actual local file -> PASS, or a
+    bounded physical repair + re-render, or an invalidated semantic mismatch
+    that this harness must never deliver as a preview.
+
+    `freeze_blocked=True` means Final Story Coherence Validation / the repair
+    loop already determined this draft must not be frozen -- Selection
+    Freeze and Boundary never ran for it upstream, so there is nothing safe
+    to render here either. Per the canonical live order, a semantic failure
+    must never reach render at all.
+    """
+    if not preview_output:
+        return None, None, None
+    if not draft.selected:
+        return None, "empty_draft", None
+    if freeze_blocked:
+        return None, "freeze_blocked_no_render", None
+
+    plan = build_render_plan(draft, local_paths)
+    if not preview_captions:
+        plan = tuple(replace(segment, caption_text="") for segment in plan)
+    qc_result = render_with_post_render_qc(draft, plan, preview_output)
+    if qc_result.status != "PASS":
+        return None, f"post_render_qc_{qc_result.status.lower()}", qc_result
+    return qc_result.output_path, None, qc_result
+
+
+def segments_as_rendered(segments, renderer_trailing_trims) -> tuple[tuple, int]:
+    """D-097.10 (R14): apply the renderer's RECORDED trailing trims (one row
+    per segment whose exit `tighten_trailing_silence` moved: `clip_id`,
+    optional `render_fragment_id`, `tightened_end`) to the QC attempt's
+    segment state, so every post-render reviewer reads the exact source
+    spans that exist in the file -- the recorded truth, never a re-probe. A
+    trim is applied only when it shortens the segment and leaves it a
+    positive span; returns the segments and the number of trims applied."""
+    by_key: dict[tuple[str, str | None], float] = {}
+    for row in renderer_trailing_trims or ():
+        if not isinstance(row, dict):
+            continue
+        try:
+            tightened = float(row.get("tightened_end"))
+        except (TypeError, ValueError):
+            continue
+        by_key[(str(row.get("clip_id") or ""), row.get("render_fragment_id") or None)] = tightened
+    if not by_key:
+        return tuple(segments), 0
+    out = []
+    applied = 0
+    for seg in segments:
+        fragment = getattr(seg, "render_fragment_id", None) or None
+        tightened = by_key.get((seg.clip_id, fragment))
+        if tightened is None and fragment is not None:
+            tightened = by_key.get((seg.clip_id, None))
+        if tightened is not None and float(seg.start) < tightened < float(seg.end):
+            out.append(replace(seg, end=tightened))
+            applied += 1
+        else:
+            out.append(seg)
+    return tuple(out), applied
+
+
+def _perceptual_review(
+    preview_path: str | None,
+    draft,
+    local_paths: Mapping[str, str],
+    qc_result,
+    *,
+    rendered_path: str | None = None,
+) -> dict[str, Any] | None:
+    """D-097 §4: perceptual System Watch+Listen v1 (advisory, routing only)
+    on the rendered MP4. Runs on the final attempt's segments (post physical
+    repair) so its findings describe the file that exists. Never raises.
+
+    D-097.2: a candidate the technical QC did NOT pass is still reviewed --
+    the file at `rendered_path` (the last attempt's render, uploaded only as
+    the clearly-named diagnostic-invalidated artifact) carries the same
+    perceptual evidence a human would need to route the defect, and run
+    34029861712 showed that a QC loop stuck on its own findings left the
+    perceptual review NULL for the very artifact under diagnosis. The review
+    is marked `artifact_kind` = "deliverable_candidate" |
+    "diagnostic_invalidated"; it never changes the delivery status."""
+    if qc_result is None:
+        return None
+    deliverable = bool(preview_path) and bool(qc_result.deliverable)
+    media_path = preview_path if deliverable else rendered_path
+    if not media_path or not os.path.exists(media_path):
+        return None
+    artifact_kind = "deliverable_candidate" if deliverable else "diagnostic_invalidated"
+    applied_trims = 0
+    try:
+        last_attempt = qc_result.attempts[-1] if qc_result.attempts else None
+        final_state = last_attempt.input_boundary_state if last_attempt is not None else ()
+        plan = build_render_plan(draft, local_paths)
+        by_id = {s.clip_id: s for s in plan}
+        segments = tuple(
+            replace(by_id[row["clip_id"]], start=float(row["start"]), end=float(row["end"]))
+            for row in final_state if row.get("clip_id") in by_id
+        ) or plan
+        # D-097.10 (R14): review the segments AS RENDERED. The renderer's
+        # last mechanical op (`tighten_trailing_silence`, recorded per
+        # segment in the attempt's `renderer_trailing_trims`) moved 16 exits
+        # on RAW 34047064840 by 0.24-2.10 s; the reviewer mapped source
+        # reset events onto the PRE-tighten ends, so 9 of 13 "exit debris"
+        # findings pointed at material that is not in the MP4 at all.
+        segments, applied_trims = segments_as_rendered(
+            segments, getattr(last_attempt, "renderer_trailing_trims", ()) if last_attempt is not None else (),
+        )
+        windows = segment_output_windows(segments)
+        review = review_rendered_candidate(media_path, draft, segments, windows).as_dict()
+    except Exception as exc:  # noqa: BLE001 -- ERROR is a reported status, never a silent pass
+        review = error_review(f"perceptual_review_failed: {exc}").as_dict()
+    review["artifact_kind"] = artifact_kind
+    review["segments_as_rendered"] = True
+    review["renderer_trims_applied"] = applied_trims
+    review["technical_qc_status"] = getattr(qc_result, "status", None)
+    return review
+
+
+def perceptual_review_for_rendered_candidate(
+    output_path: str, draft, local_paths: Mapping[str, str], qc_result,
+) -> dict[str, Any] | None:
+    """D-288: public entry point for `_perceptual_review`, for a caller with
+    an already-PASSed technical QC candidate (e.g. `export_job.run_export_
+    job`, the real mobile export path) rather than the RAW validation
+    harness's own preview-path/skipped-reason bookkeeping. Before D-288,
+    `export_job.py` never called `perceptual_watch_listen.review_rendered_
+    candidate` (or anything in this module) at all -- a technically-PASSing
+    render reached `state="finished"`/a real `download_url` with ZERO
+    perceptual review, confirmed/demonstrated finding of this gate's own
+    audit, not merely a suspicion. Same review mechanics as `_perceptual_
+    review`, not a second implementation -- `output_path` is passed as both
+    `preview_path` and `rendered_path` since a caller here only ever invokes
+    this once technical QC has already reached PASS (the file at
+    `output_path` is therefore always the real, valid final candidate)."""
+    return _perceptual_review(output_path, draft, local_paths, qc_result, rendered_path=output_path)
+
+
+def _live_render_qc_diagnostics(
+    qc_result: LiveRenderQCResult | None, *, skipped_reason: str | None,
+    story_completeness: str = "complete",
+    perceptual_status: str | None = None,
+    watch_listen_status: str | None = None,
+) -> dict[str, Any]:
+    """`story_completeness` (D-097.B): when the engine marked the run
+    story-incomplete (a family with no usable realization was dropped by
+    decision), the candidate is NOT deliverable even if the technical QC
+    passed -- it is kept as a clearly-marked diagnostic artifact for
+    review, never presented as a clean complete story.
+
+    `perceptual_status` (D-097 §4, kept for backward-compatible diagnostics
+    only): the COARSE `PerceptualReview.status` (PASS/FAIL/UNCERTAIN) --
+    human-readable, never itself a gating value.
+
+    `watch_listen_status` (D-288, corrects a real defect this exact field
+    audit found on RAW #122's own evidence: this function used to build
+    `delivery_status`'s string suffix from `perceptual_status` above, which
+    is `PerceptualReview.status` -- the COARSE 3-state PASS/FAIL/UNCERTAIN
+    field -- not `PerceptualReview.watch_listen_status`, the real typed
+    4-state authority (D-154/D-155: BLOCKED/HUMAN_REVIEW_REQUIRED/
+    SYSTEM_PASS/HUMAN_APPROVED) already computed and already present in the
+    SAME review dict at `perceptual_watch_listen.as_dict()["watch_listen_
+    status"]`. `human_watch_listen_required` was also always hardcoded
+    `True` regardless of the real verdict. Both are fixed here: `deliverable`
+    stays governed ONLY by technical QC + story completeness (D-036 item 7
+    is unchanged -- "archivo disponible para inspección" is a technical-only
+    question), but `delivery_status`/`human_watch_listen_required` now read
+    the real typed status, and a `WATCH_LISTEN_BLOCKED` verdict is reported
+    as `NOT_DELIVERABLE_WATCH_LISTEN_BLOCKED` -- never `DELIVERABLE_PENDING_
+    ...`, which previously implied "just needs sign-off" for what could be a
+    confirmed perceptual defect."""
+    if qc_result is None:
+        return {
+            "status": "not_attempted",
+            "reason": skipped_reason,
+            "deliverable": False,
+            "delivery_status": "NOT_DELIVERABLE_not_attempted",
+            "watch_listen_status": None,
+            "output_path": None,
+            "plan_id": None,
+            "plan_version": None,
+            "semantic_hash": None,
+            "render_attempt_count": 0,
+            "attempts": [],
+        }
+    story_incomplete = str(story_completeness or "complete") != "complete"
+    deliverable = bool(qc_result.deliverable) and not story_incomplete
+    if qc_result.deliverable and story_incomplete:
+        delivery_status = f"NOT_DELIVERABLE_INCOMPLETE_STORY_REVIEW:{story_completeness}"
+    elif deliverable and watch_listen_status == WATCH_LISTEN_BLOCKED:
+        # D-288: a confirmed perceptual defect is never reported as merely
+        # "pending" -- "archivo disponible para inspección" still holds
+        # (deliverable/output_path are unchanged), but the delivery_status
+        # string itself must not read as "just needs sign-off".
+        delivery_status = f"NOT_DELIVERABLE_WATCH_LISTEN_BLOCKED:perceptual={perceptual_status}"
+    elif deliverable and watch_listen_status is not None:
+        delivery_status = f"DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:watch_listen={watch_listen_status}"
+    elif deliverable and perceptual_status is not None:
+        delivery_status = f"DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual={perceptual_status}"
+    else:
+        delivery_status = qc_result.delivery_status
+    return {
+        "status": qc_result.status,
+        "reason": None,
+        # D-036 item 7: the ONE authoritative delivery gate, read straight off
+        # LiveRenderQCResult rather than re-derived here -- a candidate is
+        # deliverable if and only if the shared render/QC service reached
+        # PASS -- AND (D-097.B) the engine did not mark the story incomplete.
+        "deliverable": deliverable,
+        "delivery_status": delivery_status,
+        "story_completeness": story_completeness,
+        "perceptual_review_status": perceptual_status,
+        "watch_listen_status": watch_listen_status,
+        # D-288: real value, not a hardcoded constant -- False once the
+        # typed status is SYSTEM_PASS or HUMAN_APPROVED.
+        "human_watch_listen_required": watch_listen_status not in (
+            WATCH_LISTEN_SYSTEM_PASS, WATCH_LISTEN_HUMAN_APPROVED,
+        ),
+        "output_path": qc_result.output_path,
+        "plan_id": qc_result.plan_id,
+        "plan_version": qc_result.plan_version,
+        "semantic_hash": qc_result.semantic_hash,
+        "render_attempt_count": len(qc_result.attempts),
+        "attempts": [dataclasses.asdict(a) for a in qc_result.attempts],
+    }
+
+
+def run_single_universal_clean_cut_validation(
+    key: str,
+    *,
+    project_id: str = "cutsell-universal-clean-cut-validation",
+    language_hint: str | None = None,
+    preview_output: str | None = None,
+    preview_captions: bool = False,
+) -> dict[str, Any]:
+    """Run one full S3 raw through local perception plus the active Selection authority."""
+    # D-288 (finding 5): the real per-job init boundary for the
+    # EditorialSlotResolution evidence ContextVar -- must run before any
+    # arbiter call this job could make, so a PREVIOUS job's evidence (in
+    # the same warm worker thread) can never leak into this job's own
+    # `active_path_identity` block.
+    reset_editorial_slot_resolution_evidence()
+    if not _is_real_video_key(key):
+        raise ValueError("unsupported validation video")
+
+    config = load_runtime_config()
+    if not config.s3_bucket:
+        raise RuntimeError("S3_BUCKET is required")
+
+    brain = build_brain_runtime(config)
+    source_id = stable_source_id(project_id, 0, PurePosixPath(key).name)
+    source = SourceAsset(
+        source_asset_id=source_id,
+        project_id=project_id,
+        user_id="validation",
+        original_name=PurePosixPath(key).name,
+        source_order=0,
+        duration_sec=0.0,
+        uri=f"s3://{config.s3_bucket}/{key}",
+    )
+    request = ProcessingRequest(
+        project_id=project_id,
+        user_id="validation",
+        sources=(source,),
+        language_hint=language_hint,
+    )
+
+    asr = FasterWhisperASR(model_name=config.asr_model)
+
+    started = time.monotonic()
+    preview_path = None
+    preview_skipped_reason = None
+    with tempfile.TemporaryDirectory(prefix="cutsell-universal-clean-cut-") as directory:
+        destination = str(Path(directory) / source.original_name)
+        local = download_source(source.uri, destination)
+        source_duration_sec = float(probe_media(local).duration_sec)
+        local_paths = {source_id: local}
+
+        result = process_universal_clean_cut_sources(
+            request,
+            local_paths,
+            asr_provider=asr,
+            whole_video_provider=brain.whole_video_provider,
+            visual_provider=brain.visual_provider,
+            take_grouping_provider=brain.take_grouping_provider,
+            take_judge_provider=brain.take_judge_provider,
+            clean_cut_provider=brain.clean_cut_provider,
+            editorial_judge=brain.editorial_judge,
+            selection_reasoner=brain.selection_reasoner,
+            deterministic_best_take_authority_enabled=brain.deterministic_best_take_authority_enabled,
+            semantic_equivalence_arbiter=brain.semantic_equivalence_arbiter,
+            # D-061 Phase 2: this was the exact gap D-059/D-060 identified --
+            # process_universal_clean_cut_sources already accepts and
+            # correctly threads claim_equivalence_arbiter through
+            # ClaimCoverageBestTake and StoryValidator, but this real
+            # production/RAW-harness call site never passed one, so the
+            # ambiguous claim-coverage band always failed open to NOT
+            # COVERED regardless of whether a real paraphrase judgment was
+            # available.
+            claim_equivalence_arbiter=brain.claim_equivalence_arbiter,
+            clean_cut_core_v1_enabled=brain.clean_cut_core_v1_enabled,
+        )
+
+        freeze_blocked = bool(result.stage_status.get("freeze_blocked_pending_coherence_review"))
+        preview_path, preview_skipped_reason, live_render_qc_result = _render_validation_preview(
+            result.draft,
+            local_paths,
+            preview_output=preview_output,
+            preview_captions=preview_captions,
+            freeze_blocked=freeze_blocked,
+        )
+        perceptual = _perceptual_review(
+            preview_path, result.draft, local_paths, live_render_qc_result, rendered_path=preview_output,
+        )
+
+    elapsed = round(time.monotonic() - started, 3)
+    selected_duration_sec = round(
+        sum(max(0.0, clip.end - clip.start) for clip in result.draft.selected), 3
+    )
+    diagnostics = result.draft.diagnostics
+    clean_decisions = list(diagnostics.get("clean_cut_decisions") or ())
+    temporal = list(diagnostics.get("temporal_performance_trims") or ())
+    hybrid_chunks = list(diagnostics.get("hybrid_editorial_chunks") or ())
+    unified_diag = diagnostics.get("unified_selection_reasoner") or {}
+
+    return {
+        "schema_version": result.schema_version,
+        "benchmark_mode": "universal_clean_cut",
+        "brain_backend": brain.backend,
+        "external_brain_calls_enabled": brain.external_calls_enabled,
+        "selection_reasoner_enabled": brain.selection_reasoner is not None,
+        "selection_reasoner_status": unified_diag.get("status") if isinstance(unified_diag, dict) else None,
+        "selection_reasoner_provider": unified_diag.get("provider") if isinstance(unified_diag, dict) else None,
+        "selection_reasoner_model": unified_diag.get("model") if isinstance(unified_diag, dict) else None,
+        "hybrid_provider": brain.hybrid_settings.provider if brain.external_calls_enabled else None,
+        "hybrid_primary_model": brain.hybrid_settings.primary_model if brain.external_calls_enabled else None,
+        "hybrid_requested_group_count": int(diagnostics.get("hybrid_editorial_requested_chunk_count") or 0),
+        "hybrid_available_group_count": int(diagnostics.get("hybrid_editorial_available_chunk_count") or 0),
+        "hybrid_deleted_count": int(diagnostics.get("hybrid_editorial_deleted_count") or 0),
+        "hybrid_group_diagnostic_count": len(hybrid_chunks),
+        "project_id": result.project_id,
+        "source_key": key,
+        "source_duration_sec": round(source_duration_sec, 3),
+        "selected_duration_sec": selected_duration_sec,
+        "selected_to_input_ratio": round(selected_duration_sec / source_duration_sec, 4) if source_duration_sec else None,
+        "elapsed_sec": elapsed,
+        "preview_path": preview_path,
+        "preview_captions": bool(preview_captions),
+        "preview_skipped_reason": preview_skipped_reason,
+        # D-030/D-035: the exact same live render/QC/repair-loop service the
+        # real mobile export job uses -- render attempt history, the
+        # PostRenderWatchListenQC findings for each attempt, and the exact
+        # frozen plan id/version/hash the delivered (or invalidated) output
+        # corresponds to.
+        "live_render_qc": _live_render_qc_diagnostics(
+            live_render_qc_result, skipped_reason=preview_skipped_reason,
+            story_completeness=str(result.stage_status.get("story_completeness") or "complete"),
+            perceptual_status=(perceptual or {}).get("status") if perceptual else None,
+            # D-288: the real typed 4-state authority, not the coarse
+            # PASS/FAIL/UNCERTAIN `status` field -- see this function's own
+            # D-288 docstring for the exact defect this closes.
+            watch_listen_status=(perceptual or {}).get("watch_listen_status") if perceptual else None,
+        ),
+        # D-097 §4: perceptual System Watch+Listen v1 (advisory, routing only).
+        "perceptual_watch_listen": perceptual,
+        "empty_draft": not bool(result.draft.selected),
+        "selected_count": len(result.draft.selected),
+        "alternate_count": len(result.draft.alternates),
+        "discarded_count": len(result.draft.discarded),
+        "clean_cut_removed_count": sum(1 for item in clean_decisions if not bool(item.get("keep", True))),
+        "temporal_trimmed_count": sum(1 for item in temporal if bool(item.get("applied"))),
+        "models": {
+            "brain_backend": brain.backend,
+            "asr": config.asr_model,
+            "whole_video": "runpod_local_asr_context",
+            "visual": "runpod_local_mediapipe_opencv",
+            "take_grouping": "deterministic_local_evidence",
+            "take_judge": "deterministic_local_evidence",
+            "clean_cut_judge": "deterministic_local_evidence",
+            "hybrid_editorial": brain.hybrid_settings.primary_model if brain.editorial_judge is not None else None,
+            "unified_selection": brain.hybrid_settings.primary_model if brain.selection_reasoner is not None else None,
+            "semantic_sales": None,
+            "composer": None,
+            "draft_review": None,
+        },
+        "stage_status": result.stage_status,
+        "diagnostics": diagnostics,
+        "selected": [
+            {"clip_id": clip.clip_id, "start": clip.start, "end": clip.end, "text": clip.text, "take_group_id": clip.take_group_id}
+            for clip in result.draft.selected
+        ],
+        "alternates": [
+            {"clip_id": clip.clip_id, "start": clip.start, "end": clip.end, "text": clip.text, "take_group_id": clip.take_group_id}
+            for clip in result.draft.alternates
+        ],
+        "discarded": [
+            {"clip_id": clip.clip_id, "start": clip.start, "end": clip.end, "text": clip.text}
+            for clip in result.draft.discarded
+        ],
+    }

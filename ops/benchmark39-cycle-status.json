@@ -1,0 +1,7 @@
+{
+  "deploy_run_id": 32202938058,
+  "pod_id": "5z0eyyi8o2thy1",
+  "image": "ghcr.io/automatedretailservices/cutsell-worker@sha256:f0d0dd9b917990a98db9c26ab32cd8fb2a8f5ee8eb56eaece2a4bf78e7a71071",
+  "benchmark_run_id": 32203133381,
+  "status": "benchmark_dispatched"
+}

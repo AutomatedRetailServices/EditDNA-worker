@@ -1,0 +1,26 @@
+{
+  "video": "00",
+  "source": "human_review_benchmark52",
+  "doctrine": {
+    "post_sentence_cleanup": "Cut dead air, visual reset, grimace, or non-communicative motion immediately after a completed idea when it does not help continuity.",
+    "retry_selection": "If a delivery starts acceptably but later fumbles and is then re-delivered cleanly, the broken delivery loses as a whole against the clean retake unless it contains unique necessary information.",
+    "winner_count": "Competing deliveries of the same idea should yield exactly one final winner."
+  },
+  "annotations": [
+    {"range":"00:12","action":"cut_after_completed_phrase","reason":"dead_air_and_visual_reset"},
+    {"range":"00:14-00:22","action":"reject_delivery","reason":"starts_well_then_fumbles_and_restarts_same_idea"},
+    {"range":"00:23-00:32","action":"keep_as_clean_retake","reason":"clean_restatement_of_previous_idea"},
+    {"range":"00:33-00:34","action":"cut","reason":"dead_air_or_visual_reset"},
+    {"range":"00:42-00:43","action":"cut","reason":"dead_air_or_visual_reset"},
+    {"range":"01:03-01:04","action":"cut","reason":"dead_air_or_visual_reset"},
+    {"range":"01:04-01:07","action":"reject_delivery","reason":"fumble_and_repetition_before_clean_retake"},
+    {"range":"01:08","action":"prefer_retake","reason":"clean_retake_after_fumble"},
+    {"range":"01:17-01:19","action":"cut","reason":"completed_phrase_then_visual_dead_air"},
+    {"range":"01:46-01:47","action":"cut","reason":"completed_phrase_then_visual_dead_air"},
+    {"range":"01:49-02:00","action":"cut","reason":"dead_air_or_noncommunicative_visual_gap"},
+    {"range":"02:05-02:07","action":"cut","reason":"dead_air_and_visual_error"},
+    {"range":"02:16-02:17","action":"cut","reason":"dead_air_and_visual_error"},
+    {"range":"02:25-02:43","action":"keep_as_final_winner","reason":"best_complete_closing_delivery"},
+    {"range":"02:45-03:01","action":"reject_delivery","reason":"inferior_duplicate_close_with_fumble_and_abrupt_cut_near_02:59"}
+  ]
+}

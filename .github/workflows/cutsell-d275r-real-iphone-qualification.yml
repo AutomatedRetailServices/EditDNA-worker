@@ -1,0 +1,119 @@
+name: CutSell D-275R Real iPhone Media Qualification (Stages 3-22)
+
+# D-275R Stages 3-22: live qualification of REAL, Product-Owner-confirmed
+# iPhone source media (from the "Editdna longform validation/" S3 corpus)
+# against the ACTUAL, UNCHANGED current D-271 (profile) -> D-272 (policy)
+# -> D-274A (plan) -> D-274B/C/D (executor) -> D-271 (reprobe) -> D-272
+# (reevaluate) -> D-274E (format QC) -> D-274F (live worker_job seam)
+# chain, plus a bounded Stage 20 final-render sanity check. This gate
+# makes ZERO code changes to any of the eight canonical modules -- it
+# only imports and calls them, exactly as `run_flow_b_job` does in
+# production, with mocked downstream (never `process_local_sources`,
+# never ASR, never Watch+Listen, never Freeze/Boundary/Pacing/Audio
+# Join, never Modal/RunPod GPU compute).
+#
+# Credentials: SAME already-authorized source as
+# cutsell-d275r-real-iphone-inventory.yml / cutsell-d254r-preview-
+# retrieval.yml (RunPod template env via RUNPOD_API_KEY). Read-only S3
+# GET of exactly 4 already-existing files (`aws s3 cp` -- never
+# --recursive/sync, never put-object/delete-object). No S3 mutation.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - .github/workflows/cutsell-d275r-real-iphone-qualification.yml
+
+jobs:
+  qualify-real-iphone-samples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare directories
+        shell: bash
+        run: mkdir -p artifact samples
+
+      - name: Install ffmpeg (ffprobe/ffmpeg not preinstalled)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      # numpy is the one non-stdlib dependency cutsell_worker's own package
+      # __init__.py transitively requires at import time -- same dependency
+      # cutsell-d254r-preview-retrieval.yml's own D-254C step already
+      # installs, never the heavy torch/faster-whisper/CLIP stack.
+      - name: Install numpy (cutsell_worker package init dependency)
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet 'numpy>=1.26,<3'
+
+      - name: Load base RunPod template (env source of truth only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Download the 4 selected real-iPhone samples (read-only GET, never upload)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+
+          declare -A SAMPLES=(
+            ["Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4"]="samples/video00_raw.mp4"
+            ["Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4"]="samples/copy_9E4975E5.MP4"
+            ["Editdna longform validation/copy_0C08368A-1FA1-4217-B9AB-A05BE613B6A4.MOV"]="samples/copy_0C08368A.MOV"
+            ["Editdna longform validation/copy_767E1C78-4791-4AFD-B6C1-49CEEC5F73EE.MOV"]="samples/copy_767E1C78.MOV"
+          )
+          for key in "${!SAMPLES[@]}"; do
+            dest="${SAMPLES[$key]}"
+            echo "Downloading (GET only): $key -> $dest"
+            aws s3 cp "s3://$S3_BUCKET/$key" "$dest"
+            test -s "$dest"
+            ls -la "$dest"
+          done
+
+      - name: Syntax-check D-275R driver script (committed at scripts/d275r_qualification_driver.py)
+        shell: bash
+        run: python3 -m py_compile scripts/d275r_qualification_driver.py
+
+      - name: Run D-275R Stages 3-22 live qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$(pwd)" python3 scripts/d275r_qualification_driver.py
+
+      - name: Upload D-275R qualification results (JSON diagnostics only, no video bytes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-d275r-qualification-results
+          path: |
+            artifact/d275r-per-sample-results.json
+            artifact/d275r-render-sanity-results.json
+          retention-days: 30
+          if-no-files-found: warn

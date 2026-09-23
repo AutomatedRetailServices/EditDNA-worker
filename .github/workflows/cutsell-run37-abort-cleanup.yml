@@ -1,0 +1,112 @@
+name: CutSell Run37 Abort Cleanup
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-run37-abort-cleanup.yml
+
+permissions:
+  actions: write
+  contents: read
+  packages: read
+
+jobs:
+  abort-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      TARGET_RUN_ID: "32164192843"
+      IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
+      IMAGE_TAG: 9b0b811aa1db2da62fe4dd3e1a527a8250ea9593
+
+    steps:
+      - name: Cancel obsolete Run37 before Gold enqueue
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID/cancel" || true
+          echo "cancel_requested_run_id=$TARGET_RUN_ID"
+
+      - name: Resolve exact obsolete Run37 image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker buildx imagetools inspect "$IMAGE_REPO:$IMAGE_TAG" > image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve obsolete Run37 digest'; exit 2; }
+          IMAGE_REF="$IMAGE_REPO@$digest"
+          echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
+          echo "obsolete_image_ref=$IMAGE_REF"
+
+      - name: Cancel any Run37 Gold job if enqueue raced cancellation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import os
+          from redis import Redis
+          from rq import Queue
+          from rq.job import Job
+          from rq.registry import StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          ids = set(Queue('cutsell', connection=connection).job_ids)
+          for cls in (StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry):
+              try:
+                  ids.update(cls('cutsell', connection=connection).get_job_ids())
+              except Exception:
+                  pass
+          matched = []
+          for job_id in ids:
+              try:
+                  job = Job.fetch(job_id, connection=connection)
+                  meta = job.meta or {}
+                  if meta.get('worker_image_tag') != os.environ['IMAGE_TAG']:
+                      continue
+                  if meta.get('dataset_role') != 'clean_cut_gold_raw':
+                      continue
+                  status_obj = job.get_status(refresh=True)
+                  status = getattr(status_obj, 'value', str(status_obj))
+                  matched.append((job.id, status))
+                  if status in {'queued','deferred','scheduled'}:
+                      job.cancel()
+                  elif status == 'started':
+                      try:
+                          from rq.command import send_stop_job_command
+                          send_stop_job_command(connection, job.id)
+                      except Exception:
+                          pass
+              except Exception:
+                  continue
+          print('matched_run37_gold_jobs=', matched)
+          PY
+
+      - name: Delete and verify exact obsolete Run37 Pod absent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods.json
+          jq --arg image "$IMAGE_REF" '[.[] | select(.name == "cutsell-staging-worker" and .imageName == $image)] | map({id,name,imageName,desiredStatus,costPerHr,adjustedCostPerHr})' pods.json
+          count=$(jq --arg image "$IMAGE_REF" '[.[] | select(.name == "cutsell-staging-worker" and .imageName == $image)] | length' pods.json)
+          if [ "$count" = "0" ]; then
+            echo 'Exact obsolete Run37 Pod already absent.'
+            exit 0
+          fi
+          test "$count" = "1" || { echo "Expected exactly one obsolete Run37 Pod, found $count"; exit 4; }
+          pod_id=$(jq -r --arg image "$IMAGE_REF" '[.[] | select(.name == "cutsell-staging-worker" and .imageName == $image)][0].id' pods.json)
+          test -n "$pod_id" || { echo 'Unable to resolve exact obsolete Run37 Pod id'; exit 5; }
+          echo "deleting_exact_run37_pod=$pod_id"
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$pod_id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output delete-response.txt)
+          test "$code" = "204" || { echo "RunPod DELETE status: $code"; cat delete-response.txt || true; exit 6; }
+          sleep 3
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output after.json
+          remaining=$(jq --arg id "$pod_id" '[.[] | select(.id == $id)] | length' after.json)
+          test "$remaining" = "0" || { echo 'Exact obsolete Run37 Pod still present'; exit 7; }
+          echo "obsolete_run37_pod_deleted_and_absent=$pod_id"

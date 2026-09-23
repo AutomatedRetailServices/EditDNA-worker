@@ -1,0 +1,185 @@
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+import sys
+
+import cutsell_worker.export_job as export_job
+import cutsell_worker.exports as exports
+from cutsell_worker.render_plan import RenderSegment
+
+
+def _draft():
+    return {
+        "schema_version": "cutsell.v1",
+        "project_id": "project-1",
+        "strategy": "mixed",
+        "selected": [{
+            "clip_id": "clip-1",
+            "source_asset_id": "src-1",
+            "source_order": 0,
+            "start": 1.0,
+            "end": 2.0,
+            "text": "hello",
+            "caption_text": "hello",
+            "semantic_role": "OTHER",
+            "selected": True,
+        }],
+        "alternates": [],
+        "discarded": [],
+        "diagnostics": {},
+        "text_overlays": [{
+            "overlay_id": "txt1",
+            "text": "SALE",
+            "start": 0.1,
+            "end": 0.9,
+            "x": 0.5,
+            "y": 0.2,
+            "scale": 1.0,
+        }],
+    }
+
+
+class FakeJob:
+    def __init__(self):
+        self.id = "job-test-1"
+        # D-269A Stage 9/10: a real RQ worker sets `started_at` before
+        # calling the job function -- this fake now carries a plausible
+        # numeric value so the stale-job guard's ordering evidence is
+        # exercised the same way it is in production.
+        self.started_at = 1_700_000_000.0
+        self.meta = {}
+        self.saved = []
+    def save_meta(self):
+        self.saved.append(dict(self.meta))
+
+
+def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_path):
+    fake_job = FakeJob()
+    rq_module = ModuleType("rq")
+    rq_module.get_current_job = lambda: fake_job
+    monkeypatch.setitem(sys.modules, "rq", rq_module)
+
+    validated = []
+    monkeypatch.setattr(
+        export_job,
+        "validate_product_source_uri",
+        lambda uri, **kwargs: validated.append((uri, kwargs)) or ("bucket", "key"),
+    )
+    monkeypatch.setattr(
+        export_job,
+        "download_source",
+        lambda uri, destination: Path(destination).write_bytes(b"source") or destination,
+    )
+    fake_plan = (RenderSegment(clip_id="clip-1", source_asset_id="src-1", source_path="/tmp/x.mp4", start=1.0, end=2.0),)
+    monkeypatch.setattr(export_job, "build_render_plan", lambda draft, local_paths: fake_plan)
+
+    # D-288: this test's own fake "rendered" file is literal bytes
+    # (b"mp4"), not real decodable media -- the real perceptual reviewer
+    # would legitimately ERROR (and therefore BLOCK) on it. This test's
+    # actual purpose (proving `run_export_job` skips re-running AI on an
+    # already-edited draft) is unrelated to perceptual review, so it is
+    # stubbed to a clean SYSTEM_PASS here, exactly like this gate's own
+    # `test_cutsell_d288_export_job_perceptual_gate.py`.
+    from cutsell_worker.perceptual_watch_listen import WATCH_LISTEN_SYSTEM_PASS
+    monkeypatch.setattr(
+        export_job, "perceptual_review_for_rendered_candidate",
+        lambda output_path, draft, local_paths, qc_result: {"watch_listen_status": WATCH_LISTEN_SYSTEM_PASS, "status": "PASS"},
+    )
+
+    rendered = []
+    def fake_render_with_qc(draft, plan, output, *, text_overlays=(), media_overlays=(), **kwargs):
+        rendered.append((plan, output, tuple(text_overlays), tuple(media_overlays)))
+        Path(output).write_bytes(b"mp4")
+        # D-030: run_export_job now calls render_with_post_render_qc (real
+        # PostRenderWatchListenQC wiring) instead of a bare render_preview --
+        # this fake stands in for a clean PASS, exactly like a real render
+        # that has no physical or semantic findings.
+        return SimpleNamespace(
+            status="PASS", output_path=output, plan_id="plan_test",
+            plan_version=1, semantic_hash="hash_test", attempts=(),
+            # D-288: `_tenant_safe_deliver` now also runs the perceptual
+            # reviewer on this qc_result, which reads `.deliverable` (the
+            # SAME property a real `LiveRenderQCResult` always exposes --
+            # D-036 item 7) -- this fake must carry it too, matching its
+            # own `status="PASS"`.
+            deliverable=True,
+        )
+    monkeypatch.setattr(export_job, "render_with_post_render_qc", fake_render_with_qc)
+
+    def fake_store_export(output, **kwargs):
+        # D-269A: a realistic fake of the now-real `store_export` --
+        # returns the SAME tenant-safe key/metadata the caller passed in,
+        # as a real post-upload HEAD response would, so `verify_remote_
+        # delivery` sees a genuinely matching remote object rather than
+        # an empty/missing one.
+        size = Path(output).stat().st_size
+        key = kwargs.get("object_key") or "cutsell/exports/file.mp4"
+        metadata = dict(kwargs.get("object_metadata") or {})
+        return {
+            "export_uri": f"s3://bucket/{key}",
+            "download_url": "https://download.invalid/file.mp4",
+            "expires_in": 3600,
+            "size_bytes": size,
+            "bucket": "bucket",
+            "object_key": key,
+            "remote_head": {"exists": True, "key": key, "size_bytes": size, "metadata": metadata},
+        }
+    monkeypatch.setattr(export_job, "store_export", fake_store_export)
+
+    result = export_job.run_export_job({
+        "project_id": "project-1",
+        "user_id": "user-1",
+        "draft": _draft(),
+        "sources": [{
+            "source_asset_id": "src-1",
+            "original_name": "one.mov",
+            "uri": "s3://bucket/cutsell/uploads/u/p/one.mov",
+        }],
+    })
+
+    assert result["state"] == "finished"
+    assert result["selected_count"] == 1
+    assert result["text_overlay_count"] == 1
+    assert result["media_overlay_count"] == 0
+    assert result["download_url"].startswith("https://download.invalid/")
+    assert len(validated) == 1
+    assert validated[0][1] == {"project_id": "project-1", "user_id": "user-1"}
+    assert len(rendered) == 1
+    assert rendered[0][2][0].text == "SALE"
+    assert rendered[0][3] == ()
+    assert result["post_render_qc_status"] == "PASS"
+    assert result["plan_id"] == "plan_test"
+    assert fake_job.meta["stage"] == "finished"
+    assert fake_job.meta["progress_percent"] == 100
+
+
+class FakeS3:
+    def __init__(self):
+        self.uploads = []
+        self.urls = []
+    def upload_file(self, source, bucket, key, ExtraArgs=None):
+        self.uploads.append((source, bucket, key, ExtraArgs))
+    def generate_presigned_url(self, operation, Params, ExpiresIn):
+        self.urls.append((operation, Params, ExpiresIn))
+        return "https://download.invalid/export.mp4"
+
+
+def test_store_export_scopes_object_and_returns_temporary_download(monkeypatch, tmp_path):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"video-bytes")
+    monkeypatch.setattr(
+        exports,
+        "load_runtime_config",
+        lambda: SimpleNamespace(s3_bucket="bucket", aws_region="us-east-1"),
+    )
+    client = FakeS3()
+    result = exports.store_export(
+        str(video),
+        project_id="project-1",
+        user_id="user-1",
+        client=client,
+    )
+    assert result["export_uri"].startswith("s3://bucket/cutsell/exports/")
+    assert result["download_url"] == "https://download.invalid/export.mp4"
+    assert result["size_bytes"] == len(b"video-bytes")
+    assert client.uploads[0][3] == {"ContentType": "video/mp4"}
+    assert client.urls[0][0] == "get_object"

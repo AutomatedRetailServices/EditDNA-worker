@@ -1,0 +1,1095 @@
+"""Universal Clean Cut orchestration -- Clean Cut Core V1.
+
+This module separates semantic Selection from physical Boundary. Clean Cut Core V1
+(clean_cut_core_v1_enabled=True, the default) reasons idea-first: local perception,
+attempt reconstruction, and idea/retry-family clustering (pipeline.py, take_grouping_
+provider.py, semantic_idea_equivalence.py) already ran before this module is reached;
+here the deterministic Best-Take authority and Final Story Coherence Validation are
+the semantic authorities that decide final KEEP/DISCARD membership before the hard
+freeze. Gemini participates only as a bounded semantic arbiter at specific points
+(idea-equivalence during grouping, residual-ambiguity resolution during coherence
+validation) -- it is never the primary editor, and the old whole-video Unified
+Selection reasoner is deactivated in this path (kept only behind
+clean_cut_core_v1_enabled=False for rollback). SWAP is out of scope for Clean Cut
+Core V1: everything not SELECTed is DISCARDed, never parked as an alternate. Boundary
+can then change timing/fragment structure only, never the selected spoken stream, and
+must never repair a semantic membership mistake.
+"""
+from __future__ import annotations
+
+import dataclasses
+from dataclasses import replace
+from typing import Mapping
+
+from .asr import ASRProvider
+from .claim_coverage_best_take import apply_claim_coverage_best_take
+from .clean_cut_provider import CleanCutProvider
+from .contracts import ProcessingRequest, ProcessingResult
+from .deterministic_best_take_authority import apply_deterministic_best_take_authority
+from .watch_listen_besttake_guard_authority import apply_watch_listen_besttake_guard_authority
+from .final_boundary_authority import enforce_complete_idea_boundaries
+from .final_story_coherence_validation import (
+    apply_final_story_coherence_validation,
+    apply_post_authority_story_validation,
+    fold_alternates_into_discarded,
+)
+from .post_authority_validation import (
+    INTEGRITY_FAILURE_SELECTION_MUTATION,
+    PHASE_BOUNDED_REPAIR,
+    PHASE_STORY_VALIDATION,
+    POST_AUTHORITY_VALIDATION_MODE,
+    PostAuthorityBoundaryRecord,
+    PostAuthorityIntegrityError,
+    build_post_authority_validation_context,
+    compare_selection_signatures,
+    mutation_report_to_diagnostics,
+    semantic_selection_signature,
+    signature_to_diagnostics,
+)
+from .causal_order_validator import CausalOrderArbiter
+from .semantic_atom_importance import SemanticAtomImportanceArbiter
+from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
+from .canonical_edit_plan import authoritative_plan_source_to_diagnostics, build_authoritative_plan_source
+from .repair_loop import run_repair_loop
+# D-239F: bounded, additive, read-only D-235S/D-235T projection -- see
+# lost_atom_ownership_materiality_diagnostics.py's own module docstring.
+# Reads ONLY repair_result.suppression_decisions/.attempts, never calls
+# decide_lost_atom_repair_suppression again.
+from .lost_atom_ownership_materiality_diagnostics import (
+    lost_atom_repair_suppression_by_provenance_diagnostics,
+)
+from .flow_b import ProgressCallback, process_local_sources
+from .semantic_ledger import build_ledger_parity_report, build_semantic_ledger_diagnostics, build_semantic_ledger_shadow
+from .realization_resolver import (
+    apply_authoritative_realization_resolution,
+    AUTHORITATIVE_REVIEW_REQUIRED,
+    build_authoritative_resolution_diagnostics,
+    build_authoritative_semantic_state,
+    build_authoritative_semantic_state_diagnostics,
+    build_realization_resolver_diagnostics,
+    build_effective_claim_importance_diagnostics,
+    build_effective_claim_importance_index,
+    build_preserved_claim_id_index,
+    build_semantic_preservation_proofs,
+    build_semantic_preservation_proofs_diagnostics,
+    build_story_placement_diagnostics,
+    resolve_intra_idea_semantic_preservation_shadow,
+    resolve_pre_group_semantic_preservation_shadow,
+    resolve_realizations_shadow,
+)
+from .resolver_mode import RESOLVER_MODE_AUTHORITATIVE, resolve_resolver_mode
+from .boundary_engine_pass import apply_post_freeze_boundary_pass
+from .dialogue_pacing_transition import apply_dialogue_pacing_transition_pass
+from .pacing_v2_live_diagnostics_integration import pacing_v2_diagnostics_enabled
+from .pacing_v2_evidence_adapter import build_pacing_v2_live_diagnostics_with_real_evidence
+from .pacing_v2_handle_aware_evidence import build_handle_aware_pacing_v2_diagnostics
+from .pacing_v2_audio_join_treatment_live_diagnostics import (
+    audio_join_treatment_diagnostics_enabled,
+    build_audio_join_treatment_live_diagnostics,
+)
+from .selection_freeze_diagnostics import (
+    build_selection_freeze_diagnostics,
+    build_lost_semantic_atom_diagnostics,
+)
+from .human_boundary_polish_v5 import polish_human_boundaries_v5
+from .hybrid_editorial import EditorialJudge
+from .providers import NoopSemanticProvider
+from .selection_boundary_contract import enforce_selection_contract, freeze_selection_contract
+from .selection_conflicted_bridge_guard import apply_selection_conflicted_bridge_guard
+from .selection_phase_authority import apply_selection_phase_authority
+from .semantic_idea_equivalence import SemanticEquivalenceArbiter
+from .take_grouping_provider import TakeGroupingProvider
+from .take_judge_provider import TakeJudgeProvider
+from .unified_selection_reasoner import UnifiedSelectionReasoner, apply_unified_selection_reasoner
+from .visual_analysis import VisualProvider
+from .whole_video_analysis import WholeVideoProvider
+
+
+
+_BTS_SINGLETON_BASIS = "single_bts_unusable"
+
+
+def derive_story_completeness(take_judge_groups) -> dict:
+    """D-097.B / D-097.9 (R11): read the Best Take rows that ended with no
+    usable realization and decide whether the STORY is incomplete.
+
+    `no_usable_realization_basis == "no_usable_realization"` (D-097.B) is a
+    dropped intended idea -> `incomplete_no_usable_realization`, never
+    deliverable as a clean complete story. `"single_bts_unusable"` (D-097.8
+    R10) is a corroborated lone `bts` take -- no audience-facing idea vanished
+    with it, so it is listed (never silent) but leaves the story complete. A
+    row without a basis (older diagnostics) is treated as a dropped idea."""
+    dropped = [
+        row for row in (take_judge_groups or ())
+        if isinstance(row, dict) and row.get("no_usable_realization")
+    ]
+    bts = [row for row in dropped if row.get("no_usable_realization_basis") == _BTS_SINGLETON_BASIS]
+    ideas = [row for row in dropped if row.get("no_usable_realization_basis") != _BTS_SINGLETON_BASIS]
+    return {
+        "story_completeness": "incomplete_no_usable_realization" if ideas else "complete",
+        "dropped_families": dropped,
+        "idea_family_ids": [str(row.get("group_id") or "") for row in ideas],
+        "bts_singleton_ids": [str(row.get("group_id") or "") for row in bts],
+    }
+
+def process_universal_clean_cut_sources(
+    request: ProcessingRequest,
+    local_paths: Mapping[str, str],
+    *,
+    asr_provider: ASRProvider,
+    visual_provider: VisualProvider | None = None,
+    take_judge_provider: TakeJudgeProvider | None = None,
+    clean_cut_provider: CleanCutProvider | None = None,
+    take_grouping_provider: TakeGroupingProvider | None = None,
+    whole_video_provider: WholeVideoProvider | None = None,
+    editorial_judge: EditorialJudge | None = None,
+    selection_reasoner: UnifiedSelectionReasoner | None = None,
+    deterministic_best_take_authority_enabled: bool = True,
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
+    causal_order_arbiter: CausalOrderArbiter | None = None,
+    semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
+    clean_cut_core_v1_enabled: bool = True,
+    progress: ProgressCallback | None = None,
+) -> ProcessingResult:
+    """Run the Universal Clean Cut brain with explicit Selection/Boundary ownership."""
+    result = process_local_sources(
+        request,
+        local_paths,
+        asr_provider=asr_provider,
+        semantic_provider=NoopSemanticProvider(),
+        visual_provider=visual_provider,
+        take_judge_provider=take_judge_provider,
+        clean_cut_provider=clean_cut_provider,
+        composer_provider=None,
+        take_grouping_provider=take_grouping_provider,
+        draft_review_provider=None,
+        whole_video_provider=whole_video_provider,
+        editorial_judge=editorial_judge,
+        semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+        progress=progress,
+        # D-097.C/E: physical edge/interior cleanup runs ONCE, after Freeze,
+        # on the final KEEP set (boundary_engine_pass.py) -- the draft-time
+        # wrappers skip on this path.
+        boundary_owner="post_freeze",
+    )
+
+    # D-235X Part A: the live exact-identity context `pipeline.py::build_
+    # flow_b_draft` optionally built (see `ProcessingResult.lost_atom_
+    # exact_identity_context`'s own docstring) -- `{}` defaults whenever
+    # it was never built (flag off, or no live Language Spine evidence),
+    # so both call sites below stay byte-identical to every pre-D-235X
+    # caller in that case.
+    _lost_atom_exact_identity_context = getattr(result, "lost_atom_exact_identity_context", None) or {}
+    _exact_match_by_clip_id = _lost_atom_exact_identity_context.get("exact_match_by_clip_id") or {}
+    _proposition_candidate_ids_by_attempt_id = (
+        _lost_atom_exact_identity_context.get("proposition_candidate_ids_by_attempt_id") or {}
+    )
+    _proposition_slot_evidence_by_id = (
+        _lost_atom_exact_identity_context.get("proposition_slot_evidence_by_id") or {}
+    )
+    # D-237G: bounded, additive, diagnostics-only per-clip identity rows
+    # (see exact_identity_observability.py's own module docstring) --
+    # `{}` whenever the context above was never built, same fail-open
+    # posture as the three extractions above.
+    _identity_observability_by_clip_id = (
+        _lost_atom_exact_identity_context.get("identity_observability_by_clip_id") or {}
+    )
+    # D-239: the live D-238 bounded lost-atom ownership map -- `{}` under
+    # the SAME fail-open posture as the extractions above.
+    _lost_atom_ownership_by_clip_id = (
+        _lost_atom_exact_identity_context.get("lost_atom_ownership_by_clip_id") or {}
+    )
+    # D-239I: the live P1 role/audience-delivery maps -- `{}` under the
+    # SAME fail-open posture as the extractions above.
+    _p1_moment_role_by_clip_id = (
+        _lost_atom_exact_identity_context.get("p1_moment_role_by_clip_id") or {}
+    )
+    _p1_audience_delivery_status_by_clip_id = (
+        _lost_atom_exact_identity_context.get("p1_audience_delivery_status_by_clip_id") or {}
+    )
+    # D-239O: the live, bounded, per-lost-atom-clip_id P1 lookup
+    # observability map -- `{}` under the SAME fail-open posture as the
+    # extractions above. Diagnostics only: threaded into `final_story_
+    # coherence_validation.py` purely so it can re-project this verbatim
+    # into its own `diagnostics["exact_p1_target_evidence"]` key (the SAME
+    # pattern as `_identity_observability_by_clip_id`/D-237G above) --
+    # never read for any Freeze/materiality/repair decision there.
+    _p1_target_lookup_evidence_by_clip_id = (
+        _lost_atom_exact_identity_context.get("p1_target_lookup_evidence_by_clip_id") or {}
+    )
+
+    has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
+    if has_draft_contract:
+        if clean_cut_core_v1_enabled:
+            # Clean Cut Core V1 (see CLAUDE.md / docs/CUTSELL_DECISIONS.md):
+            # idea-first deterministic pipeline is the one active path.
+            # Gemini is a bounded semantic arbiter (semantic_idea_equivalence,
+            # invoked from pipeline.py's grouping stage and again from Final
+            # Story Coherence Validation below), never the primary editor --
+            # the whole-video Unified Selection reasoner is deactivated here
+            # regardless of whether a selection_reasoner instance was passed
+            # in; it is retained only behind clean_cut_core_v1_enabled=False
+            # for rollback. SWAP is out of scope for this path: a legitimate
+            # losing retry is DISCARDed, not parked as an alternate.
+            result = replace(result, draft=apply_selection_phase_authority(result.draft))
+            result = replace(result, draft=apply_selection_conflicted_bridge_guard(result.draft))
+            result = replace(
+                result,
+                draft=apply_deterministic_best_take_authority(result.draft, swap_enabled=False),
+            )
+            # D-174 (docs/CUTSELL_DECISIONS.md D-174): Watch+Listen BestTake
+            # Guard Authority, Phase 2 (the ONE real winner-mutation seam --
+            # see watch_listen_besttake_guard_authority.py's own module
+            # docstring for the full two-phase design). Runs immediately
+            # after the deterministic ranker's own verdict above -- the SAME
+            # existing place a family's real bucket assignment is already
+            # finalized -- so a rejected winner's replacement is decided by
+            # `deterministic_best_take_authority.clear_retry_family_winner`
+            # (reused verbatim) on the remainder, never by this module or by
+            # D-172's own V2 evidence directly. Default OFF
+            # (CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED): a
+            # total no-op (byte-identical draft) when off, or when Phase 1
+            # marked no family GUARD_REJECT_CURRENT_WINNER.
+            result = replace(
+                result,
+                draft=apply_watch_listen_besttake_guard_authority(result.draft),
+            )
+            # D-038: a visually/performance-clean take must not beat a
+            # semantically complete one -- runs strictly after the
+            # deterministic ranker's own verdict, before it becomes final,
+            # so it can still correct a clear-winner decision that drops a
+            # critical audience-facing claim another family member carried.
+            result = replace(
+                result,
+                draft=apply_claim_coverage_best_take(
+                    result.draft,
+                    claim_equivalence_arbiter=claim_equivalence_arbiter,
+                    clause_role_arbiter=clause_role_arbiter,
+                ),
+            )
+            result = replace(
+                result,
+                draft=apply_final_story_coherence_validation(
+                    result.draft,
+                    semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+                    semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+                    claim_equivalence_arbiter=claim_equivalence_arbiter,
+                    clause_role_arbiter=clause_role_arbiter,
+                    # D-235X Part A: see this function's own extraction comment above.
+                    exact_match_by_clip_id=_exact_match_by_clip_id,
+                    proposition_candidate_ids_by_attempt_id=_proposition_candidate_ids_by_attempt_id,
+                    proposition_slot_evidence_by_id=_proposition_slot_evidence_by_id,
+                    identity_observability_by_clip_id=_identity_observability_by_clip_id,
+                    # D-239: see this function's own extraction comment above.
+                    lost_atom_ownership_by_clip_id=_lost_atom_ownership_by_clip_id,
+                    # D-239I: see this function's own extraction comment above.
+                    p1_moment_role_by_clip_id=_p1_moment_role_by_clip_id,
+                    p1_audience_delivery_status_by_clip_id=_p1_audience_delivery_status_by_clip_id,
+                    # D-239O: see this function's own extraction comment above.
+                    exact_p1_target_evidence_by_clip_id=_p1_target_lookup_evidence_by_clip_id,
+                ),
+            )
+            selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
+            semantic_status = "clean_cut_core_v1_idea_first"
+            reasoner_status_label = "disabled_clean_cut_core_v1"
+        elif selection_reasoner is not None:
+            # One whole-video semantic authority sees Selected + SWAP + Discarded
+            # together and decides. Local/group decisions inform its payload as
+            # evidence, but no longer have unconditional final say afterward --
+            # see the deterministic Best-Take pass immediately below.
+            result = replace(
+                result,
+                draft=apply_unified_selection_reasoner(result.draft, selection_reasoner),
+            )
+            reasoner_diag = (result.draft.diagnostics or {}).get("unified_selection_reasoner") or {}
+            reasoner_status = str(reasoner_diag.get("status") or "unknown")
+            selection_stage = f"unified_whole_video_selection_{reasoner_status}"
+
+            # Architecture rebalance Phase 0/1: Unified Selection and the
+            # deterministic take_judge Best-Take layer are now sequential
+            # rather than Unified Selection having unconditional final say.
+            # For a retry-family contest the local ranker was genuinely
+            # decisive about, its verdict becomes authoritative here; an
+            # ambiguous (thin score-gap) contest is left exactly as Unified
+            # Selection decided it. Rollback: set
+            # CUTSELL_DETERMINISTIC_BEST_TAKE_AUTHORITY=0 to restore the
+            # previous pure-whole-video-reasoner behavior unmodified.
+            if deterministic_best_take_authority_enabled:
+                result = replace(
+                    result,
+                    draft=apply_deterministic_best_take_authority(result.draft, swap_enabled=True),
+                )
+                selection_stage = f"{selection_stage}+deterministic_best_take_authority"
+            semantic_status = "whole_video_selection"
+            reasoner_status_label = "enabled"
+        else:
+            # Legacy fallback remains available while Unified Selection is
+            # feature-gated. Untouched by this phase: this path already has its
+            # own, more targeted Best-Take reconciliation (pipeline.py's
+            # _semantic_best_take plus these Hybrid-vote-informed guards); the
+            # new deterministic override above is scoped to Unified Selection
+            # mode only, so it can never undo a legitimate Hybrid semantic
+            # override made here.
+            result = replace(result, draft=apply_selection_phase_authority(result.draft))
+            result = replace(result, draft=apply_selection_conflicted_bridge_guard(result.draft))
+            selection_stage = "legacy_explicit_final_selection_authority_executed"
+            semantic_status = "not_requested_clean_cut_only"
+            reasoner_status_label = "disabled"
+
+        # CanonicalEditPlan (D-024) + bounded targeted repair loop (D-026) +
+        # general causal/story order validation (D-027): build v1, review it
+        # (review now also runs CAUSAL_ORDER_BREAK's general cross-idea
+        # dependency check, see causal_order_validator.py), and -- only for
+        # finding types with a safe, content-preserving repair strategy
+        # (today: STORY_ORDER_BREAK's composite reordering; CAUSAL_ORDER_
+        # BREAK has none by design -- a cross-idea reorder risks undoing an
+        # intentional Composer pacing choice, see repair_loop.py's own
+        # docstring) -- apply bounded, targeted repairs and re-review. Never
+        # invents semantic judgment; never mutates an unrelated Idea.
+        #
+        # D-050C3 Section 1/4: this FIRST pass runs on whatever the 3-way
+        # selection branch above produced -- the pre-cutover ("legacy")
+        # draft. In LEGACY/SHADOW mode (and always for the two non-Clean-
+        # Cut-Core-V1 selection branches, which the Unified Realization
+        # Resolver was never designed for) this pass's output IS the real,
+        # final diagnostics -- nothing below ever touches it again. In
+        # AUTHORITATIVE mode it is ALSO still needed here: (a) the Semantic
+        # Ledger's own reconstruction reads `final_story_coherence_
+        # validation`/`canonical_edit_plan` diagnostics for one enrichment
+        # (see semantic_ledger.py Section 11), so this pass has to exist
+        # before the Ledger is built, and (b) it becomes this run's LEGACY
+        # EVIDENCE for comparison once the authoritative pass below
+        # recomputes these same three diagnostics keys on the resolver's
+        # OWN resolved draft and takes over as the real ones Freeze reads.
+        repair_result = run_repair_loop(
+            result.draft, causal_order_arbiter=causal_order_arbiter,
+            # D-235X Part B: the SAME already-computed D-235Q result the
+            # Freeze-composition pass above stored on this exact draft --
+            # `{}` (the field's own default) whenever the materiality flag
+            # is off, preserving byte-identical prior behavior.
+            lost_atom_materiality_by_provenance_id=getattr(
+                result.draft, "lost_atom_materiality_by_provenance_id", None,
+            ),
+        )
+        edit_plan = repair_result.final_plan
+        review_result = repair_result.final_review
+        result = replace(result, draft=repair_result.final_draft)
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["canonical_edit_plan"] = dataclasses.asdict(edit_plan)
+        diagnostics["final_edit_reviewer"] = {
+            "status": review_result.status,
+            "findings": [dataclasses.asdict(f) for f in review_result.findings],
+            "warnings": [dataclasses.asdict(f) for f in review_result.warnings],
+        }
+        diagnostics["repair_loop"] = {
+            "status": repair_result.status,
+            "attempt_count": len(repair_result.attempts),
+            "attempts": [dataclasses.asdict(a) for a in repair_result.attempts],
+            # D-239F: bounded D-235S/D-235T per-provenance-id projection --
+            # see lost_atom_ownership_materiality_diagnostics.py's own
+            # module docstring. Reads ONLY repair_result.suppression_
+            # decisions/.attempts (already computed above), never calls
+            # decide_lost_atom_repair_suppression again.
+            "lost_atom_repair_suppression_diagnostics": lost_atom_repair_suppression_by_provenance_diagnostics(
+                suppression_decisions=repair_result.suppression_decisions,
+                repair_attempts=repair_result.attempts,
+            ),
+        }
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+        final_edit_reviewer_status = review_result.status
+
+        # D-050B: Semantic Ledger. Built here -- after every stage it
+        # observes (grouping, DeliveryScorer, semantic best-take,
+        # ClaimCoverage, StoryValidator, CanonicalEditPlan, FinalEditReviewer)
+        # has already run and already written its own diagnostics -- as a
+        # pure, read-only reconstruction. In LEGACY/SHADOW mode this remains
+        # purely observational: nothing below this line (Freeze, Boundary,
+        # complete-idea recovery, Render/QC) reads `diagnostics
+        # ["semantic_ledger"]`. In AUTHORITATIVE mode it is ALSO the
+        # Unified Realization Resolver's own input two steps below -- see
+        # semantic_ledger.py's module docstring for the full contract.
+        ledger = build_semantic_ledger_shadow(result.draft)
+        ledger_parity = build_ledger_parity_report(ledger, result.draft)
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["semantic_ledger"] = build_semantic_ledger_diagnostics(ledger, ledger_parity)
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+
+        # D-050C1/D-050C1.5/D-050C1.6: Unified Realization Resolver. Consumes
+        # the Semantic Ledger built immediately above and computes what ONE
+        # unified resolver decides per semantic idea. `resolve_realizations_
+        # shadow` itself NEVER writes to a DraftTimeline -- it is pure
+        # observation, same as every prior D-050C1.x directive. Whether that
+        # decision is APPLIED depends entirely on `resolver_mode` below.
+        resolver_mode = resolve_resolver_mode()
+        resolver_report = resolve_realizations_shadow(ledger)
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["realization_resolver_shadow"] = build_realization_resolver_diagnostics(resolver_report)
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+
+        # D-050C2/D-050C3 CONTROLLED AUTHORITY CUTOVER -- see resolver_mode.py's
+        # own module docstring for the 3-state contract (LEGACY/SHADOW/
+        # AUTHORITATIVE, default LEGACY, one environment variable, no code
+        # revert to roll back) and realization_resolver.py's
+        # `apply_authoritative_realization_resolution` docstring for exactly
+        # what gets applied. This is THE ONE explicit point in the pipeline
+        # the resolver's decision is ever applied (Section 3) -- no other
+        # module below this line, or above it, mutates selection membership
+        # on the resolver's behalf. Gated on `clean_cut_core_v1_enabled` too:
+        # the resolver's per-idea/retry-family model only makes sense against
+        # Clean Cut Core V1's own idea-first grouping.
+        #
+        # D-050C3 Section 4 (the C2 evidence-only exemption removed): where
+        # D-050C2 left CanonicalEditPlan/StoryValidator/FinalEditReviewer's
+        # FIRST-pass output (computed above, on the pre-cutover draft) as the
+        # diagnostics Freeze actually reads even in AUTHORITATIVE mode, this
+        # phase re-runs all three -- StoryValidator, then CanonicalEditPlan
+        # + FinalEditReviewer + bounded repair -- a SECOND time, strictly on
+        # the resolver's own resolved draft, and THAT second pass becomes
+        # the real `diagnostics["canonical_edit_plan"]`/`["final_edit_
+        # reviewer"]`/`["final_story_coherence_validation"]`/["repair_loop"]`
+        # keys Freeze reads below. The first pass's output for those same
+        # four keys is relabeled `*_legacy_evidence` -- still present, still
+        # fully computed, but structurally unable to block or approve
+        # anything: no code below this point ever reads those `_legacy_
+        # evidence` keys for a decision, only for comparison/observability.
+        # In `LEGACY`/`SHADOW` mode (and the two non-Clean-Cut-V1 selection
+        # branches) none of this runs: identical to every prior D-050C1.x/
+        # D-050C2 directive -- the first pass above is the only pass, full
+        # stop.
+        authoritative_result = None
+        authoritative_semantic_state = None
+        post_authority_integrity_failed = False
+        if clean_cut_core_v1_enabled and resolver_mode == RESOLVER_MODE_AUTHORITATIVE:
+            authoritative_result = apply_authoritative_realization_resolution(
+                result.draft, ledger, resolver_report, claim_equivalence_arbiter=claim_equivalence_arbiter,
+            )
+            # D-092 (D-090 QA_ENGINE P2): KEEP/DISCARD normalization at the
+            # authority boundary. The resolver's application may park a
+            # candidate it refuses to silently drop (`retained_for_
+            # contextual_value`) in `alternates`; Clean Cut Core V1 is
+            # KEEP/DISCARD only (D-019), and before D-090 the second
+            # StoryValidator pass folded those into `discarded`. D-090 made
+            # that pass validation-only (it folds on a working copy for the
+            # coverage checks' view), so the fold now happens exactly ONCE,
+            # here, before the D-090 signature is captured: `selected` is
+            # untouched (the signature proves it), the folded clips reach
+            # the coverage checks and the plan's discard provenance as
+            # discarded, and the resolver's own `retained_for_contextual_
+            # value` reasoning stays visible in `realization_resolver_
+            # authority`. The realization_resolver application itself is
+            # unchanged.
+            alternates_folded_at_authority_boundary = [
+                clip.clip_id for clip in (authoritative_result.draft.alternates or ())
+            ]
+            if alternates_folded_at_authority_boundary:
+                authoritative_result = replace(
+                    authoritative_result,
+                    draft=fold_alternates_into_discarded(authoritative_result.draft),
+                )
+
+            pre_authority_diagnostics = dict(result.draft.diagnostics or {})
+            legacy_evidence_keys = (
+                "canonical_edit_plan", "final_edit_reviewer", "repair_loop",
+                "final_story_coherence_validation",
+            )
+            authoritative_diagnostics = {
+                key: value for key, value in pre_authority_diagnostics.items()
+                if key not in legacy_evidence_keys
+            }
+            for key in legacy_evidence_keys:
+                if key in pre_authority_diagnostics:
+                    authoritative_diagnostics[f"{key}_legacy_evidence"] = pre_authority_diagnostics[key]
+            # D-087 SINGLE-TRUTH HANDOFF: the resolver's own per-idea verdict
+            # (winner / composite / review-required, with its coverage
+            # evidence) becomes the canonical source CanonicalEditPlan
+            # represents in AUTHORITATIVE mode -- built once here from the
+            # very same `authoritative_result` + `ledger` every other
+            # authoritative stage consumes, stored as diagnostics (Section
+            # 15) and handed to the repair loop below explicitly. LEGACY/
+            # SHADOW never reach this branch, so they never carry the key
+            # and CanonicalEditPlan keeps its pre-D-087 path there.
+            authoritative_plan_source = build_authoritative_plan_source(authoritative_result, ledger)
+            authoritative_diagnostics["authoritative_plan_source"] = authoritative_plan_source_to_diagnostics(
+                authoritative_plan_source
+            )
+            authoritative_draft = replace(authoritative_result.draft, diagnostics=authoritative_diagnostics)
+
+            # D-076: SEMANTIC_PRESERVATION_PROOF -- built from the same
+            # `ledger`/`resolver_report` already computed above, ONLY here
+            # (AUTHORITATIVE mode's own second StoryValidator pass) since
+            # this is structurally the first point in the pipeline both
+            # the Ledger and a resolved draft exist together. StoryValidator
+            # only ever consumes this map (one dict lookup per discarded
+            # clip) -- see final_story_coherence_validation.py's own
+            # consumption comment; it discovers no candidate, extracts no
+            # claim, and invokes no arbiter of its own for this decision.
+            pre_group_semantic_preservation_proofs = resolve_pre_group_semantic_preservation_shadow(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+            )
+            # D-079 Phase 1/2: the third, remaining discard population --
+            # a realization that DID reach grouping and lost, within its
+            # own idea, to that idea's own resolved winner/composite.
+            # Reuses the ALREADY-COMPUTED `resolver_report` from this same
+            # function's own diagnostics pass above (no redundant second
+            # per-idea resolution).
+            intra_idea_semantic_preservation_proofs = resolve_intra_idea_semantic_preservation_shadow(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter, resolver_report=resolver_report,
+            )
+            semantic_preservation_proofs = build_semantic_preservation_proofs(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+                pre_group_proofs=pre_group_semantic_preservation_proofs,
+                intra_idea_proofs=intra_idea_semantic_preservation_proofs,
+            )
+            # D-079 Phase 1/2: the single, CLAIM-scoped index `_lost_
+            # critical_claims` consumes -- built from ALL verified proofs
+            # (hybrid_editorial PATH A/B reframed, pre-group, and this
+            # directive's own intra-idea pass), never from a coarse clip-
+            # or idea-level credit. See `build_preserved_claim_id_index`'s
+            # own docstring for the full contract.
+            critical_claim_preservation_index = build_preserved_claim_id_index(
+                pre_group_semantic_preservation_proofs, intra_idea_semantic_preservation_proofs,
+            )
+            # D-089 Part A: the ONE canonical effective-importance truth --
+            # the Ledger's own per-idea requirement-group importance (the
+            # exact rule the resolver above and ClaimCoverageBestTake
+            # already honor), keyed by canonical_claim_id, so StoryValidator
+            # can never re-derive a weaker/stronger importance for the SAME
+            # proposition from its own raw re-extraction.
+            canonical_effective_importance_index = build_effective_claim_importance_index(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+            )
+            authoritative_draft = replace(
+                authoritative_draft,
+                diagnostics={
+                    **dict(authoritative_draft.diagnostics or {}),
+                    "canonical_effective_importance": build_effective_claim_importance_diagnostics(
+                        canonical_effective_importance_index
+                    ),
+                    # D-089 Part B Section 12: every restoration placement
+                    # unit the authoritative application made, inspectable
+                    # from the RAW log without a forensic extract.
+                    "authoritative_story_placement": build_story_placement_diagnostics(
+                        authoritative_result.story_placement
+                    ),
+                },
+            )
+
+            # D-090 AUTHORITY BOUNDARY: the resolver's applied selection is
+            # the ONE semantic truth from here on. Capture its signature
+            # now; everything below is validation/representation/bounded
+            # physical-order repair and must hand back the SAME selection.
+            post_authority_integrity_failures: list[str] = []
+            post_authority_context = None
+            context_status, context_detail = "present", ""
+            try:
+                post_authority_context = build_post_authority_validation_context(
+                    authoritative_result, authoritative_plan_source,
+                )
+            except PostAuthorityIntegrityError as exc:
+                context_status, context_detail = exc.code, exc.detail
+                post_authority_integrity_failures.append(exc.code)
+            source_identity = post_authority_context.source_identity if post_authority_context else ""
+            signature_after_authority = semantic_selection_signature(
+                authoritative_draft, authority_identity=source_identity,
+            )
+
+            # StoryValidator, AUTHORITATIVELY -- VALIDATION-ONLY (D-090):
+            # re-validated on the resolver's own resolved selection, never
+            # the pre-cutover one, and structurally unable to edit it. A
+            # missing context is an integrity failure that fails closed
+            # inside the call; it never falls back to the legacy pass.
+            authoritative_draft = apply_post_authority_story_validation(
+                authoritative_draft,
+                context=post_authority_context,
+                # D-097.1: pre-group restart credit only (validation evidence).
+                semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+                integrity_failure=(
+                    (context_status, context_detail) if post_authority_context is None else None
+                ),
+                semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+                claim_equivalence_arbiter=claim_equivalence_arbiter,
+                clause_role_arbiter=clause_role_arbiter,
+                semantic_preservation_proofs=semantic_preservation_proofs,
+                critical_claim_preservation_index=critical_claim_preservation_index,
+                canonical_effective_importance_index=canonical_effective_importance_index,
+                # D-235X Part A: SAME context as the legacy-resolving pass above.
+                exact_match_by_clip_id=_exact_match_by_clip_id,
+                proposition_candidate_ids_by_attempt_id=_proposition_candidate_ids_by_attempt_id,
+                proposition_slot_evidence_by_id=_proposition_slot_evidence_by_id,
+                identity_observability_by_clip_id=_identity_observability_by_clip_id,
+                # D-239: SAME context as the legacy-resolving pass above.
+                lost_atom_ownership_by_clip_id=_lost_atom_ownership_by_clip_id,
+                # D-239I: SAME context as the legacy-resolving pass above.
+                p1_moment_role_by_clip_id=_p1_moment_role_by_clip_id,
+                p1_audience_delivery_status_by_clip_id=_p1_audience_delivery_status_by_clip_id,
+                # D-239O: SAME context as the legacy-resolving pass above.
+                exact_p1_target_evidence_by_clip_id=_p1_target_lookup_evidence_by_clip_id,
+            )
+            signature_after_validation = semantic_selection_signature(
+                authoritative_draft, authority_identity=source_identity,
+            )
+            validation_invariant = compare_selection_signatures(
+                signature_after_authority, signature_after_validation,
+                phase=PHASE_STORY_VALIDATION, order_sensitive=True,
+            )
+            if not validation_invariant.unchanged:
+                post_authority_integrity_failures.append(
+                    f"{INTEGRITY_FAILURE_SELECTION_MUTATION}:{PHASE_STORY_VALIDATION}"
+                )
+
+            # CanonicalEditPlan + FinalEditReviewer + bounded repair,
+            # AUTHORITATIVELY: same call as the first pass above, now
+            # operating on the resolved draft -- this becomes the plan
+            # Freeze actually consumes. The loop's ONE permitted repair is
+            # a story-order reorder, so the ORDER-INSENSITIVE projection
+            # (membership, speech, provenance, authority identity) must
+            # come back unchanged (D-090 Section 6).
+            repair_result = run_repair_loop(
+                authoritative_draft,
+                causal_order_arbiter=causal_order_arbiter,
+                authoritative_source=authoritative_plan_source,
+                # D-235X Part B: SAME already-computed D-235Q result the
+                # AUTHORITATIVE pass above stored on this exact draft.
+                lost_atom_materiality_by_provenance_id=getattr(
+                    authoritative_draft, "lost_atom_materiality_by_provenance_id", None,
+                ),
+            )
+            edit_plan = repair_result.final_plan
+            review_result = repair_result.final_review
+            signature_after_repair = semantic_selection_signature(
+                repair_result.final_draft, authority_identity=source_identity,
+            )
+            repair_invariant = compare_selection_signatures(
+                signature_after_authority, signature_after_repair,
+                phase=PHASE_BOUNDED_REPAIR, order_sensitive=False,
+            )
+            if not repair_invariant.unchanged:
+                post_authority_integrity_failures.append(
+                    f"{INTEGRITY_FAILURE_SELECTION_MUTATION}:{PHASE_BOUNDED_REPAIR}"
+                )
+            # Fail closed on drift: keep the (mutated) draft exactly as the
+            # offending stage produced it -- never silently restore the
+            # pre-mutation selection and call it a PASS, never rebuild the
+            # authoritative source from it. The record below makes the
+            # drift visible and the Freeze gate blocks on it.
+            result = replace(result, draft=repair_result.final_draft)
+            final_edit_reviewer_status = review_result.status
+            post_authority_record = PostAuthorityBoundaryRecord(
+                validation_mode=POST_AUTHORITY_VALIDATION_MODE,
+                context_status=context_status,
+                context_detail=context_detail,
+                authoritative_source_identity=source_identity,
+                authoritative_status=authoritative_result.status,
+                decision_count=post_authority_context.decision_count if post_authority_context else 0,
+                signature_after_authority=signature_to_diagnostics(signature_after_authority),
+                signature_after_validation=signature_to_diagnostics(signature_after_validation),
+                signature_after_repair=signature_to_diagnostics(signature_after_repair),
+                validation_invariant=mutation_report_to_diagnostics(validation_invariant),
+                repair_invariant=mutation_report_to_diagnostics(repair_invariant),
+                integrity_failures=tuple(post_authority_integrity_failures),
+                extra={
+                    # D-092: what the authority boundary folded (D-019).
+                    "alternates_folded_at_authority_boundary": alternates_folded_at_authority_boundary,
+                    "authoritative_families_accepted": list(
+                        ((authoritative_draft.diagnostics or {}).get("final_story_coherence_validation") or {})
+                        .get("authoritative_families_accepted") or []
+                    ),
+                    "authority_membership_findings": list(
+                        ((authoritative_draft.diagnostics or {}).get("final_story_coherence_validation") or {})
+                        .get("authority_membership_findings") or []
+                    ),
+                    "story_validator_freeze_blocked": bool(
+                        ((authoritative_draft.diagnostics or {}).get("final_story_coherence_validation") or {})
+                        .get("freeze_blocked")
+                    ),
+                    "repair_loop_status": repair_result.status,
+                    "final_edit_reviewer_status": review_result.status,
+                },
+            )
+            post_authority_integrity_failed = post_authority_record.integrity_failed
+
+            diagnostics = dict(result.draft.diagnostics or {})
+            diagnostics["canonical_edit_plan"] = dataclasses.asdict(edit_plan)
+            diagnostics["final_edit_reviewer"] = {
+                "status": review_result.status,
+                "findings": [dataclasses.asdict(f) for f in review_result.findings],
+                "warnings": [dataclasses.asdict(f) for f in review_result.warnings],
+            }
+            diagnostics["repair_loop"] = {
+                "status": repair_result.status,
+                "attempt_count": len(repair_result.attempts),
+                "attempts": [dataclasses.asdict(a) for a in repair_result.attempts],
+                # D-239F: see the legacy-resolving pass's own identically-named field.
+                "lost_atom_repair_suppression_diagnostics": lost_atom_repair_suppression_by_provenance_diagnostics(
+                    suppression_decisions=repair_result.suppression_decisions,
+                    repair_attempts=repair_result.attempts,
+                ),
+            }
+            authoritative_semantic_state = build_authoritative_semantic_state(authoritative_result, ledger)
+            diagnostics["authoritative_semantic_state"] = build_authoritative_semantic_state_diagnostics(
+                authoritative_semantic_state
+            )
+            # D-076 Section 14: every PRE_GROUP_SEMANTIC_PRESERVATION
+            # attempt, verified or not -- LEXICAL_REPLACEMENT/SEMANTIC_
+            # REPLACEMENT's own full evidence stays in `realization_
+            # resolver_shadow`/`realization_resolver_authority`'s existing
+            # `orphan_reviews`, unchanged.
+            diagnostics["semantic_preservation_proofs"] = build_semantic_preservation_proofs_diagnostics(
+                pre_group_semantic_preservation_proofs
+            )
+            # D-089: carried forward from the authoritative draft built
+            # above (the repair loop's final draft is derived from it);
+            # re-stated here so the keys survive even if a repair rebuilt
+            # the diagnostics dict.
+            diagnostics.setdefault(
+                "canonical_effective_importance",
+                build_effective_claim_importance_diagnostics(canonical_effective_importance_index),
+            )
+            diagnostics.setdefault(
+                "authoritative_story_placement",
+                build_story_placement_diagnostics(authoritative_result.story_placement),
+            )
+            # D-090 Section 9: the authority-boundary record, always written
+            # (not setdefault -- it must reflect THIS run's invariant).
+            diagnostics["post_authority_validation"] = post_authority_record.to_diagnostics()
+            result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["realization_resolver_authority"] = (
+            build_authoritative_resolution_diagnostics(authoritative_result, mode=resolver_mode)
+            if authoritative_result is not None
+            else {"schema_version": "cutsell.realization_resolver_authority.v1", "mode": resolver_mode, "status": None, "ideas": []}
+        )
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+
+        # Hard pre-Freeze gate: Final Story Coherence Validation may find a
+        # high-confidence semantic failure (an unresolved factual
+        # contradiction between still-co-selected same-retry-family members,
+        # or an entire intended idea losing every member from the final
+        # selected set) that must never reach Selection Freeze. The repair
+        # loop's own NEEDS_HUMAN_REVIEW outcome (FinalEditReviewer still FAILs
+        # after exhausting any safe repair) is the same kind of finding --
+        # not something Boundary could ever repair -- so this skips freeze/
+        # boundary entirely and surfaces the draft as-is (still selected/
+        # discarded, just unfrozen) for human review rather than silently
+        # producing a bad video. D-050C2 Section 11 (Freeze contract): in
+        # AUTHORITATIVE mode, the resolver's own REVIEW_REQUIRED status is
+        # an equally hard gate -- OR'd in here, never allowed to be
+        # silently overridden by a legacy coherence check that ran on the
+        # PRE-cutover selection and has no visibility into the resolver's
+        # own verdict.
+        coherence_diag = (result.draft.diagnostics or {}).get("final_story_coherence_validation") or {}
+        freeze_blocked = bool(coherence_diag.get("freeze_blocked")) or repair_result.status == "NEEDS_HUMAN_REVIEW"
+        if authoritative_result is not None and authoritative_result.status == AUTHORITATIVE_REVIEW_REQUIRED:
+            freeze_blocked = True
+        # D-090: a post-authority selection mutation (or a missing
+        # authoritative context) is a named integrity failure -- an equally
+        # hard gate, never silently repaired.
+        if post_authority_integrity_failed:
+            freeze_blocked = True
+        blocked_status = (
+            "not_frozen_post_authority_integrity_failure"
+            if post_authority_integrity_failed
+            else "not_frozen_freeze_blocked_by_coherence_review"
+        )
+
+        if freeze_blocked:
+            recovery_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            polish_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            boundary_pass_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            contract_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            pacing_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            selection_stage = f"{selection_stage}+freeze_blocked_pending_human_review"
+
+            # D-025 (Issue 2): install_selection_freeze()/install_boundary_
+            # selection_invariant() unconditionally freeze+verify inside
+            # process_local_sources -> build_flow_b_draft, BEFORE StoryValidator/
+            # CanonicalEditPlan/FinalEditReviewer ever run in this module -- a
+            # holdover from the pre-V1 architecture where build_flow_b_draft's
+            # own output was the final answer. That leaves diagnostics.
+            # selection_boundary_contract.status stuck at "frozen"/"verified"
+            # from that premature, pre-StoryValidator freeze even though this
+            # gate has just determined the real final draft must NOT be frozen
+            # -- a direct evidence-level contradiction (RAW 33366538992: the
+            # result JSON reported freeze_blocked=true AND selection_boundary_
+            # contract.status=frozen simultaneously). This is the one place
+            # that authoritatively knows the true state, so it corrects the
+            # record rather than leaving that stale, misleading key in place.
+            stale_contract = dict((result.draft.diagnostics or {}).get("selection_boundary_contract") or {})
+            diagnostics = dict(result.draft.diagnostics or {})
+            diagnostics["selection_boundary_contract"] = {
+                "schema_version": "cutsell.selection_boundary_contract.v1",
+                "status": blocked_status,
+                "plan_id": edit_plan.plan_id,
+                "plan_version": edit_plan.plan_version,
+                "semantic_hash": edit_plan.semantic_hash,
+                "superseded_premature_freeze_status": stale_contract.get("status"),
+            }
+            result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+        else:
+            # Complete-idea recovery may restore source-proven leading/trailing spoken words.
+            # It therefore belongs before Selection freeze regardless of semantic authority.
+            result = enforce_complete_idea_boundaries(
+                result,
+                local_paths,
+                asr_provider=asr_provider,
+            )
+            recovery_stage = "complete_idea_word_lock_overlap_guard_before_freeze"
+
+            # Hard semantic phase barrier. Everything after this line is Boundary-only.
+            # Freezes the specific plan FinalEditReviewer PASSed (D-025) --
+            # see freeze_selection_contract's own docstring for why this is
+            # observability (matches_reviewed_plan), not a hard equality gate.
+            result = replace(result, draft=freeze_selection_contract(result.draft, plan=edit_plan))
+
+            # D-097.C/E: the one post-Freeze BoundaryEngine pass -- evidence
+            # edge trim, interior dead air / performance gaps, audio entry/
+            # exit -- on the FINAL keep set (D-096 root cause #4).
+            result = apply_post_freeze_boundary_pass(result)
+            boundary_pass_stage = "post_freeze_edge_interior_audio_edges_complete"
+
+            result = polish_human_boundaries_v5(result, local_paths)
+            polish_stage = "source_evidenced_multimodal_v5_boundary_only_complete"
+
+            # Fail closed if Boundary changed ordered spoken content after the freeze.
+            result = replace(result, draft=enforce_selection_contract(result.draft))
+            contract_stage = "selection_semantic_stream_verified_after_boundary"
+
+            # D-142 Phase 1: Dialogue/Pacing Transition planning -- strictly
+            # after Boundary, strictly before any render is ever invoked
+            # (which happens later, at export time, from this persisted
+            # draft). Diagnostics-only: never reassigns `draft.selected`,
+            # never touches D-123/D-128/BestTake/grouping. Consumes ONLY
+            # the canonical D-134 `dialogue_overlap_enabled` permission --
+            # never the legacy `audio_overlap` field directly.
+            result = apply_dialogue_pacing_transition_pass(
+                result, dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+            )
+            pacing_stage = "dialogue_pacing_transition_phase1_planned"
+
+            # D-216: Pacing V2 live diagnostic integration -- default OFF,
+            # DIAGNOSTICS ONLY. When enabled, computes D-215's own decision
+            # foundation over the SAME real, already-Boundary-finalized,
+            # already-Phase-1-planned `result.draft.selected` sequence, at
+            # this exact seam, strictly after D-142's own live pass -- never
+            # before it, never re-ordering it. `draft.selected`/`result`'s
+            # live fields are never reassigned by this block; only a new,
+            # additive `diagnostics["pacing_v2"]` key is ever attached. No
+            # live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority: D-142's own
+            # `pacing_stage` above already reflects the only mode ever
+            # actually executed.
+            #
+            # D-217: real evidence-source wiring, additive to D-216, same
+            # flag. `build_pacing_v2_live_diagnostics_with_real_evidence`
+            # (pacing_v2_evidence_adapter.py) derives relationship-hint/
+            # Prosodic/candidate-timing evidence from what is ALREADY on
+            # `result.draft.diagnostics` (the SAME dict already threaded
+            # through as `boundary_diagnostics` -- "editorial_moment_
+            # sequence"/"take_judge_groups" keys, both no-op/absent unless
+            # their OWN separate flags were already on for this run, never
+            # turned on by this call) then calls D-216's own unmodified
+            # `build_pacing_v2_live_diagnostics` underneath -- still the
+            # one decision engine (D-215's `decide_transition`), still
+            # never executed live.
+            if pacing_v2_diagnostics_enabled():
+                pacing_v2_diag = build_pacing_v2_live_diagnostics_with_real_evidence(
+                    result.draft.selected,
+                    dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+                    boundary_diagnostics=result.draft.diagnostics,
+                    live_transition_modes=tuple(
+                        row.get("mode")
+                        for row in (result.draft.diagnostics.get("dialogue_pacing_transition") or {}).get("transitions", ())
+                    ),
+                    editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
+                    take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
+                )
+                # D-224: Source Audio Handle live evidence integration --
+                # SAME flag, purely additive `diagnostics["pacing_v2_
+                # handle_aware"]` key. Reads ONLY already-computed real
+                # state already on `result.draft`/`request` at this exact
+                # seam (boundary_engine_pass's own audio-edge audit trail,
+                # post_selection_edge_only_boundary's own audit trail,
+                # `draft.discarded`, `request.sources[*].duration_sec`) --
+                # never a new provider call, never an ASR rerun. Still
+                # zero live J_CUT/L_CUT/MICRO_AUDIO_OVERLAP authority: D-142's
+                # own `pacing_stage` above remains the only mode ever
+                # actually executed; this block only ever reads from
+                # `result.draft`, it is never written back onto `selected`,
+                # `RenderSegment`, or any Boundary/Ordering/BestTake state.
+                boundary_engine_pass_diag = result.draft.diagnostics.get("boundary_engine_pass") or {}
+                handle_aware_diag = build_handle_aware_pacing_v2_diagnostics(
+                    result.draft.selected,
+                    dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+                    boundary_diagnostics=result.draft.diagnostics,
+                    discarded=result.draft.discarded,
+                    boundary_engine_pass_audit=tuple(boundary_engine_pass_diag.get("audio_edge_rows") or ()),
+                    post_selection_edge_only_boundary_audit=tuple(
+                        result.draft.diagnostics.get("post_selection_edge_only_boundary") or ()
+                    ),
+                    source_duration_by_asset={
+                        source.source_asset_id: source.duration_sec
+                        for source in getattr(request, "sources", ()) or ()
+                    },
+                    editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
+                    take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
+                )
+                extra_diagnostics = {
+                    "pacing_v2": pacing_v2_diag,
+                    "pacing_v2_handle_aware": handle_aware_diag,
+                }
+
+                # D-234: Audio Join Treatment live diagnostic integration --
+                # SEPARATE flag (default OFF), strictly additive
+                # `diagnostics["audio_join_treatment_v2"]` key. Reuses the
+                # SAME `handles`/relationship-hint/Prosodic evidence
+                # foundation as D-224/D-217 above (own internal recompute,
+                # cheap and pure -- no new provider, no ASR rerun); the
+                # D-230->D-231->D-232->D-233 chain is DIAGNOSTIC ONLY. This
+                # block never writes back onto `result.draft.selected`,
+                # `RenderSegment`, Boundary, Ordering, Family/BestTake, or
+                # the D-142 primary transition mode above -- and never
+                # imports `render_plan`/`render`'s D-233 offline treatment
+                # executor. `advanced_treatment_executed_count` and
+                # `live_audio_window_mutation_count` in its own summary are
+                # therefore always 0, structurally, not merely asserted.
+                if audio_join_treatment_diagnostics_enabled():
+                    extra_diagnostics["audio_join_treatment_v2"] = build_audio_join_treatment_live_diagnostics(
+                        result.draft.selected,
+                        dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+                        boundary_diagnostics=result.draft.diagnostics,
+                        discarded=result.draft.discarded,
+                        boundary_engine_pass_audit=tuple(boundary_engine_pass_diag.get("audio_edge_rows") or ()),
+                        post_selection_edge_only_boundary_audit=tuple(
+                            result.draft.diagnostics.get("post_selection_edge_only_boundary") or ()
+                        ),
+                        source_duration_by_asset={
+                            source.source_asset_id: source.duration_sec
+                            for source in getattr(request, "sources", ()) or ()
+                        },
+                        editorial_moment_sequence_diagnostics=result.draft.diagnostics.get("editorial_moment_sequence"),
+                        take_judge_groups=result.draft.diagnostics.get("take_judge_groups") or (),
+                        live_transition_modes=tuple(
+                            row.get("mode")
+                            for row in (result.draft.diagnostics.get("dialogue_pacing_transition") or {}).get("transitions", ())
+                        ),
+                    )
+
+                result = replace(result, draft=replace(
+                    result.draft, diagnostics={
+                        **result.draft.diagnostics,
+                        **extra_diagnostics,
+                    },
+                ))
+
+        # D-235G: Selection Freeze blocker OBSERVABILITY ONLY -- runs
+        # after the freeze_blocked if/else above either way, reading
+        # ONLY the already-final `freeze_blocked` boolean and the
+        # already-computed evidence this function already built above
+        # (`coherence_diag`, `repair_result.status`, `authoritative_
+        # result.status`, `post_authority_integrity_failed`). Never
+        # recomputes whether Freeze should block, never changes it;
+        # `pacing_seam_reached` is the plain negation of the SAME
+        # `freeze_blocked` value already used to gate the Pacing gate
+        # above -- not a second decision. `*_serialized` fields are pure
+        # key-presence checks on `result.draft.diagnostics`, never a new
+        # evidence source. Sibling-safe: no Video00 golden-file content,
+        # no hardcoded expected count, generic for any source.
+        _post_authority_diag = (result.draft.diagnostics or {}).get("post_authority_validation") or {}
+        selection_freeze_diag = build_selection_freeze_diagnostics(
+            freeze_blocked=freeze_blocked,
+            coherence_diag=coherence_diag,
+            repair_loop_status=getattr(repair_result, "status", None),
+            resolver_status=getattr(authoritative_result, "status", None) if authoritative_result is not None else None,
+            post_authority_integrity_failed=post_authority_integrity_failed,
+            post_authority_integrity_failure_codes=_post_authority_diag.get("integrity_failures") or (),
+            selected_count_before_freeze=len(result.draft.selected) if result.draft.selected is not None else None,
+            pacing_v2_serialized="pacing_v2" in (result.draft.diagnostics or {}),
+            pacing_v2_handle_aware_serialized="pacing_v2_handle_aware" in (result.draft.diagnostics or {}),
+            audio_join_treatment_v2_serialized="audio_join_treatment_v2" in (result.draft.diagnostics or {}),
+        )
+        result = replace(result, draft=replace(
+            result.draft, diagnostics={
+                **result.draft.diagnostics,
+                "selection_freeze_diagnostics": selection_freeze_diag,
+            },
+        ))
+
+        # D-235J: Lost Semantic Atom DETAIL observability, OBSERVABILITY
+        # ONLY -- reads the SAME already-computed `coherence_diag.get(
+        # "lost_semantic_atoms")` rows this function already threaded into
+        # `freeze_blocked` above (via `_coherence_sub_reasons` inside
+        # `build_selection_freeze_diagnostics`), plus the already-
+        # serialized `diagnostics["repair_loop"]["attempts"]` list this
+        # function already wrote (either the V1 branch above or the
+        # AUTHORITATIVE branch above, whichever ran). No recomputation of
+        # semantic atoms, no materiality judgment, no `blocking` flag
+        # change -- a separate top-level diagnostics key, sibling to
+        # `selection_freeze_diagnostics`, never nested inside it.
+        _repair_loop_diag = (result.draft.diagnostics or {}).get("repair_loop") or {}
+        lost_semantic_atom_diag = build_lost_semantic_atom_diagnostics(
+            lost_semantic_atoms=coherence_diag.get("lost_semantic_atoms"),
+            repair_loop_attempts=_repair_loop_diag.get("attempts") or (),
+        )
+        result = replace(result, draft=replace(
+            result.draft, diagnostics={
+                **result.draft.diagnostics,
+                "lost_semantic_atom_diagnostics": lost_semantic_atom_diag,
+            },
+        ))
+    else:
+        selection_stage = "not_applicable_missing_draft_contract"
+        polish_stage = "not_applicable_missing_draft_contract"
+        boundary_pass_stage = "not_applicable_missing_draft_contract"
+        recovery_stage = "not_applicable_missing_draft_contract"
+        contract_stage = "not_applicable_missing_draft_contract"
+        pacing_stage = "not_applicable_missing_draft_contract"
+        semantic_status = "not_requested_clean_cut_only"
+        reasoner_status_label = "disabled"
+        freeze_blocked = False
+        post_authority_integrity_failed = False
+        final_edit_reviewer_status = "not_applicable_missing_draft_contract"
+
+    # D-097.B (PO adjustment §1): a family Best Take found no usable
+    # realization for is dropped from the timeline BY DECISION and the run
+    # is marked story-incomplete -- never presented as a clean complete
+    # story. Read by the validation harness / delivery gate.
+    # D-097.9 (R11): only a dropped IDEA family makes the story incomplete;
+    # a corroborated lone `bts` take (D-097.8 R10) is recording-process
+    # material whose removal is the product working, not a missing idea.
+    story = derive_story_completeness(
+        (getattr(result.draft, "diagnostics", None) or {}).get("take_judge_groups") or ()
+    )
+    dropped_families = story["dropped_families"]
+    story_completeness = story["story_completeness"]
+
+    return ProcessingResult(
+        schema_version=result.schema_version,
+        project_id=result.project_id,
+        state=result.state,
+        draft=result.draft,
+        stage_status={
+            **result.stage_status,
+            "story_completeness": story_completeness,
+            "no_usable_realization_family_count": len(dropped_families),
+            "no_usable_realization_family_ids": [str(row.get("group_id") or "") for row in dropped_families],
+            "no_usable_realization_idea_family_ids": story["idea_family_ids"],
+            "no_usable_realization_bts_singleton_ids": story["bts_singleton_ids"],
+            "freeze_blocked_pending_coherence_review": freeze_blocked,
+            "post_authority_integrity_failure": post_authority_integrity_failed,
+            "final_edit_reviewer": final_edit_reviewer_status,
+            "brain_mode": "universal_clean_cut",
+            "semantic": semantic_status,
+            "composer": "not_requested_clean_cut_only",
+            "draft_review": "not_requested_clean_cut_only",
+            "selection_phase_authority": selection_stage,
+            "unified_selection_reasoner": reasoner_status_label,
+            "selection_boundary_contract": contract_stage,
+            "boundary_engine_pass": boundary_pass_stage,
+            "human_boundary_polish": polish_stage,
+            "final_boundary_authority": recovery_stage,
+            "dialogue_pacing_transition": pacing_stage,
+        },
+    )
+
+# Raw benchmark trigger marker: unified whole-video Selection reasoner pivot.

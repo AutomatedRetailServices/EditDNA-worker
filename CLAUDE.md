@@ -1,0 +1,349 @@
+# CLAUDE.md — CutSell.ai Operating Contract
+
+You are continuing an existing production-oriented app. Do NOT redesign CutSell and do NOT start from scratch.
+
+## Mandatory startup
+Before editing, inspect live Git state:
+
+```bash
+git status
+git branch --show-current
+git rev-parse HEAD
+git log -1 --oneline
+```
+
+Expected handoff context unless newer intentional commits exist:
+- repo: `AutomatedRetailServices/EditDNA-worker`
+- branch: `cutsell/mobile-v1-clean`
+- PR #25: OPEN / DRAFT / UNMERGED
+- main base SHA: `2fb13e5aa228e8e525b942a9b49182032b797e61`
+- handoff head before Claude docs: `9fad0788e120b2af07576f2d145fc4c179b24adb`
+
+If HEAD is newer, inspect intervening commits and reconcile state. Never reset blindly.
+
+## Read order
+1. `docs/claude-handoff/CUTSELL_COMPLETE_HANDOFF.md`
+2. `docs/claude-handoff/SECURITY_CONSTITUTION.md`
+3. existing `AGENTS.md`
+4. existing `docs/CUTSELL_DECISIONS.md`
+5. existing `docs/CUTSELL_BRAIN_DOCTRINE.md`
+6. existing `docs/CUTSELL_MOBILE_V1_ASAP_SCOPE.md`
+7. existing `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` (D-062) -- canonical roles/gates/QA modes; an engine change is never self-certified release-ready by the role that implemented it.
+8. existing `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md` (D-062.2) -- Automatic Editor Doctrine, CRITICAL_COVERAGE_DOMINANCE, the 16-layer Automatic Resolution Hierarchy, and the HUMAN_CHOICE_ELIGIBLE escalation contract; human choice is a last resort, never a convenience valve for resolver uncertainty.
+9. `docs/CUTSELL_SYSTEM_AUDIT_D096.md` (D-096) -- the canonical AS-IS system map, authority tables, collision map, gap table, duplication report and PROPOSED target architecture; read it before touching any authority. It is an audit: Part 11 is a proposal, not an implementation, and Part 12 requires Product Owner approval before structural changes.
+10. `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` Section 12 (D-091) -- the Continuous Autonomous Engineering & Escalation Contract: within an authorized technical scope Claude continues through diagnose -> fix -> tests -> QA -> retest without waiting for a relayed "continue"; it stops only on a listed Product Owner escalation condition.
+
+## Source precedence
+When sources conflict:
+1. live code/live Git state;
+2. current Claude handoff;
+3. current scope/decision contract;
+4. canonical repo doctrine;
+5. historical checkpoint;
+6. old conversations.
+
+## Canonical quality ladder (D-095, binding)
+`RAW → CUT.AI PARITY → HUMAN GOLD PARITY → technical post-render QC → perceptual
+SYSTEM WATCH + LISTEN → HUMAN WATCH + LISTEN PASS` (the perceptual gate is an
+additional blocking post-render gate still to be implemented at the right stage;
+the technical QC is preserved, never replaced; the perceptual gate is a QA/reviewer
+authority that ROUTES failures to the owning authority -- Selection/BestTake for wrong
+content, Boundary for bad physical cuts, Renderer for A/V defects -- and never edits
+membership). Every RAW must prove the evaluated code is the code inside the worker
+that produced the video (commit + in-worker package fingerprint + component activity
+markers): CODE EXISTS != VIDEO USED IT. One coherent pipeline, never a parallel one.
+Human Gold is the ultimate editorial authority; Cut.ai is the intermediate
+COMMERCIAL BASELINE oracle. Video00 QA references (QA-ONLY, never exposed to
+production Selection/Boundary/BestTake/grouping/render/LLM prompts):
+- RAW `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`
+- CUT.AI `Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4`
+- HUMAN GOLD `Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4`
+Every CutSell discrepancy is classified LEVEL 1 (worse than Cut.ai: fix first),
+LEVEL 2 (≈Cut.ai, Gold better: after Level 1 is stable) or LEVEL 3 (matches/
+exceeds Gold: do not touch) with `benchmarks/video00_quality_ladder.py` (four-way
+region map + traceability + attributed authority) -- run it via
+`.github/workflows/cutsell-video00-quality-ladder.yml` (CPU, no paid compute) or
+the ladder step of the Modal RAW workflow. Do not characterize CutSell as "almost
+Human Gold"; do not add another rescue/guard/reconciliation authority for a
+symptom; if Level-1 failures are widespread across independent regions, produce
+an architecture-level diagnosis first (D-095). THE PRODUCT IS THE RENDERED VIDEO,
+NOT THE TEST SUITE. Re-base means QA priority/validation order only: every
+previously accepted canonical component (attempt reconstruction, recording-process
+cleanup, grouping, Best Take, claim protections, composites, editorial-slot
+resolution, Selection/Boundary ownership, Freeze, CanonicalEditPlan/review/repair
+loop, Boundary, render/QC, regression coverage) stays in force unless the four-way
+diagnostic proves a specific component wrong; never reset the architecture.
+
+## Current mission
+**Flow B → Clean Cut Core V1 (idea-first).** See `docs/CUTSELL_DECISIONS.md` D-019/D-020.
+
+Clean Cut Core V1 reasons idea-first: complete intended ideas → all delivery attempts
+per idea → quality/completeness competition → one winning delivery or a necessary
+composite → KEEP/DISCARD. Gemini is a bounded semantic arbiter only (idea-equivalence
+during clustering, residual-ambiguity resolution during final coherence validation),
+never the primary editor; the whole-video Unified Selection reasoner is deactivated in
+the active path (rollback: `CUTSELL_CLEAN_CUT_CORE_V1=0`).
+
+**SWAP IS OUT OF SCOPE FOR CLEAN CUT V1 UNTIL THE USER EXPLICITLY REINTRODUCES IT**
+(D-019). The active semantic membership model is SELECT/KEEP vs DISCARD only — no
+alternate-take inventory in the winning timeline. Do not design, optimize, validate,
+or preserve the active Clean Cut architecture around SWAP; do not spend engineering
+time maintaining or improving SWAP behavior. Legacy SWAP machinery stays in the
+codebase, deactivated for this path only (never delete it destructively if that would
+destabilize unrelated systems) — see `deterministic_best_take_authority.py`'s
+`swap_enabled` parameter and `draft_edits.py`'s unrelated manual editor-layer
+`swap_take`, which is a different product layer and out of this scope decision.
+
+Preserve:
+- one final semantic Selection authority;
+- one winning realization per retry family (GOOD TAKE != UNIQUE IDEA);
+- complete delivery dominates an incomplete/abandoned retry of the same idea;
+- contradictory retries (differing number/negation) are never composited or left to
+  coexist silently — they block Selection Freeze for human review (D-020);
+- idea coverage — an intended idea must not silently vanish from the winning edit;
+- Selection Freeze;
+- Boundary-only physical timing after freeze; Boundary never repairs a semantic
+  membership mistake;
+- KEEP/DISCARD semantics (not SELECT/SWAP/DISCARD — see D-019);
+- Human Gold QA (oracle only, never fed into runtime production logic);
+- CleanCutBench as the general editorial test suite gating paid Video00 iteration;
+- unseen generalization.
+
+See `docs/CUTSELL_DECISIONS.md` D-021 for the canonical component map (AttemptReconstructor, IdeaClusterer, RetryFamilyResolver, DeliveryScorer, BestTakeResolver, SemanticArbiter, CompositeResolver, StoryValidator, SelectionFreeze, BoundaryEngine, Renderer) that every active behavior must map to.
+
+## Editorial rules
+- WHEN UNCERTAIN, KEEP.
+- Preserve unique audience-facing information.
+- Preserve story/personality.
+- Remove real failed/retry/BTS material.
+- Never invent speech.
+- Never hardcode Video00 timestamps, phrases or clip IDs.
+- Do not force rigid sales-funnel logic during Clean Cut.
+- Human performance errors matter even when transcript is complete.
+
+## Engineering rules
+- Diagnose from latest run/artifact before editing.
+- Prefer structural root-cause fixes.
+- Add targeted tests for behavior changes.
+- Run tests before CI.
+- CI success is not editorial success.
+- Do not run overlapping paid RAW benchmarks.
+- Always verify RunPod teardown.
+- Preserve observability; never accept silent provider fallback.
+
+## Security rules
+`docs/claude-handoff/SECURITY_CONSTITUTION.md` is binding.
+Security runs in parallel with editorial QA; do not postpone it to launch.
+
+## Repository protection
+Without explicit user approval:
+- do not merge PR #25;
+- do not write to `main`;
+- do not close PR #25;
+- do not deploy production;
+- do not perform TestFlight/App Store release;
+- do not make destructive repository/archive changes;
+- do not expose/move secrets;
+- do not create materially new recurring paid infrastructure.
+
+## Canonical engine architecture pointer (D-098)
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` is the evolutionary
+target-architecture canon: D-096 (foundation) + D-097.x (accepted
+implementation) + a Perception/Understanding evolution layer, read as ONE
+continuous architecture, never a second system. It classifies every
+future capability's relationship to today's code (EXISTING / EXISTING +
+NEEDS CONSOLIDATION / PARTIALLY IMPLEMENTED / MISSING-FUTURE, action
+PRESERVE / CONSOLIDATE LATER / FUTURE only -- nothing marked obsolete).
+- **TARGET ARCHITECTURE:** 20 layers, Perception (L1-4) -> Clean Raw/
+  Cut.ai (L5-9) -> Human Gold (L10-16) -> engine growth/learning (L17-20);
+  upstream perceptual understanding (informs editorial decisions) is
+  architecturally distinct from downstream perceptual Watch+Listen QA
+  (diagnoses/routes, never edits selection) -- see the document's
+  Section 4.
+- **CURRENT ACTIVE MILESTONE:** Milestone 1, RAW -> Cut.ai Commercial
+  Parity. Milestone 2 (Cut.ai -> Human Gold) is downstream and not
+  started.
+- **CURRENT PARTIAL / CLOSED CAPABILITIES:** D-097.12's stomach-family
+  selection fix is CLOSED at the offline/CleanCutBench level (55/55);
+  D-097.13's Clean Raw diagnostic checkpoint
+  (`benchmarks/clean_raw_checkpoint.py`) is a PROVEN MECHANISM on
+  synthetic proxy media only -- real Video00 MP4 proof for the stomach
+  family remains PENDING and must never be described as real proof;
+  `perceptual_watch_listen.py` v1 has 4 EVALUATED capabilities and 4
+  `NOT_IMPLEMENTED` (facial expression, gesture continuity, clipped-
+  phoneme ASR realign, framing/eye contact) -- never silently PASS.
+- **CURRENT EXACT NEXT ENGINEERING INVESTIGATION:** the Perception +
+  Understanding active dataflow map (what evidence exists today, where
+  it lives, which authorities actually consume it) -- NOT authorized
+  until the Product Owner explicitly greenlights it; D-098's own
+  documentation task ended before this investigation began.
+- **Bounded-task STOP precedence:** an explicit task-local STOP
+  condition (as D-098's was) always takes precedence over D-091
+  autonomous continuity for that task's own next step; D-091 continuity
+  resumes normally for any separately-authorized objective.
+- **Behavior + Proposition Abstraction Doctrine (D-111), Section 10 of
+  the same document:** an additive evolution, not a second architecture
+  -- generalizes creator behavior into reusable BEHAVIOR/PROPOSITION/
+  ATTEMPT-RELATIONSHIP/CONFIDENCE abstractions; formalizes "same product/
+  topic/opener != same proposition" as a Milestone-1 (Cut.ai) requirement;
+  names a bounded multimodal fallback arbiter (NOT IMPLEMENTED, used only
+  for genuine medium-confidence conflict, never over a stronger
+  deterministic answer like D-110's replacement-rejection rule); and
+  binds an anti-rule-proliferation classification (A-I) before writing
+  any new special-case rule. Documentation only -- authorizes nothing.
+- **Overlap editing doctrine + iOS Native Swift Foundation (D-129),
+  Sections 11-12 of the same document:** additive, documentation only.
+  Formalizes user-facing `Overlap` pacing/editing (internal name
+  `dialogue_overlap_enabled`, distinct from the unchanged internal term
+  `overlaps_delivery`; CLARITY-BEFORE-SPEED invariant; placed after
+  Selection Freeze/Boundary, before Renderer) and iOS as a required
+  parallel product-platform track. Honestly inventories `mobile/ios/`'s
+  EXISTING XcodeGen Swift skeleton (27 files, SOURCE PRESENT / NOT
+  BUILD-VERIFIED / NOT DEVICE-VERIFIED / NO TESTFLIGHT) against a 22-item
+  minimum vertical-slice target -- never claims it is proven or complete.
+  Runs in parallel with, never blocks, the current engine milestone.
+  Authorizes zero Swift/Xcode/Overlap-engine/backend/RAW/provider work.
+
+## Current state pointer
+The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`
+(D-097 / D-097.1 / D-097.2 at the time of writing: the approved post-audit
+implementation -- retry-family completeness, no-usable-realization, Resolver
+usability, polarity safety, ONE post-Freeze BoundaryEngine pass with the
+physical ownership contract, dead-air reconciliation, perceptual Watch+Listen
+v1 (advisory, never auto-PASS) and the CLEAN RAW gate; RAW 34028202024 was
+Freeze-blocked (fixed in D-097.1); RAW 34029861712 PASSED Freeze (D-097.A and
+D-097.1 proven on the selection) but produced no deliverable MP4 because the
+renderer's part+concat-demuxer join drifted the output timeline and the QC
+probed speech instead of joins -- D-097.2 rebuilt the renderer as one gapless
+pass with frame-exact windows, made semantic-label budget starvation explicit
+(default ceiling $0.015), merged restart-evidence pairs at the reconcile tier
+and reviews diagnostic artifacts perceptually; the RAW on that head (34032322925)
+died on a latent ledger crash, fixed in D-097.2.1; RAW 34033468088 then proved
+R1/R2 on the selection but Freeze was blocked by the continuity coalescer
+re-minting a family winner's identity, fixed in D-097.3 (gap restored,
+identities preserved); RAW 34034507983 then PASSED Freeze and proved the
+renderer's frame-exact joins on video, but the technical QC's join probe
+flagged clean speech joins and its repairs lengthened the output -- both
+fixed in D-097.4 (join-instant step detector; repairs trim the tightened
+edge); RAW 34040848026 then produced the FIRST DELIVERABLE MP4 (QC PASS on
+attempt 1, pending human Watch+Listen) but lost the papillary-cancer
+diagnosis sentence: the AttemptReconstructor fused it with the next sentence
+across 2.96 s of measured dead air the ASR padded over and the D-089 waiver
+dropped the claim -- fixed in D-097.5 at the owning authority (measured
+dead-air pause boundary); the waiver narrowing and F3b are Product Owner
+decisions; RAW 34042123557 proved R6 (diagnosis kept, QC PASS, deliverable) but
+the finer segmentation let the legacy pre-resolver guard chain compose two
+abandoned attempts over the `winner` clean retry -- D-097.6 applies the §3
+usability floor at those guards -- PROVEN on RAW 34043247473 (best ladder so
+far), which then blocked Freeze over a take the multimodal layer had rejected
+as `wrong_take`; D-097.7 makes that confirmation a deterministic pre-group
+credit -- RAW 34043967265 then delivered an MP4 with the clean retry and the
+diagnosis, and D-097.8 fixed the arbiter pair ranking (content overlap leads,
+proximity is a tie-break) and the unresolved corroborated `bts` singleton --
+RAW 34045158712 PROVED both on the selection (abandoned stomach attempt
+contested and discarded; "¡Vamos!" dropped) but the drop was misread as an
+incomplete story and the clean MP4 refused, and an import-time coverage-first
+wrapper was found re-ordering R9's pair budget -- both fixed in D-097.9 (the
+no-usable basis; one pair-order authority); RAW 34047064840 then DELIVERED
+the MP4 (pending human Watch+Listen) with R12 proven on the selection, and
+D-097.10 fixed the post-render QA layers that read pre-render boundaries
+(R14: the perceptual reviewer and the ladder now measure the segments as
+rendered; the physical Level-1 view is the headline); the stomach aside is
+recorded as escalation A (arbiter inconsistency vs the D-085 fail-closed
+probe); RAW 34048444463 PROVED R14 on the rendered MP4 (deliverable) and
+showed the stomach family decided by the arbiter's run-to-run answer (three
+runs, three verdicts) -- escalation A with options recorded in D-097.11,
+which also fixed the trailing-ellipsis completeness marker (R15); the
+remaining Level-1 mass (46 of 53 physical seconds) is Product Owner
+territory, so no RAW runs until a fix with an expected MP4 effect or a PO
+decision; D-096 remains the source of
+truth, its Appendix B records implementation status)
+(read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
+document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical
+context from the Unified Selection era, superseded by the decision log; do not
+treat them as the standing next task.
+
+## Continuity contract (D-091)
+Within an already-authorized technical scope, CONTINUE AUTONOMOUSLY. Do not wait
+for "continue", "proceed", "what next?" or a relayed prompt when the next action
+is an ordinary technical consequence of the current authorized objective. A
+technical checkpoint (a D-xxx entry, a green test run, a QA verdict) is not a
+stopping point by itself.
+
+Canonical loop:
+`diagnose → reproduce → fix → targeted tests → QA (independent pass) → if QA
+finds an in-scope defect return to Engineering → retest → offline qualification
+/ CI where applicable → analyze evidence → next proven root cause within scope`.
+
+Engineering and QA remain distinct roles with separate reporting; Claude
+orchestrates the hand-off between them itself. Engineering never rewrites a QA
+verdict; it fixes and re-submits.
+
+Stop and ask the Product Owner ONLY when at least one is true:
+- A. PRODUCT DECISION REQUIRED (product behavior, UX doctrine, workflow,
+  editorial policy, pricing, scope, acceptance criteria);
+- B. SAFETY / AUTHORITY CHANGE REQUIRED (would weaken Freeze, critical-content
+  protection, security, privacy, authorization, tenant isolation, claim safety,
+  or another canonical safety contract);
+- C. PAID COMPUTE OUTSIDE AUTHORIZATION (any Modal/RunPod/provider run beyond
+  the currently approved count/budget/scope; default: no paid compute);
+- D. PROTECTED REPOSITORY ACTION (the list under "Repository protection");
+- E. P0/P1 ACCEPTED-RISK DECISION;
+- F. HUMAN EDITORIAL ACCEPTANCE (a real rendered artifact needs watch/listen);
+- G. TRUE SCOPE BOUNDARY (the proven next root cause belongs to a materially
+  different objective).
+Otherwise: continue.
+
+Task-local "Then STOP" / "No code" / "No RAW" / "Report only" bound THAT
+directive's actions only; they never disable this contract. NO RAW still allows
+offline diagnose/fix/test/QA. NO CODE allows investigation/documentation.
+REPORT ONLY ends before code modification; an implementation already authorized
+by the Product Owner may then proceed under that authorization.
+
+Root-cause continuity: a defect exposed within the same authorized objective is
+investigated and fixed automatically; an unrelated one is recorded separately
+without expanding scope. Sequential D-xxx entries may be created autonomously
+while inside authorized scope and no stop condition is crossed.
+
+## QA loop
+`diagnose → fix → targeted tests → independent QA → auto-loop back on in-scope
+defects → offline qualification / CI where applicable → (paid run only when
+authorized) one RAW → JSON+MP4 → architecture check → Selection analysis →
+Human Gold → Watch+Listen → unseen/regression`
+
+On `feature/runpod-pod-on-demand` no unpaid CI workflow runs on push (the
+clean-worker CI runs on pull requests to `main`), so the offline qualification
+set (compileall, targeted suites, CleanCutBench both modes, full
+`tests/test_cutsell_*.py`, whole `tests/`) is the CI-equivalent gate.
+
+## Quality states (D-095)
+`CODE FIXED != TESTS PASS != CI GREEN != CUT.AI PARITY != HUMAN GOLD PARITY !=
+HUMAN WATCH + LISTEN PASS`. Never declare success from duration similarity,
+selection counts or green CI; never deliver a video before the rendered artifact
+passes the relevant QA gate.
+
+## Status vocabulary
+While continuing, report compactly with this block:
+- CURRENT OBJECTIVE
+- CURRENT STAGE
+- LAST VERIFIED RESULT
+- CURRENT ROOT CAUSE
+- NEXT AUTOMATIC ACTION
+- HUMAN ACTION REQUIRED: YES/NO (with the escalation condition letter if YES)
+
+Never ask "what do you want me to do next?" when the next technical action is
+already implied by the current objective.
+
+Report exact state instead of generic "done":
+- CODE FIXED
+- TESTS PASS
+- CI GREEN
+- RAW COMPLETE
+- ARCHITECTURE PASS/FAIL
+- GOLD CANDIDATE
+- HUMAN WATCH+LISTEN PASS
+- REGRESSION PASS
+- SECURITY REVIEWED / SECURITY SCAN PASS when applicable
+
+## Documentation duty
+After material checkpoints, update durable current-state/decision docs. Never make the user reconstruct CutSell from chat again.

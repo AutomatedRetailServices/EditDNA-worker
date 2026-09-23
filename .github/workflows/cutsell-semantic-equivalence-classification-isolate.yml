@@ -1,0 +1,63 @@
+name: CutSell Semantic Equivalence Classification Isolation
+
+# GPU-free real-Gemini isolation probe for the Phase 2 semantic-equivalence
+# arbiter (cutsell_worker/semantic_idea_equivalence_google.py). Makes one
+# small, real, billed batch call over general video-agnostic paraphrase /
+# distinct-idea fixtures with known expected labels and reports
+# classification accuracy. Never touches RunPod and does not appear in the
+# paid RAW workflow's on.push.paths. Mirrors
+# cutsell-unified-selection-output-budget-isolate.yml's cheap pattern: a
+# small number of real but small Gemini calls on ubuntu-latest.
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-semantic-equivalence-classification-isolate.yml
+      - scripts/isolate_semantic_equivalence_classification.py
+      - cutsell_worker/semantic_idea_equivalence.py
+      - cutsell_worker/semantic_idea_equivalence_google.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify secret without revealing value
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
+          echo 'Gemini credential is present.'
+
+      - name: Install minimal dependencies
+        shell: bash
+        run: pip install requests
+
+      - name: Run semantic equivalence classification isolation probe
+        shell: bash
+        run: python scripts/isolate_semantic_equivalence_classification.py
+
+      - name: Upload isolation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-semantic-equivalence-classification-isolation-${{ github.sha }}
+          path: artifacts/semantic-equivalence-classification-isolation.json
+          if-no-files-found: warn
+          retention-days: 14

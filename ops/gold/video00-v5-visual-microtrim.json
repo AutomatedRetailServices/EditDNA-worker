@@ -1,0 +1,25 @@
+{
+  "baseline": "video00-v5-historical-gold-locked",
+  "historical_run_id": 32780956434,
+  "historical_artifact_id": 9539973947,
+  "authority": "human_watch_listen_visual_only",
+  "timeline": "rendered_output_seconds",
+  "speech_changes_allowed": false,
+  "cuts": [
+    {
+      "start": 59.68,
+      "end": 60.32,
+      "reason": "face_off_visual_reset_before_next_delivery"
+    },
+    {
+      "start": 67.91,
+      "end": 68.72,
+      "reason": "head_drop_pause_face_reset_after_completed_delivery"
+    },
+    {
+      "start": 75.55,
+      "end": 76.12,
+      "reason": "mic_drop_face_off_visual_reset_before_next_delivery"
+    }
+  ]
+}

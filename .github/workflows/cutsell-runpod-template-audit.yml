@@ -1,0 +1,73 @@
+name: CutSell RunPod Template Audit
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-runpod-template-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+    steps:
+      - name: Validate audit credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
+
+      - name: Audit current staging Pod state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          POD=$(jq -c '[.[] | select(.name == "cutsell-staging-worker")][0]' pods.json)
+          test "$POD" != "null" || { echo 'No current cutsell-staging-worker Pod found'; exit 4; }
+          printf '%s' "$POD" | jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr,lastStatusChange,uptimeSeconds,runtime,machine,gpu,containerDiskInGb,volumeInGb,volumeMountPath}'
+
+      - name: Inspect live RQ workers
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import os, json
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker, Queue
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          workers = Worker.all(connection=connection)
+          now = datetime.now(timezone.utc)
+          print('rq_worker_count=', len(workers))
+          for worker in workers:
+              heartbeat = worker.last_heartbeat
+              if heartbeat is not None and heartbeat.tzinfo is None:
+                  heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+              age = (now - heartbeat).total_seconds() if heartbeat else None
+              current = worker.get_current_job()
+              print(json.dumps({
+                  'worker': worker.name,
+                  'state': worker.get_state(),
+                  'birth_date': str(worker.birth_date),
+                  'last_heartbeat': str(worker.last_heartbeat),
+                  'heartbeat_age_sec': age,
+                  'current_job_id': getattr(current, 'id', None),
+                  'current_job_func': getattr(current, 'func_name', None) if current else None,
+                  'current_job_meta': dict(getattr(current, 'meta', {}) or {}) if current else None,
+              }, default=str, sort_keys=True))
+          queue = Queue('cutsell', connection=connection)
+          print('queue_count=', len(queue))
+          print('queued_job_ids=', queue.job_ids[:20])
+          PY

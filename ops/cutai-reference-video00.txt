@@ -1,0 +1,3 @@
+CUTAI_REFERENCE_KEY=Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4
+HUMAN_GOLD_KEY=Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
+PURPOSE=QA-only commercial baseline and Human Gold oracle for Video00. Never pass either reference into production Selection/Boundary code.

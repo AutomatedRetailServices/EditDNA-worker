@@ -1,0 +1,20 @@
+{
+  "deploy": {
+    "id": 32324670300,
+    "run_number": 1,
+    "status": "in_progress",
+    "conclusion": null,
+    "head_sha": "4277af71f63739a36f8aaca18ccfcf283d238948",
+    "created_at": "2026-08-20T02:27:04Z",
+    "updated_at": "2026-08-20T02:27:08Z"
+  },
+  "benchmark": {
+    "id": 32318014133,
+    "run_number": 51,
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "7a7c8d26475e6dfed36dd4362504fc88321df00e",
+    "created_at": "2026-08-20T00:37:36Z",
+    "updated_at": "2026-08-20T01:25:31Z"
+  }
+}
