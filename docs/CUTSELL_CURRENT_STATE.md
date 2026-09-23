@@ -601,3 +601,14 @@ CanonicalEditPlan realization-level validation), reaches Freeze, keeps the
 acne chain, resolves stomach and percentage as RAW did, runs the boundary
 authority and trims the CTA at "aliméntate" with the real timings. Ready for
 the real-video run; nothing rendered is proven yet.
+
+### D-291.4 — RAW #126 (run 35931561397 on `636bab5e`): MP4 rendered (148.03 s)
+
+Observed from the ladder tail: acne head + "resorcina." kept (chain fix on
+real media), stomach gastritis only, aside dropped, CTA clip starts at
+358.17 without "Por eso cuídate," (trim on real media), W intact -- but the
+pimples family formed as {A1, M} with M winning and L separate (A1 lost, M
+kept), and R+T were kept (no family with W): Level-1 selection 31.66 s vs
+21.96 s in #125. Provider grouping variance, not D-291.2. Artifacts (JSON,
+MP4, validator reports) unreachable from the container; QA/acceptance
+failed for reasons not yet read. No Watch+Listen yet. No relaunch.

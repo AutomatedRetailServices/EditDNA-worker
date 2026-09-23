@@ -79677,3 +79677,65 @@ untouched.
 
 **Not proven:** the rendered MP4 and run-to-run consistency. The next
 step is the real-video run the Product Owner authorizes.
+
+## D-291.4 — RAW #126 (the ONE authorized Modal run on `636bab5e`, run 35931561397): first MP4 since D-289.11; acne continuation and CTA fixed on real media; pimples and percentage regressed by a different family formation
+
+**Run facts (OBSERVED, GitHub run record):** dispatched 23:02:44 UTC on
+`fix/video00-stable-editorial-oracle` at `636bab5e` (remote == local, clean
+tree, no other Modal RAW active), RAW #125's inputs (`pacing_v2_
+diagnostics_enabled=1`, no prosodic flag, D-291 default). Job 107419082198,
+10 min, teardown confirmed. Failed steps: frozen Selection lock (expected),
+Human Gold 18-check QA, editorial acceptance. The three Pacing V2 steps
+PASSED this time (`diagnostics['pacing_v2']` present -> Freeze reached).
+Artifacts: human-review **580 MB** (541 MB in #125: an MP4 is inside),
+validator reports 102 KB, run log 2.6 KB -- all on the artifact host the
+environment's network policy denies; only the last 5,000 log lines are
+reachable (ladder from 127.71 s on, 89 regions, summary, 24 traceability
+rows with render correlation).
+
+**OBSERVED (ladder tail):** `cutsell_rendered = 148.026 s` -- an MP4 WAS
+rendered (`render_found = true` on 22 of 24 traceability rows). Level-1
+selection **31.66 s** / 19 regions (RAW #125 21.96; RAW #121, 18/18: 37.09;
+RAW #122 21.69); boundary 3.447 s; CutSell-vs-Gold F1 0.7463 (#125:
+0.8417); by authority: BestTakeResolver 18.73 s, BoundaryEngine 6.62 s,
+AttemptReconstructor 5.01 s, IdeaClusterer 3.77 s, RealizationResolver
+0.98 s.
+
+| item | RAW #125 (run) | replay of #125 inputs on the fix (D-291.3) | **RAW #126 (this run)** | RAW #121 (18/18) |
+|---|---|---|---|---|
+| acne + continuation | head DISCARDED, "resorcina." stranded, Freeze blocked | head + tail kept as one realization | **head 185.24–189.84 kept (family winner, Level 3) + "resorcina." 191.14–191.74 rendered** | earlier acne take 171–181 |
+| pimples | A1 + L, M out (M/L never in one family) | same as #125 | **A1 192.44–198.12 DISCARDED (family {A1, M} -> M wins), M 198.88–211.02 KEPT (Level 1, 12.14 s), L 213.34–222.98 kept separately** | A1 + L, M out |
+| stomach | G only | G only | **G only** (attempt + fragment discarded) | G only |
+| "No quiero…" | two clips | two clips | two clips; the ladder's render correlation places "No" at 56.58 s vs "quiero…" at 111.23 s (coverage 0.275, one word) -- an ordering defect OR a correlation artifact, NOT established | one clip |
+| conclusion | W kept, aside A kept | W kept | **W kept (family {W, aside} -> W), aside DISCARDED (Gold drops it)** | W kept |
+| percentage R+T | out (W won the family via the claim arbiter) | out | **R 327.78–334.24 + T 340.18–342.58 KEPT (Level 2/1; no family with W formed)** | kept |
+| CTA | "Por eso cuídate, …" (Freeze blocked, no trim ran) | trimmed at 358.17 | **rendered clip starts 358.17 = "alimentate bien, hidrátate y haz ejercicio…", the re-opened "Por eso cuídate," gone; W still ends "Así que cuídate." -> no repetition** | "Por eso cuídate, …" |
+| early take 25–47 s | 35.46–46.42 | -- | 25.60–34.60 family winner (Level 2) | 35.46–45.54 |
+| deliverable | NO (Freeze blocked) | Freeze reached offline | **MP4 rendered, 148.03 s** (QA/acceptance steps failed; reports unreachable) | yes |
+
+**Replay vs run, kept apart:** the D-291.3 replay used RAW #125's own
+labels/answers/scores and showed the fix REACHES Freeze on those inputs.
+This run is new provider data: the acne continuation, the stomach take,
+the CTA trim and the aside all came out as the replay/fix predicted; the
+pimples and percentage families did NOT -- their grouping differs from
+#125 (A1 paired with M, L separate; W not paired with R+T), so M won its
+family and R+T never competed. That is the RAW #115 "never competed"
+class plus a new wrong pairing, caused by run-varying arbiter/label
+answers, NOT by D-291.2 (which only unifies continuation chains) --
+INFERRED until this run's `semantic_idea_equivalence`, `distinct_idea_
+grouping_safety` and `take_judge_groups` are read. Whether D-291 fired
+here is unknown for the same reason.
+
+**What is proven on real media (selection level):** the chain fix (acne
+head + tail rendered) and the CTA trim (clip start at the word after the
+repeated closing). **Not proven:** perceptual quality (no Watch+Listen),
+the "No" placement, the QA/acceptance verdicts, and consistency -- one run
+each way.
+
+**Exact next step (no relaunch):** attach `cutsell-video00-modal-human-
+review` (`video00-modal.json` + the MP4) and `cutsell-video00-modal-
+validator-reports` from run 35931561397 (or allow the artifact host), then
+record the QA/acceptance reports, the D-291 rows, the pimples/percentage
+grouping trace and the "No" render position, and do the human
+Watch+Listen. The pimples/percentage run-to-run grouping variance is the
+next engineering objective (Product Owner scope decision).
