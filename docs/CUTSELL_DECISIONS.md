@@ -78822,5 +78822,32 @@ validator end to end on RAW #124- and RAW #122-shaped results, baseline
 untouched. Every arbiter answer is a labelled fake; none proves the real
 outcome of a rerun.
 
-### Verification
-See the Verification section appended below after the full run.
+### Verification (committed tree `8e0767cb`)
+- compileall OK; the touched-authority set (D-289.10 file 20, D-146/D-149/
+  D-150, D-183/D-184/D-191, D-097.A/D-097.5/D-097.9, D-085/D-094/D-094.2/
+  D-108, D-289/D-289.4/D-289.7, D-150 measured pause, D-100, D-287, D-082,
+  D-101, D-122/D-123, D-050*/D-058 P2/D-073/D-076/D-079/D-087/D-090/D-092,
+  the QA validator suites D-106/D-148 and `test_video00_regression_qa.py`):
+  **925 passed**;
+- full `tests/` (excluding the pre-existing broken collection file
+  `test_semantic_stitch.py`) on the working tree: **8973 passed, 10
+  skipped, 13 subtests passed, 8 failed** (363.70 s) -- the same 5
+  pre-existing/unrelated failures every D-288.x/D-289.x entry verified
+  (`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+  hybrid_semantic_parity` x4) plus 3 working-tree-only `git diff HEAD`
+  guards (D-169 `test_30_old_serialized_ids_unaffected`, D-174 `test_36_
+  language_spine_zero_diff`, D-239L `test_32_pipeline_zero_diff`), which
+  pass on the COMMITTED tree (**153 passed** with the new file); zero new
+  failures; `benchmarks/video00_regression_qa.json` and the selection lock
+  byte-identical; `cutsell/mobile-v1-clean` and `main` untouched.
+
+**Pending limits:** (1) the pimples family's outcome under the fix is a
+REVIEW_REQUIRED block -- choosing L needs either a human choice or a NEW
+provider/evidence answer (the bounded finalist authority, D-191, flag-OFF;
+never simulated here as proof); (2) the stomach fix is proven offline on
+the recorded inputs; on video it needs a run the Product Owner has not
+authorized; (3) the family-context aside A (kept; Cut.ai keeps it, Gold
+does not) is an editorial review item, not changed here; (4)
+`required_realization` is available to the manifest but adopted by no
+baseline until the Product Owner decides. **Exact next step:** Product
+Owner review; no integration, no RAW, no baseline change.
