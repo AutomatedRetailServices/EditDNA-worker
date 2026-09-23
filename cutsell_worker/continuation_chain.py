@@ -104,6 +104,41 @@ def fold_family_members(
     return tuple(out), folded_tails
 
 
+def unify_chain_realizations(
+    takes: Sequence[CandidateTake], tails_by_head: Mapping[str, Sequence[str]],
+) -> tuple[tuple[CandidateTake, ...], dict[str, str]]:
+    """D-291.2 (RAW #125): a chain is ONE realization for the CANONICAL
+    model too, not only for the family competition. Every tail's
+    `realization_id` becomes its head's (D-050A's own "a physical split
+    preserves realization identity" invariant, applied at the one place
+    the pipeline learns two takes are one delivery split at a pause), so
+    the Semantic Ledger registers one `RealizationRecord` holding both
+    clips, the Realization Resolver evaluates/keeps/discards the sentence
+    as a unit, and the authoritative application moves both clips
+    together. Returns (takes with tails restamped, {tail_clip_id:
+    head_realization_id}) -- the second value is what `DraftClip.parent_
+    realization_id` records on each tail. A head without a
+    `realization_id` (never minted) leaves its chain untouched: nothing is
+    unified on partial identity."""
+    by_id = {take.clip_id: take for take in takes}
+    parent_by_tail: dict[str, str] = {}
+    for head_id, tail_ids in tails_by_head.items():
+        head = by_id.get(head_id)
+        head_rid = getattr(head, "realization_id", None) if head is not None else None
+        if not head_rid:
+            continue
+        for tail_id in tail_ids:
+            if tail_id in by_id:
+                parent_by_tail[tail_id] = str(head_rid)
+    if not parent_by_tail:
+        return tuple(takes), {}
+    out = tuple(
+        replace(take, realization_id=parent_by_tail[take.clip_id]) if take.clip_id in parent_by_tail else take
+        for take in takes
+    )
+    return out, parent_by_tail
+
+
 def continuation_member_ids(row: Mapping | None) -> tuple[str, ...]:
     if not row:
         return ()

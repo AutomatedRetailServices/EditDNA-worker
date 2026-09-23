@@ -79444,3 +79444,119 @@ confirmation`, the acne family's resolver basis, the `final_boundary_
 authority` rows for the CTA, the QA/acceptance reports and the Modal
 delivery status, and record them here. No code, baseline or flag change
 was made for this entry.
+
+## D-291.2 — A sentence-continuation chain is ONE realization for the canonical model: Ledger, Resolver and authoritative application (RAW #125 acne chain)
+
+**Scope:** isolated branch `fix/video00-stable-editorial-oracle` off
+`a53459dd`. Offline only. No RAW, no integration, no baseline/canon/`main`
+change, no flag, no threshold, no id/phrase/timestamp, no later
+restoration. **The attachment named in the directive did not reach this
+container** (no new file under the session uploads; RAW #125's result JSON
+remains unreachable -- artifact host denied, invalid AWS key). The
+reproduction below therefore uses RAW #125's RECORDED clip texts/spans
+(ladder traceability) and, for the window labels the Ledger reads, the
+recorded RAW #122 chunk-3 labels of the same clips (head `failed` 0.90,
+tail `alternate` 0.70, earlier attempt `failed` 0.98) -- labelled as such;
+its shape matches the directive's description of the JSON exactly
+(`sentence_continuation` head->tail, BestTake selects the chain, the
+Resolver keeps "resorcina" alone, `waived_failed_realization_source` on
+the acne content).
+
+### Reproduced (committed tree `a53459dd`, real `build_flow_b_draft` ->
+`build_semantic_ledger_shadow` -> `resolve_realizations_shadow` ->
+`apply_authoritative_realization_resolution`)
+IdeaClusterer records `continuation_chains = [[H, T]]`; the family
+{F0, H(+T)} folds the chain onto H; BestTake selects H (the sentence).
+The Ledger then registers H and T as TWO realizations of the idea
+(`realization_id` minted per take from source/attempt/text); the Resolver
+applies the family-scoped `failed` label of the HEAD (0.90 >= 0.85 ->
+unusable) and of F0 (0.98), the bare tail is the only usable candidate ->
+`RESOLVED_WINNER` = "resorcina.", H and F0 discarded, their CRITICAL
+claim groups waived (`critical_groups_waived_from_failed_realizations`
+non-empty = `waived_failed_realization_source`); applied selection
+`[T, X, Y]`. That is RAW #125's stranded "resorcina." (191.14-191.74 s,
+Level 1) with the acne sentence (185.24-189.84 s) missing.
+
+**How the prior `failed` label intervenes:** it is the hybrid WINDOW label
+of the truncated head ("...con la que yo resolvía con" judged alone),
+carried as the family-scoped candidate label into the Ledger record; the
+Resolver's `_unusable_realization_ids` cancels it only when EVERY
+candidate of the idea is failed. With the tail registered as a separate,
+unlabelled realization the cancellation never fires and the label decides
+against the sentence that BestTake had already chosen. D-289.1 had made
+the chain atomic for ranking, labels, BestTake, ClaimCoverage and
+StoryValidator -- not for the canonical model.
+
+### Fix (general, in the existing handoff)
+- `continuation_chain.unify_chain_realizations`: at the one point the
+  pipeline learns two takes are one delivery split at a pause (right after
+  `chain_tails_by_head`), every tail takes its head's `realization_id` --
+  D-050A's own "a physical split preserves realization identity"
+  invariant -- and `DraftClip.parent_realization_id` (already the
+  contract's split marker) records the join. Selected, alternate and
+  discarded clips all carry it. A head without an identity leaves its
+  chain untouched.
+- `semantic_ledger.build_semantic_ledger_shadow`: a realization with
+  several clips is ONE record in source order: `text` = the complete
+  sentence, claims extracted from that sentence (never from the dangling
+  head or the bare predicate), span = joined span, `complete_idea`
+  re-graded on the joined text with the SAME `take_segmentation._looks_
+  complete_idea` the family fold uses, `semantic_label` = the head's
+  recorded label (kept visible, not hidden). Single-clip realizations are
+  byte-identical to before.
+- The Resolver and `apply_authoritative_realization_resolution` needed no
+  change: they already key on `realization_id`, so the unit is evaluated,
+  kept or discarded as one and both clips move together.
+
+### After (same inputs)
+One record `('H', 'T')`, text "Por temporada me salió un acné en la
+espalda con la que yo resolvía con resorcina.", `complete_idea = True`,
+label `failed` 0.90 recorded; F0 `failed` 0.98; every candidate failed ->
+the evidence cancels (WHEN UNCERTAIN, KEEP) -> `RESOLVED_WINNER` = the
+chain, nothing discarded, nothing waived; applied `[H, T, X, Y]`, F0 in
+alternates and folded to discarded. Full path to Freeze through
+`process_universal_clean_cut_sources` (pipeline draft, fake ASR with
+synthetic timings): Freeze not blocked, contract `verified`, H followed by
+T in the frozen selection, F0 out, `final_boundary_authority` rows for
+H and T present and `final_boundary_reopened_closing_trim_count`
+recorded -- the pre-Freeze boundary authority IS reached on this path.
+
+### Controls (`tests/test_cutsell_d291_2_continuation_realization_unit.py`, 8)
+Before-shape reproduction (tail with its own id -> tail alone, sentence
+waived); after-shape (unit kept, nothing waived); independent ideas stay
+two realizations with no `parent_realization_id`; a genuinely failed
+earlier attempt is still discarded beside the chain; a failed head with a
+clean later retake is removed early WITH its tail by the existing hybrid
+"failed + later overlapping complete retake" basis (never the tail alone);
+a chain that competes against a clean later take moves as a unit whatever
+the Resolver decides; `unify_chain_realizations` contract (restamp,
+parent map, no-identity head untouched, no chains byte-identical); the
+full path to Freeze above.
+
+### The CTA question (D-289.11) on RAW #125 -- NOT attributed
+RAW #125's selection reached Freeze (plan `plan_92758e…` exists) but the
+run's `final_boundary_authority` rows and its timed ASR are in the
+unreachable JSON, so whether the re-opened "Por eso cuídate," was refused
+(recorded reason) or never matched (this run's ASR says "haces", the
+break after "cuídate" unknown) is NOT established, and the repetition is
+NOT attributed to the trimmer. What is proven offline: the fixed path
+reaches `enforce_complete_idea_boundaries` (test above) and the D-289.11
+rule fires on RAW #124's texts when the ASR carries a break (D-289.11
+tests). Evaluating the CTA with the real timings needs the JSON's
+`timed_asr_replay_evidence` (D-290) -- the exact field to attach.
+
+### Pending limits (recorded, not fixed here)
+- **Resolver tie when the family's winner label agrees with the local
+  winner:** the Ledger records `SEMANTIC_WINNER_OVERRIDE` only when
+  BestTake overrode the DeliveryScore winner, so a "winner" label that
+  agrees with it leaves NO evidence for the Resolver; on equal coverage
+  `_pick_winner` then falls through DeliveryScore and richness to
+  realization-id order (exposed by the synthetic control where every score
+  is 1.0: the chain, not the family's chosen clean take, was restored).
+  Real runs rarely tie exactly, but a longer chain can outscore a clean
+  retake on DeliveryScore. Proposed, not applied (Product Owner decision:
+  it changes which evidence the Resolver sees): record the family's
+  selected winner label in the Ledger whether or not it overrode the
+  local winner.
+- The pimples/acne/CTA outcomes on real media stay unproven until the RAW
+  #125 artifacts are readable or a new authorized run exists.

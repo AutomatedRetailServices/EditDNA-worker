@@ -573,3 +573,19 @@ with a stranded "resorcina." (new Level-1 regression). Level-1 selection
 consistency is not proven. Next: obtain the run's artifacts (network policy
 or attachment) and record the D-291 rows, the acne resolver basis, the CTA
 boundary rows, the QA reports and the delivery status.
+
+### D-291.2 — continuation chain = one realization for Ledger/Resolver (RAW #125 acne)
+
+Reproduced on `a53459dd` with the recorded RAW #125 texts/spans and the
+recorded RAW #122 labels for the same clips: the Ledger registered the acne
+head and its "resorcina." tail as two realizations, the Resolver applied
+the head's pre-fold `failed` window label, kept the tail alone and waived
+the sentence. Fixed at the handoff: tails carry the head's `realization_id`
+(`parent_realization_id` records the join) and the Ledger registers a
+multi-clip realization with the complete sentence, its claims, span and
+completeness. Proven offline through the real pipeline and the full path
+to Freeze (boundary authority reached). No id/phrase/threshold/restoration.
+Recorded, not fixed: the Resolver's id-order tie when the family's winner
+label agrees with the local winner (no Ledger evidence). The RAW #125
+attachment did not reach the container; the CTA on real ASR timings is
+still unevaluated. No RAW launched.

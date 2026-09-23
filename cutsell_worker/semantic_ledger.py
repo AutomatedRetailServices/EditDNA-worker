@@ -574,10 +574,29 @@ def _all_clips(draft) -> list:
 
 
 def _extract_claims_for_clip(clip) -> tuple[Claim, ...]:
+    return _extract_claims_for_text(clip.clip_id, str(clip.text or ""))
+
+
+def _extract_claims_for_text(clip_id: str, text: str) -> tuple[Claim, ...]:
     try:
-        return extract_claims(clip.clip_id, str(clip.text or ""))
+        return extract_claims(clip_id, str(text or ""))
     except Exception:  # pragma: no cover -- defensive: never let shadow observation break the run
         return ()
+
+
+def _looks_complete_unit(text: str, duration_sec: float) -> bool | None:
+    """D-291.2: completeness of a multi-clip realization, graded on its
+    joined text with the SAME segmentation rule `fold_family_members` uses
+    (`take_segmentation._looks_complete_idea`); None if that rule is
+    unavailable (never a guess)."""
+    try:
+        from .take_segmentation import _looks_complete_idea
+    except Exception:  # pragma: no cover
+        return None
+    try:
+        return bool(_looks_complete_idea(str(text or ""), max(0.0, float(duration_sec))))
+    except Exception:  # pragma: no cover
+        return None
 
 
 def missing_idea_coverage_idea_ids(coherence_diag: Mapping[str, Any], ledger: "SemanticLedger") -> tuple[str, ...]:
@@ -691,6 +710,14 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
     draft_review_removed_ids = set(diagnostics.get("draft_review_removed_ids") or ())
 
     for realization_id, clips in realization_clips.items():
+        # D-291.2: the clips of one realization in source order -- a
+        # continuation chain (head + tail, `parent_realization_id` on the
+        # tail) is ONE record: its text is the complete sentence, its
+        # claims are extracted from that sentence (never from the dangling
+        # head or the bare predicate alone), its span covers both clips and
+        # its completeness is re-graded on the joined text. Single-clip
+        # realizations are byte-identical to before.
+        clips = sorted(clips, key=lambda c: (float(c.start), float(c.end), c.clip_id))
         primary = clips[0]
         state = "selected" if any(c.clip_id in selected_ids for c in clips) else (
             "alternate" if any(c in draft.alternates for c in clips) else "discarded"
@@ -719,9 +746,16 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             else:
                 discard_reason = "clean_cut_or_composite_resolution"
 
-        claims = []
-        for clip in clips:
-            claims.extend(_extract_claims_for_clip(clip))
+        if len(clips) > 1:
+            unit_text = " ".join(str(c.text or "").strip() for c in clips).strip()
+            unit_end = max(float(c.end) for c in clips)
+            claims = list(_extract_claims_for_text(primary.clip_id, unit_text))
+            unit_complete = _looks_complete_unit(unit_text, unit_end - float(primary.start))
+        else:
+            unit_text = str(primary.text or "")
+            unit_end = float(primary.end)
+            claims = list(_extract_claims_for_clip(primary))
+            unit_complete = getattr(primary, "complete_idea", None)
         source_span_ids = tuple(dict.fromkeys(
             str(getattr(c, "source_span_id", None)) for c in clips if getattr(c, "source_span_id", None)
         ))
@@ -736,15 +770,15 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             source_span_ids=source_span_ids,
             attempt_id=str(getattr(primary, "attempt_id", None)) if getattr(primary, "attempt_id", None) else None,
             clip_ids=tuple(dict.fromkeys(c.clip_id for c in clips)),
-            text=str(primary.text or ""),
-            start=float(primary.start), end=float(primary.end),
+            text=unit_text,
+            start=float(primary.start), end=unit_end,
             delivery_score=None,
             state=state,
             discard_reason=discard_reason,
             replacement_realization_id=replacement_id,
             claim_ids=tuple(claim.canonical_claim_id for claim in claims),
             render_fragment_ids=fragment_ids,
-            complete_idea=getattr(primary, "complete_idea", None),
+            complete_idea=unit_complete,
             source_asset_id=str(getattr(primary, "source_asset_id", "") or ""),
             semantic_label=next((family_label_by_clip[c.clip_id][0] for c in clips if c.clip_id in family_label_by_clip), ""),
             semantic_label_confidence=next((family_label_by_clip[c.clip_id][1] for c in clips if c.clip_id in family_label_by_clip), 0.0),

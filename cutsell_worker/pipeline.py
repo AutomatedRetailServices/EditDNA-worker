@@ -28,6 +28,7 @@ from .continuation_chain import (
     REALIZATION_TEXT_KEY,
     bind_continuation_tails,
     chain_tails_by_head,
+    unify_chain_realizations,
     fold_family_members,
 )
 from .composer_provider import ComposerProvider, safe_compose_order
@@ -848,7 +849,10 @@ def terminal_besttake_confidence_run_summary(rows: Iterable[Mapping]) -> dict:
     return counts
 
 
-def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
+def _draft_clip(
+    take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool,
+    parent_realization_id: str | None = None,
+) -> DraftClip:
     # D-050A: `group_id` here is already the FINAL, post-semantic-
     # equivalence take-group id (pipeline.py is its one minting owner --
     # see canonical_identity.py's ID OWNERSHIP table). semantic_idea_id
@@ -878,6 +882,9 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
         realization_id=take.realization_id,
         semantic_idea_id=semantic_idea_id,
         retry_family_id=retry_family_id,
+        # D-291.2: a continuation-chain tail records the head realization it
+        # is a physical part of (None on every other clip).
+        parent_realization_id=parent_realization_id,
         # D-050C1.6: carried unchanged from the CandidateTake -- see
         # DraftClip.complete_idea's own docstring.
         complete_idea=take.complete_idea,
@@ -1809,13 +1816,23 @@ def build_flow_b_draft(
             "CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON"
         ),
     }
-    group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
     # D-289.1: a sentence-continuation chain is ONE realization -- folded
     # onto its head for the whole family competition (see
     # continuation_chain.py's own module docstring). `chain_tails_by_head`
     # is consulted again after `compose_selected` below so the tails follow
     # their head into the selection.
     chain_tails = chain_tails_by_head(cohesion_diagnostics.get("continuation_chains") or (), take_by_id)
+    # D-291.2 (RAW #125): the chain is one realization for the CANONICAL
+    # model as well -- every tail carries its head's `realization_id` from
+    # here on (Ledger record, Resolver competition, authoritative
+    # application, CanonicalEditPlan all key on it), and `DraftClip.parent_
+    # realization_id` records the join. Without this the Ledger registered
+    # the head and the tail as two competing realizations of one idea, the
+    # Resolver read the head's pre-fold `failed` window label, kept the
+    # tail ("resorcina.") alone and discarded the sentence.
+    kept, chain_tail_parent_realization = unify_chain_realizations(kept, chain_tails)
+    take_by_id = {take.clip_id: take for take in kept}
+    group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
 
     groups = []
     clip_to_group: Dict[str, str] = {}
@@ -2645,6 +2662,7 @@ def build_flow_b_draft(
             take,
             role=label_map.get(take.clip_id, SemanticLabel(take.clip_id, SemanticRole.OTHER, 0.0)).role,
             group_id=clip_to_group.get(take.clip_id),
+            parent_realization_id=chain_tail_parent_realization.get(take.clip_id),
             selected=True,
         )
         for take in selected_takes
@@ -2659,6 +2677,7 @@ def build_flow_b_draft(
             take,
             role=label_map.get(take.clip_id, SemanticLabel(take.clip_id, SemanticRole.OTHER, 0.0)).role,
             group_id=clip_to_group.get(take.clip_id),
+            parent_realization_id=chain_tail_parent_realization.get(take.clip_id),
             selected=False,
         )
         for take in kept
@@ -2685,6 +2704,7 @@ def build_flow_b_draft(
             # general to any discard path that reaches this constructor.
             group_id=clip_to_group.get(take.clip_id),
             selected=False,
+            parent_realization_id=chain_tail_parent_realization.get(take.clip_id),
         )
         for take in (*discarded, *review_removed, *no_usable_removed)
     )
