@@ -32,17 +32,20 @@ def _redis_client(client=None):
     return Redis.from_url(config.redis_url)
 
 
-def publish_notification(*, user_id: str, project_id: str, kind: str, payload: dict | None = None, client=None) -> dict:
+def publish_notification(
+    *, user_id: str, project_id: str, kind: str, payload: dict | None = None, client=None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """D-288.3: `idempotency_key`, when given, makes a repeat call for the
+    same `(kind, idempotency_key)` pair a no-op that returns the ORIGINAL
+    notification instead of firing a duplicate -- a caller recovering
+    from an interruption (e.g. `export_job.resume_delivery_after_
+    approval` retried after a crash right after a successful finalize)
+    can safely call this again. `idempotency_key=None` (every existing
+    caller) is byte-for-byte the prior always-append behavior."""
     normalized = str(kind or "")
     if normalized not in ALLOWED_KINDS:
         raise ValueError("unsupported notification kind")
-    record = {
-        "notification_id": f"ntf_{uuid4().hex}",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "project_id": str(project_id),
-        "kind": normalized,
-        "payload": dict(payload or {}),
-    }
     target = _redis_client(client)
     key = notification_key(user_id)
     raw = target.get(key)
@@ -51,6 +54,18 @@ def publish_notification(*, user_id: str, project_id: str, kind: str, payload: d
     items = json.loads(raw) if raw else []
     if not isinstance(items, list):
         items = []
+    if idempotency_key:
+        for existing in items:
+            if existing.get("kind") == normalized and existing.get("idempotency_key") == idempotency_key:
+                return existing
+    record = {
+        "notification_id": f"ntf_{uuid4().hex}",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "project_id": str(project_id),
+        "kind": normalized,
+        "payload": dict(payload or {}),
+        "idempotency_key": idempotency_key,
+    }
     items.insert(0, record)
     target.set(key, json.dumps(items[:MAX_NOTIFICATIONS], ensure_ascii=False))
     return record

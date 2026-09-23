@@ -96,6 +96,39 @@ class PendingReviewDecisionRequest(BaseModel):
     # never a client-supplied label.
 
 
+@router.get("/media")
+def get_pending_review_media(
+    project_id: str, job_id: str, expected_render_identity: str, expected_output_sha256: str, request: Request,
+):
+    """D-288.3 (blocker 4): "acceso autenticado al MP4 privado para
+    revisarlo antes de aprobar" -- a short-lived presigned URL for the
+    ACTUAL pending file, so the authenticated owner can watch/listen to
+    it before deciding. Deliberately a SEPARATE endpoint from `GET
+    ""` (metadata only): never returns a `delivery_status`, never touches
+    `watch_listen_status`/`approval_status`, and lives under this job's
+    private review namespace only -- reading it can never, by itself,
+    promote anything toward Ready. `expected_render_identity`/`expected_
+    output_sha256` are REQUIRED query params (the same two-field binding
+    `PendingReviewDecisionRequest` already requires for a decision) so a
+    stale client reference to a PREVIOUS pending record for this job_id
+    is refused rather than silently handed a preview of whatever file
+    occupies this job's CURRENT slot now."""
+    requesting = _authenticated_requesting(request, project_id=project_id, job_id=job_id)
+    try:
+        return pwl.get_pending_review_media_access(
+            user_id=requesting.user_id, project_id=project_id, job_id=job_id,
+            requesting=requesting,
+            expected_render_identity=expected_render_identity,
+            expected_output_sha256=expected_output_sha256,
+        )
+    except pwl.PendingReviewError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
 @router.post("/decision")
 def submit_pending_review_decision(project_id: str, job_id: str, payload: PendingReviewDecisionRequest, request: Request):
     """Approve or reject (including REVOKE an earlier approval -- the

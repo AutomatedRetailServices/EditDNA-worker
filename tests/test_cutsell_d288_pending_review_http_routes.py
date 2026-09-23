@@ -13,6 +13,7 @@ than a new one. No Video00 fact/id anywhere below.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -54,6 +55,12 @@ class FakeS3Client:
 
 
 class FakeRedis:
+    """D-288.3: `eval` implements the SAME atomic check-and-write
+    semantics as `pending_watch_listen_review._CAS_LUA` (get -> decode ->
+    compare `version` -> set) -- required now that `apply_human_approval`/
+    `resume_delivery_after_approval` use `_cas_save` instead of a blind
+    `set`."""
+
     def __init__(self):
         self.data: dict[str, str] = {}
 
@@ -63,6 +70,19 @@ class FakeRedis:
     def set(self, key, value, **_kwargs):
         self.data[key] = value
         return True
+
+    def eval(self, script, numkeys, *keys_and_args):
+        key = keys_and_args[0]
+        expected_version = keys_and_args[1]
+        new_value = keys_and_args[2]
+        current = self.data.get(key)
+        if current is None:
+            return "missing"
+        decoded = json.loads(current)
+        if str(decoded.get("version")) != str(expected_version):
+            return "conflict"
+        self.data[key] = new_value
+        return "ok"
 
 
 @pytest.fixture
@@ -268,4 +288,57 @@ def test_resume_without_a_prior_approval_over_http_is_rejected(client, fake_redi
     _persist(fake_redis, fake_s3, tmp_path)
     headers = {"Authorization": "Bearer good-token"}
     resp = client.post("/v1/projects/proj-http/jobs/job-http/pending-review/resume-delivery", headers=headers)
+    assert resp.status_code == 422
+
+
+# =============================================================================
+# D-288.3 (blocker 4): the media-preview endpoint, over real HTTP.
+# =============================================================================
+
+def test_media_preview_requires_auth(client):
+    resp = client.get(
+        "/v1/projects/proj-http/jobs/job-http/pending-review/media",
+        params={"expected_render_identity": "x", "expected_output_sha256": "y"},
+    )
+    assert resp.status_code == 401
+
+
+def test_owner_can_fetch_a_media_preview_url_over_http(client, fake_redis, fake_s3, tmp_path):
+    record = _persist(fake_redis, fake_s3, tmp_path)
+    headers = {"Authorization": "Bearer good-token"}
+    resp = client.get(
+        "/v1/projects/proj-http/jobs/job-http/pending-review/media",
+        params={"expected_render_identity": record.render_identity, "expected_output_sha256": record.output_sha256},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["preview_url"]
+    assert body["render_identity"] == record.render_identity
+    assert "delivery_status" not in body
+
+
+def test_a_different_authenticated_user_cannot_fetch_the_media_preview(client, fake_redis, fake_s3, tmp_path, monkeypatch):
+    record = _persist(fake_redis, fake_s3, tmp_path, user_id="the-real-owner")
+    monkeypatch.setattr(middleware, "resolve_session", lambda token: {"user_id": "someone-else"} if token == "good-token" else (_ for _ in ()).throw(PermissionError("bad")))
+    headers = {"Authorization": "Bearer good-token"}
+    resp = client.get(
+        "/v1/projects/proj-http/jobs/job-http/pending-review/media",
+        params={"expected_render_identity": record.render_identity, "expected_output_sha256": record.output_sha256},
+        headers=headers,
+    )
+    # The lookup key is scoped by the AUTHENTICATED user_id -- no such
+    # record for "someone-else", so this surfaces as the module's own
+    # "no pending review found" (422), never another user's preview URL.
+    assert resp.status_code == 422
+
+
+def test_media_preview_bound_to_exact_artifact_refuses_a_stale_reference_over_http(client, fake_redis, fake_s3, tmp_path):
+    _persist(fake_redis, fake_s3, tmp_path)
+    headers = {"Authorization": "Bearer good-token"}
+    resp = client.get(
+        "/v1/projects/proj-http/jobs/job-http/pending-review/media",
+        params={"expected_render_identity": "render_STALE", "expected_output_sha256": "sha-STALE"},
+        headers=headers,
+    )
     assert resp.status_code == 422

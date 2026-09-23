@@ -20,8 +20,12 @@ No Video00 fact/id anywhere below.
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
+import json
 import sys
+import threading
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -29,8 +33,11 @@ import pytest
 
 from cutsell_worker import export_job
 from cutsell_worker import exports
+from cutsell_worker import notifications as notif
 from cutsell_worker import pending_watch_listen_review as pwl
+from cutsell_worker import project_store
 from cutsell_worker import render_delivery as rd
+from cutsell_worker import render_versions as rv
 from cutsell_worker import tenant_safe_delivery as tsd
 from cutsell_worker.perceptual_watch_listen import (
     WATCH_LISTEN_BLOCKED,
@@ -46,16 +53,28 @@ from cutsell_worker.render_plan import RenderSegment
 # =============================================================================
 
 class FakeS3Client:
+    """`download_hook`, when set, is called with `key` INSIDE `download_
+    file`, before the bytes are read -- a real, deterministic
+    synchronization point a concurrency test can use to force a chosen
+    interleaving (e.g. block until a concurrent revocation has landed),
+    rather than relying on timing/`sleep`."""
+
     def __init__(self):
         self.objects: dict[str, dict] = {}
+        self._lock = threading.Lock()
+        self.download_hook = None
 
     def upload_file(self, filename, bucket, key, **_kwargs):
         with open(filename, "rb") as handle:
             data = handle.read()
-        self.objects[key] = {"body": data, "size": len(data)}
+        with self._lock:
+            self.objects[key] = {"body": data, "size": len(data)}
 
     def download_file(self, bucket, key, destination):
-        obj = self.objects[key]
+        if self.download_hook is not None:
+            self.download_hook(key)
+        with self._lock:
+            obj = self.objects[key]
         Path(destination).write_bytes(obj["body"])
 
     def head_object(self, Bucket, Key):  # noqa: N803
@@ -70,15 +89,50 @@ class FakeS3Client:
 
 
 class FakeRedis:
+    """D-288.3: thread-safe (a `threading.Lock` guards every access) so
+    this fake can back a genuine multi-thread concurrency proof, exactly
+    like this repo's own `test_cutsell_d288_editorial_slot_resolution_
+    observability.py` precedent. `eval` implements the SAME atomic
+    check-and-write semantics as `pending_watch_listen_review._CAS_LUA`
+    (get -> decode -> compare `version` -> set), executed under the same
+    lock as every other access, so it is a real, race-free CAS primitive
+    for this fake -- not a simulation of one."""
+
     def __init__(self):
         self.data: dict[str, str] = {}
+        self._lock = threading.Lock()
 
     def get(self, key):
-        return self.data.get(key)
+        with self._lock:
+            return self.data.get(key)
 
     def set(self, key, value, **_kwargs):
-        self.data[key] = value
+        with self._lock:
+            self.data[key] = value
         return True
+
+    def eval(self, script, numkeys, *keys_and_args):
+        key = keys_and_args[0]
+        expected_version = keys_and_args[1]
+        new_value = keys_and_args[2]
+        with self._lock:
+            current = self.data.get(key)
+            if current is None:
+                return "missing"
+            decoded = json.loads(current)
+            if str(decoded.get("version")) != str(expected_version):
+                return "conflict"
+            self.data[key] = new_value
+            return "ok"
+
+    def zadd(self, key, mapping):
+        # Only `project_store.update_project` needs this (its own index
+        # write) -- the stale-job-guard test below exercises the REAL
+        # `project_store`/`render_versions` modules against this same fake.
+        with self._lock:
+            bucket = self.data.setdefault(f"__zset__{key}", {})
+            bucket.update(mapping)
+        return len(mapping)
 
 
 @pytest.fixture
@@ -810,3 +864,368 @@ def test_resume_refuses_a_modified_pending_artifact(tmp_path, wire_real_store_ex
             client=fake_redis, s3_client=wire_real_store_export,
         )
     assert not any(k.startswith("cutsell/exports/") for k in wire_real_store_export.objects)
+
+
+# =============================================================================
+# D-288.3: atomic, versioned transitions -- the low-level `_cas_save`
+# primitive itself.
+# =============================================================================
+
+def test_cas_save_refuses_a_stale_expected_version(tmp_path, fake_s3, fake_redis):
+    local_path = _rendered_file(tmp_path)
+    record = _persist_record(fake_redis, fake_s3, local_path=local_path)
+    assert record.version == 1
+
+    updated = pwl._cas_save(record, expected_version=1, client=fake_redis)
+    assert updated is not None
+    assert updated.version == 2
+
+    # A second write against the NOW-STALE version 1 is refused, never
+    # silently overwriting whatever the first write committed.
+    conflict = pwl._cas_save(record, expected_version=1, client=fake_redis)
+    assert conflict is None
+    reloaded = pwl.load_pending_review(user_id="user-1", project_id="proj-1", job_id="job-1", client=fake_redis)
+    assert reloaded.version == 2  # the refused write never landed
+
+
+# =============================================================================
+# D-288.3 required test 1: two simultaneous resumes -- real concurrent OS
+# threads (same precedent this repo's own D-288.1 ContextVar proof used),
+# never a duplicate delivery/version/notification.
+# =============================================================================
+
+def test_two_simultaneous_resumes_converge_on_one_delivery_never_duplicate(tmp_path, wire_real_store_export, fake_redis, monkeypatch):
+    monkeypatch.setattr(export_job, "add_render_version", lambda **kwargs: rv.add_render_version(client=fake_redis, **kwargs))
+    monkeypatch.setattr(export_job, "publish_notification", lambda **kwargs: notif.publish_notification(client=fake_redis, **kwargs))
+
+    local_path = _rendered_file(tmp_path, content=b"concurrent-resume-bytes")
+    output_sha256 = rd.compute_output_sha256(local_path)
+    record = pwl.persist_pending_review(
+        local_path=local_path, user_id="user-race", project_id="proj-race", job_id="job-race",
+        render_identity="render_" + "2" * 24, output_sha256=output_sha256,
+        plan_id="plan_1", plan_version=1, watch_listen_status=WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
+        perceptual_review={}, client=fake_redis, store_export_fn=export_job.store_export,
+    )
+    requesting = tsd.DeliveryOwnershipScope(user_id="user-race", project_id="proj-race", job_id="job-race")
+    pwl.apply_human_approval(
+        user_id="user-race", project_id="proj-race", job_id="job-race", requesting=requesting,
+        approved=True, approver="user-race",
+        expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+        expected_plan_id=record.plan_id, expected_plan_version=record.plan_version, client=fake_redis,
+    )
+
+    # Force genuine overlap: BOTH threads must reach (and pass) their own
+    # download call before either proceeds to the fresh re-read/upload/
+    # finalize/commit sequence below it.
+    barrier = threading.Barrier(2, timeout=5)
+    wire_real_store_export.download_hook = lambda key: barrier.wait(timeout=5)
+
+    results: dict[str, dict] = {}
+    errors: dict[str, Exception] = {}
+
+    def _resume(name):
+        try:
+            results[name] = export_job.resume_delivery_after_approval(
+                user_id="user-race", project_id="proj-race", job_id="job-race", requesting=requesting,
+                client=fake_redis, s3_client=wire_real_store_export,
+            )
+        except Exception as exc:
+            errors[name] = exc
+
+    t1 = threading.Thread(target=_resume, args=("t1",))
+    t2 = threading.Thread(target=_resume, args=("t2",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert not errors, errors
+    assert results["t1"] == results["t2"]
+    assert results["t1"]["delivery_status"] == rd.DELIVERY_STATUS_DELIVERY_READY
+
+    versions = rv.list_render_versions(user_id="user-race", project_id="proj-race", client=fake_redis)
+    assert len(versions) == 1  # never duplicated despite two concurrent resumes
+
+    notes = notif.list_notifications(user_id="user-race", client=fake_redis)
+    render_finished = [n for n in notes if n["kind"] == "render_finished"]
+    assert len(render_finished) == 1  # never duplicated
+
+    reloaded = pwl.load_pending_review(user_id="user-race", project_id="proj-race", job_id="job-race", client=fake_redis)
+    assert reloaded.resumed_delivery_result == results["t1"]
+
+
+# =============================================================================
+# D-288.3 required test 2: interruption after finalize, then a retry --
+# recoverable, idempotent by render identity (never a duplicate version or
+# notification), even though the crash happened AFTER the real work
+# completed and BEFORE this function's own bookkeeping write landed.
+# =============================================================================
+
+def test_interruption_after_finalize_then_retry_never_duplicates(tmp_path, wire_real_store_export, fake_redis, monkeypatch):
+    monkeypatch.setattr(export_job, "add_render_version", lambda **kwargs: rv.add_render_version(client=fake_redis, **kwargs))
+    monkeypatch.setattr(export_job, "publish_notification", lambda **kwargs: notif.publish_notification(client=fake_redis, **kwargs))
+
+    local_path = _rendered_file(tmp_path, content=b"crash-retry-bytes")
+    output_sha256 = rd.compute_output_sha256(local_path)
+    record = pwl.persist_pending_review(
+        local_path=local_path, user_id="user-crash", project_id="proj-crash", job_id="job-crash",
+        render_identity="render_" + "3" * 24, output_sha256=output_sha256,
+        plan_id="plan_1", plan_version=1, watch_listen_status=WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
+        perceptual_review={}, client=fake_redis, store_export_fn=export_job.store_export,
+    )
+    requesting = tsd.DeliveryOwnershipScope(user_id="user-crash", project_id="proj-crash", job_id="job-crash")
+    pwl.apply_human_approval(
+        user_id="user-crash", project_id="proj-crash", job_id="job-crash", requesting=requesting,
+        approved=True, approver="user-crash",
+        expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+        expected_plan_id=record.plan_id, expected_plan_version=record.plan_version, client=fake_redis,
+    )
+
+    # Simulate a process crash AFTER finalize (render version registered,
+    # notification fired -- real work, real side effects) but BEFORE this
+    # function's own final atomic commit lands: raise on the FIRST call to
+    # `_cas_save` only (approval's own earlier, already-completed use of
+    # `_cas_save` is unaffected -- this monkeypatch is installed AFTER it).
+    real_cas_save = pwl._cas_save
+    calls = {"n": 0}
+
+    def _crashing_cas_save(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated_process_crash")
+        return real_cas_save(*args, **kwargs)
+    monkeypatch.setattr(pwl, "_cas_save", _crashing_cas_save)
+
+    with pytest.raises(RuntimeError, match="simulated_process_crash"):
+        export_job.resume_delivery_after_approval(
+            user_id="user-crash", project_id="proj-crash", job_id="job-crash", requesting=requesting,
+            client=fake_redis, s3_client=wire_real_store_export,
+        )
+
+    versions_after_crash = rv.list_render_versions(user_id="user-crash", project_id="proj-crash", client=fake_redis)
+    assert len(versions_after_crash) == 1  # finalize DID run once before the simulated crash
+
+    reloaded = pwl.load_pending_review(user_id="user-crash", project_id="proj-crash", job_id="job-crash", client=fake_redis)
+    assert reloaded.resumed_delivery_result is None  # the crash prevented the commit from landing
+    assert reloaded.watch_listen_status == WATCH_LISTEN_HUMAN_APPROVED  # still approved -- retriable
+
+    # Retry -- must succeed, and must NOT duplicate the version/notification
+    # `_finalize_successful_delivery` already, really, produced.
+    result = export_job.resume_delivery_after_approval(
+        user_id="user-crash", project_id="proj-crash", job_id="job-crash", requesting=requesting,
+        client=fake_redis, s3_client=wire_real_store_export,
+    )
+    assert result["state"] == "finished"
+
+    versions_after_retry = rv.list_render_versions(user_id="user-crash", project_id="proj-crash", client=fake_redis)
+    assert len(versions_after_retry) == 1  # still just one -- idempotent by render identity
+
+    notes = notif.list_notifications(user_id="user-crash", client=fake_redis)
+    render_finished = [n for n in notes if n["kind"] == "render_finished"]
+    assert len(render_finished) == 1  # still just one
+
+
+# =============================================================================
+# D-288.3 required test 3: revocation during resumption -- a revocation
+# that lands after this function's initial read but before the tenant-
+# safe upload must stop delivery, never be silently overwritten by a
+# stale final save.
+# =============================================================================
+
+def test_revocation_during_resume_stops_delivery_before_upload(tmp_path, wire_real_store_export, fake_redis):
+    local_path = _rendered_file(tmp_path, content=b"revoke-during-resume-bytes")
+    output_sha256 = rd.compute_output_sha256(local_path)
+    record = pwl.persist_pending_review(
+        local_path=local_path, user_id="user-revoke", project_id="proj-revoke", job_id="job-revoke",
+        render_identity="render_" + "4" * 24, output_sha256=output_sha256,
+        plan_id="plan_1", plan_version=1, watch_listen_status=WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
+        perceptual_review={}, client=fake_redis, store_export_fn=export_job.store_export,
+    )
+    requesting = tsd.DeliveryOwnershipScope(user_id="user-revoke", project_id="proj-revoke", job_id="job-revoke")
+    pwl.apply_human_approval(
+        user_id="user-revoke", project_id="proj-revoke", job_id="job-revoke", requesting=requesting,
+        approved=True, approver="user-revoke",
+        expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+        expected_plan_id=record.plan_id, expected_plan_version=record.plan_version, client=fake_redis,
+    )
+
+    def _revoke_during_download(key):
+        # The exact "revocación durante la reanudación" scenario: the
+        # revocation is a REAL `apply_human_approval` call, landing
+        # between resume's initial read and its tenant-safe upload.
+        pwl.apply_human_approval(
+            user_id="user-revoke", project_id="proj-revoke", job_id="job-revoke", requesting=requesting,
+            approved=False, approver="user-revoke",
+            expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+            expected_plan_id=record.plan_id, expected_plan_version=record.plan_version, client=fake_redis,
+        )
+    wire_real_store_export.download_hook = _revoke_during_download
+
+    with pytest.raises(pwl.PendingReviewError, match="pending_review_not_approved"):
+        export_job.resume_delivery_after_approval(
+            user_id="user-revoke", project_id="proj-revoke", job_id="job-revoke", requesting=requesting,
+            client=fake_redis, s3_client=wire_real_store_export,
+        )
+
+    assert not any(k.startswith("cutsell/exports/") for k in wire_real_store_export.objects)
+    reloaded = pwl.load_pending_review(user_id="user-revoke", project_id="proj-revoke", job_id="job-revoke", client=fake_redis)
+    assert reloaded.approval_status == "REJECTED"
+    assert reloaded.resumed_delivery_result is None
+
+
+# =============================================================================
+# D-288.3 required test 4: aprobar -> entregar -> rechazar -> reanudar --
+# a rejection AFTER a real delivery already completed cannot un-deliver
+# it (there is no such mechanism); a subsequent resume returns the SAME
+# already-delivered result, never a new/duplicate delivery.
+# =============================================================================
+
+def test_approve_deliver_then_reject_then_resume_returns_the_same_already_delivered_result(tmp_path, wire_real_store_export, fake_redis, monkeypatch):
+    monkeypatch.setattr(export_job, "add_render_version", lambda **kwargs: rv.add_render_version(client=fake_redis, **kwargs))
+    monkeypatch.setattr(export_job, "publish_notification", lambda **kwargs: notif.publish_notification(client=fake_redis, **kwargs))
+
+    local_path = _rendered_file(tmp_path, content=b"deliver-then-reject-bytes")
+    output_sha256 = rd.compute_output_sha256(local_path)
+    record = pwl.persist_pending_review(
+        local_path=local_path, user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr",
+        render_identity="render_" + "5" * 24, output_sha256=output_sha256,
+        plan_id="plan_1", plan_version=1, watch_listen_status=WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
+        perceptual_review={}, client=fake_redis, store_export_fn=export_job.store_export,
+    )
+    requesting = tsd.DeliveryOwnershipScope(user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr")
+    approval_kwargs = dict(
+        user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr", requesting=requesting,
+        expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+        expected_plan_id=record.plan_id, expected_plan_version=record.plan_version, client=fake_redis,
+    )
+    pwl.apply_human_approval(approved=True, approver="user-dtr", **approval_kwargs)
+
+    delivered = export_job.resume_delivery_after_approval(
+        user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr", requesting=requesting,
+        client=fake_redis, s3_client=wire_real_store_export,
+    )
+    assert delivered["state"] == "finished"
+
+    rejected = pwl.apply_human_approval(approved=False, approver="user-dtr", **approval_kwargs)
+    assert rejected.approval_status == "REJECTED"
+    assert rejected.resumed_delivery_result == delivered  # the past delivery is not erased by a later rejection
+
+    resumed_again = export_job.resume_delivery_after_approval(
+        user_id="user-dtr", project_id="proj-dtr", job_id="job-dtr", requesting=requesting,
+        client=fake_redis, s3_client=wire_real_store_export,
+    )
+    assert resumed_again == delivered  # the SAME already-delivered result -- nothing new delivered
+
+    versions = rv.list_render_versions(user_id="user-dtr", project_id="proj-dtr", client=fake_redis)
+    assert len(versions) == 1  # a late rejection never triggers a duplicate/second delivery
+
+
+# =============================================================================
+# D-288.3 required test 5: aprobar A después de que B sea el resultado
+# vigente -- a late-approved OLDER job's resumed delivery must never
+# regress a project whose "latest" pointer already moved on to a NEWER
+# job's own delivery (`job_started_at`, no longer disabled with `None`).
+# =============================================================================
+
+def test_approving_an_older_job_after_a_newer_job_is_already_current_never_regresses_the_project(tmp_path, wire_real_store_export, fake_redis, monkeypatch):
+    monkeypatch.setattr(project_store, "_redis_client", lambda client=None: fake_redis if client is None else client)
+    monkeypatch.setattr(export_job, "add_render_version", lambda **kwargs: rv.add_render_version(client=fake_redis, **kwargs))
+    monkeypatch.setattr(export_job, "_safe_notify", lambda **kwargs: {"status": "queued", "notification_id": "n-stale-job-test"})
+
+    user_id, project_id = "user-stale-job", "proj-stale-job"
+    now = 1_700_000_000.0
+
+    # Seed the project as already "finished" by a NEWER job B.
+    seed = {
+        "schema_version": "cutsell.project.v1", "project_id": project_id, "user_id": user_id,
+        "title": "Untitled Cut", "state": "finished",
+        "created_at": "t", "updated_at": "t", "sources": [],
+        "latest_job_id": "job-B", "latest_job_started_at": now + 100.0,
+        "render_versions": [],
+    }
+    fake_redis.set(project_store.project_key(user_id=user_id, project_id=project_id), json.dumps(seed))
+
+    # Persist + approve an OLDER job A's pending review, carrying an
+    # OLDER `job_started_at` than B's.
+    local_path = _rendered_file(tmp_path, content=b"stale-job-a-bytes")
+    output_sha256 = rd.compute_output_sha256(local_path)
+    record = pwl.persist_pending_review(
+        local_path=local_path, user_id=user_id, project_id=project_id, job_id="job-A",
+        render_identity="render_" + "9" * 24, output_sha256=output_sha256,
+        plan_id="plan_1", plan_version=1, watch_listen_status=WATCH_LISTEN_HUMAN_REVIEW_REQUIRED,
+        perceptual_review={}, client=fake_redis, store_export_fn=export_job.store_export,
+        job_started_at=now - 100.0,
+    )
+    requesting = tsd.DeliveryOwnershipScope(user_id=user_id, project_id=project_id, job_id="job-A")
+    pwl.apply_human_approval(
+        user_id=user_id, project_id=project_id, job_id="job-A", requesting=requesting,
+        approved=True, approver=user_id,
+        expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+        expected_plan_id=record.plan_id, expected_plan_version=record.plan_version, client=fake_redis,
+    )
+
+    result = export_job.resume_delivery_after_approval(
+        user_id=user_id, project_id=project_id, job_id="job-A", requesting=requesting,
+        client=fake_redis, s3_client=wire_real_store_export,
+    )
+    assert result["delivery_status"] == rd.DELIVERY_STATUS_DELIVERY_READY  # A's own delivery still succeeds
+
+    current_project = project_store.get_project(user_id=user_id, project_id=project_id, client=fake_redis)
+    assert current_project["latest_job_id"] == "job-B"  # never regressed by A's late resume
+    assert current_project["latest_job_started_at"] == now + 100.0  # unchanged
+
+    # A's render version is still recorded -- an audit trail, never
+    # silently dropped just because it didn't become "latest".
+    versions = rv.list_render_versions(user_id=user_id, project_id=project_id, client=fake_redis)
+    assert any(v["export_uri"] == result["export_uri"] for v in versions)
+
+
+# =============================================================================
+# D-288.3 required test 6 (blocker 4): the owner can preview the private
+# pending MP4 before deciding; a different authenticated user cannot.
+# =============================================================================
+
+def test_owner_can_preview_the_pending_mp4_a_different_user_cannot(tmp_path, fake_s3, fake_redis):
+    local_path = _rendered_file(tmp_path)
+    record = _persist_record(fake_redis, fake_s3, local_path=local_path)
+    owner = tsd.DeliveryOwnershipScope(user_id="user-1", project_id="proj-1", job_id="job-1")
+    access = pwl.get_pending_review_media_access(
+        user_id="user-1", project_id="proj-1", job_id="job-1", requesting=owner,
+        expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+        client=fake_redis, s3_client=fake_s3,
+    )
+    assert access["preview_url"]
+    assert access["render_identity"] == record.render_identity
+    # Never anything that could be mistaken for a real delivery result.
+    assert "delivery_status" not in access
+
+    stranger = tsd.DeliveryOwnershipScope(user_id="attacker", project_id="proj-1", job_id="job-1")
+    with pytest.raises(PermissionError):
+        pwl.get_pending_review_media_access(
+            user_id="user-1", project_id="proj-1", job_id="job-1", requesting=stranger,
+            expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+            client=fake_redis, s3_client=fake_s3,
+        )
+
+
+def test_media_access_rejects_requesting_none(tmp_path, fake_s3, fake_redis):
+    local_path = _rendered_file(tmp_path)
+    record = _persist_record(fake_redis, fake_s3, local_path=local_path)
+    with pytest.raises(pwl.PendingReviewError, match="requesting_identity_required_no_none_bypass"):
+        pwl.get_pending_review_media_access(
+            user_id="user-1", project_id="proj-1", job_id="job-1", requesting=None,
+            expected_render_identity=record.render_identity, expected_output_sha256=record.output_sha256,
+            client=fake_redis, s3_client=fake_s3,
+        )
+
+
+def test_media_access_bound_to_exact_artifact_refuses_a_stale_reference(tmp_path, fake_s3, fake_redis):
+    local_path = _rendered_file(tmp_path)
+    record = _persist_record(fake_redis, fake_s3, local_path=local_path)
+    owner = tsd.DeliveryOwnershipScope(user_id="user-1", project_id="proj-1", job_id="job-1")
+    with pytest.raises(pwl.PendingReviewError, match="media_access_bound_to_different_artifact"):
+        pwl.get_pending_review_media_access(
+            user_id="user-1", project_id="proj-1", job_id="job-1", requesting=owner,
+            expected_render_identity="render_STALE_REFERENCE", expected_output_sha256=record.output_sha256,
+            client=fake_redis, s3_client=fake_s3,
+        )

@@ -52,6 +52,43 @@ named by the finding:
 `resume_delivery_after_approval` (in `export_job.py`, which owns the real
 tenant-safe delivery seam) is the "reanudación de entrega" this finding
 also requires -- see that module for the actual resumed upload.
+
+## D-288.3 -- atomic, versioned transitions (second correction pass)
+
+Product Owner review of D-288.2 found the real remaining race: `resume_
+delivery_after_approval` read this record ONCE at the top and used that
+SAME stale snapshot both to decide "is this approved?" and, much later
+(after a real S3 download/upload), to build its FINAL save via
+`dataclasses.replace(stale_record, ...)` -- a concurrent revocation (or a
+second concurrent resume) landing in that window was silently clobbered
+by the stale write. Fixed with two mechanisms, both applied to EVERY
+mutating entry point in this module (`apply_human_approval` included, not
+only resume):
+
+1. **`version`**: a monotonic counter, incremented on every successful
+   write. `_cas_save` writes a record ONLY if the currently-stored
+   record's `version` still equals the `expected_version` the caller read
+   -- one atomic Redis Lua script (`_CAS_LUA`), never a separate GET-then-
+   SET (which is exactly the race being closed). A conflict returns
+   `None` (never raises by itself) so a caller can decide: retry with a
+   fresh read (`apply_human_approval`), or treat it as "someone else
+   already reached the terminal state I was about to write" (`export_job.
+   resume_delivery_after_approval`, which rereads and returns the
+   concurrent winner's own result rather than erroring on a benign race).
+2. **Re-validate live state immediately before the irreversible action**:
+   `resume_delivery_after_approval` re-reads this record FRESH right
+   before the tenant-safe (customer-facing) upload -- the actual point of
+   no return -- rather than trusting the read from the top of the
+   function. A revocation that lands after the initial read is caught
+   here, before anything customer-visible happens, never after.
+
+See `export_job.resume_delivery_after_approval`'s own docstring for how
+these combine with render-identity-keyed idempotency (`render_versions.
+add_render_version`, `notifications.publish_notification`) to make a
+retry after a mid-flight interruption safe, and with `job_started_at`
+(now carried on this record from the ORIGINAL job, never `None`) to keep
+a late approval of a since-superseded job from regressing the project's
+current result.
 """
 from __future__ import annotations
 
@@ -82,6 +119,15 @@ class PendingReviewError(ValueError):
     """Every rejection reason below raises this, always naming the exact
     reason in the message -- never a silent no-op, never a generic
     exception a caller could accidentally swallow."""
+
+
+class PendingReviewConflict(PendingReviewError):
+    """D-288.3: a `_cas_save` write lost to a genuinely incompatible
+    concurrent change -- exhausted retries in `apply_human_approval`, or
+    `resume_delivery_after_approval`'s own final commit conflicted with a
+    change that was NOT simply another resume reaching the same terminal
+    result first (that benign case is handled by rereading and returning
+    the concurrent winner's result, never raised as a conflict)."""
 
 
 def _redis_client(client=None):
@@ -146,6 +192,21 @@ class PendingWatchListenRecord:
     # record returns THIS stored result instead of re-registering a render
     # version or re-firing a "finished" notification.
     resumed_delivery_result: dict | None = None
+    # D-288.3 (blockers 1/2): a monotonic write counter -- see `_cas_save`.
+    # Every mutating write increments this; a write is only ever applied
+    # if the currently-stored record's own `version` still matches what
+    # the writer last read, so a stale in-memory snapshot can never
+    # silently clobber a concurrent change.
+    version: int = 1
+    # D-288.3 (blocker 3): the ORIGINAL job's own real start timestamp
+    # (`export_job._job_started_epoch`), carried from `persist_pending_
+    # review` time so a LATER resumed delivery can preserve the ORIGINAL
+    # job's identity/order for `tenant_safe_delivery.is_job_still_current`
+    # -- never `None` (which that guard treats as "no ordering evidence,
+    # always allow", i.e. would let a late approval of a stale job
+    # silently regress a project whose "latest" pointer already moved on
+    # to a newer job).
+    job_started_at: float | None = None
 
     @property
     def ownership(self) -> "tsd.DeliveryOwnershipScope":
@@ -179,6 +240,7 @@ def persist_pending_review(
     selected_count: int = 0,
     text_overlay_count: int = 0,
     media_overlay_count: int = 0,
+    job_started_at: float | None = None,
 ) -> PendingWatchListenRecord:
     """Finding 1: uploads the ACTUAL rendered file to a PRIVATE location
     and records recoverable metadata, so it survives the caller's own
@@ -227,6 +289,7 @@ def persist_pending_review(
         selected_count=int(selected_count),
         text_overlay_count=int(text_overlay_count),
         media_overlay_count=int(media_overlay_count),
+        job_started_at=job_started_at,
     )
     target = _redis_client(client)
     target.set(
@@ -246,12 +309,50 @@ def load_pending_review(*, user_id: str, project_id: str, job_id: str, client=No
     return _from_dict(json.loads(raw))
 
 
-def _save(record: PendingWatchListenRecord, *, client=None) -> None:
+# D-288.3: a single atomic Lua script -- the check-and-write is ONE round
+# trip to Redis, never a separate GET-then-SET a concurrent writer could
+# interleave with. `cjson` is built into real Redis's Lua sandbox (no
+# extension needed). Returns a literal status string, never raises for an
+# ordinary version conflict -- the caller decides how to react.
+_CAS_LUA = """
+local current = redis.call('GET', KEYS[1])
+if current == false then
+  return 'missing'
+end
+local ok, decoded = pcall(cjson.decode, current)
+if not ok then
+  return 'corrupt'
+end
+if tostring(decoded['version']) ~= ARGV[1] then
+  return 'conflict'
+end
+redis.call('SET', KEYS[1], ARGV[2])
+return 'ok'
+"""
+
+_MAX_CAS_RETRIES = 5
+
+
+def _cas_save(
+    record: PendingWatchListenRecord, *, expected_version: int, client=None,
+) -> PendingWatchListenRecord | None:
+    """D-288.3: atomically writes `record` (with `version` bumped to
+    `expected_version + 1`) ONLY IF the record currently stored under this
+    key still has `version == expected_version`. Returns the newly-
+    written record (with its bumped `version`) on success, or `None` on a
+    conflict (someone else wrote first) -- never raises by itself, so a
+    caller can retry with a fresh read (`apply_human_approval`) or treat
+    "someone else already reached the terminal state I was about to
+    write" as a benign race rather than an error (`export_job.resume_
+    delivery_after_approval`)."""
     target = _redis_client(client)
-    target.set(
-        pending_review_key(user_id=record.user_id, project_id=record.project_id, job_id=record.job_id),
-        json.dumps(_to_dict(record), ensure_ascii=False),
-    )
+    key = pending_review_key(user_id=record.user_id, project_id=record.project_id, job_id=record.job_id)
+    new_record = dataclasses.replace(record, version=int(expected_version) + 1)
+    new_json = json.dumps(_to_dict(new_record), ensure_ascii=False)
+    result = target.eval(_CAS_LUA, 1, key, str(int(expected_version)), new_json)
+    if isinstance(result, bytes):
+        result = result.decode("utf-8")
+    return new_record if result == "ok" else None
 
 
 def _require_authenticated_requesting(requesting: "tsd.DeliveryOwnershipScope | None") -> "tsd.DeliveryOwnershipScope":
@@ -287,6 +388,62 @@ def get_pending_review_for_authenticated_caller(
     return record
 
 
+def get_pending_review_media_access(
+    *,
+    user_id: str,
+    project_id: str,
+    job_id: str,
+    requesting: "tsd.DeliveryOwnershipScope | None",
+    expected_render_identity: str,
+    expected_output_sha256: str,
+    client=None,
+    s3_client=None,
+    expires_in: int = 900,
+) -> dict:
+    """D-288.3 (blocker 4): "acceso autenticado al MP4 privado para
+    revisarlo antes de aprobar" -- a short-lived, read-only presigned URL
+    for the ACTUAL pending MP4 (never a redirect through `tenant_safe_
+    delivery`, and never anything that could be mistaken for a real
+    `download_url`: this object lives under `PENDING_REVIEW_PREFIX`, the
+    same private namespace `persist_pending_review` uploaded to, and this
+    function's own return value carries no `delivery_status` field and
+    never promotes the record -- reading it has zero effect on `watch_
+    listen_status`/`approval_status`).
+
+    "Ligado al artefacto exacto": the caller MUST name the render's
+    CURRENT `render_identity`/`output_sha256` (the SAME two-field binding
+    `apply_human_approval` already requires) -- a mismatch (e.g. a stale
+    client reference to a PREVIOUS pending record for this same job_id,
+    since a job_id's pending-review slot is reused/overwritten by a
+    later export attempt) is refused rather than silently handing back
+    access to whatever file happens to occupy this job's CURRENT slot
+    now."""
+    _require_authenticated_requesting(requesting)
+    if not str(expected_render_identity or "").strip() or not str(expected_output_sha256 or "").strip():
+        raise PendingReviewError("media_access_requires_non_empty_render_identity_and_output_sha256")
+    record = load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
+    if record is None:
+        raise PendingReviewError("no_pending_review_found")
+    tsd.assert_delivery_access(requesting=requesting, record_ownership=record.ownership)
+    if record.render_identity != expected_render_identity or record.output_sha256 != expected_output_sha256:
+        raise PendingReviewError("media_access_bound_to_different_artifact")
+
+    parsed_bucket, parsed_key = record.pending_s3_uri[5:].split("/", 1)
+    if s3_client is None:
+        import boto3
+        s3_client = boto3.client("s3")
+    url = s3_client.generate_presigned_url(
+        "get_object", Params={"Bucket": parsed_bucket, "Key": parsed_key}, ExpiresIn=int(expires_in),
+    )
+    return {
+        "record_id": record.record_id,
+        "render_identity": record.render_identity,
+        "output_sha256": record.output_sha256,
+        "preview_url": url,
+        "expires_in": int(expires_in),
+    }
+
+
 def apply_human_approval(
     *,
     user_id: str,
@@ -319,71 +476,82 @@ def apply_human_approval(
     exactly why "no declares flujo autenticado basándote únicamente en
     pruebas de helpers" requires the REAL route handler (not this
     function's own unit tests) to be the thing that actually enforces it;
-    see `cutsell_app/pending_review_routes.py`."""
+    see `cutsell_app/pending_review_routes.py`.
+
+    D-288.3: every read-decide-write cycle below uses a FRESH read and an
+    atomic, versioned `_cas_save` -- never a stale snapshot blindly
+    overwritten. A conflict (another approval/rejection/resume landed
+    between this call's read and write) retries with a fresh read, up to
+    `_MAX_CAS_RETRIES` times, rather than clobbering whatever the
+    concurrent writer just committed."""
     from .perceptual_watch_listen import (
         WATCH_LISTEN_BLOCKED, WATCH_LISTEN_HUMAN_APPROVED, WATCH_LISTEN_HUMAN_REVIEW_REQUIRED, WATCH_LISTEN_SYSTEM_PASS,
     )
 
     _require_authenticated_requesting(requesting)
 
-    record = load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
-    if record is None:
-        raise PendingReviewError("no_pending_review_found")
-
-    # Authentication/authorization -- reuses the EXISTING tenant-safe
-    # delivery ownership-match authority, never a second one.
-    tsd.assert_delivery_access(requesting=requesting, record_ownership=record.ownership)
-
     approver_clean = str(approver or "").strip()
     if not approver_clean:
         raise PendingReviewError("approval_requires_non_empty_approver_identity")
-
     if not str(expected_render_identity or "").strip() or not str(expected_output_sha256 or "").strip():
         raise PendingReviewError("approval_requires_non_empty_render_identity_and_output_sha256")
     if not str(expected_plan_id or "").strip():
         raise PendingReviewError("approval_requires_non_empty_plan_id")
 
-    if record.watch_listen_status == WATCH_LISTEN_BLOCKED:
-        raise PendingReviewError("blocked_never_approvable")
+    for _attempt in range(_MAX_CAS_RETRIES):
+        record = load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
+        if record is None:
+            raise PendingReviewError("no_pending_review_found")
 
-    artifact_matches = (
-        record.render_identity == expected_render_identity
-        and record.output_sha256 == expected_output_sha256
-        and record.plan_id == expected_plan_id
-        and int(record.plan_version) == int(expected_plan_version)
-    )
-    if not artifact_matches:
-        raise PendingReviewError("approval_bound_to_different_artifact_or_plan")
+        # Authentication/authorization -- reuses the EXISTING tenant-safe
+        # delivery ownership-match authority, never a second one.
+        tsd.assert_delivery_access(requesting=requesting, record_ownership=record.ownership)
 
-    if not approved:
-        # D-288.2 (blocker 1, the revocation bug): a rejection -- whether
-        # this is a first-time decline of a HUMAN_REVIEW_REQUIRED record
-        # or a REVOCATION of a PRIOR approval -- always reverts `watch_
-        # listen_status` back to the record's own immutable `automated_
-        # watch_listen_status`. Before this fix, rejecting an ALREADY-
-        # APPROVED record left `watch_listen_status` unchanged at HUMAN_
-        # APPROVED (only `approval_status` moved to REJECTED), which
-        # `resume_delivery_after_approval`'s own single-field check would
-        # have silently accepted as still-deliverable.
-        updated = dataclasses.replace(
-            record,
-            watch_listen_status=record.automated_watch_listen_status,
-            approval_status=APPROVAL_STATUS_REJECTED,
-            approver=approver_clean,
-            approved_at=time.time(),
+        if record.watch_listen_status == WATCH_LISTEN_BLOCKED:
+            raise PendingReviewError("blocked_never_approvable")
+
+        artifact_matches = (
+            record.render_identity == expected_render_identity
+            and record.output_sha256 == expected_output_sha256
+            and record.plan_id == expected_plan_id
+            and int(record.plan_version) == int(expected_plan_version)
         )
-        _save(updated, client=client)
-        return updated
+        if not artifact_matches:
+            raise PendingReviewError("approval_bound_to_different_artifact_or_plan")
 
-    if record.watch_listen_status not in (WATCH_LISTEN_HUMAN_REVIEW_REQUIRED, WATCH_LISTEN_SYSTEM_PASS):
-        raise PendingReviewError(f"automated_status_not_promotable:{record.watch_listen_status}")
+        if not approved:
+            # D-288.2 (blocker 1, the revocation bug): a rejection --
+            # whether this is a first-time decline of a HUMAN_REVIEW_
+            # REQUIRED record or a REVOCATION of a PRIOR approval -- always
+            # reverts `watch_listen_status` back to the record's own
+            # immutable `automated_watch_listen_status`. Before this fix,
+            # rejecting an ALREADY-APPROVED record left `watch_listen_
+            # status` unchanged at HUMAN_APPROVED (only `approval_status`
+            # moved to REJECTED), which `resume_delivery_after_approval`'s
+            # own single-field check would have silently accepted as
+            # still-deliverable.
+            updated = dataclasses.replace(
+                record,
+                watch_listen_status=record.automated_watch_listen_status,
+                approval_status=APPROVAL_STATUS_REJECTED,
+                approver=approver_clean,
+                approved_at=time.time(),
+            )
+        else:
+            if record.watch_listen_status not in (WATCH_LISTEN_HUMAN_REVIEW_REQUIRED, WATCH_LISTEN_SYSTEM_PASS):
+                raise PendingReviewError(f"automated_status_not_promotable:{record.watch_listen_status}")
+            updated = dataclasses.replace(
+                record,
+                watch_listen_status=WATCH_LISTEN_HUMAN_APPROVED,
+                approval_status=APPROVAL_STATUS_APPROVED,
+                approver=approver_clean,
+                approved_at=time.time(),
+            )
 
-    updated = dataclasses.replace(
-        record,
-        watch_listen_status=WATCH_LISTEN_HUMAN_APPROVED,
-        approval_status=APPROVAL_STATUS_APPROVED,
-        approver=approver_clean,
-        approved_at=time.time(),
-    )
-    _save(updated, client=client)
-    return updated
+        saved = _cas_save(updated, expected_version=record.version, client=client)
+        if saved is not None:
+            return saved
+        # D-288.3: a concurrent write landed between our read and our
+        # write -- retry with a fresh read rather than overwrite it.
+
+    raise PendingReviewConflict("pending_review_concurrent_update_conflict")

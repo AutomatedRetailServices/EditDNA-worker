@@ -109,6 +109,7 @@ def _tenant_safe_deliver(
     qc_result=None,
     requesting: "tsd.DeliveryOwnershipScope | None" = None,
     pending_review_redis_client=None,
+    job_started_at: float | None = None,
 ) -> dict:
     """D-269A: the live activation seam -- binds the actual rendered/QC-
     passed local file to a tenant-safe remote delivery. Computes D-267's
@@ -199,6 +200,12 @@ def _tenant_safe_deliver(
             selected_count=len(draft.selected) if draft is not None else 0,
             text_overlay_count=len(getattr(draft, "text_overlays", ()) or ()) if draft is not None else 0,
             media_overlay_count=len(getattr(draft, "media_overlays", ()) or ()) if draft is not None else 0,
+            # D-288.3 (blocker 3): the ORIGINAL job's own real start
+            # timestamp, so a LATER resumed delivery can preserve this
+            # job's identity/order for the stale-job guard instead of
+            # disabling it with `None` -- see `resume_delivery_after_
+            # approval`'s own docstring.
+            job_started_at=job_started_at,
         )
         raise PendingHumanWatchListenReview(pending_record)
 
@@ -367,12 +374,60 @@ def resume_delivery_after_approval(
     record whose `resumed_delivery_result` is already set (a PRIOR
     successful resume) returns that STORED result directly -- no re-
     upload, no second render-version registration, no duplicate
-    notification."""
+    notification.
+
+    D-288.3 (second correction pass): closes two further races the
+    D-288.2 shape above still had --
+
+    1. This function used to read the record ONCE at the top and use that
+       SAME stale snapshot both to decide "is this approved?" and, much
+       later (after a real S3 download), to build its final save. A
+       revocation landing in that window was silently clobbered by the
+       stale write. Now: the approval check right here (before any I/O)
+       is a fast-path convenience only -- the state that actually gates
+       the irreversible action (the tenant-safe, customer-facing upload)
+       is a SECOND, FRESH read taken immediately before that upload (see
+       "consulta la caché antes de comprobar la aprobación vigente"
+       below), and the final write is an atomic, versioned `_cas_save`
+       keyed off THAT fresh read, never off this function's own top-of-
+       function snapshot.
+    2. `job_started_at` is now the ORIGINAL job's own real start
+       timestamp, carried on the record since `persist_pending_review`
+       time -- never the fabricated `None` this function used to pass,
+       which fully disabled `tenant_safe_delivery.is_job_still_current`'s
+       stale-job guard and let a late approval of an OLD job overwrite a
+       project whose "latest" pointer had already moved on to a NEWER
+       job's own delivery. Preserving the original timestamp means a
+       late resume of a superseded job still registers its render version
+       (an audit trail, D-269 Stage 22) but never regresses the project's
+       current `state`/`latest_job_id`.
+
+    Recoverable/idempotent by render identity (blocker 2, "recuperable e
+    idempotencia por identidad del render, también en registro de versión
+    y notificación"): the tenant-safe upload is idempotent by construction
+    (`build_tenant_safe_export_key` is deterministic per render_identity),
+    and `_finalize_successful_delivery`'s own `add_render_version`/`_safe_
+    notify` calls are now idempotent keyed by `render_identity`/`export_
+    uri` (see that function's own D-288.3 docstring) -- so a retry after
+    ANY interruption (a crash between a successful finalize and this
+    function's own final `_cas_save`, or two overlapping concurrent calls
+    for the same record) safely reruns the whole sequence: every side
+    effect converges to the SAME single render version and SAME single
+    notification, and the final `_cas_save` either records this call's own
+    result or, on a conflict, rereads and returns whichever concurrent
+    call's result is now authoritative -- never a duplicate, never a lost
+    update."""
     pwl._require_authenticated_requesting(requesting)
 
     from .perceptual_watch_listen import WATCH_LISTEN_HUMAN_APPROVED
 
     ownership = tsd.DeliveryOwnershipScope(user_id=user_id, project_id=project_id, job_id=job_id)
+
+    def _require_approved(candidate: "pwl.PendingWatchListenRecord") -> None:
+        if candidate.watch_listen_status != WATCH_LISTEN_HUMAN_APPROVED or candidate.approval_status != pwl.APPROVAL_STATUS_APPROVED:
+            raise pwl.PendingReviewError(
+                f"pending_review_not_approved:{candidate.watch_listen_status}:{candidate.approval_status}"
+            )
 
     record = pwl.load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
     if record is None:
@@ -382,16 +437,11 @@ def resume_delivery_after_approval(
     if record.resumed_delivery_result is not None:
         return dict(record.resumed_delivery_result)
 
-    # D-288.2 (blocker 1): BOTH fields must agree -- never trust `watch_
-    # listen_status` alone (the exact single-field check the revocation
-    # bug slipped through). A record whose approval was later revoked has
-    # `watch_listen_status` reverted (by `apply_human_approval`'s own
-    # fix) but this redundant check means even a hypothetical future bug
-    # in that revert would still be caught here, never silently deliver.
-    if record.watch_listen_status != WATCH_LISTEN_HUMAN_APPROVED or record.approval_status != pwl.APPROVAL_STATUS_APPROVED:
-        raise pwl.PendingReviewError(
-            f"pending_review_not_approved:{record.watch_listen_status}:{record.approval_status}"
-        )
+    # D-288.2 (blocker 1)/D-288.3: BOTH fields must agree -- never trust
+    # `watch_listen_status` alone. This is a fast-path check only (avoids
+    # a real S3 download for the common "never approved at all" case); the
+    # check that actually GATES delivery is the fresh reread below.
+    _require_approved(record)
 
     with tempfile.TemporaryDirectory(prefix="cutsell-resume-delivery-") as directory:
         local_path = str(Path(directory) / "cutsell-resume-export.mp4")
@@ -423,29 +473,68 @@ def resume_delivery_after_approval(
             )
             raise TenantSafeDeliveryBlocked(blocked)
 
+        # D-288.3 (blocker 1, "consulta la caché antes de comprobar la
+        # aprobación vigente"): re-read LIVE, right before the point of no
+        # return (the tenant-safe, customer-facing upload) -- a real S3
+        # download just took real time, so the snapshot at the top of this
+        # function may already be stale. A concurrent revocation landing
+        # in that window is caught HERE, before anything customer-visible
+        # happens, never silently overwritten by a later blind write.
+        live = pwl.load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
+        if live is None:
+            raise pwl.PendingReviewError("no_pending_review_found")
+        if live.resumed_delivery_result is not None:
+            # Someone else already completed this exact resume while we
+            # were downloading -- converge on their result rather than
+            # doing (and duplicating) the upload ourselves.
+            return dict(live.resumed_delivery_result)
+        _require_approved(live)
+        if live.render_identity != record.render_identity or live.output_sha256 != record.output_sha256:
+            # The approved artifact identity itself changed underneath us
+            # (e.g. a later export overwrote this job's pending-review
+            # slot with a different render) -- never deliver bytes that no
+            # longer match the CURRENT record's own approved identity.
+            raise pwl.PendingReviewError("resumed_artifact_identity_changed")
+
         delivery = _upload_verify_and_finalize_delivery(
             local_path=local_path, ownership=ownership, requesting=requesting,
-            render_identity=record.render_identity, local_delivery=local_delivery,
+            render_identity=live.render_identity, local_delivery=local_delivery,
             project_id=project_id, user_id=user_id, job_id=job_id,
-            watch_listen_status=record.watch_listen_status,
+            watch_listen_status=live.watch_listen_status,
         )
 
-        # D-288.2 (blocker 3): reuse the SAME finalization the same-job
-        # path uses -- render version registered, project "finished",
-        # real notification fired. Job-start timestamp is unknown here
-        # (this is not itself a fresh render job); `None` is `project_
-        # store.update_project`'s own documented "no ordering evidence,
-        # allow through" sentinel, not a fabricated value.
+        # D-288.2 (blocker 3)/D-288.3: reuse the SAME finalization the
+        # same-job path uses -- render version registered, project
+        # "finished" (unless a newer job already superseded it, per
+        # `is_job_still_current`), real notification fired -- idempotent
+        # by render identity, so a retry of this whole block after an
+        # interruption never duplicates either. `job_started_at` is the
+        # ORIGINAL job's own real timestamp (D-288.3 blocker 3), never a
+        # fabricated `None`.
         finalized = _finalize_successful_delivery(
-            user_id=user_id, project_id=project_id, job_id=job_id, job_started_at=None,
-            delivery=delivery, selected_count=record.selected_count,
-            text_overlay_count=record.text_overlay_count, media_overlay_count=record.media_overlay_count,
+            user_id=user_id, project_id=project_id, job_id=job_id, job_started_at=live.job_started_at,
+            delivery=delivery, selected_count=live.selected_count,
+            text_overlay_count=live.text_overlay_count, media_overlay_count=live.media_overlay_count,
         )
 
-        pwl._save(
-            dataclasses.replace(record, resumed_delivery_at=time.time(), resumed_delivery_result=finalized),
-            client=client,
+        # D-288.3 (blocker 1): atomic, versioned commit -- never a blind
+        # `dataclasses.replace(stale_record, ...)` overwrite. `expected_
+        # version=live.version` is the freshest version we actually read.
+        # A conflict means another writer changed the record AGAIN in the
+        # (much narrower) window since that read; reread once and, if that
+        # writer was another concurrent resume that already recorded a
+        # result, return theirs -- the two calls converge on one outcome,
+        # never a lost update and never two independent "finished" results
+        # for the same delivery.
+        committed = pwl._cas_save(
+            dataclasses.replace(live, resumed_delivery_at=time.time(), resumed_delivery_result=finalized),
+            expected_version=live.version, client=client,
         )
+        if committed is None:
+            reread = pwl.load_pending_review(user_id=user_id, project_id=project_id, job_id=job_id, client=client)
+            if reread is not None and reread.resumed_delivery_result is not None:
+                return dict(reread.resumed_delivery_result)
+            raise pwl.PendingReviewConflict("resume_commit_conflicted_with_concurrent_change")
         return finalized
 
 
@@ -468,7 +557,22 @@ def _finalize_successful_delivery(
     resumed delivery -- one implementation, never a second guess, so a
     resumed delivery reaches the EXACT SAME finished state a same-job
     delivery does (registered render version, "finished" project state,
-    a real notification an approving human/mobile client can observe)."""
+    a real notification an approving human/mobile client can observe).
+
+    D-288.3 (blocker 2, "idempotencia por identidad del render... en
+    registro de versión y notificación"): `add_render_version` and `_safe_
+    notify` below are both idempotent, keyed by `delivery["render_
+    identity"]`/`delivery["export_uri"]` (a render's own `export_uri` is
+    derived deterministically from its `render_identity`, so the two are
+    equivalent keys). Calling this function AGAIN for the SAME delivery
+    (e.g. `resume_delivery_after_approval` recovering after a crash that
+    happened right after a first, successful call to this function but
+    before its OWN caller could record that fact) reuses the existing
+    render version and skips re-firing the notification, rather than
+    duplicating either -- `job_started_at` is the ONLY thing that then
+    still matters to re-supply correctly (see that function's own D-288.3
+    docstring for why it must be the ORIGINAL job's timestamp, never
+    `None`)."""
     version_payload: dict = {}
     version = None
     try:
@@ -514,6 +618,7 @@ def _finalize_successful_delivery(
             "job_id": job_id,
             "render_version_id": version["render_version_id"] if version else None,
         },
+        idempotency_key=str(delivery.get("render_identity") or "") or None,
     )
     return {
         "project_id": project_id,
@@ -528,13 +633,16 @@ def _finalize_successful_delivery(
     }
 
 
-def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | None = None) -> dict:
+def _safe_notify(
+    *, user_id: str, project_id: str, kind: str, payload: dict | None = None, idempotency_key: str | None = None,
+) -> dict:
     try:
         event = publish_notification(
             user_id=user_id,
             project_id=project_id,
             kind=kind,
             payload=payload,
+            idempotency_key=idempotency_key,
         )
         return {"status": "queued", "notification_id": event["notification_id"]}
     except Exception as exc:
@@ -652,6 +760,7 @@ def run_export_job(payload: dict) -> dict:
             delivery = _tenant_safe_deliver(
                 output_path=output, plan=plan, draft=draft, local_paths=local_paths, qc_result=qc_result,
                 project_id=project_id, user_id=user_id, job_id=job_id,
+                job_started_at=job_started_at,
             )
             finalized = _finalize_successful_delivery(
                 user_id=user_id, project_id=project_id, job_id=job_id, job_started_at=job_started_at,

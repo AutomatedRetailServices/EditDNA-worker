@@ -77141,3 +77141,148 @@ DO NOT SWITCH BRANCHES.
 DO NOT MERGE.
 DO NOT REBASE.
 DO NOT TOUCH cutsell/mobile-v1-clean.
+
+## D-288.3 — Third Structural Correction to D-288/D-288.1/D-288.2 (offline
+implementation, same isolated branch `audit/watch-listen-delivery-
+authority`, off verified HEAD
+`640a4a010033eb9a423878ff51cd262e2d816d09`)
+
+**NOT integrated into `cutsell/mobile-v1-clean`. NOT merged. `main` and
+PR #25 (OPEN/DRAFT/UNMERGED) untouched. iOS work untouched. No RAW
+dispatched. `perceptual_repair_cycle.py` untouched (still fully
+disconnected from every live caller).**
+
+**Objective.** Product Owner review of D-288.2 found the real remaining
+race: the ver -> aprobar/rechazar -> entregar round trip still had four
+defects before it could be called correct under concurrency or recovery.
+All four closed here.
+
+1. **`resume_delivery_after_approval` checked the cache before the LIVE
+   approval, and its final save could overwrite a concurrent
+   revocation.** It read the pending record ONCE at the top and used that
+   SAME stale snapshot both to decide "is this approved?" and, after a
+   real S3 download, to build its final `dataclasses.replace(stale_
+   record, ...)` write -- a revocation (or a second concurrent resume)
+   landing in that window was silently clobbered. Fixed with atomic,
+   versioned transitions applied to EVERY mutating entry point in `pending_
+   watch_listen_review.py` (not only resume): a new monotonic `version`
+   field plus `_cas_save`, a single atomic Redis Lua script (`_CAS_LUA`,
+   using Redis's own built-in `cjson`) that writes ONLY if the currently-
+   stored record's `version` still equals what the caller read -- one
+   round trip, never a separate GET-then-SET a concurrent writer could
+   interleave with. `apply_human_approval` now loops read-decide-`_cas_
+   save`, retrying with a fresh read on a conflict (bounded, `_MAX_CAS_
+   RETRIES=5`) rather than ever blind-overwriting. `resume_delivery_
+   after_approval` re-reads the record FRESH immediately before the
+   tenant-safe (customer-facing) upload -- the actual point of no return
+   -- and gates on THAT read, not the stale top-of-function one; its
+   final commit is a `_cas_save` keyed off that same fresh read, and a
+   conflict there rereads and returns whichever concurrent call's result
+   is now authoritative rather than erroring or clobbering.
+2. **The cache was saved after upload and finalization, so two concurrent
+   requests, or an interruption before that save, could duplicate
+   effects.** Fixed by making the side effects THEMSELVES idempotent by
+   render identity, not by trying to prevent concurrent execution:
+   `render_versions.add_render_version` now returns the EXISTING entry
+   when one with the same `export_uri` (1:1 with `render_identity` via
+   the deterministic tenant-safe key) already exists for the project,
+   instead of always appending; `notifications.publish_notification`
+   gained an optional `idempotency_key` (a repeat call for the same
+   `(kind, idempotency_key)` pair returns the ORIGINAL notification
+   record); `export_job._finalize_successful_delivery` passes `render_
+   identity` as that key. Combined with item 1's atomic final commit,
+   this makes the whole `resume_delivery_after_approval` sequence safely
+   re-runnable end to end after ANY interruption or overlap: two
+   concurrent resumes, or a crash between a successful finalize and the
+   function's own bookkeeping write, converge on ONE render version, ONE
+   notification, and ONE returned result -- never a duplicate, never a
+   lost update.
+3. **`job_started_at=None` disabled the stale-job guard entirely.**
+   `tenant_safe_delivery.is_job_still_current` already existed for
+   exactly this ("a late-completing OLDER job must never regress a
+   project's 'latest' pointer") but treats `candidate_job_started_at is
+   None` as "no ordering evidence, always allow" -- and `resume_delivery_
+   after_approval` was passing literal `None`, fully disabling that
+   guard for every resumed delivery. Fixed: `PendingWatchListenRecord`
+   gained a `job_started_at` field, carried from the ORIGINAL job's real
+   `_job_started_epoch(job)` at `persist_pending_review` time (threaded
+   through `_tenant_safe_deliver`/`run_export_job`), and `resume_
+   delivery_after_approval` now supplies THAT value to `_finalize_
+   successful_delivery` instead of `None`. A late-approved OLDER job's
+   resumed delivery still succeeds and still registers its render version
+   (an audit trail, D-269 Stage 22, unconditional in `project_store.
+   update_project`) but never regresses the project's `state`/`latest_
+   job_id` once a NEWER job's own delivery already became current.
+4. **No authenticated access to the private pending MP4 itself before
+   deciding.** `GET .../pending-review` returned metadata only -- no way
+   for a human to actually watch/listen to the candidate before
+   approving/rejecting it. Fixed: new `pending_watch_listen_review.get_
+   pending_review_media_access` and a new `GET .../pending-review/media`
+   route, both requiring the SAME two-field artifact binding (`expected_
+   render_identity`/`expected_output_sha256`) `apply_human_approval`
+   already requires -- a stale client reference to a PREVIOUS pending
+   record for this `job_id` (its slot is reused by a later export
+   attempt) is refused rather than silently handed a preview of whatever
+   file occupies the job's CURRENT slot now. Returns a short-lived
+   presigned URL to the PRIVATE `PENDING_REVIEW_PREFIX` object only --
+   never touches `watch_listen_status`/`approval_status`, never returns a
+   `delivery_status`, and is structurally incapable of being mistaken for
+   a real tenant-safe `download_url`.
+
+**Report claims corrected (D-288.2's own text superseded by this
+entry):** D-288.2 correctly reported the revocation-transition and
+finalization-reuse fixes as complete, and those stand, unchanged and
+re-verified here. Its own approve -> resume walkthrough tests, however,
+only ever exercised a SINGLE, uncontested caller; any reading of that as
+proof the flow was safe under concurrent or interrupted execution would
+be WRONG -- it was not, until this entry.
+
+### Verification run
+
+- New/expanded tests in `test_cutsell_d288_pending_review_and_approval.py`
+  (34, up from 25 -- 9 new: the `_cas_save` primitive itself; two
+  simultaneous resumes via REAL concurrent OS threads, same precedent
+  this repo's own multi-threaded ContextVar proof used; interruption
+  after finalize then a retry; revocation during resumption; aprobar ->
+  entregar -> rechazar -> reanudar; a late-approved older job never
+  regressing an already-current newer job; owner-can-preview / stranger-
+  cannot / stale-artifact-refused for the new media endpoint).
+  `test_cutsell_d288_pending_review_http_routes.py` (14, up from 10 -- 4
+  new: the same media-preview proof over real HTTP through the real
+  `AuthScopeMiddleware`).
+- `compileall` over `cutsell_worker/`, `cutsell_app/`, `tests/`: clean.
+- `perceptual_repair_cycle.py` confirmed to still have zero callers
+  outside its own test file -- untouched, still disconnected.
+- The two new concurrency tests (two simultaneous resumes; interruption-
+  then-retry) run stable across 15 repeated executions with zero
+  flakiness before being counted as passing.
+- Targeted regression (`test_cutsell_d267*`, `test_cutsell_d269*`,
+  `test_cutsell_d097*`, all `test_cutsell_d288*`, `test_cutsell_clean_
+  worker_export/render_versions/notifications/projects/auth.py`): 518
+  passed, 0 failed.
+- Full `tests/` suite (excluding the one pre-existing, unrelated broken
+  collection file `test_semantic_stitch.py`): IN PROGRESS at the time
+  this entry was written; result to be recorded in a follow-up commit,
+  same two-step pattern D-288.1/D-288.2 both used.
+
+### Verdict
+
+**CODE FIXED. TESTS PASS (518/518 targeted regression; full-suite result
+pending, see above). CI GREEN: not run (no CI dispatch in this gate).**
+RAW COMPLETE: N/A. ARCHITECTURE PASS: N/A. HUMAN WATCH+LISTEN PASS: N/A.
+
+**Product Owner decision required:** YES, unchanged in kind from D-288/
+D-288.1/D-288.2: (a) integrating this branch; (b) live-wiring `perceptual_
+repair_cycle.py` (still disconnected, its D-288.2-documented pending
+issues untouched by this entry); (c) any policy change for duplications/
+prosody named in the original audit.
+
+**Exact next step:** await the full-suite result (follow-up commit), then
+Product Owner review of this diff before any integration.
+
+Then STOP.
+
+DO NOT SWITCH BRANCHES.
+DO NOT MERGE.
+DO NOT REBASE.
+DO NOT TOUCH cutsell/mobile-v1-clean.
