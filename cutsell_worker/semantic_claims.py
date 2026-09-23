@@ -271,10 +271,19 @@ def _split_into_clauses(text: str, *, _search_from: int = 0) -> tuple[str, ...]:
         # giving up on splitting the sentence entirely.
         return _split_into_clauses(text, _search_from=match.end())
     connector_len = match.end() - match.start()
-    further = _split_into_clauses(right[connector_len:])
+    remainder = right[connector_len:]
+    further = _split_into_clauses(remainder)
     if len(further) == 1:
         return (left, right)
-    return (left, (right[:connector_len] + further[0]).strip()) + further[1:]
+    # D-289.4 (RAW #123): `further[0]` is the STRIPPED first clause of
+    # `remainder`; re-attaching the connector to it without the original
+    # whitespace fused the connector into the next word ("por eso" + "no
+    # creo" -> "por esono creo"), which erased the clause's own negation
+    # marker and made the winning clip's CRITICAL claim read as lost
+    # against the clip itself (negation-flip cap). Every clause must stay a
+    # contiguous substring of the sentence.
+    lead = remainder[: len(remainder) - len(remainder.lstrip())]
+    return (left, (right[:connector_len] + lead + further[0]).strip()) + further[1:]
 
 
 # D-065/D-066: the SAME protected-content marker vocabulary

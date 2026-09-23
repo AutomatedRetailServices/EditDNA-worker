@@ -37,6 +37,9 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+from dataclasses import replace
+
+from .take_grouping import continuation_pairs
 from .complete_retry_identity_guard import (
     SEQUENCE_IDENTITY_BELOW_THRESHOLD,
     is_rejected_replacement,
@@ -250,6 +253,49 @@ def _covered_by_authoritative_peers(
     }
 
 
+def _continuation_units(kept: tuple[CandidateTake, ...]) -> dict[str, tuple[str, ...]]:
+    """{clip_id: (head_id, tail_ids...)} for every continuation chain among
+    `kept` (`take_grouping.continuation_pairs`, reused verbatim)."""
+    by_id = {t.clip_id: t for t in kept}
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for pair in continuation_pairs(kept):
+        ids = sorted(pair)
+        if len(ids) == 2 and ids[0] in by_id and ids[1] in by_id:
+            parent[find(ids[0])] = find(ids[1])
+    groups: dict[str, list[str]] = {}
+    for cid in parent:
+        groups.setdefault(find(cid), []).append(cid)
+    units: dict[str, tuple[str, ...]] = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        ordered = tuple(sorted(members, key=lambda cid: (by_id[cid].start, by_id[cid].end, cid)))
+        for cid in ordered:
+            units[cid] = ordered
+    return units
+
+
+def _continuation_unit_take(members: tuple[CandidateTake, ...]) -> CandidateTake:
+    """The chain judged as one candidate: the head's identity, the joined
+    sentence, the whole span. Never written back anywhere."""
+    ordered = sorted(members, key=lambda t: (t.start, t.end, t.clip_id))
+    head = ordered[0]
+    return replace(
+        head,
+        text=" ".join(str(t.text or "").strip() for t in ordered).strip(),
+        end=max(t.end for t in ordered),
+        words=tuple(w for t in ordered for w in t.words),
+    )
+
+
 def collapse_cross_group_semantic_retries(
     kept: Iterable[CandidateTake],
     semantic_decisions: Iterable[tuple[str, str, float]],
@@ -265,15 +311,57 @@ def collapse_cross_group_semantic_retries(
     session_diagnostics_tuple = tuple(session_diagnostics)
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
+    # D-289.4 (RAW #123): a sentence split at a mid-sentence pause into a
+    # dangling head and a lower-case tail (`take_grouping.sentence_
+    # continuation`, adjacency decided once in `continuation_pairs`) is ONE
+    # realization. Judged alone, a two-content-word tail ("... are
+    # hereditary.") is always "covered" by any peer that mentions the same
+    # nouns and is deleted here BEFORE grouping ever sees the chain, leaving
+    # its head to be kept with a dangling ending (RAW #123, reason code
+    # `cross_group_semantic_retry_covered_by_authoritative_delivery`). The
+    # relation is reused verbatim, not re-derived: the unit is judged on its
+    # complete sentence and its head's own label, and is removed or kept as
+    # a whole -- a tail is never evaluated by itself, and nothing is
+    # restored after the fact.
+    units = _continuation_units(kept_tuple)
 
     for candidate in kept_tuple:
+        unit = units.get(candidate.clip_id)
+        if unit is not None and unit[0] != candidate.clip_id:
+            continue  # a continuation tail follows its head's verdict below
         label, confidence = semantic.get(candidate.clip_id, ("", 0.0))
         if label not in {"failed", "alternate"} or confidence < 0.75:
             continue
-        peers = _authoritative_peers(candidate, kept_tuple, semantic)
-        covered, evidence = _covered_by_authoritative_peers(candidate, peers)
-        if not covered:
-            continue
+        if unit is not None:
+            unit_members = tuple(t for t in kept_tuple if t.clip_id in unit)
+            judged = _continuation_unit_take(unit_members)
+            others = tuple(t for t in kept_tuple if t.clip_id not in unit)
+            peers = _authoritative_peers(judged, others, semantic)
+            covered, evidence = _covered_by_authoritative_peers(judged, peers)
+            unit_evidence = {
+                "evaluated_as_continuation_unit": True,
+                "continuation_unit_member_ids": list(unit),
+                "continuation_unit_text": judged.text,
+            }
+            if not covered:
+                diagnostics.append({
+                    "clip_id": candidate.clip_id,
+                    "reason": "continuation_unit_not_covered_kept_for_grouping",
+                    "semantic_label": label,
+                    "semantic_confidence": round(confidence, 4),
+                    "text": candidate.text,
+                    "removal_applied": False,
+                    **unit_evidence,
+                    **evidence,
+                })
+                continue
+        else:
+            unit_members = (candidate,)
+            unit_evidence = {}
+            peers = _authoritative_peers(candidate, kept_tuple, semantic)
+            covered, evidence = _covered_by_authoritative_peers(candidate, peers)
+            if not covered:
+                continue
 
         # D-112/D-113: only a single-peer coverage verdict names one exact
         # directional (candidate, peer) pair a prior guard rejection can be
@@ -300,17 +388,19 @@ def collapse_cross_group_semantic_retries(
             })
             continue
 
-        removed_ids.add(candidate.clip_id)
-        diagnostics.append({
-            "clip_id": candidate.clip_id,
-            "reason": "cross_group_semantic_retry_covered_by_authoritative_delivery",
-            "semantic_label": label,
-            "semantic_confidence": round(confidence, 4),
-            "text": candidate.text,
-            "prior_replacement_rejection_found": False,
-            "removal_applied": True,
-            **evidence,
-        })
+        for member in unit_members:
+            removed_ids.add(member.clip_id)
+            diagnostics.append({
+                "clip_id": member.clip_id,
+                "reason": "cross_group_semantic_retry_covered_by_authoritative_delivery",
+                "semantic_label": label,
+                "semantic_confidence": round(confidence, 4),
+                "text": member.text,
+                "prior_replacement_rejection_found": False,
+                "removal_applied": True,
+                **unit_evidence,
+                **evidence,
+            })
 
     survivors = tuple(take for take in kept_tuple if take.clip_id not in removed_ids)
     removed = tuple(take for take in kept_tuple if take.clip_id in removed_ids)
