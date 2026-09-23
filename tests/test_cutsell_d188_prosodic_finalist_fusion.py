@@ -2,26 +2,24 @@
 DIAGNOSTIC FUSION ONLY. Offline. No winner authority. No RAW. No
 provider. No master prosody score. No "more energy = better" rule.
 
-Covers this task's own 54-item offline test matrix: absence/availability
-of Prosodic evidence, D-183 eligibility precedence (DECISIVE never
-reopened), the fusion merge (visual+prosody agree/conflict/near-equal/
-one-missing), each of the three DIRECTIONALLY SAFE dimensions in
-isolation, each DESCRIPTIVE-ONLY dimension producing NO preference,
-gain-invariance, the filler control, the Boundary-owned-pause control,
-the meaning/negation/number/factual firewall (blocks before Prosody is
-even consulted), three-finalist dominance and cycle-conflict, the
-D-186B abstract Pimples/Gynecologist replay controls (generic, no
-literal transcript text), no-majority-voting/no-master-score/no-new-
-weights/no-provider/no-winner-mutation structural scans, determinism,
-and order/id independence. Items 42-54 of the directive's matrix
-(D-123/D-150/D-167/D-174/D-180/D-183/D-184/D-187/Family/Language Spine/
-Boundary/Pacing/Renderer unchanged) are verified by running those
-modules' own existing, untouched test suites plus a `git diff` scope
-check -- not duplicated here.
+D-290 safety correction: Phase-A continuity, hesitation and restart
+labels describe acoustic/lexical observations, not independently proven
+in-span delivery defects. Differing or unknown labels must abstain;
+their raw diagnostic relations remain observable. Equal known labels
+remain NEAR_EQUAL. No fixture label can certify an acoustic preference.
+
+Consumer-only tests separately inject an explicitly HYPOTHETICAL
+certified comparison to preserve D-184's existing merge, meaning and
+eligibility contracts. Those tests do not exercise the Phase-A producer
+and are not evidence that real prosody can safely distinguish takes.
+Also covers gain, filler, boundary, determinism and structural firewalls.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from cutsell_worker.bounded_finalist_arbiter import (
     DECISION_ABSTAIN,
@@ -107,6 +105,14 @@ def _fusion_input(**overrides):
     return FinalistArbiterInput(**defaults)
 
 
+def _assert_uncertified(comparison):
+    assert comparison.comparison_state == COMPARISON_INSUFFICIENT_EVIDENCE
+    assert comparison.preferred_candidate_id is None
+    assert comparison.directional_evidence_present is False
+    assert comparison.conflict_present is False
+    assert "independent_in_span_disruption_evidence" in comparison.missing_evidence
+
+
 # ===========================================================================
 # 1-2. Prosodic absent / actual audio required.
 # ===========================================================================
@@ -142,11 +148,7 @@ def test_02b_transcript_only_analyze_prosodic_delivery_never_fakes_evidence():
 # 3. D-183 DECISIVE -> arbiter not eligible, Prosody never reopens it.
 # ===========================================================================
 def test_03_d183_decisive_stays_not_eligible_even_with_prosody_dominance():
-    comparison = compare_prosodic_finalists(
-        {"a": _pde("a", CONTINUITY_FRAGMENTED, HESITATION_PRESENT, RESTART_SUPPORTED),
-         "b": _pde("b", CONTINUITY_CONTINUOUS, HESITATION_NOT_OBSERVED, RESTART_NOT_OBSERVED)},
-        ["a", "b"],
-    )
+    comparison = _hypothetical_certified_comparison()
     assert comparison.comparison_state == COMPARISON_DOMINANT
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
         terminal_confidence_state="DECISIVE", prosodic_comparison=comparison,
@@ -158,19 +160,31 @@ def test_03_d183_decisive_stays_not_eligible_even_with_prosody_dominance():
 
 
 # ===========================================================================
-# 4-6. D-183 NON_DECISIVE / TIED / CONFLICTED + Prosody dominance -> PREFER.
+# 4-6. Consumer-only contracts with HYPOTHETICAL certified dominance.
 # ===========================================================================
-def _dominance_comparison():
-    return compare_prosodic_finalists(
-        {"a": _pde("a", CONTINUITY_FRAGMENTED, HESITATION_PRESENT, RESTART_SUPPORTED),
-         "b": _pde("b", CONTINUITY_CONTINUOUS, HESITATION_NOT_OBSERVED, RESTART_NOT_OBSERVED)},
-        ["a", "b"],
+def _hypothetical_certified_comparison():
+    """HYPOTHETICAL certified input for D-184 consumer tests ONLY.
+
+    No current Phase-A producer can emit this safely. Constructing the
+    contract directly tests downstream behavior, not acoustic success.
+    """
+    return ProsodicFinalistComparison(
+        candidate_ids=("a", "b"), comparison_state=COMPARISON_DOMINANT,
+        preferred_candidate_id="b",
+        continuity_comparison="NEAR_EQUAL", hesitation_comparison="NEAR_EQUAL",
+        restart_comparison="b", pause_structure_comparison="NEAR_EQUAL",
+        descriptive_rate_relation="NEAR_EQUAL", descriptive_energy_relation="NEAR_EQUAL",
+        descriptive_emphasis_relation="NEAR_EQUAL", pitch_status=PITCH_NOT_IMPLEMENTED,
+        directional_evidence_present=True, conflict_present=False,
+        missing_evidence=("pitch_analysis",),
+        evidence_sources=("hypothetical_independent_in_span_disruption",),
+        provenance="HYPOTHETICAL_CERTIFIED_COMPARISON_CONSUMER_TEST_ONLY",
     )
 
 
 def test_04_non_decisive_plus_prosody_dominance_prefers():
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
-        terminal_confidence_state="NON_DECISIVE", prosodic_comparison=_dominance_comparison(),
+        terminal_confidence_state="NON_DECISIVE", prosodic_comparison=_hypothetical_certified_comparison(),
     ))
     assert result.decision == DECISION_PREFER_CANDIDATE
     assert result.preferred_candidate_id == "b"
@@ -181,7 +195,7 @@ def test_04_non_decisive_plus_prosody_dominance_prefers():
 
 def test_05_tied_plus_prosody_dominance_prefers():
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
-        terminal_confidence_state="TIED", prosodic_comparison=_dominance_comparison(),
+        terminal_confidence_state="TIED", prosodic_comparison=_hypothetical_certified_comparison(),
     ))
     assert result.decision == DECISION_PREFER_CANDIDATE
     assert result.preferred_candidate_id == "b"
@@ -189,7 +203,7 @@ def test_05_tied_plus_prosody_dominance_prefers():
 
 def test_06_conflicted_terminal_plus_prosody_safe_preference_prefers():
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
-        terminal_confidence_state="CONFLICTED", prosodic_comparison=_dominance_comparison(),
+        terminal_confidence_state="CONFLICTED", prosodic_comparison=_hypothetical_certified_comparison(),
     ))
     assert result.decision == DECISION_PREFER_CANDIDATE
     assert result.preferred_candidate_id == "b"
@@ -201,15 +215,16 @@ def test_06_conflicted_terminal_plus_prosody_safe_preference_prefers():
 # ===========================================================================
 def test_07_visual_near_equal_editability_no_evidence_prosody_dominance_prefers():
     # No v2_evidence_by_id / editability supplied at all -> both NO_EVIDENCE
-    # (never appended to `sources`) -- Prosody alone decides.
-    result = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_dominance_comparison()))
+    # (never appended to `sources`). Hypothetical certified evidence tests
+    # the consumer's existing merge, NOT a real Phase-A acoustic success.
+    result = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_hypothetical_certified_comparison()))
     assert result.decision == DECISION_PREFER_CANDIDATE
     assert result.preferred_candidate_id == "b"
 
 
 def test_08_visual_and_prosody_agree_same_candidate_prefers():
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
-        prosodic_comparison=_dominance_comparison(),
+        prosodic_comparison=_hypothetical_certified_comparison(),
         editability_preferred_candidate_id="b",
     ))
     assert result.decision == DECISION_PREFER_CANDIDATE
@@ -218,7 +233,7 @@ def test_08_visual_and_prosody_agree_same_candidate_prefers():
 
 def test_09_visual_vs_prosody_conflict_abstains():
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
-        prosodic_comparison=_dominance_comparison(),  # favors b
+        prosodic_comparison=_hypothetical_certified_comparison(),  # favors b
         editability_preferred_candidate_id="a",  # favors a
     ))
     assert result.decision == DECISION_ABSTAIN
@@ -238,16 +253,29 @@ def test_10_both_near_equal_abstains():
 # 11. Prosody internal conflict -> ABSTAIN/CONFLICTED.
 # ===========================================================================
 def test_11_prosodic_internal_conflict_abstains():
-    conflicted = compare_prosodic_finalists(
-        {"a": _pde("a", CONTINUITY_CONTINUOUS, HESITATION_NOT_OBSERVED, RESTART_SUPPORTED),
-         "b": _pde("b", CONTINUITY_FRAGMENTED, HESITATION_NOT_OBSERVED, RESTART_NOT_OBSERVED)},
-        ["a", "b"],
+    # Consumer contract only: Phase-A descriptor disagreements are not
+    # independently certified conflicts (see test_11b).
+    conflicted = replace(
+        _hypothetical_certified_comparison(), comparison_state=COMPARISON_CONFLICTED,
+        preferred_candidate_id=None, continuity_comparison="a",
+        pause_structure_comparison="a", conflict_present=True,
     )
     assert conflicted.comparison_state == COMPARISON_CONFLICTED
     result = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=conflicted))
     assert result.decision == DECISION_ABSTAIN
     assert result.arbiter_state == STATE_CONFLICTED
     assert result.prosodic_comparison_status == "CONFLICTED"
+
+
+def test_11b_descriptor_disagreement_is_not_certified_conflict():
+    comparison = compare_prosodic_finalists(
+        {"a": _pde("a", CONTINUITY_CONTINUOUS, HESITATION_NOT_OBSERVED, RESTART_SUPPORTED),
+         "b": _pde("b", CONTINUITY_FRAGMENTED, HESITATION_NOT_OBSERVED, RESTART_NOT_OBSERVED)},
+        ["a", "b"],
+    )
+    _assert_uncertified(comparison)
+    assert comparison.continuity_comparison == "a"
+    assert comparison.restart_comparison == "b"
 
 
 # ===========================================================================
@@ -276,30 +304,44 @@ def test_12_partial_prosodic_evidence_is_insufficient_never_a_source():
 
 
 # ===========================================================================
-# 13-16. Each safe dimension alone; pause_structure == continuity signal.
+# 13-16. Each descriptor alone abstains; pause_structure == continuity.
 # ===========================================================================
-def test_13_continuity_only_safe_preference():
+def test_13_continuity_only_difference_cannot_certify_preference():
     c = compare_prosodic_finalists(
         {"a": _pde("a", continuity=CONTINUITY_FRAGMENTED), "b": _pde("b", continuity=CONTINUITY_CONTINUOUS)},
         ["a", "b"],
     )
-    assert c.comparison_state == COMPARISON_DOMINANT and c.preferred_candidate_id == "b"
+    _assert_uncertified(c)
+    assert c.continuity_comparison == "b"
 
 
-def test_14_hesitation_only_safe_preference():
+def test_14_hesitation_only_difference_cannot_certify_preference():
     c = compare_prosodic_finalists(
         {"a": _pde("a", hesitation=HESITATION_PRESENT), "b": _pde("b", hesitation=HESITATION_NOT_OBSERVED)},
         ["a", "b"],
     )
-    assert c.comparison_state == COMPARISON_DOMINANT and c.preferred_candidate_id == "b"
+    _assert_uncertified(c)
+    assert c.hesitation_comparison == "b"
 
 
-def test_15_restart_only_safe_preference():
+def test_15_restart_label_alone_cannot_certify_preference():
     c = compare_prosodic_finalists(
         {"a": _pde("a", restart=RESTART_SUPPORTED), "b": _pde("b", restart=RESTART_NOT_OBSERVED)},
         ["a", "b"],
     )
-    assert c.comparison_state == COMPARISON_DOMINANT and c.preferred_candidate_id == "b"
+    _assert_uncertified(c)
+    assert c.restart_comparison == "b"
+
+
+@pytest.mark.parametrize("field", ["vocal_continuity_state", "hesitation_state", "restart_or_interruption_state"])
+@pytest.mark.parametrize("candidate_count", [2, 3])
+@pytest.mark.parametrize("all_unknown", [False, True])
+def test_unknown_descriptor_is_insufficient_even_when_other_candidates_match(field, candidate_count, all_unknown):
+    ids = ("a", "b", "c")[:candidate_count]
+    evidence = {cid: _pde(cid) for cid in ids}
+    for cid in ids if all_unknown else ids[-1:]:
+        evidence[cid] = replace(evidence[cid], **{field: UNKNOWN})
+    _assert_uncertified(compare_prosodic_finalists(evidence, ids))
 
 
 def test_16_pause_structure_comparison_always_equals_continuity_comparison():
@@ -385,9 +427,8 @@ def test_21_gain_invariance_same_comparison_state():
 # ===========================================================================
 def test_22_filler_text_does_not_cause_acoustic_preference():
     """Candidate A has filler text in Language Spine but continuous
-    acoustic delivery; Candidate B has no filler but interrupted acoustic
-    delivery. Actual acoustic shape must control -- B, not A, should be
-    the one with worse delivery evidence."""
+    acoustic delivery; Candidate B has a measured interior pause. Neither
+    filler nor silence alone proves an inferior spoken delivery."""
     import numpy as np
     from cutsell_worker.prosodic_audio_v2 import AudioSamples
 
@@ -401,10 +442,10 @@ def test_22_filler_text_does_not_cause_acoustic_preference():
         audio_silence_intervals=[(1.5, 2.0)],
     )
     assert ev_a.hesitation_state == HESITATION_NOT_OBSERVED  # filler alone never escalates
-    assert ev_b.hesitation_state == HESITATION_PRESENT  # real interior pause does
+    assert ev_b.hesitation_state == HESITATION_PRESENT  # descriptive pause-derived label
     c = compare_prosodic_finalists({"a": ev_a, "b": ev_b}, ["a", "b"])
-    assert c.comparison_state == COMPARISON_DOMINANT
-    assert c.preferred_candidate_id == "a"  # A's actual delivery is cleaner, despite filler text
+    _assert_uncertified(c)
+    assert c.hesitation_comparison == "a"  # observation survives, editorial preference does not
 
 
 # ===========================================================================
@@ -435,7 +476,7 @@ def test_24_meaning_conflict_blocks_prosody_never_consulted():
             "a": "The cream clears acne breakouts in 2 weeks.",
             "b": "The cream does not clear acne breakouts in 2 weeks.",
         },
-        prosodic_comparison=_dominance_comparison(),
+        prosodic_comparison=_hypothetical_certified_comparison(),
     ))
     assert result.arbiter_state == STATE_CONFLICTED
     assert result.prosodic_comparison_status == "NOT_AVAILABLE"  # never even looked at
@@ -447,7 +488,7 @@ def test_25_negation_conflict_blocks():
             "a": "The cream clears acne breakouts in 2 weeks.",
             "b": "The cream does not clear acne breakouts in 2 weeks.",
         },
-        prosodic_comparison=_dominance_comparison(),
+        prosodic_comparison=_hypothetical_certified_comparison(),
     ))
     assert result.arbiter_state == STATE_CONFLICTED
 
@@ -458,7 +499,7 @@ def test_26_number_conflict_blocks():
             "a": "Apply the cream twice daily for 2 weeks to clear the breakout.",
             "b": "Apply the cream twice daily for 4 weeks to clear the breakout.",
         },
-        prosodic_comparison=_dominance_comparison(),
+        prosodic_comparison=_hypothetical_certified_comparison(),
     ))
     assert result.arbiter_state == STATE_CONFLICTED
 
@@ -466,7 +507,7 @@ def test_26_number_conflict_blocks():
 def test_27_outside_meaning_sufficient_blocks():
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
         meaning_sufficient_candidate_ids=("a",),  # b excluded
-        prosodic_comparison=_dominance_comparison(),
+        prosodic_comparison=_hypothetical_certified_comparison(),
     ))
     assert result.arbiter_state == STATE_CONFLICTED
     assert result.reason == "candidate_not_meaning_sufficient"
@@ -475,55 +516,60 @@ def test_27_outside_meaning_sufficient_blocks():
 # ===========================================================================
 # 28-29. Three finalists.
 # ===========================================================================
-def test_28_three_finalists_clear_prosodic_dominance():
+def test_28_three_finalists_descriptor_dominance_is_not_certified():
     c = compare_prosodic_finalists(
         {"a": _pde("a", CONTINUITY_FRAGMENTED, HESITATION_PRESENT, RESTART_SUPPORTED),
          "b": _pde("b", CONTINUITY_CONTINUOUS, HESITATION_NOT_OBSERVED, RESTART_NOT_OBSERVED),
          "c": _pde("c", CONTINUITY_FRAGMENTED, HESITATION_PRESENT, RESTART_SUPPORTED)},
         ["a", "b", "c"],
     )
-    assert c.comparison_state == COMPARISON_DOMINANT
-    assert c.preferred_candidate_id == "b"
+    _assert_uncertified(c)
+    assert c.continuity_comparison == "b"
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
         candidate_ids=("a", "b", "c"), meaning_sufficient_candidate_ids=("a", "b", "c"),
         prosodic_comparison=c,
     ))
-    assert result.decision == DECISION_PREFER_CANDIDATE
-    assert result.preferred_candidate_id == "b"
+    assert result.decision == DECISION_ABSTAIN
+    assert result.preferred_candidate_id is None
+    assert result.arbiter_state == STATE_INSUFFICIENT_EVIDENCE
 
 
-def test_29_three_finalists_cycle_conflict_abstains():
-    # A beats B on continuity, B beats C on hesitation, C beats A on restart
-    # -- a genuine directed 3-cycle, never resolved by an arbitrary pick.
+def test_29_three_finalists_descriptor_cycle_is_not_certified_conflict():
+    # Crossed descriptor labels alone do not prove conflicting in-span
+    # defects. They are insufficient evidence, not an editorial conflict.
     a = _pde("a", continuity=CONTINUITY_CONTINUOUS, hesitation=HESITATION_PRESENT, restart=RESTART_SUPPORTED)
     b = _pde("b", continuity=CONTINUITY_FRAGMENTED, hesitation=HESITATION_NOT_OBSERVED, restart=RESTART_SUPPORTED)
     c_ev = _pde("c", continuity=CONTINUITY_FRAGMENTED, hesitation=HESITATION_PRESENT, restart=RESTART_NOT_OBSERVED)
     comparison = compare_prosodic_finalists({"a": a, "b": b, "c": c_ev}, ["a", "b", "c"])
-    assert comparison.comparison_state == COMPARISON_CONFLICTED
+    _assert_uncertified(comparison)
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
         candidate_ids=("a", "b", "c"), meaning_sufficient_candidate_ids=("a", "b", "c"),
         prosodic_comparison=comparison,
     ))
     assert result.decision == DECISION_ABSTAIN
-    assert result.arbiter_state == STATE_CONFLICTED
+    assert result.arbiter_state == STATE_INSUFFICIENT_EVIDENCE
+    assert result.structured_conflict is False
 
 
 # ===========================================================================
 # 30-32. D-186B abstract replay controls (generic -- no literal transcript).
 # ===========================================================================
-def test_30_d186b_abstract_pimples_differentiation_prefers_clean_delivery():
-    """D-186B's real Pimples family was NON_DECISIVE/NEAR_EQUAL on visual;
-    this generic two-take fixture (same shape, no literal transcript)
-    checks that Prosody differentiates and the fusion PREFERS the cleaner
-    delivery -- exactly the roadmap's success interpretation."""
+def test_30_abstract_descriptor_differences_do_not_prove_better_delivery():
+    """Handwritten labels cannot reproduce a safe real-media verdict.
+
+    The former abstract replay inferred better delivery solely from these
+    descriptors. Preserve their observations without certifying a winner.
+    """
     fragmented = _pde("a", CONTINUITY_FRAGMENTED, HESITATION_PRESENT, RESTART_SUPPORTED)
     clean = _pde("b", CONTINUITY_CONTINUOUS, HESITATION_NOT_OBSERVED, RESTART_NOT_OBSERVED)
     comparison = compare_prosodic_finalists({"a": fragmented, "b": clean}, ["a", "b"])
+    _assert_uncertified(comparison)
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
         terminal_confidence_state="NON_DECISIVE", prosodic_comparison=comparison,
     ))
-    assert result.decision == DECISION_PREFER_CANDIDATE
-    assert result.preferred_candidate_id == "b"
+    assert result.decision == DECISION_ABSTAIN
+    assert result.preferred_candidate_id is None
+    assert result.arbiter_state == STATE_INSUFFICIENT_EVIDENCE
     assert result.action_applied is False
 
 
@@ -542,7 +588,7 @@ def test_32_d186b_gynecologist_decisive_control_never_reopened():
     """Known D-186B finding: Gynecologist family was D-183 DECISIVE / D-184
     NOT_ELIGIBLE. D-188 must not make it eligible just because Prosodic
     evidence exists."""
-    comparison = _dominance_comparison()
+    comparison = _hypothetical_certified_comparison()
     result = evaluate_bounded_finalist_arbiter(_fusion_input(
         terminal_confidence_state="DECISIVE", prosodic_comparison=comparison,
     ))
@@ -605,7 +651,7 @@ def test_36_no_provider_or_network_source_scan():
 # 37. No winner mutation.
 # ===========================================================================
 def test_37_no_winner_mutation():
-    result = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_dominance_comparison()))
+    result = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_hypothetical_certified_comparison()))
     assert result.action_applied is False
     field_names = set(BoundedFinalistArbiterResult.__dataclass_fields__.keys())
     assert "selected_clip_id" not in field_names
@@ -619,9 +665,11 @@ def test_37_no_winner_mutation():
 # 38-41. Determinism, order/id independence.
 # ===========================================================================
 def test_38_determinism_identical_inputs_identical_output():
-    c1 = _dominance_comparison()
-    c2 = _dominance_comparison()
+    evidence = {"a": _pde("a", CONTINUITY_FRAGMENTED), "b": _pde("b")}
+    c1 = compare_prosodic_finalists(evidence, ("a", "b"))
+    c2 = compare_prosodic_finalists(evidence, ("a", "b"))
     assert c1 == c2
+    _assert_uncertified(c1)
     r1 = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=c1))
     r2 = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=c2))
     assert r1 == r2
@@ -634,20 +682,21 @@ def test_39_candidate_order_independence():
     c_ba = compare_prosodic_finalists(
         {"a": _pde("a", CONTINUITY_FRAGMENTED), "b": _pde("b", CONTINUITY_CONTINUOUS)}, ["b", "a"],
     )
-    assert c_ab.comparison_state == c_ba.comparison_state == COMPARISON_DOMINANT
-    assert c_ab.preferred_candidate_id == c_ba.preferred_candidate_id == "b"
+    _assert_uncertified(c_ab)
+    _assert_uncertified(c_ba)
+    assert c_ab.continuity_comparison == c_ba.continuity_comparison == "b"
 
 
 def test_40_clip_id_independence():
     a = _pde("clip_xyz_9f2", CONTINUITY_FRAGMENTED, HESITATION_PRESENT, RESTART_SUPPORTED)
     b = _pde("clip_abc_1a7", CONTINUITY_CONTINUOUS, HESITATION_NOT_OBSERVED, RESTART_NOT_OBSERVED)
     c = compare_prosodic_finalists({"clip_xyz_9f2": a, "clip_abc_1a7": b}, ["clip_xyz_9f2", "clip_abc_1a7"])
-    assert c.comparison_state == COMPARISON_DOMINANT
-    assert c.preferred_candidate_id == "clip_abc_1a7"
+    _assert_uncertified(c)
+    assert c.continuity_comparison == "clip_abc_1a7"
 
 
 def test_41_family_id_independence():
-    comparison = _dominance_comparison()
+    comparison = _hypothetical_certified_comparison()
     r1 = evaluate_bounded_finalist_arbiter(_fusion_input(family_id="tg_aaa", prosodic_comparison=comparison))
     r2 = evaluate_bounded_finalist_arbiter(_fusion_input(family_id="tg_zzz_different", prosodic_comparison=comparison))
     assert r1.decision == r2.decision == DECISION_PREFER_CANDIDATE
@@ -658,7 +707,7 @@ def test_41_family_id_independence():
 # Diagnostics / tail-safe summary shape (this task's own required fields).
 # ===========================================================================
 def test_prosodic_finalist_diagnostics_has_13_required_keys():
-    comparison = _dominance_comparison()
+    comparison = _hypothetical_certified_comparison()
     row = prosodic_finalist_diagnostics(comparison)
     for key in (
         "prosodic_finalist_evaluated", "prosodic_finalist_state",
@@ -676,13 +725,13 @@ def test_prosodic_finalist_diagnostics_has_13_required_keys():
 
 
 def test_bounded_finalist_arbiter_prosodic_fusion_diagnostics_shape():
-    result = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_dominance_comparison()))
+    result = evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_hypothetical_certified_comparison()))
     row = bounded_finalist_arbiter_prosodic_fusion_diagnostics(result)
     assert row == {"bounded_finalist_arbiter_prosodic_status": "AVAILABLE", "bounded_finalist_arbiter_prosodic_contributed": True}
 
 
 def test_tail_safe_summaries_have_all_6_required_counts():
-    comparisons = [_dominance_comparison(), compare_prosodic_finalists({"a": _pde("a"), "b": _pde("b")}, ["a", "b"])]
+    comparisons = [_hypothetical_certified_comparison(), compare_prosodic_finalists({"a": _pde("a"), "b": _pde("b")}, ["a", "b"])]
     summary = prosodic_finalist_run_summary(comparisons)
     for key in (
         "prosodic_finalist_evaluated_count", "prosodic_finalist_dominance_count",
@@ -693,7 +742,7 @@ def test_tail_safe_summaries_have_all_6_required_counts():
     assert summary["prosodic_finalist_dominance_count"] == 1
     assert summary["prosodic_finalist_near_equal_count"] == 1
 
-    results = [evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_dominance_comparison()))]
+    results = [evaluate_bounded_finalist_arbiter(_fusion_input(prosodic_comparison=_hypothetical_certified_comparison()))]
     fusion_summary = bounded_finalist_arbiter_prosodic_fusion_run_summary(results)
     assert fusion_summary == {"arbiter_preferences_due_to_prosody_count": 1}
 

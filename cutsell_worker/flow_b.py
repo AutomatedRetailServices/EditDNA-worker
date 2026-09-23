@@ -16,7 +16,7 @@ from .attempt_reconstruction import (
 from .canonical_asr_evidence import build_canonical_asr_evidence, normalize_transcript_segments
 from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
-from .contracts import ProcessingRequest, ProcessingResult
+from .contracts import ProcessingRequest, ProcessingResult, TranscriptSegment
 from .draft_review_provider import DraftReviewProvider
 from .frame_sampling import sample_take_frames
 from .hybrid_editorial import EditorialJudge
@@ -94,6 +94,7 @@ def process_local_sources(
     claim_equivalence_arbiter=None,
     progress: ProgressCallback | None = None,
     boundary_owner: str = "pre_freeze",
+    transcript_observer: Callable[[tuple[TranscriptSegment, ...]], None] | None = None,
 ) -> ProcessingResult:
     """Process registered sources from raw media to an editable Flow B draft.
 
@@ -157,6 +158,10 @@ def process_local_sources(
         hydrated_sources, local_paths, asr_provider, request.language_hint,
     )
     transcript_tuple = perception_outcome.transcripts
+    if transcript_observer is not None:
+        # The validation harness can persist the EXACT timed ASR input for
+        # offline replay. Normal app jobs never install this observer.
+        transcript_observer(transcript_tuple)
     trace.complete("asr", segment_count=len(transcript_tuple))
     trace.complete("parallel_perception", **perception_outcome.diagnostics())
     notify("analyzing", 27)

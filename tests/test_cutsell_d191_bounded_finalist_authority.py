@@ -19,12 +19,11 @@ finalist_arbiter` directly, never via a full pipeline run):
 2. A small number of TRUE pipeline-level integration tests (reusing
    `test_cutsell_d189_prosodic_pipeline_wiring.py`'s own fixture style)
    proving the NEW wiring itself: default-off byte-identical
-   compatibility, a real arbiter PREFERENCE_SUPPORTED verdict with the
-   authority flag OFF never mutating the winner, and the authority flag
-   ON actually replacing the terminal winner with the arbiter's own
-   supported preference on a real (generic, non-Video00) prosodic-
-   dominance fixture -- the ONE canonical BestTake mutation seam this
-   task authorizes, proven end-to-end through `build_flow_b_draft`.
+   compatibility and pause-only evidence never mutating the winner,
+   including with all three opt-in flags ON. The old pause-only positive
+   fixture did not establish an independently proven interruption.
+   Hypothetical supported-verdict authority remains tested separately at
+   the direct consumer-contract layer; it is not real acoustic proof.
 
 No literal Video00/Pimples transcript, timestamp, clip id, or family id
 anywhere in this file -- every fixture is generic and abstract, per this
@@ -515,17 +514,12 @@ def _reversed_dominance_audio_path(tmp_path):
 
 
 def _reversed_dominance_context():
-    """D-190 generic abstract replay, injected the way Audio V1 evidence
-    actually reaches Prosodic Audio V2 (`events_by_source`, an
-    `AUDIO_SILENCE_EVENT_KIND` interval -- see pipeline.py's own
-    `_prosodic_silence_intervals` reuse, never a second silence
-    detector): the CURRENTLY-WINNING (raw-score) candidate's window
-    [4.0, 6.0] ('strong') carries an interior pause (fragmenting it),
-    while the losing candidate's window [1.0, 3.0] ('weak') is
-    CONTINUOUS -- the exact structural shape D-190 proved on real
-    Video00 media (the raw-score winner was the one with worse
-    continuity/hesitation/restart), generalized with no literal
-    transcript, timestamp, or clip id."""
+    """Generic pause-only evidence through the real Audio V1 reuse path.
+
+    The raw-score winner has a measured interior silence; its alternative
+    has none. These observations do not establish a failed take or prove
+    which delivery is better, regardless of the resulting descriptor labels.
+    """
     silence_event = TemporalEvent(
         source_asset_id="src", start=4.7, end=5.3,
         kind=AUDIO_SILENCE_EVENT_KIND, confidence=0.9, description="interior pause",
@@ -596,9 +590,7 @@ def test_p1_default_off_byte_identical_winner():
 
 
 def test_p2_diagnostic_preference_but_authority_off_no_mutation(tmp_path, monkeypatch):
-    """D-184/D-188 (diagnostics) ON, D-191's own authority flag OFF: even
-    a real PREFERENCE_SUPPORTED diagnostic verdict never changes the
-    winner."""
+    """D-184/D-188 ON, D-191 OFF: pause-only evidence preserves the winner."""
     _set_env(monkeypatch, {
         "CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED": "1",
         "CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED": "1",
@@ -614,30 +606,32 @@ def test_p2_diagnostic_preference_but_authority_off_no_mutation(tmp_path, monkey
     assert [c.clip_id for c in result.draft.selected] == [expected_winner]
 
 
-def test_p3_authority_applies_winner_changes_to_arbiter_preference(tmp_path, monkeypatch):
-    """THE authority-mutation case: with all three flags on and a real
-    prosodic-dominance fixture that favors the CURRENTLY-LOSING candidate
-    ('weak'), the bounded finalist arbiter reaches PREFERENCE_SUPPORTED
-    toward 'weak', and D-191 replaces the terminal winner with it -- the
-    D-190 real-media shape, generically replayed."""
+def test_p3_all_flags_on_pause_only_evidence_cannot_change_winner(tmp_path, monkeypatch):
+    """Mandatory negative control: one pause cannot authorize a new winner.
+
+    No skip is allowed when the producer correctly abstains. This verifies
+    the live path, not a preconstructed comparison or arbiter result.
+    """
     _set_env(monkeypatch, ENV_ALL_THREE_ON)
-    request, takes, labels, _raw_score_winner = _weak_strong_fixture()
+    request, takes, labels, raw_score_winner = _weak_strong_fixture()
     path = _reversed_dominance_audio_path(tmp_path)
     result = build_flow_b_draft(request, takes, labels, whole_video_context=_reversed_dominance_context(), local_paths={"src": path})
     row = _group_row(result)
-    if row.get("prosodic_finalist_state") != "DOMINANT":
-        pytest.skip("synthetic fixture did not reach real DOMINANT this run -- see test_10's own precedent")
-    assert row["bounded_finalist_arbiter_state"] == STATE_PREFERENCE_SUPPORTED
-    assert row["bounded_finalist_authority_state"] == STATE_APPLIED
-    assert row["bounded_finalist_authority_applied"] is True
-    assert row["bounded_finalist_authority_winner_before"] == "strong"
-    assert row["bounded_finalist_authority_winner_after"] == "weak"
-    assert row["final_winner"] == "weak"
-    assert [c.clip_id for c in result.draft.selected] == ["weak"]
+    assert row["prosodic_finalist_state"] == "INSUFFICIENT_EVIDENCE"
+    assert row["prosodic_finalist_preferred_candidate_id"] is None
+    assert row["prosodic_finalist_directional_evidence_present"] is False
+    assert "independent_in_span_disruption_evidence" in row["prosodic_finalist_missing_evidence"]
+    assert row["bounded_finalist_arbiter_state"] in (STATE_NEAR_EQUAL, STATE_INSUFFICIENT_EVIDENCE)
+    assert row["bounded_finalist_authority_state"] == STATE_NO_SUPPORTED_PREFERENCE
+    assert row["bounded_finalist_authority_applied"] is False
+    assert row["bounded_finalist_authority_winner_before"] == raw_score_winner
+    assert row["bounded_finalist_authority_winner_after"] == raw_score_winner
+    assert row["final_winner"] == raw_score_winner
+    assert [c.clip_id for c in result.draft.selected] == [raw_score_winner]
     summary = result.draft.diagnostics["bounded_finalist_authority"]
     assert summary["status"] == "evaluated"
-    assert summary["finalist_authority_applied_count"] == 1
-    assert summary["finalist_authority_winner_changed_count"] == 1
+    assert summary["finalist_authority_applied_count"] == 0
+    assert summary["finalist_authority_winner_changed_count"] == 0
 
 
 def test_p4_authority_diagnostics_bounded_no_dump(tmp_path, monkeypatch):

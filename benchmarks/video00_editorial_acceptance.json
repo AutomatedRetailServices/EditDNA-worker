@@ -1,0 +1,79 @@
+{
+  "schema_version": "cutsell.video00.editorial_acceptance.v1",
+  "purpose": "User-reviewed video00 editorial decisions; independent of the historical Human Gold 18-check manifest",
+  "evidence_runs": [35707498803, 35717322207, 35799404391, 35886004885],
+  "reference_note": "Both Cut.ai and Human Gold prefer the later pimples take and the complete gastritis take. They differ on the later percentage restatement; its exclusion and the unique closing reflect the user's stated preference. Source coordinates are benchmark evidence only, never production instructions.",
+  "checks": [
+    {
+      "id": "pimples_bad_monolith_absent",
+      "kind": "forbidden_realization",
+      "text": "También me salían espinillas en esta parte de aquí detrás de la oreja y todo el cuello"
+    },
+    {
+      "id": "pimples_bad_source_absent",
+      "kind": "forbidden_source_overlap",
+      "source_start_sec": 198.86,
+      "source_end_sec": 211.02,
+      "min_overlap_sec": 3.0
+    },
+    {
+      "id": "pimples_later_source_selected",
+      "kind": "required_source_overlap",
+      "source_start_sec": 213.44,
+      "source_end_sec": 222.38,
+      "min_overlap_sec": 7.0
+    },
+    {
+      "id": "abandoned_stomach_attempt_absent",
+      "kind": "forbidden_source_overlap",
+      "source_start_sec": 245.39,
+      "source_end_sec": 253.37,
+      "min_overlap_sec": 0.5
+    },
+    {
+      "id": "full_gynecologist_take_selected",
+      "kind": "required_source_overlap",
+      "source_start_sec": 95.55,
+      "source_end_sec": 104.1,
+      "min_overlap_sec": 7.5
+    },
+    {
+      "id": "sonography_opening_complete",
+      "kind": "required_contiguous_phrase",
+      "text": "Ahí fue cuando me mandaron a hacer sonografía"
+    },
+    {
+      "id": "same_take_negation_with_sentence",
+      "kind": "required_contiguous_phrase",
+      "text": "No quiero sonar a conspiración"
+    },
+    {
+      "id": "percentage_restatement_absent",
+      "kind": "forbidden_source_overlap",
+      "source_start_sec": 327.8,
+      "source_end_sec": 342.1,
+      "min_overlap_sec": 2.0
+    },
+    {
+      "id": "closing_exhortation_not_reopened",
+      "kind": "repeated_closing_absent",
+      "text": "Por eso cuídate, aliméntate bien, hidrátate y haz ejercicio.",
+      "search_all_prior": true,
+      "target_final_selected": true
+    },
+    {
+      "id": "closing_instruction_preserved",
+      "kind": "required_ordered_anchors",
+      "tokens": ["aliméntate", "bien", "hidrátate", "haz", "ejercicio"],
+      "max_span_tokens": 9,
+      "positive_text": "Aliméntate bien, hidrátate y haz ejercicio.",
+      "must_be_final_selected": true
+    },
+    {
+      "id": "closing_care_exhortation_exactly_once",
+      "kind": "phrase_count",
+      "text": "cuídate",
+      "expected_count": 1
+    }
+  ]
+}

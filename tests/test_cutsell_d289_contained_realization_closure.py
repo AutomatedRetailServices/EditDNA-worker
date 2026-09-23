@@ -872,3 +872,27 @@ def test_wiring_universal_clean_cut_forwards_the_same_claim_arbiter_object_to_gr
     )
     assert result.draft is not None
     assert seen and all(a is sentinel for a in seen)
+
+
+def test_validation_observer_reads_exact_real_path_asr_words_without_changing_selection(tmp_path, monkeypatch):
+    """A future RAW must keep exact ASR timing for replay without making a
+    second ASR call or changing any selection membership decision."""
+    from cutsell_worker.universal_clean_cut import process_universal_clean_cut_sources
+    from cutsell_worker.universal_clean_cut_validation import _timed_asr_replay_evidence
+
+    asr, request, paths = _fake_asr_and_request(tmp_path, monkeypatch)
+    observed = []
+    result = process_universal_clean_cut_sources(
+        request, paths, asr_provider=asr, transcript_observer=observed.append,
+    )
+    baseline = process_universal_clean_cut_sources(request, paths, asr_provider=asr)
+    assert observed and len(observed) == 1
+    assert [(c.start, c.end, c.text) for c in result.draft.selected] == [
+        (c.start, c.end, c.text) for c in baseline.draft.selected
+    ]
+    evidence = _timed_asr_replay_evidence(observed[0])
+    assert evidence["schema_version"] == "cutsell.timed_asr_replay_evidence.v1"
+    assert evidence["raw_segments"][0]["source_asset_id"] == "src_one"
+    assert evidence["raw_segments"][0]["words"][1] == {
+        "text": "serum", "start": 0.25, "end": 0.5, "confidence": None,
+    }

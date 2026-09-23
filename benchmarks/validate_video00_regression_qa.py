@@ -26,12 +26,12 @@ except ModuleNotFoundError:
 # actually cares about (`video00_semantic_alignment.py` stays zero-import in
 # the other direction) is unaffected.
 try:
-    from cutsell_worker.contradiction_signal import any_pair_contradicts
+    from cutsell_worker.contradiction_signal import any_pair_contradicts, detect_text_contradiction
 except ModuleNotFoundError:  # pragma: no cover - import-path fallback only
     import sys as _sys
     from pathlib import Path as _Path
     _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
-    from cutsell_worker.contradiction_signal import any_pair_contradicts
+    from cutsell_worker.contradiction_signal import any_pair_contradicts, detect_text_contradiction
 
 
 # D-106 (QA semantics correction): MEANING PRESERVATION ("did CutSell
@@ -372,6 +372,47 @@ def _ordered_tokens(text: str) -> list[str]:
     return _ORDERED_TOKEN_RE.findall(_norm(text))
 
 
+def _asr_anchor_token(token: str) -> str:
+    """Compare a short QA anchor without treating accent drift as content."""
+    return "".join(
+        letter for letter in unicodedata.normalize("NFKD", token)
+        if not unicodedata.combining(letter)
+    )
+
+
+def _asr_anchor_matches(token: str, anchor: str) -> bool:
+    token, anchor = _asr_anchor_token(token), _asr_anchor_token(anchor)
+    if token == anchor:
+        return True
+    # Allow one ASR insertion/deletion/substitution in a LONG content word.
+    # A one-letter change in "no" or a number must never get this credit.
+    if min(len(token), len(anchor)) < 8 or abs(len(token) - len(anchor)) > 1:
+        return False
+    if len(token) == len(anchor):
+        return sum(a != b for a, b in zip(token, anchor)) == 1
+    shorter, longer = sorted((token, anchor), key=len)
+    return any(longer[:pos] + longer[pos + 1:] == shorter for pos in range(len(longer)))
+
+
+def _has_ordered_anchors(text: str, anchors: list[str], *, max_span_tokens: int) -> bool:
+    words = _ordered_tokens(text)
+    for start, word in enumerate(words):
+        if not _asr_anchor_matches(word, anchors[0]):
+            continue
+        at = start
+        for anchor in anchors[1:]:
+            at = next(
+                (pos for pos in range(at + 1, min(len(words), start + max_span_tokens))
+                 if _asr_anchor_matches(words[pos], anchor)),
+                len(words),
+            )
+            if at == len(words):
+                break
+        else:
+            return True
+    return False
+
+
 def _repeated_closing_match(left_text: str, right_text: str) -> dict | None:
     """The phrase `right_text` re-opens with that `left_text` closed on, or
     None: `{"skip": n, "repeated_tokens": [...]}`."""
@@ -395,15 +436,21 @@ def _repeated_closing_match(left_text: str, right_text: str) -> dict | None:
     return None
 
 
-def find_repeated_closings(rows: list[tuple[str, str]], *, only_index: int | None = None) -> list[dict]:
+def find_repeated_closings(
+    rows: list[tuple[str, str]], *, only_index: int | None = None,
+    all_prior: bool = False,
+) -> list[dict]:
     """Every selected row (or only `only_index`) that re-opens with the
     closing phrase of one of its previous `_REPEATED_CLOSING_MAX_LOOKBACK_
-    ROWS` rows -- nearest earlier row first, one finding per later row."""
+    ROWS` rows -- nearest earlier row first, one finding per later row.
+    A targeted QA check can inspect all prior rows; production's short,
+    speech-safe trim window is deliberately unaffected."""
     findings: list[dict] = []
     for index, (clip_id, text) in enumerate(rows):
         if only_index is not None and index != only_index:
             continue
-        for back in range(1, _REPEATED_CLOSING_MAX_LOOKBACK_ROWS + 1):
+        limit = index if all_prior else _REPEATED_CLOSING_MAX_LOOKBACK_ROWS
+        for back in range(1, limit + 1):
             earlier = index - back
             if earlier < 0:
                 break
@@ -524,11 +571,20 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
             # closing phrase of a nearby earlier selected row. Presence of
             # the segment is a precondition, never the verdict.
             rows = _selected_rows(result)
-            target_index = _locate_target_row(rows, check.get("text"))
+            if check.get("target_final_selected"):
+                target_index = (
+                    len(rows) - 1 if rows and _locate_target_row(rows[-1:], check.get("text")) is not None
+                    else None
+                )
+            else:
+                target_index = _locate_target_row(rows, check.get("text"))
             if target_index is None:
                 failures.append({"id": check_id, "kind": kind, "reason": "missing_required_segment"})
                 continue
-            found = find_repeated_closings(rows, only_index=target_index)
+            found = find_repeated_closings(
+                rows, only_index=target_index,
+                all_prior=bool(check.get("search_all_prior")),
+            )
             if found:
                 failures.append({
                     "id": check_id, "kind": kind,
@@ -545,6 +601,152 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
                 failures.append({"id": check_id, "kind": kind, "reason": "historical_bad_take_returned"})
             else:
                 passes.append(check_id)
+            continue
+
+        if kind == "forbidden_realization":
+            # A literal forbidden substring misses punctuation-only ASR
+            # changes ("aquí detrás" vs "aquí, detrás"). The same
+            # symmetric take-identity check as required_realization asks
+            # whether the rejected realization itself was selected.
+            row = _find_present_realization(_selected_rows(result), check.get("text"))
+            if row is not None:
+                failures.append({
+                    "id": check_id, "kind": kind,
+                    "reason": "forbidden_realization_selected",
+                    "clip_id": row[0],
+                })
+            else:
+                passes.append(check_id)
+            continue
+
+        if kind == "required_contiguous_phrase":
+            # Preserve short, meaning-critical openings (including "no")
+            # within ONE source delivery. A token search over joined clips
+            # would accept a negation spliced from a different take.
+            required = _ordered_tokens(check.get("text"))
+            present = bool(required) and any(
+                any(_ordered_tokens(text)[pos:pos + len(required)] == required
+                    for pos in range(len(_ordered_tokens(text)) - len(required) + 1))
+                for _, text in _selected_rows(result)
+            )
+            if present:
+                passes.append(check_id)
+            else:
+                failures.append({
+                    "id": check_id, "kind": kind,
+                    "reason": "phrase_not_contiguous_within_one_delivery",
+                })
+            continue
+
+        if kind == "required_ordered_anchors":
+            # Use only for a compact, single delivery's key actions where
+            # harmless ASR spelling/punctuation drift is known to occur.
+            raw_anchors = check.get("tokens")
+            if not isinstance(raw_anchors, list) or not raw_anchors or not all(
+                isinstance(value, str) and len(_ordered_tokens(value)) == 1
+                for value in raw_anchors
+            ):
+                raise ValueError(f"invalid ordered-anchors check: {check_id}")
+            anchors = [_ordered_tokens(value)[0] for value in raw_anchors]
+            max_span = check.get("max_span_tokens")
+            if type(max_span) is not int or max_span < len(anchors):
+                raise ValueError(f"invalid ordered-anchors span: {check_id}")
+            reference = check.get("positive_text")
+            if reference is not None and (not isinstance(reference, str) or not reference.strip()):
+                raise ValueError(f"invalid ordered-anchors positive reference: {check_id}")
+            candidates = _selected_rows(result)
+            if check.get("must_be_final_selected"):
+                candidates = candidates[-1:]
+            matches = [
+                text for _, text in candidates
+                if _has_ordered_anchors(text, anchors, max_span_tokens=max_span)
+            ]
+            if matches and any(
+                reference is None or not (
+                    (verdict := detect_text_contradiction(reference, text)).negation_conflict
+                    or verdict.number_conflict
+                ) for text in matches
+            ):
+                passes.append(check_id)
+            else:
+                failures.append({
+                    "id": check_id, "kind": kind,
+                    "reason": (
+                        "ordered_actions_polarity_conflict" if matches
+                        else "ordered_actions_not_present_in_one_delivery"
+                    ),
+                })
+            continue
+
+        if kind == "phrase_count":
+            # A check for a single closing exhortation must establish both
+            # presence and uniqueness, even when the prior delivery and CTA
+            # are separated by several other selected clips.
+            phrase = [_asr_anchor_token(token) for token in _ordered_tokens(check.get("text"))]
+            expected = check.get("expected_count")
+            if not phrase or type(expected) is not int or expected < 0:
+                raise ValueError(f"invalid phrase-count check: {check_id}")
+            count = 0
+            for _, selected_text in _selected_rows(result):
+                tokens = [_asr_anchor_token(token) for token in _ordered_tokens(selected_text)]
+                count += sum(
+                    tokens[pos:pos + len(phrase)] == phrase
+                    for pos in range(len(tokens) - len(phrase) + 1)
+                )
+            if count == expected:
+                passes.append(check_id)
+            else:
+                failures.append({
+                    "id": check_id, "kind": kind,
+                    "reason": "phrase_occurrence_count_mismatch",
+                    "expected_count": expected, "observed_count": count,
+                })
+            continue
+
+        if kind in {"required_source_overlap", "forbidden_source_overlap"}:
+            # Only a benchmark-specific manifest supplies these source
+            # coordinates. They never feed the production editor. They
+            # distinguish two takes with similar wording and catch a
+            # truncated failed attempt that no text-only search can name.
+            start = float(check["source_start_sec"])
+            end = float(check["source_end_sec"])
+            minimum = float(check["min_overlap_sec"])
+            if not (0 <= start < end and 0 < minimum <= end - start):
+                raise ValueError(f"invalid source-overlap check: {check_id}")
+            selected = result.get("selected") or []
+            if any("start" not in row or "end" not in row for row in selected):
+                failures.append({
+                    "id": check_id, "kind": kind,
+                    "reason": "source_interval_unavailable",
+                })
+                continue
+            overlapping = sorted(
+                (
+                    max(start, float(row["start"])),
+                    min(end, float(row["end"])),
+                    str(row.get("clip_id") or ""),
+                ) for row in selected
+                if min(end, float(row["end"])) > max(start, float(row["start"]))
+            )
+            # Legitimate re-chunking can split one preferred take into
+            # several clips. Sum the UNION of covered source time, never
+            # require that a single row carry the entire delivery or double
+            # count overlapping clips of the same source.
+            coverage_end = start
+            covered = 0.0
+            for row_start, row_end, _ in overlapping:
+                covered += max(0.0, row_end - max(row_start, coverage_end))
+                coverage_end = max(coverage_end, row_end)
+            matching_ids = [row_id for _, _, row_id in overlapping] if covered >= minimum else []
+            if (kind == "required_source_overlap") == bool(matching_ids):
+                passes.append(check_id)
+            else:
+                failures.append({
+                    "id": check_id, "kind": kind,
+                    "reason": "source_overlap_missing" if kind == "required_source_overlap" else "forbidden_source_overlap_selected",
+                    "clip_ids": matching_ids,
+                    "covered_source_sec": round(covered, 3),
+                })
             continue
 
         if kind == "required_order":

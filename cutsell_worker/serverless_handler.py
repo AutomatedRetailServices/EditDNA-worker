@@ -125,6 +125,7 @@ def _focused(payload: dict) -> dict:
         "ok": True,
         "benchmark_id": safe_id,
         "source_key": source_key,
+        "source_media_sha256": result.get("source_media_sha256"),
         "brain_backend": result.get("brain_backend"),
         "external_brain_calls_enabled": result.get("external_brain_calls_enabled"),
         "selection_reasoner_enabled": result.get("selection_reasoner_enabled"),

@@ -11,6 +11,7 @@ one shared production-grade service. See docs/CUTSELL_DECISIONS.md D-035.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 
 import dataclasses
@@ -40,6 +41,35 @@ from .source_identity import stable_source_id
 from .storage import download_source
 from .universal_clean_cut import process_universal_clean_cut_sources
 from .validation import _is_real_video_key
+
+
+def _sha256_source_media(path: str | Path) -> str:
+    """Hash the downloaded SOURCE bytes before ASR or rendering begins.
+
+    A source key and an output/package checksum cannot prove that two jobs
+    processed the same input file. Stream the existing local download so
+    long-form input never needs to be held in memory. Read failure aborts
+    the validation rather than fabricating an identity.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(4 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _timed_asr_replay_evidence(segments) -> dict[str, Any]:
+    """Private validation artifact: exact ASR input to the editorial path.
+
+    Keep full word timing/confidence precision. It is stored only in the
+    existing private result.json, never printed by the compact serverless
+    response or exported by the normal mobile app path. Provider verdicts
+    also affect selection, so this snapshot alone is not a full replay.
+    """
+    return {
+        "schema_version": "cutsell.timed_asr_replay_evidence.v1",
+        "raw_segments": [dataclasses.asdict(segment) for segment in segments],
+    }
 
 
 def _render_validation_preview(
@@ -323,9 +353,16 @@ def run_single_universal_clean_cut_validation(
     started = time.monotonic()
     preview_path = None
     preview_skipped_reason = None
+    timed_asr_replay_evidence = None
+
+    def _capture_timed_asr(segments) -> None:
+        nonlocal timed_asr_replay_evidence
+        timed_asr_replay_evidence = _timed_asr_replay_evidence(segments)
+
     with tempfile.TemporaryDirectory(prefix="cutsell-universal-clean-cut-") as directory:
         destination = str(Path(directory) / source.original_name)
         local = download_source(source.uri, destination)
+        source_media_sha256 = _sha256_source_media(local)
         source_duration_sec = float(probe_media(local).duration_sec)
         local_paths = {source_id: local}
 
@@ -352,6 +389,7 @@ def run_single_universal_clean_cut_validation(
             # available.
             claim_equivalence_arbiter=brain.claim_equivalence_arbiter,
             clean_cut_core_v1_enabled=brain.clean_cut_core_v1_enabled,
+            transcript_observer=_capture_timed_asr,
         )
 
         freeze_blocked = bool(result.stage_status.get("freeze_blocked_pending_coherence_review"))
@@ -393,6 +431,8 @@ def run_single_universal_clean_cut_validation(
         "hybrid_group_diagnostic_count": len(hybrid_chunks),
         "project_id": result.project_id,
         "source_key": key,
+        "source_media_sha256": source_media_sha256,
+        "timed_asr_replay_evidence": timed_asr_replay_evidence,
         "source_duration_sec": round(source_duration_sec, 3),
         "selected_duration_sec": selected_duration_sec,
         "selected_to_input_ratio": round(selected_duration_sec / source_duration_sec, 4) if source_duration_sec else None,

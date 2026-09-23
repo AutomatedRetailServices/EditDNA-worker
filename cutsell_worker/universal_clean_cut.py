@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import replace
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .asr import ASRProvider
 from .claim_coverage_best_take import apply_claim_coverage_best_take
 from .clean_cut_provider import CleanCutProvider
-from .contracts import ProcessingRequest, ProcessingResult
+from .contracts import ProcessingRequest, ProcessingResult, TranscriptSegment
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
 from .watch_listen_besttake_guard_authority import apply_watch_listen_besttake_guard_authority
 from .final_boundary_authority import enforce_complete_idea_boundaries
@@ -152,6 +152,7 @@ def process_universal_clean_cut_sources(
     clause_role_arbiter: ClauseRoleArbiter | None = None,
     clean_cut_core_v1_enabled: bool = True,
     progress: ProgressCallback | None = None,
+    transcript_observer: Callable[[tuple[TranscriptSegment, ...]], None] | None = None,
 ) -> ProcessingResult:
     """Run the Universal Clean Cut brain with explicit Selection/Boundary ownership."""
     result = process_local_sources(
@@ -172,6 +173,7 @@ def process_universal_clean_cut_sources(
         # bounded claim-equivalence arbiter the stages below already use.
         claim_equivalence_arbiter=claim_equivalence_arbiter,
         progress=progress,
+        transcript_observer=transcript_observer,
         # D-097.C/E: physical edge/interior cleanup runs ONCE, after Freeze,
         # on the final KEEP set (boundary_engine_pass.py) -- the draft-time
         # wrappers skip on this path.

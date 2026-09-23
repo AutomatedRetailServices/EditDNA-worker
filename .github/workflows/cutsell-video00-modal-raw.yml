@@ -458,6 +458,7 @@ jobs:
             fi
           done
           test -s benchmarks/video00_regression_qa.json
+          test -s benchmarks/video00_editorial_acceptance.json
           test -s benchmarks/video00_selection_lock.json
 
       - name: Prepare artifact directory
@@ -1842,6 +1843,25 @@ jobs:
             | tee artifact/video00-modal-regression-qa-report.json
           echo "--- Human Gold regression QA summary ---"
           jq '{qa_pass, passed_check_count, failed_check_count, selected_count}' artifact/video00-modal-regression-qa-report.json
+
+      - name: Verify Video00 editorial acceptance (independent of historical Human Gold QA)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$SOURCE_KEY" != "$CANONICAL_VIDEO00_KEY" ]; then
+            echo "Editorial acceptance is scoped to canonical Video00; sibling source skipped."
+            exit 0
+          fi
+          if [ ! -s artifact/video00-modal.json ]; then
+            echo "No result JSON was downloaded; cannot verify editorial acceptance." >&2
+            exit 1
+          fi
+          python benchmarks/validate_video00_regression_qa.py \
+            artifact/video00-modal.json \
+            benchmarks/video00_editorial_acceptance.json \
+            | tee artifact/video00-modal-editorial-acceptance-report.json
+          jq '{qa_pass, passed_check_count, failed_check_count, selected_count}' artifact/video00-modal-editorial-acceptance-report.json
 
       - name: Video00 quality ladder (RAW vs Cut.ai vs Human Gold vs CutSell, D-095)
         # QA-only, CPU-only, runs on the runner after the paid computation is
@@ -6638,6 +6658,7 @@ jobs:
             artifact/d218_pacing_v2_real_media_qualification.json
             artifact/d221_pacing_v2_jl_timing_candidates.json
             artifact/d225_pacing_v2_handle_aware_real_media_qualification.json
+            artifact/video00-modal-editorial-acceptance-report.json
             artifact/selection-freeze-diagnostics.json
             artifact/lost-semantic-atom-diagnostics.json
             artifact/exact-identity-observability.json

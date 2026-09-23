@@ -78992,3 +78992,185 @@ the family-history aside A stays (Cut.ai keeps, Gold drops): editorial
 review, never automatic deletion; (3) the pimples REVIEW_REQUIRED block
 (D-289.10) is unchanged and still a Product Owner decision. **Exact next
 step:** Product Owner review; no integration, no RAW, no baseline change.
+
+## D-290 — Editorial acceptance grounded in four renders; no automatic BestTake verdict fabricated
+
+**Scope:** isolated branch `fix/video00-stable-editorial-oracle` off
+`98a961a4`; CPU-only QA and reproducibility. No changes to production
+selection, frozen Selection Lock, the historical 18-check Human Gold
+manifest, or the pre-Freeze speech boundary. No paid run or integration.
+
+**Direct observations from RAW #115/#118/#122 and the #124 MP4 evidence:**
+
+| Run | Pimples take | Stomach | Closing | Independent acceptance |
+| --- | --- | --- | --- | ---: |
+| #115 | Bad and later good both kept in different families | Partial failed attempt kept | Two `cuídate` | 4/11 |
+| #118 | Bad kept, later good discarded | 1.56 s failed fragment kept | One `cuídate`; conclusion already ends earlier | 5/11 |
+| #122 | Later good kept; bad discarded | Clean gastritis | Two `cuídate` | 6/11 |
+| #124 | Bad kept, later good discarded | 5.94 s failed attempt kept | Two `cuídate` | 3/11 |
+
+RAW #124's acceptance row uses reconstructed selected source intervals from
+the delivered MP4 package rather than a complete engine result JSON.
+The normal 18-check QA is historical; these new scores do not rewrite it.
+
+**Root causes and strict limits of inference:** #115 did not form a take
+competition (different `take_group_id`s). In #118/#124 the takes did
+compete, but a NON_DECISIVE numeric fallback selected the rejected long
+take; #122's two contextual winner verdicts instead both selected the
+clean later take despite its lower numeric DeliveryScore. All observed
+candidate-level prosody, visual finalist, and Watch+Listen BestTake
+comparators were disabled. The measured 0.71 s pause/hand motion inside
+the bad take does NOT reach the general speech-safety bar; a motion
+candidate is not independent corroboration of a failed take. D-192 is a
+real precedent: with its three finalist flags ON, the existing bounded
+authority preferred the later take at this source region while
+preserving the decisive gynecologist control. Those flags were OFF in
+#115/#118/#122/#124; D-289.10's subsequent complete-window conflict now
+routes to REVIEW_REQUIRED after BestTake. `prosodic_audio_v2.py` derives
+continuity, hesitation and restart from the SAME interior pause (Audio V1
+admits one at 0.60 s): three favorable comparisons can therefore reflect
+one ordinary rhetorical pause rather than independent failed-take proof.
+D-192 proves one real winner change, not the safety of enabling its flags
+for the present inputs. No current evidence justifies hard-coding "choose
+the later take", lowering the speech-safety bar, or turning those flags on
+by default. Post-render perceptual QC cannot compare an unselected take. Source
+video byte SHA-256 is absent, while normalized transcript hashes differ
+across runs despite a common source key and ASR config; changed output
+cannot be attributed to code alone. RAW #118's conclusion omitted the
+first `cuídate` *before* Boundary saw it; its one-time CTA is not proof
+that Boundary repaired the repetition.
+
+**QA correction:** `benchmarks/video00_editorial_acceptance.json` is
+separate from Human Gold and declares explicit user preferences where
+references differ. `forbidden_realization` and the existing
+`required_realization` diagnostic expose the #118 punctuation/shared-word
+false PASS; the acceptance manifest uses unioned source intervals for the
+later preferred take so benign re-chunking does not fail. Source intervals
+are independent identity checks for both pimples takes, the abandoned stomach
+attempt, the complete later gynecologist take and the restated percentage;
+they are never imported into the editor. `required_contiguous_phrase`
+pins the same-take negative opening and full sonography opening; a
+separately kept `No` still retains meaning but fails the preferred
+continuous delivery, pending real listening. `required_ordered_anchors`
+keeps the three CTA actions in the FINAL selected delivery through #118's
+ASR spelling drift; only long words may differ by a single character,
+whereas short critical words receive no fuzzy credit. The existing
+contradiction authority rejects negated CTA actions despite word matches.
+`phrase_count` requires `cuídate` EXACTLY once (accent drift tolerated),
+while `repeated_closing_absent` checks the re-opened closing even across
+more than three intervening rows. Neither assumes that dropping the CTA's
+repeated prefix means dropping its useful actions.
+
+**Controlled comparison:** `run_single_universal_clean_cut_validation`
+streams a SHA-256 of the DOWNLOADED source file immediately before media
+probe/ASR and exposes it as `source_media_sha256` in the full result and
+the compact serverless response. This hashes the bytes actually processed,
+not a separately fetched copy that could have changed under the same S3
+key. Only the validation harness installs the `transcript_observer` on
+Flow B. It records the same ASR provider's original timed segments and
+every word's full timing/confidence in the existing full result JSON
+under `timed_asr_replay_evidence` (no second ASR run; no raw transcript in
+the compact job response or mobile export). The S3 result object and the
+GitHub human-review artifact (14-day artifact retention) also contain
+speech from discarded takes: verify actual bucket and repository access
+policy before claiming either destination confidential. These observations never
+influence Selection. They cannot alone replay a bounded provider decision:
+exact arbiter requests, responses, declines/failures must also be retained
+for an exact deterministic replay. Historical #115/#118/#122 do not
+contain the original full timed ASR, so this correction is prospective.
+`benchmarks/compare_editorial_run_evidence.py` compares selected
+source-interval unions, records canonical ASR content and config
+fingerprints separately, reads the recorded source SHA-256 on new runs,
+and accepts an externally verified SHA-256 for old ones; mismatches fail
+closed. Output/package hashes never masquerade as source identity. With
+changing or missing ASR or unverified media bytes,
+it explicitly declines code-regression attribution. With identical
+inputs it marks a controlled replay as possible, never proven causal.
+
+**Next technical experiment before any BestTake policy change:** capture
+one immutable source checksum, one timed ASR transcript and each arbiter's
+ordered request/answer/decline (including claim-preservation consultations);
+replay #115's missing family formation and #118/#124's indecisive family
+arbitration separately. Test whether D-192's finalist comparison has
+independent in-speech interruption evidence; abstain when multiple votes
+are just one ordinary 0.7 s pause with a gesture. Keep D-289.10's conflict
+visible unless a meaning-safe independently supported winner resolves it
+through the existing Ledger/Resolver. Then an authorized RAW and human Watch+Listen
+would establish whether the integrated engine, not just the QA, improved
+the video. D-289.10/11 remain offline until tested on real media.
+
+## D-290.1 — do not treat correlated pause descriptors as independent finalist proof
+
+**Status:** local safety correction on `fix/video00-stable-editorial-oracle`.
+No RAW/provider call, push, integration, default-flag change, baseline
+change or perceptual-repair activation in this gate.
+
+**Observed reproduction:** two complete same-text synthetic candidates,
+one with an interior 0.71 s pause and an ordinary hand gesture, one without
+that pause. D-187 described the first as interrupted/hesitant/restarted;
+D-188 counted those correlated categories as safe quality votes. With V2
+NEAR_EQUAL, the actual D-184/D-191 path still supported a winner change.
+These acoustic observations cannot distinguish a rhetorical beat from a
+production error. A language-restart flag also cannot localize the error:
+it can mark a clean retry following a preceding abandoned attempt.
+
+**Correction in the existing D-188 authority:** retain the measured
+descriptor relations and double-counting audit, remove the categorical
+dominance/conflict certification from this Phase-A producer. Differences
+or missing categories now return INSUFFICIENT_EVIDENCE with
+`independent_in_span_disruption_evidence`; equal known categories return
+NEAR_EQUAL. No preference/directional quality evidence is generated.
+Partial unknown data cannot be labelled equal merely because two other
+finalists have matching known states. No pause threshold, score weight,
+new detector, semantic ranking or word-safety floor changed.
+
+This deliberately quarantines ALL current Phase-A prosody-only votes, not
+just short pauses: duration alone does not qualify a source-local failed
+delivery. It does not disable independently supported V2/editability
+preferences. The positive control supplies a separate, source-local verbal
+fumble to the existing V2 builder, then runs real D-184/D-191 and changes
+the winner despite the opposite pause descriptor. This proves consumption
+of that evidence, not automatic detection of a fumble in actual footage.
+
+**Tests:** D-188 producer cases previously asserting dominance from hand-
+constructed labels now require abstention. Consumer-only dominance and
+conflict contracts use explicitly HYPOTHETICAL certified verdicts, never
+presented as acoustic proof. D-191's live all-flags-ON pause-only fixture
+now mandatorily asserts no winner mutation; its prior conditional skip is
+removed. New synthetic audio tests cover ordinary gestures, single/multiple/
+long pauses, language-restart-only, missing/unknown evidence, 2/3 candidates,
+ordering/label invariance, independent V2 preference, digit/negation vetoes
+and unchanged default-OFF flags. A separate review attempts falsification.
+
+**Known semantic limitation exposed by controls, not hidden:** the existing
+contradiction number extractor recognizes digits, not the English words
+`twelve` versus `twenty`. With both candidates incorrectly supplied as
+meaning-sufficient, that lexical difference does not veto an independent
+V2 preference. The numeric regression here uses the existing `12` versus
+`20` contract; it does not establish universal numeric or semantic parity.
+No unrelated contradiction-policy expansion was made in this correction.
+
+**Scope of result:** D-192 remains a historical real winner change, not a
+current safety qualification. It no longer justifies enabling prosody-only
+authority on current inputs. The conflicting semantic verdict in D-289.10
+still needs independently supported, meaning-safe resolution through the
+existing Ledger/Resolver. The original source video and exact historical
+timed ASR/provider inputs are not locally available for a full controlled
+replay. This gate does not select the correct pimples take, repair the CTA
+on real audio, or prove a better MP4. A new paid run remains authorization-
+gated. GitHub export remains blocked pending explicit push approval.
+
+**Verification:** combined D-184/187/188/189/191/290.1 targeted suites:
+254 passed. Independent read-only QA found no in-scope blocker, passed
+117 focused tests and exhaustively checked 47,952 known/unknown descriptor
+combinations across two/three finalists with no unsupported preference.
+Full named non-paid regression on committed code `dbdbc65`, with the worktree
+unchanged throughout: `python -m pytest -q tests/test_cutsell_*.py
+tests/test_video00_regression_qa.py` => **8425 passed, 10 skipped, zero
+failures**, 511.96 s. This is the complete named regression set, not every
+file in `tests/`; no claim about excluded tests or the historical five
+unrelated failures is inferred. No post-commit guard-only rerun substituted
+for this clean full run. A read-only in-memory comparison of the committed
+`cf68ca5` producer against `dbdbc65`, with identical generic synthetic audio,
+also reproduced old DOMINANT/preferred-b versus new INSUFFICIENT/no preference.
+Verification recording is documentation-only; no code changed after the run.

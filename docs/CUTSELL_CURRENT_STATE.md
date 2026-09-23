@@ -144,6 +144,96 @@ Verified state at `781a8634`:
   baselines untouched; offline proof on recorded texts with SYNTHETIC word
   timings. The aside A remains an editorial review item. No RAW.
 
+## D-290 editorial acceptance and controlled input comparison (isolated)
+
+Branch `fix/video00-stable-editorial-oracle` (based on D-289.11 at
+`98a961a4`) adds an independent, CPU-only Video00 acceptance manifest,
+evidence-aware QA checks and a read-only run comparator. The historic
+18-check Human Gold manifest and Selection Lock are unchanged. Default-OFF
+finalist flags remain unchanged; D-290.1 below contains the opt-in prosodic
+comparison correction. This branch has not been integrated or run on Modal/RunPod.
+
+The recorded runs demonstrate **two separate selection defects**: RAW #115
+kept both pimples deliveries in DIFFERENT retry families (no competition);
+RAW #118/#124 placed them in competition but an internally NON_DECISIVE
+DeliveryScore favored the rejected monolith; RAW #122 had two agreeing
+semantic winners for the later clean take and selected it. The video output
+alone does not establish an independent, reliable tie-breaker. The one
+0.71-second source pause plus hand movement in the rejected take fails the
+existing physical-cleanliness proof bar (1.2-second interior silence or
+an independently corroborated disengagement). Lowering that floor would
+turn normal expressive gestures into fabricated failed takes.
+
+Old QA falsely passed RAW #118 on the pimples monolith because a comma
+changed the forbidden literal, and it marked the later preferred take
+present when only shared words were selected. The new manifest checks
+rejected-realization identity and source interval independently, the
+later preferred take by the union of selected source coverage (valid
+re-chunking is allowed), the abandoned
+stomach attempt, the full later gynecologist take, sonography opening,
+one-delivery `No quiero` (editorial continuity; the old composite retains
+semantic negation), the user's single-percentage preference (Cut.ai differs
+from Gold), and a unique `cuídate` WITH final actions preserved. The CTA
+checks allow the D-289.11 trim when the earlier conclusion says `cuídate`
+once and the later CTA keeps the advice. Results on the recorded selections:
+RAW #115 4/11, #118 5/11, #122 6/11 and #124 3/11 (the last comparison
+uses the rendered-segment source intervals reconstructed from the MP4
+evidence package; no complete #124 result JSON was available locally).
+These are separate acceptance checks, not retroactive changes to prior QA.
+
+The source key and ASR config match #115/#118/#122, but their canonical ASR
+hashes differ and no source-video byte checksum is in those historical
+results. Future benchmark runs now hash the downloaded SOURCE bytes before
+ASR and persist the exact timed raw ASR segments/words in the full result
+JSON. This also goes into the S3 result object and GitHub human-review
+artifact; verify their actual access policy before treating raw speech as
+confidential. The compact job result surfaces only the checksum, never the
+full raw transcript. A future exact replay still needs every consulted
+semantic arbiter's request/verdict (including declines) bound to those
+inputs; the ASR snapshot by itself does not prove a selection result.
+The new read-only comparator reports
+source-interval differences and refuses to
+attribute them to a code regression without matching immutable inputs and
+a controlled replay. The latest selection fixes D-289.10/11 remain offline
+and unvalidated by a new MP4. A reliable automatic BestTake needs a
+candidate-level audiovisual comparison with negative controls for natural
+pauses and meaning preservation; a post-render Watch+Listen verdict cannot
+choose a take that has already been discarded. Do not claim the video is
+fixed on the strength of an improved QA manifest.
+
+D-192 previously changed this same pimples family's winner to the preferred
+later take when its bounded finalist, prosodic diagnostics and authority
+flags were ON; all were OFF in #115/#118/#122/#124. The three prosodic
+categories (continuity, hesitation and restart) can all result from one
+measured pause starting at 0.60 s, so D-192 alone does not establish safety
+for a natural rhetorical pause. D-289.10 also routes complete-window winner
+disagreement to a later REVIEW_REQUIRED gate. The next offline gate must
+prove independent interruption evidence and trace a meaning-safe resolution
+through that existing authority. No flags or protected branches changed.
+
+### D-290.1 — pause-only finalist preference contained locally
+
+The synthetic audio reproduction confirmed that one ordinary 0.71 s pause
+could generate continuity, hesitation and restart votes and flip the
+winner through D-184/D-191. D-188 now retains the descriptors but does not
+certify a preference from them. Differing/unknown Phase-A descriptors yield
+INSUFFICIENT_EVIDENCE (`independent_in_span_disruption_evidence`); equal known
+descriptors remain NEAR_EQUAL. The unscoped language-restart boolean is not
+independent proof of a failure inside the candidate. Actual V2 evidence
+remains eligible through the existing authority; defaults remain OFF.
+
+This is a safety correction, not an automatic answer to the pimples family:
+D-192's historical prosody-only success is no longer a qualified enabling
+argument, and D-289.10's conflicting semantic verdict remains visible.
+No source-specific exception, threshold change, RAW or integration. Work
+remains local; the prior push permission stop has not been bypassed.
+Verification on code commit `dbdbc65`: 254 targeted tests passed;
+`tests/test_cutsell_*.py` plus `tests/test_video00_regression_qa.py` completed
+with **8425 passed, 10 skipped, zero failures** (511.96 s), on a clean,
+unchanged committed tree. Independent review found no in-scope blocker.
+This is the complete named regression set, not every test in `tests/`.
+No rendered-video improvement is claimed.
+
 ## Mobile backend integration checkpoint — D-277 through D-282A
 
 **Canonical HEAD:** `86a058d20567078af918d7f8dc8d02da84a85417`

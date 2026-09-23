@@ -1,81 +1,27 @@
-"""D-188: Prosodic Audio V2 -> Bounded Finalist Arbiter -- PHASE B,
-DIAGNOSTIC FUSION ONLY. Offline. No winner authority. No RAW. No
-provider.
+"""D-188 comparison, D-290.1 safety correction: Phase-A descriptors only.
 
-This module answers ONE bounded question for a small (2-3) finalist set
-that D-187's `ProsodicDeliveryEvidence` has already been computed for:
-"does the OBSERVABLE VOCAL DELIVERY safely distinguish these finalists,
-in a direction any editor would agree is safe, or not?" It NEVER decides
-who wins -- `compare_prosodic_finalists` returns a diagnostic comparison
-object with no winner/action field, exactly like D-184's own
-`BoundedFinalistArbiterResult` (which separately consumes this module's
-output as ONE additional evidence dimension -- see
-`bounded_finalist_arbiter.py`'s new `prosodic_comparison` field).
+An interior pause can be a rhetorical beat or a failed delivery. D-187
+derives continuity, hesitation and restart categories from the same pause
+evidence. Its optional language-restart flag is not scoped to an in-span
+error either: it may identify a clean retry after an abandoned attempt.
+These fields do not independently prove which realization is better.
 
-## Core principle (this task's own, binding)
+Keep raw descriptor relations visible, but never promote their differences
+to DOMINANT or CONFLICTED quality evidence. Differing or unknown categories
+yield INSUFFICIENT_EVIDENCE with an explicit missing-proof reason; equal
+known categories yield NEAR_EQUAL. No threshold or silence detector is
+added. D-184 may still use its independently supported V2 evidence.
 
-PROSODY MAY BREAK A TRUE LOCAL BESTTAKE TIE. PROSODY MUST NOT CREATE A
-PREFERENCE FROM DESCRIPTIVE DIFFERENCES THAT HAVE NO SAFE EDITORIAL
-DIRECTION.
-
-## Two evidence categories (binding, structurally enforced)
-
-**A. DIRECTIONALLY SAFE delivery-quality evidence** -- MAY support a
-bounded preference: vocal continuity (`CONTINUOUS` > `MILDLY_
-INTERRUPTED` > `FRAGMENTED`), acoustic hesitation (`NOT_OBSERVED` >
-`PRESENT`), vocal restart/interruption (`NOT_OBSERVED` > `SUPPORTED`).
-These three categorical D-187 states are the ONLY inputs to the
-dominance test below -- no numeric threshold is invented; each is
-already a categorical judgment D-187 itself produced.
-
-**B. DESCRIPTIVE / context-dependent evidence** -- speech rate, energy
-mean/variation, emphasis dynamics, pitch. These NEVER independently
-create a preference (no `HIGH_ENERGY > LOW_ENERGY`, no `FAST > SLOW`,
-no `MORE_PITCH_VARIATION > LESS` rule exists anywhere in this module --
-tested by source-scan). They are recorded on `ProsodicFinalistComparison`
-as `descriptive_*_relation` fields purely for future context-aware
-reasoning (D-098 15.4's Editorial Moment/Sequence Understanding, not
-this task) -- never consulted by `comparison_state`/`preferred_
-candidate_id`.
-
-## Partial-order dominance rule (this task's own, binding)
-
-Candidate B prosodically dominates A only if (1) at least one safe
-dimension materially favors B, AND (2) no safe dimension materially
-favors A, AND (3) both A and B have REAL, `EVALUATED` acoustic evidence
-(never a transcript-only guess). (Meaning parity -- "candidates must be
-meaning-sufficient" -- is D-184's own P0 gate, checked BEFORE this
-module is ever consulted; this module is purely about delivery.) If
-safe dimensions disagree across a pair (one favors A, another favors
-B) that pair is CONFLICTED, never resolved by picking one. NO
-`ProsodyScore` -- no numeric weight is ever summed across dimensions;
-this is a structural partial order over categorical states only.
-
-## Double-counting audit (this task's own explicit requirement)
-
-`vocal_continuity_state` and `pause_structure_state` are the SAME
-value in D-187 Phase A (`prosodic_audio_v2.analyze_prosodic_delivery`
-sets both from one `_continuity_state(...)` computation) -- so
-`continuity_comparison` and `pause_structure_comparison` on
-`ProsodicFinalistComparison` are DERIVED FROM ONE UNDERLYING SIGNAL and
-are counted as ONE vote (not two) in the dominance test below (see
-`DOUBLE_COUNTING_AUDIT`). Separately, Prosodic pause evidence itself is
-already D-187's own reuse of Audio V1's dead-air evidence (never an
-independent recomputation) -- this module adds no new silence
-detection of any kind.
-
-## Firewalls (restates D-187's, binding here too)
-
-No psychological/demographic/identity inference. No master prosody
-score. No winner authority -- `ProsodicFinalistComparison` has no
-`selected_clip_id`/`winner`/`action` field, and this module imports
-nothing from `pipeline.py`/`canonical_edit_plan.py`/any render module.
-No provider/network call.
+DOMINANT and CONFLICTED remain part of the typed consumer contract, not
+verdicts that this Phase-A producer can certify. A future qualified source
+of independent, source-local delivery-error evidence needs its own review
+before enabling a prosodic preference. No psychological inference, master
+score, provider call, selection mutation or render authority lives here.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from itertools import combinations, permutations
+from dataclasses import dataclass
+from itertools import combinations
 from typing import Iterable, Mapping, Sequence, Tuple
 import os
 
@@ -113,10 +59,9 @@ _RELATION_NEAR_EQUAL = "NEAR_EQUAL"
 _RELATION_CONFLICTED = "CONFLICTED"
 _RELATION_UNKNOWN = "UNKNOWN"
 
-# Directionally-safe categorical ranks (higher = more favorable delivery
-# quality). Only these three source fields ever participate in the
-# dominance test -- everything else on ProsodicDeliveryEvidence is
-# descriptive-only and structurally excluded below.
+# Descriptor ordering only. Phase A derives these categories from pauses
+# or an unscoped language-restart flag, not independently verified in-span
+# speech errors. Ordering them must NOT produce an editorial preference.
 _CONTINUITY_RANK: Mapping[str, int] = {
     CONTINUITY_CONTINUOUS: 2, CONTINUITY_MILDLY_INTERRUPTED: 1, CONTINUITY_FRAGMENTED: 0,
 }
@@ -127,10 +72,10 @@ _RESTART_RANK: Mapping[str, int] = {RESTART_NOT_OBSERVED: 1, RESTART_SUPPORTED: 
 # code-derived record of how the diagnostic fields on
 # ProsodicFinalistComparison relate to each other and to D-187/Audio V1.
 DOUBLE_COUNTING_AUDIT: Mapping[str, str] = {
-    "continuity_comparison": "DECISION_SOURCE (one of three independent safe votes)",
+    "continuity_comparison": "PAUSE_DERIVED_OBSERVATION_NEVER_AN_INDEPENDENT_SAFE_VOTE",
     "pause_structure_comparison": "SAME_UNDERLYING_SIGNAL_AS_continuity_comparison_NEVER_AN_INDEPENDENT_VOTE",
-    "hesitation_comparison": "DECISION_SOURCE (one of three independent safe votes)",
-    "restart_comparison": "DECISION_SOURCE (one of three independent safe votes)",
+    "hesitation_comparison": "PAUSE_DERIVED_OBSERVATION_NEVER_AN_INDEPENDENT_SAFE_VOTE",
+    "restart_comparison": "PAUSE_OR_UNSCOPED_LANGUAGE_OBSERVATION_NEVER_AN_INDEPENDENT_SAFE_VOTE",
     "descriptive_rate_relation": "OBSERVATIONAL_ONLY_NEVER_A_VOTE",
     "descriptive_energy_relation": "OBSERVATIONAL_ONLY_NEVER_A_VOTE",
     "descriptive_emphasis_relation": "OBSERVATIONAL_ONLY_NEVER_A_VOTE",
@@ -173,7 +118,7 @@ class ProsodicFinalistComparison:
     descriptive_emphasis_relation: str
     pitch_status: str  # always PITCH_NOT_IMPLEMENTED this phase
 
-    directional_evidence_present: bool  # True iff >=1 safe dimension differentiated any pair
+    directional_evidence_present: bool  # Phase-A descriptors alone never set this
     conflict_present: bool  # True iff comparison_state == CONFLICTED
     missing_evidence: Tuple[str, ...]
 
@@ -185,23 +130,20 @@ def _relation_for_dimension(
     ids: Sequence[str], rank_map: Mapping[str, int], evidences: Mapping[str, ProsodicDeliveryEvidence],
     state_attr: str,
 ) -> str:
-    """Aggregate one safe dimension's pairwise votes into a single compact
+    """Aggregate one descriptive dimension into a single compact
     relation string: a candidate_id if every pair that produces a vote
     agrees on the SAME favored candidate, CONFLICTED if pairs disagree,
     NEAR_EQUAL if evaluated but no pair differentiates, UNKNOWN if the
     dimension's own state is unavailable on any candidate."""
+    if any(getattr(evidences[cid], state_attr) not in rank_map for cid in ids):
+        return _RELATION_UNKNOWN
     votes: set[str] = set()
-    any_state_known = False
     for a_id, b_id in combinations(ids, 2):
         a_state = getattr(evidences[a_id], state_attr)
         b_state = getattr(evidences[b_id], state_attr)
-        if a_state in rank_map and b_state in rank_map:
-            any_state_known = True
         vote = _rank_favor(rank_map, a_state, b_state, a_id, b_id)
         if vote is not None:
             votes.add(vote)
-    if not any_state_known:
-        return _RELATION_UNKNOWN
     if len(votes) == 0:
         return _RELATION_NEAR_EQUAL
     if len(votes) == 1:
@@ -219,60 +161,6 @@ def _rank_favor(rank_map: Mapping[str, int], a_state: str, b_state: str, a_id: s
     if rb > ra:
         return b_id
     return None
-
-
-def _safe_votes_for_pair(a: ProsodicDeliveryEvidence, b: ProsodicDeliveryEvidence) -> Tuple[str | None, ...]:
-    """The three INDEPENDENT safe-dimension votes for one pair (continuity/
-    pause-structure counted ONCE, per DOUBLE_COUNTING_AUDIT)."""
-    return (
-        _rank_favor(_CONTINUITY_RANK, a.vocal_continuity_state, b.vocal_continuity_state, a.candidate_id, b.candidate_id),
-        _rank_favor(_HESITATION_RANK, a.hesitation_state, b.hesitation_state, a.candidate_id, b.candidate_id),
-        _rank_favor(_RESTART_RANK, a.restart_or_interruption_state, b.restart_or_interruption_state, a.candidate_id, b.candidate_id),
-    )
-
-
-def _prosodic_dominates(a: ProsodicDeliveryEvidence, b: ProsodicDeliveryEvidence) -> bool:
-    """True iff `a` prosodically dominates `b`: >=1 safe dimension favors
-    `a`, AND no safe dimension favors `b`, AND both carry real, EVALUATED
-    acoustic evidence."""
-    if a.analysis_status != STATUS_EVALUATED or b.analysis_status != STATUS_EVALUATED:
-        return False
-    votes = _safe_votes_for_pair(a, b)
-    favors_a = any(v == a.candidate_id for v in votes)
-    favors_b = any(v == b.candidate_id for v in votes)
-    return favors_a and not favors_b
-
-
-def _pair_has_internal_conflict(a: ProsodicDeliveryEvidence, b: ProsodicDeliveryEvidence) -> bool:
-    if a.analysis_status != STATUS_EVALUATED or b.analysis_status != STATUS_EVALUATED:
-        return False
-    votes = _safe_votes_for_pair(a, b)
-    distinct = {v for v in votes if v is not None}
-    return len(distinct) >= 2
-
-
-def _dominant_candidate(
-    evidences: Mapping[str, ProsodicDeliveryEvidence], ids: Tuple[str, ...],
-) -> Tuple[str | None, bool]:
-    """Mirrors `bounded_finalist_arbiter._v2_preferred_candidate`'s own
-    generic N-candidate (2 or 3) dominance-search + cycle-detection shape
-    -- reused pattern, not a new algorithm family. Returns
-    `(preferred_id_or_None, internally_conflicted)`."""
-    def dominates(x: str, y: str) -> bool:
-        return _prosodic_dominates(evidences[x], evidences[y])
-
-    dominant = [cid for cid in ids if all(dominates(cid, other) for other in ids if other != cid)]
-    if len(dominant) == 1:
-        return dominant[0], False
-    if len(dominant) == 0:
-        if len(ids) >= 3:
-            for a, b, c in permutations(ids, 3):
-                if dominates(a, b) and dominates(b, c) and dominates(c, a):
-                    return None, True
-        return None, False
-    # Defensive: strict dominance should make >1 simultaneous full-
-    # dominators impossible, but report conflict rather than pick.
-    return None, True
 
 
 def _descriptive_relation(ids: Sequence[str], evidences: Mapping[str, ProsodicDeliveryEvidence], value_attr: str) -> str:
@@ -338,20 +226,6 @@ def compare_prosodic_finalists(
             ids, state=COMPARISON_INSUFFICIENT_EVIDENCE, missing=("acoustic_evidence_partial",), provenance=provenance,
         )
 
-    pref, cycle_conflict = _dominant_candidate(evidences, ids)
-    pair_conflict = any(
-        _pair_has_internal_conflict(evidences[a], evidences[b]) for a, b in combinations(ids, 2)
-    )
-    if cycle_conflict or (pref is None and pair_conflict):
-        comparison_state = COMPARISON_CONFLICTED
-        preferred = None
-    elif pref is not None:
-        comparison_state = COMPARISON_DOMINANT
-        preferred = pref
-    else:
-        comparison_state = COMPARISON_NEAR_EQUAL
-        preferred = None
-
     continuity_comparison = _relation_for_dimension(ids, _CONTINUITY_RANK, evidences, "vocal_continuity_state")
     hesitation_comparison = _relation_for_dimension(ids, _HESITATION_RANK, evidences, "hesitation_state")
     restart_comparison = _relation_for_dimension(ids, _RESTART_RANK, evidences, "restart_or_interruption_state")
@@ -359,9 +233,16 @@ def compare_prosodic_finalists(
     # never independently derived (DOUBLE_COUNTING_AUDIT).
     pause_structure_comparison = continuity_comparison
 
-    directional_evidence_present = any(
-        rel not in (_RELATION_NEAR_EQUAL, _RELATION_UNKNOWN)
+    # These are correlated descriptors, not evidence that a pause or a
+    # restart belongs to a failed delivery. Even a language restart may
+    # mark the clean retry after a preceding abandoned attempt. Phase A
+    # carries no source-local error proof to authorize a preference.
+    missing_disruption_proof = any(
+        rel != _RELATION_NEAR_EQUAL
         for rel in (continuity_comparison, hesitation_comparison, restart_comparison)
+    )
+    comparison_state = (
+        COMPARISON_INSUFFICIENT_EVIDENCE if missing_disruption_proof else COMPARISON_NEAR_EQUAL
     )
 
     descriptive_rate_relation = _descriptive_relation(ids, evidences, "speech_rate")
@@ -369,11 +250,13 @@ def compare_prosodic_finalists(
     descriptive_emphasis_relation = _emphasis_relation(ids, evidences)
 
     missing_evidence = ["pitch_analysis"]  # never available this phase, honest always
+    if missing_disruption_proof:
+        missing_evidence.append("independent_in_span_disruption_evidence")
 
     return ProsodicFinalistComparison(
         candidate_ids=ids,
         comparison_state=comparison_state,
-        preferred_candidate_id=preferred,
+        preferred_candidate_id=None,
         continuity_comparison=continuity_comparison,
         hesitation_comparison=hesitation_comparison,
         restart_comparison=restart_comparison,
@@ -382,8 +265,8 @@ def compare_prosodic_finalists(
         descriptive_energy_relation=descriptive_energy_relation,
         descriptive_emphasis_relation=descriptive_emphasis_relation,
         pitch_status=PITCH_NOT_IMPLEMENTED,
-        directional_evidence_present=directional_evidence_present,
-        conflict_present=comparison_state == COMPARISON_CONFLICTED,
+        directional_evidence_present=False,
+        conflict_present=False,
         missing_evidence=tuple(missing_evidence),
         evidence_sources=("prosodic_audio_v2",),
         provenance=provenance,

@@ -49,6 +49,7 @@ FULL_VALIDATION_RESULT = {
     "alternate_count": 3,
     "discarded_count": 2,
     "selected_duration_sec": 141.667,
+    "source_media_sha256": "a" * 64,
     "elapsed_sec": 12.5,
     # A provider key must never be echoed back to the compact RunPod output,
     # even if it were ever accidentally present on the full result dict.
@@ -110,6 +111,7 @@ def test_focused_compact_state_matches_full_validation_result(patched_focused):
         "alternate_count",
         "discarded_count",
         "selected_duration_sec",
+        "source_media_sha256",
         "elapsed_sec",
     ):
         assert out[key] == FULL_VALIDATION_RESULT[key], key
