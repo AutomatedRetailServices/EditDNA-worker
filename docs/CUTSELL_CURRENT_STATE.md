@@ -720,3 +720,15 @@ stopped at credential preflight in run 36041858862 because the live
 `EditDNA-Worker-2` template still lacks `DEEPGRAM_API_KEY`. No GPU or Deepgram
 request occurred. The comparison awaits that credential; manual-only workflow
 restored at 6b97dfc2. See the ASR evaluation document for exact evidence.
+
+
+## 2026-09-24 authorized GPT + WhisperX full-engine experiment
+
+The Product Owner now explicitly authorized one complete Video00 run with GPT
+transcription and WhisperX alignment (supersedes the older pending-authorization
+statement only for this experiment). Branch `feat/gpt-whisperx-video00`, primary
+ASR opt-in only; production/default Medium and all editorial authorities stay
+unchanged. Implementation passed 135 offline tests. Run `36045181502`, exact
+head `23845fa143b27e80cf972c85ed1812b228960ceb`, completed; manual-only
+trigger restored at `212a5a4b8d74fe2f599ccb863efe77d8e60624de`. Result: 643 aligned words, zero zero-duration words, 138.2-second MP4, technical QC PASS; editorial acceptance failed 3/11 checks (stomach false start, full gynecologist take, repeated percentage). Human Watch+Listen remains required. No production switch. A post-run per-source cache correction prevents the observed duplicate full-source GPT call; offline verified, no second paid run.
+See `CUTSELL_GPT_WHISPERX_FULL_ENGINE_EVALUATION.md`.

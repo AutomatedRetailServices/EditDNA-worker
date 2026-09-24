@@ -115,12 +115,26 @@ def test_provider_orchestrates_real_contract_without_leaking_secrets(monkeypatch
     monkeypatch.setattr(gw.requests, "post", post)
     monkeypatch.setattr(gw.subprocess, "run", run)
     provider = gw.GPTWhisperXASR()
-    output = provider.transcribe("video.mp4", source_asset_id="s")
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"first source bytes")
+    output = provider.transcribe(str(source), source_asset_id="s")
     assert len(requests_seen) == 1
     assert output[0].text == "No cuesta 23."
     assert provider.last_audit["status"] == "passed"
     assert provider.last_audit["word_count"] == 3
     assert "fake-project" not in json.dumps(provider.last_audit)
+    # The real engine re-enters ASR for pre-Freeze boundary completion.
+    # It must receive the exact evidence and incur no second API pass.
+    again = provider.transcribe(str(source), source_asset_id="s")
+    assert again is output
+    assert len(requests_seen) == 1
+    assert provider.last_audit["cache_hit_count"] == 1
+    # Path reuse never permits stale speech evidence.
+    first_hash = provider.last_audit["source_media_sha256"]
+    source.write_bytes(b"different source bytes")
+    provider.transcribe(str(source), source_asset_id="s")
+    assert len(requests_seen) == 2
+    assert provider.last_audit["source_media_sha256"] != first_hash
 
 
 def test_provider_failure_never_falls_back(monkeypatch, tmp_path):

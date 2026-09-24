@@ -202,3 +202,6 @@ adapter. Production still uses Medium; no winner is declared for Deepgram.
 ## Authorized full-engine GPT + WhisperX experiment (2026-09-24)
 
 The user authorized one Video00 run through the complete existing engine using GPT text and WhisperX word alignment. Implementation, isolation, evidence and execution bounds are recorded in [CUTSELL_GPT_WHISPERX_FULL_ENGINE_EVALUATION.md](CUTSELL_GPT_WHISPERX_FULL_ENGINE_EVALUATION.md). This remains on `feat/gpt-whisperx-video00`; canonical/default ASR is unchanged.
+
+
+Full-engine result (run `36045181502`, head `23845fa1`): GPT + WhisperX supplied 643 timed words with zero zero-duration words; the existing engine rendered 138.2 seconds with technical QC PASS. Editorial acceptance failed 3/11 checks (abandoned stomach attempt kept, full gynecologist take missing, percentage restatement kept); human Watch+Listen still required. No production switch. The complete report records residual timing anomalies and the post-run cache fix for a duplicate full-source ASR call. This is a same-source integration trial, not an identical-code Medium A/B or a human-certified word-accuracy result.

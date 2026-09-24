@@ -8,6 +8,7 @@ clean worker's Faster-Whisper / Torch / MediaPipe dependency boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import copy
 import hashlib
 import json
 import math
@@ -45,7 +46,7 @@ class ProviderFingerprint:
                 "chunk_target": TARGET_CHUNK_SEC, "chunk_max": MAX_CHUNK_SEC,
                 "silence_db": -35, "silence_sec": 0.6, "prompt": None,
                 "audio": "pcm_s16le-mono-16000", "policy": "strict-word-coverage-v1",
-                "language_hint": self.language_hint}
+                "language_hint": self.language_hint, "reuse": "per-job-source-sha256"}
         return "asrcfg_" + hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -106,6 +107,7 @@ def checked_segments(chunk: dict, aligned: dict, source_asset_id: str) -> tuple[
 class GPTWhisperXASR:
     model_name: str = "gpt-transcribe+whisperx-3.8.6"
     last_audit: dict = field(default_factory=dict, init=False)
+    _source_cache: dict = field(default_factory=dict, init=False, repr=False)
 
     def config_fingerprint(self, *, language_hint: str | None = None) -> ProviderFingerprint:
         return ProviderFingerprint(language_hint)
@@ -118,6 +120,21 @@ class GPTWhisperXASR:
             raise RuntimeError("The isolated WhisperX environment is missing")
         if language_hint is not None and language_hint not in {"en", "es"}:
             raise ValueError("This qualified alignment image supports en/es only")
+        # The canonical pre-Freeze boundary completion stage asks the same
+        # provider for the same full source again. Reuse immutable evidence
+        # within this job instead of paying/re-decoding and risking a second
+        # text. Hash the bytes, not just the path: a rewritten file is a miss.
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+        cache_key = (digest.hexdigest(), source_asset_id, language_hint,
+                     self.config_fingerprint(language_hint=language_hint).fingerprint())
+        if cache_key in self._source_cache:
+            segments, audit = self._source_cache[cache_key]
+            audit["cache_hit_count"] += 1
+            self.last_audit = copy.deepcopy(audit)
+            return segments
         began = time.monotonic()
         probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path],
                                check=True, capture_output=True, text=True, timeout=60)
@@ -128,7 +145,9 @@ class GPTWhisperXASR:
         self.last_audit = {"provider": PROVIDER, "model": "gpt-transcribe", "duration_sec": duration,
                            "config_fingerprint": self.config_fingerprint(language_hint=language_hint).fingerprint(),
                            "chunks": [], "status": "running", "timestamp_interpolation": False,
-                           "fallback": None, "prompt": None, "requested_language": language_hint}
+                           "fallback": None, "prompt": None, "requested_language": language_hint,
+                           "source_media_sha256": digest.hexdigest(), "cache_hit_count": 0,
+                           "confidence_semantics": "CTC alignment score; not GPT lexical confidence"}
         try:
             with tempfile.TemporaryDirectory(prefix="cutsell-gpt-whisperx-") as work:
                 work = Path(work)
@@ -191,7 +210,9 @@ class GPTWhisperXASR:
                     output.extend(segments)
                 self.last_audit.update(status="passed", word_count=sum(len(s.words) for s in output),
                                        segment_count=len(output), elapsed_sec=round(time.monotonic() - began, 3))
-                return tuple(output)
+                immutable = tuple(output)
+                self._source_cache[cache_key] = (immutable, copy.deepcopy(self.last_audit))
+                return immutable
         except Exception as exc:
             self.last_audit.update(status="failed", error=str(exc), elapsed_sec=round(time.monotonic() - began, 3))
             # The ordinary job fails closed; preserve evidence in the protected workflow log.
