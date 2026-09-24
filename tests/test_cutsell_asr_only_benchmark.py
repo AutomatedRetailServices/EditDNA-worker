@@ -219,10 +219,10 @@ def test_text_candidate_is_opt_in_and_never_replaces_timed_asr(monkeypatch):
     assert requests == []
 
     compared = harness.run_asr_only_benchmark({
-        "source_key": "videos/source.mp4", "text_provider": "gpt-transcribe", "language_hint": "es",
+        "source_key": "videos/source.mp4", "text_provider": "gpt-4o-transcribe", "language_hint": "es",
     })
     assert len(requests) == 1
-    assert requests[0][1:] == ("gpt-transcribe", "es")
+    assert requests[0][1:] == ("gpt-4o-transcribe", "es")
     assert compared["text_candidate"]["selection_authority"] is False
     assert compared["normalized_word_sequence"] == baseline["normalized_word_sequence"]
 
