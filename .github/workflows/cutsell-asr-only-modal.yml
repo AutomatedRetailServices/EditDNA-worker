@@ -57,9 +57,9 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, urllib.request, urllib.error
-          req = urllib.request.Request("https://rest.runpod.io/v1/templates", headers={"Authorization": "Bearer " + os.environ["RUNPOD_API_KEY"]})
-          with urllib.request.urlopen(req, timeout=20) as response:
-              templates = json.load(response)
+          import subprocess
+          output = subprocess.run(["curl", "--fail", "--silent", "--show-error", "--url", "https://rest.runpod.io/v1/templates", "--header", "Authorization: Bearer " + os.environ["RUNPOD_API_KEY"]], check=True, capture_output=True, timeout=20)
+          templates = json.loads(output.stdout)
           template = next(x for x in templates if x.get("name") == "EditDNA-Worker-2")
           env = template.get("env") or {}
           key = str(env.get("OPENAI_API_KEY") or "").strip()
