@@ -782,3 +782,14 @@ one selected 3.66-second fragment, coherence/content-loss review blocked
 freeze and render. No GPT MP4 exists. Neither result is approved.
 Manual-only workflow restored at `0be700b`; no further paid calls or promotion.
 See `CUTSELL_UPLOADED_ASR_COMPARISON.md`.
+
+
+## 2026-09-24 uploaded GPT repeat completed
+
+User authorized one additional GPT + WhisperX full-engine run. Run
+`36064364263`, test SHA `349b00cd3cc430521f7e8a06cd2c024e91719f93`,
+completed and Modal app stopped. Same source and engine package SHA as previous
+comparison. Two new GPT requests; 157 words, zero zero-duration words; same
+50.70015–54.36 selected fragment, 15 discards. Coherence/content loss again
+blocked freeze and render. No new MP4. Elapsed 75.722 s. No further paid calls
+authorized. Manual-only restored at `2d7ab16`. Production unchanged.

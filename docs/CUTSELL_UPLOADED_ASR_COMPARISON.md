@@ -46,3 +46,15 @@ Evidence artifacts: uploaded-medium-reports (10835745425), uploaded-medium-A
 uploaded-comparison-manifest (10835631236). Original ZIP digests verified locally.
 User report embeds all original JSON evidence. Report generator:
 benchmarks/report_uploaded_asr_comparison.py.
+
+
+## Authorized repeat
+
+Run 36064364263 / job 107850529335: same input and exact engine package hash,
+new primary ASR requests, completed in 75.722 s. 157 words, zero zero-duration
+words; identical selected source range 50.70015–54.36 and text. Again 15
+discards, lost semantic content, NEEDS_HUMAN_REVIEW, no freeze or render.
+Both GPT trials reproduce the selection failure; no universal reliability claim.
+Reports artifact 10834793895, ZIP SHA256
+6aac7f0017e905058ec4b7766c4261a065bf786a5dd8aec4064d0b328407ac17 verified.
+No paid retry beyond the one newly authorized call. No editor code changed.
