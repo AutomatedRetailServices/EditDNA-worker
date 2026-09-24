@@ -793,3 +793,19 @@ comparison. Two new GPT requests; 157 words, zero zero-duration words; same
 50.70015–54.36 selected fragment, 15 discards. Coherence/content loss again
 blocked freeze and render. No new MP4. Elapsed 75.722 s. No further paid calls
 authorized. Manual-only restored at `2d7ab16`. Production unchanged.
+
+
+## 2026-09-24 new 97-second MOV GPT test
+
+User authorized one GPT + WhisperX full-engine test on the newly uploaded MOV.
+Run `36065470982`, test SHA `c580fad32e8de421450aea90ae48930f617e88d5`,
+completed and Modal stopped. Source SHA256
+`5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681`,
+68,730,266 bytes, 97.433 s. Same engine package as previous trials.
+136 words, zero zero-duration words, three GPT requests; four selected clips,
+six discards, 17.567 s MP4, technical PASS, human review required.
+Selected transcript retains a setup remark, Yeah, and repeated CTA. GPT returned
+empty text for 0–60 s despite nonzero source audio (mean -24.9 dB, max -5.6 dB);
+speech/music not adjudicated. Do not claim full transcript coverage or editorial
+approval. Report artifact 10836610270, video part 10836405775; hashes verified.
+Full local decode passed. No further paid calls. Manual-only restored at 9cede8a.
