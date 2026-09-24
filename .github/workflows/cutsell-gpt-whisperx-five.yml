@@ -1,0 +1,136 @@
+name: CutSell GPT WhisperX Five Full Trials
+
+# Five explicitly authorized full RAW calls; no automatic paid reruns.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths: [.github/workflows/cutsell-gpt-whisperx-five.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  five-trials:
+    if: >-
+      github.run_attempt == 1 &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && github.event.head_commit.message == 'run(asr): five authorized GPT WhisperX full trials'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      CUTSELL_VALIDATION_ASR_PROVIDER: gpt-transcribe-whisperx
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Install transport and CPU QA dependencies
+        run: pip install --disable-pip-version-check --quiet modal boto3 'numpy>=1.26,<3' 'requests>=2.32.3'
+
+      - name: Freeze one configuration and preflight credentials and source
+        id: prepare
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py prepare
+
+      - name: Full engine trial 1 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 1
+
+      - name: Preserve trial 1
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-trial-1
+          path: stability-artifacts/trial-1/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 2 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 2
+
+      - name: Preserve trial 2
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-trial-2
+          path: stability-artifacts/trial-2/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 3 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 3
+
+      - name: Preserve trial 3
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-trial-3
+          path: stability-artifacts/trial-3/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 4 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 4
+
+      - name: Preserve trial 4
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-trial-4
+          path: stability-artifacts/trial-4/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 5 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 5
+
+      - name: Preserve trial 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-trial-5
+          path: stability-artifacts/trial-5/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Aggregate all five outcomes and editorial gate
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py finalize
+
+      - name: Preserve batch manifest and comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-five-summary
+          path: |
+            stability-artifacts/batch.json
+            stability-artifacts/five-trial-summary.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Remove private configuration snapshot
+        if: always()
+        run: python -c 'import os, shutil; from pathlib import Path; shutil.rmtree(Path(os.environ["RUNNER_TEMP"]) / "cutsell-five-private", ignore_errors=True)'

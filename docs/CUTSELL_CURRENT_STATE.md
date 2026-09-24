@@ -2,6 +2,26 @@
 
 Product generation: **CutSell.ai 7**
 
+## 2026-09-24 GPT + WhisperX five-run stability qualification (authorized)
+
+The Product Owner requested: “podrias hacerlo otra vez? hacer 5 pruebas con
+este? sistema?” This authorizes FIVE new independent full Video00 trials on
+`feat/gpt-whisperx-video00`, including the per-job source-cache correction at
+`e1d6892983d64d12191d58df7545668d85bbfef1`. The earlier completed trial is not
+one of these five. No sixth paid invocation, production promotion or PR #25
+merge is authorized by this batch.
+
+The QA transport uses one checkout and one private worker-template snapshot,
+the same canonical `run_op("focused")` engine and microtrim payload, five
+sequential fresh Modal apps/providers, unique benchmark IDs, L4, retries=0,
+and the existing 5400-second remote bound. Claims prevent retries even after
+failure; uncertain termination blocks subsequent dispatches. Transcripts are
+not shared across trials. The same-source cache operates only within each
+job. Each trial preserves its own video, raw result, logs, build/source proof,
+technical QC and unchanged editorial/Gold QA. Paid workflow reruns are blocked.
+Code under `cutsell_worker` and the canonical Modal wrapper are unchanged by
+this qualification harness. Results and consistency verdict are pending.
+
 ## Isolated ASR provider evaluation (not integrated)
 
 The five RAW #127 attempts showed five distinct ASR content hashes on the
