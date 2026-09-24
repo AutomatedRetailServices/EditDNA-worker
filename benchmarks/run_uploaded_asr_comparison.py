@@ -162,7 +162,7 @@ def run(provider):
         pieces = []
         digest = hashlib.sha256()
         with video.open("rb") as source:
-            for n, letter in enumerate("ABC"):
+            for n, letter in enumerate("ABCDEFGHIJKL"):
                 block = source.read(20 * 1024 * 1024)
                 if not block:
                     break
