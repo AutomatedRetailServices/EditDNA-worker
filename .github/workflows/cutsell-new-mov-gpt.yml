@@ -1,8 +1,6 @@
 name: CutSell New MOV GPT Test
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/gpt-whisperx-video00]
 permissions:
   contents: read
 concurrency:
