@@ -14,9 +14,6 @@ name: CutSell ASR-Only Modal Benchmark
 # (baseline, flag OFF) and Section 8 (candidate, flag ON) can both be run
 # from this one workflow without editing YAML between runs.
 on:
-  push:
-    branches: [feat/asr-provider-evaluation-and-replay]
-    paths: [.github/workflows/cutsell-asr-only-modal.yml]
   workflow_dispatch:
     inputs:
       deterministic_config:
@@ -107,7 +104,7 @@ jobs:
           # candidate-vs-baseline variable. No hybrid/resolver overlays are
           # applied here (unlike cutsell-video00-modal-raw.yml) -- this
           # harness never reaches those stages.
-          DETERMINISTIC="1"
+          DETERMINISTIC="${{ inputs.deterministic_config && '1' || '0' }}"
           jq -c --arg det "$DETERMINISTIC" '(.env // {}) + {CUTSELL_ASR_DETERMINISTIC_CONFIG:$det}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
@@ -142,7 +139,7 @@ jobs:
           set -euo pipefail
           jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
             --arg model "${{ inputs.model_name || 'medium' }}" \
-            --arg comparator "gpt-4o-transcribe" \
+            --arg comparator "${{ inputs.text_provider || 'none' }}" \
             '{source_key:$source,benchmark_id:$benchmark,model_name:$model} +
               (if $comparator == "none" then {} else {text_provider:$comparator} end)' \
             > /tmp/payload.json
