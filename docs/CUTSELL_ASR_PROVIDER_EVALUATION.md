@@ -53,3 +53,14 @@ upstream source of variation, not that ASR accounts for every downstream change.
 
 A more accurate transcript by itself does not prove repeated BestTake decisions
 or a clean edit. Production still uses Faster-Whisper `medium` on this branch.
+
+## Video00 ASR-only run 36016458706 (2026-09-24)
+
+Executed one isolated matrix run on source `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4` at SHA `acac420178c055357d51761b55c1d05886633745`, using the same deterministic temperature 0.0 and NVIDIA L4. Both jobs passed structurally; no editor or renderer was invoked. GitHub Actions: https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/36016458706 . The temporary branch-only `push` trigger was removed at `3ec5dea87ce738ede15f2bff84ab50de6f8be2ca`; the workflow is manual-only again. Production is unchanged.
+
+| Model | Words | Segments | Elapsed | Observed ending |
+| --- | ---: | ---: | ---: | --- |
+| Faster-Whisper `medium` | 623 | 54 | 34.283 s | Contains conclusion, percentage and closing advice. One `No quiero sonar a conspiración` segment. |
+| Faster-Whisper `large-v3` | 771 | 53 | 55.244 s | From 299.46 s onward, repeats `No quiero sonar a conspiración…` in **20** transcript segments, including near-zero-duration word timestamps at 366.9 s, and omits the actual conclusion and CTA. |
+
+The `large-v3` output is unsafe as a transcription source on Video00 with this runtime/configuration. Workflow `success` means jobs ran, not that transcription is accurate. Do **not** switch production to `large-v3` on this evidence. The `medium` content hash under deterministic config (`asrcontent_dcc16eb97390b41df67327af`) matches one recorded RAW #127 result; a single new `medium` invocation does not establish repeatability. Before selecting a provider, validate against independently listened reference speech, rerun repeatability, and test held-out English and Spanish videos. The catastrophic repeat warrants a generic audio-grounded repetition/zero-duration-word reject gate before any new ASR is allowed to feed selection. This observation does not certify `medium` as fully accurate or solve downstream judge variability.
