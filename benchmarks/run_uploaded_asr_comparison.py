@@ -19,7 +19,7 @@ PRIVATE = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "cutsell-upload-comparis
 OUT = ROOT / "uploaded-comparison-artifacts"
 
 
-def prepare():
+def prepare(existing_source_key=None):
     import requests
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
@@ -48,24 +48,29 @@ def prepare():
             print("::add-mask::" + v.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
     write_json(PRIVATE / "environment.json", env)
     (PRIVATE / "environment.json").chmod(0o600)
-    key = f"cutsell/benchmark-inputs/upload-{os.environ['GITHUB_RUN_ID']}/{EXPECTED_SHA}.mp4"
-    # Only a short-lived, one-object PUT capability is returned, encrypted to
-    # the requester's ephemeral public key. AWS/inference keys never leave CI.
-    url = s3_client(env).generate_presigned_url("put_object", Params={
-        "Bucket": env["S3_BUCKET"], "Key": key, "ContentType": "video/mp4",
-        "ContentLength": EXPECTED_BYTES}, ExpiresIn=1200, HttpMethod="PUT")
-    public = serialization.load_pem_public_key((ROOT / "benchmarks/upload_comparison_public.pem").read_bytes())
-    aes_key, nonce = AESGCM.generate_key(bit_length=256), os.urandom(12)
-    ciphertext = AESGCM(aes_key).encrypt(nonce, json.dumps({"url": url, "source_key": key}).encode(), None)
-    wrapped = public.encrypt(aes_key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-    write_json(OUT / "upload-response.enc.json", {"wrapped_key": base64.b64encode(wrapped).decode(),
-        "nonce": base64.b64encode(nonce).decode(), "ciphertext": base64.b64encode(ciphertext).decode()})
+    if existing_source_key:
+        key = existing_source_key
+    else:
+        key = f"cutsell/benchmark-inputs/upload-{os.environ['GITHUB_RUN_ID']}/{EXPECTED_SHA}.mp4"
+        # Only a short-lived, one-object PUT capability is returned, encrypted to
+        # the requester's ephemeral public key. AWS/inference keys never leave CI.
+        url = s3_client(env).generate_presigned_url("put_object", Params={
+            "Bucket": env["S3_BUCKET"], "Key": key, "ContentType": "video/mp4",
+            "ContentLength": EXPECTED_BYTES}, ExpiresIn=1200, HttpMethod="PUT")
+        public = serialization.load_pem_public_key((ROOT / "benchmarks/upload_comparison_public.pem").read_bytes())
+        aes_key, nonce = AESGCM.generate_key(bit_length=256), os.urandom(12)
+        ciphertext = AESGCM(aes_key).encrypt(nonce, json.dumps({"url": url, "source_key": key}).encode(), None)
+        wrapped = public.encrypt(aes_key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+        write_json(OUT / "upload-response.enc.json", {"wrapped_key": base64.b64encode(wrapped).decode(),
+            "nonce": base64.b64encode(nonce).decode(), "ciphertext": base64.b64encode(ciphertext).decode()})
     write_json(PRIVATE / "source.json", {"key": key})
     write_json(OUT / "manifest.json", {"source_sha256": EXPECTED_SHA, "source_bytes": EXPECTED_BYTES,
-        "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 2,
-        "providers": ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
+        "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 1 if existing_source_key else 2,
+        "providers": ["gpt-transcribe-whisperx"] if existing_source_key else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
         "same_template_snapshot": True, "auto_speech_visual_microtrim": True})
-    print("Upload capability prepared; waiting for source before any GPU call")
+    if existing_source_key:
+        write_json(PRIVATE / "single-provider.json", {"provider": "gpt-whisperx"})
+    print("Source preflight prepared; no GPU call yet")
 
 
 def await_upload():
@@ -98,7 +103,10 @@ def run(provider):
         raise RuntimeError("Only the two authorized provider calls are supported")
     if not (PRIVATE / "source.verified").exists() or (PRIVATE / "STOP").exists():
         raise RuntimeError("Source or prior terminal-state preflight failed")
-    if provider == "gpt-whisperx" and not (PRIVATE / "medium.terminal").exists():
+    single = PRIVATE / "single-provider.json"
+    if single.exists() and provider != json.loads(single.read_text())["provider"]:
+        raise RuntimeError("Provider outside single-run authorization")
+    if provider == "gpt-whisperx" and not single.exists() and not (PRIVATE / "medium.terminal").exists():
         raise RuntimeError("Sequential calls required")
     with (PRIVATE / f"{provider}.claimed").open("x") as f:
         f.write("No retry")
@@ -169,4 +177,4 @@ def run(provider):
 
 
 if __name__ == "__main__":
-    {"prepare": prepare, "await-upload": await_upload, "run": lambda: run(sys.argv[2])}[sys.argv[1]]()
+    {"prepare-existing": lambda: prepare(sys.argv[2]), "prepare": prepare, "await-upload": await_upload, "run": lambda: run(sys.argv[2])}[sys.argv[1]]()
