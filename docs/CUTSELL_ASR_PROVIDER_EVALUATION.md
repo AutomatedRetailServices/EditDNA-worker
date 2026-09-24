@@ -92,3 +92,30 @@ Do not promote GPT-4o as the edit authority on this evidence, and do not infer a
 Run https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/36022529122 (SHA `1b8d2e7fd095c434b5feeb39561a561e3e256125`) used the existing worker project key to POST less than one second of generated silence to `/v1/audio/transcriptions`, without Video00 or Modal. The response was HTTP 403, `error_type=invalid_request_error`, `error_code=model_not_found`, with the precise provider explanation that **the project associated with the key does not have access to `gpt-transcribe`**. Request id: `req_4cb4b10930174d15a319d558ba84067a`. This resolves the earlier ambiguity: the model exists in the provider's official docs and the endpoint is correct, while the worker's project cannot access it. The account balance was not measured by the probe and must not be asserted as the cause. Previous read-only model checks returned 404 for this ID and 200 for `gpt-4o-transcribe` using this same key.
 
 Access remediation is an account/project decision outside this branch: inspect the usage tier and model availability in the API organization/project actually associated with the worker key (a balance in a different project, or promotional credits, does not establish this project's model access). If the eligible project has access, use its authorized scoped key; otherwise request model access from provider support citing the request id. Do not retry full Video00 on this model until the same no-original preflight succeeds. Temporary push trigger removed at `8a7a5630528f355d020c336f0ad288e41e18ca37`; no production key, model, canonical branch or editor output changed.
+
+
+## GPT-Transcribe access resolved; authorized Video00 comparison
+
+On 2026-09-24 the user authorized adding only `gpt-transcribe` to the worker
+project model allowlist. Read-back verified that model was added and no existing
+model was removed. The same worker-key synthetic probe then returned HTTP 200
+at 17:59:28 UTC (run 36022529122, job 107763146014,
+request `req_94b30788cdd24c74865e6827bc00673b`). No credentials changed in code.
+
+The user subsequently authorized one Video00 ASR-only comparison of
+`gpt-transcribe` versus Faster-Whisper `medium`. The adapter now accepts both
+OpenAI model IDs; the new model uses `languages[]` only when a hint is supplied.
+This run preserves the prior automatic language detection, deterministic
+Whisper temperature 0, source video, MP3 comparator extraction and L4 runtime.
+Whisper reads the original video; GPT receives its full mono 16 kHz, 64 kbps MP3
+extraction, as in the prior GPT-4o comparisons. Thus this compares the existing
+integration paths, not identical encoded input bytes or model-only latency.
+
+Pre-run qualification: 44 targeted adapter/harness/Modal/dependency-boundary
+tests passed. A separate skeptical self-review in the same session checked
+opt-in routing, model-specific parameters, HTTP failure propagation, lack of
+selection authority, no retries, one GPU job, fixed endpoint and source, and
+unchanged production defaults. This is self-review, not independent release
+certification. A commit-message/first-attempt guarded branch-only push trigger
+launches this one authorized comparison and is removed immediately afterward.
+No editor, renderer, production deployment or new persistent resource is involved.

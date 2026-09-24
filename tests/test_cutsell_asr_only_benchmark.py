@@ -205,7 +205,8 @@ def test_asr_only_rejects_unreviewed_or_empty_explicit_model(monkeypatch, model_
             harness.run_asr_only_benchmark({"source_key": "videos/source.mp4", "model_name": model_name})
 
 
-def test_text_candidate_is_opt_in_and_never_replaces_timed_asr(monkeypatch):
+@pytest.mark.parametrize("text_provider", ["gpt-transcribe", "gpt-4o-transcribe"])
+def test_text_candidate_is_opt_in_and_never_replaces_timed_asr(monkeypatch, text_provider):
     provider = _FakeASRProvider()
     _install_common_fakes(monkeypatch, asr_provider=provider)
     requests = []
@@ -219,10 +220,10 @@ def test_text_candidate_is_opt_in_and_never_replaces_timed_asr(monkeypatch):
     assert requests == []
 
     compared = harness.run_asr_only_benchmark({
-        "source_key": "videos/source.mp4", "text_provider": "gpt-4o-transcribe", "language_hint": "es",
+        "source_key": "videos/source.mp4", "text_provider": text_provider, "language_hint": "es",
     })
     assert len(requests) == 1
-    assert requests[0][1:] == ("gpt-4o-transcribe", "es")
+    assert requests[0][1:] == (text_provider, "es")
     assert compared["text_candidate"]["selection_authority"] is False
     assert compared["normalized_word_sequence"] == baseline["normalized_word_sequence"]
 

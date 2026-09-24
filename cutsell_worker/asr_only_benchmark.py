@@ -135,7 +135,7 @@ def run_asr_only_benchmark(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not source_key:
         raise ValueError("source_key is required")
     text_provider = str(payload.get("text_provider") or "").strip()
-    if text_provider not in {"", "gpt-4o-transcribe", "deepgram-nova-3-multi"}:
+    if text_provider not in {"", "gpt-transcribe", "gpt-4o-transcribe", "deepgram-nova-3-multi"}:
         raise ValueError("unsupported ASR text comparison provider")
     safe_id = _safe_id(payload.get("benchmark_id"), "asr-only")
     language_hint = payload.get("language_hint")
@@ -169,7 +169,9 @@ def run_asr_only_benchmark(payload: Mapping[str, Any]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="cutsell-asr-only-") as directory:
         local_path = download_source(source.uri, str(Path(directory) / source.original_name))
         duration_sec = float(probe_media(local_path).duration_sec)
+        asr_started = time.monotonic()
         transcript = asr_provider.transcribe(local_path, source_asset_id=source_id, language_hint=request.language_hint)
+        asr_elapsed_sec = round(time.monotonic() - asr_started, 3)
         candidate = compare_text_candidate(local_path, text_provider, language_hint=request.language_hint) if text_provider else None
     elapsed_sec = round(time.monotonic() - started, 3)
 
@@ -189,6 +191,7 @@ def run_asr_only_benchmark(payload: Mapping[str, Any]) -> dict[str, Any]:
         "source_key": source_key,
         "source_duration_sec": round(duration_sec, 3),
         "elapsed_sec": elapsed_sec,
+        "asr_elapsed_sec": asr_elapsed_sec,
         "text_candidate": candidate,
         "raw_segment_count": len(transcript),
         "raw_transcript": [
