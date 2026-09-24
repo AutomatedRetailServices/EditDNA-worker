@@ -308,6 +308,11 @@ def _live_render_qc_diagnostics(
     }
 
 
+def _validation_asr(config, *, env=None):
+    """Build the RAW harness ASR through the same gated decode policy as production."""
+    return load_asr_provider_from_env(env, model_name=config.asr_model)
+
+
 def run_single_universal_clean_cut_validation(
     key: str,
     *,
@@ -348,7 +353,7 @@ def run_single_universal_clean_cut_validation(
         language_hint=language_hint,
     )
 
-    asr = load_asr_provider_from_env(model_name=config.asr_model)
+    asr = _validation_asr(config)
 
     started = time.monotonic()
     preview_path = None
