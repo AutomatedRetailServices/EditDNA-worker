@@ -277,7 +277,7 @@ class WindowSensitiveJudge(FakeJudge):
     def judge(self, session):
         self.sessions.append(session)
         ids = [c.clip_id for c in session.candidates]
-        if set(ids) <= {"A1", "M", "L", "HAIR"} and {"M", "L"} <= set(ids):
+        if set(ids) <= {"PRE", "M", "L", "HAIR"} and {"M", "L"} <= set(ids):
             answer = self.confirmation
         elif self.flip_marker in ids:
             answer = {"M": ("winner", 0.92), "L": ("alternate", 0.8)}
@@ -290,9 +290,15 @@ class WindowSensitiveJudge(FakeJudge):
 def _e2e_takes():
     # 12 takes -> windows [0..9] and [2..11] overlap on 2..9; the family (M, L)
     # sits inside the overlap so BOTH windows are family-complete.
+    # D-291.5: the short complementary delivery A1 is deliberately ABSENT
+    # here -- with A1 present, the composite Best Take authority now
+    # replaces the monolith M with A1 + L BEFORE grouping (the reference
+    # outcome), so no M/L family and no window conflict exist to confirm.
+    # This harness keeps a genuine two-take family so the confirmation
+    # mechanism itself stays under test; `PRE` stands in A1's slot.
     filler = [_e2e_take(f"F{i}", 10.0 * i + 1.0, 10.0 * i + 6.0, f"Tema distinto número {i} de la historia.") for i in range(7)]
     return tuple([*filler[:6],
-                  _e2e_take("A1", 192.44, 198.12, "También me salían espinillas. Era como un rush, una alergia."),
+                  _e2e_take("PRE", 192.44, 198.12, "Antes de eso quiero contar cómo empezó todo esto."),
                   _e2e_take("M", 198.88, 211.02, M_TEXT), _e2e_take("L", 213.34, 222.98, L_TEXT),
                   _e2e_take("HAIR", 226.31, 233.0, "Se me caía mucho el pelo cuando me lavaba el pelo perdía mucho pelo."),
                   filler[6], _e2e_take("F7", 300.0, 305.0, "Cierre de la historia con otro tema.")])
@@ -317,7 +323,7 @@ def test_end_to_end_conflicting_windows_then_confirmation_selects_the_later_take
     assert row["complete_window_winner_conflict"]["resolved_by_family_confirmation"] == "L"
     assert row["semantic_best_take_reason"] == "single_semantic_winner" and row["selected_clip_id"] == "L"
     selected = {c.clip_id for c in result.draft.selected}
-    assert "L" in selected and "M" not in selected and "A1" in selected
+    assert "L" in selected and "M" not in selected and "PRE" in selected
     # exactly one confirmation request for the whole run
     family_sessions = [s for s in judge.sessions if {"M", "L"} <= {c.clip_id for c in s.candidates} and len(s.candidates) <= 4]
     assert len(family_sessions) == 1

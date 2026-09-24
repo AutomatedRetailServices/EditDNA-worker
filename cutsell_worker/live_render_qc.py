@@ -140,6 +140,24 @@ class LiveRenderQCResult:
         return "DELIVERABLE" if self.deliverable else f"NOT_DELIVERABLE_{self.status}"
 
 
+def protected_speech_by_clip_id(draft) -> dict[str, tuple[tuple[float, float], ...]]:
+    """D-291.6: word intervals (source seconds) per selected clip id, read
+    from the frozen draft's own `DraftClip.words`. A clip with no word
+    timings is NOT listed: for that clip the repair has no speech evidence,
+    so it fails closed on a join-instant probe and trims only a defect
+    measured inside the segment's own window."""
+    out: dict[str, tuple[tuple[float, float], ...]] = {}
+    for clip in getattr(draft, "selected", ()) or ():
+        words = tuple(
+            (float(word.start), float(word.end))
+            for word in (getattr(clip, "words", ()) or ())
+            if getattr(word, "end", None) is not None and float(word.end) > float(word.start)
+        )
+        if words:
+            out[str(clip.clip_id)] = words
+    return out
+
+
 def _segment_state(segments: Sequence[RenderSegment]) -> tuple[dict, ...]:
     return tuple({"clip_id": s.clip_id, "start": s.start, "end": s.end} for s in segments)
 
@@ -187,6 +205,11 @@ def render_with_post_render_qc(
     edit_plan = _resolve_edit_plan(draft)
     current_segments = tuple(segments)
     attempts: list[RenderAttemptRecord] = []
+    # D-291.6: the frozen draft's own word timings are the speech evidence
+    # every physical repair must respect -- built once here from the
+    # selected clips so `repair_segment_for_finding` never trims into a
+    # word and never trims a join-instant probe without evidence of room.
+    protected_speech = protected_speech_by_clip_id(draft)
 
     for attempt_index in range(max_attempts):
         trailing_trims: list[dict] = []
@@ -280,7 +303,9 @@ def render_with_post_render_qc(
         target_finding = None
         unrepairable = 0
         for candidate in media.findings:
-            repair = repair_segment_for_finding(current_segments, candidate)
+            repair = repair_segment_for_finding(
+                current_segments, candidate, protected_speech_by_clip_id=protected_speech,
+            )
             if repair is not None:
                 target_finding = candidate
                 break

@@ -79739,3 +79739,170 @@ record the QA/acceptance reports, the D-291 rows, the pimples/percentage
 grouping trace and the "No" render position, and do the human
 Watch+Listen. The pimples/percentage run-to-run grouping variance is the
 next engineering objective (Product Owner scope decision).
+
+## D-291.5 — A kept complete complementary delivery competes for the composite Best Take on its own merits (RAW #125 vs #126 skin family)
+
+**Objective (Product Owner directive, this window):** stop attributing the
+skin-family divergence to provider variability without showing how the
+answers become engine decisions; fix the existing authority, no
+phrase/id/timestamp/threshold rule.
+
+**Mechanism chain, demonstrated with the runs' own data (OBSERVED unless
+marked):**
+
+| step | RAW #125 (JSON `video00-modal-35921819172-1`) | RAW #126 (5,000-line log tail) |
+|---|---|---|
+| window labels | M (clip_0cd3…) winner 0.92/0.95; A1 alternate 0.75/0.70; L alternate 0.80/0.60 | not readable (artifacts unreachable) |
+| pair budget (14 pairs, cap 2 per group) | no {A1, M}, {M, L} or {A1, L} pair -- M was already gone before grouping; computed priorities A1–M 0.9420, M–L 0.8253, A1–L 0.8154 vs the 14th accepted pair 0.3117 | A1–M formed a family (top priority) |
+| M's fate | deleted by `hybrid_cross_group_retry_integrity`, restored by the complementary guard as a unique tail, then suppressed by `hybrid_composite_best_take` (`composite_best_take_two_complementary_deliveries_replace_monolithic_retry`, A1 + L, coverage 0.6667, shared 10) | M survived the cross-group chain, won the {A1, M} family on the winner label, L stayed separate: A1 DISCARDED, M KEPT (12.14 s, Level 1) |
+
+So the "right" #125 outcome (A1 + L, M out) was PATH-DEPENDENT: the
+composite judgment only ran because an unrelated deletion/restoration
+had put M on the restore path. When the deletion did not happen (#126),
+no authority ever compared the monolithic retry with the two complete
+complementary deliveries that cover it, and the family label (a
+window-local "winner") decided.
+
+**Fix (owning authority, `hybrid_composite_best_take.py`):**
+`_kept_complementary_rows` -- a KEPT complete delivery that is a
+complementary piece of a kept peer (the complementary guard's own
+association criterion: peer winner/keep >= 0.80 with more content,
+shared content >= 2, coverage >= 0.50, unique fraction >= 0.15, gap <= 45
+s, complete, >= 3 s, not `failed` >= 0.85) becomes a composite candidate
+row, deduplicated against the existing restore rows; the existing
+`_choose_composite_replacements` then applies its unchanged criteria
+(peer winner/keep, >= 6 content tokens, each piece complete >= 3 s, gap
+<= 24 s, coverage >= 0.60, critical subset, unique tokens, duration <=
+1.6x + 2). No criterion, threshold or ordering was changed; the
+composite judgment is now independent of whether a deletion happened
+first. Diagnostics: `kept_complementary_candidates`.
+
+**Refuting tests** (`tests/test_cutsell_d291_5_composite_kept_
+complementary.py`, 10): the RAW #126 shape before/after (M kept -> A1 +
+L kept, M discarded, composite row recorded); controls that must NOT
+change: no monolith, two true retakes (same content, no unique
+fraction), an incomplete/failed piece, a number/negation difference,
+inconclusive labels, non-covering pieces, a larger piece that is not a
+peer; end to end through `build_flow_b_draft` (selected `I, A1, L, HAIR`).
+The D-291 end-to-end harness had used A1 as the second family member; with
+D-291.5 that composite fires before grouping (correctly), so the harness
+now uses a genuine two-take family ("PRE"), documented in the test.
+
+**Recorded, not changed (Resolver):** when the family's winner label
+agrees with the local winner the Resolver tie falls to realization-id
+order with no Ledger evidence (D-291.2 finding) -- unchanged, no
+tie-break rule added per the directive.
+
+**Not proven:** anything on real media. This is an offline mechanism fix
+verified on recorded data; the next RAW is the proof (D-291.7).
+
+## D-291.6 — The live post-render physical repair never removes speech: in-window clamp + word floor (addendum point 3)
+
+**Capability audit on HEAD `01591b02` (executed path, OBSERVED from code):**
+`universal_clean_cut.py:854 apply_post_freeze_boundary_pass` (post-Freeze
+entry/exit/interior dead air from measured `audio_silence_interval`
+events; D-115/D-116 visual CASE A edge trims; D-177 partial straddles) ->
+`universal_clean_cut_validation.py:106` / `export_job.py:681`
+`render_with_post_render_qc` (technical QC: structural checks, ffmpeg
+silencedetect >= 1.2 s, frozen/black frames, D-097.4 join-instant step
+probe; ONE Boundary-only repair per attempt via `live_boundary_repair.
+repair_segment_for_finding`, `DEFAULT_MAX_RENDER_ATTEMPTS`) ->
+`perceptual_review_for_rendered_candidate` (System Watch+Listen v1: 4
+evaluated capabilities, 4 `NOT_IMPLEMENTED` -- facial expression, gesture
+continuity across the cut, clipped-phoneme ASR realign, framing/eye
+contact -- advisory, never auto-PASS; `HUMAN_REVIEW_REQUIRED` gates
+delivery). `perceptual_repair_cycle.py` has ZERO importers (D-288/D-288.2
+preconditions still open) -- NOT activated here.
+
+**Defect found (this entry):** the ONE physical repair the technical loop
+can apply was bounded only by the 0.6 s routing tolerance, the 40 % trim
+fraction and the 0.5 s remaining floor. (1) A measured silence that
+STRADDLES a join (begins up to 0.6 s before this segment's window or ends
+up to 0.6 s after it) was trimmed by its WHOLE duration from one segment's
+edge -- up to 0.6 s of real speech at that segment's head or tail. (2) No
+word boundary was consulted on either edge (the trailing branch trusted
+the renderer's silence tightener; the leading branch had no floor), so a
+zero-extent join-instant finding trimmed 50 ms off an edge that the frozen
+clip's own word timings show is inside a word. This is the same gap D-288
+recorded for the disconnected perceptual cycle, but it was LIVE in the
+technical loop on every RAW since D-030.
+
+**Fix (owning authority, BoundaryEngine's live repair):** the trim is
+clamped to the defect extent measured INSIDE the segment's own rendered
+window (`measured_inside_window_sec`); `live_render_qc` builds
+`protected_speech_by_clip_id` from the frozen draft's `DraftClip.words`
+(clips without word timings are not listed = no evidence) and the repair
+never enters a word (`speech_room_at_edge`; a physical fragment inherits
+its parent clip's words); a finding with no measured extent inside the
+window is repairable only with word evidence of room, else refused ->
+`PHYSICAL_FAIL_UNREPAIRABLE` recorded, never a silent cut. The legacy
+call without word evidence is byte-identical (D-097.4 tests unchanged);
+`_MIN_TRIM_SEC`, the tolerance and the floors keep their values. Repair
+records carry `measured_inside_window_sec` and `speech_room_sec`.
+
+**Refuting tests** (`tests/test_cutsell_d291_6_live_repair_speech_floor.py`,
+13): straddling silence at the trailing and at the leading edge trims
+only the in-window part; fully-inside silence unchanged; trailing/leading
+trims stop at the last/first word; a word at the edge refuses the repair;
+fragment inherits parent words; join-instant probe needs room evidence
+(refused on `a`, routed to `b` only when `b` shows room; refused on both
+when neither does); legacy behaviour kept; `protected_speech_by_clip_id`
+lists only clips with words; live loop refuses to clip a word for a join
+probe (one render, `PHYSICAL_FAIL_UNREPAIRABLE`); live loop repairs up to
+the word floor and records the evidence.
+
+**Verification (offline, this tree):** compileall OK; D-291.x suites
+39 + 10 + 13 passed; the repair-related suites (live QC, D-097.4 join
+probe, D-288 cycle, validation live QC) 48 passed unchanged; full
+`tests/` (baseline invocation, `--ignore=tests/test_semantic_stitch.py`):
+9096 passed, 17 failed = the 5 pre-existing unrelated failures
+(`test_hybrid_story_guard_incomplete_retry` x1, `test_video00_modal_
+hybrid_semantic_parity` x4, identical to D-291.3) + 10 working-tree
+zero-diff guards on `live_render_qc.py` (`git diff HEAD`, self-resolving
+on commit, the D-171/D-172 pattern) + 2 fixed-SHA closed-track guards
+(D-274E / D-274E-A) from which `live_render_qc.py` is removed with the
+D-291.6 disclosure, following the D-288 precedent recorded in those
+lists (64 passed after the adjustment).
+
+**Effect on a real run (INFERRED):** a run whose technical QC previously
+PASSED after a repair that cut into speech will now end
+`PHYSICAL_FAIL_UNREPAIRABLE` on that finding (not delivered, reason
+recorded) -- the safe outcome the addendum asks for ("corrección segura y
+nueva comprobación"); RAW #125 never rendered and RAW #126's repair
+records are unreachable, so whether either run took such a repair is
+unknown.
+
+**Pending capabilities, explicitly:** (a) the four `NOT_IMPLEMENTED`
+Watch+Listen capabilities (no face/pose/gaze estimation, no rendered-audio
+ASR realign); (b) `perceptual_repair_cycle.py` stays disconnected until
+its D-288/D-288.2 preconditions are implemented (exact edge identity,
+confirmed-defect allowlist, `input_boundary_state` cross-check); (c) no
+mid-segment physical repair exists by design (edge trims only); (d)
+pre-Freeze preparation/restart cleanup uses measured audio silence and
+D-115 positioned visual evidence (`positioned_performance_evidence`) but
+no gesture/pose model -- "natural pause vs corroborated restart" rests on
+the A-5 local performance events and the explicit reset markers.
+
+## D-291.7 — RAW retrieval block (the ONE authorized run NOT dispatched)
+
+The Product Owner's condition: verify a permitted means to recover JSON,
+reports and MP4 BEFORE spending the run; if blocked, finish everything
+else and report only the concrete block. Verified from the container:
+
+| channel | result |
+|---|---|
+| GitHub Actions artifact download (`/actions/artifacts/{id}/zip` -> `productionresultssa*.blob.core.windows.net`) | proxy CONNECT 403 (host denied by the environment's network policy) |
+| S3 (`aws s3 cp` of `result_uri`/`preview_uri`, the workflow's own durable copy) | container AWS credentials invalid (`InvalidClientTokenId`) |
+| job log via API | last 5,000 lines only (ladder tail; no JSON, no reports, no MP4) |
+| `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `raw.githubusercontent.com` | reachable |
+
+A relay (a CPU-only workflow copying an existing run's artifacts onto a
+pre-release of this private repository, served from the reachable host)
+would clear it, but creating that workflow was refused by the session's
+permission layer as an unauthorized new mechanism, so it was NOT added.
+Remedies are the Product Owner's: allow `*.blob.core.windows.net` in the
+environment's network policy, attach run 35931561397's
+`cutsell-video00-modal-human-review` (580 MB, MP4 + JSON) and
+`cutsell-video00-modal-validator-reports` (102 KB), or approve the relay
+workflow. Until one exists the authorized RAW stays unspent (D-091 C /
+directive). Active runs at the time of this check: 0 in progress.

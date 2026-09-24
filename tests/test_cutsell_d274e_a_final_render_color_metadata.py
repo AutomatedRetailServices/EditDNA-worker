@@ -370,7 +370,13 @@ def test_output_bytes_differ_from_pre_remediation_shape_but_identity_does_not(sd
     "cutsell_worker/source_format_policy.py",
     "cutsell_worker/source_media_profile.py",
     "cutsell_worker/output_format_qc.py",
-    "cutsell_worker/live_render_qc.py",
+    # live_render_qc.py removed from this closed-track list: D-291.6 (a
+    # later, separately-authorized gate on the isolated editorial branch)
+    # legitimately supplies the frozen draft's word timings to the live
+    # physical repair (`protected_speech_by_clip_id`) so the repair never
+    # trims into speech -- same self-resolving-guard pattern as the D-288
+    # removals below (docs/CUTSELL_DECISIONS.md D-291.6 has the full
+    # disclosure).
     # render_delivery.py / export_job.py removed from this closed-track
     # list: D-288 (a later, separately-authorized gate) legitimately adds
     # the watch_listen_status delivery gate and the real perceptual-review

@@ -238,6 +238,88 @@ def _restore_performance_only_unique_deliveries(
     return restore_ids, rows
 
 
+def _kept_complementary_rows(
+    kept: tuple[CandidateTake, ...],
+    semantic: dict[str, tuple[str, float]],
+    *,
+    maximum_gap_sec: float = 45.0,
+) -> list[dict]:
+    """D-291.5 (RAW #125 vs RAW #126): a KEPT complete delivery that is
+    complementary to a strong kept monolith is a composite candidate for
+    that monolith exactly like a restored one.
+
+    Before this, `_choose_composite_replacements` only ever saw pieces that
+    Hybrid had first DELETED and a guard then restored (`hybrid_
+    complementary_delivery_guard`'s `restore_complete_complementary_
+    delivery_with_unique_tail`, the performance-only restore above). RAW
+    #125: the two short complementary skin deliveries were deleted as
+    cross-group retries of the long take, restored for their unique tails,
+    and the composite then replaced the long take -- the reference edit.
+    RAW #126: the same two deliveries were never deleted, so this authority
+    never looked at them; the long take survived into grouping, paired with
+    the first short delivery, won the family, and the short delivery was
+    lost. The editorial question ("do two complementary complete deliveries
+    jointly cover this monolith?") must not depend on whether a deletion
+    happened first. This function applies the SAME association criterion
+    the complementary guard applies to a deletion (same-source strong
+    winner/keep peer, >= 2 shared content tokens, >= 0.50 of the
+    candidate's own content covered by the peer, a unique tail of >= 0.15,
+    complete, >= 3 s, never `failed` at the Resolver's unusable floor)
+    to kept deliveries, and returns rows in the restored-row shape. The
+    composite conditions themselves (`_choose_composite_replacements`)
+    are unchanged. No phrase, id, timestamp or new threshold."""
+    rows: list[dict] = []
+    for candidate in kept:
+        if not bool(candidate.complete_idea) or candidate.duration_sec < 3.0:
+            continue
+        label, confidence = semantic.get(candidate.clip_id, ("", 0.0))
+        if _semantically_unusable(label, confidence):
+            continue
+        own = _content(candidate.text)
+        if len(own) < 4:
+            continue
+        best = None
+        best_shared = 0
+        best_coverage = 0.0
+        best_unique: set[str] = set()
+        for peer in kept:
+            if peer.clip_id == candidate.clip_id or peer.source_asset_id != candidate.source_asset_id:
+                continue
+            if _gap(candidate, peer) > maximum_gap_sec:
+                continue
+            peer_label, peer_conf = semantic.get(peer.clip_id, ("", 0.0))
+            if peer_label not in {"winner", "keep"} or peer_conf < 0.80:
+                continue
+            peer_content = _content(peer.text)
+            if len(peer_content) < 6 or len(peer_content) <= len(own):
+                continue  # a composite replaces a MONOLITH: the peer must carry more content than the piece
+            shared = len(own & peer_content)
+            coverage = shared / max(1, len(own))
+            unique = own - peer_content
+            if shared > best_shared or (shared == best_shared and coverage > best_coverage):
+                best = peer
+                best_shared = shared
+                best_coverage = coverage
+                best_unique = unique
+        if best is None or best_shared < 2 or best_coverage < 0.50:
+            continue
+        unique_fraction = len(best_unique) / max(1, len(own))
+        if not best_unique or unique_fraction < 0.15:
+            continue
+        rows.append({
+            "clip_id": candidate.clip_id,
+            "peer_clip_id": best.clip_id,
+            "reason": "kept_complete_complementary_delivery_for_composite_best_take",
+            "semantic_label": label,
+            "semantic_confidence": round(float(confidence), 4),
+            "shared_content_tokens": best_shared,
+            "coverage": round(best_coverage, 4),
+            "unique_content_tokens": sorted(best_unique),
+            "unique_fraction": round(unique_fraction, 4),
+        })
+    return rows
+
+
 def _delete_strong_prefix_prior_restarts(
     kept: tuple[CandidateTake, ...],
     semantic: dict[str, tuple[str, float]],
@@ -478,7 +560,18 @@ def install_hybrid_composite_best_take() -> None:
                 if strong_delete_ids:
                     kept = tuple(take for take in kept if take.clip_id not in strong_delete_ids)
 
-            restored_rows = [*_existing_restored_rows(result.diagnostics), *perf_restore_rows]
+            # D-291.5: kept complementary deliveries are candidates too (see
+            # `_kept_complementary_rows`); a clip already restored keeps its
+            # restored row (first occurrence wins, one row per clip).
+            kept_complementary_rows = _kept_complementary_rows(kept, semantic)
+            seen_candidate_ids = {
+                str(row.get("clip_id") or "")
+                for row in (*_existing_restored_rows(result.diagnostics), *perf_restore_rows)
+            }
+            kept_complementary_rows = [
+                row for row in kept_complementary_rows if row["clip_id"] not in seen_candidate_ids
+            ]
+            restored_rows = [*_existing_restored_rows(result.diagnostics), *perf_restore_rows, *kept_complementary_rows]
             suppress_ids, split_ids, composite_rows = _choose_composite_replacements(
                 kept,
                 semantic,
@@ -500,6 +593,10 @@ def install_hybrid_composite_best_take() -> None:
                     "deleted_strong_prefix_unavailable_restarts": strong_delete_rows,
                     "composite_replacements": composite_rows,
                     "split_group_clip_ids": sorted(split_ids),
+                    # D-291.5: kept complementary candidates offered to the
+                    # composite judgment (observability; only the rows in
+                    # `composite_replacements` changed anything).
+                    "kept_complementary_candidates": kept_complementary_rows,
                 },
                 "restored_ids": sorted(perf_restore_ids),
                 "deleted_ids": sorted(strong_delete_ids | suppress_ids),

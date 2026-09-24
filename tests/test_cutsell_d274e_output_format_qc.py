@@ -684,7 +684,13 @@ def test_diagnostics_never_carry_secrets(rendered_output_mp4):
     # precedent in test_cutsell_d269a_live_tenant_safe_delivery.py (which
     # documents the D-282 uploads.py/main.py precedent this follows).
     "cutsell_worker/post_render_media_qc.py",
-    "cutsell_worker/live_render_qc.py",
+    # live_render_qc.py removed from this closed-track list: D-291.6 (a
+    # later, separately-authorized gate on the isolated editorial branch)
+    # legitimately supplies the frozen draft's word timings to the live
+    # physical repair (`protected_speech_by_clip_id`) so the repair never
+    # trims into speech -- same self-resolving-guard pattern as the D-288
+    # removals above (docs/CUTSELL_DECISIONS.md D-291.6 has the full
+    # disclosure).
 ])
 def test_closed_track_files_unmodified_by_this_gate(relative_path):
     """D-274E's own scope is additive-only: a NEW module (`output_format_

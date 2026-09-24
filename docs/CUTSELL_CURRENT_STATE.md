@@ -612,3 +612,38 @@ kept), and R+T were kept (no family with W): Level-1 selection 31.66 s vs
 21.96 s in #125. Provider grouping variance, not D-291.2. Artifacts (JSON,
 MP4, validator reports) unreachable from the container; QA/acceptance
 failed for reasons not yet read. No Watch+Listen yet. No relaunch.
+
+### D-291.5 — kept complementary deliveries compete for the composite Best Take
+
+Mechanism shown with #125's JSON and #126's log: in #125 the monolithic
+skin retry M was deleted, restored as a unique tail and only THEN judged
+against A1 + L by `hybrid_composite_best_take` (M out); in #126 M was never
+deleted, so no authority compared it with the two complete complementary
+deliveries and the {A1, M} family label decided (A1 out, M kept 12 s). Fix
+in the same authority: a kept complete complementary delivery is a
+composite candidate on the complementary guard's own association
+criterion; the composite criteria are unchanged. 10 refuting tests; D-291
+harness uses a genuine two-take family. Offline only; not proven on media.
+
+### D-291.6 — live post-render repair: in-window clamp + word floor
+
+Executed path audited (`apply_post_freeze_boundary_pass` -> `render_with_
+post_render_qc` -> Watch+Listen v1 advisory; `perceptual_repair_cycle`
+still has zero importers). Defect: the live technical repair trimmed a
+straddling silence by its whole duration from one edge (up to 0.6 s of
+speech) and consulted no word boundary on either edge. Fix in
+`live_boundary_repair` + `live_render_qc`: trim only the defect measured
+inside the segment's window; never enter a word (frozen draft words);
+zero-extent join findings need evidence of room or are refused
+(`PHYSICAL_FAIL_UNREPAIRABLE`, recorded). 13 refuting tests; D-097.4
+behaviour without word evidence unchanged. Pending: 4 `NOT_IMPLEMENTED`
+Watch+Listen capabilities, the disconnected perceptual repair cycle, no
+mid-segment repair, no gesture/pose model for pause-vs-restart.
+
+### D-291.7 — RAW retrieval block
+
+Artifact host denied by the network policy, AWS keys invalid, logs capped
+at 5,000 lines; `*.githubusercontent.com` reachable. A relay workflow to
+release assets was refused by the session's permission layer and NOT
+added. The ONE authorized RAW is unspent until the Product Owner allows the
+host, attaches run 35931561397's artifacts, or approves the relay.
