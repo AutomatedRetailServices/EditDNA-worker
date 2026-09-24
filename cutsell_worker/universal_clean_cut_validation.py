@@ -312,6 +312,9 @@ def _validation_asr(config, *, env=None):
     """Build the RAW harness ASR through the same gated decode policy as production."""
     values = os.environ if env is None else env
     provider = values.get("CUTSELL_VALIDATION_ASR_PROVIDER", "faster-whisper").strip()
+    if provider == "deepgram-nova-3-multi":
+        from .deepgram_asr import DeepgramASR
+        return DeepgramASR()
     if provider == "gpt-transcribe-whisperx":
         from .gpt_whisperx_asr import GPTWhisperXASR
         return GPTWhisperXASR()

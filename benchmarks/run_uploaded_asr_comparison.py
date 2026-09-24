@@ -21,6 +21,9 @@ OUT = ROOT / "uploaded-comparison-artifacts"
 
 def prepare(existing_source_key=None, single_provider=False):
     import requests
+    selected_provider = os.environ.get("UPLOAD_SINGLE_PROVIDER", "gpt-whisperx")
+    if selected_provider not in {"gpt-whisperx", "deepgram"}:
+        raise ValueError("Unsupported single provider")
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -41,8 +44,9 @@ def prepare(existing_source_key=None, single_provider=False):
     env = {str(k): str(v) for k, v in templates[0]["env"].items()}
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     env.update(OVERLAYS, CUTSELL_BUILD_GIT_SHA=head, CUTSELL_ASR_MODEL="medium")
-    if not env.get("OPENAI_API_KEY") or env["OPENAI_API_KEY"].startswith("sk-admin-"):
-        raise RuntimeError("Ordinary OpenAI inference key missing; no GPU started")
+    required_key = "DEEPGRAM_API_KEY" if selected_provider == "deepgram" else "OPENAI_API_KEY"
+    if not env.get(required_key) or env[required_key].startswith("sk-admin-"):
+        raise RuntimeError("Required inference key missing; no GPU started")
     for k, v in env.items():
         if v and (len(v) >= 12 or any(s in k for s in ("KEY", "TOKEN", "SECRET"))) and k not in OVERLAYS and k != "CUTSELL_BUILD_GIT_SHA":
             print("::add-mask::" + v.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))
@@ -66,10 +70,10 @@ def prepare(existing_source_key=None, single_provider=False):
     write_json(PRIVATE / "source.json", {"key": key})
     write_json(OUT / "manifest.json", {"source_sha256": EXPECTED_SHA, "source_bytes": EXPECTED_BYTES,
         "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 1 if existing_source_key or single_provider else 2,
-        "providers": ["gpt-transcribe-whisperx"] if existing_source_key or single_provider else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
+        "providers": ["deepgram-nova-3-multi" if selected_provider == "deepgram" else "gpt-transcribe-whisperx"] if existing_source_key or single_provider else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
         "same_template_snapshot": True, "auto_speech_visual_microtrim": True})
     if existing_source_key or single_provider:
-        write_json(PRIVATE / "single-provider.json", {"provider": "gpt-whisperx"})
+        write_json(PRIVATE / "single-provider.json", {"provider": selected_provider})
     print("Source preflight prepared; no GPU call yet")
 
 
@@ -99,11 +103,13 @@ def await_upload():
 
 
 def run(provider):
-    if provider not in {"medium", "gpt-whisperx"} or os.environ.get("GITHUB_RUN_ATTEMPT") != "1":
-        raise RuntimeError("Only the two authorized provider calls are supported")
+    if provider not in {"medium", "gpt-whisperx", "deepgram"} or os.environ.get("GITHUB_RUN_ATTEMPT") != "1":
+        raise RuntimeError("Unsupported provider or repeat attempt")
     if not (PRIVATE / "source.verified").exists() or (PRIVATE / "STOP").exists():
         raise RuntimeError("Source or prior terminal-state preflight failed")
     single = PRIVATE / "single-provider.json"
+    if provider == "deepgram" and not single.exists():
+        raise RuntimeError("Deepgram requires explicit single-provider mode")
     if single.exists() and provider != json.loads(single.read_text())["provider"]:
         raise RuntimeError("Provider outside single-run authorization")
     if provider == "gpt-whisperx" and not single.exists() and not (PRIVATE / "medium.terminal").exists():
@@ -111,7 +117,7 @@ def run(provider):
     with (PRIVATE / f"{provider}.claimed").open("x") as f:
         f.write("No retry")
     env = json.loads((PRIVATE / "environment.json").read_text())
-    env["CUTSELL_VALIDATION_ASR_PROVIDER"] = "faster-whisper" if provider == "medium" else "gpt-transcribe-whisperx"
+    env["CUTSELL_VALIDATION_ASR_PROVIDER"] = {"medium": "faster-whisper", "gpt-whisperx": "gpt-transcribe-whisperx", "deepgram": "deepgram-nova-3-multi"}[provider]
     config = PRIVATE / f"{provider}.json"
     write_json(config, env)
     key = json.loads((PRIVATE / "source.json").read_text())["key"]

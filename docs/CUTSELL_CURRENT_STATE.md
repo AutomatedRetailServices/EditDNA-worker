@@ -824,3 +824,15 @@ and provider effects are not isolated. No editor invocation, GPU or production
 change. Manual-only restored at 283b11a. Artifact 10836188777 verified SHA256
 8987fa7cb8b8cfcc44e5d81d4b45b5fbeefb39d99ddcb23796333d9bf7b79352.
 No further paid request authorized.
+
+
+## Authorized Deepgram full-engine experiment in progress
+
+Product Owner requested the edited video from Deepgram. Added opt-in RAW
+Deepgram provider, native word timing validation, per-job successful source
+cache, no fallback or invented timestamps. Defaults and editorial authorities
+unchanged. One full-engine L4 run on the 97-second MOV authorized. Nova-3 multi
+with punctuation for sentence grouping, no WhisperX. Native positive overlapping
+word ranges are retained and counted, not silently altered (observed in prior
+real payload); segment bounds enclose all words. Prior real 268-word response
+preserves every word. Results pending.
