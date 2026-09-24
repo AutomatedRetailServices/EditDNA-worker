@@ -135,7 +135,7 @@ def run_asr_only_benchmark(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not source_key:
         raise ValueError("source_key is required")
     text_provider = str(payload.get("text_provider") or "").strip()
-    if text_provider not in {"", "gpt-transcribe", "deepgram-nova-3-multi"}:
+    if text_provider not in {"", "gpt-4o-transcribe", "deepgram-nova-3-multi"}:
         raise ValueError("unsupported ASR text comparison provider")
     safe_id = _safe_id(payload.get("benchmark_id"), "asr-only")
     language_hint = payload.get("language_hint")
