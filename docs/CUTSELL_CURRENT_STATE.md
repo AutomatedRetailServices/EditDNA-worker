@@ -773,4 +773,12 @@ same source and checkout. Source SHA-256: `c9d892629f19d49058246e79bb57eb0af10bd
 changes, no Video00-specific acceptance oracle, no retries or production
 promotion. Source upload uses a short-lived one-object PUT capability encrypted
 to an ephemeral public key; cloud credentials remain in the existing runner.
-Source bytes must verify before any GPU call. Results pending.
+Source bytes verified before both GPU calls. Completed run `36062782881` at
+`89bb9c9bceb40264d5911677de790088b204232a`; both Modal apps stopped.
+Medium: 168 words, ten zero-duration words, four selected fragments, 16-second
+MP4; technical QC PASS but perceptual repeated-content FAIL blocks delivery.
+GPT + WhisperX: 157 words, zero zero-duration words, ASR passed (two requests);
+one selected 3.66-second fragment, coherence/content-loss review blocked
+freeze and render. No GPT MP4 exists. Neither result is approved.
+Manual-only workflow restored at `0be700b`; no further paid calls or promotion.
+See `CUTSELL_UPLOADED_ASR_COMPARISON.md`.
