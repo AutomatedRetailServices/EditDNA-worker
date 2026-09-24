@@ -13,13 +13,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from benchmarks.run_video00_gpt_whisperx_stability import OVERLAYS, require_media_tools, s3_client, write_json
 
-EXPECTED_SHA = "c9d892629f19d49058246e79bb57eb0af10bdf123416122307aa0bcd5c91cb14"
-EXPECTED_BYTES = 12429383
+EXPECTED_SHA = os.environ.get("UPLOAD_EXPECTED_SHA", "c9d892629f19d49058246e79bb57eb0af10bdf123416122307aa0bcd5c91cb14")
+EXPECTED_BYTES = int(os.environ.get("UPLOAD_EXPECTED_BYTES", "12429383"))
 PRIVATE = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "cutsell-upload-comparison"
 OUT = ROOT / "uploaded-comparison-artifacts"
 
 
-def prepare(existing_source_key=None):
+def prepare(existing_source_key=None, single_provider=False):
     import requests
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
@@ -65,10 +65,10 @@ def prepare(existing_source_key=None):
             "nonce": base64.b64encode(nonce).decode(), "ciphertext": base64.b64encode(ciphertext).decode()})
     write_json(PRIVATE / "source.json", {"key": key})
     write_json(OUT / "manifest.json", {"source_sha256": EXPECTED_SHA, "source_bytes": EXPECTED_BYTES,
-        "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 1 if existing_source_key else 2,
-        "providers": ["gpt-transcribe-whisperx"] if existing_source_key else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
+        "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 1 if existing_source_key or single_provider else 2,
+        "providers": ["gpt-transcribe-whisperx"] if existing_source_key or single_provider else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
         "same_template_snapshot": True, "auto_speech_visual_microtrim": True})
-    if existing_source_key:
+    if existing_source_key or single_provider:
         write_json(PRIVATE / "single-provider.json", {"provider": "gpt-whisperx"})
     print("Source preflight prepared; no GPU call yet")
 
@@ -177,4 +177,4 @@ def run(provider):
 
 
 if __name__ == "__main__":
-    {"prepare-existing": lambda: prepare(sys.argv[2]), "prepare": prepare, "await-upload": await_upload, "run": lambda: run(sys.argv[2])}[sys.argv[1]]()
+    {"prepare-single": lambda: prepare(single_provider=True), "prepare-existing": lambda: prepare(sys.argv[2]), "prepare": prepare, "await-upload": await_upload, "run": lambda: run(sys.argv[2])}[sys.argv[1]]()
