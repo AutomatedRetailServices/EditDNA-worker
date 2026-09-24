@@ -23,9 +23,6 @@ name: CutSell Video00 Modal RAW
 # "exact test head" guarantee for this backend. The checked-out commit SHA
 # is still printed for the record.
 on:
-  push:
-    branches: [feat/gpt-whisperx-video00]
-    paths: [.github/workflows/cutsell-video00-modal-raw.yml]
   workflow_dispatch:
     inputs:
       asr_provider:
@@ -437,13 +434,11 @@ env:
   # -- same rule as Human Gold: never read by production code, never in the payload,
   # and (D-228) Video00-specific only.
   CUTAI_REFERENCE_KEY: Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4
-  CUTSELL_VALIDATION_ASR_PROVIDER: ${{ github.event.inputs.asr_provider || 'gpt-transcribe-whisperx' }}
+  CUTSELL_VALIDATION_ASR_PROVIDER: ${{ github.event.inputs.asr_provider || 'faster-whisper' }}
   BENCHMARK_ID: video00-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   video00-modal-raw:
-    if: >-
-      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.event.head_commit.message == 'run(asr): authorized single Video00 GPT WhisperX full engine'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
