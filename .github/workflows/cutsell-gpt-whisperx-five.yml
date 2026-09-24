@@ -3,9 +3,6 @@ name: CutSell GPT WhisperX Five Full Trials
 # Five explicitly authorized full RAW calls; no automatic paid reruns.
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/gpt-whisperx-video00]
-    paths: [.github/workflows/cutsell-gpt-whisperx-five.yml]
 
 permissions:
   contents: read
@@ -16,10 +13,7 @@ concurrency:
 
 jobs:
   five-trials:
-    if: >-
-      github.run_attempt == 1 &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event_name == 'push' && github.event.head_commit.message == 'run(asr): five authorized GPT WhisperX full trials'))
+    if: github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
