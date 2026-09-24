@@ -140,7 +140,7 @@ def run_asr_only_benchmark(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not config.s3_bucket:
         raise RuntimeError("S3_BUCKET is required")
 
-    asr_provider: FasterWhisperASR = load_asr_provider_from_env(model_name=config.asr_model)
+    # An explicit ASR-only comparison never changes the production model.\n    # Restrict to reviewed multilingual Whisper sizes; arbitrary model paths\n    # could load untrusted weights on the GPU worker.\n    candidate_model = str(payload.get("model_name") or config.asr_model).strip()\n    if candidate_model not in {"medium", "large-v3"}:\n        raise ValueError("unsupported ASR comparison model")\n    asr_provider: FasterWhisperASR = load_asr_provider_from_env(model_name=candidate_model)
     source_id = stable_source_id(safe_id, 0, Path(source_key).name)
     source = SourceAsset(
         source_asset_id=source_id,
