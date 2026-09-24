@@ -14,6 +14,10 @@ name: CutSell ASR-Only Modal Benchmark
 # (baseline, flag OFF) and Section 8 (candidate, flag ON) can both be run
 # from this one workflow without editing YAML between runs.
 on:
+  # One user-requested Deepgram comparison; removed after this launch.
+  push:
+    branches: [feat/asr-provider-evaluation-and-replay]
+    paths: [.github/workflows/cutsell-asr-only-modal.yml]
   workflow_dispatch:
     inputs:
       deterministic_config:
@@ -44,6 +48,8 @@ env:
 
 jobs:
   asr-only-modal:
+    if: >-
+      github.event_name != 'push' || (github.run_attempt == 1 && startsWith(github.event.head_commit.message, 'test(asr): compare Video00 with Deepgram'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -104,7 +110,7 @@ jobs:
           # candidate-vs-baseline variable. No hybrid/resolver overlays are
           # applied here (unlike cutsell-video00-modal-raw.yml) -- this
           # harness never reaches those stages.
-          DETERMINISTIC="${{ inputs.deterministic_config && '1' || '0' }}"
+          DETERMINISTIC="${{ (github.event_name == 'push' || inputs.deterministic_config) && '1' || '0' }}"
           jq -c --arg det "$DETERMINISTIC" '(.env // {}) + {CUTSELL_ASR_DETERMINISTIC_CONFIG:$det}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
@@ -139,13 +145,38 @@ jobs:
           set -euo pipefail
           jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
             --arg model "${{ inputs.model_name || 'medium' }}" \
-            --arg comparator "${{ inputs.text_provider || 'none' }}" \
+            --arg comparator "${{ inputs.text_provider || (github.event_name == 'push' && 'deepgram-nova-3-multi' || 'none') }}" \
             '{source_key:$source,benchmark_id:$benchmark,model_name:$model} +
               (if $comparator == "none" then {} else {text_provider:$comparator} end)' \
             > /tmp/payload.json
           echo "CUTSELL_ASR_ONLY_PAYLOAD_JSON=$(cat /tmp/payload.json)" >> "$GITHUB_ENV"
           echo "--- payload ---"
           jq . /tmp/payload.json
+
+      - name: Verify requested provider credential before GPU
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(os.environ["CUTSELL_ASR_ONLY_PAYLOAD_JSON"])
+          provider = payload.get("text_provider", "none")
+          key_name = {
+              "gpt-transcribe": "OPENAI_API_KEY",
+              "gpt-4o-transcribe": "OPENAI_API_KEY",
+              "deepgram-nova-3-multi": "DEEPGRAM_API_KEY",
+          }.get(provider)
+          if key_name:
+              config = json.loads(Path(os.environ["CUTSELL_ENV_JSON_PATH"]).read_text())
+              present = bool(str(config.get(key_name) or "").strip())
+              print(f"Requested provider: {provider}; {key_name} present: {present}")
+              if not present:
+                  raise SystemExit(f"{key_name} is missing from the worker template. Stopped before any GPU or provider request.")
+          else:
+              print("No external ASR provider requested.")
+          PY
 
       - name: Run Modal ASR-only benchmark
         id: modal_asr_only
