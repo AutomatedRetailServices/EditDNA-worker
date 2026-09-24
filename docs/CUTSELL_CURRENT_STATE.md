@@ -875,3 +875,12 @@ silence at output 42.9635–44.4669; diagnostic MP4 only. No human listening or
 universal ASR superiority claim. Modal stopped. Artifact reports 10837364760;
 parts 10837424599/10837324883; SHA digests verified. Manual-only restored at
 1bfe30f8. No Watch & Listen fix or production change; no further paid call.
+
+
+## Five Deepgram Video00 trials newly authorized
+
+Product Owner requested five full-engine Video00 outputs for comparison with
+the five existing GPT + WhisperX trials. Exactly five new sequential calls,
+one frozen environment snapshot, same source and checkout, fresh provider per
+trial, no cross-trial transcript reuse or automatic retries. No editorial
+changes; reuse identical Video00 criteria. Results pending.

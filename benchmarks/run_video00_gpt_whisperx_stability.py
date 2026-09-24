@@ -22,7 +22,10 @@ sys.path.insert(0, str(ROOT))
 TRIAL_COUNT = 5
 SOURCE_KEY = "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4"
 SOURCE_SHA256 = "b37059b1790cf3eb0447bb54595cc99f6668aadc5f65dafa9cdf6181621ef9f5"
-PROVIDER = "gpt-transcribe-whisperx"
+PROVIDER = os.environ.get("CUTSELL_STABILITY_PROVIDER", "gpt-transcribe-whisperx")
+if PROVIDER not in {"gpt-transcribe-whisperx", "deepgram-nova-3-multi"}:
+    raise ValueError("Unsupported stability provider")
+TRIAL_TAG = "deepgram" if PROVIDER == "deepgram-nova-3-multi" else "gptwx"
 OVERLAYS = {
     "CUTSELL_HYBRID_LLM_ENABLED": "1",
     "CUTSELL_HYBRID_PROVIDER": "google",
@@ -102,9 +105,9 @@ def prepare() -> None:
     env = {str(k): str(v) for k, v in matches[0]["env"].items()}
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     env.update(OVERLAYS, CUTSELL_BUILD_GIT_SHA=head)
-    key = env.get("OPENAI_API_KEY", "").strip()
+    key = env.get("DEEPGRAM_API_KEY" if TRIAL_TAG == "deepgram" else "OPENAI_API_KEY", "").strip()
     if not key or key.startswith("sk-admin-"):
-        raise RuntimeError("Ordinary OpenAI inference key missing; no GPU started")
+        raise RuntimeError("Required inference key missing; no GPU started")
     for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET"):
         if not env.get(name):
             raise RuntimeError(f"Missing required environment variable: {name}")
@@ -127,7 +130,7 @@ def prepare() -> None:
     output = ROOT / "stability-artifacts"
     output.mkdir(exist_ok=True)
     write_json(output / "batch.json", {
-        "schema": "cutsell.gpt_whisperx_stability.v1", "authorized_trials": TRIAL_COUNT,
+        "schema": "cutsell.asr_provider_stability.v1", "authorized_trials": TRIAL_COUNT,
         "run_id": os.environ["GITHUB_RUN_ID"], "build_sha": head,
         "package": lock["package"], "source_key": SOURCE_KEY,
         "expected_source_sha256": SOURCE_SHA256, "overlays": OVERLAYS,
@@ -142,7 +145,7 @@ def collect(compact: dict, env: dict, output: Path, index: int) -> dict:
     from benchmarks.validate_video00_regression_qa import validate
     client = s3_client(env)
     downloads = [("result_uri", "result.json"),
-                 ("preview_uri", f"Video00_GPT_WhisperX_Prueba_{index}.mp4"),
+                 ("preview_uri", f"Video00_{TRIAL_TAG}_Prueba_{index}.mp4"),
                  ("diagnostic_preview_uri", f"Video00_Prueba_{index}_INVALIDADO.mp4")]
     for field, filename in downloads:
         if compact.get(field):
@@ -199,7 +202,7 @@ def run_trial(index: int) -> None:
     claim_trial(private, index)
     output = ROOT / "stability-artifacts" / f"trial-{index}"
     output.mkdir(exist_ok=False)
-    benchmark_id = f"video00-gptwx-five-{os.environ['GITHUB_RUN_ID']}-{index}"
+    benchmark_id = f"video00-{TRIAL_TAG}-five-{os.environ['GITHUB_RUN_ID']}-{index}"
     env = json.loads(config.read_text())
     child_env = dict(os.environ)
     for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "S3_BUCKET"):

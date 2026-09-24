@@ -1,0 +1,697 @@
+name: CutSell Deepgram Five Full Trials
+
+# Five explicitly authorized full RAW calls; no automatic paid reruns.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  five-trials:
+    if: >-
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized five Deepgram Video00 trials')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      CUTSELL_VALIDATION_ASR_PROVIDER: deepgram-nova-3-multi
+      CUTSELL_STABILITY_PROVIDER: deepgram-nova-3-multi
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Install transport and CPU QA dependencies
+        run: |
+          pip install --disable-pip-version-check --quiet modal boto3 'numpy>=1.26,<3' 'requests>=2.32.3'
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+
+      - name: Freeze one configuration and preflight credentials and source
+        id: prepare
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py prepare
+
+      - name: Full engine trial 1 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 1
+
+      - name: Package trial 1
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/package_stability_trial.py 1
+      - name: Preserve trial 1 reports
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-reports
+          path: stability-transfer/trial-1/reports/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 A
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-A
+          path: stability-transfer/trial-1/A/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 B
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-B
+          path: stability-transfer/trial-1/B/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 C
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-C
+          path: stability-transfer/trial-1/C/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 D
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-D
+          path: stability-transfer/trial-1/D/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 E
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-E
+          path: stability-transfer/trial-1/E/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 F
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-F
+          path: stability-transfer/trial-1/F/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 G
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-G
+          path: stability-transfer/trial-1/G/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 H
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-H
+          path: stability-transfer/trial-1/H/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 I
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-I
+          path: stability-transfer/trial-1/I/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 J
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-J
+          path: stability-transfer/trial-1/J/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 K
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-K
+          path: stability-transfer/trial-1/K/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 1 L
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-1-L
+          path: stability-transfer/trial-1/L/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 2 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 2
+
+      - name: Package trial 2
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/package_stability_trial.py 2
+      - name: Preserve trial 2 reports
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-reports
+          path: stability-transfer/trial-2/reports/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 A
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-A
+          path: stability-transfer/trial-2/A/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 B
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-B
+          path: stability-transfer/trial-2/B/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 C
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-C
+          path: stability-transfer/trial-2/C/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 D
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-D
+          path: stability-transfer/trial-2/D/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 E
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-E
+          path: stability-transfer/trial-2/E/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 F
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-F
+          path: stability-transfer/trial-2/F/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 G
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-G
+          path: stability-transfer/trial-2/G/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 H
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-H
+          path: stability-transfer/trial-2/H/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 I
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-I
+          path: stability-transfer/trial-2/I/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 J
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-J
+          path: stability-transfer/trial-2/J/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 K
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-K
+          path: stability-transfer/trial-2/K/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 2 L
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-2-L
+          path: stability-transfer/trial-2/L/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 3 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 3
+
+      - name: Package trial 3
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/package_stability_trial.py 3
+      - name: Preserve trial 3 reports
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-reports
+          path: stability-transfer/trial-3/reports/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 A
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-A
+          path: stability-transfer/trial-3/A/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 B
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-B
+          path: stability-transfer/trial-3/B/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 C
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-C
+          path: stability-transfer/trial-3/C/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 D
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-D
+          path: stability-transfer/trial-3/D/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 E
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-E
+          path: stability-transfer/trial-3/E/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 F
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-F
+          path: stability-transfer/trial-3/F/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 G
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-G
+          path: stability-transfer/trial-3/G/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 H
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-H
+          path: stability-transfer/trial-3/H/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 I
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-I
+          path: stability-transfer/trial-3/I/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 J
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-J
+          path: stability-transfer/trial-3/J/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 K
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-K
+          path: stability-transfer/trial-3/K/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 3 L
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-3-L
+          path: stability-transfer/trial-3/L/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 4 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 4
+
+      - name: Package trial 4
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/package_stability_trial.py 4
+      - name: Preserve trial 4 reports
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-reports
+          path: stability-transfer/trial-4/reports/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 A
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-A
+          path: stability-transfer/trial-4/A/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 B
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-B
+          path: stability-transfer/trial-4/B/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 C
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-C
+          path: stability-transfer/trial-4/C/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 D
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-D
+          path: stability-transfer/trial-4/D/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 E
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-E
+          path: stability-transfer/trial-4/E/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 F
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-F
+          path: stability-transfer/trial-4/F/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 G
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-G
+          path: stability-transfer/trial-4/G/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 H
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-H
+          path: stability-transfer/trial-4/H/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 I
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-I
+          path: stability-transfer/trial-4/I/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 J
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-J
+          path: stability-transfer/trial-4/J/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 K
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-K
+          path: stability-transfer/trial-4/K/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 4 L
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-4-L
+          path: stability-transfer/trial-4/L/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Full engine trial 5 of 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py trial 5
+
+      - name: Package trial 5
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/package_stability_trial.py 5
+      - name: Preserve trial 5 reports
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-reports
+          path: stability-transfer/trial-5/reports/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 A
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-A
+          path: stability-transfer/trial-5/A/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 B
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-B
+          path: stability-transfer/trial-5/B/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 C
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-C
+          path: stability-transfer/trial-5/C/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 D
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-D
+          path: stability-transfer/trial-5/D/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 E
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-E
+          path: stability-transfer/trial-5/E/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 F
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-F
+          path: stability-transfer/trial-5/F/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 G
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-G
+          path: stability-transfer/trial-5/G/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 H
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-H
+          path: stability-transfer/trial-5/H/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 I
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-I
+          path: stability-transfer/trial-5/I/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 J
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-J
+          path: stability-transfer/trial-5/J/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 K
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-K
+          path: stability-transfer/trial-5/K/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+      - name: Preserve trial 5 L
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepgram-five-5-L
+          path: stability-transfer/trial-5/L/
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Aggregate all five outcomes and editorial gate
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: python benchmarks/run_video00_gpt_whisperx_stability.py finalize
+
+      - name: Preserve batch manifest and comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-deepgram-five-summary
+          path: |
+            stability-artifacts/batch.json
+            stability-artifacts/five-trial-summary.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Remove private configuration snapshot
+        if: always()
+        run: python -c 'import os, shutil; from pathlib import Path; shutil.rmtree(Path(os.environ["RUNNER_TEMP"]) / "cutsell-five-private", ignore_errors=True)'
