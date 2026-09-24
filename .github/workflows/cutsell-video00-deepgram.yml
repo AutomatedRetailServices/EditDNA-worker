@@ -1,8 +1,6 @@
 name: CutSell Video00 Deepgram
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/gpt-whisperx-video00]
 permissions:
   contents: read
 concurrency:
