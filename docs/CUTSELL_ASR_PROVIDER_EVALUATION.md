@@ -171,3 +171,29 @@ better candidate on this test's repeated-sentence failure. Critical word
 accuracy, GPT repeatability and cross-video performance remain unqualified.
 Its text remains `selection_authority=False`; no word-alignment or production
 promotion was performed. One successful request is not editorial acceptance.
+
+
+## Deepgram credential recheck — 2026-09-24 18:32 UTC
+
+After the user added Deepgram to the requested comparison, run
+https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/36041858862
+(SHA `709760bbc9d18369a4013fe667f908a89154cc0f`, job `107775698719`)
+checked the live `EditDNA-Worker-2` template. It reported
+`DEEPGRAM_API_KEY present: False`. The new generic provider-credential gate
+stopped before any Modal GPU or Deepgram request; **no Deepgram transcript
+was produced and no paid ASR comparison was consumed**. Creating the account
+does not itself install the key in the worker environment.
+
+The branch-only launch trigger was removed at
+`6b97dfc22389128f7acd68943f4c0c38d98abc95`. The workflow remains manual-only;
+the credential gate is retained for future explicitly requested providers.
+Offline checks exercised missing, blank, present and no-provider cases and
+confirmed the key value is never printed. A separate self-review in the same
+session checked the single-job guard, no retries and pre-GPU ordering.
+The summary now runs only if Modal actually supplied an exit code, avoiding
+misreporting a credential preflight stop as an attempted GPU failure.
+
+Outstanding input: connect an authorized Deepgram API key as
+`DEEPGRAM_API_KEY` in the existing worker template. Once available, the
+requested Video00 comparison can use the existing `nova-3`/`language=multi`
+adapter. Production still uses Medium; no winner is declared for Deepgram.

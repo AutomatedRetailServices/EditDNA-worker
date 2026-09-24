@@ -713,3 +713,10 @@ earlier 623-word attribution to that run. The workflow is manual-only again
 at d47221f9; no further paid run was launched.
 See `CUTSELL_ASR_PROVIDER_EVALUATION.md` for qualification and live evidence.
 Canonical/production editing remains unchanged.
+
+
+Deepgram follow-up (2026-09-24 18:32 UTC): requested Video00 comparison
+stopped at credential preflight in run 36041858862 because the live
+`EditDNA-Worker-2` template still lacks `DEEPGRAM_API_KEY`. No GPU or Deepgram
+request occurred. The comparison awaits that credential; manual-only workflow
+restored at 6b97dfc2. See the ASR evaluation document for exact evidence.

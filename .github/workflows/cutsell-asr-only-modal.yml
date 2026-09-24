@@ -191,7 +191,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Print Modal run summary
-        if: always()
+        if: always() && steps.modal_asr_only.outputs.exit_code != ''
         shell: bash
         run: |
           if [ "${{ steps.modal_asr_only.outputs.exit_code }}" != "0" ]; then
