@@ -21,7 +21,7 @@ import tempfile
 import time
 from typing import Any
 
-from .asr import FasterWhisperASR
+from .asr import load_asr_provider_from_env
 from .brain_runtime import build_brain_runtime
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
@@ -348,7 +348,7 @@ def run_single_universal_clean_cut_validation(
         language_hint=language_hint,
     )
 
-    asr = FasterWhisperASR(model_name=config.asr_model)
+    asr = load_asr_provider_from_env(model_name=config.asr_model)
 
     started = time.monotonic()
     preview_path = None
