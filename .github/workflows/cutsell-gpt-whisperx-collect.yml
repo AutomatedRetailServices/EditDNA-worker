@@ -1,8 +1,5 @@
 name: CutSell Five Trial Artifact Collection (CPU only)
 on:
-  push:
-    branches: [feat/gpt-whisperx-video00]
-    paths: [.github/workflows/cutsell-gpt-whisperx-collect.yml]
   workflow_dispatch:
     inputs:
       source_run_id:
@@ -14,9 +11,6 @@ permissions:
   actions: read
 jobs:
   collect:
-    if: >-
-      github.run_attempt == 1 &&
-      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'collect(asr): retrieve five authorized trial artifacts without GPU')
     runs-on: ubuntu-latest
     timeout-minutes: 80
     env:
