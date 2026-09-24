@@ -25,6 +25,11 @@ on:
         type: choice
         options: [medium, large-v3]
         default: medium
+      text_provider:
+        description: "Optional paid, text-only comparator (no edit authority)"
+        type: choice
+        options: [none, gpt-transcribe, deepgram-nova-3-multi]
+        default: none
 
 concurrency:
   group: cutsell-asr-only-modal-${{ github.ref }}
@@ -134,7 +139,8 @@ jobs:
           set -euo pipefail
           jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
             --arg model "${{ inputs.model_name || 'medium' }}" \
-            '{source_key:$source,benchmark_id:$benchmark,model_name:$model}' \
+            --arg comparator "${{ inputs.text_provider || 'none' }}" \
+            '{source_key:$source,benchmark_id:$benchmark,model_name:$model} +\n              (if $comparator == "none" then {} else {text_provider:$comparator} end)' \
             > /tmp/payload.json
           echo "CUTSELL_ASR_ONLY_PAYLOAD_JSON=$(cat /tmp/payload.json)" >> "$GITHUB_ENV"
           echo "--- payload ---"
