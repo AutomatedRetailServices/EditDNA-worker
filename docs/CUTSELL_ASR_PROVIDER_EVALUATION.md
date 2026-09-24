@@ -197,3 +197,8 @@ Outstanding input: connect an authorized Deepgram API key as
 `DEEPGRAM_API_KEY` in the existing worker template. Once available, the
 requested Video00 comparison can use the existing `nova-3`/`language=multi`
 adapter. Production still uses Medium; no winner is declared for Deepgram.
+
+
+## Authorized full-engine GPT + WhisperX experiment (2026-09-24)
+
+The user authorized one Video00 run through the complete existing engine using GPT text and WhisperX word alignment. Implementation, isolation, evidence and execution bounds are recorded in [CUTSELL_GPT_WHISPERX_FULL_ENGINE_EVALUATION.md](CUTSELL_GPT_WHISPERX_FULL_ENGINE_EVALUATION.md). This remains on `feat/gpt-whisperx-video00`; canonical/default ASR is unchanged.

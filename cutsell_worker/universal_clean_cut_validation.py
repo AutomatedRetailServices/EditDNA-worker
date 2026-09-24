@@ -310,6 +310,13 @@ def _live_render_qc_diagnostics(
 
 def _validation_asr(config, *, env=None):
     """Build the RAW harness ASR through the same gated decode policy as production."""
+    values = os.environ if env is None else env
+    provider = values.get("CUTSELL_VALIDATION_ASR_PROVIDER", "faster-whisper").strip()
+    if provider == "gpt-transcribe-whisperx":
+        from .gpt_whisperx_asr import GPTWhisperXASR
+        return GPTWhisperXASR()
+    if provider not in {"", "faster-whisper"}:
+        raise ValueError(f"Unknown validation ASR provider: {provider}")
     return load_asr_provider_from_env(env, model_name=config.asr_model)
 
 
@@ -469,7 +476,7 @@ def run_single_universal_clean_cut_validation(
         "temporal_trimmed_count": sum(1 for item in temporal if bool(item.get("applied"))),
         "models": {
             "brain_backend": brain.backend,
-            "asr": config.asr_model,
+            "asr": getattr(asr, "model_name", config.asr_model),
             "whole_video": "runpod_local_asr_context",
             "visual": "runpod_local_mediapipe_opencv",
             "take_grouping": "deterministic_local_evidence",
@@ -481,6 +488,7 @@ def run_single_universal_clean_cut_validation(
             "composer": None,
             "draft_review": None,
         },
+        "asr_provider_audit": getattr(asr, "last_audit", None),
         "stage_status": result.stage_status,
         "diagnostics": diagnostics,
         "selected": [

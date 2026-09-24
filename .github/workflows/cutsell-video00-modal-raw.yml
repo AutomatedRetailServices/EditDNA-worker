@@ -25,6 +25,14 @@ name: CutSell Video00 Modal RAW
 on:
   workflow_dispatch:
     inputs:
+      asr_provider:
+        description: "RAW ASR evidence provider (GPT uses isolated WhisperX alignment)."
+        required: false
+        type: choice
+        default: faster-whisper
+        options:
+          - faster-whisper
+          - gpt-transcribe-whisperx
       source_key:
         # D-228: optional override of the exact S3 object this RAW processes.
         # Empty (default) = the existing hardcoded Video00 canonical source,
@@ -426,6 +434,7 @@ env:
   # -- same rule as Human Gold: never read by production code, never in the payload,
   # and (D-228) Video00-specific only.
   CUTAI_REFERENCE_KEY: Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4
+  CUTSELL_VALIDATION_ASR_PROVIDER: ${{ github.event.inputs.asr_provider || 'faster-whisper' }}
   BENCHMARK_ID: video00-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
@@ -810,6 +819,27 @@ jobs:
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
           echo "CUTSELL_ENV_JSON_PATH=/tmp/cutsell-env.json" >> "$GITHUB_ENV"
+
+      - name: Select RAW ASR and preflight ordinary OpenAI key
+        shell: bash
+        run: |
+          python3 - <<'PYASR'
+          import json, os
+          from pathlib import Path
+          p = Path('/tmp/cutsell-env.json')
+          env = json.loads(p.read_text())
+          provider = os.environ['CUTSELL_VALIDATION_ASR_PROVIDER']
+          if provider not in {'faster-whisper', 'gpt-transcribe-whisperx'}:
+              raise SystemExit('Unknown RAW ASR provider')
+          if provider == 'gpt-transcribe-whisperx':
+              key = str(env.get('OPENAI_API_KEY') or '').strip()
+              if not key or key.startswith('sk-admin-'):
+                  raise SystemExit('Ordinary OPENAI_API_KEY missing; no GPU invocation')
+          env['CUTSELL_VALIDATION_ASR_PROVIDER'] = provider
+          p.write_text(json.dumps(env))
+          print('RAW ASR provider:', provider)
+          print('ASR credential preflight passed; key values not displayed')
+          PYASR
 
       - name: D-235U lost-atom materiality Freeze authority overlay
         # Kept as its OWN step (rather than appended inline into the

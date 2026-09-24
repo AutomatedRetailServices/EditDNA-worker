@@ -111,6 +111,29 @@ image = (
     .apt_install(*CUTSELL_APT_PACKAGES)
     .pip_install_from_requirements(CUTSELL_REQUIREMENTS_FILE)
     .pip_install(CUTSELL_RUNPOD_PIP_SPEC)
+)
+
+# RAW-only experiment. Keep the canonical Torch/Faster-Whisper/MediaPipe
+# installation intact; WhisperX needs a different Torch/Numpy generation.
+# The CPU image build resolves dependencies and warms EN/ES alignment
+# models before any paid L4 function is dispatched.
+if os.environ.get("CUTSELL_VALIDATION_ASR_PROVIDER") == "gpt-transcribe-whisperx":
+    image = (
+        image.apt_install("python3-venv")
+        .run_commands(
+            "python -m venv /opt/cutsell-whisperx",
+            "/opt/cutsell-whisperx/bin/python -m pip install --upgrade pip",
+            "/opt/cutsell-whisperx/bin/python -m pip install whisperx==3.8.6",
+            "/opt/cutsell-whisperx/bin/python -m pip check",
+            "/opt/cutsell-whisperx/bin/python -c \"import nltk, whisperx; "
+            "assert nltk.download('punkt_tab', quiet=True); "
+            "whisperx.load_align_model('es', 'cpu'); whisperx.load_align_model('en', 'cpu')\"",
+        )
+        .add_local_file("cutsell_whisperx_alignment.py", "/opt/cutsell-whisperx/align.py", copy=True)
+    )
+
+image = (
+    image
     # Mounts the ENTIRE cutsell_worker package (from this exact checked-out
     # git commit -- the workflow checks out `ref: github.sha` before this
     # script ever runs) into the remote container. This is the "exact test

@@ -44,6 +44,16 @@ class _FakeImage:
         self.pip_install_calls: list[tuple] = []
         self.pip_install_from_requirements_calls: list[tuple] = []
         self.add_local_python_source_calls: list[tuple] = []
+        self.run_commands_calls: list[tuple] = []
+        self.add_local_file_calls: list[tuple] = []
+
+    def run_commands(self, *args, **kwargs):
+        self.run_commands_calls.append((args, kwargs))
+        return self
+
+    def add_local_file(self, *args, **kwargs):
+        self.add_local_file_calls.append((args, kwargs))
+        return self
 
     def from_registry(self, *args, **kwargs):
         self.from_registry_calls.append((args, kwargs))
@@ -508,3 +518,21 @@ def test_main_dispatches_normally_when_no_existing_result(monkeypatch, tmp_path)
     assert written["ok"] is True
     assert written["selected_count"] == 15
     assert written["benchmark_result_uri"] == "s3://test-bucket/cutsell/benchmark-results/bench-fresh/compact-result.json"
+
+
+def test_experimental_alignment_image_isolated_and_default_image_unchanged(monkeypatch):
+    image = _FakeImage()
+    monkeypatch.setattr(sys.modules['modal'], 'Image', image)
+    monkeypatch.setenv('CUTSELL_VALIDATION_ASR_PROVIDER', 'gpt-transcribe-whisperx')
+    monkeypatch.delenv('CUTSELL_ENV_JSON_PATH', raising=False)
+    spec = importlib.util.spec_from_file_location('gpt_whisperx_image_test', mvb.__file__)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    commands = ' '.join(c for args, _ in image.run_commands_calls for c in args)
+    assert '/opt/cutsell-whisperx/bin/python -m pip install whisperx==3.8.6' in commands
+    assert "whisperx.load_align_model('es', 'cpu')" in commands
+    assert "whisperx.load_align_model('en', 'cpu')" in commands
+    assert image.add_local_file_calls[0][1]['copy'] is True
+    assert module.run_video00_benchmark.kwargs['retries'] == 0
+    assert module.run_video00_benchmark.kwargs['gpu'] == 'L4'
+    assert not mvb.image.run_commands_calls
