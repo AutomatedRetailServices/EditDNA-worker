@@ -809,3 +809,18 @@ empty text for 0–60 s despite nonzero source audio (mean -24.9 dB, max -5.6 dB
 speech/music not adjudicated. Do not claim full transcript coverage or editorial
 approval. Report artifact 10836610270, video part 10836405775; hashes verified.
 Full local decode passed. No further paid calls. Manual-only restored at 9cede8a.
+
+
+## 2026-09-24 Deepgram newly authorized source test
+
+DEEPGRAM_API_KEY now present in canonical RunPod template and valid.
+CPU-only run 36066724857 / test ccd3014e75ec1cca201158a9d00fe7d70b41e527
+completed one Nova-3 multilingual request on the same 97-second MOV.
+268 words; 130 before 60 s, first word 0.08 s, last 96.99 s. Prior GPT had
+136 words and zero before 60 s. Deepgram timestamps retained in raw response.
+This is coverage evidence, not human-reference accuracy or editorial approval.
+Deepgram uses full mono16k MP3; prior GPT used mono16k WAV chunks, so transport
+and provider effects are not isolated. No editor invocation, GPU or production
+change. Manual-only restored at 283b11a. Artifact 10836188777 verified SHA256
+8987fa7cb8b8cfcc44e5d81d4b45b5fbeefb39d99ddcb23796333d9bf7b79352.
+No further paid request authorized.
