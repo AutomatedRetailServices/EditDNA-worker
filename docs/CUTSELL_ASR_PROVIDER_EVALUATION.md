@@ -29,8 +29,11 @@ upstream source of variation, not that ASR accounts for every downstream change.
 
 ## Gates still open
 
-1. Run the actual repo test suite and worker CI on a full checkout. Syntax-only
-   verification from this environment is not a substitute.
+1. Run the actual repo test suite and worker CI on a full checkout. Here,
+   `compileall` of changed Python files, YAML parsing, a manual `jq` payload
+   check and four isolated HTTP-fake provider tests passed. The full repo
+   test suite could not run without the repository checkout; these narrower
+   checks are not a substitute.
 2. Inventory diverse English, Spanish, and mixed-language source files from the
    existing S3 folder. Establish independently reviewed spoken-word references,
    including negations, numbers, omissions and audio-adjacent speech.
