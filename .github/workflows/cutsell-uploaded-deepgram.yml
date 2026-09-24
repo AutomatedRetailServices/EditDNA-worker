@@ -1,8 +1,6 @@
 name: CutSell Uploaded Deepgram Test
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/gpt-whisperx-video00]
 permissions:
   contents: read
 jobs:
