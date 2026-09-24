@@ -34,13 +34,13 @@ def test_gpt_comparison_is_text_only_and_never_selection_authority(monkeypatch):
         seen.append((url, kw)), _Response({"text": "No quiero cambiar el mensaje."})
     )[1])
 
-    result = comparison.compare_text_candidate("source.mp4", "gpt-transcribe", language_hint="es")
+    result = comparison.compare_text_candidate("source.mp4", "gpt-4o-transcribe", language_hint="es")
 
     assert result["text"] == "No quiero cambiar el mensaje."
     assert result["has_word_timestamps"] is False
     assert result["selection_authority"] is False
     assert seen[0][0] == "https://api.openai.com/v1/audio/transcriptions"
-    assert seen[0][1]["data"]["model"] == "gpt-transcribe"
+    assert seen[0][1]["data"]["model"] == "gpt-4o-transcribe"
 
 
 def test_nova_multilingual_comparison_keeps_english_and_spanish(monkeypatch):
@@ -65,7 +65,7 @@ def test_missing_api_key_never_silently_falls_back(monkeypatch):
     _fake_audio(monkeypatch)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
-        comparison.compare_text_candidate("source.mp4", "gpt-transcribe")
+        comparison.compare_text_candidate("source.mp4", "gpt-4o-transcribe")
 
 
 def test_unknown_provider_rejected_before_audio_or_network(monkeypatch):
