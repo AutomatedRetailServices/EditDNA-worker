@@ -31,7 +31,7 @@ on:
       text_provider:
         description: "Optional paid, text-only comparator (no edit authority)"
         type: choice
-        options: [none, gpt-transcribe, deepgram-nova-3-multi]
+        options: [none, gpt-4o-transcribe, deepgram-nova-3-multi]
         default: none
 
 concurrency:
@@ -46,40 +46,7 @@ env:
   BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  openai-access-probe:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-    steps:
-      - name: Inspect ASR model access without audio or GPU
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json, os, urllib.request, urllib.error
-          import subprocess
-          output = subprocess.run(["curl", "--fail", "--silent", "--show-error", "--url", "https://rest.runpod.io/v1/templates", "--header", "Authorization: Bearer " + os.environ["RUNPOD_API_KEY"]], check=True, capture_output=True, timeout=20)
-          templates = json.loads(output.stdout)
-          template = next(x for x in templates if x.get("name") == "EditDNA-Worker-2")
-          env = template.get("env") or {}
-          key = str(env.get("OPENAI_API_KEY") or "").strip()
-          print("configured_openai_key:", bool(key))
-          if not key:
-              raise SystemExit(0)
-          for model in ("gpt-transcribe", "gpt-4o-transcribe"):
-              req = urllib.request.Request("https://api.openai.com/v1/models/" + model, headers={"Authorization": "Bearer " + key})
-              try:
-                  with urllib.request.urlopen(req, timeout=20) as response:
-                      print(model, "http_status:", response.status, "request_id:", response.headers.get("x-request-id", ""))
-              except urllib.error.HTTPError as exc:
-                  try:
-                      error = json.loads(exc.read(4096)).get("error") or {}
-                  except (ValueError, TypeError):
-                      error = {}
-                  print(model, "http_status:", exc.code, "error_type:", error.get("type"), "error_code:", error.get("code"), "request_id:", exc.headers.get("x-request-id", ""))
-          PY
   asr-only-modal:
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -140,7 +107,7 @@ jobs:
           # candidate-vs-baseline variable. No hybrid/resolver overlays are
           # applied here (unlike cutsell-video00-modal-raw.yml) -- this
           # harness never reaches those stages.
-          DETERMINISTIC="${{ inputs.deterministic_config && '1' || '0' }}"
+          DETERMINISTIC="1"
           jq -c --arg det "$DETERMINISTIC" '(.env // {}) + {CUTSELL_ASR_DETERMINISTIC_CONFIG:$det}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
@@ -175,7 +142,7 @@ jobs:
           set -euo pipefail
           jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
             --arg model "${{ inputs.model_name || 'medium' }}" \
-            --arg comparator "${{ inputs.text_provider || 'none' }}" \
+            --arg comparator "gpt-4o-transcribe" \
             '{source_key:$source,benchmark_id:$benchmark,model_name:$model} +
               (if $comparator == "none" then {} else {text_provider:$comparator} end)' \
             > /tmp/payload.json
