@@ -1,0 +1,33 @@
+name: CutSell Uploaded Deepgram Test
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+permissions:
+  contents: read
+jobs:
+  transcribe:
+    if: >-
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized uploaded Deepgram test')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install CPU tools
+        run: |
+          pip install -q requests boto3
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Verify key and source then one Deepgram request
+        run: python benchmarks/run_uploaded_deepgram.py
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-deepgram-evidence
+          path: deepgram-uploaded-artifacts/
+          retention-days: 14
