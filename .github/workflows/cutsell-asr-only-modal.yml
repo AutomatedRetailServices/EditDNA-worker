@@ -14,6 +14,9 @@ name: CutSell ASR-Only Modal Benchmark
 # (baseline, flag OFF) and Section 8 (candidate, flag ON) can both be run
 # from this one workflow without editing YAML between runs.
 on:
+  push:
+    branches: [feat/asr-provider-evaluation-and-replay]
+    paths: [.github/workflows/cutsell-asr-only-modal.yml]
   workflow_dispatch:
     inputs:
       deterministic_config:
@@ -43,7 +46,40 @@ env:
   BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
+  model-access-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Inspect GPT Transcribe denial without original video or GPU
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os,subprocess,urllib.request,urllib.error,wave,io,uuid,re
+          proc=subprocess.run(["curl","--fail","--silent","--show-error","--url","https://rest.runpod.io/v1/templates","--header","Authorization: Bearer "+os.environ["RUNPOD_API_KEY"]],check=True,capture_output=True,timeout=20)
+          env=next(x for x in json.loads(proc.stdout) if x.get("name")=="EditDNA-Worker-2").get("env") or {}
+          key=str(env.get("OPENAI_API_KEY") or "").strip()
+          print("key_present:",bool(key))
+          if not key: raise SystemExit(0)
+          buf=io.BytesIO()
+          with wave.open(buf,"wb") as wav:
+              wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(16000);wav.writeframes(b"\x00\x00"*16000)
+          boundary="cutsell-"+uuid.uuid4().hex
+          body=(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-transcribe\r\n--"+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"silence.wav\"\r\nContent-Type: audio/wav\r\n\r\n").encode()+buf.getvalue()+("\r\n--"+boundary+"--\r\n").encode())
+          req=urllib.request.Request("https://api.openai.com/v1/audio/transcriptions",data=body,headers={"Authorization":"Bearer "+key,"Content-Type":"multipart/form-data; boundary="+boundary})
+          try:
+              with urllib.request.urlopen(req,timeout=35) as resp:
+                  print("post_status:",resp.status,"request_id:",resp.headers.get("x-request-id",""))
+          except urllib.error.HTTPError as e:
+              try: error=(json.loads(e.read(4096)).get("error") or {})
+              except (ValueError,TypeError): error={}
+              msg=str(error.get("message") or "")[:500]
+              msg=re.sub(r"(sk-|org-|proj-)[A-Za-z0-9_-]+",r"\1***",msg)
+              print("post_status:",e.code,"error_type:",error.get("type"),"error_code:",error.get("code"),"error_message:",msg,"request_id:",e.headers.get("x-request-id",""))
+          PY
   asr-only-modal:
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
