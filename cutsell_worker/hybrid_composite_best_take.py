@@ -238,7 +238,7 @@ def _restore_performance_only_unique_deliveries(
     return restore_ids, rows
 
 
-_KEPT_CANDIDATE_LABELS = frozenset({"winner", "keep", "alternate"})
+_KEPT_CANDIDATE_LABELS = frozenset({"winner", "keep", "alternate", "failed"})
 
 
 def _kept_complementary_rows(
@@ -282,7 +282,11 @@ def _kept_complementary_rows(
         # judge has NOT labelled in this window carries no evidence of being
         # a usable delivery -- an unlabelled abandoned restart is not a
         # composite piece. Restored rows come with their own guard evidence;
-        # a kept candidate needs a positive label here.
+        # a kept candidate needs a judge label here. D-291.5.2 (RAW #127):
+        # a `failed` label BELOW the Resolver's unusable floor is still a
+        # judged, usable delivery (D-097.6's own rule) -- the short skin
+        # delivery was `alternate` 0.75 in one window and `failed` 0.8 in the
+        # other, and only the second window also held the later piece.
         if label not in _KEPT_CANDIDATE_LABELS:
             continue
         own = _content(candidate.text)

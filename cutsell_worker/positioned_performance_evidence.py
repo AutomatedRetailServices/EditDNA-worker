@@ -130,19 +130,58 @@ class PositionAwarePerformanceEvidence:
     positioned_events: Tuple[PositionedEvent, ...] = ()
 
 
-def compute_delivery_span(words: Iterable[Word]) -> DeliverySpan:
+DELIVERY_SPAN_SOURCE_WORD_ENVELOPE_SILENCE_CLAMPED = "word_envelope_clamped_to_measured_speech"
+# D-291.12: only the primary silencedetect floor (confidence 1.0) may clamp
+# the envelope -- the relaxed floor swallows quiet trailing words (D-291.9).
+DELIVERY_SPAN_CLAMP_MIN_CONFIDENCE = 1.0
+DELIVERY_SPAN_CLAMP_TOLERANCE_SEC = 0.05
+
+
+def compute_delivery_span(words: Iterable[Word], silences: Iterable = ()) -> DeliverySpan:
     """DELIVERY start/end = first spoken word start / last spoken word end,
     using only the already-existing aligned word timestamps. No fixed
     lead-in/tail, no semantic lookahead, no threshold. Absent any word,
-    the span is explicitly unavailable rather than guessed."""
+    the span is explicitly unavailable rather than guessed.
+
+    D-291.12 (RAW #127, run 35945070839, gynecologist family): the ASR pads
+    the last word over the following pause, so the "delivery" ran 2 s into
+    measured silence and the mic-hand movements of that post-speech pause
+    counted as DELIVERY-zone (pause-corroborated) resets, letting the CASE B
+    gate bypass the decisive `winner`. With the source's measured silences
+    (`audio_silence_interval`, primary floor), a silence that begins inside
+    the envelope and runs to (or past) its end ends the delivery where the
+    silence starts; symmetrically a silence that covers the envelope start
+    and ends inside it starts the delivery where the silence ends. Absent
+    silences the span is the plain word envelope, unchanged."""
     word_tuple = tuple(words)
     if not word_tuple:
         return DeliverySpan(start=None, end=None, available=False,
                              source=DELIVERY_SPAN_SOURCE_UNAVAILABLE)
     start = min(float(word.start) for word in word_tuple)
     end = max(float(word.end) for word in word_tuple)
-    return DeliverySpan(start=start, end=end, available=True,
-                         source=DELIVERY_SPAN_SOURCE_WORD_ENVELOPE)
+    source = DELIVERY_SPAN_SOURCE_WORD_ENVELOPE
+    tol = DELIVERY_SPAN_CLAMP_TOLERANCE_SEC
+    primary = []
+    for event in silences or ():
+        kind = getattr(event, "kind", None) if not isinstance(event, dict) else event.get("kind")
+        if str(kind or "") != AUDIO_SILENCE_EVENT_KIND:
+            continue
+        conf = getattr(event, "confidence", 0.0) if not isinstance(event, dict) else event.get("confidence", 0.0)
+        if float(conf or 0.0) < DELIVERY_SPAN_CLAMP_MIN_CONFIDENCE:
+            continue
+        s_start = float(getattr(event, "start", 0.0) if not isinstance(event, dict) else event.get("start", 0.0))
+        s_end = float(getattr(event, "end", 0.0) if not isinstance(event, dict) else event.get("end", 0.0))
+        if s_end > s_start:
+            primary.append((s_start, s_end))
+    trailing = [s for s in primary if start + tol < s[0] < end - tol and s[1] >= end - tol]
+    if trailing:
+        end = min(s[0] for s in trailing)
+        source = DELIVERY_SPAN_SOURCE_WORD_ENVELOPE_SILENCE_CLAMPED
+    leading = [s for s in primary if s[0] <= start + tol and start + tol < s[1] < end - tol]
+    if leading:
+        start = max(s[1] for s in leading)
+        source = DELIVERY_SPAN_SOURCE_WORD_ENVELOPE_SILENCE_CLAMPED
+    return DeliverySpan(start=start, end=end, available=True, source=source)
 
 
 def classify_event_zone(
@@ -197,8 +236,8 @@ def build_positioned_performance_evidence(
     (default: the four D-114 local-performance kinds + `audio_silence_
     interval`) so default-only/aggregate-only `MediaSignals` fields never
     masquerade as positioned evidence."""
-    delivery_span = compute_delivery_span(candidate.words)
     events = _events_for_source(context, candidate.source_asset_id)
+    delivery_span = compute_delivery_span(candidate.words, events)
     positioned: list[PositionedEvent] = []
     for event in events:
         kind = str(event.kind)

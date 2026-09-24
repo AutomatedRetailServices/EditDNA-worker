@@ -80129,3 +80129,123 @@ Watch+Listen v1 stays advisory); no mid-segment physical repair;
 W "never competed" (pair budget / grouping variance, RAW #115 class) is not
 addressed here; run-to-run label variance of the provider is not addressed
 here.
+
+## D-291.12 — RAW #127 (the ONE authorized Modal run on `b76bcc9b`, run 35945070839): first automatic MP4 that reaches human review; what it proved on video, what it still gets wrong, and the four corrections it demanded
+
+**Run facts (OBSERVED, GitHub run record + S3 artifacts):** dispatched
+2026-09-24 01:56:04 UTC on `fix/video00-stable-editorial-oracle` at
+`b76bcc9b` (remote == local, clean tree, no run in progress, the push
+fired nothing), RAW #126's parameters (`pacing_v2_diagnostics_enabled=1`,
+nothing else). Completed 02:04:10 (failed steps: frozen Selection lock,
+Human Gold 18-check QA, editorial acceptance -- expected for a non-Gold
+edit). Artifacts read from `s3://script2clipshop-video-automatedretail
+services/cutsell/serverless/video00-modal-35945070839-1/` (`result.json`
+1,104,283 B; `preview.mp4` 38,149,147 B, 145.967 s) -- the run link:
+https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/35945070839
+
+**Delivery state (OBSERVED):** `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:
+watch_listen=HUMAN_REVIEW_REQUIRED` -- technical QC PASS on attempt 1 (no
+repair), Freeze reached, `final_boundary_authority` complete, perceptual
+Watch+Listen **0 FAIL** (8 reset-debris findings UNCERTAIN, 7 of them
+`during_spoken_word`, 1 long pause UNCERTAIN; 4 capabilities
+NOT_IMPLEMENTED). RAW #126 was BLOCKED on the same footage.
+
+**Proven on video (corrections of D-291.8-D-291.11 seen in the MP4):**
+thyroid: the complete retake T2 (35.46-45.54) rendered, T1 gone -- the
+CASE B gate reads `raw_count_difference_not_materially_corroborated`
+(D-291.10); acne: "…con la que yo resolvía con resorcina." one take
+185.22-190.28, no silent clip (this run's ASR timed the word itself; the
+D-291.9 clamps ran on 34 words and clamped the negation particle's start
+to the measured silence end 275.936); negation: "No quiero sonar a
+conspiración…" one take 275.93-283.65, rendered with its "No" (join at
+108.13 s: "pastillas." -> "No quiero"); no Watch+Listen BLOCK from
+gestures at spoken edges (D-291.10). Frames one before/after each of these
+joins show the same pose (no jump).
+
+**Still wrong in the MP4 (OBSERVED on audio peaks and frames), and the
+authority behind each:**
+1. Symptoms take (48.99-59.41) cut inside continuous speech at 52.71->52.99
+   and 53.93->54.27 (peaks 1570/1560 and 1874/1892 either side of the
+   cuts; hand position jumps between adjacent frames) -- NOT the interior
+   gap trim (its rows are empty, D-291.10 held) but `human_boundary_
+   polish_v5._remove_micro_visual_reset_word_gaps` (`reset_score` 2.7 /
+   2.0, `strong_reset_events` 2, no measured pause), a FOURTH consumer of
+   the same gesture candidates. And a third cut at 56.97->57.67 inside the
+   same sentence: the AttemptReconstructor drew a `pause_plus_strong_
+   reset` boundary at the 0.8 s mid-sentence hold ("…y me comenzó" |
+   "a hacer ruido.") after D-291.9's clamps exposed the real pause; the
+   pacing transition removed 0.62 s and the frames jump (eyes closed ->
+   open). The approved edit keeps 48.8-58.33 continuous.
+2. Gynecologist: X (82.40-90.36, `alternate` 0.7, the first attempt)
+   rendered instead of Z (95.91-104.02, `winner` 0.9/0.98, the approved
+   segment): CASE B `material_count_difference_confirmed` -- Z's one
+   pause-corroborated candidate (103.14) sits in the 2 s of measured
+   silence the ASR padded Z's last word over ("indicar." 102.36-104.02,
+   a D-291.9 `no_adjacent_room` word), i.e. after the speech ended,
+   counted as DELIVERY-zone because D-115's span is the raw word envelope.
+3. Skin: M (198.82-210.54) rendered, A1 (192.40-197.44) discarded: the
+   D-291.5 composite did not fire -- window 5 held A1 `alternate` 0.75 and
+   M but not the later piece L; window 6 held all three with A1 `failed`
+   0.8 (below the 0.85 floor) and D-291.5.1's label rule excluded it.
+4. Closing: the aside "Soy la primera en mi familia…" (319.38-327.44,
+   `winner` 0.95) rendered after W, repeating W's own "Soy la única en mi
+   familia…": no family with W was formed (RAW #115 class), unchanged.
+5. Sonography entry at 120.11: the source restarts the sentence at 120.0
+   ("Ahí fue cuando me mandaron a hacer…", peaks 4448 from 120.00); this
+   run's ASR transcribed only "a hacer sonografías…" with a 1.4 s padded
+   "a" from 120.11, so the clip starts ~0.1 s into the restart -- a possible
+   clipped syllable at the entry (ASR miss; the approved cut is 120.07).
+   Acceptable variations: hook/gynecologist-end/diagnosis-end/conclusion
+   boundaries within the renderer's trailing trims; R (`failed` 0.9) and T
+   correctly out this time.
+
+**Corrections (each in its owning authority, tests first, offline only --
+no further RAW is authorized):**
+- **D-291.5.2** `hybrid_composite_best_take`: a `failed` label below the
+  Resolver's unusable floor is a judged, usable candidate (D-097.6's own
+  rule); unlabelled stays excluded. RAW #127's window 6 now composes A1 + L
+  over M (test with those labels).
+- **D-291.12a** `human_boundary_polish_v5`: a micro word gap (0.22-0.55 s)
+  splits only when a measured silence overlaps it, and the cut lands inside
+  that silence with the D-095.2 pad -- the D-291.10 rule; fixtures that
+  expect a split carry the pause they need (cut points moved from the ASR
+  edges to the padded silence edges); a new control: strong candidates
+  around a gap with no measured pause leave the clip whole.
+- **D-291.12b** `attempt_reconstruction`: `pause_plus_strong_reset` never
+  splits a sentence continuation -- non-terminal left, lower-case right,
+  no lexical restart (evaluated earlier), pause within the 1.2 s
+  continuation ceiling (`_nonterminal_continuation`, the tiny-tail guard
+  generalised); a capitalised restart after the same pause still forms the
+  boundary (test). The "…y me comenzó a hacer ruido." delivery is one
+  attempt again.
+- **D-291.12c** `positioned_performance_evidence.compute_delivery_span`:
+  the DELIVERY span is the word envelope clamped to measured speech -- a
+  primary-floor silence that begins inside the envelope and runs to its
+  end ends the delivery where the silence starts (symmetric at the start);
+  `build_positioned_performance_evidence` passes the source's silences.
+  Consumers (D-116 boundary rows, CASE B, D-097 cleanliness) therefore see
+  post-speech gestures as EXIT. On RAW #126's own thyroid events T2's
+  45.80 candidate moves to EXIT (material 2 vs 0); on RAW #127's
+  gynecologist shape Z's 103.14 candidate is EXIT -> no CASE B bypass.
+
+**Compared with RAW #126 and the approved edit (evaluation only):** 18
+approved segments; RAW #127 covers 15 of them at >= 0.84 (gynecologist and
+rash at 0.00 -- items 2 and 3 above; symptoms 0.84 through four pieces);
+RAW #126 covered 13 (thyroid, gynecologist-end, rash, negation wrong).
+Rendered 145.97 s vs approved 134.83 s; the surplus is X (8 s), the aside
+(8 s) and M instead of A1 (+7 s). Human Gold preferences (aside and closing
+reformulations out) are recorded as preferences, not defects.
+
+**Verification (offline, this tree):** full `tests/` (baseline invocation)
+9135 passed, 8 failed = the 5 pre-existing unrelated failures + 2 D-050A
+resplit fixtures that were given their measured pause after the run
+started (file re-run: 26 passed) + 1 working-tree zero-diff guard on
+`attempt_reconstruction.py` (self-resolving on commit, re-run green on the
+committed tree). Targeted: reconstruction suites 18 + 2, v5 polish 7,
+D-050A 26, D-115/D-116/case-B/D-097.C 155, D-291.10 8, D-291.5 14.
+
+**What could not be verified:** human Watch+Listen of the MP4 (this record
+describes measured audio peaks and sampled frames at the joins, not a
+continuous human viewing); phoneme-level clipping (no ASR realign on the
+rendered audio); consistency across runs (one run each way); whether
+D-291.12a-c hold on video (no further RAW authorized).

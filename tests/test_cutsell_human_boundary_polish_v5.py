@@ -10,6 +10,8 @@ semantic clip -- even across a second split of an already-split piece.
 """
 from types import SimpleNamespace
 
+import pytest
+
 from cutsell_worker.contracts import (
     DraftClip,
     DraftTimeline,
@@ -39,6 +41,14 @@ def _reset_event(start, end, confidence=0.9):
     )
 
 
+def _silence(start, end, confidence=1.0):
+    # D-291.12: a micro-gap split needs the measured silence of the gap
+    return SimpleNamespace(
+        source_asset_id="src", start=start, end=end,
+        kind="audio_silence_interval", confidence=confidence, description="silencedetect",
+    )
+
+
 def _timeline(*events):
     return SimpleNamespace(source_asset_id="src", events=tuple(events))
 
@@ -60,12 +70,14 @@ def test_two_fragment_split_gets_unique_ids_and_shared_parent():
     words = (_word("one", 0.0, 1.0), _word("two", 1.4, 2.0))
     clip = _clip(words)
     # gap = 1.0 -> 1.4 (0.4s, in the >=0.34 band): needs score>=1.20, strong>=1.
-    timeline = _timeline(_reset_event(0.9, 1.5, confidence=0.9), _reset_event(0.9, 1.5, confidence=0.9))
+    timeline = _timeline(_reset_event(0.9, 1.5, confidence=0.9), _reset_event(0.9, 1.5, confidence=0.9), _silence(1.02, 1.38))
 
     pieces, rows = _remove_micro_visual_reset_word_gaps(clip, timeline)
 
     assert len(pieces) == 2
     assert len(rows) == 1
+    # D-291.12: the cut lands inside the measured silence (1.02-1.38), padded, never on the ASR edges 1.0 / 1.4
+    assert pieces[0].end == pytest.approx(1.14) and pieces[1].start == pytest.approx(1.26)
     assert rows[0]["action"] == "remove_micro_visual_reset_word_gap"
     assert rows[0]["semantic_membership_changed"] is False
 
@@ -102,6 +114,7 @@ def test_three_fragment_split_preserves_order_and_all_unique_ids():
     timeline = _timeline(
         _reset_event(0.9, 1.5), _reset_event(0.9, 1.5),   # gap 1 (1.0-1.4)
         _reset_event(1.9, 2.5), _reset_event(1.9, 2.5),   # gap 2 (2.0-2.4)
+        _silence(1.02, 1.38), _silence(2.02, 2.38),        # D-291.12: measured pauses in both gaps
     )
 
     pieces, rows = _remove_micro_visual_reset_word_gaps(clip, timeline)
@@ -113,8 +126,9 @@ def test_three_fragment_split_preserves_order_and_all_unique_ids():
     assert all(effective_parent_semantic_clip_id(p) == "clip_root" for p in pieces)
     assert all(p.clip_id == "clip_root" for p in pieces), "semantic identity must never change"
     # Rendered order must be the source order -- no reordering.
-    assert [round(p.start, 3) for p in pieces] == [0.0, 1.4, 2.4]
-    assert [round(p.end, 3) for p in pieces] == [1.0, 2.0, 3.4]
+    # D-291.12: cuts inside the measured silences (padded 0.12 s), not on the ASR word edges
+    assert [round(p.start, 3) for p in pieces] == [0.0, 1.26, 2.26]
+    assert [round(p.end, 3) for p in pieces] == [1.14, 2.14, 3.4]
     assert [p.text for p in pieces] == ["one", "two", "three"]
     assert [p.fragment_index for p in pieces] == [0, 1, 2]
     assert all(p.fragment_count == 3 for p in pieces)
@@ -139,7 +153,7 @@ def test_resplitting_an_already_split_fragment_points_at_the_true_root():
         words=words, selected=True,
         render_fragment_id="clip_root__priorchild", parent_semantic_clip_id="clip_root",
     )
-    timeline = _timeline(_reset_event(0.9, 1.5), _reset_event(0.9, 1.5))
+    timeline = _timeline(_reset_event(0.9, 1.5), _reset_event(0.9, 1.5), _silence(1.02, 1.38))
 
     pieces, _rows = _remove_micro_visual_reset_word_gaps(already_split_piece, timeline)
 
@@ -189,6 +203,8 @@ def test_polish_human_boundaries_v5_never_changes_selected_clip_count_intent_or_
                     "events": [
                         {"start": 0.9, "end": 1.5, "kind": "body_reset_candidate", "confidence": 0.9},
                         {"start": 0.9, "end": 1.5, "kind": "body_reset_candidate", "confidence": 0.9},
+                        # D-291.12: a micro-gap split needs the measured silence of the gap
+                        {"start": 1.02, "end": 1.38, "kind": "audio_silence_interval", "confidence": 1.0},
                     ],
                 }]
             }
@@ -204,3 +220,14 @@ def test_polish_human_boundaries_v5_never_changes_selected_clip_count_intent_or_
     combined_text = " ".join(c.text for c in polished.draft.selected if c.clip_id == "clip_a")
     assert combined_text == "one two"
     assert polished.draft.selected[-1].text == "three"
+
+
+def test_micro_gap_without_a_measured_pause_is_a_gesture_and_stays_whole():
+    """D-291.12 (RAW #127): two strong reset candidates around a 0.4 s ASR word
+    gap with NO measured silence -- speech ran through the gap on the source
+    and the render cut it twice. No split, no row."""
+    words = (_word("one", 0.0, 1.0), _word("two", 1.4, 2.0))
+    clip = _clip(words)
+    timeline = _timeline(_reset_event(0.9, 1.5, confidence=0.9), _reset_event(0.9, 1.5, confidence=0.9))
+    pieces, rows = _remove_micro_visual_reset_word_gaps(clip, timeline)
+    assert len(pieces) == 1 and rows == [] and pieces[0].render_fragment_id is None

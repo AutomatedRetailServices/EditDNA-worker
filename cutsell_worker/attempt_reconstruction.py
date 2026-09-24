@@ -145,6 +145,31 @@ def _short_incomplete_suffix(left: CandidateTake, right: CandidateTake) -> bool:
     return gap <= 0.35
 
 
+def _nonterminal_continuation(
+    left: CandidateTake,
+    right: CandidateTake,
+    *,
+    max_continuation_gap_sec: float,
+) -> bool:
+    """D-291.12: the right take continues the left sentence -- the left text
+    is non-terminal, the right begins mid-sentence (its first character is a
+    lower-case letter), both are one source and the pause between them is
+    within the continuation ceiling. A lexical restart is evaluated earlier
+    and never reaches this check."""
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    gap = max(0.0, right.start - left.end)
+    if gap > max_continuation_gap_sec:
+        return False
+    left_text = str(left.text or "").rstrip()
+    right_text = str(right.text or "").lstrip()
+    if not left_text or not right_text or _TERMINAL_PUNCT_RE.search(left_text):
+        return False
+    if len(_tokens(left.text)) < 3 or len(_tokens(right.text)) < 1:
+        return False
+    return right_text[0].isalpha() and right_text[0].islower()
+
+
 def _tiny_nonterminal_continuation(
     left: CandidateTake,
     right: CandidateTake,
@@ -231,10 +256,17 @@ def _attempt_boundary_reason(
         return "multi_family_delivery_reset"
 
     # With an actual pause, one exceptionally strong reset is sufficient corroboration.
+    # D-291.12 (RAW #127, run 35945070839): NOT when the right side simply
+    # continues the left sentence -- the left text is non-terminal, the
+    # right starts mid-sentence (lower-case) and no lexical restart was found
+    # above. A creator holding a sentence for 0.8 s while the mic hand moves
+    # is a mid-sentence pause; splitting it made two attempts of one
+    # delivery and the render removed the pause with a jump cut inside the
+    # sentence. The tiny-tail guard above is the same idea for 1-2 words.
     if gap >= 0.65 and any(
         _kind(event.kind) in _RESET_KINDS and float(event.confidence) >= 0.95
         for event in nearby
-    ):
+    ) and not _nonterminal_continuation(left, right, max_continuation_gap_sec=max_continuation_gap_sec):
         return "pause_plus_strong_reset"
 
     if gap > max_continuation_gap_sec:

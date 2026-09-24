@@ -19,6 +19,35 @@ from .contracts import DraftClip, ProcessingResult, Word
 from .human_boundary_polish_v2 import _timeline_proxies, _reset_score
 
 BOUNDARY_REASON_MICRO_VISUAL_RESET_GAP = "remove_micro_visual_reset_word_gap"
+# D-291.12 (RAW #127, run 35945070839): this pass split one continuous
+# symptoms delivery twice at 0.28 s / 0.34 s ASR word gaps on hand-motion
+# candidates alone; the source audio carried speech through both gaps and
+# the render showed two jump cuts inside the sentence. Same rule as
+# D-291.10's interior gap trim: a micro word gap is a reset only when a
+# measured silence (audio_silence.py, the D-095.2 measurement) overlaps it,
+# and the cut lands INSIDE that silence with a natural-pause pad, never on
+# an ASR word edge.
+AUDIO_SILENCE_EVENT_KIND = "audio_silence_interval"
+MEASURED_PAUSE_MIN_CONFIDENCE = 0.90
+MEASURED_PAUSE_EDGE_PAD_SEC = 0.12
+
+
+def _measured_pause_in_gap(timeline, gap_start: float, gap_end: float) -> tuple[float, float] | None:
+    """The measured silence overlapping [gap_start, gap_end] with the largest
+    overlap, or None when the gap has no measured pause at all."""
+    best = None
+    for event in getattr(timeline, "events", ()) or ():
+        if str(getattr(event, "kind", "")) != AUDIO_SILENCE_EVENT_KIND:
+            continue
+        if float(getattr(event, "confidence", 0.0)) < MEASURED_PAUSE_MIN_CONFIDENCE:
+            continue
+        start, end = float(event.start), float(event.end)
+        overlap = min(end, gap_end) - max(start, gap_start)
+        if overlap <= 0:
+            continue
+        if best is None or overlap > best[0]:
+            best = (overlap, start, end)
+    return None if best is None else (best[1], best[2])
 
 
 def _words_before(words: tuple[Word, ...], end: float) -> tuple[Word, ...]:
@@ -116,8 +145,13 @@ def _remove_micro_visual_reset_word_gaps(
             eligible = score >= 1.20 and strong >= 1
         if not eligible:
             continue
-
-        candidates.append((gap_start, gap_end, score, strong))
+        pause = _measured_pause_in_gap(timeline, gap_start, gap_end)
+        if pause is None:
+            continue  # D-291.12: speech continues through this ASR gap -- a gesture, not a reset
+        cut_start = max(gap_start, pause[0])
+        cut_end = min(gap_end, pause[1])
+        pad = min(MEASURED_PAUSE_EDGE_PAD_SEC, max(0.0, (cut_end - cut_start) / 3.0))
+        candidates.append((cut_start + pad, cut_end - pad, score, strong))
 
     if not candidates:
         return (clip,), []

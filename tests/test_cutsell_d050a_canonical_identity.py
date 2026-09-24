@@ -258,6 +258,8 @@ def test_human_boundary_polish_split_preserves_realization_id_and_stamps_parent(
     timeline = SimpleNamespace(source_asset_id="src", events=(
         SimpleNamespace(source_asset_id="src", start=0.9, end=1.5, kind="body_reset_candidate", confidence=0.9, description=""),
         SimpleNamespace(source_asset_id="src", start=0.9, end=1.5, kind="body_reset_candidate", confidence=0.9, description=""),
+        # D-291.12: a micro-gap split needs the measured silence of the gap
+        SimpleNamespace(source_asset_id="src", start=1.02, end=1.38, kind="audio_silence_interval", confidence=1.0, description=""),
     ))
     pieces, rows = _remove_micro_visual_reset_word_gaps(clip, timeline)
     assert len(pieces) == 2, "fixture must actually exercise the split path"
@@ -284,12 +286,13 @@ def test_resplit_of_an_already_split_fragment_keeps_realization_id_and_true_root
     def event(start, end):
         return SimpleNamespace(source_asset_id="src", start=start, end=end, kind="body_reset_candidate", confidence=0.9, description="")
 
-    timeline = SimpleNamespace(source_asset_id="src", events=(event(0.9, 1.5), event(0.9, 1.5)))
+    silence = lambda start, end: SimpleNamespace(source_asset_id="src", start=start, end=end, kind="audio_silence_interval", confidence=1.0, description="")  # noqa: E731
+    timeline = SimpleNamespace(source_asset_id="src", events=(event(0.9, 1.5), event(0.9, 1.5), silence(1.02, 1.38)))  # D-291.12: measured pause in the gap
     first_pieces, _ = _remove_micro_visual_reset_word_gaps(clip, timeline)
     assert len(first_pieces) == 2
     # Split the right piece again.
     right = first_pieces[1]
-    timeline2 = SimpleNamespace(source_asset_id="src", events=(event(2.3, 2.5), event(2.3, 2.5)))
+    timeline2 = SimpleNamespace(source_asset_id="src", events=(event(2.3, 2.5), event(2.3, 2.5), silence(2.02, 2.38)))
     second_pieces, _ = _remove_micro_visual_reset_word_gaps(right, timeline2)
     for piece in (*first_pieces, *second_pieces):
         assert piece.realization_id == "real_chain_root"
@@ -401,10 +404,11 @@ def test_parent_pointers_never_point_at_a_fragment_id_no_cycles():
     def event(start, end):
         return SimpleNamespace(source_asset_id="src", start=start, end=end, kind="body_reset_candidate", confidence=0.9, description="")
 
-    timeline = SimpleNamespace(source_asset_id="src", events=(event(0.9, 1.5), event(0.9, 1.5)))
+    silence = lambda start, end: SimpleNamespace(source_asset_id="src", start=start, end=end, kind="audio_silence_interval", confidence=1.0, description="")  # noqa: E731
+    timeline = SimpleNamespace(source_asset_id="src", events=(event(0.9, 1.5), event(0.9, 1.5), silence(1.02, 1.38)))  # D-291.12: measured pause in the gap
     first_pieces, _ = _remove_micro_visual_reset_word_gaps(clip, timeline)
     right = first_pieces[1]
-    timeline2 = SimpleNamespace(source_asset_id="src", events=(event(2.3, 2.5), event(2.3, 2.5)))
+    timeline2 = SimpleNamespace(source_asset_id="src", events=(event(2.3, 2.5), event(2.3, 2.5), silence(2.02, 2.38)))
     second_pieces, _ = _remove_micro_visual_reset_word_gaps(right, timeline2)
     fragment_ids = {piece.render_fragment_id for piece in (*first_pieces, *second_pieces)}
     for piece in second_pieces:

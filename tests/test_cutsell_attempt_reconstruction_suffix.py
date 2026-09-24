@@ -67,3 +67,32 @@ def test_tiny_tail_after_terminal_sentence_can_still_form_reset_boundary():
 
     assert len(attempts) == 2
     assert diagnostics["boundaries"][0]["reason"] == "pause_plus_strong_reset"
+
+
+def test_mid_sentence_pause_with_a_strong_reset_does_not_split_a_continuing_sentence():
+    """D-291.12 (RAW #127 shape): '... y me comenzó' | 'a hacer ruido.' with a
+    0.8 s pause and a 1.0-confidence hand-motion candidate in it: the right
+    side continues the sentence (non-terminal left, lower-case right, no
+    restart), so this is a mid-sentence hold, not an attempt boundary."""
+    left = _take("left", 54.27, 56.867, "si tuve pérdida de pelo y me comenzó")
+    right = _take("right", 57.67, 58.116, "a hacer ruido.")
+    reset = TemporalEvent(
+        source_asset_id="src-1", start=57.605, end=57.671,
+        kind="hand_motion_reset_candidate", confidence=1.0, description="mic hand moves during the hold",
+    )
+    attempts, diagnostics = reconstruct_delivery_attempts((left, right), _context(reset))
+    assert len(attempts) == 1
+    assert attempts[0].text.endswith("y me comenzó a hacer ruido.")
+    assert diagnostics["boundaries"] == []
+
+
+def test_a_capitalised_restart_after_the_same_pause_still_forms_the_boundary():
+    left = _take("left", 54.27, 56.867, "si tuve pérdida de pelo y me comenzó")
+    right = _take("right", 57.67, 60.0, "Se me caía mucho el pelo cuando me lavaba.")
+    reset = TemporalEvent(
+        source_asset_id="src-1", start=57.605, end=57.671,
+        kind="hand_motion_reset_candidate", confidence=1.0, description="reset",
+    )
+    attempts, diagnostics = reconstruct_delivery_attempts((left, right), _context(reset))
+    assert len(attempts) == 2
+    assert diagnostics["boundaries"][0]["reason"] == "pause_plus_strong_reset"

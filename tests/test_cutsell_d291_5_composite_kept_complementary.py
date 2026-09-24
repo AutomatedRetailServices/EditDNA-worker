@@ -218,3 +218,17 @@ def test_end_to_end_the_monolith_is_replaced_before_grouping_and_the_short_deliv
     composite = [row for chunk in draft.diagnostics["hybrid_editorial_chunks"]
                  for row in ((chunk.get("hybrid_composite_best_take") or {}).get("composite_replacements") or [])]
     assert composite and composite[0]["suppressed_peer_clip_id"] == "M" and composite[0]["composite_clip_ids"] == ["A1", "L"]
+
+
+def test_a_failed_label_below_the_unusable_floor_still_composes_raw127_window():
+    """RAW #127: the short delivery was `alternate` 0.75 in the window without
+    the later piece and `failed` 0.8 (below the 0.85 floor) in the window
+    with it -- a judged, usable delivery (D-097.6); the composite must fire."""
+    labels = {"A1": ("failed", 0.8), "M": ("winner", 0.9), "L": ("alternate", 0.75), "HAIR": ("winner", 0.95)}
+    cand = _kept_complementary_rows((A1, M, L, HAIR), labels)
+    assert {r["clip_id"] for r in cand} == {"A1", "L"}
+    assert _suppressed((A1, M, L, HAIR), labels, cand)[0] == {"M"}
+    at_floor = {**labels, "A1": ("failed", 0.85)}
+    cand2 = _kept_complementary_rows((A1, M, L, HAIR), at_floor)
+    assert {r["clip_id"] for r in cand2} == {"L"}  # unusable A1 -> L alone; a composite needs two pieces
+    assert _suppressed((A1, M, L, HAIR), at_floor, cand2)[0] == set()

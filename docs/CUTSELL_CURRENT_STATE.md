@@ -667,3 +667,18 @@ measured silence in `audio_silence.py`, wired in `flow_b`), D-291.10
 edge debris). D-291.6 verified on the real path; the two fixed-SHA guard
 edits justified by empty range diffs. Not proven on video yet: the ONE
 authorized RAW runs on the pushed head; retrieval via S3 + attached JSON.
+
+### D-291.12 — RAW #127 (run 35945070839 on `b76bcc9b`): automatic MP4 reaches human review
+
+`DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN` (technical QC PASS, Watch+Listen 0
+FAIL / 8 UNCERTAIN, Freeze reached), 145.97 s. Proven on the MP4: thyroid
+retake T2, acne sentence with its last word, "No quiero…" with its
+negation, no gesture BLOCK. Still wrong: symptoms take cut inside speech
+by `human_boundary_polish_v5` (micro gaps, no measured pause) and by a
+`pause_plus_strong_reset` boundary at a mid-sentence hold; gynecologist X
+over Z (CASE B counted a post-speech gesture inside the ASR-padded
+delivery span); skin M over A1 (A1 `failed` 0.8 excluded by D-291.5.1);
+closing aside repeated after W (never competed, open). Corrected offline
+(D-291.5.2, D-291.12a-c) with tests; NO further RAW authorized -- the next
+run is the Product Owner's call. Human Watch+Listen of run 35945070839's
+MP4 still required (F).

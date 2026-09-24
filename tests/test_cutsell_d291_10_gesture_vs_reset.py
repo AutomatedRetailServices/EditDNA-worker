@@ -18,6 +18,8 @@ gesture, not a reset -- applied in the three authorities where RAW #126
 """
 from __future__ import annotations
 
+import pytest
+
 from cutsell_worker import perceptual_watch_listen as pwl
 from cutsell_worker.case_b_performance_evidence import build_case_b_performance_evidence
 from cutsell_worker.contracts import CandidateTake, DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION, SemanticRole, Word
@@ -57,12 +59,16 @@ T2 = _take("T2", 35.46, 46.42, T2_WORDS)
 def test_raw126_thyroid_gestures_no_longer_bypass_the_decisive_semantic_winner():
     context = _context(T1_EVENTS + T2_EVENTS)
     evidence = {t.clip_id: build_case_b_performance_evidence(t, context) for t in (T1, T2)}
-    # raw D-097-countable candidates: the pre-fix "material" counts
+    # raw D-097-countable candidates: the pre-fix "material" counts (RAW #126
+    # recorded 4 vs 7; with D-291.12's measured-speech delivery span the
+    # retake's last candidate at 45.80 falls in the post-speech EXIT zone,
+    # its padded last word having ended at the 45.21 measured silence)
     assert sum(1 for e in evidence["T1"].delivery_events if e.d097_would_be_counted) == 4
-    assert sum(1 for e in evidence["T2"].delivery_events if e.d097_would_be_counted) == 7
-    # pause-corroborated: 2 (T1) vs 1 (T2) -- the retake is not the worse delivery
+    assert sum(1 for e in evidence["T2"].delivery_events if e.d097_would_be_counted) == 6
+    assert evidence["T2"].delivery_end == pytest.approx(45.214, abs=1e-3)
+    # pause-corroborated: 2 (T1) vs 0 (T2) -- the retake is not the worse delivery
     assert _material_delivery_event_count(evidence["T1"]) == 2
-    assert _material_delivery_event_count(evidence["T2"]) == 1
+    assert _material_delivery_event_count(evidence["T2"]) == 0
     assert _case_b_fast_path_conflict("T2", "T1", {"T1", "T2"}, evidence) is None
 
 
@@ -76,11 +82,13 @@ def test_without_any_silence_measurement_corroboration_is_not_evaluated_and_the_
 
 
 def test_a_reset_next_to_a_measured_pause_still_counts_as_material():
-    # the retake's ONE pause-corroborated candidate (45.804, next to the 45.214 pause) keeps counting
+    # the abandoned attempt's two candidates next to the 32.67 pause keep counting;
+    # the retake's candidate at 45.80 lies AFTER its measured speech end (45.21): EXIT, not delivery
     context = _context(T1_EVENTS + T2_EVENTS)
-    ev = build_case_b_performance_evidence(T2, context)
-    corroborated = [e for e in ev.delivery_events if e.pause_corroborated]
-    assert [round(e.start, 3) for e in corroborated] == [45.804]
+    ev1 = build_case_b_performance_evidence(T1, context)
+    assert [round(e.start, 3) for e in ev1.delivery_events if e.pause_corroborated and e.d097_would_be_counted] == [32.469, 33.336]
+    ev2 = build_case_b_performance_evidence(T2, context)
+    assert all(round(e.start, 3) != 45.804 for e in ev2.delivery_events)
 
 
 # --- Watch+Listen: edge candidates during a spoken word -----------------------
@@ -133,3 +141,39 @@ def test_without_word_evidence_the_d149_pause_rule_is_unchanged():
     ]
     report = pwl._reset_debris_at_edges(_draft(events, []), (_seg("a", 10.0, 15.0),), [(0.0, 5.0)])
     assert report.status == pwl.EVALUATED_FAIL
+
+
+# --- D-291.12c: the DELIVERY span ends where measured speech ends ------------
+
+def test_delivery_span_is_clamped_to_measured_speech_at_both_ends():
+    from cutsell_worker.positioned_performance_evidence import (
+        DELIVERY_SPAN_SOURCE_WORD_ENVELOPE, DELIVERY_SPAN_SOURCE_WORD_ENVELOPE_SILENCE_CLAMPED, compute_delivery_span,
+    )
+    words = tuple(Word(t, s, e) for t, s, e in (("al", 95.52, 96.02), ("pedí", 100.1, 100.6), ("pudiese", 102.02, 102.36), ("indicar.", 102.36, 104.02)))
+    # RAW #127 gynecologist shape: the last word padded 1.7 s over the measured pause 102.24-104.68
+    silences = (TemporalEvent(SRC, 102.238, 104.68, "audio_silence_interval", 1.0, ""),
+                TemporalEvent(SRC, 94.9, 95.907, "audio_silence_interval", 1.0, ""))
+    span = compute_delivery_span(words, silences)
+    assert span.start == pytest.approx(95.907) and span.end == pytest.approx(102.238)
+    assert span.source == DELIVERY_SPAN_SOURCE_WORD_ENVELOPE_SILENCE_CLAMPED
+    # no silences -> the plain word envelope, unchanged behaviour
+    plain = compute_delivery_span(words)
+    assert (plain.start, plain.end, plain.source) == (95.52, 104.02, DELIVERY_SPAN_SOURCE_WORD_ENVELOPE)
+    # a relaxed-floor silence never clamps; a silence strictly inside the envelope never clamps
+    relaxed = compute_delivery_span(words, (TemporalEvent(SRC, 102.1, 104.68, "audio_silence_interval", 0.9, ""),))
+    assert relaxed.end == 104.02
+    interior = compute_delivery_span(words, (TemporalEvent(SRC, 96.5, 99.5, "audio_silence_interval", 1.0, ""),))
+    assert (interior.start, interior.end) == (95.52, 104.02)
+
+
+def test_a_gesture_in_the_padded_post_speech_tail_is_exit_not_delivery_for_case_b():
+    words = [("al", 95.52, 96.02), ("terminar", 96.02, 96.5), ("mi", 96.5, 96.7), ("contrato", 96.7, 97.3), ("cambié", 97.3, 97.8),
+             ("de", 97.8, 97.9), ("ginecóloga", 97.9, 98.6), ("y", 98.6, 98.7), ("le", 98.7, 98.9), ("pedí", 98.9, 100.6),
+             ("pudiese", 102.02, 102.36), ("indicar.", 102.36, 104.02)]
+    z = _take("Z", 95.52, 104.02, words)
+    events = [["audio_silence_interval", 102.238, 104.68, 1.0], ["hand_motion_reset_candidate", 103.14, 103.21, 1.0],
+              ["hand_motion_reset_candidate", 99.34, 99.41, 1.0]]
+    ev = build_case_b_performance_evidence(z, _context(events))
+    assert ev.delivery_end == pytest.approx(102.238)
+    assert [round(e.start, 2) for e in ev.delivery_events] == [99.34]  # the 103.14 gesture is EXIT
+    assert _material_delivery_event_count(ev) == 0  # 99.34 is mid-speech, no pause near it
