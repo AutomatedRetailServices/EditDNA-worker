@@ -172,3 +172,34 @@ def test_collect_asr_runtime_audit_never_crashes_when_deps_missing():
     assert "gpu_name" in audit
     assert "cuda_available" in audit
     assert "transcribe_signature" in audit
+
+
+def test_asr_only_can_compare_large_v3_without_changing_production(monkeypatch):
+    provider = _FakeASRProvider()
+    provider.model_name = "large-v3"
+    seen = []
+    monkeypatch.setattr(harness, "load_runtime_config", lambda: _fake_config(asr_model="medium"))
+    monkeypatch.setattr(harness, "load_asr_provider_from_env", lambda *, model_name: (seen.append(model_name), provider)[1])
+    monkeypatch.setattr(harness, "download_source", lambda uri, destination: destination)
+    monkeypatch.setattr(harness, "probe_media", lambda path: MediaProbe(duration_sec=12.5, width=1920, height=1080, fps=30.0, has_audio=True))
+
+    result = harness.run_asr_only_benchmark({"source_key": "videos/source.mp4", "model_name": "large-v3"})
+
+    assert seen == ["large-v3"]
+    assert result["asr_config"]["model_name"] == "large-v3"
+    assert result["normalized_word_sequence"] == ["hello", "world"]
+    assert len(provider.transcribe_calls) == 1
+
+
+@pytest.mark.parametrize("model_name", ["../weights", "medium.en", "large-v3-turbo", ""]) 
+def test_asr_only_rejects_unreviewed_or_empty_explicit_model(monkeypatch, model_name):
+    monkeypatch.setattr(harness, "load_runtime_config", lambda: _fake_config())
+    if not model_name:
+        # Empty value uses the fixed deployment default instead of loading arbitrary weights.
+        provider = _FakeASRProvider()
+        _install_common_fakes(monkeypatch, asr_provider=provider)
+        result = harness.run_asr_only_benchmark({"source_key": "videos/source.mp4", "model_name": model_name})
+        assert result["asr_config"]["model_name"] == "medium"
+    else:
+        with pytest.raises(ValueError, match="unsupported ASR comparison model"):
+            harness.run_asr_only_benchmark({"source_key": "videos/source.mp4", "model_name": model_name})
