@@ -231,3 +231,18 @@ def test_unknown_text_provider_fails_before_download_or_api(monkeypatch):
     monkeypatch.setattr(harness, "download_source", lambda *args: pytest.fail("unexpected download"))
     with pytest.raises(ValueError, match="unsupported ASR text comparison provider"):
         harness.run_asr_only_benchmark({"source_key": "videos/source.mp4", "text_provider": "unknown"})
+
+
+def test_implicit_model_preserves_existing_deployment_configuration(monkeypatch):
+    provider = _FakeASRProvider()
+    provider.model_name = "small"
+    seen = []
+    monkeypatch.setattr(harness, "load_runtime_config", lambda: _fake_config(asr_model="small"))
+    monkeypatch.setattr(harness, "load_asr_provider_from_env", lambda *, model_name: (seen.append(model_name), provider)[1])
+    monkeypatch.setattr(harness, "download_source", lambda uri, destination: destination)
+    monkeypatch.setattr(harness, "probe_media", lambda path: MediaProbe(duration_sec=12.5, width=1920, height=1080, fps=30.0, has_audio=True))
+
+    result = harness.run_asr_only_benchmark({"source_key": "videos/source.mp4"})
+
+    assert seen == ["small"]
+    assert result["asr_config"]["model_name"] == "small"
