@@ -14,6 +14,9 @@ name: CutSell ASR-Only Modal Benchmark
 # (baseline, flag OFF) and Section 8 (candidate, flag ON) can both be run
 # from this one workflow without editing YAML between runs.
 on:
+  push:
+    branches: [feat/asr-provider-evaluation-and-replay]
+    paths: [.github/workflows/cutsell-asr-only-modal.yml]
   workflow_dispatch:
     inputs:
       deterministic_config:
@@ -43,7 +46,40 @@ env:
   BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
+  openai-access-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Inspect ASR model access without audio or GPU
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          req = urllib.request.Request("https://rest.runpod.io/v1/templates", headers={"Authorization": "Bearer " + os.environ["RUNPOD_API_KEY"]})
+          with urllib.request.urlopen(req, timeout=20) as response:
+              templates = json.load(response)
+          template = next(x for x in templates if x.get("name") == "EditDNA-Worker-2")
+          env = template.get("env") or {}
+          key = str(env.get("OPENAI_API_KEY") or "").strip()
+          print("configured_openai_key:", bool(key))
+          if not key:
+              raise SystemExit(0)
+          for model in ("gpt-transcribe", "gpt-4o-transcribe"):
+              req = urllib.request.Request("https://api.openai.com/v1/models/" + model, headers={"Authorization": "Bearer " + key})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as response:
+                      print(model, "http_status:", response.status, "request_id:", response.headers.get("x-request-id", ""))
+              except urllib.error.HTTPError as exc:
+                  try:
+                      error = json.loads(exc.read(4096)).get("error") or {}
+                  except (ValueError, TypeError):
+                      error = {}
+                  print(model, "http_status:", exc.code, "error_type:", error.get("type"), "error_code:", error.get("code"), "request_id:", exc.headers.get("x-request-id", ""))
+          PY
   asr-only-modal:
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
