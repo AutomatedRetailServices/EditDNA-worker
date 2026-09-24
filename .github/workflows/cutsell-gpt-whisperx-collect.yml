@@ -1,0 +1,219 @@
+name: CutSell Five Trial Artifact Collection (CPU only)
+on:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths: [.github/workflows/cutsell-gpt-whisperx-collect.yml]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        type: string
+        required: true
+        default: "36054192894"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  collect:
+    if: >-
+      github.run_attempt == 1 &&
+      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'collect(asr): retrieve five authorized trial artifacts without GPU')
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ github.event.inputs.source_run_id || '36054192894' }}
+    steps:
+      - name: Checkout collector
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Retrieve trial 1 (read-only, no GPU)
+        continue-on-error: true
+        run: python benchmarks/collect_gpt_whisperx_artifacts.py 1
+      - name: Preserve trial 1 JSON and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-small-1
+          path: collected/trial-1/reports/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve trial 1 video part A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-1-A
+          path: collected/trial-1/parts/A
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 1 video part B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-1-B
+          path: collected/trial-1/parts/B
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 1 video part C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-1-C
+          path: collected/trial-1/parts/C
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Retrieve trial 2 (read-only, no GPU)
+        continue-on-error: true
+        run: python benchmarks/collect_gpt_whisperx_artifacts.py 2
+      - name: Preserve trial 2 JSON and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-small-2
+          path: collected/trial-2/reports/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve trial 2 video part A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-2-A
+          path: collected/trial-2/parts/A
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 2 video part B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-2-B
+          path: collected/trial-2/parts/B
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 2 video part C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-2-C
+          path: collected/trial-2/parts/C
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Retrieve trial 3 (read-only, no GPU)
+        continue-on-error: true
+        run: python benchmarks/collect_gpt_whisperx_artifacts.py 3
+      - name: Preserve trial 3 JSON and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-small-3
+          path: collected/trial-3/reports/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve trial 3 video part A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-3-A
+          path: collected/trial-3/parts/A
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 3 video part B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-3-B
+          path: collected/trial-3/parts/B
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 3 video part C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-3-C
+          path: collected/trial-3/parts/C
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Retrieve trial 4 (read-only, no GPU)
+        continue-on-error: true
+        run: python benchmarks/collect_gpt_whisperx_artifacts.py 4
+      - name: Preserve trial 4 JSON and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-small-4
+          path: collected/trial-4/reports/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve trial 4 video part A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-4-A
+          path: collected/trial-4/parts/A
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 4 video part B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-4-B
+          path: collected/trial-4/parts/B
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 4 video part C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-4-C
+          path: collected/trial-4/parts/C
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Retrieve trial 5 (read-only, no GPU)
+        continue-on-error: true
+        run: python benchmarks/collect_gpt_whisperx_artifacts.py 5
+      - name: Preserve trial 5 JSON and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-small-5
+          path: collected/trial-5/reports/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve trial 5 video part A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-5-A
+          path: collected/trial-5/parts/A
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 5 video part B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-5-B
+          path: collected/trial-5/parts/B
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
+      - name: Preserve trial 5 video part C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-gptwx-video-5-C
+          path: collected/trial-5/parts/C
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
