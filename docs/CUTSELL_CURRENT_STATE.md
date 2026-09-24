@@ -860,3 +860,18 @@ only. clean_cut_provider=None; v2/guard diagnostics disabled. P2 whole-video
 reasoning flag is diagnostics-only and cannot repair selection by enabling it.
 No engine fix, threshold change, production change or paid run. See
 CUTSELL_WATCH_LISTEN_DEEPGRAM_FORENSIC.md for evidence and correction boundary.
+
+
+## 2026-09-24 authorized Video00 Deepgram full run completed
+
+Run 36069441576 / job 107866693967, test 9aa5e5180a534e27833eb8d5ee717368b2203d3c.
+Original Video00 source hash verified. Deepgram: 651 words, zero zero-duration
+words, seven native overlapping pairs; one request and one intra-job cache hit.
+20 selected/20 discarded, output 143.334 s, engine elapsed 431.011 s.
+Editorial criteria 10/11: full gynecologist and percentage-restatement checks
+pass, abandoned stomach attempt remains. Historical gold 17/18 (exact pimples
+micro-2 mismatch). Technical QC NEEDS_HUMAN_REVIEW for 1.5034 s accidental
+silence at output 42.9635–44.4669; diagnostic MP4 only. No human listening or
+universal ASR superiority claim. Modal stopped. Artifact reports 10837364760;
+parts 10837424599/10837324883; SHA digests verified. Manual-only restored at
+1bfe30f8. No Watch & Listen fix or production change; no further paid call.
