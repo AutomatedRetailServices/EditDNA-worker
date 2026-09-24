@@ -29,7 +29,10 @@ jobs:
           fetch-depth: 1
 
       - name: Install transport and CPU QA dependencies
-        run: pip install --disable-pip-version-check --quiet modal boto3 'numpy>=1.26,<3' 'requests>=2.32.3'
+        run: |
+          pip install --disable-pip-version-check --quiet modal boto3 'numpy>=1.26,<3' 'requests>=2.32.3'
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
 
       - name: Freeze one configuration and preflight credentials and source
         id: prepare

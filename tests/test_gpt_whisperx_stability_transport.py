@@ -6,6 +6,12 @@ import yaml
 from benchmarks import run_video00_gpt_whisperx_stability as batch
 
 
+def test_missing_media_tool_fails_before_paid_preparation(monkeypatch):
+    monkeypatch.setattr(batch.shutil, "which", lambda name: None if name == "ffprobe" else "/usr/bin/ffmpeg")
+    with pytest.raises(RuntimeError, match="ffprobe"):
+        batch.prepare()
+
+
 def test_sixth_and_zero_trials_cannot_claim_paid_work(tmp_path):
     for index in (0, -1, 6, 100):
         with pytest.raises(ValueError):

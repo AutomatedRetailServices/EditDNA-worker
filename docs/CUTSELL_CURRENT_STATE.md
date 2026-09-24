@@ -20,7 +20,16 @@ not shared across trials. The same-source cache operates only within each
 job. Each trial preserves its own video, raw result, logs, build/source proof,
 technical QC and unchanged editorial/Gold QA. Paid workflow reruns are blocked.
 Code under `cutsell_worker` and the canonical Modal wrapper are unchanged by
-this qualification harness. Results and consistency verdict are pending.
+this qualification harness. **Completed:** run `36054192894`, test SHA
+`99c02183246c3e2caa96c006ad81e7c966ba4a51`; five full results and five diagnostic
+MP4s, all blocked by physical silence QC. Editorial scores: 6/11, 5/11,
+8/11, 5/11, 8/11. The same three prior failures remain in all five. Zero
+zero-duration ASR words in every trial; 65 distinct GPT requests and one
+same-source cache reuse per job. Five selections differ despite lexical
+disagreement of only 0–0.7764%. No production promotion or sixth run.
+The runner's missing CPU ffprobe caused a separate post-render collection
+error; all exact outputs were recovered and verified locally without GPU
+re-execution. See `CUTSELL_GPT_WHISPERX_FIVE_TRIALS.md` for evidence and limits.
 
 ## Isolated ASR provider evaluation (not integrated)
 

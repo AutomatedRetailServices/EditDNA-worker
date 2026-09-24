@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -71,7 +72,14 @@ def s3_client(env: dict):
     )
 
 
+def require_media_tools() -> None:
+    missing = [name for name in ("ffmpeg", "ffprobe") if not shutil.which(name)]
+    if missing:
+        raise RuntimeError("Missing CPU media tools before paid dispatch: " + ", ".join(missing))
+
+
 def prepare() -> None:
+    require_media_tools()
     import requests
     from cutsell_worker.active_path_identity import package_fingerprint
     from modal_gpu_config import require_modal_token_env
