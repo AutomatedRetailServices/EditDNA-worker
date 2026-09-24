@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import time
 
-_TEXT_PROVIDERS = ("gpt-transcribe", "deepgram-nova-3-multi")
+_TEXT_PROVIDERS = ("gpt-4o-transcribe", "deepgram-nova-3-multi")
 _MAX_OPENAI_BYTES = 25 * 1024 * 1024
 
 
@@ -33,7 +33,7 @@ def compare_text_candidate(source_path: str, provider: str, *, language_hint: st
         )
         if not audio.exists() or not audio.stat().st_size:
             raise RuntimeError("ASR comparison audio extraction produced no audio")
-        if provider == "gpt-transcribe":
+        if provider == "gpt-4o-transcribe":
             key = os.environ.get("OPENAI_API_KEY", "").strip()
             if not key:
                 raise RuntimeError("OPENAI_API_KEY is required for the requested ASR comparison")
@@ -44,7 +44,7 @@ def compare_text_candidate(source_path: str, provider: str, *, language_hint: st
                     "https://api.openai.com/v1/audio/transcriptions",
                     headers={"Authorization": f"Bearer {key}"},
                     files={"file": ("audio.mp3", source, "audio/mpeg")},
-                    data={"model": "gpt-transcribe"},
+                    data={"model": provider},
                     timeout=300,
                 )
             response.raise_for_status()
