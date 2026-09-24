@@ -97,8 +97,59 @@ def test_control_an_incomplete_piece_or_a_failed_piece_never_composes():
     assert _suppressed((A1, M, L), LABELS, cand)[0] == set()
     failed = {**LABELS, "L": ("failed", 0.9)}
     cand2 = _kept_complementary_rows((A1, M, L), failed)
-    assert {r["clip_id"] for r in cand2} == {"A1"}
+    # D-291.5.1: with L unusable, A1 is the only piece and it PRECEDES M --
+    # an earlier attempt alone never makes the later monolith replaceable.
+    assert cand2 == []
     assert _suppressed((A1, M, L), failed, cand2)[0] == set()
+
+
+# --- B2. D-291.5.1 controls from the RAW #126 replay (gynecologist family) ---
+
+X_TEXT = ("Al terminar mi contrato hablé con mi ginecóloga y le pedí todos los test que ella pudiera imaginarse o que me "
+          "pudiera indicar.")
+Y_TEXT = "Al terminar mi contrato le pedía a mi ginecóloga"
+Z_TEXT = ("al terminar mi contrato cambié de ginecóloga y le pedí que me hiciera un test de todo lo que ella se pudiera "
+          "imaginar y me pudiese indicar.")
+X = take("X", 82.82, 90.60, X_TEXT)
+Y = take("Y", 91.20, 94.34, Y_TEXT)
+Z = take("Z", 95.52, 104.32, Z_TEXT)
+
+
+def test_control_true_retakes_with_different_words_before_the_final_delivery_never_compose():
+    """RAW #126 replay on D-291.5 (before D-291.5.1): X + Y, two earlier
+    attempts of the same idea with different wording, replaced the final
+    complete delivery Z. Both precede Z: the later complete retake dominates."""
+    labels = {"X": ("alternate", 0.85), "Y": ("failed", 0.95), "Z": ("winner", 0.98)}
+    cand = _kept_complementary_rows((X, Y, Z), labels)
+    assert cand == []
+    assert _suppressed((X, Y, Z), labels, cand)[0] == set()
+    # even with Y usable and positively labelled, both pieces still precede Z
+    labels2 = {"X": ("alternate", 0.85), "Y": ("keep", 0.8), "Z": ("winner", 0.98)}
+    cand2 = _kept_complementary_rows((X, Y, Z), labels2)
+    assert cand2 == [] and _suppressed((X, Y, Z), labels2, cand2)[0] == set()
+
+
+def test_control_unlabelled_kept_pieces_carry_no_evidence_and_never_compose():
+    """The RAW #126 replay window that fired had NO label for X or Y in its
+    semantic map ('' / 0.0): a kept take without a judge label is not a
+    proven usable delivery."""
+    labels = {"M": ("winner", 0.95), "HAIR": ("winner", 0.95)}  # A1, L unlabelled
+    cand = _kept_complementary_rows((A1, M, L, HAIR), labels)
+    assert cand == []
+    assert _suppressed((A1, M, L, HAIR), labels, cand)[0] == set()
+
+
+def test_a_monolith_is_replaceable_only_when_a_complementary_piece_follows_it():
+    # RAW #125/#126 skin shape: A1 before M, L after M -> both rows survive
+    cand = _kept_complementary_rows((A1, M, L, HAIR), LABELS)
+    assert {r["clip_id"]: r["candidate_after_peer"] for r in cand} == {"A1": False, "L": True}
+    # the same two pieces both moved BEFORE the monolith -> earlier attempts, no composite
+    a_early = take("A1", 170.0, 175.68, A1_TEXT)
+    l_early = take("L", 176.5, 186.14, L_TEXT)
+    m_late = take("M", 198.88, 211.02, M_TEXT)
+    cand2 = _kept_complementary_rows((a_early, l_early, m_late, HAIR), LABELS)
+    assert cand2 == []
+    assert _suppressed((a_early, l_early, m_late, HAIR), LABELS, cand2)[0] == set()
 
 
 def test_control_numbers_and_negations_of_the_monolith_must_survive_in_the_pair():

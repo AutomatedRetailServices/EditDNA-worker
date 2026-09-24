@@ -233,6 +233,8 @@ def test_interior_gap_trim_split_preserves_realization_id_and_stamps_parent():
                 {"kind": "hand_motion_reset_candidate", "start": 1.25, "end": 1.80, "confidence": 0.96},
                 {"kind": "body_reset_candidate", "start": 1.35, "end": 1.90, "confidence": 0.95},
                 {"kind": "facial_expression_shift_candidate", "start": 1.40, "end": 1.95, "confidence": 0.88},
+                # D-291.10: a word-gap split needs the measured silence of the gap
+                {"kind": "audio_silence_interval", "start": 1.22, "end": 2.18, "confidence": 1.0},
             ],
         }]},
     }

@@ -41,6 +41,7 @@ from .raw_understanding_map import (
 )
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .silence_analysis import word_silence_gaps
+from .audio_silence import reconcile_transcript_words_with_measured_silence
 from .audio_silence import merge_audio_silence_into_context
 from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
@@ -164,6 +165,21 @@ def process_local_sources(
         transcript_observer(transcript_tuple)
     trace.complete("asr", segment_count=len(transcript_tuple))
     trace.complete("parallel_perception", **perception_outcome.diagnostics())
+    # D-291.9: ASR word spans reconciled against the measured source silence
+    # BEFORE any consumer (segmentation, reconstruction, boundaries, render)
+    # trusts them -- see audio_silence.reconcile_transcript_words_with_
+    # measured_silence. The observer above still receives the raw ASR.
+    transcript_tuple, word_timing_rows = reconcile_transcript_words_with_measured_silence(
+        transcript_tuple, perception_outcome.audio_silence_by_source,
+    )
+    trace.complete(
+        "asr_word_timing_reconciliation",
+        row_count=len(word_timing_rows),
+        reanchored_count=sum(1 for r in word_timing_rows if r["rule"].startswith("reanchored")),
+        clamped_count=sum(1 for r in word_timing_rows if "clamped" in r["rule"]),
+        no_room_count=sum(1 for r in word_timing_rows if r["rule"] == "inside_measured_silence_no_adjacent_room"),
+        rows=list(word_timing_rows[:80]),
+    )
     notify("analyzing", 27)
 
     # D-052 Part A Section 2/3 observability: compute canonical ASR evidence

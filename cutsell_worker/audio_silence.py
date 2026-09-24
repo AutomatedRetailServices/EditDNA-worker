@@ -192,3 +192,244 @@ def merge_audio_silence_into_context(
             tuple(source.events) + additions, key=lambda e: (float(e.start), float(e.end), e.kind),
         ))))
     return replace(context, sources=tuple(merged))
+
+
+# --- D-291.9: ASR word timings reconciled against the measured silence ------
+#
+# RAW #126 (project video00-modal-35931561397-1), verified on the source
+# audio and on the rendered MP4: Whisper placed a sentence-final word and,
+# elsewhere, a clause-initial negation particle ENTIRELY inside a silence
+# the same run had measured with ffmpeg silencedetect (one under the
+# primary -35 dB floor, the other under the relaxed -30 dB floor). The real
+# words sit right next to the pause: the sentence-final word ends where the
+# silence starts (speech energy up to ~0.3 s before it) and the particle
+# starts where the last silence before its clause ends. Every downstream
+# authority trusted the ASR spans: the take ended on the previous word,
+# inside the real one; a 0.6 s clip of pure silence was rendered for it;
+# the AttemptReconstructor split the particle from its clause across the
+# measured dead air (D-097.5, correct on its own evidence) and the rendered
+# sentence lost its negation. The same padding stretches sentence-final
+# words over the following pause (one ran 1 s past a measured 0.64 s
+# silence that started inside it).
+#
+# This is the measured-silence authority (D-095.2 / D-097 Priority C), so
+# the reconciliation lives here: a word whose whole ASR span lies inside a
+# measured silence was not spoken there; it is re-anchored to the adjacent
+# non-silent room next to its neighbouring words (the larger room wins), and
+# a word a primary-floor measured silence starts inside ends where that
+# silence starts (symmetrically for a padded start). No word is invented,
+# dropped or re-ordered; a word with no room on either side is left as it
+# was and reported. A re-anchored word that becomes adjacent to the
+# neighbouring ASR segment joins it (the same 0.75 s speech-unit gap
+# `take_segmentation`/`canonical_asr_evidence` already use), so the
+# sentence-final word is back in its sentence and the negated clause stays
+# one unit.
+WORD_RECONCILIATION_EDGE_TOLERANCE_SEC = 0.05
+WORD_RECONCILIATION_MINIMUM_ROOM_SEC = 0.05
+WORD_RECONCILIATION_RULE_BEFORE = "reanchored_before_measured_silence"
+WORD_RECONCILIATION_RULE_AFTER = "reanchored_after_measured_silence"
+WORD_RECONCILIATION_RULE_NO_ROOM = "inside_measured_silence_no_adjacent_room"
+WORD_RECONCILIATION_RULE_END = "padded_end_clamped_to_silence_start"
+WORD_RECONCILIATION_RULE_START = "padded_start_clamped_to_silence_end"
+
+
+_TERMINAL_MARKS = (".", "!", "?", "…")
+
+
+def _is_sentence_final(text: str) -> bool:
+    return str(text or "").strip().rstrip("\"'”’)").endswith(_TERMINAL_MARKS)
+
+
+def _measured_silences(events: Iterable, *, minimum_confidence: float) -> list[tuple[float, float, float]]:
+    """(start, end, confidence) triples of the measured silence events at or
+    above `minimum_confidence`, sorted by start."""
+    out = []
+    for event in events or ():
+        kind = getattr(event, "kind", None) if not isinstance(event, dict) else event.get("kind")
+        if str(kind or "") != AUDIO_SILENCE_EVENT_KIND:
+            continue
+        conf = getattr(event, "confidence", 0.0) if not isinstance(event, dict) else event.get("confidence", 0.0)
+        if float(conf or 0.0) < minimum_confidence:
+            continue
+        start = float(getattr(event, "start", 0.0) if not isinstance(event, dict) else event.get("start", 0.0))
+        end = float(getattr(event, "end", 0.0) if not isinstance(event, dict) else event.get("end", 0.0))
+        if end > start:
+            out.append((start, end, float(conf or 0.0)))
+    return sorted(out)
+
+
+def reconcile_transcript_words_with_measured_silence(
+    segments: Iterable,
+    events_by_source: Mapping[str, Iterable],
+    *,
+    minimum_confidence: float = RELAXED_CONFIDENCE,
+    clamp_minimum_confidence: float = 1.0,
+    adjacent_gap_sec: float | None = None,
+    edge_tolerance_sec: float = WORD_RECONCILIATION_EDGE_TOLERANCE_SEC,
+    minimum_room_sec: float = WORD_RECONCILIATION_MINIMUM_ROOM_SEC,
+) -> tuple[tuple, tuple[dict, ...]]:
+    """Return (segments, rows): the transcript segments with every word span
+    reconciled against the measured silence of its source (see the module
+    comment above) and one observability row per changed or unplaceable
+    word. Segments of a source with no measured silence are returned as the
+    same objects; nothing is invented, dropped or re-ordered.
+
+    Evidence rules (RAW #126 dry run over the whole source, checked against
+    the audio peaks): the relaxed -30 dB floor swallows the quiet tail of a
+    trailing word (peaks of 700-1100 under the 1036 relaxed peak), so a word
+    is CLAMPED only by a primary-floor silence (`clamp_minimum_confidence`);
+    a fully covered word prefers the primary floor too and falls back to the
+    relaxed floor (the negation-particle case sits only under the relaxed
+    floor). A sentence-final word never re-anchors to the right (it belongs
+    to the sentence before the pause) and a right re-anchor never leaves the
+    word's own ASR segment span (the ASR grouped the particle with its
+    clause; it did not group a sentence-final word with the next sentence)."""
+    from dataclasses import replace as _replace
+    from .canonical_asr_evidence import DEFAULT_SPLIT_GAP_SEC
+
+    gap_sec = float(DEFAULT_SPLIT_GAP_SEC if adjacent_gap_sec is None else adjacent_gap_sec)
+    segment_list = list(segments)
+    rows: list[dict] = []
+    # per-segment mutable word lists: seg_idx -> list of Word (in ASR order)
+    seg_words: dict[int, list] = {idx: list(seg.words) for idx, seg in enumerate(segment_list)}
+    changed_segments: set[int] = set()
+
+    by_source: dict[str, list[int]] = {}
+    for idx, seg in enumerate(segment_list):
+        by_source.setdefault(str(seg.source_asset_id), []).append(idx)
+
+    for source_asset_id, seg_indices in by_source.items():
+        silences = _measured_silences(events_by_source.get(source_asset_id, ()), minimum_confidence=minimum_confidence)
+        if not silences:
+            continue
+        clamp_silences = [s for s in silences if s[2] >= clamp_minimum_confidence]
+        # time-ordered word entries: (start, end, seg_idx, word_idx)
+        entries = []
+        for seg_idx in seg_indices:
+            for word_idx, word in enumerate(seg_words[seg_idx]):
+                entries.append([float(word.start), float(word.end), seg_idx, word_idx])
+        entries.sort(key=lambda e: (e[0], e[1], e[2], e[3]))
+        moves: list[tuple[int, int, str, dict]] = []  # (seg_idx, word_idx, rule, row)
+
+        for pos, entry in enumerate(entries):
+            ws, we, seg_idx, word_idx = entry
+            word = seg_words[seg_idx][word_idx]
+            if we <= ws:
+                continue  # zero-length ASR word: no span to reconcile
+            duration = we - ws
+            prev_end = entries[pos - 1][1] if pos > 0 else None
+            next_start = entries[pos + 1][0] if pos + 1 < len(entries) else None
+            covering = [s for s in silences if s[0] <= ws + edge_tolerance_sec and we <= s[1] + edge_tolerance_sec]
+            new_start, new_end, rule, silence = ws, we, None, None
+            segment_end = float(segment_list[seg_idx].end)
+            if covering:
+                # primary floor first, then the largest overlap
+                silence = max(covering, key=lambda s: (s[2], min(we, s[1]) - max(ws, s[0])))
+                left_room = (silence[0] - prev_end) if prev_end is not None else 0.0
+                anchor_end = silence[1]
+                if next_start is not None:
+                    later = [s[1] for s in silences if s[1] >= silence[0] and s[1] <= next_start + edge_tolerance_sec]
+                    if later:
+                        anchor_end = max(later)
+                right_room = (next_start - anchor_end) if next_start is not None else 0.0
+                right_allowed = (
+                    not _is_sentence_final(word.text)
+                    and next_start is not None
+                    and anchor_end <= segment_end + edge_tolerance_sec
+                )
+                if left_room >= right_room and left_room >= minimum_room_sec:
+                    new_end = silence[0]
+                    new_start = max(prev_end, silence[0] - duration)
+                    rule = WORD_RECONCILIATION_RULE_BEFORE
+                elif right_allowed and right_room >= minimum_room_sec:
+                    new_start = anchor_end
+                    new_end = min(next_start, anchor_end + duration)
+                    rule = WORD_RECONCILIATION_RULE_AFTER
+                elif left_room >= minimum_room_sec:
+                    new_end = silence[0]
+                    new_start = max(prev_end, silence[0] - duration)
+                    rule = WORD_RECONCILIATION_RULE_BEFORE
+                else:
+                    rule = WORD_RECONCILIATION_RULE_NO_ROOM
+            else:
+                # padded end: a primary-floor silence that starts inside the word --
+                # one word never contains a measured >= 0.6 s silence, so the word
+                # ended where the earliest such silence starts (the ASR padded the
+                # word to its segment end, past the pause)
+                ends = [s for s in clamp_silences if ws + edge_tolerance_sec < s[0] < we - edge_tolerance_sec]
+                if ends:
+                    silence = min(ends)
+                    new_end = silence[0]
+                    rule = WORD_RECONCILIATION_RULE_END
+                # padded start: a primary-floor silence that covers the word's start and
+                # ends inside it -- the word started where the silence ends
+                starts = [s for s in clamp_silences if s[0] <= ws + edge_tolerance_sec and ws + edge_tolerance_sec < s[1] < new_end - edge_tolerance_sec]
+                if starts:
+                    silence_start = max(starts)
+                    new_start = silence_start[1]
+                    rule = WORD_RECONCILIATION_RULE_START if rule is None else rule + "+" + WORD_RECONCILIATION_RULE_START
+                    silence = silence if silence is not None else silence_start
+            if rule is None:
+                continue
+            row = {
+                "source_asset_id": source_asset_id,
+                "word": str(word.text),
+                "rule": rule,
+                "from_start": round(ws, 3), "from_end": round(we, 3),
+                "to_start": round(new_start, 3), "to_end": round(new_end, 3),
+                "silence_start": round(silence[0], 3) if silence else None,
+                "silence_end": round(silence[1], 3) if silence else None,
+                "moved_to_adjacent_segment": False,
+            }
+            rows.append(row)
+            if rule != WORD_RECONCILIATION_RULE_NO_ROOM and new_end > new_start:
+                seg_words[seg_idx][word_idx] = _replace(word, start=round(new_start, 3), end=round(new_end, 3))
+                entry[0], entry[1] = new_start, new_end
+                changed_segments.add(seg_idx)
+                if rule in (WORD_RECONCILIATION_RULE_BEFORE, WORD_RECONCILIATION_RULE_AFTER):
+                    moves.append((seg_idx, word_idx, rule, row))
+
+        # a re-anchored FIRST/LAST word that now sits next to the neighbouring
+        # ASR segment belongs to that segment (same speech-unit gap rule)
+        ordered = sorted(seg_indices, key=lambda i: (float(segment_list[i].start), i))
+        for seg_idx, word_idx, rule, row in moves:
+            words_here = seg_words[seg_idx]
+            if not words_here or words_here[word_idx] is None:
+                continue
+            word = words_here[word_idx]
+            position = ordered.index(seg_idx)
+            if rule == WORD_RECONCILIATION_RULE_BEFORE and word_idx == 0 and position > 0:
+                target = ordered[position - 1]
+                target_words = [w for w in seg_words[target] if w is not None]
+                if target_words and float(word.start) - float(target_words[-1].end) <= gap_sec:
+                    seg_words[target].append(word)
+                    words_here[word_idx] = None
+                    changed_segments.update((seg_idx, target))
+                    row["moved_to_adjacent_segment"] = True
+            elif rule == WORD_RECONCILIATION_RULE_AFTER and word_idx == len(words_here) - 1 and position + 1 < len(ordered):
+                target = ordered[position + 1]
+                target_words = [w for w in seg_words[target] if w is not None]
+                if target_words and float(target_words[0].start) - float(word.end) <= gap_sec:
+                    seg_words[target].insert(0, word)
+                    words_here[word_idx] = None
+                    changed_segments.update((seg_idx, target))
+                    row["moved_to_adjacent_segment"] = True
+
+    if not changed_segments:
+        return tuple(segment_list), tuple(rows)
+    out = []
+    for idx, seg in enumerate(segment_list):
+        if idx not in changed_segments:
+            out.append(seg)
+            continue
+        words = tuple(sorted((w for w in seg_words[idx] if w is not None), key=lambda w: (float(w.start), float(w.end))))
+        if not words:
+            continue
+        out.append(_replace(
+            seg,
+            start=float(words[0].start),
+            end=float(words[-1].end),
+            text=" ".join(str(w.text) for w in words).strip(),
+            words=words,
+        ))
+    return tuple(out), tuple(rows)

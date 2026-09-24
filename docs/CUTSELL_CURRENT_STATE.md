@@ -647,3 +647,23 @@ at 5,000 lines; `*.githubusercontent.com` reachable. A relay workflow to
 release assets was refused by the session's permission layer and NOT
 added. The ONE authorized RAW is unspent until the Product Owner allows the
 host, attaches run 35931561397's artifacts, or approves the relay.
+
+### D-291.8 – D-291.11 — RAW #126 read for real; approved supervised edit as reference; three engine corrections
+
+RAW #126's JSON was attached; its MP4 and the original were read from the
+project bucket (unsigned reads work through the proxy -- security
+observation E for the Product Owner). Real #126: technical QC PASS,
+Watch+Listen BLOCKED on six hand-motion "debris" findings that overlap
+spoken words; thyroid T1 (abandoned attempt) chosen over T2 (`winner`
+0.95) by the case-B gesture count; skin M over A1 by DeliveryScore
+tie-break; "resorcina." and "No" rendered as silent clips because Whisper
+placed them inside measured silence; symptoms take cut twice inside
+speech at ASR word gaps. The approved edit (18 segments, evaluation only)
+maps one-to-one onto engine takes. Fixes: D-291.5.1 (positive label +
+later-piece order for kept composite candidates; gynecologist regression
+found by the #126 replay), D-291.9 (ASR word spans reconciled against
+measured silence in `audio_silence.py`, wired in `flow_b`), D-291.10
+(gesture vs reset in case-B materiality, interior gap trim, Watch+Listen
+edge debris). D-291.6 verified on the real path; the two fixed-SHA guard
+edits justified by empty range diffs. Not proven on video yet: the ONE
+authorized RAW runs on the pushed head; retrieval via S3 + attached JSON.

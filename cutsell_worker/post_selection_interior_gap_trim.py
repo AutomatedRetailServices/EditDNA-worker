@@ -53,6 +53,9 @@ AUDIO_SILENCE_EVENT_KIND = "audio_silence_interval"
 # already owns interior physical gaps.
 LONG_AUDIO_SILENCE_SEC = 1.20
 AUDIO_SILENCE_EDGE_PAD_SEC = 0.12
+# D-291.10: a word-gap split needs a measured silence overlapping the gap;
+# both silencedetect floors count (audio_silence.RELAXED_CONFIDENCE).
+MEASURED_PAUSE_MIN_CONFIDENCE = 0.90
 
 
 def _clamp_word(word, start: float, end: float):
@@ -307,6 +310,24 @@ def split_selected_interior_performance_gaps(
                     1 for event in physical
                     if _kind(event.get("kind")) == "hand_motion_reset_candidate"
                 )
+                # D-291.10 (RAW #126, a 0.34 s ASR gap at a comma): the
+                # word-gap modes cut at ASR word edges on visual candidates
+                # alone; the source audio showed speech through that gap
+                # (the ASR start of the next word was 0.24 s late) and the
+                # render cut into it, twice in one delivery, with a jump
+                # cut each time. A word gap is a reset only when the SAME
+                # measured silence the D-095.2 mode trusts overlaps it
+                # (D-149: a genuine reset has a real pause); the cut then
+                # lands INSIDE that measured silence, never on an ASR edge.
+                measured_pauses = [
+                    (float(event.get("start") or 0.0), float(event.get("end") or 0.0))
+                    for event in events
+                    if _kind(event.get("kind")) == AUDIO_SILENCE_EVENT_KIND
+                    and float(event.get("confidence") or 0.0) >= MEASURED_PAUSE_MIN_CONFIDENCE
+                    and float(event.get("end") or 0.0) > gap_start
+                    and float(event.get("start") or 0.0) < gap_end
+                ]
+                measured_pause = max(measured_pauses, key=lambda p: min(p[1], gap_end) - max(p[0], gap_start)) if measured_pauses else None
                 physical_ok = len(physical) >= 2 and hand_count >= 1
                 multimodal_ok = physical_ok and bool(breaks)
                 completed_left = _is_completed_left_delivery(left_word)
@@ -341,6 +362,8 @@ def split_selected_interior_performance_gaps(
                     and near_gap_reset_count >= 1
                 )
 
+                if rejection is None and measured_pause is None and (multimodal_ok or long_gap_physical_ok or anticipatory_ok):
+                    rejection = "no_measured_pause_in_word_gap"
                 if rejection is None and not multimodal_ok and not long_gap_physical_ok and not anticipatory_ok:
                     if completed_left and anticipatory_minimum_gap_sec <= gap < long_gap_without_break_sec:
                         if len(anticipatory_physical) < 2:
@@ -385,6 +408,10 @@ def split_selected_interior_performance_gaps(
                         "anticipatory_hand_event_count": anticipatory_hand_count,
                         "anticipatory_near_gap_reset_count": near_gap_reset_count,
                         "anticipatory_ok": bool(anticipatory_ok),
+                        "measured_pause_in_gap": (
+                            {"start": round(measured_pause[0], 3), "end": round(measured_pause[1], 3)}
+                            if measured_pause is not None else None
+                        ),
                         "physical_events": [
                             {
                                 "kind": _kind(event.get("kind")),
@@ -443,19 +470,30 @@ def split_selected_interior_performance_gaps(
                         selected_physical,
                         breaks,
                         evidence_mode,
+                        measured_pause,
                     )
 
             if best is None:
                 original_pieces.append(clip)
                 continue
 
-            _, index, gap_start, gap_end, physical, breaks, evidence_mode = best
+            _, index, gap_start, gap_end, physical, breaks, evidence_mode, measured_pause = best
             left_words = words[: index + 1]
             right_words = words[index + 1 :]
+            # D-291.10: cut inside the measured silence (a natural pause edge
+            # on both sides, as the D-095.2 mode does), never on the ASR
+            # word edge the gap was found with.
+            pause_start = max(gap_start, float(measured_pause[0]))
+            pause_end = min(gap_end, float(measured_pause[1]))
+            pad = min(float(audio_pad_sec), max(0.0, (pause_end - pause_start) / 3.0))
+            left_end = pause_start + pad
+            right_start = pause_end - pad
+            left_words = tuple(_clamp_word(w, float(clip.start), left_end) for w in left_words)
+            right_words = tuple(_clamp_word(w, right_start, float(clip.end)) for w in right_words)
             left = replace(
                 clip,
-                clip_id=_child_id(clip, "l", float(clip.start), float(left_words[-1].end)),
-                end=float(left_words[-1].end),
+                clip_id=_child_id(clip, "l", float(clip.start), float(left_end)),
+                end=float(left_end),
                 text=_text(left_words),
                 caption_text=_text(left_words),
                 words=left_words,
@@ -471,8 +509,8 @@ def split_selected_interior_performance_gaps(
             )
             right = replace(
                 clip,
-                clip_id=_child_id(clip, "r", float(right_words[0].start), float(clip.end)),
-                start=float(right_words[0].start),
+                clip_id=_child_id(clip, "r", float(right_start), float(clip.end)),
+                start=float(right_start),
                 text=_text(right_words),
                 caption_text=_text(right_words),
                 words=right_words,

@@ -390,6 +390,20 @@ def _measured_pause_near(
     return False
 
 
+def _spoken_words_for_segment(draft, segment) -> tuple[tuple[float, float], ...]:
+    """D-291.10: the frozen draft's own word timings for this segment's clip
+    (by clip id, then by parent semantic clip id for a physical fragment),
+    in source seconds. Empty when the draft carries no words for it."""
+    wanted = {str(segment.clip_id), str(getattr(segment, "parent_semantic_clip_id", "") or "")}
+    for clip in getattr(draft, "selected", ()) or ():
+        if str(clip.clip_id) in wanted:
+            return tuple(
+                (float(w.start), float(w.end)) for w in (getattr(clip, "words", ()) or ())
+                if float(getattr(w, "end", 0.0)) > float(getattr(w, "start", 0.0))
+            )
+    return ()
+
+
 def _reset_debris_at_edges(draft, segments: Sequence, output_windows: Sequence[tuple[float, float]]) -> CapabilityReport:
     name = "reset_debris_at_edges_source_evidence"
     diagnostics = dict(getattr(draft, "diagnostics", None) or {})
@@ -401,6 +415,7 @@ def _reset_debris_at_edges(draft, segments: Sequence, output_windows: Sequence[t
             continue
         evidence_seen = True
         seg_start, seg_end = float(segment.start), float(segment.end)
+        spoken = _spoken_words_for_segment(draft, segment)
         for event in events:
             kind = str(event.get("kind") or "").strip().lower()
             if kind not in _RESET_KINDS or float(event.get("confidence") or 0.0) < EDGE_DEBRIS_MIN_CONFIDENCE:
@@ -435,7 +450,16 @@ def _reset_debris_at_edges(draft, segments: Sequence, output_windows: Sequence[t
                     events, e_start, e_end, tolerance_sec=RESET_CANDIDATE_PAUSE_PROXIMITY_SEC,
                 )
                 detail["measured_pause_nearby"] = pause_nearby
-                severity = "FAIL" if pause_nearby else "UNCERTAIN"
+                # D-291.10 (RAW #126: six FAILs, all 67 ms hand-motion
+                # candidates at an edge with the clip's own pre/post-speech
+                # pause "nearby", every one during a spoken word on the
+                # frames -- the mic hand moving as speech starts or ends).
+                # An edge event that overlaps a word the frozen clip itself
+                # carries is happening DURING speech: a gesture, never
+                # confirmed debris. UNCERTAIN, still reported and routed.
+                during_word = any(w_start < e_end and w_end > e_start for w_start, w_end in spoken)
+                detail["during_spoken_word"] = during_word
+                severity = "FAIL" if (pause_nearby and not during_word) else "UNCERTAIN"
             findings.append(PerceptualFinding(
                 name, RESET_DEBRIS_AT_EDGE, out_start, out_end, severity, ROUTE_BOUNDARY, detail,
             ))

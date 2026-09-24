@@ -238,6 +238,9 @@ def _restore_performance_only_unique_deliveries(
     return restore_ids, rows
 
 
+_KEPT_CANDIDATE_LABELS = frozenset({"winner", "keep", "alternate"})
+
+
 def _kept_complementary_rows(
     kept: tuple[CandidateTake, ...],
     semantic: dict[str, tuple[str, float]],
@@ -275,6 +278,13 @@ def _kept_complementary_rows(
         label, confidence = semantic.get(candidate.clip_id, ("", 0.0))
         if _semantically_unusable(label, confidence):
             continue
+        # D-291.5.1 (RAW #126 replay, gynecologist family): a kept take the
+        # judge has NOT labelled in this window carries no evidence of being
+        # a usable delivery -- an unlabelled abandoned restart is not a
+        # composite piece. Restored rows come with their own guard evidence;
+        # a kept candidate needs a positive label here.
+        if label not in _KEPT_CANDIDATE_LABELS:
+            continue
         own = _content(candidate.text)
         if len(own) < 4:
             continue
@@ -309,6 +319,7 @@ def _kept_complementary_rows(
         rows.append({
             "clip_id": candidate.clip_id,
             "peer_clip_id": best.clip_id,
+            "candidate_after_peer": bool(float(candidate.start) >= float(best.end)),
             "reason": "kept_complete_complementary_delivery_for_composite_best_take",
             "semantic_label": label,
             "semantic_confidence": round(float(confidence), 4),
@@ -317,7 +328,16 @@ def _kept_complementary_rows(
             "unique_content_tokens": sorted(best_unique),
             "unique_fraction": round(unique_fraction, 4),
         })
-    return rows
+    # D-291.5.1 (RAW #126 replay, gynecologist family): two complementary
+    # pieces that BOTH precede the monolith are the creator's earlier
+    # attempts, which the later complete delivery redoes -- the ordinary
+    # "later complete retake dominates" doctrine, never a composite. A
+    # monolith is only replaceable when at least one complementary piece
+    # comes AFTER it (the creator went on to restate part of it, so the
+    # monolith was not the final word -- the RAW #125/#126 skin shape: the
+    # ears/neck delivery follows the long intermediate take).
+    peers_with_later_piece = {row["peer_clip_id"] for row in rows if row["candidate_after_peer"]}
+    return [row for row in rows if row["peer_clip_id"] in peers_with_later_piece]
 
 
 def _delete_strong_prefix_prior_restarts(

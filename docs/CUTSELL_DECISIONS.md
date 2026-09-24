@@ -79906,3 +79906,226 @@ environment's network policy, attach run 35931561397's
 `cutsell-video00-modal-validator-reports` (102 KB), or approve the relay
 workflow. Until one exists the authorized RAW stays unspent (D-091 C /
 directive). Active runs at the time of this check: 0 in progress.
+
+## D-291.8 — RAW #126 read from its own JSON, MP4 and the original; D-291.5 verified and corrected (D-291.5.1); the approved supervised edit as the evaluation reference
+
+**Evidence now in hand (OBSERVED):** the Product Owner attached RAW #126's
+`video00-modal.json` (project `video00-modal-35931561397-1`, byte-identical
+to `s3://…/cutsell/serverless/video00-modal-35931561397-1/result.json`),
+the approved supervised edit `CutSell_video_editado.mp4` (134.834 s,
+sha256 `b4a6d64f…`, 18 segments listed in `reviewed-edit.json`, NOT an
+engine output) and its reproducible cut list. The original
+`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4` (sha256
+`b37059b1…`, the `source_sha256` the cut list names) and RAW #126's
+`preview.mp4` (148.026 s) were retrieved from the project bucket
+`script2clipshop-video-automatedretailservices`: the bucket answers
+UNSIGNED reads and listings through the session's egress proxy (the
+environment's AWS credentials are proxy placeholders that STS rejects,
+`InvalidClientTokenId`). **Security observation for the Product Owner
+(escalation E, not acted on):** the bucket holding the creators' source
+videos and every RAW artifact is publicly listable and readable.
+
+**RAW #126 as it really was (OBSERVED, supersedes the log-tail inferences
+of D-291.4):** technical QC PASS on attempt 1, no repair; perceptual
+Watch+Listen **BLOCKED** (`NOT_DELIVERABLE_WATCH_LISTEN_BLOCKED:
+perceptual=FAIL`): 6 FAIL findings of `reset_debris_at_edges_source_
+evidence`, every one a 67 ms `hand_motion_reset_candidate` at a clip edge
+with the clip's own pre/post-speech pause "nearby" (cruise entry 13.80,
+symptoms exit 57.8, gynecologist entry 95.6, symptom-intro exit 157.8 and
+158.0, the "resorcina." exit 191.6); 4 capabilities `NOT_IMPLEMENTED`.
+Skin family {A1, M}: two complete windows disagreed (M winner 0.95 / A1
+failed 0.8 vs A1 alternate 0.8 / M alternate 0.85 / L winner 0.95), gate
+`ABSTAIN_CONFLICT`, D-291 confirmation attempted and unresolved (no single
+winner among members), DeliveryScore tie-break M 0.667 vs A1 0.606 -> M.
+Thyroid family {T1 25.6-34.6, T2 35.46-46.42}: ONE complete window, T2
+`winner` 0.95, T1 `alternate` 0.8, gate AUTHORITATIVE -- and the CASE B
+gate bypassed it (`case_b_performance_conflict`, `material_count_
+difference_confirmed`: T2 carried 7 D-097-countable hand-motion candidates
+vs T1's 4), DeliveryScore chose T1 (0.6817 vs 0.6211, NON_DECISIVE
+margin). "No" (269.37-270.17) labelled `failed` 0.95, kept anyway; R
+`failed` 0.85 + T kept with no family with W.
+
+**Comparison with the approved edit (evaluation only, never injected):**
+the 18 approved segments map one-to-one onto engine takes. Differences
+that are engine errors: (1) thyroid: T1 (the abandoned "…mínimo dos
+estados." attempt) instead of T2 (approved 35.37-45.43) -- retake choice by
+gesture count (D-291.10); (2) skin: M (198.88-211.02) instead of A1
+(approved 192.17-197.63) -- D-291.5 mechanism; (3) "resorcina." rendered as
+a silent 0.6 s clip after an acne take cut inside the real word; (4) "No"
+rendered as a near-silent 0.8 s clip 6 s before "quiero sonar a
+conspiración", whose real "No" (275.9) is cut off -- a negation lost
+(D-291.9); (5) symptoms take cut twice inside continuous speech at ASR word
+gaps of 0.34/0.32 s on hand-motion candidates (D-291.10); (6) R + T
+(327.78-334.24 + 340.18-342.58, "solo un 5-10% de los cánceres son
+hereditarios") kept as a broken restatement of W's own claim -- the RAW
+#115 "never competed" class (no family with W), open. Acceptable
+variations (not errors): hook 8.37-11.89 vs 8.57-11.2; gynecologist end
+104.32 vs 102.9; diagnosis end 140.96 vs 139.07 (renderer trims the tail);
+conclusion/advice identical in content. Human Gold preferences (aside
+dropped, closing reformulations dropped) are recorded as preferences.
+
+**D-291.5 on RAW #126's own data:** a replay of #126's inputs (its 47 clip
+rows with the timed words, recorded merges/rejections/probes, recorded
+DeliveryScores, recorded events) on `01591b02` reproduces the observed
+skin outcome (M kept, A1 discarded, L separate) and on `be98040f` keeps A1
++ L and discards M. Deviation to state plainly: 9 of the 10 judge windows
+the replay forms are not the recorded windows (the recorded chunks had a
+different membership), so those labels are the best recorded label per
+clip, not the recorded window answer; the skin family's own window labels
+(A1 alternate 0.6 / M winner 0.95 / L alternate 0.75) are exercised in
+`tests/test_cutsell_d291_5_composite_kept_complementary.py`. The same
+replay exposed a D-291.5 regression: in the gynecologist family the two
+EARLIER attempts X (82.82-90.6) and Y (91.2-94.34, the abandoned "Al
+terminar mi contrato le pedía a mi ginecóloga") composed to replace the
+final complete delivery Z (95.52-104.32, the approved segment), in a
+window where X and Y carried no label at all. **D-291.5.1** (same
+authority): a kept candidate needs a positive label in the window
+(`winner`/`keep`/`alternate`; unlabelled = no evidence), and a monolith is
+replaceable only when at least one complementary piece FOLLOWS it (the
+creator restated part of it later -- the skin shape); two pieces that both
+precede it are earlier attempts the later complete delivery redoes. Three
+new controls (true retakes with different words before the final
+delivery; unlabelled pieces; order), 13 tests in the file.
+
+## D-291.9 — ASR word spans reconciled against the measured silence (the owning authority is `audio_silence.py`)
+
+**Defect (OBSERVED on the source audio, the frames and the rendered MP4):**
+Whisper placed "resorcina." at 191.14-191.74 and "No" at 269.37-270.17,
+both entirely inside a silence the run had measured (190.29-192.28 at
+-35 dB; 268.12-270.97 at the relaxed floor). On the source, "resorcina"
+peaks until ~190.0 (the frame at 191.40 shows the mic lowered, idle) and
+"No" is spoken at 275.9-276.1 right before "quiero" (276.09). Every
+downstream authority trusted the spans: the acne take ended at "con"
+(189.84) inside the real word, a silent clip was rendered as "resorcina.",
+the AttemptReconstructor split "No" from its clause across the measured
+dead air (D-097.5, right on its own evidence) and the rendered sentence
+lost its negation. Sentence-final words are padded over the following
+pause the same way ("pastillas." to 269.37 over a 268.33 pause;
+"ginecóloga." to 23.28; "estados." to 34.6).
+
+**Fix:** `audio_silence.reconcile_transcript_words_with_measured_silence`,
+wired in `flow_b.py` right after ASR ingestion (the raw ASR still reaches
+the replay observer): a word fully inside a measured silence is re-anchored
+to the adjacent non-silent room next to its neighbours (larger room wins;
+primary floor preferred; a sentence-final word never moves right; a right
+move never leaves the word's own ASR segment); a word a primary-floor
+silence starts inside ends where that silence starts (symmetrically for a
+padded start); a re-anchored first/last word that becomes adjacent to the
+neighbouring ASR segment joins it (the existing 0.75 s speech-unit gap).
+Nothing invented, dropped or re-ordered; unplaceable words are reported
+(`inside_measured_silence_no_adjacent_room`). The rules were shaped by a
+dry run over the whole RAW #126 source checked against the audio peaks:
+the relaxed -30 dB floor swallows quiet trailing words ("perfectamente"
+peaks 690-1341 under the 1036 relaxed peak), so clamping uses the primary
+floor only; a naive right re-anchor moved "bien.", "pandemia." and
+"tiroides." into the NEXT sentence 3-9 s later, hence the sentence-final
+and own-segment rules. Result on #126's full ASR: 3 re-anchors
+("perfectamente." -> 44.84-45.21 joining "…estaba funcionando";
+"resorcina." -> 189.84-190.29 joining the acne sentence; "No" ->
+275.94-276.09 with "quiero"), 40 padded clamps, 13 reported no-room
+words, 0 wrong moves; `segment_takes` then yields "…resolvía con
+resorcina." (complete) and "No quiero sonar a conspiración…" (one take).
+Tests: `tests/test_cutsell_d291_9_asr_word_timing_reconciliation.py` (12,
+real #126 words and silences; controls: no silence -> same objects, low
+confidence ignored, no room reported, spoken pause between sentences
+untouched, numbers/negations order kept, quiet trailing word, sentence-
+final never right, own segment).
+
+## D-291.10 — A kinematic reset candidate during continuous speech is a gesture (case-B materiality, interior gap trim, Watch+Listen edge debris)
+
+**Defect (OBSERVED on the frames of the original):** the 67 ms
+`hand_motion_reset_candidate` events are the mic hand moving while she
+speaks (13.60-13.95, 52.70-53.15). Three authorities consumed them as
+resets: (a) the CASE B gate counted every D-097-countable candidate as
+"material" and bypassed the decisive T2 `winner` 0.95 for T1 (7 vs 4
+candidates; the frames show gestures; only 1 vs 2 near a measured pause);
+(b) `post_selection_interior_gap_trim`'s word-gap modes split the symptoms
+take at "cara, | aumento" (0.34 s ASR gap, 4 physical + 2 face-shift
+candidates, NO measured silence) and at "peso, | si" -- the source carries
+speech through both gaps (the ASR start of "aumento" is 0.24 s late), so
+the render cut into words and produced two jump cuts in one continuous
+take; (c) `perceptual_watch_listen._reset_debris_at_edges` confirmed FAIL
+on six edge candidates that overlap the clip's first/last spoken word,
+blocking delivery.
+
+**Fix (each in its owning authority, the D-149/D-285 doctrine):** (a)
+`CaseBEvent.pause_corroborated` (measured silence within
+`hybrid_session_cleanup._RESET_PAUSE_PROXIMITY_SEC`; None when the source
+has no silence measurement) and `_material_delivery_event_count` counts
+only pause-corroborated candidates (None keeps the legacy count) -- on
+#126's real events T1 2 vs T2 1: no bypass, T2 wins; (b) a word-gap split
+requires a measured silence overlapping the gap
+(`no_measured_pause_in_word_gap` otherwise) and the cut lands INSIDE that
+silence with the D-095.2 pad, never on an ASR word edge; the three
+synthetic fixtures that expect a split now carry the measured pause they
+need (their cut points moved from the ASR edges to the padded silence
+edges); (c) an edge candidate overlapping a word the frozen clip carries is
+UNCERTAIN (`during_spoken_word`), still reported and routed; the D-149
+pause rule is unchanged when no words are available. Tests:
+`tests/test_cutsell_d291_10_gesture_vs_reset.py` (6, real #126 thyroid
+events/words) and the D-291.10 section of the interior gap trim suite (3,
+incl. the real "cara, | aumento" events).
+
+## D-291.11 — D-291.6 on the real path; the two fixed-SHA guards; pending capabilities
+
+**D-291.6 on the real path (OBSERVED from code + tests):** `pipeline._draft_
+clip(words=take.words)` puts the ASR words on every DraftClip; the interior
+gap trim clamps them to each piece; `final_boundary_authority` rebuilds
+`words=` from its envelopes; `boundary_engine_pass` trims edges without
+touching words; `build_render_plan` keeps clip ids; `live_render_qc.
+protected_speech_by_clip_id(draft)` maps every selected clip with words
+(fragments by their own id, parent id as fallback); the repair compares a
+SOURCE-time edge (output finding mapped through the segment start, or the
+renderer-tightened end) with SOURCE-time words. `tests/test_cutsell_d291_6_
+real_path_word_evidence.py` (4) proves the words exist after
+`build_flow_b_draft`, cover every selected clip, survive a physical split
+inside the piece span, and that the time system survives a trim. **When
+evidence is missing or incomplete:** a clip with no ASR words is not
+listed -> a measured silence inside the window is still trimmed (the
+measurement proves no speech), a zero-extent join probe is refused; an ASR
+word padded PAST the edge (D-291.9's own case) makes the room 0 -> the
+repair is refused, never trusted. Phoneme safety is therefore bounded by
+the quality of the word spans: D-291.9 removes the gross misplacements;
+sub-100 ms ASR jitter remains and `clipped_phoneme_asr_realign` is still
+NOT_IMPLEMENTED in Watch+Listen -- no claim of phoneme safety beyond that.
+
+**The two fixed-SHA guards (Product Owner item 4):** `test_cutsell_d274e_
+output_format_qc.py::test_closed_track_files_unmodified_by_this_gate` and
+`test_cutsell_d274e_a_final_render_color_metadata.py::…` assert `git diff
+--stat <SHA before the gate> -- <file>` is empty for a list of closed-track
+files: they proved D-274E (output-format QC) and D-274E-A (color metadata)
+were additive and touched none of those files. That property still holds
+and is re-checkable: `git diff --stat fcb57cf de3bb99 -- cutsell_worker/
+live_render_qc.py` and `git diff --stat de3bb99 b9716661 -- …` are both
+empty; the only change to the file since is D-291.6 (`be98040f`, 26
+insertions, 1 deletion). Removing the file from the two lists (the
+disclosure pattern those lists already use for D-274F/D-274F-A/D-288)
+does not weaken a behavioural check: the D-274E/E-A suites' 64 tests test
+the format-QC and color-flag behaviour itself, and the live QC loop's
+behaviour is covered by `test_cutsell_live_render_qc.py`, the D-097.4 join
+suite, the D-288 cycle suite and now the D-291.6 suites (13 + 4). A guard
+turning green after being edited is not the proof; the empty range diffs
+and those suites are.
+
+**Verification (offline, this tree):** full `tests/` with the baseline
+invocation: 9123 passed, 16 failed = the 5 pre-existing unrelated failures
+(unchanged since D-291.3) + 8 working-tree zero-diff guards on `flow_b.py`,
+`pipeline.py` and `case_b_performance_evidence.py` (`git diff HEAD`,
+self-resolving on commit, re-run green on the committed tree) + 2 guards
+against Video00 content words inside `audio_silence.py` (the new module
+comment quoted the misplaced words; rewritten generically -- the guard is
+right, engine code must not carry Video00 phrases even in comments) + 1
+D-050A fixture that expected an interior split without a measured pause
+(now carries it, as the other gap-trim fixtures do). Targeted re-run after
+those three edits: 103 passed across the D-095.2, D-097.C, D-050A,
+D-291.5/6/9/10 and interior-gap-trim suites. CleanCutBench and the D-050C
+parity suite pass (94 in the flow-level run).
+
+**Capabilities that actually affected this result and remain absent:**
+`clipped_phoneme_asr_realign`, `gesture_continuity_across_cut`,
+`facial_expression_post_line`, `framing_and_eye_contact` (NOT_IMPLEMENTED,
+Watch+Listen v1 stays advisory); no mid-segment physical repair;
+`perceptual_repair_cycle.py` disconnected (D-288 preconditions); R + T vs
+W "never competed" (pair budget / grouping variance, RAW #115 class) is not
+addressed here; run-to-run label variance of the provider is not addressed
+here.

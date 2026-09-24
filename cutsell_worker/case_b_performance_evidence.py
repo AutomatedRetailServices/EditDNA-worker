@@ -101,6 +101,14 @@ class CaseBEvent:
     d097_geometrically_inside: bool
     d097_meets_confidence_floor: bool
     d097_would_be_counted: bool
+    # D-291.10 (RAW #126 thyroid family): a kinematic reset CANDIDATE is
+    # corroborated evidence of a genuine reset only when a measured source
+    # silence lies within hybrid_session_cleanup's own reset/pause proximity
+    # of it (D-149 / D-285 doctrine). None = not evaluated (no context or a
+    # synthetic record); the materiality count treats None as legacy
+    # (counted) and False as a gesture during continuous speech (not
+    # counted).
+    pause_corroborated: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +163,30 @@ def build_case_b_performance_evidence(
         candidate, context, event_kinds=LOCAL_PERFORMANCE_EVENT_KINDS,
     )
     delivery = evidence.delivery_span
+    # D-291.10: measured silences of this source, for pause corroboration of
+    # each reset candidate (same proximity hybrid_session_cleanup uses).
+    from .hybrid_session_cleanup import _RESET_PAUSE_PROXIMITY_SEC  # deferred: import cycle
+    from .audio_silence import AUDIO_SILENCE_EVENT_KIND
+    source_events = ()
+    if context is not None:
+        for source in getattr(context, "sources", ()) or ():
+            if getattr(source, "source_asset_id", None) == candidate.source_asset_id:
+                source_events = tuple(getattr(source, "events", ()) or ())
+                break
+    silences = [
+        (float(e.start), float(e.end)) for e in source_events
+        if str(getattr(e, "kind", "")) == AUDIO_SILENCE_EVENT_KIND
+    ]
+
+    def _pause_corroborated(start: float, end: float) -> bool | None:
+        if context is None or not silences:
+            # No measured-silence evidence for this source at all (no
+            # context, or a context that carries no silencedetect result):
+            # the corroboration was NOT evaluated -- never "no pause".
+            return None
+        lo, hi = start - _RESET_PAUSE_PROXIMITY_SEC, end + _RESET_PAUSE_PROXIMITY_SEC
+        return any(s_end >= lo and s_start <= hi for s_start, s_end in silences)
+
     delivery_events: list[CaseBEvent] = []
     count_by_kind: dict[str, int] = {}
     duration_by_kind: dict[str, float] = {}
@@ -177,6 +209,7 @@ def build_case_b_performance_evidence(
             d097_geometrically_inside=inside,
             d097_meets_confidence_floor=meets_floor,
             d097_would_be_counted=bool(inside and meets_floor),
+            pause_corroborated=_pause_corroborated(event.start, event.end),
         ))
         count_by_kind[event.kind] = count_by_kind.get(event.kind, 0) + 1
         duration_by_kind[event.kind] = round(duration_by_kind.get(event.kind, 0.0) + duration, 3)
@@ -237,7 +270,14 @@ def case_b_performance_evidence_diagnostics(evidence: CaseBPerformanceEvidence) 
                 "d097_geometrically_inside": e.d097_geometrically_inside,
                 "d097_meets_confidence_floor": e.d097_meets_confidence_floor,
                 "d097_would_be_counted": e.d097_would_be_counted,
+                "pause_corroborated": e.pause_corroborated,
             }
             for e in evidence.delivery_events
         ],
+        # D-291.10: how many D-097-countable events are pause-corroborated
+        # (the count the CASE B materiality gate now uses).
+        "material_pause_corroborated_event_count": sum(
+            1 for e in evidence.delivery_events
+            if e.d097_would_be_counted and e.pause_corroborated is not False
+        ),
     }

@@ -439,7 +439,18 @@ def _material_delivery_event_count(evidence: object) -> int:
     defect (`d097_would_be_counted`) -- never a new confidence/duration/
     density cutoff of this function's own invention."""
     events = getattr(evidence, "delivery_events", ()) or ()
-    return sum(1 for event in events if getattr(event, "d097_would_be_counted", False))
+    # D-291.10 (RAW #126 thyroid family {T1, T2}): the complete `winner` 0.95
+    # retake carried 8 hand-motion candidates against the abandoned first
+    # attempt's 4, every one of them a gesture during continuous speech
+    # (seen on the frames; only 1 vs 2 lay near a measured pause), and this
+    # count bypassed the decisive semantic winner. A candidate is material
+    # only when pause-corroborated (D-149 / D-285); None (not evaluated)
+    # keeps the legacy count.
+    return sum(
+        1 for event in events
+        if getattr(event, "d097_would_be_counted", False)
+        and getattr(event, "pause_corroborated", None) is not False
+    )
 
 
 def _case_b_fast_path_conflict(

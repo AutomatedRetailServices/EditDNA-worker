@@ -1,3 +1,5 @@
+import pytest
+
 from cutsell_worker.contracts import DraftClip, SemanticRole, Word
 from cutsell_worker.post_selection_interior_gap_trim import split_selected_interior_performance_gaps
 
@@ -25,7 +27,7 @@ def _clip():
     )
 
 
-def _diagnostics(with_reset=True):
+def _diagnostics(with_reset=True, with_measured_pause=True):
     events = []
     if with_reset:
         events = [
@@ -33,6 +35,9 @@ def _diagnostics(with_reset=True):
             {"kind": "body_reset_candidate", "start": 1.35, "end": 1.90, "confidence": 0.95},
             {"kind": "facial_expression_shift_candidate", "start": 1.40, "end": 1.95, "confidence": 0.88},
         ]
+        if with_measured_pause:
+            # D-291.10: the measured silence the ASR word gap (1.20-2.20) sits in
+            events.append({"kind": "audio_silence_interval", "start": 1.22, "end": 2.18, "confidence": 1.0})
     return {
         "whole_video_context": {
             "sources": [
@@ -69,6 +74,9 @@ def _long_gap_clip(left_terminal=True):
 def _physical_only_diagnostics(two_resets=True):
     events = [
         {"kind": "hand_motion_reset_candidate", "start": 1.45, "end": 1.70, "confidence": 0.96},
+        # D-291.10: measured silence inside the 1.10-2.75 word gap (shorter than
+        # the 1.2 s D-095.2 dead-air floor, so only the physical-reset mode applies)
+        {"kind": "audio_silence_interval", "start": 1.60, "end": 2.50, "confidence": 1.0},
     ]
     if two_resets:
         events.append(
@@ -110,6 +118,8 @@ def _short_completed_gap_clip(gap_sec=0.44):
 def _anticipatory_reset_diagnostics(*, include_near_gap=True):
     events = [
         {"kind": "hand_motion_reset_candidate", "start": 1.10, "end": 1.17, "confidence": 1.0},
+        # D-291.10: measured silence inside the 3.00-3.44 word gap
+        {"kind": "audio_silence_interval", "start": 3.02, "end": 3.42, "confidence": 1.0},
     ]
     if include_near_gap:
         events.append(
@@ -132,8 +142,10 @@ def test_multimodal_speech_free_interior_gap_is_split():
     selected, audit = split_selected_interior_performance_gaps((_clip(),), _diagnostics(True))
 
     assert len(selected) == 2
-    assert selected[0].end == 1.20
-    assert selected[1].start == 2.20
+    # D-291.10: the cut lands INSIDE the measured silence (1.22-2.18) with the
+    # D-095.2 natural-pause pad, never on the ASR word edges 1.20 / 2.20
+    assert selected[0].end == pytest.approx(1.34)
+    assert selected[1].start == pytest.approx(2.06)
     assert [w.text for w in selected[0].words] == ["uno", "dos", "tres"]
     assert [w.text for w in selected[1].words] == ["cuatro", "cinco", "seis"]
     assert len(audit) == 1
@@ -158,8 +170,8 @@ def test_long_completed_sentence_gap_with_two_physical_resets_is_split_without_f
     )
 
     assert len(selected) == 2
-    assert selected[0].end == 1.10
-    assert selected[1].start == 2.75
+    assert selected[0].end == pytest.approx(1.72)  # inside the measured silence 1.60-2.50, padded
+    assert selected[1].start == pytest.approx(2.38)
     assert [w.text for child in selected for w in child.words] == [w.text for w in clip.words]
     assert " ".join(child.text for child in selected) == clip.text
     assert len(audit) == 1
@@ -192,8 +204,8 @@ def test_short_completed_sentence_gap_with_anticipatory_and_near_gap_resets_is_s
     )
 
     assert len(selected) == 2
-    assert selected[0].end == 3.00
-    assert selected[1].start == 3.44
+    assert selected[0].end == pytest.approx(3.02 + 0.12)  # inside the measured silence 3.02-3.42, padded
+    assert selected[1].start == pytest.approx(3.42 - 0.12)
     assert [w.text for child in selected for w in child.words] == [w.text for w in clip.words]
     assert len(audit) == 1
     assert audit[0]["removed_gap_sec"] == 0.44
@@ -260,3 +272,57 @@ def test_chained_split_keeps_parent_semantic_clip_id_pointed_at_the_true_root():
     assert len(selected) == 2
     for piece in selected:
         assert piece.parent_semantic_clip_id == "root"
+
+
+# --- D-291.10: a word gap without a measured pause is speech, never a cut ---
+
+
+def test_multimodal_candidates_without_a_measured_pause_in_the_gap_never_split():
+    """RAW #126 shape: four hand-motion candidates and two face-shift breaks
+    around a 0.34 s ASR gap ("cara, | aumento") with NO measured silence --
+    the source audio carried speech through the gap and the render cut it."""
+    selected, audit = split_selected_interior_performance_gaps(
+        (_clip(),), _diagnostics(True, with_measured_pause=False), include_rejected_diagnostics=True,
+    )
+    assert len(selected) == 1 and selected[0].clip_id == "clip-a"
+    rejected = [row for row in audit if row.get("decision") == "reject" and row.get("gap_start") == 1.2]
+    assert rejected and rejected[0]["reason"] == "no_measured_pause_in_word_gap"
+    assert rejected[0]["measured_pause_in_gap"] is None
+
+
+def test_raw126_cara_aumento_gap_with_real_events_is_kept():
+    words = (
+        Word("hinchazón", 51.33, 51.89), Word("en", 51.89, 52.03), Word("mi", 52.03, 52.23), Word("cara,", 52.23, 52.75),
+        Word("aumento", 53.09, 53.25), Word("de", 53.25, 53.53), Word("peso,", 53.53, 53.93), Word("si", 54.25, 54.41),
+    )
+    clip = DraftClip(
+        clip_id="sym", source_asset_id="src", source_order=0, start=50.9, end=54.8,
+        text=" ".join(w.text for w in words), caption_text=" ".join(w.text for w in words), words=words,
+        semantic_role=SemanticRole.STORY, selected=True,
+    )
+    events = [  # RAW #126 positioned events inside the symptoms take (no measured silence here)
+        {"kind": "hand_motion_reset_candidate", "start": 52.071, "end": 52.138, "confidence": 1.0},
+        {"kind": "hand_motion_reset_candidate", "start": 52.671, "end": 52.738, "confidence": 1.0},
+        {"kind": "facial_expression_shift_candidate", "start": 52.871, "end": 52.938, "confidence": 0.737},
+        {"kind": "hand_motion_reset_candidate", "start": 52.938, "end": 53.004, "confidence": 1.0},
+        {"kind": "hand_motion_reset_candidate", "start": 53.271, "end": 53.338, "confidence": 1.0},
+        {"kind": "facial_expression_shift_candidate", "start": 52.004, "end": 52.071, "confidence": 0.7434},
+        {"kind": "hand_motion_reset_candidate", "start": 54.138, "end": 54.204, "confidence": 1.0},
+    ]
+    diagnostics = {"whole_video_context": {"sources": [{"source_asset_id": "src", "events": events}]}}
+    selected, audit = split_selected_interior_performance_gaps((clip,), diagnostics)
+    assert len(selected) == 1 and selected[0].clip_id == "sym"
+    assert audit == ()
+
+
+def test_a_measured_pause_shorter_than_the_word_gap_places_the_cut_inside_the_pause():
+    # ASR gap 1.20-2.20 but the measured silence is only 1.50-2.10: the ASR
+    # edges are not trusted; both pieces keep the unmeasured audio next to them.
+    diag = _diagnostics(True, with_measured_pause=False)
+    diag["whole_video_context"]["sources"][0]["events"].append(
+        {"kind": "audio_silence_interval", "start": 1.50, "end": 2.10, "confidence": 1.0}
+    )
+    selected, audit = split_selected_interior_performance_gaps((_clip(),), diag)
+    assert len(selected) == 2
+    assert selected[0].end == pytest.approx(1.62)
+    assert selected[1].start == pytest.approx(1.98)
