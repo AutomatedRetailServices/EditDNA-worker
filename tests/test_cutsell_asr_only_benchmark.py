@@ -203,3 +203,31 @@ def test_asr_only_rejects_unreviewed_or_empty_explicit_model(monkeypatch, model_
     else:
         with pytest.raises(ValueError, match="unsupported ASR comparison model"):
             harness.run_asr_only_benchmark({"source_key": "videos/source.mp4", "model_name": model_name})
+
+
+def test_text_candidate_is_opt_in_and_never_replaces_timed_asr(monkeypatch):
+    provider = _FakeASRProvider()
+    _install_common_fakes(monkeypatch, asr_provider=provider)
+    requests = []
+    monkeypatch.setattr(harness, "compare_text_candidate", lambda path, name, *, language_hint: (
+        requests.append((path, name, language_hint)),
+        {"provider": name, "text": "Hola, this is my experience.", "selection_authority": False},
+    )[1])
+
+    baseline = harness.run_asr_only_benchmark({"source_key": "videos/source.mp4"})
+    assert baseline["text_candidate"] is None
+    assert requests == []
+
+    compared = harness.run_asr_only_benchmark({
+        "source_key": "videos/source.mp4", "text_provider": "gpt-transcribe", "language_hint": "es",
+    })
+    assert len(requests) == 1
+    assert requests[0][1:] == ("gpt-transcribe", "es")
+    assert compared["text_candidate"]["selection_authority"] is False
+    assert compared["normalized_word_sequence"] == baseline["normalized_word_sequence"]
+
+
+def test_unknown_text_provider_fails_before_download_or_api(monkeypatch):
+    monkeypatch.setattr(harness, "download_source", lambda *args: pytest.fail("unexpected download"))
+    with pytest.raises(ValueError, match="unsupported ASR text comparison provider"):
+        harness.run_asr_only_benchmark({"source_key": "videos/source.mp4", "text_provider": "unknown"})
