@@ -47,9 +47,10 @@ env:
 jobs:
   asr-only-modal:
     strategy:
+      fail-fast: false
       max-parallel: 1
       matrix:
-        text_provider: [gpt-transcribe, deepgram-nova-3-multi]
+        text_provider: [deepgram-nova-3-multi]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -97,6 +98,14 @@ jobs:
             --output /tmp/templates.json
           jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
           test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Require Deepgram key before GPU (never print it)
+        shell: bash
+        run: |
+          if ! jq -e '(.env.DEEPGRAM_API_KEY // "") | length > 0' /tmp/base-template.json >/dev/null; then
+            echo 'Deepgram credential is not configured in the runtime template; no GPU launched.'
+            exit 1
+          fi
 
       - name: Build masked Modal env-secret file
         shell: bash
