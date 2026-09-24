@@ -847,3 +847,16 @@ Turn it around, I'm already gonna mess it up), so not editorially approved.
 No human listening. Modal completed/stopped. Reports artifact 10836867865; video
 parts 10836573202 and 10836653262, digests verified. 18 targeted tests passed.
 Manual-only restored at 9214068; no further paid run authorized or production switch.
+
+
+## Watch & Listen forensic after Deepgram output
+
+Read-only audit traced retained bts 0.80/0.75 to kept_fail_open and singleton
+resolution safety floors. Offline actual _semantic_best_take checks reproduce
+keep at bts 0.80 even with corroboration, keep at 0.90 without corroboration,
+and discard at 0.90 with corroboration. Active whole-video context is an ASR
+summary plus separately computed local signals; hybrid Gemini cleanup is text
+only. clean_cut_provider=None; v2/guard diagnostics disabled. P2 whole-video
+reasoning flag is diagnostics-only and cannot repair selection by enabling it.
+No engine fix, threshold change, production change or paid run. See
+CUTSELL_WATCH_LISTEN_DEEPGRAM_FORENSIC.md for evidence and correction boundary.
