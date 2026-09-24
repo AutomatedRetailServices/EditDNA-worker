@@ -2,6 +2,19 @@
 
 Product generation: **CutSell.ai 7**
 
+## Isolated ASR provider evaluation (not integrated)
+
+The five RAW #127 attempts showed five distinct ASR content hashes on the
+same original and decode fingerprint. On the isolated
+`feat/asr-provider-evaluation-and-replay` branch, the RAW entry point now
+honors the existing ASR decode selector and the ASR-only manual harness can
+compare `medium`, `large-v3`, and opt-in GPT/Deepgram text candidates.
+No production provider or source transcript snapshot was changed, and no
+paid ASR comparison was dispatched. See
+`docs/CUTSELL_ASR_PROVIDER_EVALUATION.md` for the remaining alignment,
+replay and cross-video gates.
+
+
 This file is the operational checkpoint. Update it whenever the active benchmark, release gate, branch state or major implementation focus changes.
 
 ## Repository
