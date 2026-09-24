@@ -14,6 +14,9 @@ name: CutSell ASR-Only Modal Benchmark
 # (baseline, flag OFF) and Section 8 (candidate, flag ON) can both be run
 # from this one workflow without editing YAML between runs.
 on:
+  push:
+    branches: [feat/asr-provider-evaluation-and-replay]
+    paths: [.github/workflows/cutsell-asr-only-modal.yml]
   workflow_dispatch:
     inputs:
       deterministic_config:
@@ -40,13 +43,17 @@ permissions:
 
 env:
   SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
-  BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   asr-only-modal:
+    strategy:
+      max-parallel: 1
+      matrix:
+        text_provider: [gpt-transcribe, deepgram-nova-3-multi]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.text_provider }}
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
@@ -104,7 +111,7 @@ jobs:
           # candidate-vs-baseline variable. No hybrid/resolver overlays are
           # applied here (unlike cutsell-video00-modal-raw.yml) -- this
           # harness never reaches those stages.
-          DETERMINISTIC="${{ inputs.deterministic_config && '1' || '0' }}"
+          DETERMINISTIC="1"
           jq -c --arg det "$DETERMINISTIC" '(.env // {}) + {CUTSELL_ASR_DETERMINISTIC_CONFIG:$det}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
@@ -139,7 +146,7 @@ jobs:
           set -euo pipefail
           jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
             --arg model "${{ inputs.model_name || 'medium' }}" \
-            --arg comparator "${{ inputs.text_provider || 'none' }}" \
+            --arg comparator "${{ matrix.text_provider }}" \
             '{source_key:$source,benchmark_id:$benchmark,model_name:$model} +
               (if $comparator == "none" then {} else {text_provider:$comparator} end)' \
             > /tmp/payload.json
@@ -160,7 +167,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-asr-only-modal-run-log
+          name: cutsell-asr-only-modal-run-log-${{ matrix.text_provider }}
           path: modal-asr-only-output.log
           retention-days: 14
           if-no-files-found: warn
@@ -197,7 +204,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-asr-only-modal-human-review
+          name: cutsell-asr-only-modal-human-review-${{ matrix.text_provider }}
           path: artifact/
           retention-days: 14
           if-no-files-found: warn
