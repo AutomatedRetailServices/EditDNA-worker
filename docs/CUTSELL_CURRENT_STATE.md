@@ -761,3 +761,16 @@ unchanged. Implementation passed 135 offline tests. Run `36045181502`, exact
 head `23845fa143b27e80cf972c85ed1812b228960ceb`, completed; manual-only
 trigger restored at `212a5a4b8d74fe2f599ccb863efe77d8e60624de`. Result: 643 aligned words, zero zero-duration words, 138.2-second MP4, technical QC PASS; editorial acceptance failed 3/11 checks (stomach false start, full gynecologist take, repeated percentage). Human Watch+Listen remains required. No production switch. A post-run per-source cache correction prevents the observed duplicate full-source GPT call; offline verified, no second paid run.
 See `CUTSELL_GPT_WHISPERX_FULL_ENGINE_EVALUATION.md`.
+
+
+## 2026-09-24 uploaded 55-second source comparison (authorized)
+
+The user supplied `v12044gd0000d46k2m7og65re0trr1rg.MP4` after requesting
+a full-engine test and accepting a Medium versus GPT + WhisperX comparison.
+Exactly two new sequential L4 calls are authorized, one per provider on the
+same source and checkout. Source SHA-256: `c9d892629f19d49058246e79bb57eb0af10bdf123416122307aa0bcd5c91cb14`,
+12,429,383 bytes, 55.401 seconds. One frozen template snapshot; no engine
+changes, no Video00-specific acceptance oracle, no retries or production
+promotion. Source upload uses a short-lived one-object PUT capability encrypted
+to an ephemeral public key; cloud credentials remain in the existing runner.
+Source bytes must verify before any GPU call. Results pending.

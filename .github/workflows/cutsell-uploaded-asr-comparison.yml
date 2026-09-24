@@ -1,0 +1,124 @@
+name: CutSell Uploaded Video ASR Comparison
+on:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths: [.github/workflows/cutsell-uploaded-asr-comparison.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: >-
+      github.run_attempt == 1 &&
+      (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'run(asr): compare two providers on authorized uploaded video')
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install CPU transport and media tools
+        run: |
+          pip install -q modal boto3 requests cryptography
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Prepare configuration and encrypted upload capability
+        run: python benchmarks/run_uploaded_asr_comparison.py prepare
+      - name: Return encrypted upload response
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-comparison-upload-response
+          path: uploaded-comparison-artifacts/upload-response.enc.json
+          retention-days: 1
+      - name: Verify exact uploaded video before GPU
+        id: source
+        run: python benchmarks/run_uploaded_asr_comparison.py await-upload
+      - name: Full engine with medium
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run medium
+      - name: Preserve medium reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-reports
+          path: uploaded-comparison-artifacts/medium/reports/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-A
+          path: uploaded-comparison-artifacts/medium/A/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-B
+          path: uploaded-comparison-artifacts/medium/B/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-C
+          path: uploaded-comparison-artifacts/medium/C/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Full engine with gpt-whisperx
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run gpt-whisperx
+      - name: Preserve gpt-whisperx reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-gpt-whisperx-reports
+          path: uploaded-comparison-artifacts/gpt-whisperx/reports/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve gpt-whisperx A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-gpt-whisperx-A
+          path: uploaded-comparison-artifacts/gpt-whisperx/A/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve gpt-whisperx B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-gpt-whisperx-B
+          path: uploaded-comparison-artifacts/gpt-whisperx/B/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve gpt-whisperx C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-gpt-whisperx-C
+          path: uploaded-comparison-artifacts/gpt-whisperx/C/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve comparison manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-comparison-manifest
+          path: uploaded-comparison-artifacts/manifest.json
+          if-no-files-found: warn
+      - name: Remove private runtime files
+        if: always()
+        run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'
