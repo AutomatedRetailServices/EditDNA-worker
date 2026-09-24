@@ -20,6 +20,11 @@ on:
         description: "Set CUTSELL_ASR_DETERMINISTIC_CONFIG=1 (candidate config) instead of leaving it unset (current/LEGACY config)"
         type: boolean
         default: false
+      model_name:
+        description: "ASR model for this isolated comparison; production remains unchanged"
+        type: choice
+        options: [medium, large-v3]
+        default: medium
 
 concurrency:
   group: cutsell-asr-only-modal-${{ github.ref }}
@@ -128,7 +133,8 @@ jobs:
         run: |
           set -euo pipefail
           jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
-            '{source_key:$source,benchmark_id:$benchmark}' \
+            --arg model "${{ inputs.model_name || 'medium' }}" \
+            '{source_key:$source,benchmark_id:$benchmark,model_name:$model}' \
             > /tmp/payload.json
           echo "CUTSELL_ASR_ONLY_PAYLOAD_JSON=$(cat /tmp/payload.json)" >> "$GITHUB_ENV"
           echo "--- payload ---"
