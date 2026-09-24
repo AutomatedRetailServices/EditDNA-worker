@@ -836,3 +836,14 @@ with punctuation for sentence grouping, no WhisperX. Native positive overlapping
 word ranges are retained and counted, not silently altered (observed in prior
 real payload); segment bounds enclose all words. Prior real 268-word response
 preserves every word. Results pending.
+
+
+Deepgram full-engine completed: run 36067890052, job 107861800043, exact test
+01a7acde8243c8410bb6f3d6823515c99f084c14. One new provider request, cache hit
+once, 268 words, one native overlapping pair, 13 selected fragments/15 discarded.
+39.5 s MP4, technical PASS, HUMAN_REVIEW_REQUIRED; elapsed 140.9 s.
+Selected transcript retains setup/blooper remarks (How am I supposed to say,
+Turn it around, I'm already gonna mess it up), so not editorially approved.
+No human listening. Modal completed/stopped. Reports artifact 10836867865; video
+parts 10836573202 and 10836653262, digests verified. 18 targeted tests passed.
+Manual-only restored at 9214068; no further paid run authorized or production switch.
