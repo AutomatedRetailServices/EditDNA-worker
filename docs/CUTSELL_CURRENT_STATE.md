@@ -695,3 +695,21 @@ closing aside repeated after W (never competed, open). Corrected offline
 (D-291.5.2, D-291.12a-c) with tests; NO further RAW authorized -- the next
 run is the Product Owner's call. Human Watch+Listen of run 35945070839's
 MP4 still required (F).
+
+
+## 2026-09-24 isolated ASR comparison update
+
+The worker project now permits `gpt-transcribe`; the existing worker-key
+synthetic probe returned HTTP 200 (run 36022529122, job 107763146014).
+The authorized Video00 ASR-only `gpt-transcribe` versus deterministic
+Faster-Whisper `medium` comparison completed successfully in run 36040003462
+on `feat/asr-provider-evaluation-and-replay` (test SHA bb80b0d7). GPT returned
+624 whitespace-delimited words in 12.578 s; Medium returned 643 such words
+(650 normalized), 45 segments, in 28.301 s. Medium has a triple repeated acne
+sentence including 15 words in 0.44 s; GPT has one complete version. Critical
+lexical ambiguities remain unverified by direct listening. Re-reading prior
+run 36020263828 confirms the same Medium transcript/hash, correcting the
+earlier 623-word attribution to that run. The workflow is manual-only again
+at d47221f9; no further paid run was launched.
+See `CUTSELL_ASR_PROVIDER_EVALUATION.md` for qualification and live evidence.
+Canonical/production editing remains unchanged.

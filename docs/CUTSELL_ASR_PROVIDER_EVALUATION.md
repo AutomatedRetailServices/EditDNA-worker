@@ -1,7 +1,7 @@
 # ASR provider evaluation and replay — isolated checkpoint
 
 Branch: `feat/asr-provider-evaluation-and-replay`, based on `5f831bce`.
-No production provider, canonical branch, Selection rule, or paid workflow has changed.
+No production provider, canonical branch, or Selection rule has changed. The isolated, authorized paid comparisons and temporary workflow triggers are recorded below.
 
 ## Evidence
 
@@ -119,3 +119,55 @@ unchanged production defaults. This is self-review, not independent release
 certification. A commit-message/first-attempt guarded branch-only push trigger
 launches this one authorized comparison and is removed immediately afterward.
 No editor, renderer, production deployment or new persistent resource is involved.
+
+
+## Video00 GPT-Transcribe versus Medium — completed 2026-09-24
+
+Run https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/36040003462
+completed successfully on SHA `bb80b0d791108d426c6d7a5f8b53478912dda631`, job
+`107769520233`. The single authorized comparison transcribed the full 366.997 s
+Video00 using automatic language detection and the existing integration paths.
+The temporary trigger was removed at `d47221f987e42aa23010b982affa7b59a021464a`;
+the workflow is again manual-only. No production/canonical branch was changed.
+
+| Observation | gpt-transcribe | Faster-Whisper medium |
+| --- | --- | --- |
+| Integration elapsed time | 12.578 s, including MP3 extraction and HTTP | 28.301 s, including model construction and decoding |
+| Raw whitespace word count, same method | 624 | 643 |
+| Word alignment | Not returned | 650 normalized words, 45 raw segments |
+| Negation and closing CTA | Present | Present |
+| Complete acne/resorcina sentence | One complete version, with incomplete retries retained | Three identical complete copies at 171.42–181.34, 181.34–191.30, 191.30–191.74 |
+| Timing defect | No word timestamps to evaluate | Third copy: 15 words in 0.44 s, 10 zero-duration words; 17 zero-duration words overall |
+| Phrase after 2023 | `hay que vomitar` | `hay que voltar` |
+
+Both outputs say `era sintomática`; agreement is not verification of the
+critical prefix against audio. Both return `resorcina` in the complete acne
+sentence. GPT's opening reads `No secreto para nadie` versus Medium's
+`No es secreto para nadie`. These disputed lexical details were not resolved
+by direct listening: this session could retrieve and extract the original,
+but native audio input was unavailable. The report embeds original audio
+fragments at 140–151, 165–193 and 245–257 s for review; it does not claim an
+independently listened reference or a word-error rate.
+
+The original downloaded for review has SHA-256
+`b37059b1790cf3eb0447bb54595cc99f6668aadc5f65dafa9cdf6181621ef9f5`,
+38,700,219 bytes. The benchmark itself did not emit a source-media hash, so this
+is review-copy provenance, not an assertion of a runtime hash measurement.
+The official result artifact matches the JSON emitted in the job log; ZIP
+SHA-256 `f13127810535a7b106fc0aea8676b644fe3e537c275042248972156144c66e1c`.
+GPU: NVIDIA L4; faster-whisper 1.0.0; CTranslate2 4.8.2; temperature [0].
+
+**Correction to the earlier GPT-4o paragraph:** rereading the actual result
+from run 36020263828/job 107703070812 shows Medium had **650 normalized
+words and 45 segments**, not the 623/54 copied from the separate earlier
+Medium-versus-large-v3 run. Its complete raw timed transcript is byte-for-byte
+equal as JSON to this new run's raw transcript. Both have content hash
+`asrcontent_faca44334019ac1cc51dee1b` and config fingerprint
+`asrcfg_664a49ba49f6baf6`. Thus the repetition was already present in that
+GPT-4o comparison; this new pair does not demonstrate a new Medium variance.
+
+Conclusion: GPT-Transcribe is now accessible and produces a structurally
+better candidate on this test's repeated-sentence failure. Critical word
+accuracy, GPT repeatability and cross-video performance remain unqualified.
+Its text remains `selection_authority=False`; no word-alignment or production
+promotion was performed. One successful request is not editorial acceptance.
