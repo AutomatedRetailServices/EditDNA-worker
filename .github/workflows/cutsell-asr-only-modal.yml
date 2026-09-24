@@ -14,9 +14,6 @@ name: CutSell ASR-Only Modal Benchmark
 # (baseline, flag OFF) and Section 8 (candidate, flag ON) can both be run
 # from this one workflow without editing YAML between runs.
 on:
-  push:
-    branches: [feat/asr-provider-evaluation-and-replay]
-    paths: [.github/workflows/cutsell-asr-only-modal.yml]
   workflow_dispatch:
     inputs:
       deterministic_config:
@@ -43,17 +40,13 @@ permissions:
 
 env:
   SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+  BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   asr-only-modal:
-    strategy:
-      max-parallel: 1
-      matrix:
-        model_name: [medium, large-v3]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.model_name }}
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
@@ -111,7 +104,7 @@ jobs:
           # candidate-vs-baseline variable. No hybrid/resolver overlays are
           # applied here (unlike cutsell-video00-modal-raw.yml) -- this
           # harness never reaches those stages.
-          DETERMINISTIC="1"
+          DETERMINISTIC="${{ inputs.deterministic_config && '1' || '0' }}"
           jq -c --arg det "$DETERMINISTIC" '(.env // {}) + {CUTSELL_ASR_DETERMINISTIC_CONFIG:$det}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
@@ -145,7 +138,7 @@ jobs:
         run: |
           set -euo pipefail
           jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
-            --arg model "${{ matrix.model_name }}" \
+            --arg model "${{ inputs.model_name || 'medium' }}" \
             --arg comparator "${{ inputs.text_provider || 'none' }}" \
             '{source_key:$source,benchmark_id:$benchmark,model_name:$model} +
               (if $comparator == "none" then {} else {text_provider:$comparator} end)' \
@@ -167,7 +160,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-asr-only-modal-run-log-${{ matrix.model_name }}
+          name: cutsell-asr-only-modal-run-log
           path: modal-asr-only-output.log
           retention-days: 14
           if-no-files-found: warn
@@ -204,7 +197,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-asr-only-modal-human-review-${{ matrix.model_name }}
+          name: cutsell-asr-only-modal-human-review
           path: artifact/
           retention-days: 14
           if-no-files-found: warn
