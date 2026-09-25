@@ -1007,3 +1007,44 @@ repair and render, not an editorial acceptance or superiority claim.
 No human listening; historical run does not receive current CutSell QC gates.
 Video delivered as MOV_EditDNA_Agosto_REPARADO.mp4, experimental output.
 No production promotion or additional invocation.
+
+
+## 2026-09-25 — Legacy semantic OTHER / abstention contract correction
+
+Scope: experimental feat/gpt-whisperx-video00 branch; worker commercial
+pipeline only. User authorized offline investigation after rejecting repaired
+August render 36081643325. No new paid inference/render or deployment.
+
+Observed evidence: merge preserves all 15 candidates. Semantic V2 leaves all
+15 kept. The subsequent midpoint-image bad-take filter rejects candidates
+2–7 and 9–11. TakeJudge reports no_sibling_group, zero comparisons; composer
+selects 0, 1, 8, 12, 13, 14. Candidate 1 is classified OTHER at .86 confidence
+but abstain=true, preserving preparation speech. The provider prompt explicitly
+requested abstention for non-sales text, contradicting downstream validated
+OTHER exclusion. Long fragments also receive high heuristic length scores.
+Sibling grouping requires same source and slot, <=18-second start distance
+and lexical overlap, after visual rejection; distant/mixed attempts cannot
+be assumed to be interchangeable.
+
+Small general correction: provider instructions now distinguish confidently
+non-sales OTHER (abstain=false) from uncertain/incomplete/tied material.
+Completeness is independent of sales relevance. Mixed valid speech and
+production talk must not be classified wholesale OTHER when that would
+discard valid content. Runtime abstention/confidence/completeness safeguards
+remain unchanged; no forced reinterpretation of prior provider responses,
+phrase blacklist, or Clean Cut deletion authority.
+
+Verification: 89 semantic/provider/TakeJudge tests and 28 runtime/Clean Cut
+foundation tests passed (117 total). Four new offline cases exercise real
+provider parsing -> enrichment -> composer with mocked transport: confident
+OTHER is excluded even through composer fallback; abstention, low confidence
+and incompleteness remain eligible, with source text and boundaries preserved.
+These tests validate the contract, not live model adherence or video quality.
+
+Remaining: whole-clip segmentation mixes valid speech with preparation;
+visual rejection precedes sibling comparison; grouping misses remote retries.
+Neither grouping nor visual authority was broadened by this change because
+whole mixed clips may contain unique speech. No claim of complete editorial
+repair, improved output, or human Watch + Listen acceptance. Historical
+snapshots and the repaired-August harness remain unchanged; that harness
+overlays only merge_incomplete_phrases and DOES NOT yet include this prompt fix.

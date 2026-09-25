@@ -146,7 +146,12 @@ def classify_semantic_v2(model: str, clauses: Sequence[SemanticClauseInput], **k
     allowed_evidence_tags = [tag.value for tag in EvidenceTag]
     instructions = (
         "Classify each target clause's own sales role. Adjacent text is context only; never classify it as part "
-        "of the target. Be conservative and abstain for incomplete, poor, tied, insufficient, or non-sales text. "
+        "of the target. Use OTHER with abstain=false for clearly non-sales target clauses, including "
+        "unambiguous production talk. Non-sales content alone is not a reason to abstain. "
+        "Abstain when the target's role is uncertain, tied, incomplete, or insufficiently supported. "
+        "Do not label an entire target OTHER when it mixes valid product or story speech with production talk; "
+        "abstain if a single classification would discard that valid speech. "
+        "Judge completeness independently of sales relevance: a complete non-sales statement can be complete. "
         "Enthusiasm alone is not a hook. Return JSON only: {results:[{id,primary_slot,secondary_slot|null,"
         "confidence,secondary_confidence|null,completeness,sales_relevance,standalone_quality,abstain,reason,evidence_tags}]}. "
         "Reason must be safe and at most 160 characters. evidence_tags must be a JSON list containing only "

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import types
 
@@ -11,6 +12,7 @@ for name, attrs in (("requests", {}), ("boto3", {}), ("clip", {}), ("faster_whis
         sys.modules[name] = module
 
 from worker import pipeline
+from worker.models import openai_provider
 from worker.semantic_slot_v2 import CanonicalSlot, EvidenceTag, SlotClassificationResult
 
 
@@ -159,3 +161,38 @@ def test_disabled_by_default_and_model_unchanged():
     assert pipeline.EDITDNA_USE_LLM is False
     assert pipeline.EDITDNA_LLM_MODEL == "gpt-5.1"
     assert pipeline.SEMANTIC_V2_MIN_CONFIDENCE == .70
+
+
+@pytest.mark.parametrize("abstain,confidence,completeness,excluded", [
+    (False, .95, .95, True),
+    (True, .95, .95, False),
+    (False, .4, .95, False),
+    (False, .95, .2, False),
+])
+def test_other_provider_to_composer_contract(monkeypatch, abstain, confidence, completeness, excluded):
+    # Exercise real provider parsing, enrichment and composition, without paid inference.
+    text = "Please hold the camera steady while we reset the lighting for another take."
+    target = pipeline.make_base_clip("target", 0, 6, text)
+    protected = {key: target[key] for key in ("id", "text", "start", "end")}
+    captured = {}
+
+    def fake_chat(operation, model, messages, **kwargs):
+        captured["prompt"] = messages[0]["content"][0]["text"]
+        return json.dumps({"results": [{
+            "id": "target", "primary_slot": "OTHER", "secondary_slot": None,
+            "confidence": confidence, "secondary_confidence": None,
+            "completeness": completeness, "sales_relevance": .05,
+            "standalone_quality": .8, "abstain": abstain,
+            "reason": "Production direction", "evidence_tags": ["non_sales_content"],
+        }]})
+
+    monkeypatch.setattr(openai_provider, "_chat", fake_chat)
+    monkeypatch.setattr(pipeline, "EDITDNA_USE_LLM", True)
+    assert pipeline.enrich_clips_semantic([target]) is True
+    assert "Use OTHER with abstain=false for clearly non-sales target clauses" in captured["prompt"]
+    assert "abstain if a single classification would discard that valid speech" in captured["prompt"]
+    assert target["meta"]["semantic_v2"].get("excluded_from_composer", False) is excluded
+    assert target["meta"]["keep"] is True
+    assert {key: target[key] for key in protected} == protected
+    composer = pipeline.build_composer([target])
+    assert ("target" not in composer["used_clip_ids"]) is excluded
