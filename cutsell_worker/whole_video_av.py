@@ -9,6 +9,7 @@ import base64
 import hashlib
 import json
 import math
+import logging
 import subprocess
 import tempfile
 import requests
@@ -96,7 +97,7 @@ class GeminiWholeVideoAVProvider:
                 encoded=base64.b64encode(prepared.read_bytes()).decode('ascii')
             contents=[{'role':'user','parts':[
                 {'inline_data':{'mime_type':'video/mp4','data':encoded}},
-                {'text':PROMPT+f'\nSource duration: {duration:.3f} seconds.'},
+                {'text':PROMPT+f'\nOriginal source ends at {source.duration_sec:.6f} seconds. All regions must end at or before that time; ignore any encoder padding.'},
             ]}]
             counted=self._post('countTokens',{'contents':contents})
             tokens=counted.get('totalTokens')
@@ -109,6 +110,12 @@ class GeminiWholeVideoAVProvider:
             raw=self._post('generateContent',{'contents':contents,'generationConfig':{
                 'responseMimeType':'application/json','maxOutputTokens':self.max_output_tokens,
             }})
+            usage = raw.get('usageMetadata') or {}
+            logging.getLogger(__name__).info(
+                'AV response source=%s input_tokens=%s output_tokens=%s thinking_tokens=%s reserved_usd=%.6f',
+                source.source_asset_id, usage.get('promptTokenCount'), usage.get('candidatesTokenCount'),
+                usage.get('thoughtsTokenCount'), reserved,
+            )
             candidates=raw.get('candidates') or []
             if len(candidates)!=1 or candidates[0].get('finishReason')!='STOP':
                 raise ValueError('AV response incomplete or blocked')
@@ -121,8 +128,15 @@ class GeminiWholeVideoAVProvider:
                 start,end,confidence=(region.get(k) for k in ('start','end','confidence'))
                 if not all(type(v) in (int,float) and math.isfinite(v) for v in (start,end,confidence)):
                     raise ValueError('AV region numeric evidence invalid')
+                # Encoder padding is bounded above by the already-checked .3s
+                # duration tolerance. Intersect advisory regions with real source;
+                # never accept a wholly out-of-source region or invent cut times.
+                if 0 <= start < source.duration_sec < end <= duration:
+                    region['encoder_padding_trimmed_sec'] = end - source.duration_sec
+                    region['end'] = end = source.duration_sec
                 if not 0<=start<end<=source.duration_sec or not 0<=confidence<=1:
-                    raise ValueError('AV region outside source')
+                    raise ValueError(f'AV region invalid: start={start}, end={end}, '
+                                     f'source_end={source.duration_sec}, confidence={confidence}')
                 if region.get('role') not in {'audience','mixed','recording_only','uncertain'}:
                     raise ValueError('AV role invalid')
                 for key in ('audio_observation','visual_observation','reason'):

@@ -133,3 +133,22 @@ def test_local_global_hypotheses_do_not_overwrite_audiovisual_evidence():
         understanding=SimpleNamespace(regions=(region,)),capability_status='ok'))
     assert result_context.sources[0].audiovisual_evidence==evidence
     assert result_context.sources[0].editorial_evidence!=evidence
+
+
+def test_encoder_padding_is_not_a_source_region(tmp_path):
+    data=result();data['regions'][0].update(start=9,end=10)
+    av,raw,session=provider(tmp_path,data)
+    original=replace(source(),duration_sec=9.9)
+    context=safe_whole_video_analyze(av,(original,),(),(),local_paths={'source':str(raw)})
+    assert context.status.available
+    region=json.loads(context.sources[0].audiovisual_evidence)['regions'][0]
+    assert region['end']==9.9 and region['encoder_padding_trimmed_sec']>0
+    assert '9.900000' in session.calls[0][1]['contents'][0]['parts'][1]['text']
+
+
+def test_region_entirely_in_padding_is_rejected(tmp_path):
+    data=result();data['regions'][0].update(start=9.95,end=10)
+    av,raw,session=provider(tmp_path,data)
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=9.9),),(),(),local_paths={'source':str(raw)})
+    assert not context.status.available
+    assert 'source_end=9.9' in context.status.reason
