@@ -1,10 +1,6 @@
 name: CutSell Video00 Watch Listen Medium WhisperX
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/gpt-whisperx-video00]
-    paths:
-      - .github/workflows/cutsell-video00-medium-whisperx.yml
 permissions:
   contents: read
 concurrency:
