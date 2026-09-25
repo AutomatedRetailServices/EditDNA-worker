@@ -883,4 +883,20 @@ Product Owner requested five full-engine Video00 outputs for comparison with
 the five existing GPT + WhisperX trials. Exactly five new sequential calls,
 one frozen environment snapshot, same source and checkout, fresh provider per
 trial, no cross-trial transcript reuse or automatic retries. No editorial
-changes; reuse identical Video00 criteria. Results pending.
+changes; reuse identical Video00 criteria. Completed: run 36070640917, test
+a5fa3918d69d89d110dac02e740a005706ca27ca. Five videos recovered and decoded;
+editorial scores 7, 10, 7, 7, 7 out of 11 (mean 7.6 versus GPT 6.4).
+Selection coverage IoU 91.393–100% versus GPT 72.821–90.996%. All five remain
+NEEDS_HUMAN_REVIEW; aggregate workflow failed its editorial gate as designed,
+not its five engine calls. Five distinct Deepgram requests; source, config,
+package and build checks passed; all Modal apps completed. No sixth run or
+production change. See CUTSELL_DEEPGRAM_FIVE_TRIALS.md.
+
+Product Owner assessment during this batch: the prior individual Deepgram
+Video00 is generally a useful Clean Cut, despite inconsistent AI decisions.
+Preserve that product assessment separately from unchanged technical QC and
+source-range criteria; it does not override the automated delivery gate.
+The sales-funnel layer is an opportunity inside the same editor to improve
+the source-supported hook, benefit progression and CTA. No commercial layer
+was changed in this batch, no rigid funnel is required, and no conversion
+improvement is established by visual cleanliness or these repeated trials.
