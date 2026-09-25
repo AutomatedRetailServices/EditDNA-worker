@@ -23,6 +23,14 @@ def main():
         if k in names:print('::add-mask::'+v)
     private=Path(os.environ['RUNNER_TEMP'])/'august-env.json';private.write_text(json.dumps(env));private.chmod(0o600)
     (out/'configuration.json').write_text(json.dumps({'reconstructed':True,'flags':flags,'historical_commit':'c8aa989','boundary_refiner':'historical default off','source_sha256':env['UPLOAD_EXPECTED_SHA'],'modern_reference_run':36076863910},indent=2))
+    if os.environ.get('AUGUST_PHRASE_REPAIR') == '1':
+        from benchmarks.prepare_august_phrase_repair import prepare
+        env['AUGUST_PIPELINE_SHA256']=prepare(ROOT)
+        env['AUGUST_PHRASE_REPAIR']='1'
+        private.write_text(json.dumps(env))
+        cfg=json.loads((out/'configuration.json').read_text())
+        cfg.update(phrase_repair=True,pipeline_sha256=env['AUGUST_PIPELINE_SHA256'],repair_commit='a1aef988091d0d9b3e7eba36d9af379cd0f92cb6')
+        (out/'configuration.json').write_text(json.dumps(cfg,indent=2))
     child=dict(os.environ,CUTSELL_ENV_JSON_PATH=str(private))
     try:
         with (out/'modal.log').open('w') as log:

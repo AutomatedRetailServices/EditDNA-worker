@@ -1,7 +1,7 @@
 """One isolated historical pipeline invocation; source code is byte-identical.
 
 Transport adaptations: verified local S3 input, unique output prefix, bounded
-OpenAI transport with zero retries. No editorial function is replaced.
+OpenAI transport with zero retries. The opt-in repaired run substitutes only the approved phrase-merge repair.
 """
 import json
 import os
@@ -13,7 +13,7 @@ app=modal.App('cutsell-authorized-august-comparison')
 image=(modal.Image.from_registry('madiator2011/better-pytorch:cuda12.4-torch2.6.0')
        .apt_install('ffmpeg','git','build-essential','python3-dev','pkg-config','libavformat-dev','libavcodec-dev','libavdevice-dev','libavutil-dev','libavfilter-dev','libswscale-dev','libswresample-dev')
        .pip_install('faster-whisper==1.0.0','boto3','requests','openai','openai-clip','pillow','torchvision==0.21.0')
-       .add_local_dir('benchmarks/editdna_august','/opt/august',copy=True)
+       .add_local_dir('benchmarks/editdna_august_repaired_runtime' if os.environ.get('AUGUST_PHRASE_REPAIR')=='1' else 'benchmarks/editdna_august','/opt/august',copy=True)
        .run_commands("PYTHONPATH=/opt/august python -c \"from worker import pipeline\""))
 
 @app.function(image=image,gpu='L4',timeout=1800,retries=0,secrets=[modal.Secret.from_dict(env)])
@@ -30,13 +30,14 @@ def run_legacy():
     except ClientError as e:
         raise RuntimeError('Historical invocation already claimed; no retry') from e
     summary={'historical_commit':'c8aa989','configuration_reconstructed':True,'source_sha256':os.environ['UPLOAD_EXPECTED_SHA']}
+    summary['phrase_repair']=os.environ.get('AUGUST_PHRASE_REPAIR')=='1'
     try:
         source='/tmp/verified-source.mov'
         client.download_file(bucket,os.environ['LEGACY_SOURCE_KEY'],source)
         assert hashlib.sha256(Path(source).read_bytes()).hexdigest()==os.environ['UPLOAD_EXPECTED_SHA']
         sys.path.insert(0,'/opt/august')
         from worker import pipeline as m
-        assert hashlib.sha256(Path(m.__file__).read_bytes()).hexdigest()=='6285b8dae54c94691cc5be8fe0b5f61ff60c6373f6e330f062aa817c6e59fec1'
+        assert hashlib.sha256(Path(m.__file__).read_bytes()).hexdigest()==os.environ.get('AUGUST_PIPELINE_SHA256','6285b8dae54c94691cc5be8fe0b5f61ff60c6373f6e330f062aa817c6e59fec1')
         traces={}
         def persist_traces():
             client.put_object(Bucket=bucket,Key=prefix+'/stages.json',Body=json.dumps(traces,default=str).encode(),ContentType='application/json')
