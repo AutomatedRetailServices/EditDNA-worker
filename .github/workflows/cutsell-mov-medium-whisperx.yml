@@ -1,6 +1,10 @@
 name: CutSell MOV Watch Listen Medium WhisperX
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths:
+      - .github/workflows/cutsell-mov-medium-whisperx.yml
 permissions:
   contents: read
 concurrency:
@@ -9,10 +13,11 @@ concurrency:
 jobs:
   compare:
     if: >-
-      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized two-source recording evidence qualification')
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized two-source native audiovisual qualification')
     runs-on: ubuntu-latest
     timeout-minutes: 210
     env:
+      CUTSELL_QUALIFY_NATIVE_AV: "1"
       UPLOAD_SINGLE_PROVIDER: medium-whisperx
       UPLOAD_EXPECTED_SHA: 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681
       UPLOAD_EXPECTED_BYTES: "68730266"

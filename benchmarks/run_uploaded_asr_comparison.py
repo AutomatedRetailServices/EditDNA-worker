@@ -45,6 +45,14 @@ def prepare(existing_source_key=None, single_provider=False):
     env = {str(k): str(v) for k, v in templates[0]["env"].items()}
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     env.update(OVERLAYS, CUTSELL_BUILD_GIT_SHA=head, CUTSELL_ASR_MODEL="medium")
+    if os.environ.get("CUTSELL_QUALIFY_NATIVE_AV") == "1":
+        env.update({
+            "CUTSELL_WATCH_LISTEN_AV_ENABLED": "1",
+            "CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD": "0.10",
+            "CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION": "0.30",
+            "CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION": "2.50",
+            "CUTSELL_HYBRID_PRIMARY_MODEL": "gemini-3.5-flash-lite",
+        })
     required_key = {"deepgram": "DEEPGRAM_API_KEY", "gpt-whisperx": "OPENAI_API_KEY", "medium": "GEMINI_API_KEY", "medium-whisperx": "GEMINI_API_KEY"}[selected_provider]
     if not env.get(required_key) or env[required_key].startswith("sk-admin-"):
         raise RuntimeError("Required inference key missing; no GPU started")
@@ -73,6 +81,12 @@ def prepare(existing_source_key=None, single_provider=False):
         "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 1 if existing_source_key or single_provider else 2,
         "providers": [{"deepgram": "deepgram-nova-3-multi", "medium": "faster-whisper-medium", "medium-whisperx": "faster-whisper-medium-whisperx", "gpt-whisperx": "gpt-transcribe-whisperx"}[selected_provider]] if existing_source_key or single_provider else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
         "same_template_snapshot": True, "auto_speech_visual_microtrim": True})
+    if os.environ.get("CUTSELL_QUALIFY_NATIVE_AV") == "1":
+        manifest = json.loads((OUT / "manifest.json").read_text())
+        manifest["native_av"] = {"enabled": True, "max_edit_usd": 0.10,
+            "model": "gemini-3.5-flash-lite", "input_per_million": 0.30, "output_per_million": 2.50,
+            "pricing_source": "https://ai.google.dev/gemini-api/docs/pricing", "pricing_verified": "2026-09-25"}
+        write_json(OUT / "manifest.json", manifest)
     if pair:
         manifest = json.loads((OUT / "manifest.json").read_text())
         manifest.update(authorized_runs=2, providers=["faster-whisper-medium", "deepgram-nova-3-multi"])
