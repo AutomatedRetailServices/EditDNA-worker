@@ -1,0 +1,147 @@
+{
+  "schema_version": "cutsell.retry_coverage_audit.v1",
+  "source_sha256": "5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681",
+  "classified_count": 18,
+  "recovered_count": 14,
+  "unavailable": [
+    {
+      "clip_id": "clip_86e2ba6bec253b1ec0af",
+      "reason": "missing_original_identity_or_completeness"
+    },
+    {
+      "clip_id": "clip_5a3adb4637fa29b0433e",
+      "reason": "missing_original_identity_or_completeness"
+    },
+    {
+      "clip_id": "clip_7368dc38f7564cd8ecf5",
+      "reason": "missing_original_identity_or_completeness"
+    },
+    {
+      "clip_id": "clip_0a211e86417b2857d570",
+      "reason": "missing_original_identity_or_completeness"
+    }
+  ],
+  "reviews": [
+    {
+      "candidate_clip_id": "clip_6d343c6197e2cca436cc",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "shut the front door and rhino is running a crazy deal right"
+    },
+    {
+      "candidate_clip_id": "clip_c39e251fbccd8d7711cc",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "now how am i supposed to say pull it yeah there you go i just needed a pep talk"
+    },
+    {
+      "candidate_clip_id": "clip_37d9dc0a1c8c0525582a",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "too many people ready set these are the"
+    },
+    {
+      "candidate_clip_id": "clip_0b9d40ada2520a1df0ad",
+      "comparisons": [
+        {
+          "candidate_clip_id": "clip_0b9d40ada2520a1df0ad",
+          "proposed_replacement_id": "clip_8cda51493b55429b06e2",
+          "coverage_verified": false,
+          "uncovered_claims": [],
+          "reason": "replacement_contains_recording_process",
+          "relation_evidence": {
+            "shared_content_tokens": [
+              "can",
+              "crazy",
+              "now",
+              "rhino",
+              "right",
+              "running"
+            ],
+            "shared_count": 6,
+            "failed_coverage": 0.2857,
+            "winner_coverage": 0.5455,
+            "incomplete_prefix_covered": false,
+            "numbers_ok": true
+          },
+          "replacement_text": "and rhino is running a crazy fine of course i can't hit it that time and rhino is running a crazy deal right now"
+        }
+      ],
+      "status": "compared",
+      "authority": "comparison_only",
+      "candidate_text": "you can get a flip it i'm already gonna mess it up ready and rhino has a crazy sale on him and rhino has a crazy sale on him right now what the heck he didn't even do anything and rhino is running a"
+    },
+    {
+      "candidate_clip_id": "clip_08bd69f2851581e3d7b3",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "and rhino is running a crate"
+    },
+    {
+      "candidate_clip_id": "clip_883ab423fd942d5de3d6",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "and rhino is running it"
+    },
+    {
+      "candidate_clip_id": "clip_d30f81ff04a9050fc121",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "okay what the"
+    },
+    {
+      "candidate_clip_id": "clip_620853062c90cda358dc",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "and rhino is running a crate i've moved my finger again"
+    },
+    {
+      "candidate_clip_id": "clip_50cd7655cd079f4ea296",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "and rhino is running"
+    },
+    {
+      "candidate_clip_id": "clip_8cda51493b55429b06e2",
+      "comparisons": [
+        {
+          "candidate_clip_id": "clip_8cda51493b55429b06e2",
+          "proposed_replacement_id": "clip_817df47b7b1f53adae89",
+          "coverage_verified": true,
+          "uncovered_claims": [],
+          "reason": "attempt_claims_covered_by_complete_replacement",
+          "relation_evidence": {
+            "shared_content_tokens": [
+              "can",
+              "crazy",
+              "deal",
+              "now",
+              "rhino",
+              "right",
+              "running"
+            ],
+            "shared_count": 7,
+            "failed_coverage": 0.6364,
+            "winner_coverage": 0.175,
+            "incomplete_prefix_covered": false,
+            "numbers_ok": true
+          },
+          "replacement_text": "just the other side that's why so if you want to grab some i'm gonna link them down below yeah pull it latch it retract it and strap the hell out of it these are the rhino retractable straps you can get them in a one inch or a two inch they added a bunch of different colors this year and rhino is running a crazy deal right now so if you want i'm gonna link them down below"
+        }
+      ],
+      "status": "compared",
+      "authority": "comparison_only",
+      "candidate_text": "and rhino is running a crazy fine of course i can't hit it that time and rhino is running a crazy deal right now"
+    }
+  ],
+  "rendered": false,
+  "counterfactual_selection": false
+}

@@ -1,0 +1,145 @@
+{
+  "schema_version": "cutsell.retry_coverage_audit.v1",
+  "source_sha256": "b37059b1790cf3eb0447bb54595cc99f6668aadc5f65dafa9cdf6181621ef9f5",
+  "classified_count": 42,
+  "recovered_count": 36,
+  "unavailable": [
+    {
+      "clip_id": "clip_c050d1dc068999de3272",
+      "reason": "missing_original_identity_or_completeness"
+    },
+    {
+      "clip_id": "clip_5cf4fcbf1d2df704ed10",
+      "reason": "missing_original_identity_or_completeness"
+    },
+    {
+      "clip_id": "clip_9a559f4142571b664d2c",
+      "reason": "original_text_hash_not_recovered"
+    },
+    {
+      "clip_id": "clip_5f21c9403eb86304bca3",
+      "reason": "original_text_hash_not_recovered"
+    },
+    {
+      "clip_id": "clip_90939808358a34689954",
+      "reason": "missing_original_identity_or_completeness"
+    },
+    {
+      "clip_id": "clip_57ab1236f96d0155ac44",
+      "reason": "missing_original_identity_or_completeness"
+    }
+  ],
+  "reviews": [
+    {
+      "candidate_clip_id": "clip_3faaf3a6d581da9fa594",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "No es secreto para nadie que llevo unos 10 años trabajando para cruceros. Tenía como costumbre, cada vez que terminaba un contrato, hacerme un chequeo de rutina con mi ginecóloga."
+    },
+    {
+      "candidate_clip_id": "clip_bbd4b5d56a4860406e11",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Al terminar mi contrato le pedía a mi ginecóloga"
+    },
+    {
+      "candidate_clip_id": "clip_0fefdbece36f67610fb8",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Ahí me mandó a hacer sonografías."
+    },
+    {
+      "candidate_clip_id": "clip_1c766e237296271abef5",
+      "comparisons": [
+        {
+          "candidate_clip_id": "clip_1c766e237296271abef5",
+          "proposed_replacement_id": "clip_51b70a1f268acb768509",
+          "coverage_verified": true,
+          "uncovered_claims": [],
+          "reason": "attempt_claims_covered_by_complete_replacement",
+          "relation_evidence": {
+            "shared_content_tokens": [
+              "ahí",
+              "cuando",
+              "fue",
+              "hacer",
+              "mandaron",
+              "sonografías",
+              "tiroides"
+            ],
+            "shared_count": 7,
+            "failed_coverage": 0.875,
+            "winner_coverage": 0.7778,
+            "incomplete_prefix_covered": false,
+            "numbers_ok": true
+          },
+          "replacement_text": "Ahí fue cuando me mandaron a hacer sonografía de tiroides y otras sonografías."
+        }
+      ],
+      "status": "compared",
+      "authority": "comparison_only",
+      "candidate_text": "Ahí fue cuando me mandaron a hacer sonografías de tiroides y otros."
+    },
+    {
+      "candidate_clip_id": "clip_1ea9540770558d128544",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Ahí fue cuando me mandó."
+    },
+    {
+      "candidate_clip_id": "clip_46fabb7724e6f667e2f2",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Tuve problemas de estómago, no."
+    },
+    {
+      "candidate_clip_id": "clip_049f5982d97e43b3bbbb",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Más bien solo un 5-10% son de"
+    },
+    {
+      "candidate_clip_id": "clip_afdeba21387201cafb81",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+    },
+    {
+      "candidate_clip_id": "clip_6f0d200f5d18fdb8969b",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Por temporada me salía en la"
+    },
+    {
+      "candidate_clip_id": "clip_fad1ae38bc8e5e8a3393",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Por temporada me salía acné en la espalda la cual yo resor..."
+    },
+    {
+      "candidate_clip_id": "clip_4cf6cccf5df14f282c5f",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "También me salían espinillas."
+    },
+    {
+      "candidate_clip_id": "clip_2c619fc3277412a9dc0c",
+      "comparisons": [],
+      "status": "no_supported_nearby_replacement",
+      "authority": "comparison_only",
+      "candidate_text": "Era como un rush, una alergia."
+    }
+  ],
+  "rendered": false,
+  "counterfactual_selection": false
+}

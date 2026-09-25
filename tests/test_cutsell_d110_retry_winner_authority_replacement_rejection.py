@@ -108,7 +108,7 @@ def test_prior_replacement_rejection_is_respected_candidate_survives():
 
 def test_no_prior_rejection_existing_retry_winner_behavior_unchanged():
     a = _take("a", 10.0, 15.0, A_TEXT)
-    c = _take("c", 16.0, 26.0, C_TEXT)
+    c = _take("c", 16.0, 26.0, A_TEXT + " These marks came from a hormonal issue.")
     context = _context(_retry_setup_event(a))
 
     kept, removed, diagnostics = enforce_proven_retry_winners(
@@ -127,7 +127,7 @@ def test_no_prior_rejection_existing_retry_winner_behavior_unchanged():
 
 def test_no_prior_rejection_explicit_empty_session_diagnostics_unchanged():
     a = _take("a", 10.0, 15.0, A_TEXT)
-    c = _take("c", 16.0, 26.0, C_TEXT)
+    c = _take("c", 16.0, 26.0, A_TEXT + " These marks came from a hormonal issue.")
     context = _context(_retry_setup_event(a))
 
     kept, removed, diagnostics = enforce_proven_retry_winners(
@@ -177,7 +177,7 @@ def test_rejection_from_another_source_does_not_leak_across_sources():
     clip_id, never by source or family, so no accidental cross-source
     collision is possible even if two sources reused an id."""
     a = _take("a", 10.0, 15.0, A_TEXT, source="src1")
-    c = _take("c", 16.0, 26.0, C_TEXT, source="src1")
+    c = _take("c", 16.0, 26.0, A_TEXT + " These marks came from a hormonal issue.", source="src1")
     context = _context(_retry_setup_event(a, source="src1"), source="src1")
     # Rejection recorded for an unrelated clip id on a different source.
     session_diagnostics = _session_diagnostics("other_clip_src2", "other_winner_src2", SEQUENCE_IDENTITY_BELOW_THRESHOLD)
@@ -200,7 +200,7 @@ def test_accepted_replacement_note_does_not_behave_like_a_rejection():
     """LEXICAL_REPLACEMENT_VERIFIED means the guard ACCEPTED the
     replacement -- it must never be treated as a rejection."""
     a = _take("a", 10.0, 15.0, A_TEXT)
-    c = _take("c", 16.0, 26.0, C_TEXT)
+    c = _take("c", 16.0, 26.0, A_TEXT + " These marks came from a hormonal issue.")
     context = _context(_retry_setup_event(a))
     session_diagnostics = _session_diagnostics("a", "c", LEXICAL_REPLACEMENT_VERIFIED)
 
@@ -219,7 +219,7 @@ def test_not_applicable_note_does_not_behave_like_a_rejection():
     """NOT_APPLICABLE means the guard was never invoked for this pair --
     it must never be treated as a rejection either."""
     a = _take("a", 10.0, 15.0, A_TEXT)
-    c = _take("c", 16.0, 26.0, C_TEXT)
+    c = _take("c", 16.0, 26.0, A_TEXT + " These marks came from a hormonal issue.")
     context = _context(_retry_setup_event(a))
     session_diagnostics = _session_diagnostics("a", "c", NOT_APPLICABLE)
 
@@ -239,7 +239,7 @@ def test_rejection_for_a_different_proposed_winner_does_not_block_this_one():
     legitimate removal in favor of c when c was never the rejected
     candidate -- directionality applies to the exact proposed pair."""
     a = _take("a", 10.0, 15.0, A_TEXT)
-    c = _take("c", 16.0, 26.0, C_TEXT)
+    c = _take("c", 16.0, 26.0, A_TEXT + " These marks came from a hormonal issue.")
     context = _context(_retry_setup_event(a))
     session_diagnostics = _session_diagnostics("a", "some_other_clip_id", SEQUENCE_IDENTITY_BELOW_THRESHOLD)
 

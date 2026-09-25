@@ -895,6 +895,10 @@ def apply_hybrid_session_cleanup(
                 "planner_predicted_planned": plan_outcome.planned if plan_outcome is not None else None,
             })
 
+    from .retry_replacement_coverage import review_retry_pool
+    retry_review = review_retry_pool(take_tuple, diagnostics)
+    if retry_review:
+        diagnostics.append({"retry_coverage_review": retry_review})
     kept = tuple(take for take in take_tuple if take.clip_id not in deleted_ids)
     deleted = tuple(take for take in take_tuple if take.clip_id in deleted_ids)
     semantic_decisions = tuple(
