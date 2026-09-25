@@ -1,0 +1,177 @@
+{
+  "source_run": 36076863910,
+  "provider": "deepgram",
+  "decisions": [
+    {
+      "clip_id": "clip_56b679e40349c58f2d85",
+      "label": "alternate",
+      "confidence": 0.85,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": true
+    },
+    {
+      "clip_id": "clip_523dc4df8cdce0eb8ca7",
+      "label": "failed",
+      "confidence": 0.85,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_82d42f248f096b9841b7",
+      "label": "bts",
+      "confidence": 0.8,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_890750966afdb5134922",
+      "label": "bts",
+      "confidence": 0.82,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_082b2595eaf4250ef6a4",
+      "label": "failed",
+      "confidence": 0.91,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_e4bf19eb25f350310e54",
+      "label": "bts",
+      "confidence": 0.84,
+      "semantic_delete_recommended": true,
+      "delete_basis": "semantic_bts_inside_corroborated_failure_cluster",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_82d42f248f096b9841b7",
+      "label": "alternate",
+      "confidence": 0.85,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_890750966afdb5134922",
+      "label": "alternate",
+      "confidence": 0.8,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_082b2595eaf4250ef6a4",
+      "label": "failed",
+      "confidence": 0.95,
+      "semantic_delete_recommended": true,
+      "delete_basis": "high_confidence_semantic",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_e4bf19eb25f350310e54",
+      "label": "alternate",
+      "confidence": 0.75,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_72eda98a40e39de72a47",
+      "label": "failed",
+      "confidence": 0.9,
+      "semantic_delete_recommended": true,
+      "delete_basis": "semantic_failed_plus_local_performance",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": true
+    },
+    {
+      "clip_id": "clip_9dd11261ade9c29970a7",
+      "label": "bts",
+      "confidence": 0.9,
+      "semantic_delete_recommended": true,
+      "delete_basis": "semantic_bts_inside_corroborated_failure_cluster",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_3b659c98c70525fb53fb",
+      "label": "winner",
+      "confidence": 0.95,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": true
+    },
+    {
+      "clip_id": "clip_e4bf19eb25f350310e54",
+      "label": "alternate",
+      "confidence": 0.8,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_72eda98a40e39de72a47",
+      "label": "failed",
+      "confidence": 0.9,
+      "semantic_delete_recommended": true,
+      "delete_basis": "semantic_failed_plus_local_performance",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": true
+    },
+    {
+      "clip_id": "clip_9dd11261ade9c29970a7",
+      "label": "bts",
+      "confidence": 0.9,
+      "semantic_delete_recommended": true,
+      "delete_basis": "semantic_bts_inside_corroborated_failure_cluster",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": false
+    },
+    {
+      "clip_id": "clip_3b659c98c70525fb53fb",
+      "label": "failed",
+      "confidence": 0.85,
+      "semantic_delete_recommended": true,
+      "delete_basis": "semantic_failed_plus_local_performance",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": true
+    },
+    {
+      "clip_id": "clip_f5864dcc1efe40b95abc",
+      "label": "alternate",
+      "confidence": 0.7,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": true
+    },
+    {
+      "clip_id": "clip_8308ecfddc3c1efb2bd6",
+      "label": "winner",
+      "confidence": 0.95,
+      "semantic_delete_recommended": false,
+      "delete_basis": "kept_fail_open",
+      "dense_semantic_failure_cluster": true,
+      "local_failure_corroborated": true
+    }
+  ]
+}

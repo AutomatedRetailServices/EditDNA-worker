@@ -80413,3 +80413,52 @@ resolution. This change is not complete Watch + Listen or a claim that all
 badtakes are resolved. The prior August repaired harness still overlays only
 merge_incomplete_phrases and must be explicitly updated before any future
 test is described as testing these new experimental changes.
+
+
+## 2026-09-25 — Current CutSell contextual BTS handoff repair
+
+Product direction: stop polishing the recovered legacy EditDNA engine.
+User requests focus on cutsell_worker, diagnose the latest uploaded MOV and
+correct general behavior for thousands of videos. No phrase/timestamp/product
+blacklist, no legacy patch port, no new paid benchmark or deployment.
+
+Failure from run 36076863910 Deepgram: selected candidate
+clip_9dd11261ade9c29970a7 was consistently labelled BTS .90 with
+semantic_delete_recommended=true and
+semantic_bts_inside_corroborated_failure_cluster, but lacked local-only
+performance corroboration. Semantic deletion is correctly deferred upstream;
+the authoritative singleton boundary consumed only local evidence and thus
+retained it. This differs from a failed delivery that may contain valid speech.
+
+Fix: contextual_bts_evidence.py carries this existing contextual evidence to
+_semantic_best_take through a distinct contextual_bts_evidence_ids parameter,
+including its integrity wrapper. It does not reclassify contextual evidence
+as deterministic local unusability. Eligibility requires all recorded window
+judgments for the candidate to agree on BTS, confidence >=.90 and a deletion
+recommendation; at least one must explicitly record the corroborated dense
+failure-cluster basis. Any conflicting/uncertain window rejects the new route.
+The authoritative family decision must also agree BTS >=.90. Only the
+singleton branch uses it, via the existing single_bts_unusable decision and
+downstream discard/provenance machinery. Multi-member selection, failed
+singletons, critical-coverage rules and local-only existing behavior remain.
+Group diagnostics expose contextual_bts_evidence_ids. No earlier deletion
+authority or new provider call is added.
+
+Validation: 53 focused contextual-BTS, singleton, no-usable-realization,
+story/pair-order and hybrid-pipeline tests; 111 terminal-confidence,
+semantic-authority, conflict and universal-Clean-Cut regressions; 164 passed.
+A minimal recorded-evidence fixture reproduces the MOV handoff without
+private URLs, keys or images. Negative tests preserve winner/keep/alternate/
+failed disagreements, uncertain confidence, unsupported context and missing
+recommendations. A full build_flow_b_draft test injects the stored-style
+upstream evidence, checks that preparation enters discarded and audience
+content remains selected. English/Spanish transcript variants demonstrate
+absence of text matching; they do not claim live multilingual classification
+quality. Source/model transport is mocked or replayed; no new video rendered.
+
+Remaining: low-confidence preparation and mixed attempts are not automatically
+removed by this rule, and the actual MOV's grouping/alignment/boundary issues
+still need separate resolution. No whole-video quality or production-readiness
+claim. Current-worker modifications are isolated by path on the existing
+experimental feat/gpt-whisperx-video00 branch; earlier legacy changes remain
+separate and have not been deployed or copied into the current engine.

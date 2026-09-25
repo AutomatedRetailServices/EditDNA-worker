@@ -1200,6 +1200,7 @@ def _semantic_best_take(
     semantic_comparative_authority: str | None = None,
     terminal_confidence_out: dict | None = None,
     complete_window_winner_conflict_ids: frozenset[str] | None = None,
+    contextual_bts_evidence_ids: frozenset[str] = frozenset(),
 ) -> tuple[str | None, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
 
@@ -1397,7 +1398,8 @@ def _semantic_best_take(
         if (
             label == "bts"
             and confidence >= _BTS_SINGLETON_UNUSABLE_CONFIDENCE
-            and (deterministic_unusable or {}).get(only_id, False)
+            and ((deterministic_unusable or {}).get(only_id, False)
+                 or (only_id in contextual_bts_evidence_ids and confidence >= .9))
         ):
             return None, None, "single_bts_unusable"
         return local_selected_clip_id, None, "single_member_no_contest"
@@ -1694,6 +1696,11 @@ def build_flow_b_draft(
             if clip_id and decision.get("local_failure_corroborated"):
                 hybrid_local_failure_corroborated[clip_id] = True
 
+    # Preserve contextual BTS evidence separately from deterministic local
+    # unusability: it is authorized only for consistent BTS singletons.
+    from .contextual_bts_evidence import contextual_bts_ids
+    hybrid_contextual_bts_ids = contextual_bts_ids(hybrid_cleanup.diagnostics)
+
     # D-050D1: `realization_id` is minted once, above, before Pass 1 even
     # starts -- every member of `kept` here already carries it (see the
     # single minting pass at the top of this function). No second minting
@@ -1977,6 +1984,7 @@ def build_flow_b_draft(
             ranked,
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
+            contextual_bts_evidence_ids=hybrid_contextual_bts_ids,
         )
         # D-150 (Phase B; docs/CUTSELL_DECISIONS.md D-150): the ONE narrow
         # authority gate over `_semantic_best_take`'s `single_semantic_
@@ -2054,6 +2062,7 @@ def build_flow_b_draft(
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
             case_b_evidence_by_id=case_b_evidence_objects,
+            contextual_bts_evidence_ids=hybrid_contextual_bts_ids,
             semantic_comparative_authority=effective_gate_status,
             terminal_confidence_out=_terminal_confidence_out,
             complete_window_winner_conflict_ids=effective_conflict_ids,
@@ -2485,6 +2494,9 @@ def build_flow_b_draft(
                 # dropped "¡Vamos!" correctly and then refused delivery
                 # because the two were indistinguishable downstream.
                 "no_usable_realization_basis": (semantic_best_take_reason if no_usable_realization else None),
+                "contextual_bts_evidence_ids": sorted(
+                    member.clip_id for member in members if member.clip_id in hybrid_contextual_bts_ids
+                ),
                 "all_members_delete_recommended": all_delete_recommended,
                 # D-097.B: this flag is the ALL-DELETE-RECOMMENDED routing
                 # only (every member semantically failed, a usable member
