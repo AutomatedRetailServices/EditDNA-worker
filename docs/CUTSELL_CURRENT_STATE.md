@@ -1473,3 +1473,20 @@ Saved-run audit (docs/evidence/retry_coverage_20260925/):
 - The audits replay baseline evidence only; they do not reproduce a new end-to-end selection or establish changed final cuts.
 
 QA: 52 targeted tests passed, covering EN/ES successful replacement, missing/changed numbers, negation, unique information, incomplete/mixed/conflicting peers, alternate search after a rejected peer, and cross-window comparison. Broader relevant regression: 1,001 passed and the same five previously reproduced baseline failures remain (four workflow-parity assertions, one incomplete-retry semantic coverage assertion). Six older identity-guard positive fixtures now explicitly preserve original claims so their tests still isolate identity-rejection behavior; the old merely topical shape is separately tested as insufficient coverage. No paid calls, GPU runs, renders, production deployment or main changes. No release-ready/generalization claim.
+
+
+## 2026-09-25 attempt classification and retry integration correction
+
+On feat/gpt-whisperx-video00 after f7aceb0: mixed/recording-only winners lose
+clean-winner authority without losing trim evidence. Gemini instructions now
+separate execution from content and avoid one artificial winner across unrelated
+ideas. The same planned calls are collected before session-scoped replacement
+comparison; proposals require directional coverage. The final proven-retry
+authority admits explicit clean audience KEEP consensus and checks conflicting
+winner evidence, short exact abandoned prefixes and original partition identity.
+No additional provider calls, paid render, production or main change.
+
+623 relevant regression tests passed; independent QA 126 passed. QA found and
+verified repairs to partition crossing and inconsistent winner consensus. Actual
+MOV/Gemini quality is NOT yet qualified; false audience labels remain possible.
+See CUTSELL_ATTEMPT_RESOLUTION_FIX.md for evidence, old-fixture changes and limits.

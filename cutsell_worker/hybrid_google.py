@@ -73,7 +73,18 @@ def _prompt_text(compact_payload: Mapping[str, Any]) -> str:
         "the same idea, treat that recording-process attempt as failed/BTS when evidence "
         "supports it. Return exactly one compact decision per candidate in the exact same "
         "order as candidates, using label, confidence and content_role. content_role=recording_only means the ENTIRE candidate is production self-talk with no audience-facing proposition; audience means intended content, including humor, quotations and rhetorical questions; mixed means both. Use uncertain if not clear. A failed take carrying a product fact is mixed or audience, never recording_only. These rules apply in English and Spanish. For recording_only or mixed, report recording_confidence independently of label confidence. For mixed candidates with word_texts, optionally report recording_prefix_words and recording_suffix_words: counts of consecutive ASR words exclusively recording-process speech at the beginning/end. Count entries in word_texts, not whitespace tokens. Never include audience facts, negations, humor, quotations or intended reactions. Leave ambiguous boundaries at zero; For interior preparation only BETWEEN complete audience sentences, use recording_word_ranges as sorted disjoint inclusive [first,last] word_texts indices; do not also set prefix/suffix counts. Never excise a correction inside an audience sentence, facts, negations or intended humor. Never invent timestamps. Do not echo clip IDs. "
-        "Exactly one winner only when justified; use uncertain when evidence is insufficient.\n\n"
+        "A session window may contain several DIFFERENT ideas, not one retry family. "
+        "Use keep for independent valid deliveries; compare winners only within the same "
+        "specific communication attempt. First assess WHO the words address and whether "
+        "the ENTIRE delivery is usable, then compare retries. A good product sentence "
+        "does not make surrounding rehearsal, self-correction or preparation audience content. "
+        "A mixed candidate is not a clean winner: report its removable word ranges when "
+        "supported, or uncertain boundaries; preserve its useful audience speech. "
+        "A reaction after speaking may refer to that preceding attempt; use chronology "
+        "and corroborating context, never a gesture, profanity or phrase alone. "
+        "Do not reward a longer take just because it contains more words. "
+        "Do not assume the last take is correct; check meaning coverage and delivery. "
+        "Use uncertain when evidence is insufficient.\n\n"
         + json.dumps(dict(compact_payload), separators=(",", ":"), ensure_ascii=False)
     )
 

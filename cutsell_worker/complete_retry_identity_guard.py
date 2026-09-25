@@ -49,6 +49,7 @@ _COMPLETE_RETRY_MIN_SEQUENCE = 0.52
 # NOT_APPLICABLE is used only by hybrid_session_cleanup.py's own call site
 # for decisions this guard was never invoked for (decision.label != "failed").
 NO_CANDIDATE = "NO_CANDIDATE"
+COVERAGE_NOT_VERIFIED = "COVERAGE_NOT_VERIFIED"
 SEMANTIC_OVERLAP_BELOW_THRESHOLD = "SEMANTIC_OVERLAP_BELOW_THRESHOLD"
 NUMBER_PRESERVATION_FAILED = "NUMBER_PRESERVATION_FAILED"
 SEQUENCE_IDENTITY_BELOW_THRESHOLD = "SEQUENCE_IDENTITY_BELOW_THRESHOLD"
@@ -59,7 +60,7 @@ NOT_APPLICABLE = "NOT_APPLICABLE"
 _VALID_REPLACEMENT_REJECTION_REASONS = frozenset({
     NO_CANDIDATE, SEMANTIC_OVERLAP_BELOW_THRESHOLD, NUMBER_PRESERVATION_FAILED,
     SEQUENCE_IDENTITY_BELOW_THRESHOLD, LEXICAL_REPLACEMENT_VERIFIED,
-    INCOMPLETE_RETRY_LOOSER_MATCH, NOT_APPLICABLE,
+    INCOMPLETE_RETRY_LOOSER_MATCH, NOT_APPLICABLE, COVERAGE_NOT_VERIFIED,
 })
 
 
@@ -138,11 +139,9 @@ def _diagnose_no_replacement_reason(
         return NO_CANDIDATE
     if filtered_scan.best_overlap_seen < minimum_overlap:
         return SEMANTIC_OVERLAP_BELOW_THRESHOLD
-    # Eligible and overlap cleared the floor, yet original() still returned
-    # no candidate -- should not happen given original()'s own invariant
-    # (D-070); fall back to the most honest available label instead of
-    # fabricating a more specific one.
-    return NO_CANDIDATE
+    # The base proposal now checks directional coverage before returning a
+    # candidate. An eligible peer with enough overlap can still lose facts.
+    return COVERAGE_NOT_VERIFIED
 
 
 def _numbers(text: str) -> frozenset[str]:
@@ -202,7 +201,13 @@ def install_complete_retry_identity_guard() -> None:
                 sequence_identity_threshold=_COMPLETE_RETRY_MIN_SEQUENCE,
                 lexical_identity_passed=None,
                 replacement_rejection_reason=(
-                    INCOMPLETE_RETRY_LOOSER_MATCH if replacement is not None else NO_CANDIDATE
+                    INCOMPLETE_RETRY_LOOSER_MATCH if replacement is not None else
+                    _diagnose_no_replacement_reason(
+                        failed_take, members, members, decisions_by_id,
+                        minimum_label_confidence=minimum_label_confidence,
+                        minimum_overlap=minimum_overlap,
+                        maximum_delay_sec=maximum_delay_sec,
+                    )
                 ),
             ))
             return replacement, overlap

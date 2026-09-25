@@ -102,6 +102,14 @@ def _retry_setup_confidence(
 def _same_retry_attempt(failed: CandidateTake, winner: CandidateTake) -> tuple[bool, dict]:
     left = _content(failed.text)
     right = _content(winner.text)
+    # A short abandoned opening can have only two content words. Require a
+    # literal ordered prefix (not bag-of-words/topic similarity) for this case.
+    # Local retry confirmation + full coverage remain required by the caller.
+    left_words, right_words = _tokens(failed.text), _tokens(winner.text)
+    if (not failed.complete_idea and winner.complete_idea and len(left) >= 2
+            and len(left_words) >= 4 and len(right_words) > len(left_words)
+            and right_words[:len(left_words)] == left_words):
+        return True, {'exact_abandoned_prefix': True, 'prefix_word_count': len(left_words)}
     if len(left) < 3 or len(right) < 3:
         return False, {}
     shared = left & right
@@ -152,6 +160,19 @@ def enforce_proven_retry_winners(
         for clip_id, label, confidence in semantic_decisions
     }
     prior_rejections = prior_replacement_rejections(session_diagnostics)
+    from .retry_replacement_coverage import replacement_semantics
+    pool_semantics = replacement_semantics(session_diagnostics)
+    from .session_boundaries import partition_takes_by_sessions
+    partition_by_id = {take.clip_id: i for i, members in enumerate(
+        partition_takes_by_sessions(kept_tuple, context)) for take in members}
+    # Keep original partition identity even if earlier hooks removed the clips
+    # next to a scene boundary and it cannot be inferred on the reduced pool.
+    recorded_partitions = {}
+    for window in session_diagnostics:
+        partition = window.get('partition_index')
+        if type(partition) is int:
+            for cid in window.get('member_ids', ()):
+                recorded_partitions.setdefault(cid, set()).add(partition)
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
 
@@ -167,13 +188,28 @@ def enforce_proven_retry_winners(
         for winner in kept_tuple:
             if winner.clip_id == failed.clip_id or winner.source_asset_id != failed.source_asset_id:
                 continue
+            if partition_by_id.get(winner.clip_id) != partition_by_id.get(failed.clip_id):
+                continue
+            recorded_left = recorded_partitions.get(failed.clip_id)
+            recorded_right = recorded_partitions.get(winner.clip_id)
+            if recorded_left and recorded_right and (
+                    len(recorded_left) != 1 or recorded_left != recorded_right):
+                continue
             if winner.start < failed.end:
                 continue
             gap = float(winner.start - failed.end)
             if gap > maximum_gap_sec:
                 continue
             winner_label, winner_conf = semantic.get(winner.clip_id, ("", 0.0))
-            if winner_label != "winner" or winner_conf < winner_confidence:
+            # A clean independent delivery is often labelled KEEP in a window
+            # containing several ideas. Admit it only with positive consensus
+            # from the actual classified pool, not the flattened label alone.
+            clean_keep = (winner_label == "keep" and winner.clip_id in pool_semantics
+                          and pool_semantics[winner.clip_id][1] >= winner_confidence
+                          and all(r.get('content_role') == 'audience'
+                                  for w in session_diagnostics for r in w.get('decisions', ())
+                                  if r.get('clip_id') == winner.clip_id))
+            if (winner_label != "winner" and not clean_keep) or winner_conf < winner_confidence:
                 continue
             same, evidence = _same_retry_attempt(failed, winner)
             if not same:
@@ -213,6 +249,13 @@ def enforce_proven_retry_winners(
 
             from .retry_replacement_coverage import replacement_coverage
             coverage = replacement_coverage(failed, winner, session_diagnostics)
+            peer_rows = [r for w in session_diagnostics for r in w.get('decisions', ())
+                         if r.get('clip_id') == winner.clip_id]
+            if coverage['coverage_verified'] and peer_rows and (
+                    winner.clip_id not in pool_semantics
+                    or pool_semantics[winner.clip_id][1] < winner_confidence):
+                coverage = {**coverage, 'coverage_verified': False,
+                            'reason': 'replacement_not_consistently_usable'}
             if not coverage["coverage_verified"]:
                 diagnostics.append({
                     "clip_id": failed.clip_id, "winner_clip_id": winner.clip_id,

@@ -38,7 +38,7 @@ def _take(clip_id, start, end, text, *, source="src", complete_idea=True):
 
 def test_diagnostic_explains_lexical_replacement_verified():
     failed = _take("failed", 10.0, 14.0, "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros")
-    retake = _take("retake", 18.0, 23.0, "a hacer sonografia de tiroides y otras sonografias")
+    retake = _take("retake", 18.0, 23.0, "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros estudios")
     decisions = {"failed": ("failed", 0.85), "retake": ("winner", 0.95)}
 
     replacement, overlap = _later_semantic_retry_replacement(failed, (failed, retake), decisions)
@@ -164,7 +164,7 @@ def test_diagnostic_explains_incomplete_retry_looser_match_found():
     assert diag.replacement_rejection_reason == INCOMPLETE_RETRY_LOOSER_MATCH
 
 
-def test_diagnostic_explains_incomplete_retry_no_candidate():
+def test_diagnostic_explains_incomplete_retry_unrelated_peer():
     failed = _take("failed", 10.0, 12.0, "me mandaron hacer sonografia tiroides", complete_idea=False)
     unrelated = _take("unrelated", 14.0, 19.0, "compre pan y leche en la tienda")
     decisions = {"failed": ("failed", 0.85), "unrelated": ("winner", 0.95)}
@@ -174,14 +174,14 @@ def test_diagnostic_explains_incomplete_retry_no_candidate():
 
     assert replacement is None
     assert diag is not None
-    assert diag.replacement_rejection_reason == NO_CANDIDATE
+    assert diag.replacement_rejection_reason == SEMANTIC_OVERLAP_BELOW_THRESHOLD
 
 
 # --- ContextVar isolation / reset -------------------------------------------
 
 def test_diagnostic_is_cleared_after_single_consumption():
     failed = _take("failed", 10.0, 14.0, "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros")
-    retake = _take("retake", 18.0, 23.0, "a hacer sonografia de tiroides y otras sonografias")
+    retake = _take("retake", 18.0, 23.0, "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros estudios")
     decisions = {"failed": ("failed", 0.85), "retake": ("winner", 0.95)}
 
     _later_semantic_retry_replacement(failed, (failed, retake), decisions)
@@ -213,7 +213,7 @@ def test_diagnostic_does_not_leak_between_successive_clips():
     diag_1 = _consume_replacement_guard_diagnostic()
 
     failed_2 = _take("failed2", 10.0, 14.0, "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros")
-    retake_2 = _take("retake2", 18.0, 23.0, "a hacer sonografia de tiroides y otras sonografias")
+    retake_2 = _take("retake2", 18.0, 23.0, "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros estudios")
     decisions_2 = {"failed2": ("failed", 0.85), "retake2": ("winner", 0.95)}
     _later_semantic_retry_replacement(failed_2, (failed_2, retake_2), decisions_2)
     diag_2 = _consume_replacement_guard_diagnostic()
@@ -245,7 +245,7 @@ def test_diagnostic_request_isolation_across_threads():
         args=(
             "a",
             "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros",
-            "a hacer sonografia de tiroides y otras sonografias",
+            "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros estudios",
             LEXICAL_REPLACEMENT_VERIFIED,
         ),
     )

@@ -126,6 +126,8 @@ def _candidate_rows(
                and text == str(candidate.text or "").strip()
                and " ".join(" ".join(candidate.word_texts).split()) == " ".join(text.split()) else {}),
             "duration_sec": round(candidate.duration_sec, 3),
+            "source_start_sec": round(candidate.start, 3),
+            "source_end_sec": round(candidate.end, 3),
             "local_label": candidate.local_label,
             "local_confidence": round(float(candidate.local_confidence), 4),
             "evidence": evidence,
@@ -140,7 +142,7 @@ def _rules(cleanup_task: bool) -> list[str]:
     common = [
         "reference every supplied clip_id exactly once; never invent ids or timestamps",
         "use source_context only to understand the full message/story; label candidates only",
-        "judge completeness, retry intent, speech structure, and visual/performance evidence together",
+        "judge intended content and execution separately; mixed preparation is not a clean winner",
         "preserve unique coherent audience-facing information; use uncertain if evidence is insufficient",
         "return content_role: recording_only for wholly production self-talk, audience for intended delivery including humor, mixed for both, uncertain when unclear; failed delivery alone does not mean recording_only",
     ]

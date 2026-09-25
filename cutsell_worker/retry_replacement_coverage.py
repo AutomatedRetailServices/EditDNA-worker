@@ -10,6 +10,28 @@ from .contradiction_signal import any_pair_contradicts
 from .complete_retry_identity_guard import prior_replacement_rejections
 
 
+def replacement_semantics(windows):
+    """Positive evidence across ALL returned windows, not a last-row winner.
+
+    This only makes a peer available for comparison. Identity, completeness,
+    chronology, coverage and the owning authority's thresholds still apply.
+    Missing roles remain compatible with historical providers, but an explicit
+    mixed/failure/uncertain decision in any window cannot be ignored.
+    """
+    by_id = {}
+    for window in windows:
+        for row in window.get('decisions', ()):
+            by_id.setdefault(row['clip_id'], []).append(row)
+    result = {}
+    for cid, rows in by_id.items():
+        if any(r.get('content_role') in {'mixed', 'recording_only'}
+               or r.get('label') not in {'winner', 'keep', 'alternate'} for r in rows):
+            continue
+        result[cid] = ('winner' if any(r['label'] == 'winner' for r in rows) else 'keep',
+                       min(float(r.get('confidence', 0)) for r in rows))
+    return result
+
+
 def replacement_coverage(failed, winner, session_diagnostics=()):
     result = {
         "candidate_clip_id": failed.clip_id,

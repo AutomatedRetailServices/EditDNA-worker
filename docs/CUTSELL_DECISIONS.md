@@ -80654,3 +80654,23 @@ Saved-run audit (docs/evidence/retry_coverage_20260925/):
 - The audits replay baseline evidence only; they do not reproduce a new end-to-end selection or establish changed final cuts.
 
 QA: 52 targeted tests passed, covering EN/ES successful replacement, missing/changed numbers, negation, unique information, incomplete/mixed/conflicting peers, alternate search after a rejected peer, and cross-window comparison. Broader relevant regression: 1,001 passed and the same five previously reproduced baseline failures remain (four workflow-parity assertions, one incomplete-retry semantic coverage assertion). Six older identity-guard positive fixtures now explicitly preserve original claims so their tests still isolate identity-rejection behavior; the old merely topical shape is separately tested as insufficient coverage. No paid calls, GPU runs, renders, production deployment or main changes. No release-ready/generalization claim.
+
+
+## 2026-09-25 — Separate audience meaning from usable attempt; consume same-session retry evidence
+
+User authorized fixing MOV-like bad takes and retakes using general rules.
+Implement the correction documented in CUTSELL_ATTEMPT_RESOLUTION_FIX.md:
+withhold winner authority on mixed/recording-only proposals; preserve evidence
+for safe trims; compare collected windows only within the original creator
+session; require directional coverage before proposing replacements; accept
+consistent explicit audience KEEP peers in the existing corroborated retry
+authority, with the same evidence/confidence safeguards as WINNER. Strict
+ordered-prefix detection covers short abandoned openings without topic-based
+merges. Maintain source/partition identity across pruning and report coverage
+rejection explicitly. No new independent deletion authority, thresholds lowered,
+video-specific production exceptions or additional provider requests.
+
+Validation: 623 relevant tests passed, independent QA 126 passed; new tests
+retain the older abbreviated-referral example as a negative preservation case.
+Offline integration verified; Gemini perception and rendered MOV quality remain
+unverified. Existing doctrine, freeze, paid-run approval and release gates stand.

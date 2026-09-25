@@ -56,7 +56,7 @@ def test_complete_same_delivery_can_still_be_superseded_by_strong_retake():
         "retake",
         18.0,
         23.0,
-        "a hacer sonografia de tiroides y otras sonografias",
+        "ahi fue cuando me mandaron a hacer sonografias de tiroides y otros estudios",
         complete_idea=True,
     )
     decisions = {

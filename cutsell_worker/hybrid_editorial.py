@@ -54,6 +54,9 @@ class EditorialDecision:
     recording_prefix_words: int = 0
     recording_suffix_words: int = 0
     recording_word_ranges: tuple[tuple[int, int], ...] = ()
+    # Preserve the provider's proposal when the contract withholds clean-winner
+    # authority. This is not a failure label or permission to delete speech.
+    proposed_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +147,9 @@ def validate_editorial_result(
             normalized_ranges.append((start, end))
             last_end = end
         reason_code = str(decision.reason_code or "").strip()[:160]
+        proposed_label = decision.proposed_label or label
+        if label == "winner" and content_role in {"mixed", "recording_only"}:
+            label = "uncertain"
         normalized.append(EditorialDecision(
             clip_id=decision.clip_id,
             label=label,
@@ -154,6 +160,7 @@ def validate_editorial_result(
             recording_prefix_words=decision.recording_prefix_words,
             recording_suffix_words=decision.recording_suffix_words,
             recording_word_ranges=tuple(normalized_ranges),
+            proposed_label=proposed_label,
         ))
         seen.add(decision.clip_id)
 

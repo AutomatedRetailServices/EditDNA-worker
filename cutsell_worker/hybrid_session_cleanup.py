@@ -305,6 +305,9 @@ def _later_semantic_retry_replacement(
         label, confidence = decisions_by_id.get(candidate.clip_id, ("", 0.0))
         if label not in {"winner", "alternate", "keep"} or confidence < minimum_label_confidence:
             continue
+        from .retry_replacement_coverage import replacement_coverage
+        if not replacement_coverage(failed_take, candidate)["coverage_verified"]:
+            continue
         overlap = _semantic_overlap(failed_take, candidate)
         if overlap >= minimum_overlap and overlap > best_overlap:
             best = candidate
@@ -676,7 +679,25 @@ def apply_hybrid_session_cleanup(
             int(work_id) for work_id in plan.deferred_optional_calls
         ]
 
+    # Gather all already-planned classifications before interpreting retry
+    # replacement. A window edge must not hide a peer or a conflicting label.
+    # Same calls/order/budget; no extra inference or deletion authority.
+    judged_windows = []
+    pool_windows = []
     for position in execution_order:
+        session = all_windows[position][3]
+        result = safe_editorial_judge(editorial_judge, session, policy)
+        judged_windows.append((position, result))
+        if result.available:
+            pool_windows.append({'decisions': [
+                {'clip_id': d.clip_id, 'label': d.label, 'confidence': d.confidence,
+                 'content_role': d.content_role}
+                for d in result.decisions
+            ]})
+    from .retry_replacement_coverage import replacement_semantics
+    pool_semantics = replacement_semantics(pool_windows)
+
+    for position, result in judged_windows:
         partition_index, chunk_index, members, session = all_windows[position]
         # D-052: the block below is unchanged from before the planner existed
         # (deliberately kept at its original nesting depth to minimize diff
@@ -684,7 +705,6 @@ def apply_hybrid_session_cleanup(
         # window is visited on each loop iteration changed, via
         # `execution_order` above.
         if True:
-            result = safe_editorial_judge(editorial_judge, session, policy)
             if result.requested:
                 requested_chunks += 1
             if result.available:
@@ -719,7 +739,7 @@ def apply_hybrid_session_cleanup(
                     take = take_map[decision.clip_id]
                     corroborated, local_reasons = local_by_id[decision.clip_id]
                     replacement, replacement_overlap = _later_semantic_retry_replacement(
-                        take, members, decisions_by_id
+                        take, partitions[partition_index], pool_semantics
                     ) if decision.label == "failed" else (None, 0.0)
                     # D-072: read-and-clear the guard's own observability
                     # side channel (set only when the call above actually
@@ -801,6 +821,8 @@ def apply_hybrid_session_cleanup(
                     decisions.append({
                         "clip_id": decision.clip_id,
                         "label": decision.label,
+                        "proposed_label": decision.proposed_label or decision.label,
+                        "winner_authority_withheld": decision.proposed_label == "winner" and decision.label != "winner",
                         "confidence": decision.confidence,
                         "reason_code": decision.reason_code,
                         "content_role": decision.content_role,
@@ -814,6 +836,7 @@ def apply_hybrid_session_cleanup(
                         "local_failure_reasons": list(local_reasons),
                         "later_retry_replacement_id": replacement.clip_id if replacement is not None else None,
                         "later_retry_semantic_overlap": round(float(replacement_overlap), 4),
+                        "replacement_scope": "complete_classified_session",
                         "dense_semantic_failure_cluster": dense_semantic_failure_cluster,
                         "delete_basis": delete_basis,
                         "applied_delete": applied_delete,
