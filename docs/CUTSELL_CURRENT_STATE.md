@@ -916,3 +916,30 @@ Both selected plans retain preparation/retry speech; this is not an approved cle
 quality win for either provider. No human listening claimed. Preserve contradictory
 Medium compact deliverable=true versus NOT_DELIVERABLE status; status used for labeling.
 Two authorized calls completed, no extra retry or production change.
+
+
+## Historical December comparison, 2026-09-25
+
+User authorized testing December EditDNA on the same latest MOV and comparing
+with existing Medium/Deepgram outputs from run 36076863910. Byte-identical
+worker/pipeline.py from 9ffbdc1 recovered as benchmarks/editdna_december_pipeline.py
+(SHA256 5d7ee91ddad80e4fcc1bb5a06cda22a8ce07658ff848e7ad0e3efb5db3c5736d).
+Configuration explicitly reconstructed: Medium, semantic GPT-5.1, CLIP vision,
+visual bad-take filter and TakeJudge enabled; boundary refiner default off.
+Historical production flags and dependency lock are not known.
+
+Run 36079200476 failed in CPU image build (PyAV headers), no engine dispatch.
+Run 36079356764 failed importing PIL before pipeline execution, ~10 GPU seconds.
+After dependency repair and CPU import smoke check, run 36079579008 executed
+the original pipeline once: 39.488 s, zero clips and zero selected IDs.
+No edited output. Historical dataset fallback points to original input; it was
+explicitly excluded from video delivery. LLM/vision/TakeJudge used=false.
+Raw result recovered CPU-only in run 36079896505, no additional inference.
+
+Offline reproduction: historical merge_incomplete_phrases drops two complete
+unpunctuated example sentences (2 -> 0) and retains punctuated versions (2 -> 2).
+This is a demonstrated algorithm defect, but not a confirmed cause of this
+run's empty clips: raw ASR and pre-merge candidates were not persisted.
+No claim that December engine is better/worse from this unsuccessful render.
+Modern outputs remain Medium 33.767 s (perceptual blocked), Deepgram 33.061 s
+(pending human review). No third edited video, no production replacement.
