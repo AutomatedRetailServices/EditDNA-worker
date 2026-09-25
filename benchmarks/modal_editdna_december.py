@@ -11,7 +11,7 @@ import modal
 env=json.loads(Path(os.environ['CUTSELL_ENV_JSON_PATH']).read_text()) if os.environ.get('CUTSELL_ENV_JSON_PATH') else {}
 app=modal.App('cutsell-authorized-december-comparison')
 image=(modal.Image.from_registry('madiator2011/better-pytorch:cuda12.4-torch2.6.0')
-       .apt_install('ffmpeg','git')
+       .apt_install('ffmpeg','git','build-essential','python3-dev','pkg-config','libavformat-dev','libavcodec-dev','libavdevice-dev','libavutil-dev','libavfilter-dev','libswscale-dev','libswresample-dev')
        .pip_install('faster-whisper==1.0.0','boto3','requests','openai','openai-clip')
        .add_local_file('benchmarks/editdna_december_pipeline.py','/opt/december_pipeline.py',copy=True))
 
