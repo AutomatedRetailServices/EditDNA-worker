@@ -1,0 +1,155 @@
+name: CutSell MOV Watch Listen Medium WhisperX
+on:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: >-
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized MOV Medium WhisperX Watch Listen')
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    env:
+      UPLOAD_SINGLE_PROVIDER: medium-whisperx
+      UPLOAD_EXPECTED_SHA: 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681
+      UPLOAD_EXPECTED_BYTES: "68730266"
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install CPU transport and media tools
+        run: |
+          pip install -q modal boto3 requests cryptography
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Prepare existing source configuration
+        run: python benchmarks/run_uploaded_asr_comparison.py prepare-existing cutsell/benchmark-inputs/upload-36065470982/5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681.mp4
+      - name: Verify exact uploaded video before GPU
+        id: source
+        run: python benchmarks/run_uploaded_asr_comparison.py await-upload
+      - name: Full engine with medium-whisperx
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run medium-whisperx
+      - name: Preserve medium-whisperx reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-reports
+          path: uploaded-comparison-artifacts/medium-whisperx/reports/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-A
+          path: uploaded-comparison-artifacts/medium-whisperx/A/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-B
+          path: uploaded-comparison-artifacts/medium-whisperx/B/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-C
+          path: uploaded-comparison-artifacts/medium-whisperx/C/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx D
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-D
+          path: uploaded-comparison-artifacts/medium-whisperx/D/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx E
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-E
+          path: uploaded-comparison-artifacts/medium-whisperx/E/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx F
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-F
+          path: uploaded-comparison-artifacts/medium-whisperx/F/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx G
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-G
+          path: uploaded-comparison-artifacts/medium-whisperx/G/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx H
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-H
+          path: uploaded-comparison-artifacts/medium-whisperx/H/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx I
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-I
+          path: uploaded-comparison-artifacts/medium-whisperx/I/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx J
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-J
+          path: uploaded-comparison-artifacts/medium-whisperx/J/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx K
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-K
+          path: uploaded-comparison-artifacts/medium-whisperx/K/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium-whisperx L
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-whisperx-L
+          path: uploaded-comparison-artifacts/medium-whisperx/L/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve comparison manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-comparison-manifest
+          path: uploaded-comparison-artifacts/manifest.json
+          if-no-files-found: warn
+      - name: Remove private runtime files
+        if: always()
+        run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'

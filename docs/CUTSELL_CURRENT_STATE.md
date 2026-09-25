@@ -1302,3 +1302,14 @@ for source-mapped reset debris near 99.33 s. Editorial 6/11 versus prior Medium
 whole-take criterion does not exclude a dangling fragment from that take.
 No editorial acceptance or causal improvement claim. Details:
 CUTSELL_VIDEO00_MEDIUM_WHISPERX_RESULT.md. Workflow restored manual-only.
+
+
+## 2026-09-25 uploaded MOV Medium + WhisperX qualification
+
+User supplied the MOV immediately after the Medium/WhisperX Video00 result,
+continuing the same test on that source. Local uploaded bytes match the prior
+MOV exactly: SHA 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681,
+68,730,266 bytes, 97.433333 seconds. One current-engine Medium + WhisperX +
+Watch/Listen invocation; no engine changes or second paid call. Existing S3
+source is reverified before GPU. Prior MOV comparisons predate the automatic
+Watch/Listen integration, so this is not an isolated WhisperX A/B experiment.
