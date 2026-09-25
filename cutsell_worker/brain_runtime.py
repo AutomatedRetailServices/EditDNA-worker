@@ -272,10 +272,12 @@ def build_brain_runtime(
         if requested_hybrid and claim_equivalence_arbiter_enabled
         else None
     )
+    from .whole_video_av import build_av_provider
+    av_provider = build_av_provider(hybrid_settings, values)
     return BrainRuntime(
         backend=RUNPOD_LOCAL_BACKEND,
         semantic_provider=NoopSemanticProvider(),
-        whole_video_provider=RunPodLocalWholeVideoProvider(),
+        whole_video_provider=av_provider or RunPodLocalWholeVideoProvider(),
         visual_provider=None,
         take_grouping_provider=None,
         take_judge_provider=HybridTakeJudgeProvider(editorial_judge=None),

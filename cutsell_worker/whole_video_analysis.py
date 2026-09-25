@@ -34,6 +34,7 @@ class SourceVideoContext:
     product_or_subject: str = ""
     story_logic: str = ""
     editorial_evidence: str = ""
+    audiovisual_evidence: str = ""
 
 
 @dataclass(frozen=True)
@@ -100,11 +101,17 @@ def safe_whole_video_analyze(
     sources: Tuple[SourceAsset, ...],
     transcripts: Tuple[TranscriptSegment, ...],
     samples: Tuple[SourceFrameSample, ...],
+    *, local_paths: dict[str, str] | None = None,
 ) -> WholeVideoContext:
     if provider is None:
         return WholeVideoContext((), ProviderStatus("none", False, False, "not_requested"))
     try:
-        result = provider.analyze(sources, transcripts, samples)
+        if callable(getattr(provider, "analyze_media", None)):
+            if local_paths is None:
+                raise ValueError("audiovisual provider requires local media")
+            result = provider.analyze_media(sources, transcripts, samples, local_paths)
+        else:
+            result = provider.analyze(sources, transcripts, samples)
         known = {source.source_asset_id for source in sources}
         seen = set()
         for source in result.sources:

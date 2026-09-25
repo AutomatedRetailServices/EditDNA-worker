@@ -3141,6 +3141,12 @@ def build_flow_b_draft(
         ordering_live_diagnostics_summary = {"status": "disabled"}
 
     whole_video_diag = {
+        "audiovisual_input_status": (
+            "received_and_parsed" if whole_video_context is not None
+            and whole_video_context.status.available and whole_video_context.sources
+            and all(s.audiovisual_evidence for s in whole_video_context.sources)
+            else "not_verified"
+        ),
         "status": whole_video_context.status.__dict__ if whole_video_context is not None else None,
         "dominant_edit_mode": whole_video_context.dominant_edit_mode if whole_video_context is not None else "natural",
         "sources": [
@@ -3154,6 +3160,7 @@ def build_flow_b_draft(
                 "main_topic": source.main_topic,
                 "product_or_subject": source.product_or_subject,
                 "story_logic": source.story_logic,
+                "audiovisual_evidence": source.audiovisual_evidence,
                 "events": [event.__dict__ for event in source.events],
             }
             for source in (whole_video_context.sources if whole_video_context is not None else ())

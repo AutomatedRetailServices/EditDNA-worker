@@ -274,7 +274,8 @@ def process_local_sources(
     if whole_video_provider is not None and hydrated_sources:
         with tempfile.TemporaryDirectory(prefix="cutsell-whole-video-") as whole_dir:
             whole_samples = []
-            for source in hydrated_sources:
+            sampling_sources = () if callable(getattr(whole_video_provider, "analyze_media", None)) else hydrated_sources
+            for source in sampling_sources:
                 source_path = local_paths[source.source_asset_id]
                 whole_samples.extend(sample_source_frames(
                     source_path,
@@ -287,7 +288,11 @@ def process_local_sources(
                 tuple(hydrated_sources),
                 transcript_tuple,
                 tuple(whole_samples),
+                local_paths=local_paths,
             )
+        if callable(getattr(whole_video_provider, "analyze_media", None)) and not whole_context.status.available:
+            trace.degraded("whole_video_context", reason=whole_context.status.reason or "audiovisual_input_failed")
+            raise RuntimeError("Required audiovisual Watch + Listen failed: " + str(whole_context.status.reason))
         if whole_context.status.status == "provider_error":
             trace.degraded("whole_video_context", reason=whole_context.status.reason or "provider_error")
         else:

@@ -23,6 +23,7 @@ from .recording_process_evidence import identity as recording_source_identity
 from contextvars import ContextVar
 from dataclasses import dataclass
 import hashlib
+import json
 import os
 import re
 from typing import Iterable, Mapping, Tuple
@@ -444,16 +445,27 @@ def _evidence(take: CandidateTake, context: WholeVideoContext | None) -> tuple[t
 def _source_context(
     context: WholeVideoContext | None,
     source_asset_id: str,
+    members=(),
 ) -> tuple[tuple[str, str | float], ...]:
     if context is None:
         return ()
     for source in context.sources:
         if source.source_asset_id != source_asset_id:
             continue
+        audiovisual = source.audiovisual_evidence
+        if audiovisual and members:
+            try:
+                data = json.loads(audiovisual)
+                data["regions"].sort(key=lambda r: not any(
+                    r["end"] > m.start and r["start"] < m.end for m in members))
+                audiovisual = json.dumps(data, separators=(",", ":"))
+            except (ValueError, TypeError, KeyError):
+                audiovisual = ""
         summary = " ".join(str(source.summary or "").split())[:3600]
         return (
             ("summary", summary),
             ("global_editorial_evidence", source.editorial_evidence),
+            ("audiovisual_evidence", audiovisual),
             ("creator_intent", str(source.creator_intent or "")[:500]),
             ("main_topic", str(source.main_topic or "")[:500]),
             ("product_or_subject", str(source.product_or_subject or "")[:500]),
@@ -564,7 +576,7 @@ def _editorial_session(
         local_confidence=0.50,
         conflict_score=0.50,
         task="classify_recording_process_within_single_creator_session",
-        source_context=_source_context(context, source_id),
+        source_context=_source_context(context, source_id, members),
     )
 
 

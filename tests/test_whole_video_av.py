@@ -1,0 +1,135 @@
+import json
+from pathlib import Path
+from dataclasses import replace
+import pytest
+from cutsell_worker.whole_video_av import GeminiWholeVideoAVProvider, build_av_provider
+from cutsell_worker.hybrid_google_transport import DollarBudgetLedger
+from cutsell_worker.contracts import SourceAsset
+from cutsell_worker.whole_video_analysis import safe_whole_video_analyze
+
+
+def source():
+    return SourceAsset('source','p','u','video.mp4',0,10,'local')
+
+
+def result():
+    return {'summary':'A demonstration with a recording reset.', 'creator_intent':'demonstrate the product',
+            'story_logic':'demonstration then invitation', 'regions':[{'start':1,'end':2,'role':'mixed',
+            'confidence':.9,'audio_observation':'hesitation then delivery',
+            'visual_observation':'turns away then returns','reason':'possible recording reset'}]}
+
+
+class Session:
+    def __init__(self,data=None): self.calls=[]; self.data=data if data is not None else result()
+    def post(self,url,headers,json,timeout):
+        self.calls.append((url,json))
+        payload=({'totalTokens':100} if url.endswith('countTokens') else
+                 {'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':__import__('json').dumps(self.data)}]}}]})
+        class Response:
+            def raise_for_status(self): pass
+            def json(self): return payload
+        return Response()
+
+
+def provider(tmp_path,data=None,budget=.1):
+    raw=tmp_path/'raw.mp4';raw.write_bytes(b'original media fixture')
+    def prepare(path,target): target.write_bytes(b'AV input fixture');return 10
+    session=Session(data)
+    av=GeminiWholeVideoAVProvider('test-key','configured-model',DollarBudgetLedger(budget),1,2,
+                                 session=session,media_preparer=prepare)
+    return av,raw,session
+
+
+def test_actual_media_handoff_and_evidence_reaches_classifier(tmp_path):
+    from cutsell_worker.hybrid_session_cleanup import _editorial_session
+    from cutsell_worker.hybrid_payload import build_compact_editorial_payload
+    from cutsell_worker.contracts import CandidateTake
+    av,raw,session=provider(tmp_path)
+    context=safe_whole_video_analyze(av,(source(),),(),(),local_paths={'source':str(raw)})
+    assert context.status.available
+    assert len(session.calls)==2
+    parts=session.calls[1][1]['contents'][0]['parts']
+    assert parts[0]['inline_data']['mime_type']=='video/mp4'
+    assert parts[0]['inline_data']['data']
+    evidence=json.loads(context.sources[0].audiovisual_evidence)
+    assert evidence['input_modalities']==['video','audio']
+    assert len(evidence['source_sha256'])==64
+    take=CandidateTake('clip','source',0,0,3,'A demonstration with a reset')
+    payload=build_compact_editorial_payload(_editorial_session((take,),context,partition_index=0,chunk_index=0))
+    assert 'audio_observation' in payload['source_context']['audiovisual_evidence']
+
+
+@pytest.mark.parametrize('mutation',['time','nan','missing_audio','missing_visual','role'])
+def test_invalid_model_observations_fail_closed(tmp_path,mutation):
+    data=result(); region=data['regions'][0]
+    if mutation=='time': region['end']=11
+    if mutation=='nan': region['confidence']=float('nan')
+    if mutation=='missing_audio': del region['audio_observation']
+    if mutation=='missing_visual': del region['visual_observation']
+    if mutation=='role': region['role']='delete'
+    av,raw,session=provider(tmp_path,data)
+    context=safe_whole_video_analyze(av,(source(),),(),(),local_paths={'source':str(raw)})
+    assert not context.status.available and context.status.status=='provider_error'
+    assert not context.sources
+    assert len(session.calls)==2  # no paid retry
+
+
+def test_no_budget_means_no_generation(tmp_path):
+    av,raw,session=provider(tmp_path,budget=.00001)
+    context=safe_whole_video_analyze(av,(source(),),(),(),local_paths={'source':str(raw)})
+    assert not context.status.available
+    assert len(session.calls)==1 and session.calls[0][0].endswith('countTokens')
+
+
+def test_missing_actual_source_does_not_fall_back_to_text(tmp_path):
+    av,raw,session=provider(tmp_path)
+    context=safe_whole_video_analyze(av,(source(),),(),())
+    assert not context.status.available and not session.calls
+
+
+def test_explicit_budget_required_and_no_automatic_spending():
+    from cutsell_worker.hybrid_provider_settings import HybridProviderSettings
+    settings=HybridProviderSettings(enabled=True)
+    assert build_av_provider(settings,{'GEMINI_API_KEY':'key'}) is None
+    with pytest.raises(ValueError):
+        build_av_provider(settings,{'GEMINI_API_KEY':'key','CUTSELL_WATCH_LISTEN_AV_ENABLED':'1'})
+
+
+def test_native_media_preparation_retains_audio_video_and_duration(tmp_path):
+    import subprocess
+    from cutsell_worker.whole_video_av import prepare_av
+    raw=tmp_path/'raw.mp4'; out=tmp_path/'prepared.mp4'
+    subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y',
+        '-f','lavfi','-i','testsrc=size=160x120:rate=12',
+        '-f','lavfi','-i','sine=frequency=600:sample_rate=16000',
+        '-t','2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',str(raw)],check=True,capture_output=True)
+    duration=prepare_av(raw,out)
+    assert abs(duration-2)<.15 and out.stat().st_size>0
+
+
+def test_runtime_selects_av_only_with_explicit_complete_configuration():
+    from cutsell_worker.brain_runtime import build_brain_runtime
+    from cutsell_worker.config import load_runtime_config
+    values={'CUTSELL_BRAIN_BACKEND':'runpod_local','CUTSELL_HYBRID_LLM_ENABLED':'1',
+            'CUTSELL_HYBRID_PROVIDER':'google','GEMINI_API_KEY':'test',
+            'CUTSELL_WATCH_LISTEN_AV_ENABLED':'1','CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD':'.1',
+            'CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION':'1',
+            'CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION':'2'}
+    brain=build_brain_runtime(load_runtime_config(values),values)
+    assert isinstance(brain.whole_video_provider,GeminiWholeVideoAVProvider)
+
+
+def test_local_global_hypotheses_do_not_overwrite_audiovisual_evidence():
+    from types import SimpleNamespace
+    from cutsell_worker.global_editorial_context import with_global_editorial_evidence
+    from cutsell_worker.whole_video_analysis import WholeVideoContext,SourceVideoContext
+    from cutsell_worker.providers import ProviderStatus
+    evidence=json.dumps({'regions':result()['regions'],'kind':'audiovisual_observations_v1'})
+    source_context=SourceVideoContext('source','summary','raw','record',audiovisual_evidence=evidence)
+    context=WholeVideoContext((source_context,),ProviderStatus('test',True,True,'applied'))
+    region=SimpleNamespace(source_asset_id='source',source_start=0,source_end=3,
+        dominant_process_status='uncertain',audience_delivery_status='mixed',confidence='SUPPORTED',conflict_flags=())
+    result_context,_=with_global_editorial_evidence(context,SimpleNamespace(
+        understanding=SimpleNamespace(regions=(region,)),capability_status='ok'))
+    assert result_context.sources[0].audiovisual_evidence==evidence
+    assert result_context.sources[0].editorial_evidence!=evidence

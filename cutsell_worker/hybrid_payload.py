@@ -60,7 +60,7 @@ def _compact_source_context(source_context: tuple[tuple[str, str | float], ...])
     compact: dict[str, Any] = {}
     for key, value in source_context:
         name = str(key)
-        if name == "global_editorial_evidence":
+        if name in {"global_editorial_evidence", "audiovisual_evidence"}:
             compact[name] = _bounded_global_evidence(value, 1800)
             continue
         if isinstance(value, str):
@@ -159,7 +159,7 @@ def _shrink_context_once(source_context: Mapping[str, Any]) -> dict[str, Any]:
             continue
         target = max(120, int(len(value) * 0.75))
         shrunk[key] = (_bounded_global_evidence(value, target)
-                       if key == "global_editorial_evidence" else value[:target])
+                       if key in {"global_editorial_evidence", "audiovisual_evidence"} else value[:target])
     return shrunk
 
 

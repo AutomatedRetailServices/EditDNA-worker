@@ -46,7 +46,7 @@ def runtime_diagnostics():
             'activation': ('explicit' if key in os.environ else 'automatic' if active else 'default_off'),
             'blocked_dependencies': [dep for dep in dependencies if not capability_enabled(_PREFIX+dep, os.environ)],
         }
-    return {'mode':'automatic' if active else 'explicit_flags', 'capabilities':rows}
+    return {'mode':'automatic' if active else 'explicit_flags', 'configuration_only':True, 'capabilities':rows}
 
 
 def automatic_watch_listen(function):
