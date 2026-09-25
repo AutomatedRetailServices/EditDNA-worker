@@ -943,3 +943,24 @@ run's empty clips: raw ASR and pre-merge candidates were not persisted.
 No claim that December engine is better/worse from this unsuccessful render.
 Modern outputs remain Medium 33.767 s (perceptual blocked), Deepgram 33.061 s
 (pending human review). No third edited video, no production replacement.
+
+
+## August commercial V2 exact-source test completed
+
+User authorized one August c8aa989 test on the same MOV. Run 36080835250,
+tested 94fbd823ac944a1bb59a0ecd747a3543e2fb9c69. Snapshot is unchanged
+worker tree plus pipeline_errors.py from c8aa989. Medium, semantic V2 and
+TakeJudge V2 requested; reconstructed flags documented by the harness.
+Original editorial functions wrapped only for input/output observation.
+
+Result: SelectionError (no clips selected), no edited MP4. Actual recorded
+ASR: 15 segments; sentence_boundary_micro_cuts: 15 -> 15;
+merge_incomplete_phrases: 15 -> 0. All 15 candidates lack terminal .?!
+punctuation. Semantic V2 receives zero candidates and returns false;
+TakeJudge returns false; composer selects none. Exact recorded merge input
+reproduces 15 -> 0 offline. This confirms pre-classification deletion as the
+cause in THIS August test; December's missing intermediates remain a limit.
+No ASR quality failure inferred, no comparison of V2 editorial quality is
+possible with empty input. No production change or second August engine run.
+Artifacts: august-reports 10841728421 includes source config, summary, logs
+and full stage traces. Preserve the trace before any repair or new test.
