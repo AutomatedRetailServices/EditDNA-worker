@@ -1,0 +1,122 @@
+name: EditDNA August Historical Comparison
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths: [.github/workflows/editdna-august-comparison.yml]
+permissions:
+  contents: read
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  historical:
+    if: >-
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized August historical comparison')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install transport
+        run: pip install -q modal requests boto3
+      - name: Run one historical full engine
+        run: python benchmarks/run_editdna_august.py
+      - name: Preserve reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-reports
+          path: |
+            august-artifacts/*.json
+            august-artifacts/*.log
+          if-no-files-found: warn
+      - name: Preserve video A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-A
+          path: august-artifacts/A/
+          if-no-files-found: ignore
+      - name: Preserve video B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-B
+          path: august-artifacts/B/
+          if-no-files-found: ignore
+      - name: Preserve video C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-C
+          path: august-artifacts/C/
+          if-no-files-found: ignore
+      - name: Preserve video D
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-D
+          path: august-artifacts/D/
+          if-no-files-found: ignore
+      - name: Preserve video E
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-E
+          path: august-artifacts/E/
+          if-no-files-found: ignore
+      - name: Preserve video F
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-F
+          path: august-artifacts/F/
+          if-no-files-found: ignore
+      - name: Preserve video G
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-G
+          path: august-artifacts/G/
+          if-no-files-found: ignore
+      - name: Preserve video H
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-H
+          path: august-artifacts/H/
+          if-no-files-found: ignore
+      - name: Preserve video I
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-I
+          path: august-artifacts/I/
+          if-no-files-found: ignore
+      - name: Preserve video J
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-J
+          path: august-artifacts/J/
+          if-no-files-found: ignore
+      - name: Preserve video K
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-K
+          path: august-artifacts/K/
+          if-no-files-found: ignore
+      - name: Preserve video L
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: august-L
+          path: august-artifacts/L/
+          if-no-files-found: ignore
