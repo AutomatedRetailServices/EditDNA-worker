@@ -12,8 +12,9 @@ env=json.loads(Path(os.environ['CUTSELL_ENV_JSON_PATH']).read_text()) if os.envi
 app=modal.App('cutsell-authorized-december-comparison')
 image=(modal.Image.from_registry('madiator2011/better-pytorch:cuda12.4-torch2.6.0')
        .apt_install('ffmpeg','git','build-essential','python3-dev','pkg-config','libavformat-dev','libavcodec-dev','libavdevice-dev','libavutil-dev','libavfilter-dev','libswscale-dev','libswresample-dev')
-       .pip_install('faster-whisper==1.0.0','boto3','requests','openai','openai-clip')
-       .add_local_file('benchmarks/editdna_december_pipeline.py','/opt/december_pipeline.py',copy=True))
+       .pip_install('faster-whisper==1.0.0','boto3','requests','openai','openai-clip','pillow','torchvision==0.21.0')
+       .add_local_file('benchmarks/editdna_december_pipeline.py','/opt/december_pipeline.py',copy=True)
+       .run_commands("python -c \"import runpy; runpy.run_path('/opt/december_pipeline.py')\""))
 
 @app.function(image=image,gpu='L4',timeout=1800,retries=0,secrets=[modal.Secret.from_dict(env)])
 def run_legacy():
