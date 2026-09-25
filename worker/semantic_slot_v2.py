@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 import re
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from worker.speech_edges import SpeechEdgeProposal, word_tokens
 
 
 class CanonicalSlot(str, Enum):
@@ -61,6 +62,7 @@ class SlotClassificationResult:
     abstain: bool
     reason: str
     evidence_tags: Tuple[EvidenceTag, ...]
+    edge_trim: Optional[SpeechEdgeProposal] = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,7 @@ class SemanticClauseInput:
     heuristic_slot: str
     semantic_score: Optional[float]
     signals: ClauseSignals
+    word_tokens: Tuple[str, ...] = ()
 
     def provider_dict(self) -> Dict[str, Any]:
         value = asdict(self)
@@ -152,5 +155,6 @@ def build_clause_inputs(clips: Sequence[Mapping[str, Any]]) -> Tuple[SemanticCla
             heuristic_slot=heuristic,
             semantic_score=float(clip["semantic_score"]) if clip.get("semantic_score") is not None else None,
             signals=signals,
+            word_tokens=word_tokens(clip),
         ))
     return tuple(result)

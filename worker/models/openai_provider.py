@@ -19,6 +19,7 @@ from worker.take_judge_v2 import (
     TakeJudgeCandidate, TakeJudgeCandidateScore, TakeJudgeV2Result, TemporalFrameSample,
 )
 from worker.semantic_slot_v2 import CanonicalSlot, EvidenceTag, SemanticClauseInput, SlotClassificationResult
+from worker.speech_edges import SpeechEdgeProposal
 
 logger = logging.getLogger("editdna.openai_provider")
 
@@ -152,6 +153,15 @@ def classify_semantic_v2(model: str, clauses: Sequence[SemanticClauseInput], **k
         "Do not label an entire target OTHER when it mixes valid product or story speech with production talk; "
         "abstain if a single classification would discard that valid speech. "
         "Judge completeness independently of sales relevance: a complete non-sales statement can be complete. "
+        "Optional edge_trim: null, or {keep_start,keep_end,confidence,reason}, using zero-based indices "
+        "into word_tokens and an exclusive keep_end. Propose only removal of unmistakable recording "
+        "errors at the beginning/end, leaving ONE contiguous, complete original utterance. "
+        "Allowed reasons: production_talk, false_start, verbal_fumble. Never trim merely for weak sales "
+        "value, profanity, personality, humor, negation, or differing claims. Never splice interior "
+        "errors, rewrite speech, or infer missing words. If unsure or word_tokens do not cover the "
+        "transcript, return null. Require confidence >=0.9; classify the retained utterance only when "
+        "proposing a confident trim, with completeness >=0.9 and abstain=false. Otherwise classify "
+        "the original target and preserve the mixed-speech abstention rule above. "
         "Enthusiasm alone is not a hook. Return JSON only: {results:[{id,primary_slot,secondary_slot|null,"
         "confidence,secondary_confidence|null,completeness,sales_relevance,standalone_quality,abstain,reason,evidence_tags}]}. "
         "Reason must be safe and at most 160 characters. evidence_tags must be a JSON list containing only "
@@ -192,9 +202,21 @@ def classify_semantic_v2(model: str, clauses: Sequence[SemanticClauseInput], **k
             tags = tuple(EvidenceTag(tag) for tag in item["evidence_tags"])
             if len(tags) != len(set(tags)):
                 raise ValueError
+            edge = None
+            raw_edge = item.get("edge_trim")
+            if raw_edge is not None:
+                clause = next(c for c in clauses if c.clause_id == cid)
+                left, right = raw_edge["keep_start"], raw_edge["keep_end"]
+                reason_code = raw_edge["reason"]
+                if (type(left) is not int or type(right) is not int
+                        or not 0 <= left < right <= len(clause.word_tokens)
+                        or (left == 0 and right == len(clause.word_tokens))
+                        or reason_code not in {"production_talk", "false_start", "verbal_fumble"}):
+                    raise ValueError
+                edge = SpeechEdgeProposal(left, right, _score(raw_edge["confidence"]), reason_code)
             output[cid] = SlotClassificationResult(
                 primary, secondary, confidence, secondary_confidence, _score(item["completeness"]),
-                _score(item["sales_relevance"]), _score(item["standalone_quality"]), abstain, reason, tags,
+                _score(item["sales_relevance"]), _score(item["standalone_quality"]), abstain, reason, tags, edge,
             )
         if set(output) != set(ids):
             raise ValueError

@@ -1094,3 +1094,58 @@ production/fumble boundaries using sufficient temporal/audio evidence.
 The historical snapshots and August repaired harness remain unchanged; the
 harness still overlays only merge_incomplete_phrases, so it does not yet test
 this patch or the preceding semantic prompt change.
+
+
+## 2026-09-25 — Contiguous mixed-take edge cleanup
+
+User authorized correction of mixed valid speech and recording-error edges.
+Implemented in experimental legacy worker, without paid inference/render or
+deployment. No change to modern cutsell_worker or historical snapshots.
+
+The existing Semantic V2 call can now return optional edge_trim with a
+zero-based contiguous kept word range, confidence and a constrained reason:
+production_talk, false_start or verbal_fumble. Input includes indexed word
+tokens, not private source paths. The model is instructed to preserve humor,
+personality, intentional profanity, claims and negation, and never splice
+interior errors or fabricate speech. No additional provider request is added;
+input/output tokens increase modestly within the existing semantic request.
+
+worker/speech_edges.py validates confidence >=.90, one nonempty contiguous
+range, complete transcript-to-word coverage, finite positive ordered
+nonoverlapping times within the original clip, and >=80 ms separation at
+each edited boundary. It adds a 40 ms handle only inside that separation.
+Classification confidence and retained completeness must also be >=.90,
+with no abstention and a non-OTHER retained role. Uncertain or invalid cuts
+preserve the original candidate; retained-only classifications cannot
+exclude or reclassify it when the cut is rejected. Original source identity
+and chain IDs remain; applied metadata records old text/bounds and reason.
+No automatic interior word deletion or whole-take rejection is introduced.
+
+Applied clips refresh their heuristic score before semantic slot assignment,
+then flow through existing comparison, composition and rendering. Renderer
+uses the grounded bounds for BOTH audio and video, without applying generic
+HEAD_TRIM_SEC/TAIL_TRIM_SEC a second time.
+
+Offline evidence: a supplied high-confidence proposal on saved ASR0000_c0
+keeps original words 0:13 and ends at 4.06 s (last word ends 4.02 s), excluding
+preparation beginning 6.61 s. This is a deterministic fixture replay with a
+mocked classifier response, NOT a new inference result. Saved ASR0008_c8
+has incomplete word coverage and is preserved with
+transcript_timing_mismatch; no missing word timing is invented.
+
+154 targeted tests passed across speech edges, TakeJudge, semantic
+provider/pipeline, runtime reliability and Clean Cut foundation. Tests cover
+prefix/tail/both-edge contiguous crops, bad ranges, uncertainty, missing/
+overlapping/zero/NaN word times, transcript mismatch, malformed provider
+responses, one-call integration, protected source identity, no-proposal
+personality preservation and matching audio/video render filters even when
+generic trimming is configured. Rendering subprocess and provider transport
+are mocked: no new video was produced and no listening/visual-quality
+acceptance is claimed.
+
+Remaining limitations: live model adherence is unmeasured; unreliable word
+alignment and interior fumbles still require further alignment/contextual
+resolution. This change is not complete Watch + Listen or a claim that all
+badtakes are resolved. The prior August repaired harness still overlays only
+merge_incomplete_phrases and must be explicitly updated before any future
+test is described as testing these new experimental changes.

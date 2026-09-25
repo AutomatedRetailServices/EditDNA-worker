@@ -20,6 +20,7 @@ from worker.models.openai_provider import (
     Verdict, classify_semantic_v2, detect_bad_take, judge_takes_v2, refine_boundaries,
 )
 from worker.semantic_slot_v2 import build_clause_inputs, publicize_canonical_slot
+from worker.speech_edges import apply_speech_edge
 from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_candidate_frames
 
 from pipeline_errors import (
@@ -777,7 +778,17 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -
         info = llm_result.get(c["id"])
         if info is None:
             continue
+        edge_status = "not_requested"
+        if info.edge_trim is not None:
+            if (info.abstain or info.confidence < .9 or info.completeness < .9
+                    or info.primary_slot.value == "OTHER"):
+                edge_status = "uncertain_retained_speech"
+            else:
+                edge_status = apply_speech_edge(c, info.edge_trim)
+                if edge_status == "applied":
+                    tag_clips_heuristic([c])
         c["meta"]["semantic_v2"] = {
+            "edge_trim_status": edge_status,
             "primary_slot": info.primary_slot.value,
             "secondary_slot": info.secondary_slot.value if info.secondary_slot else None,
             "confidence": info.confidence,
@@ -790,6 +801,10 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -
             "evidence_tags": tuple(tag.value for tag in info.evidence_tags),
             "applied": False,
         }
+        # A proposed trim classifies retained speech, not the original mixed clip.
+        # If the cut fails validation, that classification cannot exclude it.
+        if edge_status not in {"not_requested", "applied"}:
+            continue
         if info.abstain or info.confidence < SEMANTIC_V2_MIN_CONFIDENCE or info.completeness < 0.5:
             continue
         if info.primary_slot.value == "OTHER":
@@ -1888,8 +1903,9 @@ def render_funnel_video(
     filters, videos, audios = [], [], []
     for c in selected:
         source_index = int(c.get("source_index", 0))
-        start = max(0.0, safe_float(c.get("start")) + HEAD_TRIM_SEC)
-        end = max(start, safe_float(c.get("end")) - TAIL_TRIM_SEC)
+        grounded_edge = c.get("meta", {}).get("speech_edge_edit", {}).get("status") == "applied"
+        start = max(0.0, safe_float(c.get("start")) + (0.0 if grounded_edge else HEAD_TRIM_SEC))
+        end = max(start, safe_float(c.get("end")) - (0.0 if grounded_edge else TAIL_TRIM_SEC))
         if end <= start:
             continue
         number = len(videos); vlabel = f"v{number}"
