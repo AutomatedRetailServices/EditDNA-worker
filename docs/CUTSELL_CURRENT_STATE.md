@@ -986,3 +986,24 @@ tests/fixtures/august_unpunctuated_candidates.json; no fixture-specific rule.
 tests passed (110 total). Optional job-progress suite could not collect in
 the local environment because FastAPI is absent; no claim that suite passed.
 This repairs upstream candidate loss, not the complete editorial-quality gate.
+
+
+## Repaired August full test completed 2026-09-25
+
+User authorized one new run after the phrase-preservation repair. Run
+36081643325; tested 9269aee4a6a699b2e649022b9ba7a9f079587972. Derived
+snapshot changes only merge_incomplete_phrases, confirmed by AST comparison;
+historical c8aa989 snapshot remains untouched. Derived pipeline SHA256
+86d8b21b3e0a6a4e4d98841d5652a75aa51d506978df2a420e7adce97b9afc87.
+
+Actual traces: 15 ASR segments -> 15 candidates -> 15 after merge. Semantic
+V2 and vision ran; six selected clips; 27.8 s MP4 generated, 95.483 s engine
+time. Full decode and artifact/part/output SHA checks passed. Output SHA
+4355c11fe56b201bdbdf45efe7d60c20b1ff95dd6a7b7fb3d781df1d1474edc4.
+TakeJudge V2 requested but no_sibling_group: zero groups, zero comparisons.
+Selected transcript still contains preparation/retry speech (how am I
+supposed to say, pep talk, I'm done). This is a successful candidate-loss
+repair and render, not an editorial acceptance or superiority claim.
+No human listening; historical run does not receive current CutSell QC gates.
+Video delivered as MOV_EditDNA_Agosto_REPARADO.mp4, experimental output.
+No production promotion or additional invocation.
