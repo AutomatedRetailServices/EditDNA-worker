@@ -451,7 +451,9 @@ def looks_incomplete(text: str) -> bool:
 
 def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    UNE frases incompletas con la siguiente si tiene sentido.
+    Join compatible incomplete phrases; preserve every unmerged candidate.
+
+    Missing punctuation is a merge hint, not authority to delete speech.
     """
     if not clips:
         return clips
@@ -475,6 +477,7 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
             can_merge = (
                 len(next_text.split()) >= 2 and
                 not looks_incomplete(next_text) and
+                bool(text) and
                 text[0].isalpha()
             )
 
@@ -507,6 +510,7 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
                 i += 2
                 continue
 
+        merged.append(c)
         i += 1
 
     return merged

@@ -272,3 +272,30 @@ def test_defaults_remain_disabled_and_model_unchanged():
     from worker.models.config import load_model_config
     config = load_model_config().take_judge
     assert not config.enabled and config.model_name == "gpt-4o-mini" and config.frame_count == 1 and config.min_confidence == .70
+
+
+@pytest.mark.parametrize("text", ["A complete spoken idea without punctuation", "and another benefit", "Okay", "", "123"])
+def test_unmerged_final_candidate_survives_without_changing_metadata(text):
+    import copy
+    clips = [pipeline.make_base_clip("a", 1, 4, text)]
+    clips[0]["meta"].update(keep=False, source_asset_id="source-a")
+    before = copy.deepcopy(clips)
+    assert pipeline.merge_incomplete_phrases(clips) == before
+    assert clips == before
+
+
+def test_empty_candidate_before_complete_sentence_does_not_crash_or_disappear():
+    clips = [pipeline.make_base_clip("a", 0, 1, ""),
+             pipeline.make_base_clip("b", 1, 3, "A complete sentence.")]
+    assert pipeline.merge_incomplete_phrases(clips) == clips
+
+
+def test_recorded_august_candidates_survive_preclassification_merge():
+    import copy
+    import json
+    from pathlib import Path
+    clips = json.loads((Path(__file__).parent / "fixtures" / "august_unpunctuated_candidates.json").read_text())
+    before = copy.deepcopy(clips)
+    assert len(clips) == 15
+    assert pipeline.merge_incomplete_phrases(clips) == before
+    assert clips == before

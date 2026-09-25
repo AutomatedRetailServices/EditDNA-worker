@@ -1,0 +1,1752 @@
+[
+  {
+    "id": "ASR0000_c0",
+    "slot": "STORY",
+    "start": 0.0,
+    "end": 7.91,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0000_c0"
+    ],
+    "text": "shut the front door and rhino is running a crazy deal right now how am i supposed to say",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 0.0,
+        "end": 0.28,
+        "word": " shut"
+      },
+      {
+        "start": 0.28,
+        "end": 0.52,
+        "word": " the"
+      },
+      {
+        "start": 0.52,
+        "end": 0.7,
+        "word": " front"
+      },
+      {
+        "start": 0.7,
+        "end": 1.18,
+        "word": " door"
+      },
+      {
+        "start": 1.18,
+        "end": 1.86,
+        "word": " and"
+      },
+      {
+        "start": 1.86,
+        "end": 2.08,
+        "word": " rhino"
+      },
+      {
+        "start": 2.08,
+        "end": 2.2,
+        "word": " is"
+      },
+      {
+        "start": 2.2,
+        "end": 2.36,
+        "word": " running"
+      },
+      {
+        "start": 2.36,
+        "end": 2.6,
+        "word": " a"
+      },
+      {
+        "start": 2.6,
+        "end": 2.9,
+        "word": " crazy"
+      },
+      {
+        "start": 2.9,
+        "end": 3.14,
+        "word": " deal"
+      },
+      {
+        "start": 3.14,
+        "end": 3.28,
+        "word": " right"
+      },
+      {
+        "start": 3.28,
+        "end": 4.02,
+        "word": " now"
+      },
+      {
+        "start": 6.61,
+        "end": 6.75,
+        "word": " how"
+      },
+      {
+        "start": 6.75,
+        "end": 6.87,
+        "word": " am"
+      },
+      {
+        "start": 6.87,
+        "end": 6.97,
+        "word": " i"
+      },
+      {
+        "start": 6.97,
+        "end": 7.21,
+        "word": " supposed"
+      },
+      {
+        "start": 7.21,
+        "end": 7.39,
+        "word": " to"
+      },
+      {
+        "start": 7.39,
+        "end": 7.91,
+        "word": " say"
+      }
+    ]
+  },
+  {
+    "id": "ASR0001_c1",
+    "slot": "STORY",
+    "start": 7.91,
+    "end": 12.19,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0001_c1"
+    ],
+    "text": "pull it yeah there you go i just needed a pep talk",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 7.91,
+        "end": 8.69,
+        "word": " pull"
+      },
+      {
+        "start": 8.69,
+        "end": 9.27,
+        "word": " it"
+      },
+      {
+        "start": 9.27,
+        "end": 9.97,
+        "word": " yeah"
+      },
+      {
+        "start": 9.97,
+        "end": 10.17,
+        "word": " there"
+      },
+      {
+        "start": 10.17,
+        "end": 10.37,
+        "word": " you"
+      },
+      {
+        "start": 10.37,
+        "end": 11.09,
+        "word": " go"
+      },
+      {
+        "start": 11.09,
+        "end": 11.23,
+        "word": " i"
+      },
+      {
+        "start": 11.23,
+        "end": 11.39,
+        "word": " just"
+      },
+      {
+        "start": 11.39,
+        "end": 11.53,
+        "word": " needed"
+      },
+      {
+        "start": 11.53,
+        "end": 11.67,
+        "word": " a"
+      },
+      {
+        "start": 11.67,
+        "end": 11.87,
+        "word": " pep"
+      },
+      {
+        "start": 11.87,
+        "end": 12.19,
+        "word": " talk"
+      }
+    ]
+  },
+  {
+    "id": "ASR0002_c2",
+    "slot": "STORY",
+    "start": 19.69,
+    "end": 27.76,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0002_c2"
+    ],
+    "text": "strap other side so let's flip it not so good oh too many people ready set these are the",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 19.69,
+        "end": 20.17,
+        "word": " strap"
+      },
+      {
+        "start": 20.17,
+        "end": 20.65,
+        "word": " other"
+      },
+      {
+        "start": 20.65,
+        "end": 20.87,
+        "word": " side"
+      },
+      {
+        "start": 20.87,
+        "end": 21.03,
+        "word": " so"
+      },
+      {
+        "start": 21.03,
+        "end": 21.17,
+        "word": " let's"
+      },
+      {
+        "start": 21.17,
+        "end": 21.33,
+        "word": " flip"
+      },
+      {
+        "start": 21.33,
+        "end": 21.67,
+        "word": " it"
+      },
+      {
+        "start": 21.67,
+        "end": 21.85,
+        "word": " not"
+      },
+      {
+        "start": 21.85,
+        "end": 22.01,
+        "word": " so"
+      },
+      {
+        "start": 22.01,
+        "end": 23.25,
+        "word": " good"
+      },
+      {
+        "start": 24.12,
+        "end": 24.84,
+        "word": " oh"
+      },
+      {
+        "start": 24.84,
+        "end": 25.1,
+        "word": " too"
+      },
+      {
+        "start": 25.1,
+        "end": 25.22,
+        "word": " many"
+      },
+      {
+        "start": 25.22,
+        "end": 25.42,
+        "word": " people"
+      },
+      {
+        "start": 25.42,
+        "end": 25.86,
+        "word": " ready"
+      },
+      {
+        "start": 25.86,
+        "end": 26.28,
+        "word": " set"
+      },
+      {
+        "start": 26.28,
+        "end": 26.88,
+        "word": " these"
+      },
+      {
+        "start": 26.88,
+        "end": 27.02,
+        "word": " are"
+      },
+      {
+        "start": 27.02,
+        "end": 27.76,
+        "word": " the"
+      }
+    ]
+  },
+  {
+    "id": "ASR0003_c3",
+    "slot": "STORY",
+    "start": 29.45,
+    "end": 35.67,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0003_c3"
+    ],
+    "text": "you can get it flipped it i'm already gonna mess it up ready and rhino has a crazy sell on",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 29.45,
+        "end": 29.93,
+        "word": " you"
+      },
+      {
+        "start": 29.93,
+        "end": 30.15,
+        "word": " can"
+      },
+      {
+        "start": 30.15,
+        "end": 30.43,
+        "word": " get"
+      },
+      {
+        "start": 30.43,
+        "end": 31.29,
+        "word": " it"
+      },
+      {
+        "start": 31.29,
+        "end": 31.61,
+        "word": " flipped"
+      },
+      {
+        "start": 31.61,
+        "end": 32.29,
+        "word": " it"
+      },
+      {
+        "start": 32.29,
+        "end": 32.61,
+        "word": " i'm"
+      },
+      {
+        "start": 32.61,
+        "end": 32.81,
+        "word": " already"
+      },
+      {
+        "start": 32.81,
+        "end": 32.95,
+        "word": " gonna"
+      },
+      {
+        "start": 32.95,
+        "end": 33.07,
+        "word": " mess"
+      },
+      {
+        "start": 33.07,
+        "end": 33.25,
+        "word": " it"
+      },
+      {
+        "start": 33.25,
+        "end": 33.35,
+        "word": " up"
+      },
+      {
+        "start": 33.35,
+        "end": 33.79,
+        "word": " ready"
+      },
+      {
+        "start": 33.79,
+        "end": 34.55,
+        "word": " and"
+      },
+      {
+        "start": 34.55,
+        "end": 34.79,
+        "word": " rhino"
+      },
+      {
+        "start": 34.79,
+        "end": 34.93,
+        "word": " has"
+      },
+      {
+        "start": 34.93,
+        "end": 35.03,
+        "word": " a"
+      },
+      {
+        "start": 35.03,
+        "end": 35.29,
+        "word": " crazy"
+      },
+      {
+        "start": 35.29,
+        "end": 35.53,
+        "word": " sell"
+      },
+      {
+        "start": 35.53,
+        "end": 35.67,
+        "word": " on"
+      }
+    ]
+  },
+  {
+    "id": "ASR0004_c4",
+    "slot": "STORY",
+    "start": 36.45,
+    "end": 40.79,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0004_c4"
+    ],
+    "text": "and rhino has a crazy sale on them right now what the heck he didn't even do anything",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 36.45,
+        "end": 36.89,
+        "word": " and"
+      },
+      {
+        "start": 36.89,
+        "end": 37.15,
+        "word": " rhino"
+      },
+      {
+        "start": 37.15,
+        "end": 37.31,
+        "word": " has"
+      },
+      {
+        "start": 37.31,
+        "end": 37.39,
+        "word": " a"
+      },
+      {
+        "start": 37.39,
+        "end": 37.71,
+        "word": " crazy"
+      },
+      {
+        "start": 37.71,
+        "end": 37.89,
+        "word": " sale"
+      },
+      {
+        "start": 37.89,
+        "end": 38.03,
+        "word": " on"
+      },
+      {
+        "start": 38.03,
+        "end": 38.23,
+        "word": " them"
+      },
+      {
+        "start": 38.23,
+        "end": 38.47,
+        "word": " right"
+      },
+      {
+        "start": 38.47,
+        "end": 38.89,
+        "word": " now"
+      },
+      {
+        "start": 38.89,
+        "end": 39.09,
+        "word": " what"
+      },
+      {
+        "start": 39.09,
+        "end": 39.33,
+        "word": " the"
+      },
+      {
+        "start": 39.33,
+        "end": 39.53,
+        "word": " heck"
+      },
+      {
+        "start": 39.53,
+        "end": 39.65,
+        "word": " he"
+      },
+      {
+        "start": 39.65,
+        "end": 39.79,
+        "word": " didn't"
+      },
+      {
+        "start": 39.79,
+        "end": 39.99,
+        "word": " even"
+      },
+      {
+        "start": 39.99,
+        "end": 40.21,
+        "word": " do"
+      },
+      {
+        "start": 40.21,
+        "end": 40.79,
+        "word": " anything"
+      }
+    ]
+  },
+  {
+    "id": "ASR0005_c5",
+    "slot": "STORY",
+    "start": 40.79,
+    "end": 47.29,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0005_c5"
+    ],
+    "text": "and rhino is running a and rhino is running a crate and rhino is running a",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 40.79,
+        "end": 41.13,
+        "word": " and"
+      },
+      {
+        "start": 41.13,
+        "end": 41.37,
+        "word": " rhino"
+      },
+      {
+        "start": 41.37,
+        "end": 41.49,
+        "word": " is"
+      },
+      {
+        "start": 41.49,
+        "end": 41.67,
+        "word": " running"
+      },
+      {
+        "start": 41.67,
+        "end": 43.17,
+        "word": " a"
+      },
+      {
+        "start": 43.17,
+        "end": 43.39,
+        "word": " and"
+      },
+      {
+        "start": 43.39,
+        "end": 43.65,
+        "word": " rhino"
+      },
+      {
+        "start": 43.65,
+        "end": 43.79,
+        "word": " is"
+      },
+      {
+        "start": 43.79,
+        "end": 43.93,
+        "word": " running"
+      },
+      {
+        "start": 43.93,
+        "end": 44.77,
+        "word": " a"
+      },
+      {
+        "start": 44.77,
+        "end": 44.77,
+        "word": " crate"
+      },
+      {
+        "start": 44.77,
+        "end": 46.47,
+        "word": " and"
+      },
+      {
+        "start": 46.47,
+        "end": 46.79,
+        "word": " rhino"
+      },
+      {
+        "start": 46.79,
+        "end": 46.91,
+        "word": " is"
+      },
+      {
+        "start": 46.91,
+        "end": 47.07,
+        "word": " running"
+      },
+      {
+        "start": 47.07,
+        "end": 47.29,
+        "word": " a"
+      }
+    ]
+  },
+  {
+    "id": "ASR0006_c6",
+    "slot": "STORY",
+    "start": 50.9,
+    "end": 59.02,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0006_c6"
+    ],
+    "text": "okay what the and rhino is running a crate i've moved my finger again and rhino is running",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 50.9,
+        "end": 51.24,
+        "word": " okay"
+      },
+      {
+        "start": 51.24,
+        "end": 51.72,
+        "word": " what"
+      },
+      {
+        "start": 51.72,
+        "end": 52.12,
+        "word": " the"
+      },
+      {
+        "start": 52.12,
+        "end": 53.46,
+        "word": " and"
+      },
+      {
+        "start": 53.46,
+        "end": 53.78,
+        "word": " rhino"
+      },
+      {
+        "start": 53.78,
+        "end": 53.94,
+        "word": " is"
+      },
+      {
+        "start": 53.94,
+        "end": 54.08,
+        "word": " running"
+      },
+      {
+        "start": 54.08,
+        "end": 54.48,
+        "word": " a"
+      },
+      {
+        "start": 54.48,
+        "end": 54.72,
+        "word": " crate"
+      },
+      {
+        "start": 54.72,
+        "end": 55.1,
+        "word": " i've"
+      },
+      {
+        "start": 55.1,
+        "end": 55.12,
+        "word": " moved"
+      },
+      {
+        "start": 55.12,
+        "end": 55.3,
+        "word": " my"
+      },
+      {
+        "start": 55.3,
+        "end": 55.5,
+        "word": " finger"
+      },
+      {
+        "start": 55.5,
+        "end": 56.16,
+        "word": " again"
+      },
+      {
+        "start": 56.16,
+        "end": 57.36,
+        "word": " and"
+      },
+      {
+        "start": 58.36,
+        "end": 58.58,
+        "word": " rhino"
+      },
+      {
+        "start": 58.58,
+        "end": 58.76,
+        "word": " is"
+      },
+      {
+        "start": 58.76,
+        "end": 59.02,
+        "word": " running"
+      }
+    ]
+  },
+  {
+    "id": "ASR0007_c7",
+    "slot": "STORY",
+    "start": 60.14,
+    "end": 63.64,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0007_c7"
+    ],
+    "text": "and rhino is running a crazy mine of course i can't hit it that time",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 60.14,
+        "end": 60.58,
+        "word": " and"
+      },
+      {
+        "start": 60.58,
+        "end": 60.88,
+        "word": " rhino"
+      },
+      {
+        "start": 60.88,
+        "end": 61.04,
+        "word": " is"
+      },
+      {
+        "start": 61.04,
+        "end": 61.14,
+        "word": " running"
+      },
+      {
+        "start": 61.14,
+        "end": 61.34,
+        "word": " a"
+      },
+      {
+        "start": 61.34,
+        "end": 61.84,
+        "word": " crazy"
+      },
+      {
+        "start": 61.84,
+        "end": 62.5,
+        "word": " mine"
+      },
+      {
+        "start": 62.5,
+        "end": 62.72,
+        "word": " of"
+      },
+      {
+        "start": 62.72,
+        "end": 62.86,
+        "word": " course"
+      },
+      {
+        "start": 62.86,
+        "end": 62.94,
+        "word": " i"
+      },
+      {
+        "start": 62.94,
+        "end": 63.12,
+        "word": " can't"
+      },
+      {
+        "start": 63.12,
+        "end": 63.18,
+        "word": " hit"
+      },
+      {
+        "start": 63.18,
+        "end": 63.3,
+        "word": " it"
+      },
+      {
+        "start": 63.3,
+        "end": 63.48,
+        "word": " that"
+      },
+      {
+        "start": 63.48,
+        "end": 63.64,
+        "word": " time"
+      }
+    ]
+  },
+  {
+    "id": "ASR0008_c8",
+    "slot": "STORY",
+    "start": 63.64,
+    "end": 70.74,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0008_c8"
+    ],
+    "text": "and rhino is running a crazy deal right now we're gonna leave it i'm done",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 63.64,
+        "end": 64.24,
+        "word": " and"
+      },
+      {
+        "start": 64.24,
+        "end": 64.54,
+        "word": " rhino"
+      },
+      {
+        "start": 64.54,
+        "end": 64.66,
+        "word": " is"
+      },
+      {
+        "start": 64.66,
+        "end": 64.8,
+        "word": " running"
+      },
+      {
+        "start": 64.8,
+        "end": 64.94,
+        "word": " a"
+      },
+      {
+        "start": 64.94,
+        "end": 65.24,
+        "word": " crazy"
+      },
+      {
+        "start": 65.24,
+        "end": 65.42,
+        "word": " deal"
+      },
+      {
+        "start": 65.42,
+        "end": 65.66,
+        "word": " right"
+      },
+      {
+        "start": 65.66,
+        "end": 66.2,
+        "word": " now"
+      },
+      {
+        "start": 66.2,
+        "end": 67.5,
+        "word": " we're"
+      },
+      {
+        "start": 69.38,
+        "end": 69.54,
+        "word": " gonna"
+      },
+      {
+        "start": 69.54,
+        "end": 69.8,
+        "word": " leave"
+      },
+      {
+        "start": 69.8,
+        "end": 69.98,
+        "word": " it"
+      },
+      {
+        "start": 69.98,
+        "end": 70.74,
+        "word": " i'm"
+      }
+    ]
+  },
+  {
+    "id": "ASR0009_c9",
+    "slot": "STORY",
+    "start": 70.74,
+    "end": 75.72,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0009_c9"
+    ],
+    "text": "so if you want to grab some i'll link them down below so if you want to grab some i'll link them",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 70.74,
+        "end": 71.0,
+        "word": " so"
+      },
+      {
+        "start": 71.0,
+        "end": 71.1,
+        "word": " if"
+      },
+      {
+        "start": 71.1,
+        "end": 71.2,
+        "word": " you"
+      },
+      {
+        "start": 71.2,
+        "end": 71.32,
+        "word": " want"
+      },
+      {
+        "start": 71.32,
+        "end": 71.44,
+        "word": " to"
+      },
+      {
+        "start": 71.44,
+        "end": 71.58,
+        "word": " grab"
+      },
+      {
+        "start": 71.58,
+        "end": 71.84,
+        "word": " some"
+      },
+      {
+        "start": 71.84,
+        "end": 72.04,
+        "word": " i'll"
+      },
+      {
+        "start": 72.04,
+        "end": 72.14,
+        "word": " link"
+      },
+      {
+        "start": 72.14,
+        "end": 72.24,
+        "word": " them"
+      },
+      {
+        "start": 72.24,
+        "end": 72.42,
+        "word": " down"
+      },
+      {
+        "start": 72.42,
+        "end": 73.88,
+        "word": " below"
+      },
+      {
+        "start": 73.98,
+        "end": 74.4,
+        "word": " so"
+      },
+      {
+        "start": 74.4,
+        "end": 74.52,
+        "word": " if"
+      },
+      {
+        "start": 74.52,
+        "end": 74.58,
+        "word": " you"
+      },
+      {
+        "start": 74.58,
+        "end": 74.72,
+        "word": " want"
+      },
+      {
+        "start": 74.72,
+        "end": 74.82,
+        "word": " to"
+      },
+      {
+        "start": 74.82,
+        "end": 74.96,
+        "word": " grab"
+      },
+      {
+        "start": 74.96,
+        "end": 75.28,
+        "word": " some"
+      },
+      {
+        "start": 75.28,
+        "end": 75.42,
+        "word": " i'll"
+      },
+      {
+        "start": 75.42,
+        "end": 75.58,
+        "word": " link"
+      },
+      {
+        "start": 75.58,
+        "end": 75.72,
+        "word": " them"
+      }
+    ]
+  },
+  {
+    "id": "ASR0010_c10",
+    "slot": "STORY",
+    "start": 75.72,
+    "end": 81.74,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0010_c10"
+    ],
+    "text": "right down below just the other side that's why so if you want to grab some i'm gonna link them down",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 75.72,
+        "end": 76.1,
+        "word": " down"
+      },
+      {
+        "start": 76.1,
+        "end": 76.54,
+        "word": " below"
+      },
+      {
+        "start": 76.54,
+        "end": 76.94,
+        "word": " just"
+      },
+      {
+        "start": 76.94,
+        "end": 78.02,
+        "word": " the"
+      },
+      {
+        "start": 78.02,
+        "end": 78.32,
+        "word": " other"
+      },
+      {
+        "start": 78.32,
+        "end": 78.5,
+        "word": " side"
+      },
+      {
+        "start": 78.5,
+        "end": 78.8,
+        "word": " that's"
+      },
+      {
+        "start": 78.8,
+        "end": 79.0,
+        "word": " why"
+      },
+      {
+        "start": 79.0,
+        "end": 80.32,
+        "word": " so"
+      },
+      {
+        "start": 80.32,
+        "end": 80.46,
+        "word": " if"
+      },
+      {
+        "start": 80.46,
+        "end": 80.5,
+        "word": " you"
+      },
+      {
+        "start": 80.5,
+        "end": 80.64,
+        "word": " want"
+      },
+      {
+        "start": 80.64,
+        "end": 80.72,
+        "word": " to"
+      },
+      {
+        "start": 80.72,
+        "end": 80.88,
+        "word": " grab"
+      },
+      {
+        "start": 80.88,
+        "end": 81.06,
+        "word": " some"
+      },
+      {
+        "start": 81.06,
+        "end": 81.16,
+        "word": " i'm"
+      },
+      {
+        "start": 81.16,
+        "end": 81.32,
+        "word": " gonna"
+      },
+      {
+        "start": 81.32,
+        "end": 81.46,
+        "word": " link"
+      },
+      {
+        "start": 81.46,
+        "end": 81.62,
+        "word": " them"
+      },
+      {
+        "start": 81.62,
+        "end": 81.74,
+        "word": " down"
+      }
+    ]
+  },
+  {
+    "id": "ASR0011_c11",
+    "slot": "STORY",
+    "start": 81.74,
+    "end": 88.9,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0011_c11"
+    ],
+    "text": "below yeah pull it latch it retract it and strap the hell out of it these are the rhino retractable",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 81.74,
+        "end": 82.16,
+        "word": " below"
+      },
+      {
+        "start": 82.16,
+        "end": 83.94,
+        "word": " yeah"
+      },
+      {
+        "start": 83.94,
+        "end": 84.6,
+        "word": " pull"
+      },
+      {
+        "start": 84.6,
+        "end": 85.12,
+        "word": " it"
+      },
+      {
+        "start": 85.12,
+        "end": 85.38,
+        "word": " latch"
+      },
+      {
+        "start": 85.38,
+        "end": 85.88,
+        "word": " it"
+      },
+      {
+        "start": 85.88,
+        "end": 86.28,
+        "word": " retract"
+      },
+      {
+        "start": 86.28,
+        "end": 86.64,
+        "word": " it"
+      },
+      {
+        "start": 86.64,
+        "end": 86.88,
+        "word": " and"
+      },
+      {
+        "start": 86.88,
+        "end": 87.0,
+        "word": " strap"
+      },
+      {
+        "start": 87.0,
+        "end": 87.22,
+        "word": " the"
+      },
+      {
+        "start": 87.22,
+        "end": 87.36,
+        "word": " hell"
+      },
+      {
+        "start": 87.36,
+        "end": 87.54,
+        "word": " out"
+      },
+      {
+        "start": 87.54,
+        "end": 87.64,
+        "word": " of"
+      },
+      {
+        "start": 87.64,
+        "end": 87.78,
+        "word": " it"
+      },
+      {
+        "start": 87.78,
+        "end": 87.96,
+        "word": " these"
+      },
+      {
+        "start": 87.96,
+        "end": 88.04,
+        "word": " are"
+      },
+      {
+        "start": 88.04,
+        "end": 88.16,
+        "word": " the"
+      },
+      {
+        "start": 88.16,
+        "end": 88.44,
+        "word": " rhino"
+      },
+      {
+        "start": 88.44,
+        "end": 88.9,
+        "word": " retractable"
+      }
+    ]
+  },
+  {
+    "id": "ASR0012_c12",
+    "slot": "STORY",
+    "start": 88.9,
+    "end": 93.06,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0012_c12"
+    ],
+    "text": "straps you can get them in a one inch or a two inch they added a bunch of different colors this",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 88.9,
+        "end": 89.26,
+        "word": " straps"
+      },
+      {
+        "start": 89.26,
+        "end": 89.4,
+        "word": " you"
+      },
+      {
+        "start": 89.4,
+        "end": 89.54,
+        "word": " can"
+      },
+      {
+        "start": 89.54,
+        "end": 89.64,
+        "word": " get"
+      },
+      {
+        "start": 89.64,
+        "end": 89.76,
+        "word": " them"
+      },
+      {
+        "start": 89.76,
+        "end": 89.84,
+        "word": " in"
+      },
+      {
+        "start": 89.84,
+        "end": 89.98,
+        "word": " a"
+      },
+      {
+        "start": 89.98,
+        "end": 90.16,
+        "word": " one"
+      },
+      {
+        "start": 90.16,
+        "end": 90.4,
+        "word": " inch"
+      },
+      {
+        "start": 90.4,
+        "end": 90.66,
+        "word": " or"
+      },
+      {
+        "start": 90.66,
+        "end": 90.78,
+        "word": " a"
+      },
+      {
+        "start": 90.78,
+        "end": 90.96,
+        "word": " two"
+      },
+      {
+        "start": 90.96,
+        "end": 91.32,
+        "word": " inch"
+      },
+      {
+        "start": 91.32,
+        "end": 91.62,
+        "word": " they"
+      },
+      {
+        "start": 91.62,
+        "end": 91.84,
+        "word": " added"
+      },
+      {
+        "start": 91.84,
+        "end": 92.0,
+        "word": " a"
+      },
+      {
+        "start": 92.0,
+        "end": 92.18,
+        "word": " bunch"
+      },
+      {
+        "start": 92.18,
+        "end": 92.34,
+        "word": " of"
+      },
+      {
+        "start": 92.34,
+        "end": 92.52,
+        "word": " different"
+      },
+      {
+        "start": 92.52,
+        "end": 92.8,
+        "word": " colors"
+      },
+      {
+        "start": 92.8,
+        "end": 93.06,
+        "word": " this"
+      }
+    ]
+  },
+  {
+    "id": "ASR0013_c13",
+    "slot": "STORY",
+    "start": 93.06,
+    "end": 96.66,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0013_c13"
+    ],
+    "text": "and rhino is running a crazy deal right now so if you want to grab some i'm gonna link them down",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 93.06,
+        "end": 93.38,
+        "word": " and"
+      },
+      {
+        "start": 93.38,
+        "end": 93.72,
+        "word": " rhino"
+      },
+      {
+        "start": 93.72,
+        "end": 93.82,
+        "word": " is"
+      },
+      {
+        "start": 93.82,
+        "end": 94.0,
+        "word": " running"
+      },
+      {
+        "start": 94.0,
+        "end": 94.16,
+        "word": " a"
+      },
+      {
+        "start": 94.16,
+        "end": 94.42,
+        "word": " crazy"
+      },
+      {
+        "start": 94.42,
+        "end": 94.6,
+        "word": " deal"
+      },
+      {
+        "start": 94.6,
+        "end": 94.86,
+        "word": " right"
+      },
+      {
+        "start": 94.86,
+        "end": 95.12,
+        "word": " now"
+      },
+      {
+        "start": 95.12,
+        "end": 95.3,
+        "word": " so"
+      },
+      {
+        "start": 95.3,
+        "end": 95.4,
+        "word": " if"
+      },
+      {
+        "start": 95.4,
+        "end": 95.46,
+        "word": " you"
+      },
+      {
+        "start": 95.46,
+        "end": 95.56,
+        "word": " want"
+      },
+      {
+        "start": 95.56,
+        "end": 95.68,
+        "word": " to"
+      },
+      {
+        "start": 95.68,
+        "end": 95.8,
+        "word": " grab"
+      },
+      {
+        "start": 95.8,
+        "end": 96.02,
+        "word": " some"
+      },
+      {
+        "start": 96.02,
+        "end": 96.12,
+        "word": " i'm"
+      },
+      {
+        "start": 96.12,
+        "end": 96.24,
+        "word": " gonna"
+      },
+      {
+        "start": 96.24,
+        "end": 96.38,
+        "word": " link"
+      },
+      {
+        "start": 96.38,
+        "end": 96.54,
+        "word": " them"
+      },
+      {
+        "start": 96.54,
+        "end": 96.66,
+        "word": " down"
+      }
+    ]
+  },
+  {
+    "id": "ASR0014_c14",
+    "slot": "STORY",
+    "start": 96.66,
+    "end": 97.38,
+    "score": 0.0,
+    "semantic_score": 0.0,
+    "visual_score": 0.0,
+    "face_q": 1.0,
+    "scene_q": 1.0,
+    "vtx_sim": 0.0,
+    "chain_ids": [
+      "ASR0014_c14"
+    ],
+    "text": "below down below so if you want to grab some i'm gonna link them down below",
+    "llm_reason": "",
+    "visual_flags": {
+      "scene_jump": false,
+      "motion_jump": false
+    },
+    "meta": {
+      "slot": "STORY",
+      "semantic_score": 0.0,
+      "visual_score": 0.0,
+      "score": 0.0,
+      "chain_ids": [],
+      "keep": true
+    },
+    "words": [
+      {
+        "start": 96.66,
+        "end": 96.92,
+        "word": " below"
+      },
+      {
+        "start": 96.92,
+        "end": 97.38,
+        "word": " down"
+      }
+    ]
+  }
+]

@@ -80249,3 +80249,25 @@ describes measured audio peaks and sampled frames at the joins, not a
 continuous human viewing); phoneme-level clipping (no ASR realign on the
 rendered audio); consistency across runs (one run each way); whether
 D-291.12a-c hold on video (no further RAW authorized).
+
+
+## 2026-09-25 — Preserve unmerged commercial-pipeline candidates
+
+User explicitly requested correction of the rule diagnosed in August test
+36080835250. In worker/pipeline.py, merge_incomplete_phrases now preserves
+every candidate it cannot merge; missing punctuation or a conjunction is
+only a merge hint, never deletion authority. Existing successful merges and
+word-timing propagation are retained. Empty text is guarded before indexing.
+No keep/score promotion: preserved candidates still face downstream review.
+Historical benchmark snapshots remain immutable references; a future repaired
+August comparison must explicitly use this patched worker function, not rerun
+the unchanged historical snapshot and call it repaired. No new paid run or
+production deployment was performed. No cutsell_worker selection code changed.
+
+Verification: the exact 15 captured pre-merge candidates now survive as 15,
+with unchanged words, source times, ordering and metadata. Fixture stored at
+tests/fixtures/august_unpunctuated_candidates.json; no fixture-specific rule.
+65 TakeJudge/semantic pipeline tests and 45 pipeline/Clean Cut/multi-source
+tests passed (110 total). Optional job-progress suite could not collect in
+the local environment because FastAPI is absent; no claim that suite passed.
+This repairs upstream candidate loss, not the complete editorial-quality gate.
