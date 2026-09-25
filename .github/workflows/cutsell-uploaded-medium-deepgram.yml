@@ -1,0 +1,120 @@
+name: CutSell Uploaded Medium vs Deepgram
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths: [.github/workflows/cutsell-uploaded-medium-deepgram.yml]
+permissions:
+  contents: read
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: >-
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized uploaded medium versus deepgram')
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    env:
+      UPLOAD_PROVIDER_PAIR: medium,deepgram
+      UPLOAD_EXPECTED_SHA: 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681
+      UPLOAD_EXPECTED_BYTES: "68730266"
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install CPU transport and media tools
+        run: |
+          pip install -q modal boto3 requests cryptography
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Freeze configuration for both providers
+        run: python benchmarks/run_uploaded_asr_comparison.py prepare-existing cutsell/benchmark-inputs/upload-36065470982/5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681.mp4
+      - name: Verify exact uploaded video before GPU
+        id: source
+        run: python benchmarks/run_uploaded_asr_comparison.py await-upload
+      - name: Full engine with medium
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run medium
+      - name: Preserve medium reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-reports
+          path: uploaded-comparison-artifacts/medium/reports/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-A
+          path: uploaded-comparison-artifacts/medium/A/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-B
+          path: uploaded-comparison-artifacts/medium/B/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-C
+          path: uploaded-comparison-artifacts/medium/C/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Full engine with deepgram
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run deepgram
+      - name: Preserve deepgram reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-deepgram-reports
+          path: uploaded-comparison-artifacts/deepgram/reports/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve deepgram A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-deepgram-A
+          path: uploaded-comparison-artifacts/deepgram/A/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve deepgram B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-deepgram-B
+          path: uploaded-comparison-artifacts/deepgram/B/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve deepgram C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-deepgram-C
+          path: uploaded-comparison-artifacts/deepgram/C/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve comparison manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-comparison-manifest
+          path: uploaded-comparison-artifacts/manifest.json
+          if-no-files-found: warn
+      - name: Remove private runtime files
+        if: always()
+        run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'

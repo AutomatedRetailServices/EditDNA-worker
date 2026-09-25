@@ -900,3 +900,10 @@ The sales-funnel layer is an opportunity inside the same editor to improve
 the source-supported hook, benefit progression and CTA. No commercial layer
 was changed in this batch, no rigid funnel is required, and no conversion
 improvement is established by visual cleanliness or these repeated trials.
+
+
+## Uploaded MOV medium versus Deepgram authorized
+
+Two fresh full-engine outputs requested for uploaded MOV SHA 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681.
+Same source, frozen configuration and engine code; medium then Deepgram, no WhisperX.
+No retries, no production promotion. Reuse verified existing source bytes.

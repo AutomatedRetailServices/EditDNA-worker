@@ -21,7 +21,8 @@ OUT = ROOT / "uploaded-comparison-artifacts"
 
 def prepare(existing_source_key=None, single_provider=False):
     import requests
-    selected_provider = os.environ.get("UPLOAD_SINGLE_PROVIDER", "gpt-whisperx")
+    pair = os.environ.get("UPLOAD_PROVIDER_PAIR") == "medium,deepgram"
+    selected_provider = "deepgram" if pair else os.environ.get("UPLOAD_SINGLE_PROVIDER", "gpt-whisperx")
     if selected_provider not in {"gpt-whisperx", "deepgram"}:
         raise ValueError("Unsupported single provider")
     from cryptography.hazmat.primitives import hashes, serialization
@@ -72,7 +73,12 @@ def prepare(existing_source_key=None, single_provider=False):
         "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 1 if existing_source_key or single_provider else 2,
         "providers": ["deepgram-nova-3-multi" if selected_provider == "deepgram" else "gpt-transcribe-whisperx"] if existing_source_key or single_provider else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
         "same_template_snapshot": True, "auto_speech_visual_microtrim": True})
-    if existing_source_key or single_provider:
+    if pair:
+        manifest = json.loads((OUT / "manifest.json").read_text())
+        manifest.update(authorized_runs=2, providers=["faster-whisper-medium", "deepgram-nova-3-multi"])
+        write_json(OUT / "manifest.json", manifest)
+        write_json(PRIVATE / "provider-pair.json", {"providers": ["medium", "deepgram"]})
+    elif existing_source_key or single_provider:
         write_json(PRIVATE / "single-provider.json", {"provider": selected_provider})
     print("Source preflight prepared; no GPU call yet")
 
@@ -108,7 +114,13 @@ def run(provider):
     if not (PRIVATE / "source.verified").exists() or (PRIVATE / "STOP").exists():
         raise RuntimeError("Source or prior terminal-state preflight failed")
     single = PRIVATE / "single-provider.json"
-    if provider == "deepgram" and not single.exists():
+    pair = PRIVATE / "provider-pair.json"
+    if pair.exists():
+        if provider not in json.loads(pair.read_text())["providers"]:
+            raise RuntimeError("Provider outside pair authorization")
+        if provider == "deepgram" and not (PRIVATE / "medium.terminal").exists():
+            raise RuntimeError("Sequential calls required")
+    if provider == "deepgram" and not single.exists() and not pair.exists():
         raise RuntimeError("Deepgram requires explicit single-provider mode")
     if single.exists() and provider != json.loads(single.read_text())["provider"]:
         raise RuntimeError("Provider outside single-run authorization")
