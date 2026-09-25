@@ -1838,7 +1838,7 @@ def build_flow_b_draft(
         parent_label = label_map.get(parent_id)
         if parent_label is None:
             continue
-        child_ids = [item.get("kept_clip_id"), *(item.get("discarded_clip_ids") or [])]
+        child_ids = [*(item.get("kept_clip_ids") or [item.get("kept_clip_id")]), *(item.get("discarded_clip_ids") or [])]
         for child_id in child_ids:
             if child_id:
                 label_map[str(child_id)] = SemanticLabel(
@@ -3141,6 +3141,7 @@ def build_flow_b_draft(
         ordering_live_diagnostics_summary = {"status": "disabled"}
 
     whole_video_diag = {
+        "input_audit": whole_video_context.diagnostics if whole_video_context is not None else {},
         "audiovisual_input_status": (
             "received_and_parsed" if whole_video_context is not None
             and whole_video_context.status.available and whole_video_context.sources

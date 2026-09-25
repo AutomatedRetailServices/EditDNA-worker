@@ -58,7 +58,7 @@ class TransportEditorialJudge:
         for item in raw_decisions:
             if not isinstance(item, Mapping):
                 raise ValueError("hybrid provider decision must be an object")
-            if (item.get("recording_prefix_words", 0) or item.get("recording_suffix_words", 0)) and not exposed_words.get(str(item.get("clip_id") or "")):
+            if (item.get("recording_prefix_words", 0) or item.get("recording_suffix_words", 0) or item.get("recording_word_ranges")) and not exposed_words.get(str(item.get("clip_id") or "")):
                 raise ValueError("recording trim requires untruncated aligned words in payload")
             decisions.append(EditorialDecision(
                 clip_id=str(item.get("clip_id") or ""),
@@ -69,6 +69,7 @@ class TransportEditorialJudge:
                 recording_confidence=item.get("recording_confidence"),
                 recording_prefix_words=item.get("recording_prefix_words", 0),
                 recording_suffix_words=item.get("recording_suffix_words", 0),
+                recording_word_ranges=item.get("recording_word_ranges", ()),
             ))
 
         output_tokens = int(raw.get("output_tokens") or 0)

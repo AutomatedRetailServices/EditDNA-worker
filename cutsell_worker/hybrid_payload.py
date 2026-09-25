@@ -56,12 +56,27 @@ def _bounded_global_evidence(value: str, limit: int) -> str:
         return ""
 
 
+def _bounded_av_evidence(value, limit):
+    """Keep region coverage before verbose observations; detailed links live per candidate."""
+    try:
+        data = json.loads(value)
+        if not isinstance(data.get("regions"), list):
+            return ""
+        compact = {"kind": "audiovisual_observations_v1", "source_sha256": data.get("source_sha256"),
+                   "authority": "advisory", "regions": [
+                       {k: r[k] for k in ("observation_id", "start", "end", "role", "confidence") if k in r}
+                       for r in data["regions"]]}
+        return _bounded_global_evidence(json.dumps(compact), limit)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return ""
+
+
 def _compact_source_context(source_context: tuple[tuple[str, str | float], ...]) -> dict[str, Any]:
     compact: dict[str, Any] = {}
     for key, value in source_context:
         name = str(key)
         if name in {"global_editorial_evidence", "audiovisual_evidence"}:
-            compact[name] = _bounded_global_evidence(value, 1800)
+            compact[name] = (_bounded_av_evidence(value, 1800) if name == "audiovisual_evidence" else _bounded_global_evidence(value, 1800))
             continue
         if isinstance(value, str):
             normalized = " ".join(value.split())
@@ -88,12 +103,22 @@ def _candidate_rows(
     session: EditorialSession,
     *,
     text_limit: int,
+    av_details: bool = True,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for candidate in session.candidates:
         text = str(candidate.text or "").strip()
         if len(text) > text_limit:
             text = text[:text_limit]
+        evidence = _compact_evidence(candidate.evidence)
+        if isinstance(evidence.get("audiovisual"), dict):
+            av = evidence["audiovisual"]
+            evidence["audiovisual"] = {
+                "status": av.get("status"), "omitted_count": av.get("omitted_count", 0),
+                "details_included": av_details,
+                "observations": [{k: v for k, v in r.items() if av_details or k not in {"audio", "visual"}}
+                                 for r in av.get("observations", [])],
+            }
         rows.append({
             "clip_id": candidate.clip_id,
             "text": text,
@@ -103,7 +128,7 @@ def _candidate_rows(
             "duration_sec": round(candidate.duration_sec, 3),
             "local_label": candidate.local_label,
             "local_confidence": round(float(candidate.local_confidence), 4),
-            "evidence": _compact_evidence(candidate.evidence),
+            "evidence": evidence,
         })
     return rows
 
@@ -177,7 +202,8 @@ def build_compact_editorial_payload(
     rules = _rules(cleanup_task)
     source_context = _compact_source_context(session.source_context)
     text_limit = max(1, int(cost_policy.max_chars_per_candidate))
-    candidates = _candidate_rows(session, text_limit=text_limit)
+    av_details = True
+    candidates = _candidate_rows(session, text_limit=text_limit, av_details=av_details)
     payload = _payload(
         session,
         source_context=source_context,
@@ -200,10 +226,16 @@ def build_compact_editorial_payload(
         if payload_chars <= target_chars:
             break
 
+        if av_details and any(dict(c.evidence).get("audiovisual") for c in session.candidates):
+            # Keep all local region links/roles/word ranges before sacrificing speech.
+            av_details = False
+            candidates = _candidate_rows(session, text_limit=text_limit, av_details=False)
+            payload = _payload(session, source_context=source_context, candidates=candidates, rules=rules)
+            continue
         candidate_count = max(1, len(session.candidates))
         # Measure fixed overhead using identical rows with empty speech. This avoids a
         # guess based on the number of candidates and adapts automatically to evidence.
-        empty_rows = _candidate_rows(session, text_limit=1)
+        empty_rows = _candidate_rows(session, text_limit=1, av_details=av_details)
         for row in empty_rows:
             row["text"] = ""
         overhead_payload = _payload(
@@ -218,7 +250,7 @@ def build_compact_editorial_payload(
 
         if next_text_limit < text_limit:
             text_limit = next_text_limit
-            candidates = _candidate_rows(session, text_limit=text_limit)
+            candidates = _candidate_rows(session, text_limit=text_limit, av_details=av_details)
         else:
             source_context = _shrink_context_once(source_context)
 

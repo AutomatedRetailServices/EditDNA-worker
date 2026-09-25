@@ -53,7 +53,8 @@ def test_only_aligned_recording_edges_removed(text,prefix,suffix,expected,monkey
 def test_unsafe_or_unbound_evidence_preserves(changes,monkeypatch):
     take,row=sample(**changes)
     kept,deleted,proofs,diag=run(take,[row],monkeypatch)
-    assert kept==(take,) and deleted==proofs==diag==()
+    assert kept==(take,) and deleted==proofs==()
+    assert diag and not diag[0]["applied_mixed_trim"]
 
 
 def test_window_disagreement_preserves(monkeypatch):
@@ -140,3 +141,42 @@ def test_optional_word_evidence_reservation_stays_inside_existing_ceiling():
     payload={'candidates':[{'word_texts':['hello','world']}] * 10}
     assert _compact_output_token_ceiling(payload,500)==500
     assert _compact_output_token_ceiling(payload,320)==320
+
+
+@pytest.mark.parametrize('text',[
+    'This backpack fits my laptop. Please restart the camera. Shipping arrives in three days.',
+    'Esta mochila protege mi computadora. Necesito revisar mis notas. El envío tarda tres días.',
+])
+def test_interior_preparation_keeps_separate_source_sentences(text,monkeypatch):
+    take,row=sample(text,prefix=0,recording_word_ranges=((5,8),))
+    kept,deleted,proofs,diag=run(take,[row],monkeypatch)
+    assert len(kept)==2 and len(deleted)==1
+    assert tuple(w for t in sorted((*kept,*deleted),key=lambda t:t.start) for w in t.words)==take.words
+    assert kept[0].end<=deleted[0].start and deleted[0].end<=kept[1].start
+    assert diag[0]['kept_clip_ids']==[t.clip_id for t in kept]
+
+
+def test_interior_self_correction_is_not_silently_spliced(monkeypatch):
+    take,row=sample('It costs twenty wait no I mean fifty dollars today',prefix=0,recording_word_ranges=((4,6),))
+    kept,deleted,proofs,diag=run(take,[row],monkeypatch)
+    assert kept==(take,) and not deleted
+    assert diag[0]['reason']=='interior_sentence_boundary_unproven'
+
+
+def test_full_pipeline_keeps_both_unique_sentences_after_interior_cleanup():
+    from cutsell_worker import pipeline
+    from cutsell_worker.contracts import ProcessingRequest,SourceAsset
+    from cutsell_worker.hybrid_editorial import EditorialDecision,EditorialJudgeResult
+    from cutsell_worker.whole_video_analysis import WholeVideoContext,SourceVideoContext,TemporalEvent
+    from cutsell_worker.providers import ProviderStatus
+    take,row=sample('This backpack fits my laptop. Please restart the camera. Shipping arrives in three days.',prefix=0)
+    class Judge:
+        def judge(self,session):
+            return EditorialJudgeResult(tuple(EditorialDecision(c.clip_id,'failed',.8,'test','mixed',.99,0,0,((5,8),)) for c in session.candidates),'test','test',True,True)
+    context=WholeVideoContext((SourceVideoContext('source','Product and delivery facts.','raw','record',
+        (TemporalEvent('source',2,3.6,'retry_setup',.99,'confirmed physical recording restart'),)),),ProviderStatus('test',True,True,'ok'))
+    request=ProcessingRequest('p','u',(SourceAsset('source','p','u','raw.mp4',0,20,'local'),))
+    result=pipeline.build_flow_b_draft(request,(take,),editorial_judge=Judge(),whole_video_context=context,boundary_owner='post_freeze')
+    text=' '.join(c.text for c in result.draft.selected)
+    assert 'backpack fits my laptop' in text and 'Shipping arrives in three days' in text
+    assert 'restart the camera' not in text

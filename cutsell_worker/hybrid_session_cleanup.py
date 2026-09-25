@@ -19,6 +19,7 @@ Semantic Ledger preservation), which alone decide whether it survives.
 from __future__ import annotations
 
 from .recording_process_evidence import identity as recording_source_identity
+from .av_candidate_evidence import candidate_observations
 
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -548,6 +549,12 @@ def _coverage_first_windows(windows, context, *, prioritize_safety=True):
     return ordered
 
 
+def _evidence_with_av(take, context):
+    base = _evidence(take, context)
+    av = candidate_observations(take, context)
+    return (*base, ("audiovisual", av)) if av["status"] != "unavailable" else base
+
+
 def _editorial_session(
     members: Tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
@@ -570,7 +577,7 @@ def _editorial_session(
             end=member.end,
             local_label="keep",
             local_confidence=0.50,
-            evidence=_evidence(member, context),
+            evidence=_evidence_with_av(member, context),
             word_texts=tuple(w.text for w in member.words),
         ) for member in members),
         local_confidence=0.50,
@@ -800,6 +807,8 @@ def apply_hybrid_session_cleanup(
                         "recording_confidence": decision.recording_confidence,
                         "recording_prefix_words": decision.recording_prefix_words,
                         "recording_suffix_words": decision.recording_suffix_words,
+                        "recording_word_ranges": decision.recording_word_ranges,
+                        "audiovisual": candidate_observations(take, context),
                         "source_identity": recording_source_identity(take),
                         "local_failure_corroborated": corroborated,
                         "local_failure_reasons": list(local_reasons),

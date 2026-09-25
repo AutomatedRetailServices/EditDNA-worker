@@ -292,7 +292,9 @@ def process_local_sources(
             )
         if callable(getattr(whole_video_provider, "analyze_media", None)) and not whole_context.status.available:
             trace.degraded("whole_video_context", reason=whole_context.status.reason or "audiovisual_input_failed")
-            raise RuntimeError("Required audiovisual Watch + Listen failed: " + str(whole_context.status.reason))
+            failure = RuntimeError("Required audiovisual Watch + Listen failed: " + str(whole_context.status.reason))
+            failure.watch_listen_audit = whole_context.diagnostics
+            raise failure
         if whole_context.status.status == "provider_error":
             trace.degraded("whole_video_context", reason=whole_context.status.reason or "provider_error")
         else:

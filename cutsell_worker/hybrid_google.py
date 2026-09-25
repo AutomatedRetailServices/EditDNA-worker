@@ -35,6 +35,7 @@ def editorial_response_schema(candidate_count: int | None = None) -> dict[str, A
         "items": {
             "type": "object",
             "properties": {
+                "recording_word_ranges": {"type":"array","maxItems":4,"items":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"integer","minimum":0}}},
                 "recording_confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "recording_prefix_words": {"type": "integer", "minimum": 0},
                 "recording_suffix_words": {"type": "integer", "minimum": 0},
@@ -71,7 +72,7 @@ def _prompt_text(compact_payload: Mapping[str, Any]) -> str:
         "creator visibly/structurally leaves delivery to recover a line and then resumes "
         "the same idea, treat that recording-process attempt as failed/BTS when evidence "
         "supports it. Return exactly one compact decision per candidate in the exact same "
-        "order as candidates, using label, confidence and content_role. content_role=recording_only means the ENTIRE candidate is production self-talk with no audience-facing proposition; audience means intended content, including humor, quotations and rhetorical questions; mixed means both. Use uncertain if not clear. A failed take carrying a product fact is mixed or audience, never recording_only. These rules apply in English and Spanish. For recording_only or mixed, report recording_confidence independently of label confidence. For mixed candidates with word_texts, optionally report recording_prefix_words and recording_suffix_words: counts of consecutive ASR words exclusively recording-process speech at the beginning/end. Count entries in word_texts, not whitespace tokens. Never include audience facts, negations, humor, quotations or intended reactions. Leave ambiguous boundaries at zero; never remove interior words or invent timestamps. Do not echo clip IDs. "
+        "order as candidates, using label, confidence and content_role. content_role=recording_only means the ENTIRE candidate is production self-talk with no audience-facing proposition; audience means intended content, including humor, quotations and rhetorical questions; mixed means both. Use uncertain if not clear. A failed take carrying a product fact is mixed or audience, never recording_only. These rules apply in English and Spanish. For recording_only or mixed, report recording_confidence independently of label confidence. For mixed candidates with word_texts, optionally report recording_prefix_words and recording_suffix_words: counts of consecutive ASR words exclusively recording-process speech at the beginning/end. Count entries in word_texts, not whitespace tokens. Never include audience facts, negations, humor, quotations or intended reactions. Leave ambiguous boundaries at zero; For interior preparation only BETWEEN complete audience sentences, use recording_word_ranges as sorted disjoint inclusive [first,last] word_texts indices; do not also set prefix/suffix counts. Never excise a correction inside an audience sentence, facts, negations or intended humor. Never invent timestamps. Do not echo clip IDs. "
         "Exactly one winner only when justified; use uncertain when evidence is insufficient.\n\n"
         + json.dumps(dict(compact_payload), separators=(",", ":"), ensure_ascii=False)
     )

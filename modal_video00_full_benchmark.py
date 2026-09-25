@@ -278,6 +278,8 @@ def run_video00_benchmark(payload: dict) -> dict:
         result = run_op(op, payload)
     except Exception as exc:  # noqa: BLE001 -- report, don't crash the whole benchmark invocation
         result = {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+        if getattr(exc, "watch_listen_audit", None):
+            result["watch_listen_audit"] = exc.watch_listen_audit
 
     # D-056.1 item 1: persist BEFORE returning -- see _persist_benchmark_
     # result's docstring for why this specific ordering is the fix.

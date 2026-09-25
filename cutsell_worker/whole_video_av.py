@@ -3,7 +3,7 @@
 This is evidence production, not a deletion authority. No network at construction,
 no automatic retries, no silent text-only fallback, no change to model policy.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import base64
 import hashlib
@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import requests
 
+from .av_response_contract import response_schema, captured_response, parse_response
 from .hybrid_google_transport import DollarBudgetLedger
 from .providers import ProviderStatus
 from .whole_video_analysis import SourceVideoContext, WholeVideoContext
@@ -60,6 +61,7 @@ class GeminiWholeVideoAVProvider:
     media_preparer: object = prepare_av
     max_output_tokens: int = 2048
     max_media_bytes: int = 12_000_000
+    audit_records: list = field(default_factory=list, init=False)
 
     def __post_init__(self):
         for value in (self.ledger.max_usd,self.input_usd_per_million,self.output_usd_per_million):
@@ -80,6 +82,7 @@ class GeminiWholeVideoAVProvider:
         return response.json()
 
     def analyze_media(self, sources, transcripts, samples, local_paths):
+        self.audit_records = []
         contexts=[]
         for source in sources:
             path=Path(local_paths[source.source_asset_id])
@@ -107,8 +110,14 @@ class GeminiWholeVideoAVProvider:
             if not self.ledger.reserve(reserved):
                 raise ValueError('AV budget exhausted before generation')
             # Keep the reservation on timeout/failure: the server may have billed it.
+            audit = dict(contract_version='cutsell.av.v1', source_asset_id=source.source_asset_id,
+                         source_sha256=digest.hexdigest(), source_duration_sec=source.duration_sec,
+                         prepared_duration_sec=duration, model=self.model, reserved_usd=reserved,
+                         input_tokens_preflight=tokens, status='generation_requested')
+            self.audit_records.append(audit)
             raw=self._post('generateContent',{'contents':contents,'generationConfig':{
                 'responseMimeType':'application/json','maxOutputTokens':self.max_output_tokens,
+                'responseJsonSchema': response_schema(source.duration_sec),
             }})
             usage = raw.get('usageMetadata') or {}
             logging.getLogger(__name__).info(
@@ -116,36 +125,14 @@ class GeminiWholeVideoAVProvider:
                 source.source_asset_id, usage.get('promptTokenCount'), usage.get('candidatesTokenCount'),
                 usage.get('thoughtsTokenCount'), reserved,
             )
-            candidates=raw.get('candidates') or []
-            if len(candidates)!=1 or candidates[0].get('finishReason')!='STOP':
-                raise ValueError('AV response incomplete or blocked')
-            text=''.join(p.get('text','') for p in candidates[0].get('content',{}).get('parts',[]) if not p.get('thought'))
-            data=json.loads(text)
-            regions=data.get('regions')
-            if not isinstance(regions,list) or len(regions)>12:
-                raise ValueError('AV region contract invalid')
-            for region in regions:
-                start,end,confidence=(region.get(k) for k in ('start','end','confidence'))
-                if not all(type(v) in (int,float) and math.isfinite(v) for v in (start,end,confidence)):
-                    raise ValueError('AV region numeric evidence invalid')
-                # Encoder padding is bounded above by the already-checked .3s
-                # duration tolerance. Intersect advisory regions with real source;
-                # never accept a wholly out-of-source region or invent cut times.
-                if 0 <= start < source.duration_sec < end <= duration:
-                    region['encoder_padding_trimmed_sec'] = end - source.duration_sec
-                    region['end'] = end = source.duration_sec
-                if not 0<=start<end<=source.duration_sec or not 0<=confidence<=1:
-                    raise ValueError(f'AV region invalid: start={start}, end={end}, '
-                                     f'source_end={source.duration_sec}, confidence={confidence}')
-                if region.get('role') not in {'audience','mixed','recording_only','uncertain'}:
-                    raise ValueError('AV role invalid')
-                for key in ('audio_observation','visual_observation','reason'):
-                    if not isinstance(region.get(key),str) or not region[key].strip():
-                        raise ValueError('AV region missing modality evidence')
-                    region[key]=region[key][:240]
-            for key in ('summary','creator_intent','story_logic'):
-                if not isinstance(data.get(key),str) or not data[key].strip():
-                    raise ValueError('AV whole-source understanding missing')
+            audit['response'] = captured_response(raw)
+            try:
+                data = parse_response(audit['response'], source.duration_sec, duration)
+            except Exception as exc:
+                audit.update(status='rejected', rejection=str(exc))
+                raise
+            audit['status'] = 'validated'
+            regions = data['regions']
             evidence=json.dumps({'kind':'audiovisual_observations_v1','source_sha256':digest.hexdigest(),
                 'input_modalities':['video','audio'],'input_duration_sec':duration,'model':self.model,
                 'rule':'Advisory; corroborate before deletion; regions are not cut boundaries.',
@@ -154,7 +141,7 @@ class GeminiWholeVideoAVProvider:
                 'creator_raw',data['creator_intent'][:500],story_logic=data['story_logic'][:900],
                 audiovisual_evidence=evidence))
         return WholeVideoContext(tuple(contexts),ProviderStatus(
-            'gemini_whole_video_av',True,True,'applied','full_source_audio_video_received_and_parsed'))
+            'gemini_whole_video_av',True,True,'applied','full_source_audio_video_received_and_parsed'), diagnostics={'native_av': self.audit_records})
 
 
 def build_av_provider(settings, values):

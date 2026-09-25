@@ -56,7 +56,8 @@ def test_actual_media_handoff_and_evidence_reaches_classifier(tmp_path):
     assert len(evidence['source_sha256'])==64
     take=CandidateTake('clip','source',0,0,3,'A demonstration with a reset')
     payload=build_compact_editorial_payload(_editorial_session((take,),context,partition_index=0,chunk_index=0))
-    assert 'audio_observation' in payload['source_context']['audiovisual_evidence']
+    assert payload['candidates'][0]['evidence']['audiovisual']['observations'][0]['audio']
+    assert json.loads(payload['source_context']['audiovisual_evidence'])['regions']
 
 
 @pytest.mark.parametrize('mutation',['time','nan','missing_audio','missing_visual','role'])
@@ -152,3 +153,30 @@ def test_region_entirely_in_padding_is_rejected(tmp_path):
     context=safe_whole_video_analyze(av,(replace(source(),duration_sec=9.9),),(),(),local_paths={'source':str(raw)})
     assert not context.status.available
     assert 'source_end=9.9' in context.status.reason
+
+
+def test_rejected_response_is_replayable_without_network(tmp_path):
+    from cutsell_worker.av_response_contract import replay
+    data=result();data['regions'][0]['confidence']=90
+    av,raw,session=provider(tmp_path,data)
+    context=safe_whole_video_analyze(av,(source(),),(),(),local_paths={'source':str(raw)})
+    record=context.diagnostics['native_av'][0]
+    assert record['status']=='rejected' and 'AV_CONFIDENCE_RANGE' in record['rejection']
+    assert json.loads(record['response']['candidates'][0]['content']['parts'][0]['text'])['regions'][0]['confidence']==90
+    calls=len(session.calls)
+    with pytest.raises(ValueError,match='AV_CONFIDENCE_RANGE'):
+        replay(json.loads(json.dumps(record)))
+    assert len(session.calls)==calls
+    assert 'test-key' not in json.dumps(record) and 'inline_data' not in json.dumps(record)
+    schema=session.calls[1][1]['generationConfig']['responseJsonSchema']
+    assert schema['properties']['regions']['items']['properties']['confidence']['maximum']==1
+
+
+def test_replay_preserves_original_padding_response(tmp_path):
+    from cutsell_worker.av_response_contract import replay
+    data=result();data['regions'][0].update(start=9,end=10)
+    av,raw,session=provider(tmp_path,data)
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=9.9),),(),(),local_paths={'source':str(raw)})
+    record=context.diagnostics['native_av'][0]
+    assert replay(record)['regions'][0]['end']==9.9
+    assert json.loads(record['response']['candidates'][0]['content']['parts'][0]['text'])['regions'][0]['end']==10

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, Tuple
 
 from .contracts import SourceAsset, TranscriptSegment
@@ -41,6 +41,7 @@ class SourceVideoContext:
 class WholeVideoContext:
     sources: Tuple[SourceVideoContext, ...]
     status: ProviderStatus
+    diagnostics: dict = field(default_factory=dict)
 
     def compact_text(self) -> str:
         """Return compact semantic context without flooding later LLM stages.
@@ -144,6 +145,7 @@ def safe_whole_video_analyze(
                 status="provider_error",
                 reason=reason,
             ),
+            diagnostics={"native_av": getattr(provider, "audit_records", [])},
         )
 
 

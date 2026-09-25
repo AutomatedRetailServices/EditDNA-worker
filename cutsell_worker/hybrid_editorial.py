@@ -53,6 +53,7 @@ class EditorialDecision:
     recording_confidence: float | None = None
     recording_prefix_words: int = 0
     recording_suffix_words: int = 0
+    recording_word_ranges: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,19 @@ def validate_editorial_result(
         for count in (decision.recording_prefix_words, decision.recording_suffix_words):
             if type(count) is not int or count < 0:
                 raise ValueError("invalid recording word count")
+        ranges = decision.recording_word_ranges
+        if not isinstance(ranges, (tuple, list)) or len(ranges) > 4:
+            raise ValueError("invalid recording ranges")
+        last_end = -1
+        normalized_ranges = []
+        for pair in ranges:
+            if not isinstance(pair, (tuple, list)) or len(pair) != 2 or any(type(n) is not int for n in pair):
+                raise ValueError("invalid recording range indices")
+            start, end = pair
+            if start <= last_end or end < start:
+                raise ValueError("unordered or overlapping recording ranges")
+            normalized_ranges.append((start, end))
+            last_end = end
         reason_code = str(decision.reason_code or "").strip()[:160]
         normalized.append(EditorialDecision(
             clip_id=decision.clip_id,
@@ -139,6 +153,7 @@ def validate_editorial_result(
             recording_confidence=recording_confidence,
             recording_prefix_words=decision.recording_prefix_words,
             recording_suffix_words=decision.recording_suffix_words,
+            recording_word_ranges=tuple(normalized_ranges),
         ))
         seen.add(decision.clip_id)
 
