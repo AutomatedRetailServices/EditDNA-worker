@@ -1,0 +1,156 @@
+name: CutSell Video00 Watch Listen Medium
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths: [.github/workflows/cutsell-video00-watch-listen.yml]
+permissions:
+  contents: read
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: >-
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized Video00 automatic watch-listen')
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+    env:
+      UPLOAD_SINGLE_PROVIDER: medium
+      UPLOAD_EXPECTED_SHA: b37059b1790cf3eb0447bb54595cc99f6668aadc5f65dafa9cdf6181621ef9f5
+      UPLOAD_EXPECTED_BYTES: "38700219"
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install CPU transport and media tools
+        run: |
+          pip install -q modal boto3 requests cryptography
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Prepare existing source configuration
+        run: python benchmarks/run_uploaded_asr_comparison.py prepare-existing 'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4'
+      - name: Verify exact uploaded video before GPU
+        id: source
+        run: python benchmarks/run_uploaded_asr_comparison.py await-upload
+      - name: Full engine with medium
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run medium
+      - name: Preserve medium reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-reports
+          path: uploaded-comparison-artifacts/medium/reports/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium A
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-A
+          path: uploaded-comparison-artifacts/medium/A/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium B
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-B
+          path: uploaded-comparison-artifacts/medium/B/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium C
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-C
+          path: uploaded-comparison-artifacts/medium/C/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium D
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-D
+          path: uploaded-comparison-artifacts/medium/D/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium E
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-E
+          path: uploaded-comparison-artifacts/medium/E/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium F
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-F
+          path: uploaded-comparison-artifacts/medium/F/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium G
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-G
+          path: uploaded-comparison-artifacts/medium/G/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium H
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-H
+          path: uploaded-comparison-artifacts/medium/H/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium I
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-I
+          path: uploaded-comparison-artifacts/medium/I/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium J
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-J
+          path: uploaded-comparison-artifacts/medium/J/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium K
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-K
+          path: uploaded-comparison-artifacts/medium/K/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve medium L
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-medium-L
+          path: uploaded-comparison-artifacts/medium/L/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Preserve comparison manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploaded-comparison-manifest
+          path: uploaded-comparison-artifacts/manifest.json
+          if-no-files-found: warn
+      - name: Remove private runtime files
+        if: always()
+        run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'

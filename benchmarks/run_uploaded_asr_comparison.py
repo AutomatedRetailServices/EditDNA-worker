@@ -23,7 +23,7 @@ def prepare(existing_source_key=None, single_provider=False):
     import requests
     pair = os.environ.get("UPLOAD_PROVIDER_PAIR") == "medium,deepgram"
     selected_provider = "deepgram" if pair else os.environ.get("UPLOAD_SINGLE_PROVIDER", "gpt-whisperx")
-    if selected_provider not in {"gpt-whisperx", "deepgram"}:
+    if selected_provider not in {"medium", "gpt-whisperx", "deepgram"}:
         raise ValueError("Unsupported single provider")
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
@@ -45,7 +45,7 @@ def prepare(existing_source_key=None, single_provider=False):
     env = {str(k): str(v) for k, v in templates[0]["env"].items()}
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     env.update(OVERLAYS, CUTSELL_BUILD_GIT_SHA=head, CUTSELL_ASR_MODEL="medium")
-    required_key = "DEEPGRAM_API_KEY" if selected_provider == "deepgram" else "OPENAI_API_KEY"
+    required_key = {"deepgram": "DEEPGRAM_API_KEY", "gpt-whisperx": "OPENAI_API_KEY", "medium": "GEMINI_API_KEY"}[selected_provider]
     if not env.get(required_key) or env[required_key].startswith("sk-admin-"):
         raise RuntimeError("Required inference key missing; no GPU started")
     for k, v in env.items():
@@ -71,7 +71,7 @@ def prepare(existing_source_key=None, single_provider=False):
     write_json(PRIVATE / "source.json", {"key": key})
     write_json(OUT / "manifest.json", {"source_sha256": EXPECTED_SHA, "source_bytes": EXPECTED_BYTES,
         "build_sha": head, "run_id": os.environ["GITHUB_RUN_ID"], "authorized_runs": 1 if existing_source_key or single_provider else 2,
-        "providers": ["deepgram-nova-3-multi" if selected_provider == "deepgram" else "gpt-transcribe-whisperx"] if existing_source_key or single_provider else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
+        "providers": [{"deepgram": "deepgram-nova-3-multi", "medium": "faster-whisper-medium", "gpt-whisperx": "gpt-transcribe-whisperx"}[selected_provider]] if existing_source_key or single_provider else ["faster-whisper-medium", "gpt-transcribe-whisperx"], "retries": 0,
         "same_template_snapshot": True, "auto_speech_visual_microtrim": True})
     if pair:
         manifest = json.loads((OUT / "manifest.json").read_text())
