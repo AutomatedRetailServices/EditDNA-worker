@@ -5,6 +5,7 @@ import subprocess
 import copy
 import shutil
 import tempfile
+import re
 from typing import Callable, List, Dict, Any, Optional, Union
 
 import requests
@@ -932,7 +933,7 @@ def run_visual_pass(
 
 def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input_local: str):
     """
-    Marca takes visualmente MUY malos como keep=False (nivel entero de clip).
+    Record a midpoint-image signal; one image cannot reject a whole take.
     """
     import base64
 
@@ -976,9 +977,12 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
         except OpenAIProviderError:
             logger.warning("Visual bad-take check failed open", extra={"operation": "visual_bad_take"})
             continue
-        if verdict is Verdict.BAD:
-            c["meta"]["keep"] = False
-            c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed for visual bad-take."
+        c["meta"]["visual_bad_take_signal"] = {
+            "verdict": verdict.value,
+            "timestamp": mid,
+            "evidence": "single_midpoint_image",
+            "authority": "advisory_only",
+        }
 
 
 # =====================
@@ -1213,13 +1217,20 @@ def text_overlap_shorter(t1: str, t2: str) -> float:
 
 def find_sibling_groups(
     clips: List[Dict[str, Any]],
-    window_sec: float = 18.0,
+    window_sec: Optional[float] = None,
     min_overlap: float = 0.55,
 ) -> List[List[Dict[str, Any]]]:
+    """Discover possible retries across a source; grouping is not deletion authority.
+
+    An explicit time window remains available to callers. Sales labels and
+    heuristic length scores must not prevent comparison of the same attempt.
+    Every pair must meet overlap, avoiding transitive broad-topic chains.
+    """
     usable = [
         c for c in clips
         if c["meta"].get("keep", True)
-        and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
+        and len(retry_tokens(c.get("text", ""))) >= 4
+        and not c["meta"].get("semantic_v2", {}).get("excluded_from_composer", False)
     ]
     usable = sorted(usable, key=lambda c: safe_float(c.get("start", 0.0)))
 
@@ -1232,25 +1243,21 @@ def find_sibling_groups(
 
         group = [c1]
         t1 = safe_float(c1.get("start", 0.0))
-        slot1 = c1.get("slot", "STORY")
-        text1 = normalize_text(c1.get("text", ""))
 
         for j in range(i + 1, len(usable)):
             c2 = usable[j]
             if c2["id"] in used_ids:
                 continue
-            if c2.get("slot", "STORY") != slot1:
-                continue
             if int(c2.get("source_index", 0)) != int(c1.get("source_index", 0)):
                 continue
 
             t2 = safe_float(c2.get("start", 0.0))
-            if t2 - t1 > window_sec:
+            if window_sec is not None and t2 - t1 > window_sec:
                 break
 
-            text2 = normalize_text(c2.get("text", ""))
-            overlap = text_overlap_ratio(text1, text2)
-            if overlap >= min_overlap:
+            text2 = " ".join(retry_tokens(c2.get("text", "")))
+            if all(text_overlap_ratio(" ".join(retry_tokens(member.get("text", ""))), text2)
+                   >= min_overlap for member in group):
                 group.append(c2)
 
         if len(group) >= 2:
@@ -1259,6 +1266,11 @@ def find_sibling_groups(
             groups.append(group)
 
     return groups
+
+
+def retry_tokens(text: str) -> List[str]:
+    """Preserve word order, repetitions, numbers and negation; ignore punctuation."""
+    return re.findall(r"\w+(?:['’]\w+)*", (text or "").casefold())
 
 
 def run_take_judge(
@@ -1349,6 +1361,7 @@ def run_take_judge(
                 clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
         scores = {score.candidate_id: score.overall_score for score in result.candidate_scores}
+        winner = next(item for item in group if item["id"] == result.winner_id)
         for clip_item in group:
             candidate_id = clip_item["id"]
             if candidate_id not in scores:
@@ -1361,6 +1374,12 @@ def run_take_judge(
                 "candidate_winner" if candidate_id == result.winner_id else "candidate_loser"
             )
             if candidate_id != result.winner_id and clip_item["meta"].get("keep", True):
+                # Ranking a mixed/partial attempt does not authorize deleting its
+                # unique speech. Such clips require a separate boundary decision.
+                if retry_tokens(clip_item.get("text", "")) != retry_tokens(winner.get("text", "")):
+                    clip_item["meta"]["take_judge_execution_status"] = "retained_non_equivalent"
+                    clip_item["meta"]["take_judge_retention_reason"] = "unique_speech_requires_boundary_review"
+                    continue
                 clip_item["meta"]["keep"] = False
                 clip_item["llm_reason"] = (clip_item.get("llm_reason") or "") + (
                     " | Removed by TakeJudgeAI (better take exists)."

@@ -299,3 +299,83 @@ def test_recorded_august_candidates_survive_preclassification_merge():
     assert len(clips) == 15
     assert pipeline.merge_incomplete_phrases(clips) == before
     assert clips == before
+
+
+def test_distant_retries_ignore_sales_label_and_length_score():
+    a = candidate('a', 0, 3, text='It comes with a washable filter.', semantic_score=.4)
+    b = candidate('b', 65, 68, text='It comes with a washable filter!', slot='FEATURES')
+    assert pipeline.find_sibling_groups([a, b]) == [[a, b]]
+    assert pipeline.find_sibling_groups([a, b], window_sec=18) == []
+
+
+def test_grouping_preserves_source_and_exclusion_boundaries():
+    a = candidate('a', text='It comes with a washable filter.', source_index=0)
+    b = candidate('b', text=a['text'], source_index=1)
+    assert pipeline.find_sibling_groups([a, b]) == []
+    b['source_index'] = 0
+    b['meta']['semantic_v2'] = {'excluded_from_composer': True}
+    assert pipeline.find_sibling_groups([a, b]) == []
+
+
+def test_grouping_does_not_chain_topics_through_middle_clip():
+    a = candidate('a', 0, 2, text='alpha beta gamma delta')
+    b = candidate('b', 3, 5, text='alpha beta gamma delta epsilon zeta')
+    c = candidate('c', 6, 8, text='gamma delta epsilon zeta')
+    assert pipeline.find_sibling_groups([a, b, c]) == [[a, b]]
+
+
+@pytest.mark.parametrize('changed', [
+    'The strap supports 200 pounds.',
+    'The strap does not support 100 pounds.',
+    'The strap supports 100 pounds and comes in blue.',
+    'The strap supports 100 pounds wait let me restart.',
+])
+def test_ranked_loser_with_unique_speech_is_retained(monkeypatch, changed):
+    group, _, _ = configure_pipeline(monkeypatch, result())
+    group[0]['text'] = 'The strap supports 100 pounds.'
+    group[1]['text'] = changed
+    pipeline.run_take_judge(group, 'session', 'input')
+    assert all(c['meta']['keep'] for c in group)
+    assert group[1]['meta']['take_judge_execution_status'] == 'retained_non_equivalent'
+
+
+@pytest.mark.parametrize('verdict', [provider.Verdict.BAD, provider.Verdict.GOOD])
+def test_midpoint_visual_signal_cannot_remove_or_block_comparison(monkeypatch, tmp_path, verdict):
+    group = [candidate('a', 0, 3, text='This has a washable filter.'),
+             candidate('b', 65, 68, text='This has a washable filter!')]
+    def frame(source, timestamp, path):
+        from pathlib import Path
+        Path(path).write_bytes(b'fixture')
+        return True
+    monkeypatch.setattr(pipeline, 'is_openai_available', lambda: True)
+    monkeypatch.setattr(pipeline, 'grab_frame_at_timestamp', frame)
+    monkeypatch.setattr(pipeline, 'detect_bad_take', lambda *args: verdict)
+    pipeline.reject_visual_bad_takes(group, str(tmp_path), 'input')
+    assert all(c['meta']['keep'] for c in group)
+    assert all(c['meta']['visual_bad_take_signal']['authority'] == 'advisory_only' for c in group)
+    assert pipeline.find_sibling_groups(group) == [group]
+
+
+def test_saved_august_attempts_are_discoverable_without_mutation():
+    import copy
+    import json
+    from pathlib import Path
+    clips = json.loads((Path(__file__).parent / 'fixtures' / 'august_unpunctuated_candidates.json').read_text())
+    before = copy.deepcopy(clips)
+    groups = pipeline.find_sibling_groups(clips)
+    assert groups, 'Saved attempts must reach comparison, not no_sibling_group'
+    assert any(any(float(c['start']) - float(group[0]['start']) > 18 for c in group) for group in groups)
+    assert clips == before
+
+
+def test_real_discovery_reaches_judge_and_removes_only_equivalent_retry(monkeypatch):
+    discover = pipeline.find_sibling_groups
+    group, _, calls = configure_pipeline(monkeypatch, result())
+    monkeypatch.setattr(pipeline, 'find_sibling_groups', discover)
+    group[0]['text'] = 'This has a washable filter.'
+    group[1].update(text='This has a washable filter!', start=65, end=68, slot='FEATURES')
+    group[1]['meta']['visual_bad_take_signal'] = {'verdict': 'BAD', 'authority': 'advisory_only'}
+    status = {}
+    assert pipeline.run_take_judge(group, 'session', 'input', execution_status=status)
+    assert len(calls) == 1 and status['groups_evaluated'] == 1
+    assert group[0]['meta']['keep'] and not group[1]['meta']['keep']

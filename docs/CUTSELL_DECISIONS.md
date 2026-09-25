@@ -80312,3 +80312,49 @@ whole mixed clips may contain unique speech. No claim of complete editorial
 repair, improved output, or human Watch + Listen acceptance. Historical
 snapshots and the repaired-August harness remain unchanged; that harness
 overlays only merge_incomplete_phrases and DOES NOT yet include this prompt fix.
+
+
+## 2026-09-25 — Retry discovery and midpoint visual authority, offline
+
+Experimental worker/pipeline.py only, following the user's request to address
+the remaining grouping and pre-comparison visual veto. No paid inference,
+render, production deployment, modern cutsell_worker change or release claim.
+
+The midpoint GOOD/BAD check now records visual_bad_take_signal with timestamp,
+single_midpoint_image evidence and advisory_only authority. Neither verdict
+changes keep or deletes a whole clip. This removes the observed single-image
+veto before TakeJudge; it does not implement full temporal Watch + Listen.
+
+Retry discovery defaults to the entire same source, independently of sales
+slot and heuristic length score. An explicit window remains supported.
+At least four tokens and pairwise lexical overlap are required; excluded
+sales-composer OTHER and already rejected candidates remain ineligible.
+Pairwise checks avoid transitive topic chains. These are provisional retry
+candidates, not proven equivalent takes.
+
+Critical safety companion: TakeJudge ranking can remove a loser only when
+its ordered word tokens equal the winner's (case/punctuation normalized).
+Numbers, negation, repetitions and additional speech remain significant.
+Non-equivalent losers are retained with retained_non_equivalent status and
+unique_speech_requires_boundary_review reason. This is conservative source
+preservation, not a user escalation or a claim of completed fumble cleanup.
+
+Offline replay of the saved 15 pre-classification August candidates discovers
+one group: ASR0009_c9 (70.74 s) and ASR0014_c14 (96.66 s). Discovery does not
+mutate the fixture. These mixed transcripts are not deletion-equivalent.
+No new provider winner or edited-video improvement was measured.
+
+128 targeted tests passed: TakeJudge, semantic provider/pipeline, runtime
+reliability and Clean Cut foundation. Coverage includes distant/cross-slot
+retries, low heuristic scores, source/exclusion boundaries, topic chains,
+GOOD/BAD midpoint preservation, unique content/number/negation retention,
+real discovery through mocked judging for an equivalent retry, and recorded
+August replay. Existing group/candidate call limits and feature defaults
+remain unchanged; more eligible groups can mean more calls when enabled,
+within those existing limits. No calls were made here.
+
+Remaining: reconstruct complete communication attempts and trim mixed
+production/fumble boundaries using sufficient temporal/audio evidence.
+The historical snapshots and August repaired harness remain unchanged; the
+harness still overlays only merge_incomplete_phrases, so it does not yet test
+this patch or the preceding semantic prompt change.
