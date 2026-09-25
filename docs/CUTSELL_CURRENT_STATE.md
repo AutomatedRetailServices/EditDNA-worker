@@ -1313,3 +1313,16 @@ MOV exactly: SHA 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b68
 Watch/Listen invocation; no engine changes or second paid call. Existing S3
 source is reverified before GPU. Prior MOV comparisons predate the automatic
 Watch/Listen integration, so this is not an isolated WhisperX A/B experiment.
+
+
+### MOV run 36105019864 terminal evidence
+
+Medium/WhisperX alignment structurally passed (EN, 252 words, 18 segments).
+Five provisional selections / 20.418 s, but freeze_blocked_no_render and zero
+render attempts. StoryValidator blocks three UNIQUE_FACT_LOST records with
+omission_permit_denied_reason=missing_identity on discarded preparation/failed
+attempt spans; selected fragments still include how am I supposed to say.
+This is failed editorial qualification, not ASR execution failure. Full evidence
+and limits: CUTSELL_MOV_MEDIUM_WHISPERX_RESULT.md. No output MP4, bypass, second
+paid invocation or production deployment. Next: offline evidence/identity
+propagation through cleanup and final preservation validation.
