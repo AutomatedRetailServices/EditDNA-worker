@@ -1,5 +1,19 @@
 # CutSell.ai — Current State
 
+## 2026-09-25 Video00 automatic Watch + Listen live qualification
+
+Run `36086441487`, tested SHA `9066b43ab40b569391aee297534346196589f2f1`,
+completed one authorized Medium invocation: 22 selected, output 160.289 s,
+technical QC PASS, verified source/output hashes and local full decode.
+Editorial acceptance FAILED (4/11); historical Gold 15/18. BestTake V2 and
+guard authority evaluated eight cases with zero winner changes; prosody
+compared two candidates in one family, near equal. Global handoff prepared
+12/28 regions before classification. Activation is proven, editorial
+improvement is not. Final perceptual state still requires human review;
+four perceptual capabilities remain unimplemented. The one-shot trigger
+was removed; workflow is manual-only. No production promotion/new paid run.
+Details and limitations: `CUTSELL_VIDEO00_WATCH_LISTEN_RESULT.md`.
+
 Product generation: **CutSell.ai 7**
 
 ## 2026-09-24 GPT + WhisperX five-run stability qualification (authorized)
