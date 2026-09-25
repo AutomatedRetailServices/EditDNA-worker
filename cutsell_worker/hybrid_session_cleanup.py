@@ -451,6 +451,7 @@ def _source_context(
         summary = " ".join(str(source.summary or "").split())[:3600]
         return (
             ("summary", summary),
+            ("global_editorial_evidence", source.editorial_evidence),
             ("creator_intent", str(source.creator_intent or "")[:500]),
             ("main_topic", str(source.main_topic or "")[:500]),
             ("product_or_subject", str(source.product_or_subject or "")[:500]),

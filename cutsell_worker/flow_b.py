@@ -76,6 +76,10 @@ def _resolve_editorial_mode(value: str | None = None) -> str:
     return mode
 
 
+from .watch_listen_runtime import automatic_watch_listen
+
+
+@automatic_watch_listen
 def process_local_sources(
     request: ProcessingRequest,
     local_paths: Mapping[str, str],

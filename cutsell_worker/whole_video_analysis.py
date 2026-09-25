@@ -33,6 +33,7 @@ class SourceVideoContext:
     main_topic: str = ""
     product_or_subject: str = ""
     story_logic: str = ""
+    editorial_evidence: str = ""
 
 
 @dataclass(frozen=True)

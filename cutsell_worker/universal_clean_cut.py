@@ -132,6 +132,10 @@ def derive_story_completeness(take_judge_groups) -> dict:
         "bts_singleton_ids": [str(row.get("group_id") or "") for row in bts],
     }
 
+from .watch_listen_runtime import automatic_watch_listen
+
+
+@automatic_watch_listen
 def process_universal_clean_cut_sources(
     request: ProcessingRequest,
     local_paths: Mapping[str, str],

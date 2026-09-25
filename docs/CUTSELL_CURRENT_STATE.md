@@ -1198,3 +1198,65 @@ still need separate resolution. No whole-video quality or production-readiness
 claim. Current-worker modifications are isolated by path on the existing
 experimental feat/gpt-whisperx-video00 branch; earlier legacy changes remain
 separate and have not been deployed or copied into the current engine.
+
+
+## 2026-09-25 — Automatic Watch + Listen integration in current CutSell
+
+User explicitly authorizes enabling and integrating the listed capabilities
+so they run automatically when relevant, with general rules for arbitrary
+videos. Scope is current cutsell_worker on the experimental branch, not
+legacy worker, main, release PR or a production deployment. No paid run.
+
+Implementation:
+- watch_listen_runtime.py supplies a request-local ContextVar profile around
+  BOTH process_local_sources and process_universal_clean_cut_sources. Default
+  automatic activation therefore survives ingestion through post-selection
+  guard authority; nested calls and exceptions restore the prior context.
+  No process-wide environment mutation or parallel-request contamination.
+- Eleven existing capabilities use the profile: family evidence, relation
+  discovery, BestTake evidence, zone-usability V2, Watch+Listen guard authority,
+  bounded finalist evaluation/authority, prosody, P1 moments, language spine
+  and P2 global understanding. Existing eligibility/evidence/conflict gates
+  remain intact. An enabled capability is not a guarantee of an applicable
+  comparison, available audio, or a changed winner.
+- Explicit per-capability 0 remains a rollback control; dependencies block
+  incompatible partial activation. CUTSELL_WATCH_LISTEN_AUTOMATIC=0 restores
+  explicit-flags operation. Standalone builders remain default-off outside
+  the runtime scope, preserving historical diagnostic/test workflows.
+  watch_listen_runtime diagnostics list activation source and blocked
+  dependencies, alongside existing evaluated/missing-evidence diagnostics.
+- The shared benchmark overlay now explicitly requests all eleven flags and
+  the automatic profile, so the uploaded-ASR comparison cannot inherit stale
+  template OFF values for these capabilities. No benchmark was dispatched.
+- Existing P1/language/P2 construction is moved before cleanup/composite
+  resolution, once per call over the complete candidate pool. It reuses
+  upstream words and Watch+Listen objects; no additional ASR or LLM call.
+- Source-scoped global region hypotheses, confidence and conflicts now reach
+  the existing Hybrid editorial classifier's source_context through
+  global_editorial_context.py. This is an evidence input to existing
+  decisions, NOT a direct P2 deletion/reordering authority. Existing source
+  summary, identity and events remain unchanged. Twelve regions maximum per
+  source; omitted counts are recorded. Provider payload allows up to 1800
+  characters, reduces whole regions under the existing token budget, never
+  truncates JSON into a misleading partial hypothesis, and may omit context
+  when insufficient budget remains.
+- global_editorial_handoff distinguishes preparation of evidence from actual
+  provider availability. Existing call diagnostics remain the execution proof.
+
+Validation: 401 targeted tests passed, spanning automatic lifecycle,
+dependency rollback, actual mocked-media ingestion (one ASR call), source
+isolation, structured context budgeting, preselection ordering, discovery,
+BestTake evidence/V2/authority, prosodic wiring, finalist authority,
+P1/language/P2, contextual BTS and universal Clean Cut. Historical tests
+asserting an unchanged working tree were rerun after local commit; their
+behavioral cases passed as well. D-200 explicit-flags compatibility tests
+now explicitly disable the new automatic profile. No test evidence is
+claimed as live model or video-quality acceptance.
+
+Limitations: perception still depends on actual upstream signals and ASR
+quality; activation does not fabricate missing audio/visual evidence.
+Global reasoning consumes existing deterministic hypotheses; this is not
+a newly added end-to-end audiovisual foundation model. Extra local compute
+and bounded context tokens are expected, without added provider request
+count. No production changes and no new rendered video. Live before/after
+validation and human editorial acceptance remain outstanding.

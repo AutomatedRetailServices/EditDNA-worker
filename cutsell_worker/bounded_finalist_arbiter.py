@@ -119,6 +119,7 @@ from dataclasses import dataclass, field
 from itertools import permutations
 from typing import Iterable, Mapping, Sequence, Tuple
 import os
+from .watch_listen_runtime import capability_enabled
 
 from .language_proposition_relation import build_claim_signature, claim_signatures_conflict
 from .prosodic_finalist_comparison import (
@@ -192,7 +193,7 @@ def _env_true_default_false(value: str | None) -> bool:
 
 def bounded_finalist_arbiter_enabled(env: Mapping[str, str] | None = None) -> bool:
     values = env if env is not None else os.environ
-    return _env_true_default_false(values.get(_BOUNDED_FINALIST_ARBITER_ENV))
+    return capability_enabled(_BOUNDED_FINALIST_ARBITER_ENV, values)
 
 
 @dataclass(frozen=True)

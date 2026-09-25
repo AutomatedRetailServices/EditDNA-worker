@@ -5,6 +5,7 @@ No SDK imports, network calls, or secret access live here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any, Mapping
 
 from .hybrid_editorial import EditorialSession, HybridGatePolicy
@@ -29,6 +30,7 @@ def estimate_tokens_from_chars(char_count: int) -> int:
 # valid 10-candidate Hybrid window fail *before* the provider is called. These limits keep
 # the semantic map broad while leaving deterministic room for the actual candidate speech.
 _CONTEXT_CHAR_LIMITS = {
+    "global_editorial_evidence": 1800,
     "summary": 2_400,
     "creator_intent": 320,
     "main_topic": 260,
@@ -38,10 +40,29 @@ _CONTEXT_CHAR_LIMITS = {
 }
 
 
+def _bounded_global_evidence(value: str, limit: int) -> str:
+    """Shrink complete regions, never truncate a structured hypothesis mid-field."""
+    try:
+        data = json.loads(value)
+        if not isinstance(data, dict) or not isinstance(data.get("regions"), list):
+            return ""
+        encoded = json.dumps(data, separators=(",", ":"))
+        while len(encoded) > limit and data["regions"]:
+            data["regions"].pop()
+            data["omitted_for_budget"] = data.get("omitted_for_budget", 0) + 1
+            encoded = json.dumps(data, separators=(",", ":"))
+        return encoded if len(encoded) <= limit else ""
+    except (ValueError, TypeError):
+        return ""
+
+
 def _compact_source_context(source_context: tuple[tuple[str, str | float], ...]) -> dict[str, Any]:
     compact: dict[str, Any] = {}
     for key, value in source_context:
         name = str(key)
+        if name == "global_editorial_evidence":
+            compact[name] = _bounded_global_evidence(value, 1800)
+            continue
         if isinstance(value, str):
             normalized = " ".join(value.split())
             limit = _CONTEXT_CHAR_LIMITS.get(name, 240)
@@ -133,7 +154,8 @@ def _shrink_context_once(source_context: Mapping[str, Any]) -> dict[str, Any]:
             shrunk[key] = value
             continue
         target = max(120, int(len(value) * 0.75))
-        shrunk[key] = value[:target]
+        shrunk[key] = (_bounded_global_evidence(value, target)
+                       if key == "global_editorial_evidence" else value[:target])
     return shrunk
 
 

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Iterable, Mapping, Sequence, Tuple
 import os
+from .watch_listen_runtime import capability_enabled
 
 from .prosodic_audio_v2 import (
     CONTINUITY_CONTINUOUS,
@@ -96,7 +97,7 @@ def prosodic_finalist_arbiter_diagnostics_enabled(env: Mapping[str, str] | None 
     `bounded_finalist_arbiter_enabled`'s own convention. Not referenced by
     any production code path in this task."""
     values = env if env is not None else os.environ
-    return _env_true_default_false(values.get(_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENV))
+    return capability_enabled(_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENV, values)
 
 
 @dataclass(frozen=True)

@@ -53,6 +53,8 @@ def _source(source_id="src_one"):
 
 
 def _run(tmp_path, monkeypatch, *, p1_flag=None, live_spine_flag=None):
+    # Historical explicit-flag compatibility path; automatic profile has its own tests.
+    monkeypatch.setenv("CUTSELL_WATCH_LISTEN_AUTOMATIC", "0")
     if p1_flag is None:
         monkeypatch.delenv("CUTSELL_EDITORIAL_MOMENT_SEQUENCE_DIAGNOSTICS_ENABLED", raising=False)
     else:

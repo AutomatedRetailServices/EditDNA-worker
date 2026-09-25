@@ -103,6 +103,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Tuple
 import os
+from .watch_listen_runtime import capability_enabled
 
 from .attempt_reconstruction import _restart_evidence
 from .contracts import CandidateTake
@@ -169,7 +170,7 @@ def _env_true_default_false(value: str | None) -> bool:
 
 def watch_listen_relation_discovery_enabled(env: Mapping[str, str] | None = None) -> bool:
     values = env if env is not None else os.environ
-    return _env_true_default_false(values.get(_WATCH_LISTEN_RELATION_DISCOVERY_ENV))
+    return capability_enabled(_WATCH_LISTEN_RELATION_DISCOVERY_ENV, values)
 
 
 @dataclass(frozen=True)

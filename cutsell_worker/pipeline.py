@@ -1542,6 +1542,9 @@ def _semantic_best_take(
     return local_selected_clip_id, None, "local_fallback"
 
 
+from .watch_listen_runtime import runtime_diagnostics
+
+
 def build_flow_b_draft(
     request: ProcessingRequest,
     takes: Iterable[CandidateTake],
@@ -1604,6 +1607,8 @@ def build_flow_b_draft(
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
+    watch_listen_understandings = tuple(watch_listen_understandings)
+    raw_understanding_maps = tuple(raw_understanding_maps)
     # D-050D1: mint `realization_id` here -- on the COMPLETE candidate pool
     # (AttemptReconstructor output plus any `preserved_subspan_candidates`,
     # already merged into `takes` by flow_b.py before this function is
@@ -1626,6 +1631,166 @@ def build_flow_b_draft(
         )
         for take in take_tuple
     )
+
+    # D-195: P1 Editorial Moment & Sequence Understanding, Phase B --
+    # DIAGNOSTICS ONLY. {"status": "disabled"} when the (separate,
+    # default-OFF) diagnostics flag is off -- in that case this block
+    # below is never even computed, so the OFF path performs zero extra
+    # work (not merely zero extra output). Uses `take_tuple` (the
+    # complete, un-filtered candidate pool this call ever saw -- see its
+    # own comment near the top of this function, never reassigned after
+    # realization-id minting) so a discarded/failed attempt still gets
+    # its own real editorial-process-role moment, matching P1's own
+    # "role exists independently of whether it wins" contract
+    # (docs/CUTSELL_DECISIONS.md D-195). Computed here, before `draft`
+    # is constructed, so it is available for `draft.diagnostics` below
+    # -- the same location D-183/D-184/D-191's own compact summaries
+    # already live.
+    if editorial_moment_sequence_diagnostics_enabled():
+        editorial_moment_source_ids = sorted({t.source_asset_id for t in take_tuple})
+
+        # D-199 (docs/CUTSELL_DECISIONS.md D-199): live Language-Spine
+        # construction, ONLY when this SEPARATE flag is also on (never
+        # auto-linked to the P1 flag above -- see module docstring). Built
+        # ONCE per unique source_asset_id here (never per clip/family/
+        # finalist) from each source's own already-computed
+        # `RawUnderstandingMap.word_timings` -- zero ASR re-invocation.
+        # Per-source `try/except` is this call site's half of the
+        # FALLBACK FAILURE TEST contract (module docstring): a
+        # construction exception for one source is caught, recorded as
+        # NOT_EVALUABLE with an honest `missing_evidence` reason, and
+        # every other source's construction/P1 evaluation continues
+        # unaffected -- no crash, no dropped source.
+        live_language_spine_by_source: dict[str, "LiveLanguageSpineEvidence"] = {}
+        live_language_spine_construction_errors: list[dict] = []
+        if live_language_spine_diagnostics_enabled():
+            raw_map_by_source = {m.source_asset_id: m for m in raw_understanding_maps}
+            for source_asset_id in editorial_moment_source_ids:
+                try:
+                    live_language_spine_by_source[source_asset_id] = build_live_language_spine_for_source(
+                        source_asset_id=source_asset_id,
+                        raw_understanding_map=raw_map_by_source.get(source_asset_id),
+                    )
+                except Exception as exc:  # noqa: BLE001 -- fail-open per source, never crash the draft
+                    live_language_spine_by_source[source_asset_id] = build_live_language_spine_for_source(
+                        source_asset_id=source_asset_id, raw_understanding_map=None,
+                    )
+                    live_language_spine_construction_errors.append(
+                        {"source_asset_id": source_asset_id, "error": repr(exc)}
+                    )
+
+        editorial_moment_understandings = build_editorial_moment_understanding_for_sources(
+            sources=editorial_moment_source_ids,
+            takes=take_tuple,
+            watch_listen_understandings=tuple(watch_listen_understandings),
+            live_language_spine_by_source=live_language_spine_by_source,
+        )
+        # D-196 (docs/CUTSELL_DECISIONS.md D-196): OBSERVABILITY-ONLY
+        # serialization of the already-built per-source moment/sequence
+        # objects -- pure re-projection via D-194's own bounded diagnostic
+        # functions (editorial_moment_understanding_diagnostics), no new
+        # computation, no authority, no transcript. Flattened across
+        # sources into two top-level arrays so a RAW's compact log step
+        # can read them directly without reconstructing per-source
+        # structure. Without this, the aggregate counts alone gave the
+        # one authorized D-196 RAW nothing to trace per-moment/per-
+        # sequence evidence against.
+        editorial_moment_source_diagnostics = [
+            editorial_moment_understanding_diagnostics(u) for u in editorial_moment_understandings
+        ]
+        editorial_moment_sequence_summary = {
+            "status": "evaluated",
+            **editorial_moment_understanding_run_summary(editorial_moment_understandings),
+            "moments": [
+                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["moments"]
+            ],
+            "sequences": [
+                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["sequences"]
+            ],
+            # D-197: real structural local groups (docs/CUTSELL_DECISIONS.md
+            # D-197) -- the same observability-only flattening pattern as
+            # "moments"/"sequences" above, so a RAW's compact log step can
+            # read local-group formation directly without reconstructing
+            # per-source structure.
+            "local_groups": [
+                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["local_groups"]
+            ],
+        }
+
+        # D-199: SEPARATE top-level diagnostics key (never merged into
+        # `editorial_moment_sequence_summary` above -- see module
+        # docstring's "not auto-linked to the P1 flag" instruction). Empty/
+        # {"status": "disabled"} whenever `CUTSELL_LIVE_LANGUAGE_SPINE_
+        # DIAGNOSTICS_ENABLED` is off, regardless of the P1 flag's own
+        # state -- byte-identical to pre-D-199 in that case.
+        if live_language_spine_diagnostics_enabled():
+            live_language_spine_source_diagnostics = [
+                live_language_spine_source_diagnostics_for_p1(
+                    live_language_spine_by_source[source_asset_id], understanding,
+                )
+                for source_asset_id, understanding in zip(
+                    editorial_moment_source_ids, editorial_moment_understandings
+                )
+                if source_asset_id in live_language_spine_by_source
+            ]
+            editorial_moment_live_language_spine_summary = {
+                "status": "evaluated",
+                **live_language_spine_run_summary(live_language_spine_by_source.values()),
+                "sources": live_language_spine_source_diagnostics,
+                "construction_error_count": len(live_language_spine_construction_errors),
+                "construction_errors": live_language_spine_construction_errors,
+            }
+        else:
+            editorial_moment_live_language_spine_summary = {"status": "disabled"}
+    else:
+        editorial_moment_sequence_summary = {"status": "disabled"}
+        editorial_moment_live_language_spine_summary = {"status": "disabled"}
+        # D-203: P2's own live construction needs these two -- when the P1
+        # flag is off neither is ever computed above, so they default to
+        # empty here (never undefined) for the P2 block below to safely
+        # reference regardless of the P1 flag's own state.
+        editorial_moment_understandings = ()
+        live_language_spine_by_source = {}
+
+    # D-203 (docs/CUTSELL_DECISIONS.md D-203): P2 Whole-Video Editorial
+    # Reasoning compact summary -- {"status": "disabled"} when the
+    # (separate, default-OFF) `CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_
+    # DIAGNOSTICS_ENABLED` flag is off (zero P2 compute in that case, not
+    # merely zero extra output). When ON, this is a THIRD diagnostic
+    # side-channel alongside D-195/D-199 above -- reads ONLY the
+    # already-built `editorial_moment_understandings`/`live_language_
+    # spine_by_source` objects those blocks produce (or their empty
+    # defaults when the P1/D-199 flags are themselves off), never
+    # recomputing anything. Diagnostics only: no authority, never read by
+    # Family/BestTake/D-191/Boundary/Pacing/Renderer.
+    if whole_video_editorial_reasoning_diagnostics_enabled():
+        whole_video_editorial_reasoning_result = build_whole_video_editorial_reasoning(
+            editorial_moment_understandings=editorial_moment_understandings,
+            live_language_spine_by_source=live_language_spine_by_source,
+            p1_diagnostics_enabled=editorial_moment_sequence_diagnostics_enabled(),
+            live_language_spine_diagnostics_enabled=live_language_spine_diagnostics_enabled(),
+        )
+        whole_video_editorial_reasoning_summary = {
+            **whole_video_editorial_reasoning_diagnostics(whole_video_editorial_reasoning_result),
+            **whole_video_editorial_reasoning_run_summary(whole_video_editorial_reasoning_result),
+        }
+    else:
+        whole_video_editorial_reasoning_summary = {"status": "disabled"}
+        # D-208: the live Ordering diagnostic block below needs the real
+        # WholeVideoEditorialReasoningResult object (never just its own
+        # flattened summary dict) when the P2 flag is ON -- when P2 is
+        # OFF this mirrors the same "define the empty default" pattern
+        # already used for `editorial_moment_understandings`/`live_
+        # language_spine_by_source` above, so the block below can safely
+        # reference this name regardless of this flag's own state.
+        whole_video_editorial_reasoning_result = None
+
+    from .global_editorial_context import with_global_editorial_evidence
+    whole_video_context, global_editorial_handoff = with_global_editorial_evidence(
+        whole_video_context, whole_video_editorial_reasoning_result,
+    )
+    global_editorial_handoff["editorial_provider_present"] = editorial_judge is not None
+    context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
     # Pass 1: deterministic/local cleanup remains the backbone and removes obvious
     # recording garbage before optional semantic reasoning spends anything.
@@ -2732,126 +2897,6 @@ def build_flow_b_draft(
         for take in (*discarded, *review_removed, *no_usable_removed)
     )
 
-    # D-195: P1 Editorial Moment & Sequence Understanding, Phase B --
-    # DIAGNOSTICS ONLY. {"status": "disabled"} when the (separate,
-    # default-OFF) diagnostics flag is off -- in that case this block
-    # below is never even computed, so the OFF path performs zero extra
-    # work (not merely zero extra output). Uses `take_tuple` (the
-    # complete, un-filtered candidate pool this call ever saw -- see its
-    # own comment near the top of this function, never reassigned after
-    # realization-id minting) so a discarded/failed attempt still gets
-    # its own real editorial-process-role moment, matching P1's own
-    # "role exists independently of whether it wins" contract
-    # (docs/CUTSELL_DECISIONS.md D-195). Computed here, before `draft`
-    # is constructed, so it is available for `draft.diagnostics` below
-    # -- the same location D-183/D-184/D-191's own compact summaries
-    # already live.
-    if editorial_moment_sequence_diagnostics_enabled():
-        editorial_moment_source_ids = sorted({t.source_asset_id for t in take_tuple})
-
-        # D-199 (docs/CUTSELL_DECISIONS.md D-199): live Language-Spine
-        # construction, ONLY when this SEPARATE flag is also on (never
-        # auto-linked to the P1 flag above -- see module docstring). Built
-        # ONCE per unique source_asset_id here (never per clip/family/
-        # finalist) from each source's own already-computed
-        # `RawUnderstandingMap.word_timings` -- zero ASR re-invocation.
-        # Per-source `try/except` is this call site's half of the
-        # FALLBACK FAILURE TEST contract (module docstring): a
-        # construction exception for one source is caught, recorded as
-        # NOT_EVALUABLE with an honest `missing_evidence` reason, and
-        # every other source's construction/P1 evaluation continues
-        # unaffected -- no crash, no dropped source.
-        live_language_spine_by_source: dict[str, "LiveLanguageSpineEvidence"] = {}
-        live_language_spine_construction_errors: list[dict] = []
-        if live_language_spine_diagnostics_enabled():
-            raw_map_by_source = {m.source_asset_id: m for m in raw_understanding_maps}
-            for source_asset_id in editorial_moment_source_ids:
-                try:
-                    live_language_spine_by_source[source_asset_id] = build_live_language_spine_for_source(
-                        source_asset_id=source_asset_id,
-                        raw_understanding_map=raw_map_by_source.get(source_asset_id),
-                    )
-                except Exception as exc:  # noqa: BLE001 -- fail-open per source, never crash the draft
-                    live_language_spine_by_source[source_asset_id] = build_live_language_spine_for_source(
-                        source_asset_id=source_asset_id, raw_understanding_map=None,
-                    )
-                    live_language_spine_construction_errors.append(
-                        {"source_asset_id": source_asset_id, "error": repr(exc)}
-                    )
-
-        editorial_moment_understandings = build_editorial_moment_understanding_for_sources(
-            sources=editorial_moment_source_ids,
-            takes=take_tuple,
-            watch_listen_understandings=tuple(watch_listen_understandings),
-            live_language_spine_by_source=live_language_spine_by_source,
-        )
-        # D-196 (docs/CUTSELL_DECISIONS.md D-196): OBSERVABILITY-ONLY
-        # serialization of the already-built per-source moment/sequence
-        # objects -- pure re-projection via D-194's own bounded diagnostic
-        # functions (editorial_moment_understanding_diagnostics), no new
-        # computation, no authority, no transcript. Flattened across
-        # sources into two top-level arrays so a RAW's compact log step
-        # can read them directly without reconstructing per-source
-        # structure. Without this, the aggregate counts alone gave the
-        # one authorized D-196 RAW nothing to trace per-moment/per-
-        # sequence evidence against.
-        editorial_moment_source_diagnostics = [
-            editorial_moment_understanding_diagnostics(u) for u in editorial_moment_understandings
-        ]
-        editorial_moment_sequence_summary = {
-            "status": "evaluated",
-            **editorial_moment_understanding_run_summary(editorial_moment_understandings),
-            "moments": [
-                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["moments"]
-            ],
-            "sequences": [
-                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["sequences"]
-            ],
-            # D-197: real structural local groups (docs/CUTSELL_DECISIONS.md
-            # D-197) -- the same observability-only flattening pattern as
-            # "moments"/"sequences" above, so a RAW's compact log step can
-            # read local-group formation directly without reconstructing
-            # per-source structure.
-            "local_groups": [
-                row for source_diag in editorial_moment_source_diagnostics for row in source_diag["local_groups"]
-            ],
-        }
-
-        # D-199: SEPARATE top-level diagnostics key (never merged into
-        # `editorial_moment_sequence_summary` above -- see module
-        # docstring's "not auto-linked to the P1 flag" instruction). Empty/
-        # {"status": "disabled"} whenever `CUTSELL_LIVE_LANGUAGE_SPINE_
-        # DIAGNOSTICS_ENABLED` is off, regardless of the P1 flag's own
-        # state -- byte-identical to pre-D-199 in that case.
-        if live_language_spine_diagnostics_enabled():
-            live_language_spine_source_diagnostics = [
-                live_language_spine_source_diagnostics_for_p1(
-                    live_language_spine_by_source[source_asset_id], understanding,
-                )
-                for source_asset_id, understanding in zip(
-                    editorial_moment_source_ids, editorial_moment_understandings
-                )
-                if source_asset_id in live_language_spine_by_source
-            ]
-            editorial_moment_live_language_spine_summary = {
-                "status": "evaluated",
-                **live_language_spine_run_summary(live_language_spine_by_source.values()),
-                "sources": live_language_spine_source_diagnostics,
-                "construction_error_count": len(live_language_spine_construction_errors),
-                "construction_errors": live_language_spine_construction_errors,
-            }
-        else:
-            editorial_moment_live_language_spine_summary = {"status": "disabled"}
-    else:
-        editorial_moment_sequence_summary = {"status": "disabled"}
-        editorial_moment_live_language_spine_summary = {"status": "disabled"}
-        # D-203: P2's own live construction needs these two -- when the P1
-        # flag is off neither is ever computed above, so they default to
-        # empty here (never undefined) for the P2 block below to safely
-        # reference regardless of the P1 flag's own state.
-        editorial_moment_understandings = ()
-        live_language_spine_by_source = {}
-
     # D-235X Part A (docs/CUTSELL_DECISIONS.md D-235W's own "GAP A"):
     # THE live exact-identity data-source seam -- the smallest owner with
     # BOTH live `CandidateTake.word_indices`/`.words` (`take_tuple`, this
@@ -3037,39 +3082,6 @@ def build_flow_b_draft(
         }
         if lost_atom_materiality_freeze_authority_enabled() else None
     )
-
-    # D-203 (docs/CUTSELL_DECISIONS.md D-203): P2 Whole-Video Editorial
-    # Reasoning compact summary -- {"status": "disabled"} when the
-    # (separate, default-OFF) `CUTSELL_WHOLE_VIDEO_EDITORIAL_REASONING_
-    # DIAGNOSTICS_ENABLED` flag is off (zero P2 compute in that case, not
-    # merely zero extra output). When ON, this is a THIRD diagnostic
-    # side-channel alongside D-195/D-199 above -- reads ONLY the
-    # already-built `editorial_moment_understandings`/`live_language_
-    # spine_by_source` objects those blocks produce (or their empty
-    # defaults when the P1/D-199 flags are themselves off), never
-    # recomputing anything. Diagnostics only: no authority, never read by
-    # Family/BestTake/D-191/Boundary/Pacing/Renderer.
-    if whole_video_editorial_reasoning_diagnostics_enabled():
-        whole_video_editorial_reasoning_result = build_whole_video_editorial_reasoning(
-            editorial_moment_understandings=editorial_moment_understandings,
-            live_language_spine_by_source=live_language_spine_by_source,
-            p1_diagnostics_enabled=editorial_moment_sequence_diagnostics_enabled(),
-            live_language_spine_diagnostics_enabled=live_language_spine_diagnostics_enabled(),
-        )
-        whole_video_editorial_reasoning_summary = {
-            **whole_video_editorial_reasoning_diagnostics(whole_video_editorial_reasoning_result),
-            **whole_video_editorial_reasoning_run_summary(whole_video_editorial_reasoning_result),
-        }
-    else:
-        whole_video_editorial_reasoning_summary = {"status": "disabled"}
-        # D-208: the live Ordering diagnostic block below needs the real
-        # WholeVideoEditorialReasoningResult object (never just its own
-        # flattened summary dict) when the P2 flag is ON -- when P2 is
-        # OFF this mirrors the same "define the empty default" pattern
-        # already used for `editorial_moment_understandings`/`live_
-        # language_spine_by_source` above, so the block below can safely
-        # reference this name regardless of this flag's own state.
-        whole_video_editorial_reasoning_result = None
 
     # D-208 (docs/CUTSELL_DECISIONS.md D-208): Ordering Live Diagnostic
     # Integration -- DIAGNOSTIC SIDE-CHANNEL ONLY. {"status": "disabled"}
@@ -3311,6 +3323,8 @@ def build_flow_b_draft(
             # authority, never read by Family/BestTake/D-191/Boundary/
             # Pacing/Renderer.
             "whole_video_editorial_reasoning": whole_video_editorial_reasoning_summary,
+            "global_editorial_handoff": global_editorial_handoff,
+            "watch_listen_runtime": runtime_diagnostics(),
             # D-208 (docs/CUTSELL_DECISIONS.md D-208): Ordering Live
             # Diagnostic Integration compact summary -- SEPARATE top-level
             # key, never merged into any P1/P2 summary above. {"status":

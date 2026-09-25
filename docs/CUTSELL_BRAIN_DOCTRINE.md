@@ -172,3 +172,16 @@ available.
 
 A benchmark passes quality only when the output itself is postable; structural execution
 success is necessary but not sufficient.
+
+
+## Automatic execution integration — experimental 2026-09-25
+
+Current-worker media jobs activate the request-scoped Watch + Listen profile.
+Global P1/language/P2 evidence is built before cleanup and supplied as
+source-scoped hypotheses to the editorial classifier. Existing selection
+authorities continue to require sufficient evidence and preserve uncertain
+valid content. Enabling a capability never proves it evaluated a candidate
+or improved a video. Runtime reports must distinguish activation,
+dependency blocking, missing evidence and actual decisions. Explicit rollback
+controls remain available. This integration is not a production deployment
+or live editorial acceptance. See the corresponding CURRENT_STATE entry.

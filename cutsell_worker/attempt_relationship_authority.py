@@ -113,6 +113,7 @@ from .watch_listen_understanding import (
 )
 
 import os
+from .watch_listen_runtime import capability_enabled
 
 SCHEMA_VERSION = "cutsell.attempt_relationship_authority.v1"
 
@@ -171,7 +172,7 @@ def _env_true_default_false(value: str | None) -> bool:
 
 def watch_listen_family_evidence_enabled(env: Mapping[str, str] | None = None) -> bool:
     values = env if env is not None else os.environ
-    return _env_true_default_false(values.get(_WATCH_LISTEN_FAMILY_EVIDENCE_ENV))
+    return capability_enabled(_WATCH_LISTEN_FAMILY_EVIDENCE_ENV, values)
 
 
 @dataclass(frozen=True)

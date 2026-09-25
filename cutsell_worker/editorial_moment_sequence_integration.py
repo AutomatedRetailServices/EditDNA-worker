@@ -77,6 +77,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import os
+from .watch_listen_runtime import capability_enabled
 from typing import Iterable, Mapping, Sequence, Tuple
 
 from .contracts import CandidateTake
@@ -191,7 +192,7 @@ def editorial_moment_sequence_diagnostics_enabled(env: Mapping[str, str] | None 
     render output stays byte-identical (this is a diagnostics-only
     capability, not an authority; there is no authority flag)."""
     values = env if env is not None else os.environ
-    return _env_true_default_false(values.get(_DIAGNOSTICS_ENV))
+    return capability_enabled(_DIAGNOSTICS_ENV, values)
 
 
 # ---------------------------------------------------------------------------

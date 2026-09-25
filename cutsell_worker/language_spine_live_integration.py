@@ -161,6 +161,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from .watch_listen_runtime import capability_enabled
 from typing import Iterable, Mapping, Tuple
 
 from .audio_silence import AUDIO_SILENCE_EVENT_KIND
@@ -209,7 +210,7 @@ def live_language_spine_diagnostics_enabled(env: Mapping[str, str] | None = None
     this task's own directive requires the two never be auto-linked.
     When OFF, nothing in this module is ever called by ``pipeline.py``."""
     values = env if env is not None else os.environ
-    return _env_true_default_false(values.get(_DIAGNOSTICS_ENV))
+    return capability_enabled(_DIAGNOSTICS_ENV, values)
 
 
 # ---------------------------------------------------------------------------

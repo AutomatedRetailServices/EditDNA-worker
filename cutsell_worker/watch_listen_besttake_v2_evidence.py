@@ -144,6 +144,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 import os
+from .watch_listen_runtime import capability_enabled
 
 from .contracts import CandidateTake
 from .positioned_performance_evidence import build_positioned_performance_evidence
@@ -184,7 +185,7 @@ def _env_true_default_false(value: str | None) -> bool:
 
 def zone_usability_v2_besttake_enabled(env: Mapping[str, str] | None = None) -> bool:
     values = env if env is not None else os.environ
-    return _env_true_default_false(values.get(_ZONE_USABILITY_V2_BESTTAKE_ENV))
+    return capability_enabled(_ZONE_USABILITY_V2_BESTTAKE_ENV, values)
 
 
 def build_candidate_zone_usability_v2(

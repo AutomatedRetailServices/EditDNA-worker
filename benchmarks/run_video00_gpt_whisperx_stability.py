@@ -26,7 +26,11 @@ PROVIDER = os.environ.get("CUTSELL_STABILITY_PROVIDER", "gpt-transcribe-whisperx
 if PROVIDER not in {"gpt-transcribe-whisperx", "deepgram-nova-3-multi"}:
     raise ValueError("Unsupported stability provider")
 TRIAL_TAG = "deepgram" if PROVIDER == "deepgram-nova-3-multi" else "gptwx"
+from cutsell_worker.watch_listen_runtime import DEPENDENCIES as WATCH_LISTEN_CAPABILITIES
+
 OVERLAYS = {
+    "CUTSELL_WATCH_LISTEN_AUTOMATIC": "1",
+    **{"CUTSELL_" + name: "1" for name in WATCH_LISTEN_CAPABILITIES},
     "CUTSELL_HYBRID_LLM_ENABLED": "1",
     "CUTSELL_HYBRID_PROVIDER": "google",
     "CUTSELL_UNIFIED_REALIZATION_RESOLVER": "AUTHORITATIVE",
