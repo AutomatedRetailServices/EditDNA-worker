@@ -1372,3 +1372,17 @@ No retries, production promotion or extra source. Compare Video00 against
 36100898847 (6/11, perceptual blocked) and MOV against 36105019864 (Freeze
 blocked before render). Live classifier content_role/proof counts and actual
 editorial results must be checked; activation alone is not improvement.
+
+
+### Two-source terminal results — correction NOT qualified
+
+Video00 36106648051: 165.700 s / 25 clips, technical PASS, pending human
+watch/listen. Editorial regressed 6/11 -> 4/11; Gold unchanged 16/18. One of
+eight classification windows exhausted the existing budget. All 70 returned
+content roles audience; zero recording-process proofs. MOV 36106648113:
+WhisperX passed 256 words / 17 segments, but no render, two UNIQUE_FACT_LOST
+Freeze blocks. Roles 13 audience / 12 mixed / 5 recording_only; zero proofs
+(confidence below .95 and/or cross-window disagreement). Preparation survives
+in provisional selection. No consistent live editorial improvement. Same tested
+SHA bf4c77ca6d92da205c049130b3dfca4ad4998ecd, no engine changes mid-batch, no
+third invocation. See CUTSELL_TWO_SOURCE_RECORDING_QUALIFICATION.md.
