@@ -1,6 +1,9 @@
 name: CutSell Video00 Watch Listen Medium
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/gpt-whisperx-video00]
+    paths: [.github/workflows/cutsell-video00-watch-listen.yml]
 permissions:
   contents: read
 concurrency:
@@ -9,7 +12,7 @@ concurrency:
 jobs:
   compare:
     if: >-
-      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized Video00 automatic watch-listen')
+      github.run_attempt == 1 && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'benchmark: authorized Video00 watch-listen preflight fix')
     runs-on: ubuntu-latest
     timeout-minutes: 210
     env:

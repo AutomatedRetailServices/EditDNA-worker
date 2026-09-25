@@ -26,7 +26,11 @@ PROVIDER = os.environ.get("CUTSELL_STABILITY_PROVIDER", "gpt-transcribe-whisperx
 if PROVIDER not in {"gpt-transcribe-whisperx", "deepgram-nova-3-multi"}:
     raise ValueError("Unsupported stability provider")
 TRIAL_TAG = "deepgram" if PROVIDER == "deepgram-nova-3-multi" else "gptwx"
-from cutsell_worker.watch_listen_runtime import DEPENDENCIES as WATCH_LISTEN_CAPABILITIES
+import runpy
+
+# Read the dependency-free profile without executing cutsell_worker/__init__.py
+# in the CPU transport environment. The GPU image owns inference dependencies.
+WATCH_LISTEN_CAPABILITIES = runpy.run_path(str(ROOT / "cutsell_worker/watch_listen_runtime.py"))["DEPENDENCIES"]
 
 OVERLAYS = {
     "CUTSELL_WATCH_LISTEN_AUTOMATIC": "1",
