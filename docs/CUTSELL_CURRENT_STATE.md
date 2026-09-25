@@ -907,3 +907,12 @@ improvement is established by visual cleanliness or these repeated trials.
 Two fresh full-engine outputs requested for uploaded MOV SHA 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681.
 Same source, frozen configuration and engine code; medium then Deepgram, no WhisperX.
 No retries, no production promotion. Reuse verified existing source bytes.
+
+Completed run 36076863910 / job 107889907974, tested e76bf1210c561040a445436b4a1c12192c607963.
+Medium: 33.767 s, 277 ASR words, technical PASS but delivery blocked by perceptual FAIL.
+Deepgram: 33.061 s, 268 words, technical PASS, pending human Watch & Listen.
+Both MP4 hashes and full decode verified; same source and build; both Modal apps stopped.
+Both selected plans retain preparation/retry speech; this is not an approved clean-edit
+quality win for either provider. No human listening claimed. Preserve contradictory
+Medium compact deliverable=true versus NOT_DELIVERABLE status; status used for labeling.
+Two authorized calls completed, no extra retry or production change.
