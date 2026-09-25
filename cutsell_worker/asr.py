@@ -152,6 +152,8 @@ class FasterWhisperASR:
     clip_timestamps: str = "0"
     hallucination_silence_threshold: float | None = None
 
+    last_detected_language: str | None = field(default=None, init=False)
+
     @property
     def sampling_fallback_enabled(self) -> bool:
         """D-053 Section 3: true whenever the decode-with-fallback loop has
@@ -233,6 +235,7 @@ class FasterWhisperASR:
             clip_timestamps=self.clip_timestamps,
             hallucination_silence_threshold=self.hallucination_silence_threshold,
         )
+        self.last_detected_language = getattr(_info, "language", None)
         output = []
         for segment in segments:
             words = tuple(

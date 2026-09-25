@@ -315,6 +315,9 @@ def _validation_asr(config, *, env=None):
     if provider == "deepgram-nova-3-multi":
         from .deepgram_asr import DeepgramASR
         return DeepgramASR()
+    if provider == "faster-whisper-medium-whisperx":
+        from .medium_whisperx_asr import MediumWhisperXASR
+        return MediumWhisperXASR(load_asr_provider_from_env(env, model_name=config.asr_model))
     if provider == "gpt-transcribe-whisperx":
         from .gpt_whisperx_asr import GPTWhisperXASR
         return GPTWhisperXASR()

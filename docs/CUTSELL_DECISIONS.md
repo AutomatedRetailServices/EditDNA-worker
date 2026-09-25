@@ -80524,3 +80524,19 @@ a newly added end-to-end audiovisual foundation model. Extra local compute
 and bounded context tokens are expected, without added provider request
 count. No production changes and no new rendered video. Live before/after
 validation and human editorial acceptance remain outstanding.
+
+
+## 2026-09-25 — Medium + WhisperX opt-in Video00 qualification
+
+User confirmed testing Faster-Whisper Medium + WhisperX + current Watch/Listen.
+Adds explicit RAW provider faster-whisper-medium-whisperx wrapping the existing
+Medium decoder. Detects EN/ES from decoder metadata; preserves segment text,
+validates every aligned token and positive source-relative timing; fails closed
+on missing/changed tokens, invalid/overlapping times or unsupported language.
+No GPT calls, silent provider fallback, interpolation or phrase-specific rules.
+Per-job source SHA cache avoids a second ASR/alignment in boundary completion.
+WhisperX runs in the existing isolated 3.8.6 environment; default ASR unchanged.
+Base ASR only exposes detected language as metadata. One new paid Video00 run
+authorized; previous Medium run remains the comparator, not controlled ASR replay.
+36 targeted adapter/GPT/transport tests passed; no claim of live alignment or
+editorial improvement until real evidence. No production deployment.

@@ -117,7 +117,7 @@ image = (
 # installation intact; WhisperX needs a different Torch/Numpy generation.
 # The CPU image build resolves dependencies and warms EN/ES alignment
 # models before any paid L4 function is dispatched.
-if os.environ.get("CUTSELL_VALIDATION_ASR_PROVIDER") == "gpt-transcribe-whisperx":
+if os.environ.get("CUTSELL_VALIDATION_ASR_PROVIDER") in {"gpt-transcribe-whisperx", "faster-whisper-medium-whisperx"}:
     image = (
         image.apt_install("python3-venv")
         .run_commands(
