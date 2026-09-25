@@ -1,9 +1,6 @@
 name: EditDNA August Repaired Comparison
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/gpt-whisperx-video00]
-    paths: [.github/workflows/editdna-august-repaired.yml]
 permissions:
   contents: read
 concurrency:
