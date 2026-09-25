@@ -1361,3 +1361,14 @@ cleanup and source-bound proof propagation. Historical diagnostics lack the new
 role and deliberately remain fail-closed; they cannot establish a repaired video.
 No paid run/render or production promotion. Live editorial acceptance and residual
 mixed-content failures remain unverified, requiring new inference evidence.
+
+
+## 2026-09-25 two-source live qualification authorized
+
+User explicitly requested Video00 and the last MOV on corrected current engine
+94df34a, Medium + WhisperX + automatic Watch/Listen. Two invocations, one per
+verified source, sharing the existing concurrency group (sequential GPU runs).
+No retries, production promotion or extra source. Compare Video00 against
+36100898847 (6/11, perceptual blocked) and MOV against 36105019864 (Freeze
+blocked before render). Live classifier content_role/proof counts and actual
+editorial results must be checked; activation alone is not improvement.
