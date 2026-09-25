@@ -80575,3 +80575,20 @@ cleanup and source-bound proof propagation. Historical diagnostics lack the new
 role and deliberately remain fail-closed; they cannot establish a repaired video.
 No paid run/render or production promotion. Live editorial acceptance and residual
 mixed-content failures remain unverified, requiring new inference evidence.
+
+
+## Recording-boundary integration after failed two-source qualification (2026-09-25)
+
+Observed baseline: Video00 run 36106648051 regressed to 4/11 editorial checks; MOV run 36106648113 froze before rendering on two unique-content-loss findings. Neither is evidence of improved editing. Inspection corrected the initial coverage hypothesis: Video00's eight classification windows cover 42 candidate IDs, and the first seven already cover all 42. The refused window lost overlapping context, not all classification of some speech. All 70 returned Video00 roles were audience. MOV returned mixed roles but the old bridge could only represent whole recording-only candidates.
+
+General implementation:
+- Add independent optional recording_confidence and prefix/suffix ASR word counts to the typed editorial response. Label confidence is not recording-process certainty. Missing new fields remain non-authoritative for boundary trims.
+- Supply exact word_texts only with complete, matching candidate text. The transport rejects trim requests when those aligned words were not exposed (including payload truncation).
+- At the existing Clean Cut boundary, trim only contiguous recording-process edges on mixed candidates when all returned windows agree, exact source/text/bounds match, recording confidence is >=0.97, alignment is finite/ordered/in-bounds and each removed fragment has local corroboration. Parent-wide visual scores cannot corroborate child edges. Keep a contiguous audience remainder (>=3 words and >=0.5s); never stitch interior words or inherit the parent's failed label.
+- Mint exact child identities using the existing word-trim helper. Feed each discarded child's own proof to the existing loss validator; never exempt the mixed parent or audience remainder from content-loss checks.
+- Prefer uncovered candidates before redundant overlapping windows within each enabled safety tier. Preserve all overlap windows and planner rollback semantics. Report genuinely unclassified IDs separately from refused-window IDs.
+- Keep existing per-edit dollar and 500-output-token caps. Word-bearing requests reserve bounded extra structured-output headroom, using the same calculation in planner and transport. No additional provider calls or paid runs were launched.
+
+Verification: 241 targeted tests passed, including EN/ES boundary cases, negation/numeric preservation, conflicting windows, low/malformed confidence, absent/mismatched/overlapping alignment, localized event overlap, truncated payload rejection, pipeline selection plus loss-validation proof propagation, compute planner, automatic Watch/Listen and existing semantic safety regressions. Tests with annotated/model-stub decisions verify execution, not real model classification quality. No doctrine, production, main or PR25 change.
+
+Limits: archived provider outputs contain no new boundary annotations, so this change cannot retroactively demonstrate an improved video. It does not authorize interior mixed-speech deletion or settle all repeated-take grouping failures. Both sources still require a newly authorized paid qualification and output review before any claim of visual improvement or release readiness. AGENTS.md validation step 9 requires approval for that run.

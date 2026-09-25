@@ -97,6 +97,9 @@ def _candidate_rows(
         rows.append({
             "clip_id": candidate.clip_id,
             "text": text,
+            **({"word_texts": list(candidate.word_texts)} if candidate.word_texts
+               and text == str(candidate.text or "").strip()
+               and " ".join(" ".join(candidate.word_texts).split()) == " ".join(text.split()) else {}),
             "duration_sec": round(candidate.duration_sec, 3),
             "local_label": candidate.local_label,
             "local_confidence": round(float(candidate.local_confidence), 4),

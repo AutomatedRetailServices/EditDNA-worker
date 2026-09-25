@@ -520,6 +520,22 @@ def _overlapping_windows(
     return tuple(tuple(items[start : start + size]) for start in starts)
 
 
+def _coverage_first_windows(windows, context, *, prioritize_safety=True):
+    """Stable greedy coverage within safety tiers; retain all overlap for retries."""
+    remaining = list(enumerate(windows))
+    covered = set()
+    ordered = []
+    while remaining:
+        index, window = min(remaining, key=lambda entry: (
+            _classify_window_priority(entry[1][2], context) if prioritize_safety else 0,
+            -len({m.clip_id for m in entry[1][2]} - covered), entry[0],
+        ))
+        remaining.remove((index, window))
+        ordered.append(window)
+        covered.update(m.clip_id for m in window[2])
+    return ordered
+
+
 def _editorial_session(
     members: Tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
@@ -543,6 +559,7 @@ def _editorial_session(
             local_label="keep",
             local_confidence=0.50,
             evidence=_evidence(member, context),
+            word_texts=tuple(w.text for w in member.words),
         ) for member in members),
         local_confidence=0.50,
         conflict_score=0.50,
@@ -610,6 +627,7 @@ def apply_hybrid_session_cleanup(
             )
             all_windows.append((partition_index, chunk_index, members, session))
 
+    all_windows = _coverage_first_windows(all_windows, context, prioritize_safety=_semantic_compute_planner_enabled(env))
     execution_order = list(range(len(all_windows)))
     plan: SemanticComputePlan | None = None
     # D-094.F2: one settings load for the whole call -- the ledger-parity
@@ -767,6 +785,9 @@ def apply_hybrid_session_cleanup(
                         "confidence": decision.confidence,
                         "reason_code": decision.reason_code,
                         "content_role": decision.content_role,
+                        "recording_confidence": decision.recording_confidence,
+                        "recording_prefix_words": decision.recording_prefix_words,
+                        "recording_suffix_words": decision.recording_suffix_words,
                         "source_identity": recording_source_identity(take),
                         "local_failure_corroborated": corroborated,
                         "local_failure_reasons": list(local_reasons),

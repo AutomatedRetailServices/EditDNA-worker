@@ -39,6 +39,10 @@ def _compact_output_token_ceiling(compact_payload: Mapping[str, Any], requested_
         schema_ceiling = 320
     else:
         schema_ceiling = min(500, 80 + (32 * candidate_count))
+    if any(isinstance(row, Mapping) and row.get("word_texts") for row in raw_candidates):
+        # Optional mixed-boundary evidence needs room, within the existing hard
+        # 500-token and per-edit dollar caps. Planner calls this same function.
+        schema_ceiling = max(schema_ceiling, min(500, 80 + 48 * candidate_count))
     return min(hard_max, schema_ceiling)
 
 

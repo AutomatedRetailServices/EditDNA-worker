@@ -22,6 +22,7 @@ class EditorialCandidate:
     local_label: str
     local_confidence: float
     evidence: tuple[tuple[str, float | str | bool], ...] = ()
+    word_texts: tuple[str, ...] = ()
 
     @property
     def duration_sec(self) -> float:
@@ -49,6 +50,9 @@ class EditorialDecision:
     confidence: float
     reason_code: str
     content_role: str = "uncertain"
+    recording_confidence: float | None = None
+    recording_prefix_words: int = 0
+    recording_suffix_words: int = 0
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,15 @@ def validate_editorial_result(
         content_role = str(decision.content_role)
         if content_role not in {"recording_only", "audience", "mixed", "uncertain"}:
             raise ValueError("editorial judge returned invalid content role")
+        recording_confidence = decision.recording_confidence
+        if recording_confidence is not None and (
+            type(recording_confidence) not in (int, float)
+            or not 0 <= recording_confidence <= 1
+        ):
+            raise ValueError("invalid recording confidence")
+        for count in (decision.recording_prefix_words, decision.recording_suffix_words):
+            if type(count) is not int or count < 0:
+                raise ValueError("invalid recording word count")
         reason_code = str(decision.reason_code or "").strip()[:160]
         normalized.append(EditorialDecision(
             clip_id=decision.clip_id,
@@ -123,6 +136,9 @@ def validate_editorial_result(
             confidence=confidence,
             reason_code=reason_code,
             content_role=content_role,
+            recording_confidence=recording_confidence,
+            recording_prefix_words=decision.recording_prefix_words,
+            recording_suffix_words=decision.recording_suffix_words,
         ))
         seen.add(decision.clip_id)
 

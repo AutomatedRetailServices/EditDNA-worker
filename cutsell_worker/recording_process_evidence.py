@@ -13,6 +13,11 @@ def identity(clip):
             'end': float(clip.end), 'text_sha256': hashlib.sha256(clip.text.encode()).hexdigest()}
 
 
+def _recording_confidence(row):
+    value = row.get('recording_confidence')
+    return row.get('confidence') if value is None else value
+
+
 def recording_process_proofs(windows):
     by_id = {}
     for window in windows:
@@ -22,8 +27,8 @@ def recording_process_proofs(windows):
     for cid, rows in by_id.items():
         if not all(r.get('content_role') == 'recording_only'
                    and r.get('label') in {'bts', 'failed'}
-                   and type(r.get('confidence')) in (int, float)
-                   and math.isfinite(r['confidence']) and .95 <= r['confidence'] <= 1
+                   and type(_recording_confidence(r)) in (int, float)
+                   and math.isfinite(_recording_confidence(r)) and .95 <= _recording_confidence(r) <= 1
                    and r.get('local_failure_corroborated') is True
                    and isinstance(r.get('source_identity'), dict) for r in rows):
             continue
@@ -31,7 +36,7 @@ def recording_process_proofs(windows):
         if not all(r['source_identity'] == bound for r in rows):
             continue
         proofs[cid] = {**bound, 'basis': 'corroborated_recording_only',
-                       'confidence': min(r['confidence'] for r in rows), 'window_count': len(rows)}
+                       'confidence': min(_recording_confidence(r) for r in rows), 'window_count': len(rows)}
     return proofs
 
 

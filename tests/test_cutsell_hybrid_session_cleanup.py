@@ -107,8 +107,10 @@ def test_long_creator_partition_uses_overlapping_story_windows():
     assert [len(session.candidates) for session in judge.sessions] == [10, 10, 10, 10]
     windows = [[candidate.clip_id for candidate in session.candidates] for session in judge.sessions]
     assert windows[0] == [f"clip-{index}" for index in range(10)]
-    assert windows[1] == [f"clip-{index}" for index in range(5, 15)]
-    assert windows[-1] == [f"clip-{index}" for index in range(15, 25)]
+    assert windows[1] == [f"clip-{index}" for index in range(10, 20)]
+    assert windows[2] == [f"clip-{index}" for index in range(15, 25)]
+    assert len(set().union(*(set(w) for w in windows[:3]))) == 25
+    assert windows[-1] == [f"clip-{index}" for index in range(5, 15)]
     assert result.requested_chunk_count == 4
     assert result.available_chunk_count == 4
     # D-081: "bts" at 0.99 confidence with NO local corroboration is a pure

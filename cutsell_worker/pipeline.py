@@ -1813,12 +1813,23 @@ def build_flow_b_draft(
         whole_video_context,
         editorial_judge,
     )
-    # Pass 1: deterministic/local cleanup remains the backbone and removes obvious
-    # recording garbage before optional semantic reasoning spends anything.
-    kept, deterministic_discarded, decisions = apply_clean_cut(hybrid_cleanup.kept, whole_video_context)
+    # Clean Cut consumes exact, corroborated word-boundary evidence after the
+    # complete candidate pool has been classified. No extra semantic calls.
+    from .recording_process_trim import apply_recording_process_trims
+    trim_kept, trim_discarded, trim_proofs, trim_diagnostics = apply_recording_process_trims(
+        hybrid_cleanup.kept, hybrid_cleanup.diagnostics, whole_video_context,
+    )
+    if trim_proofs:
+        from dataclasses import replace as replace_cleanup
+        hybrid_cleanup = replace_cleanup(hybrid_cleanup, diagnostics=(
+            *hybrid_cleanup.diagnostics,
+            {"stage": "recording_boundary_trim", "decisions": list(trim_proofs)},
+        ))
+    kept, deterministic_discarded, decisions = apply_clean_cut(trim_kept, whole_video_context)
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
     kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
-    discarded = tuple(deterministic_discarded) + tuple(provider_discarded)
+    discarded = tuple(deterministic_discarded) + tuple(provider_discarded) + trim_discarded
+    clean_judge_diagnostics = (*clean_judge_diagnostics, *trim_diagnostics)
 
     for item in clean_judge_diagnostics:
         if not item.get("applied_mixed_trim"):
@@ -3172,6 +3183,11 @@ def build_flow_b_draft(
             "hybrid_editorial_deleted_count": len(hybrid_cleanup.deleted),
             "hybrid_editorial_semantic_decision_count": len(hybrid_cleanup.semantic_decisions),
             "hybrid_editorial_chunks": list(hybrid_cleanup.diagnostics)[:100],
+            "hybrid_editorial_unclassified_ids": sorted(
+                {cid for window in hybrid_cleanup.diagnostics for cid in window.get("member_ids", ())}
+                - {row["clip_id"] for window in hybrid_cleanup.diagnostics
+                   for row in window.get("decisions", ())}
+            ),
             # D-094.F2: explicit, counted starvation evidence (runs 33960713625 /
             # 33969388042: 2 of 6 planned P1 retry-equivalence windows refused
             # by the $0.0075 per-edit ledger, silently fail-open before this).

@@ -53,16 +53,22 @@ class TransportEditorialJudge:
         if not isinstance(raw_decisions, (list, tuple)):
             raise ValueError("hybrid provider response missing decisions array")
 
+        exposed_words = {row["clip_id"]: row.get("word_texts", []) for row in payload["candidates"]}
         decisions = []
         for item in raw_decisions:
             if not isinstance(item, Mapping):
                 raise ValueError("hybrid provider decision must be an object")
+            if (item.get("recording_prefix_words", 0) or item.get("recording_suffix_words", 0)) and not exposed_words.get(str(item.get("clip_id") or "")):
+                raise ValueError("recording trim requires untruncated aligned words in payload")
             decisions.append(EditorialDecision(
                 clip_id=str(item.get("clip_id") or ""),
                 label=str(item.get("label") or ""),
                 confidence=float(item.get("confidence", -1.0)),
                 reason_code=str(item.get("reason_code") or ""),
                 content_role=str(item.get("content_role") or "uncertain"),
+                recording_confidence=item.get("recording_confidence"),
+                recording_prefix_words=item.get("recording_prefix_words", 0),
+                recording_suffix_words=item.get("recording_suffix_words", 0),
             ))
 
         output_tokens = int(raw.get("output_tokens") or 0)
