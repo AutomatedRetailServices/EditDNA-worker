@@ -48,7 +48,8 @@ def test_schema_constrains_labels_confidence_omits_echoed_ids_and_never_bounds_c
     assert "winner" in item["properties"]["label"]["enum"]
     assert item["properties"]["confidence"]["minimum"] == 0.0
     assert item["properties"]["confidence"]["maximum"] == 1.0
-    assert item["required"] == ["label", "confidence"]
+    assert item["required"] == ["label", "confidence", "content_role"]
+    assert "mixed" in item["properties"]["content_role"]["enum"]
     assert "clip_id" not in item["properties"]
     assert "reason_code" not in item["properties"]
     assert item["additionalProperties"] is False

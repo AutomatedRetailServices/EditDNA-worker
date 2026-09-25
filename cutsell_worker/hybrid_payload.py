@@ -114,6 +114,7 @@ def _rules(cleanup_task: bool) -> list[str]:
         "use source_context only to understand the full message/story; label candidates only",
         "judge completeness, retry intent, speech structure, and visual/performance evidence together",
         "preserve unique coherent audience-facing information; use uncertain if evidence is insufficient",
+        "return content_role: recording_only for wholly production self-talk, audience for intended delivery including humor, mixed for both, uncertain when unclear; failed delivery alone does not mean recording_only",
     ]
     if cleanup_task:
         return common + [

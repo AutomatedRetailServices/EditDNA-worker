@@ -829,8 +829,17 @@ def _lost_semantic_atoms(
         return f"latom_{clip_id}_{ordinal}"
 
     findings: list[dict] = []
+    from .recording_process_evidence import recording_process_proofs, proof_for_clip
+    recording_proofs = recording_process_proofs((draft.diagnostics or {}).get("hybrid_editorial_chunks", ()))
     for clip in draft.discarded:
         text = str(clip.text or "")
+        process_proof = proof_for_clip(clip, recording_proofs)
+        if process_proof:
+            findings.append({"clip_id": clip.clip_id, "text": text[:200],
+                "classification": "RECORDING_PROCESS_ONLY_REMOVED", "blocking": False,
+                "recording_process_proof": process_proof,
+                "lost_atom_provenance_id": _mint_lost_atom_provenance_id(clip.clip_id)})
+            continue
         if clip.clip_id in no_usable_clip_ids:
             # D-097.B: content of a family with no usable realization -- lost
             # by decision, recorded (never silent), never a Freeze block.

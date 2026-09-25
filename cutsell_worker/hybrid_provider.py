@@ -62,6 +62,7 @@ class TransportEditorialJudge:
                 label=str(item.get("label") or ""),
                 confidence=float(item.get("confidence", -1.0)),
                 reason_code=str(item.get("reason_code") or ""),
+                content_role=str(item.get("content_role") or "uncertain"),
             ))
 
         output_tokens = int(raw.get("output_tokens") or 0)

@@ -1201,6 +1201,7 @@ def _semantic_best_take(
     terminal_confidence_out: dict | None = None,
     complete_window_winner_conflict_ids: frozenset[str] | None = None,
     contextual_bts_evidence_ids: frozenset[str] = frozenset(),
+    recording_process_proofs: Mapping[str, object] | None = None,
 ) -> tuple[str | None, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
 
@@ -1394,6 +1395,9 @@ def _semantic_best_take(
         # Lost BY DECISION (recorded as no_usable_realization), never a
         # label-only drop: without the deterministic evidence it is kept.
         only_id = member_ids[0]
+        from .recording_process_evidence import proof_for_clip
+        if proof_for_clip(members[0], recording_process_proofs or {}):
+            return None, None, "single_bts_unusable"
         label, confidence = semantic_decisions.get(only_id, ("", 0.0))
         if (
             label == "bts"
@@ -1792,9 +1796,26 @@ def build_flow_b_draft(
     global_editorial_handoff["editorial_provider_present"] = editorial_judge is not None
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
+    # Classify the complete candidate pool before deterministic discards.
+    kept = take_tuple
+
+    # Pass 2: batch semantic intent by bounded creator mini-session. This catches BTS,
+    # self-review and failed attempts with context while avoiding one paid call for every
+    # singleton/retry group. Semantic winner/alternate evidence is retained for Pass 3.
+    #
+    # CompositeResolver (composite_resolver.py, see D-023): the single, directly-
+    # callable authority for delivery restoration/rescue/composite marking. Owns
+    # what used to be 14 separately-monkeypatched hybrid_* authorities layered
+    # onto this one call, in the same order, same algorithms -- now one explicit
+    # composition instead of an implicit import-time chain.
+    hybrid_cleanup, composite_split_ids = apply_composite_resolution(
+        kept,
+        whole_video_context,
+        editorial_judge,
+    )
     # Pass 1: deterministic/local cleanup remains the backbone and removes obvious
     # recording garbage before optional semantic reasoning spends anything.
-    kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple, whole_video_context)
+    kept, deterministic_discarded, decisions = apply_clean_cut(hybrid_cleanup.kept, whole_video_context)
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
     kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
     discarded = tuple(deterministic_discarded) + tuple(provider_discarded)
@@ -1813,21 +1834,6 @@ def build_flow_b_draft(
                     str(child_id), parent_label.role, parent_label.confidence, parent_label.reason
                 )
 
-    # Pass 2: batch semantic intent by bounded creator mini-session. This catches BTS,
-    # self-review and failed attempts with context while avoiding one paid call for every
-    # singleton/retry group. Semantic winner/alternate evidence is retained for Pass 3.
-    #
-    # CompositeResolver (composite_resolver.py, see D-023): the single, directly-
-    # callable authority for delivery restoration/rescue/composite marking. Owns
-    # what used to be 14 separately-monkeypatched hybrid_* authorities layered
-    # onto this one call, in the same order, same algorithms -- now one explicit
-    # composition instead of an implicit import-time chain.
-    hybrid_cleanup, composite_split_ids = apply_composite_resolution(
-        kept,
-        whole_video_context,
-        editorial_judge,
-    )
-    kept = hybrid_cleanup.kept
     discarded = (*discarded, *hybrid_cleanup.deleted)
     hybrid_semantic_decisions = {
         clip_id: (label, float(confidence))
@@ -1865,6 +1871,8 @@ def build_flow_b_draft(
     # unusability: it is authorized only for consistent BTS singletons.
     from .contextual_bts_evidence import contextual_bts_ids
     hybrid_contextual_bts_ids = contextual_bts_ids(hybrid_cleanup.diagnostics)
+    from .recording_process_evidence import recording_process_proofs as build_recording_process_proofs
+    process_proofs = build_recording_process_proofs(hybrid_cleanup.diagnostics)
 
     # D-050D1: `realization_id` is minted once, above, before Pass 1 even
     # starts -- every member of `kept` here already carries it (see the
@@ -2150,6 +2158,7 @@ def build_flow_b_draft(
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
             contextual_bts_evidence_ids=hybrid_contextual_bts_ids,
+            recording_process_proofs=process_proofs,
         )
         # D-150 (Phase B; docs/CUTSELL_DECISIONS.md D-150): the ONE narrow
         # authority gate over `_semantic_best_take`'s `single_semantic_
@@ -2228,6 +2237,7 @@ def build_flow_b_draft(
             deterministic_unusable=deterministic_unusable,
             case_b_evidence_by_id=case_b_evidence_objects,
             contextual_bts_evidence_ids=hybrid_contextual_bts_ids,
+            recording_process_proofs=process_proofs,
             semantic_comparative_authority=effective_gate_status,
             terminal_confidence_out=_terminal_confidence_out,
             complete_window_winner_conflict_ids=effective_conflict_ids,
@@ -3323,6 +3333,7 @@ def build_flow_b_draft(
             # authority, never read by Family/BestTake/D-191/Boundary/
             # Pacing/Renderer.
             "whole_video_editorial_reasoning": whole_video_editorial_reasoning_summary,
+            "recording_process_evidence": {"proofs": process_proofs, "proof_count": len(process_proofs)},
             "global_editorial_handoff": global_editorial_handoff,
             "watch_listen_runtime": runtime_diagnostics(),
             # D-208 (docs/CUTSELL_DECISIONS.md D-208): Ordering Live

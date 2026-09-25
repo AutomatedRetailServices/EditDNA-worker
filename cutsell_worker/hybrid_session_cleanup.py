@@ -18,6 +18,8 @@ Semantic Ledger preservation), which alone decide whether it survives.
 """
 from __future__ import annotations
 
+from .recording_process_evidence import identity as recording_source_identity
+
 from contextvars import ContextVar
 from dataclasses import dataclass
 import hashlib
@@ -764,6 +766,8 @@ def apply_hybrid_session_cleanup(
                         "label": decision.label,
                         "confidence": decision.confidence,
                         "reason_code": decision.reason_code,
+                        "content_role": decision.content_role,
+                        "source_identity": recording_source_identity(take),
                         "local_failure_corroborated": corroborated,
                         "local_failure_reasons": list(local_reasons),
                         "later_retry_replacement_id": replacement.clip_id if replacement is not None else None,

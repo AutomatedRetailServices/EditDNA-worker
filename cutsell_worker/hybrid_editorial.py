@@ -48,6 +48,7 @@ class EditorialDecision:
     label: str
     confidence: float
     reason_code: str
+    content_role: str = "uncertain"
 
 
 @dataclass(frozen=True)
@@ -112,12 +113,16 @@ def validate_editorial_result(
         confidence = float(decision.confidence)
         if not 0.0 <= confidence <= 1.0:
             raise ValueError("editorial judge confidence outside 0..1")
+        content_role = str(decision.content_role)
+        if content_role not in {"recording_only", "audience", "mixed", "uncertain"}:
+            raise ValueError("editorial judge returned invalid content role")
         reason_code = str(decision.reason_code or "").strip()[:160]
         normalized.append(EditorialDecision(
             clip_id=decision.clip_id,
             label=label,
             confidence=confidence,
             reason_code=reason_code,
+            content_role=content_role,
         ))
         seen.add(decision.clip_id)
 

@@ -80540,3 +80540,38 @@ Base ASR only exposes detected language as metadata. One new paid Video00 run
 authorized; previous Medium run remains the comparator, not controlled ASR replay.
 36 targeted adapter/GPT/transport tests passed; no claim of live alignment or
 editorial improvement until real evidence. No production deployment.
+
+
+## 2026-09-25 — Recording-process evidence shared by cleanup and validation
+
+Observed MOV run 36105019864: a failed singleton containing preparation stayed
+selected; three pre-group discards blocked Freeze as UNIQUE_FACT_LOST with
+missing_identity. Inspection shows missing_identity is an incidental-omission
+permit denial, not proof that stamping arbitrary idea IDs would solve the case.
+No canonical identities are invented and no general preservation guard is disabled.
+
+The bounded existing Hybrid classifier now sees the whole candidate pool before
+local destructive cleanup. The same existing budget limits remain unchanged;
+more candidates can consume that budget or be deferred, never silently expand it.
+Its version-compatible decision contract adds content_role (recording_only,
+audience, mixed, uncertain), default uncertain for old/provider-missing evidence.
+Google's structured schema and both transport/validation layers retain that field.
+Model label failed alone never means recording_only; intended humor, quotations,
+rhetorical questions, mixed clips and unique audience facts stay protected.
+
+Every window must agree on recording_only plus failed/BTS at confidence >= .95
+and deterministic local failure corroboration. A proof is bound to exact clip ID,
+source ID, start/end and text SHA256; it cannot authorize a changed/derived clip.
+Singleton BestTake consumes it at the existing single_bts_unusable authority;
+StoryValidator independently rebuilds the same proof and records a nonblocking
+RECORDING_PROCESS_ONLY_REMOVED finding for an exact discarded match. Other loss
+checks and incidental/critical-content guards are unchanged. Mixed spans do not
+receive this exemption. No phrase lists, source timestamps or video-specific rules.
+
+Validation: 181 targeted tests passed (22 new evidence/authority/validator tests,
+existing D-081/D-082, composite, hybrid transport, critical facts, universal clean,
+and automatic Watch/Listen). Includes real mocked pipeline classification-before-
+cleanup and source-bound proof propagation. Historical diagnostics lack the new
+role and deliberately remain fail-closed; they cannot establish a repaired video.
+No paid run/render or production promotion. Live editorial acceptance and residual
+mixed-content failures remain unverified, requiring new inference evidence.
