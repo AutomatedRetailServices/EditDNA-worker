@@ -1290,3 +1290,15 @@ Base ASR only exposes detected language as metadata. One new paid Video00 run
 authorized; previous Medium run remains the comparator, not controlled ASR replay.
 36 targeted adapter/GPT/transport tests passed; no claim of live alignment or
 editorial improvement until real evidence. No production deployment.
+
+
+## 2026-09-25 Medium + WhisperX live outcome
+
+Run 36100898847 completed: real WhisperX 3.8.6 alignment passed on 619 words /
+54 segments, with no interpolation/fallback and one per-job cache hit. Output
+150.367 s / 24 segments. Technical PASS but perceptual FAIL, delivery blocked
+for source-mapped reset debris near 99.33 s. Editorial 6/11 versus prior Medium
+4/11, Gold 16/18. Failed attempt and repeated closing remain; passing a forbidden
+whole-take criterion does not exclude a dangling fragment from that take.
+No editorial acceptance or causal improvement claim. Details:
+CUTSELL_VIDEO00_MEDIUM_WHISPERX_RESULT.md. Workflow restored manual-only.
