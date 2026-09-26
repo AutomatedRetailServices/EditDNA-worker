@@ -1,0 +1,195 @@
+from cutsell_worker.contracts import CandidateTake
+from cutsell_worker.failed_retry_coverage_bridge import failed_retry_coverage_pairs
+from cutsell_worker.semantic_idea_equivalence import IdeaEquivalenceDecision, IdeaEquivalenceResult
+from cutsell_worker.take_grouping_provider import reconcile_semantic_idea_equivalence
+
+
+def take(cid, text, start, end, *, complete=True, source="src"):
+    return CandidateTake(cid, source, 0, start, end, text, complete_idea=complete)
+
+
+FAILED_TEXT = (
+    "different salons gave me foot fungus and I recommend this treatment "
+    "wait dad I am recording a video for a friend"
+)
+CLEAN_TEXT = (
+    "different salons can give you foot fungus so I recommend this treatment "
+    "and here is how to use it"
+)
+
+
+def row(cid, **overrides):
+    base = {
+        "clip_id": cid,
+        "label": "failed",
+        "proposed_label": "failed",
+        "confidence": 0.95,
+        "semantic_delete_recommended": True,
+        "local_failure_corroborated": True,
+        "dense_semantic_failure_cluster": True,
+        "recording_word_ranges": [],
+    }
+    base.update(overrides)
+    return base
+
+
+class CoverageArbiter:
+    def __init__(self, *, confidence=0.95, conflict=False, left_covered=True, same_idea=False):
+        self.confidence = confidence
+        self.conflict = conflict
+        self.left_covered = left_covered
+        self.same_idea = same_idea
+        self.last_request = None
+
+    def check(self, request):
+        self.last_request = request
+        return IdeaEquivalenceResult(
+            decisions=tuple(
+                IdeaEquivalenceDecision(
+                    pair_index=index,
+                    same_idea=self.same_idea,
+                    confidence=self.confidence,
+                    reason="failed delivery is covered by the later clean realization",
+                    meaning_conflict=self.conflict,
+                    left_covered_by_right=self.left_covered,
+                    right_covered_by_left=False,
+                )
+                for index, _ in enumerate(request.pairs)
+            ),
+            provider="fake",
+            model="fake",
+            requested=True,
+            available=True,
+        )
+
+
+def evidence():
+    return ({"decisions": [
+        row("failed"),
+        row(
+            "clean",
+            label="uncertain",
+            proposed_label="winner",
+            semantic_delete_recommended=False,
+            local_failure_corroborated=False,
+            dense_semantic_failure_cluster=False,
+        ),
+    ]},)
+
+
+def test_strong_failed_take_and_later_proposed_winner_become_comparison_pair():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    pairs = failed_retry_coverage_pairs(
+        (failed, clean), evidence(), partition_by_id={"failed": 0, "clean": 0},
+    )
+    assert pairs == frozenset({("failed", "clean")})
+
+
+def test_pair_requires_consistent_failure_and_same_session():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    inconsistent = (*evidence(), {"decisions": [row(
+        "failed", label="keep", proposed_label="keep",
+        semantic_delete_recommended=False,
+    )]})
+    assert not failed_retry_coverage_pairs(
+        (failed, clean), inconsistent, partition_by_id={"failed": 0, "clean": 0},
+    )
+    assert not failed_retry_coverage_pairs(
+        (failed, clean), evidence(), partition_by_id={"failed": 0, "clean": 1},
+    )
+
+
+def test_original_recorded_partition_cannot_be_erased_by_reduced_pool_repartitioning():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    windows = (
+        {"partition_index": 0, "member_ids": ["failed"], "decisions": [row("failed")]},
+        {"partition_index": 1, "member_ids": ["clean"], "decisions": [row(
+            "clean", label="uncertain", proposed_label="winner",
+            semantic_delete_recommended=False,
+            local_failure_corroborated=False,
+            dense_semantic_failure_cluster=False,
+        )]},
+    )
+    assert not failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    )
+
+
+def test_recording_prefix_or_suffix_blocks_proposed_winner_eligibility():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    for field in ("recording_prefix_words", "recording_suffix_words"):
+        windows = ({"decisions": [
+            row("failed"),
+            row(
+                "clean", label="uncertain", proposed_label="winner",
+                semantic_delete_recommended=False,
+                local_failure_corroborated=False,
+                dense_semantic_failure_cluster=False,
+                **{field: 5},
+            ),
+        ]},)
+        assert not failed_retry_coverage_pairs(
+            (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+        )
+
+
+def test_directional_coverage_can_bridge_beyond_normal_time_window():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    arbiter = CoverageArbiter()
+    merged, diagnostics = reconcile_semantic_idea_equivalence(
+        (("failed",), ("clean",)),
+        (failed, clean),
+        arbiter,
+        failed_retry_coverage_pairs=frozenset({("failed", "clean")}),
+    )
+    assert merged == (("failed", "clean"),)
+    assert diagnostics["failed_retry_coverage_pair_count"] == 1
+    assert diagnostics["merges"][0]["accepted_by"] == "failed_attempt_directional_coverage"
+
+
+def test_directional_bridge_fails_closed_on_conflict_low_confidence_or_missing_coverage():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    for arbiter in (
+        CoverageArbiter(conflict=True),
+        CoverageArbiter(conflict=True, same_idea=True),
+        CoverageArbiter(confidence=0.94),
+        CoverageArbiter(left_covered=False),
+    ):
+        merged, diagnostics = reconcile_semantic_idea_equivalence(
+            (("failed",), ("clean",)),
+            (failed, clean),
+            arbiter,
+            failed_retry_coverage_pairs=frozenset({("failed", "clean")}),
+        )
+        assert merged == (("failed",), ("clean",))
+        assert diagnostics["merged_pair_count"] == 0
+
+
+def test_unlisted_pair_does_not_gain_directional_coverage_authority():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 20, 35)
+    merged, _ = reconcile_semantic_idea_equivalence(
+        (("failed",), ("clean",)), (failed, clean), CoverageArbiter(),
+    )
+    assert merged == (("failed",), ("clean",))
+
+
+def test_listed_pair_cannot_bypass_coverage_through_deterministic_restart_fast_path():
+    text = "this exact complete product statement is repeated word for word"
+    failed = take("failed", text, 0, 10)
+    clean = take("clean", text, 50, 65)
+    merged, diagnostics = reconcile_semantic_idea_equivalence(
+        (("failed",), ("clean",)),
+        (failed, clean),
+        CoverageArbiter(conflict=True, left_covered=False, same_idea=True),
+        failed_retry_coverage_pairs=frozenset({("failed", "clean")}),
+    )
+    assert merged == (("failed",), ("clean",))
+    assert diagnostics["merged_pair_count"] == 0
+    assert diagnostics["restart_evidence_merges"] == []
