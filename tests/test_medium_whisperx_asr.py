@@ -77,10 +77,30 @@ def test_impossible_duplicate_microtail_is_dropped_before_alignment():
                         'reason': 'degenerate_duplicate_tail'}]
 
 
+def test_impossible_duplicate_microtail_after_terminal_silence_is_dropped():
+    complete = TranscriptSegment('source', 356.71, 361.55,
+        'Por eso cuídate, alimentate bien, hídrate y haz ejercicio.', ())
+    phantom = TranscriptSegment('source', 366.88, 366.90, complete.text, ())
+    kept, dropped = mw._drop_degenerate_duplicate_tail((complete, phantom))
+    assert kept == (complete,)
+    assert dropped == [{'start': 366.88, 'end': 366.90,
+                        'reason': 'degenerate_duplicate_tail'}]
+
+
+def test_duplicate_microsegment_is_not_dropped_when_it_is_not_the_source_tail():
+    repeated = 'Por eso cuídate, alimentate bien, hídrate y haz ejercicio.'
+    complete = TranscriptSegment('source', 10.0, 15.0, repeated, ())
+    micro = TranscriptSegment('source', 20.0, 20.02, repeated, ())
+    later = TranscriptSegment('source', 21.0, 24.0, 'Una idea posterior válida.', ())
+    kept, dropped = mw._drop_degenerate_duplicate_tail((complete, micro, later))
+    assert kept == (complete, micro, later)
+    assert dropped == []
+
+
 @pytest.mark.parametrize('start,end,text', [
     (362.05, 362.20, 'Por eso cuídate, alimentate bien, hidrata y haz ejercicio.'),
     (362.05, 362.07, 'Una idea nueva que debe conservarse.'),
-    (363.00, 363.02, 'Por eso cuídate, alimentate bien, hidrata y haz ejercicio.'),
+    (377.00, 377.02, 'Por eso cuídate, alimentate bien, hidrata y haz ejercicio.'),
 ])
 def test_distinct_or_plausible_tail_remains_strictly_aligned(start,end,text):
     complete = TranscriptSegment('source', 356.21, 361.61,
