@@ -1,8 +1,12 @@
+from dataclasses import replace
+
 from cutsell_worker.contracts import CandidateTake, DraftClip, DraftTimeline, EditStrategy, MediaSignals, Word
 from cutsell_worker.final_delivery_integrity import (
     collapse_overlapping_contained_deliveries,
 )
 from cutsell_worker.selection_conflicted_bridge_guard import apply_selection_conflicted_bridge_guard
+from cutsell_worker.semantic_ledger import build_semantic_ledger_shadow
+from cutsell_worker.realization_resolver import resolve_realizations_shadow
 
 
 def _take(clip_id, start, end, text, *, complete=True, source="src"):
@@ -131,3 +135,36 @@ def test_run47_final_guard_resolves_cross_family_debris_without_video_specific_r
         "missing_positive_continuation_bridge_restored",
         "later_continuation_chain_repeats_nearby_critical_claim",
     } <= reasons
+
+
+def test_final_membership_winner_is_not_resurrected_by_authoritative_resolver():
+    bad = _draft_clip("bad", 10.0, 15.0, "Nunca hicimos el chequeo porque cada año hacía dos estados.")
+    good = _draft_clip(
+        "good", 18.0, 26.0,
+        "Nunca hicimos el chequeo porque los exámenes indicaban que funcionaba perfectamente.",
+        selected=False,
+    )
+    bad = replace(bad, realization_id="real_bad", semantic_idea_id="idea_retry")
+    good = replace(good, realization_id="real_good", semantic_idea_id="idea_retry")
+    draft = DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        (good,), (), (bad,),
+        {
+            "selection_conflicted_bridge_guard": [{
+                "clip_id": "bad",
+                "winner_clip_id": "good",
+                "reason": "deterministic_retry_final_membership_resolution",
+            }],
+            "take_group_members": [["bad", "good"]],
+            "take_judge_groups": [{
+                "ranked": [{"clip_id": "bad", "score": 0.9}, {"clip_id": "good", "score": 0.8}],
+                "local_selected_clip_id": "bad",
+                "selected_clip_id": "bad",
+                "semantic_override_applied": True,
+                "semantic_candidates": [{"clip_id": "bad", "confidence": 0.95}],
+            }],
+        },
+    )
+    ledger = build_semantic_ledger_shadow(draft)
+    resolution = resolve_realizations_shadow(ledger).idea_resolutions["idea_retry"]
+    assert resolution.winner_realization_id == "real_good"
