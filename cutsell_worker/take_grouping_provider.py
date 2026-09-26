@@ -1742,7 +1742,7 @@ class _RetryEdge:
     every semantic edge, per D-085 Section 2's precedence order)."""
     left_id: str
     right_id: str
-    evidence: str  # "deterministic" | "semantic"
+    evidence: str  # "deterministic" | "directional_coverage" | "semantic"
     confidence: float
     reason: str
 
@@ -1751,7 +1751,7 @@ def _edge_sort_key(edge: _RetryEdge) -> tuple:
     """D-085 Section 2: deterministic edges first, then semantic edges by
     descending confidence, then a stable clip-id tie-break -- independent of
     whatever order `edges` was originally built in."""
-    evidence_rank = 0 if edge.evidence == "deterministic" else 1
+    evidence_rank = {"deterministic": 0, "directional_coverage": 1}.get(edge.evidence, 2)
     return (evidence_rank, -edge.confidence, edge.left_id, edge.right_id)
 
 
@@ -2582,6 +2582,52 @@ def _bridge_aware_components(
                 "conflicting_pair": [left_id, right_id],
             })
             continue
+        # D-301: the upstream failed-attempt resolver has already proved an
+        # *exact*, directional relation: one abandoned attempt's proposition
+        # is covered by a later complete delivery, with no meaning conflict.
+        # Do not replace that pair-specific verdict with a second question
+        # about the synthetic text of the whole component.  That re-ask made
+        # Yaskira05 split the failed 58--64 s attempt back out of the family
+        # even though its later delivery had been accepted at 0.95.
+        #
+        # This authority is deliberately narrow: only a singleton may attach
+        # to an existing component; component-to-component joins still need
+        # the normal cohesion proof.  The D-108 explicit non-equivalence veto
+        # above remains first and therefore cannot be bypassed.
+        directional_coverage_cross_conflict = False
+        if edge.evidence == "directional_coverage" and min(len(left_members), len(right_members)) == 1:
+            # The exact covered pair says nothing by itself about the other
+            # members of the receiving component.  Preserve D-085's
+            # deterministic contradiction safety net across *every* cross
+            # pair, including pairs that were never sent to the semantic
+            # arbiter and therefore cannot appear in `blocked_pairs`.
+            from .contradiction_signal import detect_text_contradiction
+            directional_coverage_cross_conflict = any(
+                detect_text_contradiction(take_map[left_id].text, take_map[right_id].text).has_conflict
+                for left_id in left_members for right_id in right_members
+                if left_id in take_map and right_id in take_map
+            )
+        if (
+            edge.evidence == "directional_coverage"
+            and edge.confidence >= 0.95
+            and min(len(left_members), len(right_members)) == 1
+            and not directional_coverage_cross_conflict
+        ):
+            record = {
+                "left_clip_id": edge.left_id, "right_clip_id": edge.right_id,
+                "evidence": edge.evidence,
+                "confidence": round(edge.confidence, 4),
+                "reason": edge.reason, "bridge_sensitive": True,
+                "left_component_members": list(left_members),
+                "right_component_members": list(right_members),
+                "component_cohesion_evaluated": False,
+                "accepted_by": "failed_attempt_directional_coverage",
+                "member_support": [edge.left_id, edge.right_id],
+                "accepted": True,
+            }
+            edge_trace.append(record)
+            union(edge.left_id, edge.right_id)
+            continue
         record = None
         if min(len(left_members), len(right_members)) == 1:
             multi_members = left_members if len(left_members) >= 2 else right_members
@@ -2785,6 +2831,13 @@ def split_incohesive_retry_groups(
             row = {"left_clip_id": left_id, "right_clip_id": right_id,
                    "confidence": round(confidence, 4), "reason": reason,
                    "source": "prior_restart_evidence", "accepted_by": accepted_by}
+        elif accepted_by == "failed_attempt_directional_coverage":
+            edges_by_group[weak_pair_group[(left_id, right_id)]].append(
+                _RetryEdge(left_id, right_id, "directional_coverage", confidence, reason)
+            )
+            row = {"left_clip_id": left_id, "right_clip_id": right_id,
+                   "confidence": round(confidence, 4), "reason": reason,
+                   "source": "prior_directional_coverage", "accepted_by": accepted_by}
         else:
             edges_by_group[weak_pair_group[(left_id, right_id)]].append(
                 _RetryEdge(left_id, right_id, "semantic", confidence, reason)

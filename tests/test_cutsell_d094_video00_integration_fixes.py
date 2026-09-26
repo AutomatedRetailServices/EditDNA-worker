@@ -32,7 +32,12 @@ from cutsell_worker.semantic_idea_equivalence import (
     IdeaEquivalenceResult,
     SemanticEquivalenceGatePolicy,
 )
-from cutsell_worker.take_grouping_provider import _evaluate_bridge_cohesion, _RetryEdge, split_incohesive_retry_groups
+from cutsell_worker.take_grouping_provider import (
+    _bridge_aware_components,
+    _evaluate_bridge_cohesion,
+    _RetryEdge,
+    split_incohesive_retry_groups,
+)
 
 
 def _take(clip_id, start, end, text, complete=True):
@@ -147,6 +152,130 @@ def test_f3_pipeline_passes_reconcile_merges_as_prior_confirmations(monkeypatch)
     rows = [{"left_clip_id": "x", "right_clip_id": "y", "confidence": 0.95, "reason": "same"}]
     prior = {frozenset((r["left_clip_id"], r["right_clip_id"])): (float(r["confidence"]), r["reason"]) for r in rows}
     assert prior[frozenset(("x", "y"))] == (0.95, "same")
+
+
+# ---------------------------------------------------------------------------
+# D-301: exact failed-attempt coverage survives later component cohesion
+# ---------------------------------------------------------------------------
+
+def _coverage_bridge_fixture():
+    takes = (
+        _take("A", 10.0, 14.0, "This backpack can hold", complete=False),
+        _take("B", 20.0, 25.0, "This backpack can hold two laptops and ships tomorrow."),
+        _take("C", 26.0, 30.0, "It has padded straps and a laptop sleeve."),
+        _take("D", 31.0, 35.0, "The warranty is sold separately."),
+    )
+    return takes, {take.clip_id: take for take in takes}
+
+
+def test_d301_directional_coverage_singleton_survives_synthetic_component_decline():
+    takes, take_map = _coverage_bridge_fixture()
+    # B-C forms the existing retry family. A-B is exact directional coverage.
+    # The arbiter deliberately declines the synthetic A <-> (B || C) probe;
+    # that unrelated rephrasing must not erase the already-proven exact pair.
+    arbiter = TableArbiter({})
+    trace = []
+    groups = _bridge_aware_components(
+        ("A", "B", "C"),
+        [
+            _RetryEdge("B", "C", "deterministic", 1.0, "provider_members_compatible"),
+            _RetryEdge("A", "B", "directional_coverage", 0.95,
+                       "the later complete delivery covers the abandoned attempt"),
+        ],
+        protected_ids=frozenset(), take_map=take_map, arbiter=arbiter,
+        policy=SemanticEquivalenceGatePolicy(), edge_trace=trace,
+    )
+    assert len(groups) == 1 and set(groups[0]) == {"A", "B", "C"}
+    accepted = [row for row in trace if row.get("accepted_by") == "failed_attempt_directional_coverage"]
+    assert accepted and accepted[0]["member_support"] == ["A", "B"]
+    assert accepted[0]["component_cohesion_evaluated"] is False
+
+
+def test_d301_ordinary_semantic_prior_still_requires_component_cohesion():
+    takes, _ = _coverage_bridge_fixture()
+    prior = {frozenset(("A", "B")): (0.95, "same topic", "semantic_arbiter")}
+    groups, diag = split_incohesive_retry_groups(
+        (("A", "B", "C"),), takes, TableArbiter({}),
+        prior_confirmations=prior,
+    )
+    assert len(groups) > 1
+    assert not any(row.get("accepted_by") == "failed_attempt_directional_coverage" for row in diag["edge_trace"])
+
+
+def test_d301_directional_coverage_cannot_bypass_explicit_blocked_pair():
+    _, take_map = _coverage_bridge_fixture()
+    edges = [
+        _RetryEdge("B", "C", "deterministic", 1.0, "provider_members_compatible"),
+        _RetryEdge("A", "B", "directional_coverage", 0.95, "covered"),
+    ]
+    trace = []
+    groups = _bridge_aware_components(
+        ("A", "B", "C"), edges, protected_ids=frozenset(), take_map=take_map,
+        arbiter=TableArbiter({}), policy=SemanticEquivalenceGatePolicy(), edge_trace=trace,
+        blocked_pairs=frozenset((frozenset(("A", "C")),)),
+    )
+    assert len(groups) == 2
+    rejected = next(row for row in trace if row.get("reason_rejected") == "cross_component_explicit_non_equivalence")
+    assert set(rejected["conflicting_pair"]) == {"A", "C"}
+
+
+def test_d301_directional_coverage_does_not_join_two_existing_components():
+    _, take_map = _coverage_bridge_fixture()
+    edges = [
+        _RetryEdge("A", "D", "deterministic", 1.0, "provider_members_compatible"),
+        _RetryEdge("B", "C", "deterministic", 1.0, "provider_members_compatible"),
+        _RetryEdge("A", "B", "directional_coverage", 0.95, "covered"),
+    ]
+    trace = []
+    groups = _bridge_aware_components(
+        ("A", "B", "C", "D"), edges, protected_ids=frozenset(), take_map=take_map,
+        arbiter=TableArbiter({}), policy=SemanticEquivalenceGatePolicy(), edge_trace=trace,
+    )
+    assert len(groups) == 2
+    bridge = next(row for row in trace if row["evidence"] == "directional_coverage")
+    assert bridge["component_cohesion_evaluated"] is True and bridge["accepted"] is False
+
+
+def test_d301_low_confidence_directional_label_has_no_special_authority():
+    _, take_map = _coverage_bridge_fixture()
+    trace = []
+    groups = _bridge_aware_components(
+        ("A", "B", "C"),
+        [
+            _RetryEdge("B", "C", "deterministic", 1.0, "provider_members_compatible"),
+            _RetryEdge("A", "B", "directional_coverage", 0.94, "below authority floor"),
+        ],
+        protected_ids=frozenset(), take_map=take_map, arbiter=TableArbiter({}),
+        policy=SemanticEquivalenceGatePolicy(), edge_trace=trace,
+    )
+    assert len(groups) == 2
+    bridge = next(row for row in trace if row["evidence"] == "directional_coverage")
+    assert bridge["accepted"] is False and bridge["component_cohesion_evaluated"] is True
+
+
+def test_d301_unasked_cross_member_contradiction_blocks_shortcut():
+    takes = (
+        _take("A", 10.0, 14.0, "This cream is safe for children", complete=False),
+        _take("B", 20.0, 25.0, "This cream is safe for children and works quickly."),
+        _take("C", 26.0, 30.0, "This cream is not safe for children."),
+    )
+    take_map = {take.clip_id: take for take in takes}
+    trace = []
+    groups = _bridge_aware_components(
+        ("A", "B", "C"),
+        [
+            _RetryEdge("B", "C", "deterministic", 1.0, "provider_members_compatible"),
+            _RetryEdge("A", "B", "directional_coverage", 0.95, "covered exact pair"),
+        ],
+        protected_ids=frozenset(), take_map=take_map, arbiter=TableArbiter({}),
+        policy=SemanticEquivalenceGatePolicy(), edge_trace=trace,
+        # A-C was never semantically queried, so there is no explicit D-108 row.
+        blocked_pairs=frozenset(),
+    )
+    assert len(groups) == 2
+    bridge = next(row for row in trace if row["evidence"] == "directional_coverage")
+    assert bridge["accepted"] is False
+    assert bridge["reason_rejected"] == "cross_component_contradiction"
 
 
 # ---------------------------------------------------------------------------
