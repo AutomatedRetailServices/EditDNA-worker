@@ -230,6 +230,136 @@ def test_authoritative_winner_reflected_in_canonical_edit_plan(monkeypatch):
     assert "canonical_edit_plan_legacy_evidence" in result.draft.diagnostics
 
 
+def test_authoritative_application_cannot_resurrect_a_globally_settled_restart(monkeypatch):
+    earlier = _identity_clip(
+        "earlier", 10.0, 16.0,
+        "The machine worked perfectly last year.",
+        selected=True, semantic_idea_id="idea_restart",
+    )
+    later = _identity_clip(
+        "later", 20.0, 27.5,
+        "The machine worked perfectly throughout last year.",
+        selected=False, semantic_idea_id="idea_restart",
+    )
+    draft = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p1", strategy=EditStrategy.STORYTELLING,
+        selected=(earlier,), alternates=(), discarded=(later,),
+        diagnostics={
+            "semantic_idea_equivalence": {"merges": [{
+                "left_clip_id": "earlier", "right_clip_id": "later",
+                "confidence": 1.0, "accepted_by": "same_opening_restart",
+            }]},
+            "attempt_reconstruction": {"attempts": [
+                {"clip_id": "earlier", "complete_idea": True},
+                {"clip_id": "later", "complete_idea": True},
+            ]},
+            "hybrid_editorial_chunks": [{"decisions": [
+                {"clip_id": "earlier", "label": "winner", "confidence": 0.90},
+                {"clip_id": "later", "label": "keep", "confidence": 0.95},
+            ]}],
+        },
+    )
+
+    result = _run(monkeypatch, draft, env=RESOLVER_MODE_AUTHORITATIVE)
+
+    assert [clip.clip_id for clip in result.draft.selected] == ["later"]
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is False
+    assert result.draft.diagnostics["selection_boundary_contract"]["status"] == "verified"
+
+
+def test_global_reconciliation_is_inside_the_authority_signature(monkeypatch):
+    from cutsell_worker.realization_resolver import (
+        AuthoritativeApplicationResult, AuthoritativeIdeaOutcome,
+    )
+
+    earlier = _identity_clip(
+        "early_take", 10.0, 16.0, "The machine worked perfectly last year.",
+        selected=True, semantic_idea_id="idea_restart", realization_id="real_early",
+    )
+    later = _identity_clip(
+        "later_take", 20.0, 27.5, "The machine worked perfectly throughout last year.",
+        selected=False, semantic_idea_id="idea_restart", realization_id="real_later",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "early_take", "right_clip_id": "later_take",
+            "confidence": 1.0, "accepted_by": "same_opening_restart",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "early_take", "complete_idea": True},
+            {"clip_id": "later_take", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "early_take", "label": "winner", "confidence": 0.90},
+            {"clip_id": "later_take", "label": "keep", "confidence": 0.95},
+        ]}],
+    }
+    draft = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p1", strategy=EditStrategy.STORYTELLING,
+        selected=(earlier,), alternates=(), discarded=(later,), diagnostics=diagnostics,
+    )
+
+    def fake_authority(incoming, ledger, report, **kwargs):
+        # Models the real defect: the per-idea resolver re-elects the earlier
+        # take after the global guard selected the later, fuller retry.
+        resurrected = dataclass_replace(
+            incoming, selected=(earlier,), alternates=(), discarded=(later,),
+        )
+        outcome = AuthoritativeIdeaOutcome(
+            semantic_idea_id="idea_restart", decision_status="RESOLVED_WINNER",
+            winner_realization_id="real_early", composite_realization_ids=(),
+            covered_canonical_claim_ids=(), missing_critical_claim_ids=(),
+            discarded_realization_ids=("real_later",), retained_for_contextual_value=(),
+            decision_reason="synthetic_per_idea_resurrection",
+            legacy_winner_realization_id="real_later", legacy_composite_realization_ids=(),
+            legacy_vs_authoritative_same=False,
+        )
+        return AuthoritativeApplicationResult(
+            draft=resurrected, status="SEMANTICALLY_RESOLVED", idea_outcomes=(outcome,),
+            unresolved_orphan_realization_ids=(),
+        )
+
+    monkeypatch.setattr(universal, "apply_authoritative_realization_resolution", fake_authority)
+    result = _run(monkeypatch, draft, env=RESOLVER_MODE_AUTHORITATIVE)
+
+    assert [clip.clip_id for clip in result.draft.selected] == ["later_take"]
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is False
+    assert result.draft.diagnostics["selection_boundary_contract"]["status"] == "verified"
+
+
+def test_authoritative_application_cannot_resurrect_cross_idea_duplicate(monkeypatch):
+    earlier = _identity_clip(
+        "earlier_duplicate", 10.0, 18.0,
+        "A rash appeared behind my ear and neck.",
+        selected=True, semantic_idea_id="idea_earlier",
+    )
+    later = _identity_clip(
+        "later_winner", 21.0, 28.0,
+        "The rash appeared behind my ear and on my neck.",
+        selected=True, semantic_idea_id="idea_later",
+    )
+    draft = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p1", strategy=EditStrategy.STORYTELLING,
+        selected=(earlier, later), alternates=(), discarded=(),
+        diagnostics={
+            "semantic_idea_equivalence": {"merges": [{
+                "left_clip_id": "earlier_duplicate", "right_clip_id": "later_winner",
+                "confidence": 0.95,
+            }]},
+            "hybrid_editorial_chunks": [{"decisions": [
+                {"clip_id": "earlier_duplicate", "label": "alternate", "confidence": 0.85},
+                {"clip_id": "later_winner", "label": "winner", "confidence": 0.95},
+            ]}],
+        },
+    )
+
+    result = _run(monkeypatch, draft, env=RESOLVER_MODE_AUTHORITATIVE)
+
+    assert [clip.clip_id for clip in result.draft.selected] == ["later_winner"]
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is False
+    assert result.draft.diagnostics["selection_boundary_contract"]["status"] == "verified"
+
+
 def test_review_required_blocks_freeze_and_resolved_idea_permits_it(monkeypatch):
     """REVIEW_REQUIRED (a genuine contradiction, unresolvable) must block
     Freeze; the same shape with the ambiguity removed must NOT."""
