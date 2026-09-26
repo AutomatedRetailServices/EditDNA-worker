@@ -50,6 +50,13 @@ class IdeaEquivalenceDecision:
     # different wording" or "different subject matter") -- never a
     # clip-specific or video-specific rule.
     reason: str = ""
+    # D-292: explicit meaning safety for the SAME bounded pair. Defaults are
+    # conservative/backward-compatible: an older provider response can still
+    # support ordinary same-idea grouping, but can never override a
+    # deterministic contradiction or certify replacement coverage.
+    meaning_conflict: bool = True
+    left_covered_by_right: bool = False
+    right_covered_by_left: bool = False
 
 
 @dataclass(frozen=True)
@@ -129,11 +136,22 @@ def validate_idea_equivalence_result(
         confidence = float(decision.confidence)
         if not 0.0 <= confidence <= 1.0:
             raise ValueError("semantic equivalence confidence outside 0..1")
+        if type(decision.same_idea) is not bool:
+            raise ValueError("semantic equivalence same_idea must be boolean")
+        if type(decision.meaning_conflict) is not bool:
+            raise ValueError("semantic equivalence meaning_conflict must be boolean")
+        if type(decision.left_covered_by_right) is not bool:
+            raise ValueError("semantic equivalence left_covered_by_right must be boolean")
+        if type(decision.right_covered_by_left) is not bool:
+            raise ValueError("semantic equivalence right_covered_by_left must be boolean")
         normalized.append(IdeaEquivalenceDecision(
             pair_index=index,
-            same_idea=bool(decision.same_idea),
+            same_idea=decision.same_idea,
             confidence=confidence,
             reason=str(decision.reason or "")[:200],
+            meaning_conflict=decision.meaning_conflict,
+            left_covered_by_right=decision.left_covered_by_right,
+            right_covered_by_left=decision.right_covered_by_left,
         ))
         seen.add(index)
 
@@ -185,5 +203,21 @@ def same_idea_by_pair_index(result: IdeaEquivalenceResult) -> dict[int, tuple[bo
         return {}
     return {
         decision.pair_index: (decision.same_idea, decision.confidence, decision.reason)
+        for decision in result.decisions
+    }
+
+
+def pair_safety_by_pair_index(
+    result: IdeaEquivalenceResult,
+) -> dict[int, tuple[bool, bool, bool]]:
+    """Fail-closed meaning/coverage lookup for contradiction overrides."""
+    if not result.available:
+        return {}
+    return {
+        decision.pair_index: (
+            decision.meaning_conflict,
+            decision.left_covered_by_right,
+            decision.right_covered_by_left,
+        )
         for decision in result.decisions
     }

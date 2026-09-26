@@ -18,6 +18,7 @@ from .semantic_idea_equivalence import (
     SemanticEquivalenceGatePolicy,
     safe_check_idea_equivalence,
     same_idea_by_pair_index,
+    pair_safety_by_pair_index,
 )
 from .take_grouping import (
     _DISTINCT_ADDITION_MARKERS,
@@ -1731,6 +1732,15 @@ def _evaluate_bridge_cohesion(
     # belong to no chain are judged individually, byte-for-byte as before.
     left_units = _realization_units(tuple(left_members), chain_of or {})
     right_units = _realization_units(tuple(right_members), chain_of or {})
+    component_probe_complete = bool(
+        len(left_units) <= _BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE
+        and len(right_units) <= _BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE
+    )
+    record["component_probe_complete"] = component_probe_complete
+    record["component_probe_omitted_unit_count"] = (
+        max(0, len(left_units) - _BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE)
+        + max(0, len(right_units) - _BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE)
+    )
     left_texts = [_unit_text(unit, take_map) for unit in left_units]
     right_texts = [_unit_text(unit, take_map) for unit in right_units]
     # D-094.F4: the bridge question is whether the LEFT component and the
@@ -1744,13 +1754,12 @@ def _evaluate_bridge_cohesion(
     # hereditary family's truncated fragment "canceres son hereditarios..."
     # contradicted its own full sentence, the bridge to the restatement was
     # rejected, and the restatement was co-kept as a separate family.
-    if any(
+    deterministic_cross_component_conflict = any(
         detect_text_contradiction(left_text, right_text).has_conflict
         for left_text in left_texts for right_text in right_texts
-    ):
+    )
+    if deterministic_cross_component_conflict:
         record["distinct_required_facts"] = ["cross_component_contradiction"]
-        record["reason_rejected"] = "cross_component_contradiction"
-        return False, record
     record["within_component_contradiction"] = bool(
         any_pair_contradicts(left_texts) or any_pair_contradicts(right_texts)
     )
@@ -1764,6 +1773,7 @@ def _evaluate_bridge_cohesion(
     request = IdeaEquivalenceRequest(pairs=(IdeaEquivalencePair(left_text=left_text, right_text=right_text),))
     result = safe_check_idea_equivalence(arbiter, request, policy)
     decision = same_idea_by_pair_index(result).get(0)
+    safety = pair_safety_by_pair_index(result).get(0)
     if decision is None:
         record["reason_rejected"] = "component_arbiter_unavailable_or_declined_fail_closed"
         return False, record
@@ -1771,9 +1781,45 @@ def _evaluate_bridge_cohesion(
     same_retry_family, cohesion_confidence, cohesion_reason = decision
     record["component_cohesion_evaluated"] = True
     record["cohesion_confidence"] = round(cohesion_confidence, 4)
-    if not same_retry_family:
+    if deterministic_cross_component_conflict:
+        # D-292: the lexical negation/number primitive remains the default
+        # safety gate. It may be overridden only by the SAME bounded pair
+        # judgment explicitly answering all three missing semantic questions:
+        # same retry family, no factual conflict, and directional coverage.
+        # Older/malformed/provider-unavailable responses have no `safety`
+        # record and therefore remain blocked byte-for-byte.
+        if safety is None:
+            record["semantic_contradiction_review"] = "unavailable_or_incomplete"
+            record["reason_rejected"] = "cross_component_contradiction"
+            return False, record
+        meaning_conflict, left_covered_by_right, right_covered_by_left = safety
+        record["semantic_meaning_conflict"] = meaning_conflict
+        record["semantic_left_covered_by_right"] = left_covered_by_right
+        record["semantic_right_covered_by_left"] = right_covered_by_left
+        if (
+            not component_probe_complete
+            or not same_retry_family
+            or cohesion_confidence < 0.95
+            or meaning_conflict
+            or not (left_covered_by_right or right_covered_by_left)
+        ):
+            record["semantic_contradiction_review"] = "not_cleared"
+            record["reason_rejected"] = "cross_component_contradiction"
+            return False, record
+        record["deterministic_contradiction_overridden"] = True
+        record["distinct_required_facts"] = []
+    semantic_coverage_clear = bool(
+        component_probe_complete
+        and safety is not None
+        and cohesion_confidence >= 0.95
+        and not safety[0]
+        and (safety[1] or safety[2])
+    )
+    if not same_retry_family and not semantic_coverage_clear:
         record["reason_rejected"] = "component_cohesion_declined"
         return False, record
+    if not same_retry_family and semantic_coverage_clear:
+        record["accepted_by_directional_coverage"] = True
     if cohesion_confidence < _BRIDGE_MIN_COHESION_CONFIDENCE:
         record["reason_rejected"] = "component_cohesion_below_bridge_floor"
         return False, record

@@ -53,6 +53,9 @@ def _worst_case_pair_decision_json_chars() -> int:
     sample = {
         "pair_index": 999,
         "same_idea": False,
+        "meaning_conflict": True,
+        "left_covered_by_right": False,
+        "right_covered_by_left": False,
         "confidence": 0.95,
         "reason": "x" * _REASON_CODES_HINT_MAX_CHARS,
     }
@@ -95,10 +98,17 @@ def _response_schema() -> dict[str, Any]:
                     "properties": {
                         "pair_index": {"type": "integer", "minimum": 0},
                         "same_idea": {"type": "boolean"},
+                        "meaning_conflict": {"type": "boolean"},
+                        "left_covered_by_right": {"type": "boolean"},
+                        "right_covered_by_left": {"type": "boolean"},
                         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                         "reason": {"type": "string"},
                     },
-                    "required": ["pair_index", "same_idea", "confidence", "reason"],
+                    "required": [
+                        "pair_index", "same_idea", "meaning_conflict",
+                        "left_covered_by_right", "right_covered_by_left",
+                        "confidence", "reason",
+                    ],
                     "additionalProperties": False,
                 },
             }
@@ -118,8 +128,11 @@ def build_semantic_equivalence_request(
     prompt = (
         "You are checking whether pairs of spoken deliveries are recording attempts of "
         "the SAME intended idea or message, or two DIFFERENT ideas. You are not selecting "
-        "or ranking anything -- answer only same_idea (true/false) and confidence (0-1) "
-        "for each pair, with one concise general reason (no more than a dozen words, no "
+        "or ranking anything. For each pair answer: same_idea; meaning_conflict (true only "
+        "when the two texts make incompatible factual claims, including a real negation or "
+        "number change); left_covered_by_right (every audience-facing fact from left survives "
+        "in right); right_covered_by_left (the reverse); and confidence (0-1), with one concise "
+        "general reason (no more than a dozen words, no "
         "quoting the input verbatim). "
         "Two texts are the SAME idea if a human editor would consider them competing "
         "recording attempts of one intended statement, even with very different wording, "
@@ -127,6 +140,8 @@ def build_semantic_equivalence_request(
         "if they convey distinct information, topics, or story beats, even if they share "
         "vocabulary. When genuinely uncertain, answer same_idea=false (different) -- "
         "preserving a distinct beat is always safer than merging two unrelated ones. "
+        "For coverage or conflict uncertainty, answer coverage=false and meaning_conflict=true; "
+        "never infer that a vague topic match preserves a specific fact. "
         "Return exactly one decision per pair, in the same order, with pair_index equal to "
         "its zero-based position in that order. Do not echo the input text back. Output "
         "only the requested JSON schema.\n\n"
@@ -225,10 +240,28 @@ class GoogleSemanticEquivalenceArbiter:
                 "semantic equivalence pair_index mismatch (expected sequential "
                 f"0..{len(request.pairs) - 1}, mismatches={mismatches[:5]}, finishReason={finish_reason!r})"
             )
+        boolean_fields = (
+            "same_idea", "meaning_conflict",
+            "left_covered_by_right", "right_covered_by_left",
+        )
+        malformed_booleans = [
+            (i, field)
+            for i, item in enumerate(raw_decisions)
+            for field in boolean_fields
+            if not isinstance(item, Mapping) or type(item.get(field)) is not bool
+        ]
+        if malformed_booleans:
+            raise SemanticEquivalenceUnreliableResponseError(
+                "semantic equivalence decision fields must be booleans "
+                f"(malformed={malformed_booleans[:5]}, finishReason={finish_reason!r})"
+            )
         decisions = [
             IdeaEquivalenceDecision(
                 pair_index=i,
-                same_idea=bool(item.get("same_idea")),
+                same_idea=item["same_idea"],
+                meaning_conflict=item["meaning_conflict"],
+                left_covered_by_right=item["left_covered_by_right"],
+                right_covered_by_left=item["right_covered_by_left"],
                 confidence=float(item.get("confidence", -1.0)),
                 reason=str(item.get("reason") or ""),
             )
