@@ -377,6 +377,15 @@ def process_universal_clean_cut_sources(
                     exact_p1_target_evidence_by_clip_id=_p1_target_lookup_evidence_by_clip_id,
                 ),
             )
+            # Story coherence can conservatively restore a realization while
+            # preserving an idea.  Reconcile again at the final pre-Ledger
+            # selection seam so the Ledger and resolver receive the same
+            # settled global retry/duplicate membership that will later be
+            # signed and frozen.
+            result = replace(
+                result,
+                draft=apply_selection_conflicted_bridge_guard(result.draft),
+            )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
             semantic_status = "clean_cut_core_v1_idea_first"
             reasoner_status_label = "disabled_clean_cut_core_v1"
