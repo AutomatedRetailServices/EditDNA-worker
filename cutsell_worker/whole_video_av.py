@@ -143,7 +143,7 @@ class GeminiWholeVideoAVProvider:
                     reserved_usd=reserved * 2,
                 )
                 try:
-                    raw=self._post('generateContent',generation_body,timeout_sec=120)
+                    raw=self._post('generateContent',generation_body,timeout_sec=300)
                 except Exception as exc:
                     audit.update(
                         status='generation_retry_failed',
@@ -184,7 +184,7 @@ class GeminiWholeVideoAVProvider:
                     reserved_usd=reserved * 2,
                 )
                 try:
-                    raw=self._post('generateContent',generation_body,timeout_sec=120)
+                    raw=self._post('generateContent',generation_body,timeout_sec=300)
                     audit['response'] = captured_response(raw)
                     data = parse_response(audit['response'], source.duration_sec, duration)
                 except Exception as retry_exc:
