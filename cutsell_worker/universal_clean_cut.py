@@ -584,6 +584,19 @@ def process_universal_clean_cut_sources(
                     draft=fold_alternates_into_discarded(authoritative_result.draft),
                 )
 
+            # The resolver may choose a family realization from its canonical
+            # idea model that reopens an already-settled deterministic retry or
+            # duplicate.  Reapply the evidence-only membership settlement at
+            # the authority boundary, before its semantic signature is captured,
+            # so every downstream validation and Freeze operation sees one
+            # coherent authoritative keep set.  This adds no new judgment: it
+            # consumes only retry/equivalence/Hybrid evidence already present
+            # in the resolver input ledger.
+            authoritative_result = replace(
+                authoritative_result,
+                draft=apply_selection_conflicted_bridge_guard(authoritative_result.draft),
+            )
+
             pre_authority_diagnostics = dict(result.draft.diagnostics or {})
             legacy_evidence_keys = (
                 "canonical_edit_plan", "final_edit_reviewer", "repair_loop",

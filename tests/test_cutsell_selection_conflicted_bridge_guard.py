@@ -353,6 +353,39 @@ def test_shared_abandoned_attempt_resolves_short_failed_component_debris():
     assert audit[0]["reason"] == "deterministic_retry_component_failed_debris"
 
 
+def test_retry_component_replaces_orphan_fragment_with_latest_full_delivery():
+    first_full = _clip("first_full", 10.0, 16.5, "I asked my doctor for every available test.")
+    fragment = _clip("fragment", 18.0, 20.2, "I asked my doctor")
+    later_full = _clip(
+        "later_full", 23.0, 29.8,
+        "I changed doctors and asked her to order every test she could imagine.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "first_full", "right_clip_id": "fragment",
+             "confidence": 1.0, "accepted_by": "same_opening_abandoned_start"},
+            {"left_clip_id": "later_full", "right_clip_id": "fragment",
+             "confidence": 1.0, "accepted_by": "same_opening_abandoned_start"},
+        ]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first_full", "complete_idea": True},
+            {"clip_id": "fragment", "complete_idea": True},
+            {"clip_id": "later_full", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first_full", "label": "keep", "confidence": 0.95,
+             "content_role": "audience"},
+            {"clip_id": "fragment", "label": "keep", "confidence": 0.95,
+             "content_role": "audience"},
+        ]}],
+    }
+    move, add, audit = deterministic_retry_resolution(
+        (fragment,), (), (first_full, later_full), diagnostics,
+    )
+    assert move == {"fragment"} and add == {"later_full"}
+    assert audit[0]["reason"] == "deterministic_retry_component_orphan_fragment"
+
+
 def test_selected_suffix_of_confirmed_duplicate_is_removed():
     suffix = _clip("suffix", 18.0, 20.5, "for customers with annual plans.")
     full = _clip("full", 10.0, 20.0, "This offer is for customers with annual plans.")

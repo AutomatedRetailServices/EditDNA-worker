@@ -267,6 +267,39 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
         visited.update(component)
         if component & move:
             continue
+        selected_component_ids = sorted(component & set(selected_by_id))
+        if len(selected_component_ids) == 1:
+            current_id = selected_component_ids[0]
+            current = all_by_id[current_id]
+            current_duration = max(0.0, float(current.end) - float(current.start))
+            complete_peers = [
+                all_by_id[clip_id] for clip_id in component
+                if clip_id != current_id
+                and complete.get(clip_id) is True
+                and _strongest(votes, clip_id, {"alternate", "failed"}) < 0.80
+            ]
+            if complete_peers:
+                maximum_duration = max(float(clip.end) - float(clip.start) for clip in complete_peers)
+                near_fullest = [
+                    clip for clip in complete_peers
+                    if float(clip.end) - float(clip.start) >= 0.90 * maximum_duration
+                ]
+                peer = max(near_fullest, key=lambda clip: (float(clip.start), float(clip.end)))
+                if (
+                    current_duration <= 0.50 * maximum_duration
+                    and _critical(current.text).issubset(_critical(peer.text))
+                ):
+                    move.add(current_id)
+                    add.add(peer.clip_id)
+                    audit.append({
+                        "clip_id": current_id,
+                        "winner_clip_id": peer.clip_id,
+                        "reason": "deterministic_retry_component_orphan_fragment",
+                        "component_clip_ids": sorted(component),
+                        "fragment_duration_sec": round(current_duration, 3),
+                        "winner_duration_sec": round(float(peer.end) - float(peer.start), 3),
+                    })
+                    continue
         winner_ids = [
             clip_id for clip_id in component
             if _strongest(votes, clip_id, {"winner", "keep"}) >= 0.90
@@ -619,7 +652,7 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
         elif (
             confidence >= 0.90
             and right_positive >= 0.90
-            and right_positive - left_positive >= 0.05 - 1e-9
+            and right_positive - left_positive >= 0.02 - 1e-9
             and left_negative < 0.80
             and right_negative < 0.80
         ):
@@ -627,7 +660,7 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
         elif (
             confidence >= 0.90
             and left_positive >= 0.90
-            and left_positive - right_positive >= 0.05 - 1e-9
+            and left_positive - right_positive >= 0.02 - 1e-9
             and left_negative < 0.80
             and right_negative < 0.80
         ):
