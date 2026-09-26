@@ -8,8 +8,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: cutsell-video00-after-y05-${{ github.ref }}
-  cancel-in-progress: true
+  group: cutsell-video00-after-y05-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 jobs:
   compare:
     if: >-
