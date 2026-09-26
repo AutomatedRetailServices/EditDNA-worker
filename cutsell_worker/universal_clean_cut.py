@@ -107,9 +107,10 @@ from .whole_video_analysis import WholeVideoProvider
 
 
 _BTS_SINGLETON_BASIS = "single_bts_unusable"
+_REDUNDANT_FAILED_ATTEMPT_BASIS = "redundant_failed_attempt_family"
 
 
-def derive_story_completeness(take_judge_groups) -> dict:
+def derive_story_completeness(take_judge_groups, *, selected=(), discarded=()) -> dict:
     """D-097.B / D-097.9 (R11): read the Best Take rows that ended with no
     usable realization and decide whether the STORY is incomplete.
 
@@ -123,13 +124,70 @@ def derive_story_completeness(take_judge_groups) -> dict:
         row for row in (take_judge_groups or ())
         if isinstance(row, dict) and row.get("no_usable_realization")
     ]
+    clip_by_id = {clip.clip_id: clip for clip in (*tuple(selected), *tuple(discarded))}
+
+    def redundant_failed_attempt_family(row) -> bool:
+        """A rejected retry family whose function survives in a later KEEP.
+
+        This changes delivery review only; BestTake already removed every
+        member independently.  It is intentionally stricter than topical
+        similarity: every family member must be a high-confidence failed
+        take with local and deterministic unusability evidence, and one
+        member must share a large factual core with a materially fuller,
+        later selected delivery without changing numeric facts.
+        """
+        candidates = row.get("semantic_candidates") or ()
+        usability = row.get("member_usability") or {}
+        member_ids = [str(item.get("clip_id") or "") for item in candidates]
+        if not member_ids or not bool(row.get("all_members_delete_recommended")):
+            return False
+        if not all(
+            str(item.get("label") or "") == "failed"
+            and float(item.get("confidence") or 0.0) >= 0.80
+            and usability.get(str(item.get("clip_id") or ""), {}).get("local_failure_corroborated") is True
+            and usability.get(str(item.get("clip_id") or ""), {}).get("deterministic_unusable") is True
+            for item in candidates
+        ):
+            return False
+        from .hybrid_retry_winner_authority import _content, _numbers
+        for member_id in member_ids:
+            member = clip_by_id.get(member_id)
+            if member is None:
+                continue
+            left = _content(str(member.text or ""))
+            left_numbers = _numbers(str(member.text or ""))
+            for winner in selected:
+                if winner.source_asset_id != member.source_asset_id or winner.start < member.end:
+                    continue
+                right = _content(str(winner.text or ""))
+                shared = left & right
+                right_numbers = _numbers(str(winner.text or ""))
+                numbers_ok = not left_numbers or not right_numbers or left_numbers == right_numbers
+                materially_fuller = bool(
+                    (winner.end - winner.start) >= (member.end - member.start) * 1.35
+                    or len(str(winner.text or "").split()) >= len(str(member.text or "").split()) + 12
+                )
+                if (
+                    numbers_ok and materially_fuller and len(shared) >= 8
+                    and len(shared) / max(1, len(left)) >= 0.30
+                ):
+                    return True
+        return False
+
     bts = [row for row in dropped if row.get("no_usable_realization_basis") == _BTS_SINGLETON_BASIS]
-    ideas = [row for row in dropped if row.get("no_usable_realization_basis") != _BTS_SINGLETON_BASIS]
+    redundant = [row for row in dropped if redundant_failed_attempt_family(row)]
+    redundant_ids = {id(row) for row in redundant}
+    ideas = [
+        row for row in dropped
+        if row.get("no_usable_realization_basis") != _BTS_SINGLETON_BASIS
+        and id(row) not in redundant_ids
+    ]
     return {
         "story_completeness": "incomplete_no_usable_realization" if ideas else "complete",
         "dropped_families": dropped,
         "idea_family_ids": [str(row.get("group_id") or "") for row in ideas],
         "bts_singleton_ids": [str(row.get("group_id") or "") for row in bts],
+        "redundant_failed_attempt_family_ids": [str(row.get("group_id") or "") for row in redundant],
     }
 
 from .watch_listen_runtime import automatic_watch_listen
@@ -1067,7 +1125,9 @@ def process_universal_clean_cut_sources(
     # a corroborated lone `bts` take (D-097.8 R10) is recording-process
     # material whose removal is the product working, not a missing idea.
     story = derive_story_completeness(
-        (getattr(result.draft, "diagnostics", None) or {}).get("take_judge_groups") or ()
+        (getattr(result.draft, "diagnostics", None) or {}).get("take_judge_groups") or (),
+        selected=getattr(result.draft, "selected", ()) or (),
+        discarded=getattr(result.draft, "discarded", ()) or (),
     )
     dropped_families = story["dropped_families"]
     story_completeness = story["story_completeness"]
@@ -1084,6 +1144,9 @@ def process_universal_clean_cut_sources(
             "no_usable_realization_family_ids": [str(row.get("group_id") or "") for row in dropped_families],
             "no_usable_realization_idea_family_ids": story["idea_family_ids"],
             "no_usable_realization_bts_singleton_ids": story["bts_singleton_ids"],
+            "no_usable_realization_redundant_failed_attempt_family_ids": story[
+                "redundant_failed_attempt_family_ids"
+            ],
             "freeze_blocked_pending_coherence_review": freeze_blocked,
             "post_authority_integrity_failure": post_authority_integrity_failed,
             "final_edit_reviewer": final_edit_reviewer_status,

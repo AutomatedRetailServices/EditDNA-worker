@@ -94,6 +94,41 @@ def test_rows_that_found_a_winner_are_ignored():
     assert story["story_completeness"] == "complete" and story["dropped_families"] == []
 
 
+def test_all_failed_family_covered_by_materially_fuller_later_delivery_is_complete():
+    row = _row("tg_failed", "failed", "no_usable_realization", label="failed")
+    row["all_members_delete_recommended"] = True
+    row["member_usability"]["failed"].update(
+        deterministic_unusable=True, local_failure_corroborated=True,
+    )
+    failed = _clip(
+        "failed", "Salons spread fungus because tools are dirty and this treatment helps your feet",
+        selected=False, start=5.0, end=12.0,
+    )
+    winner = _clip(
+        "winner", "Salons spread fungus because tools are dirty so use this treatment on your feet every night and order it today for delivery",
+        selected=True, start=40.0, end=55.0,
+    )
+    story = derive_story_completeness([row], selected=(winner,), discarded=(failed,))
+    assert story["story_completeness"] == "complete"
+    assert story["redundant_failed_attempt_family_ids"] == ["tg_failed"]
+
+
+def test_failed_family_without_large_later_coverage_remains_incomplete():
+    row = _row("tg_failed", "failed", "no_usable_realization", label="failed")
+    row["all_members_delete_recommended"] = True
+    failed = _clip(
+        "failed", "The warranty lasts five years and includes accidental water damage",
+        selected=False, start=5.0, end=12.0,
+    )
+    winner = _clip(
+        "winner", "This backpack has padded straps and ships tomorrow",
+        selected=True, start=40.0, end=55.0,
+    )
+    assert derive_story_completeness(
+        [row], selected=(winner,), discarded=(failed,),
+    )["story_completeness"] == "incomplete_no_usable_realization"
+
+
 def _clip(clip_id, text, *, selected, start, end):
     return DraftClip(clip_id=clip_id, source_asset_id="src", source_order=0, start=start, end=end,
                      text=text, caption_text=text, selected=selected, attempt_id=clip_id)
