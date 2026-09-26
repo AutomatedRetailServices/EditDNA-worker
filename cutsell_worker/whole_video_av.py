@@ -30,7 +30,10 @@ Return JSON: {"summary":str,"creator_intent":str,"story_logic":str,
 "regions":[{"start":seconds,"end":seconds,"role":"recording_only"|"audience"|"mixed"|"uncertain",
 "confidence":0..1,"audio_observation":str,"visual_observation":str,"reason":str}]}.
 Use at most 12 significant regions spread across the recording; they are advisory
-observations, NOT word-accurate cuts. Keep summary/story concise. Report uncertainty.
+observations, NOT word-accurate cuts. Region times must be temporally faithful:
+split when the creator changes from a fumble, interruption or laughter back into
+audience delivery, and never extend a local behavior across clean speech that does
+not exhibit it. Keep summary/story concise. Report uncertainty.
 '''
 
 
@@ -118,6 +121,10 @@ class GeminiWholeVideoAVProvider:
                          generation_attempts=1)
             self.audit_records.append(audit)
             generation_body={'contents':contents,'generationConfig':{
+                # Remove avoidable sampling variance from identical
+                # full-video qualification inputs. Provider execution may
+                # still vary and is measured by the live regressions.
+                'temperature':0.0,
                 'responseMimeType':'application/json','maxOutputTokens':self.max_output_tokens,
                 'responseJsonSchema': response_schema(source.duration_sec),
             }}

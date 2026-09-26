@@ -68,6 +68,7 @@ def test_actual_media_handoff_and_evidence_reaches_classifier(tmp_path):
     parts=session.calls[1][1]['contents'][0]['parts']
     assert parts[0]['inline_data']['mime_type']=='video/mp4'
     assert parts[0]['inline_data']['data']
+    assert session.calls[1][1]['generationConfig']['temperature']==0.0
     evidence=json.loads(context.sources[0].audiovisual_evidence)
     assert evidence['input_modalities']==['video','audio']
     assert len(evidence['source_sha256'])==64
