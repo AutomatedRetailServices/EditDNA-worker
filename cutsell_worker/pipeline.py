@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 52904)
-Total output lines: 3694
-
 """Clean orchestration for CutSell Flow B Milestone 1."""
 from __future__ import annotations
 
@@ -1841,7 +1838,209 @@ def build_flow_b_draft(
         # flattened summary dict) when the P2 flag is ON -- when P2 is
         # OFF this mirrors the same "define the empty default" pattern
         # already used for `editorial_moment_understandings`/`live_
-     …2904 tokens truncated… watch_listen_besttake_evidence_enabled()
+        # language_spine_by_source` above, so the block below can safely
+        # reference this name regardless of this flag's own state.
+        whole_video_editorial_reasoning_result = None
+
+    from .global_editorial_context import with_global_editorial_evidence
+    whole_video_context, global_editorial_handoff = with_global_editorial_evidence(
+        whole_video_context, whole_video_editorial_reasoning_result,
+    )
+    global_editorial_handoff["editorial_provider_present"] = editorial_judge is not None
+    context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
+
+    # Classify the complete candidate pool before deterministic discards.
+    kept = take_tuple
+
+    # Pass 2: batch semantic intent by bounded creator mini-session. This catches BTS,
+    # self-review and failed attempts with context while avoiding one paid call for every
+    # singleton/retry group. Semantic winner/alternate evidence is retained for Pass 3.
+    #
+    # CompositeResolver (composite_resolver.py, see D-023): the single, directly-
+    # callable authority for delivery restoration/rescue/composite marking. Owns
+    # what used to be 14 separately-monkeypatched hybrid_* authorities layered
+    # onto this one call, in the same order, same algorithms -- now one explicit
+    # composition instead of an implicit import-time chain.
+    hybrid_cleanup, composite_split_ids = apply_composite_resolution(
+        kept,
+        whole_video_context,
+        editorial_judge,
+    )
+    # Clean Cut consumes exact, corroborated word-boundary evidence after the
+    # complete candidate pool has been classified. No extra semantic calls.
+    from .recording_process_trim import apply_recording_process_trims
+    trim_kept, trim_discarded, trim_proofs, trim_diagnostics = apply_recording_process_trims(
+        hybrid_cleanup.kept, hybrid_cleanup.diagnostics, whole_video_context,
+    )
+    if trim_proofs:
+        from dataclasses import replace as replace_cleanup
+        hybrid_cleanup = replace_cleanup(hybrid_cleanup, diagnostics=(
+            *hybrid_cleanup.diagnostics,
+            {"stage": "recording_boundary_trim", "decisions": list(trim_proofs)},
+        ))
+    kept, deterministic_discarded, decisions = apply_clean_cut(trim_kept, whole_video_context)
+    clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
+    kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
+    discarded = tuple(deterministic_discarded) + tuple(provider_discarded) + trim_discarded
+    clean_judge_diagnostics = (*clean_judge_diagnostics, *trim_diagnostics)
+
+    for item in clean_judge_diagnostics:
+        if not item.get("applied_mixed_trim"):
+            continue
+        parent_id = str(item.get("clip_id") or "")
+        parent_label = label_map.get(parent_id)
+        if parent_label is None:
+            continue
+        child_ids = [*(item.get("kept_clip_ids") or [item.get("kept_clip_id")]), *(item.get("discarded_clip_ids") or [])]
+        for child_id in child_ids:
+            if child_id:
+                label_map[str(child_id)] = SemanticLabel(
+                    str(child_id), parent_label.role, parent_label.confidence, parent_label.reason
+                )
+
+    discarded = (*discarded, *hybrid_cleanup.deleted)
+    hybrid_semantic_decisions = {
+        clip_id: (label, float(confidence))
+        for clip_id, label, confidence in hybrid_cleanup.semantic_decisions
+    }
+    # D-082 Section 12: surface D-081's semantic_delete_recommended evidence
+    # (recorded per-window inside hybrid_cleanup.diagnostics, never
+    # destructive on its own) so _semantic_best_take's non-decisive-label
+    # fallback can treat it as soft negative evidence. OR-across windows:
+    # if any window flagged the candidate, that evidence is never silently
+    # dropped, matching D-081's own "never discard the evidence" posture.
+    hybrid_semantic_delete_recommended: dict[str, bool] = {}
+    for diagnostic in hybrid_cleanup.diagnostics:
+        for decision in diagnostic.get("decisions") or ():
+            clip_id = decision.get("clip_id")
+            if not clip_id:
+                continue
+            if decision.get("semantic_delete_recommended"):
+                hybrid_semantic_delete_recommended[clip_id] = True
+            else:
+                hybrid_semantic_delete_recommended.setdefault(clip_id, False)
+
+    # D-097.B: D-081's local-performance corroboration per candidate (the
+    # `local_failure_corroborated` flag hybrid_session_cleanup records on
+    # every window decision) -- deterministic unusability evidence, never a
+    # label.
+    hybrid_local_failure_corroborated: dict[str, bool] = {}
+    hybrid_dense_failure_cluster: dict[str, bool] = {}
+    for diagnostic in hybrid_cleanup.diagnostics:
+        for decision in diagnostic.get("decisions") or ():
+            clip_id = decision.get("clip_id")
+            if clip_id and decision.get("local_failure_corroborated"):
+                hybrid_local_failure_corroborated[clip_id] = True
+            if clip_id and decision.get("dense_semantic_failure_cluster"):
+                hybrid_dense_failure_cluster[clip_id] = True
+
+    # Preserve contextual BTS evidence separately from deterministic local
+    # unusability: it is authorized only for consistent BTS singletons.
+    from .contextual_bts_evidence import contextual_bts_ids
+    hybrid_contextual_bts_ids = contextual_bts_ids(hybrid_cleanup.diagnostics)
+    from .recording_process_evidence import recording_process_proofs as build_recording_process_proofs
+    process_proofs = build_recording_process_proofs(hybrid_cleanup.diagnostics)
+
+    # D-050D1: `realization_id` is minted once, above, before Pass 1 even
+    # starts -- every member of `kept` here already carries it (see the
+    # single minting pass at the top of this function). No second minting
+    # pass; no reminting.
+
+    # Pass 3: deterministic retry grouping + Best Take runs after semantic garbage is
+    # removed. The local ranker remains the fallback. If Hybrid already identified one
+    # clear winner among members of the same proven retry group, that editorial winner
+    # takes precedence over a marginal local score difference.
+    take_by_id = {take.clip_id: take for take in kept}
+    grouping = safe_group_takes_by_sessions(
+        take_grouping_provider,
+        kept,
+        whole_video_context,
+        context_text=context_text,
+    )
+    # CompositeResolver's composite-marked pairs (see above) are forced into
+    # singleton groups here so BestTakeResolver's one-winner competition
+    # cannot re-collapse an intended composite delivery. Direct call, no
+    # ContextVar, no monkeypatch of safe_group_takes_by_sessions.
+    grouping = apply_composite_group_split(grouping, kept, composite_split_ids)
+
+    # Phase 2 of the architecture rebalance: a narrow, gated semantic-
+    # equivalence arbiter may confirm that two groups the lexical layer left
+    # separate are recording attempts of the same intended idea, merging
+    # them into one retry contest BEFORE the completeness/performance
+    # ranking (safe_rank_takes) and deterministic Best Take run below. This
+    # runs here, directly on safe_group_takes_by_sessions's resolved output,
+    # rather than being threaded as a parameter through that call -- see
+    # take_grouping_provider.safe_group_takes's docstring for why: this
+    # function is already wrapped by several production monkeypatch layers
+    # that hardcode its current signature, and this is the one choke point
+    # every one of those layers' output must pass through regardless.
+    # D-025: composite_split_ids are protected here too, not just at the
+    # grouping-split step above -- otherwise this call's own, separate
+    # arbiter invocation can re-merge an accepted composite's pieces (or
+    # merge one into an unrelated group), silently discarding a decision
+    # CompositeResolver already made. See reconcile_semantic_idea_
+    # equivalence's own docstring for the exact RAW that exposed this.
+    # D-100 (D-099 Gap #1): `whole_video_context` is already a live local
+    # variable at this exact call site (used one call earlier for session
+    # partitioning's `context_text`) -- D-099 traced that it was never
+    # threaded any further into the deterministic restart-evidence merge
+    # loop below, so confirmed multimodal recording-behavior evidence
+    # (`performance_confirmation.py`'s `wrong_take`/`retry_setup` events)
+    # never reached the retry-family authority. This is the minimal bridge:
+    # a narrow, plain-tuple extraction (never the full context object) so
+    # `reconcile_semantic_idea_equivalence` can let that evidence corroborate
+    # a weaker lexical link than its existing rules require -- optional and
+    # purely additive; see `take_grouping.multimodal_corroborated_retry`.
+    confirmed_recording_evidence = confirmed_recording_behavior_events(whole_video_context)
+    from .failed_retry_coverage_bridge import failed_retry_coverage_pairs as build_failed_retry_coverage_pairs
+    from .session_boundaries import partition_takes_by_sessions
+    retry_partition_by_id = {
+        take.clip_id: partition_index
+        for partition_index, partition in enumerate(partition_takes_by_sessions(kept, whole_video_context))
+        for take in partition
+    }
+    relation_partition_by_id = {
+        take.clip_id: partition_index
+        for partition_index, partition in enumerate(
+            partition_takes_by_sessions(take_tuple, whole_video_context)
+        )
+        for take in partition
+    }
+    failed_retry_coverage_candidates = build_failed_retry_coverage_pairs(
+        kept,
+        hybrid_cleanup.diagnostics,
+        partition_by_id=retry_partition_by_id,
+        retry_groups=grouping.groups,
+        relation_takes=take_tuple,
+        relation_partition_by_id=relation_partition_by_id,
+    )
+    # D-150 (Gate 6 correction, real RAW #118 audit): same bridge pattern as
+    # `confirmed_recording_evidence` immediately above, for measured source
+    # silence instead of confirmed multimodal markers -- see
+    # `take_grouping.measured_pause_bridged_retry`'s own module comment.
+    measured_silence_evidence = measured_silence_intervals(whole_video_context)
+    # D-158: real Watch+Listen evidence only ever reaches the authority when
+    # the capability flag is ON (default OFF -- pre-D-158 behavior);
+    # `reconcile_semantic_idea_equivalence` itself also gates on the same
+    # flag, so this is belt-and-suspenders, not a second flag definition --
+    # skipping the index build entirely when OFF/empty keeps the OFF path
+    # byte-identical work, not just byte-identical output.
+    # D-161: the Relation Discovery Gate is a SEPARATE capability flag from
+    # D-158's merge-veto flag (different authorities -- see D-161 decision
+    # entry) and it also needs this same span index to build discovery
+    # candidates from. Build the index when EITHER flag is ON so that
+    # discovery works even when the family-evidence flag stays OFF; both
+    # flags OFF (the shared default) still skips the build entirely.
+    # D-163: the BestTake evidence guard is a THIRD, separate authority
+    # (docs/CUTSELL_DECISIONS.md D-163) that reuses this SAME span index
+    # (per-member entry/delivery/exit usability, behavior hypotheses,
+    # conflict flags) -- never a fourth recomputation.
+    watch_listen_spans_by_id = (
+        build_understanding_span_index(watch_listen_understandings)
+        if (
+            watch_listen_family_evidence_enabled()
+            or watch_listen_relation_discovery_enabled()
+            or watch_listen_besttake_evidence_enabled()
         )
         and watch_listen_understandings
         else None
