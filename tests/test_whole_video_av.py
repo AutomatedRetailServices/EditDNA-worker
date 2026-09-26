@@ -282,7 +282,7 @@ def test_seven_second_tail_is_included_in_previous_window(tmp_path):
 
 def test_bad_second_window_fails_closed_without_partial_context(tmp_path):
     raw=tmp_path/'raw.mp4';raw.write_bytes(b'input')
-    def prepare(path,target):target.write_bytes(b'compressed');return 180
+    def prepare(path,target):target.write_bytes(b'compressed');return 181
     def slice_media(path,target,start,length):target.write_bytes(b'window');return length
     class BadSecond(Session):
         def post(self,url,headers,json,timeout):
@@ -292,11 +292,25 @@ def test_bad_second_window_fails_closed_without_partial_context(tmp_path):
     session=BadSecond()
     av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
         session=session,media_preparer=prepare,media_slicer=slice_media)
-    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=180),),(),(),
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=181),),(),(),
         local_paths={'source':str(raw)})
     assert not context.status.available
     assert not context.sources
     assert len([c for c in session.calls if c[0].endswith('generateContent')])==2
+
+
+def test_approved_short_source_keeps_single_whole_video_request(tmp_path):
+    raw=tmp_path/'raw.mp4';raw.write_bytes(b'original')
+    def prepare(path,target):target.write_bytes(b'prepared');return 140
+    def should_not_slice(*args):raise AssertionError('short source must remain whole')
+    session=Session()
+    av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
+        session=session,media_preparer=prepare,media_slicer=should_not_slice)
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=140),),(),(),
+        local_paths={'source':str(raw)})
+    assert context.status.available
+    assert len(session.calls)==2
+    assert json.loads(context.sources[0].audiovisual_evidence)['window_count']==1
 
 
 def test_over_ten_minutes_rejected_before_media_processing(tmp_path):
