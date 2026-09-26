@@ -190,6 +190,11 @@ SEMANTIC_WINNER_OVERRIDE = "SEMANTIC_WINNER_OVERRIDE"
 # changes an idea's current winner; the Resolver's existing
 # `conflicting_high_confidence_semantic_winner_evidence` branch reads it.
 SEMANTIC_WINNER_CONFLICT_EVIDENCE = "SEMANTIC_WINNER_CONFLICT_EVIDENCE"
+# Final pre-resolver membership reconciliation is later than the provider and
+# deterministic Best-Take votes it reconciles. Preserve its explicit winner
+# as a distinct evidence tier so the authoritative resolver cannot resurrect
+# the loser from stale, earlier diagnostics.
+FINAL_MEMBERSHIP_WINNER = "FINAL_MEMBERSHIP_WINNER"
 CLAIM_COVERAGE_OVERRIDE = "CLAIM_COVERAGE_OVERRIDE"
 COMPOSITE_CREATED = "COMPOSITE_CREATED"
 CLIP_DISCARDED = "CLIP_DISCARDED"
@@ -337,7 +342,12 @@ class SemanticLedger:
         self, *, semantic_idea_id: str | None, realization_id: str, stage: str, decision_type: str,
         reason: str, evidence: Mapping[str, object] | None = None, previous_realization_id: str | None = None,
     ) -> None:
-        if decision_type not in (DELIVERY_SCORE_WINNER, SEMANTIC_WINNER_OVERRIDE, CLAIM_COVERAGE_OVERRIDE):
+        if decision_type not in (
+            DELIVERY_SCORE_WINNER,
+            SEMANTIC_WINNER_OVERRIDE,
+            FINAL_MEMBERSHIP_WINNER,
+            CLAIM_COVERAGE_OVERRIDE,
+        ):
             raise LedgerIntegrityError(f"not a winner decision type: {decision_type!r}")
         self.__decisions.append(DecisionRecord(
             order_index=self.__next_order(), stage=stage, decision_type=decision_type,
@@ -956,6 +966,36 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                         "window_id": row.get("window_id"), "request_hash": row.get("request_hash"),
                     },
                 )
+
+    # The final membership guard runs after Story Coherence and may settle a
+    # retry/duplicate that earlier provider windows described inconsistently.
+    # Both realizations intentionally remain in the Ledger for auditability,
+    # but the guard's winner is the only current final-membership verdict.
+    for row in (diagnostics.get("selection_conflicted_bridge_guard") or ()):
+        if not isinstance(row, Mapping):
+            continue
+        winner_clip_id = str(row.get("winner_clip_id") or "")
+        loser_clip_id = str(row.get("clip_id") or row.get("removed_clip_id") or "")
+        if winner_clip_id not in clip_by_id or loser_clip_id not in clip_by_id:
+            continue
+        winner_realization_id = _clip_realization_id(clip_by_id[winner_clip_id])
+        loser_realization_id = _clip_realization_id(clip_by_id[loser_clip_id])
+        winner_record = ledger.realizations().get(winner_realization_id)
+        loser_record = ledger.realizations().get(loser_realization_id)
+        if winner_record is None or loser_record is None:
+            continue
+        idea_id = winner_record.semantic_idea_id
+        if not idea_id or idea_id != loser_record.semantic_idea_id:
+            continue
+        ledger.record_winner_decision(
+            semantic_idea_id=idea_id,
+            realization_id=winner_realization_id,
+            stage="selection_conflicted_bridge_guard",
+            decision_type=FINAL_MEMBERSHIP_WINNER,
+            reason=str(row.get("reason") or "final_membership_reconciliation"),
+            evidence={"loser_realization_id": loser_realization_id},
+            previous_realization_id=loser_realization_id,
+        )
 
     # --- Section 5/9: ClaimCoverage overrides/composites/suppressions ----
     claim_coverage_diag = diagnostics.get("claim_coverage_best_take") or {}
