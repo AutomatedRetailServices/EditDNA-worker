@@ -182,6 +182,49 @@ def test_bridge_aware_components_before_and_after_the_veto():
     assert rejected[0]["component_cohesion_evaluated"] is False
 
 
+def test_material_prefix_debris_does_not_veto_two_full_retry_deliveries():
+    """A false-start prefix may stay in the family, but cannot decide which
+    two full deliveries are allowed to compete.
+
+    The prefix is an exact, materially shorter opening of the first full
+    delivery.  A marker-gated divergence between that fragment and the
+    second full delivery is therefore about completeness, not a genuinely
+    distinct audience-facing beat.  The already-confirmed full/full relation
+    must survive so Best Take sees both complete alternatives.
+    """
+    prefix = _take("prefix", 0.0, 2.3, "After my contract I asked my doctor")
+    first = _take(
+        "first", 3.0, 10.0,
+        "After my contract I asked my doctor for every medical test she could provide.",
+    )
+    second = _take(
+        "second", 13.0, 20.0,
+        "Another time after my contract I asked my doctor for every available medical test.",
+    )
+    take_map = {take.clip_id: take for take in (prefix, first, second)}
+    trace = []
+    groups = _bridge_aware_components(
+        (prefix.clip_id, first.clip_id, second.clip_id),
+        [
+            _RetryEdge(prefix.clip_id, first.clip_id, "deterministic", 1.0, "prefix_fragment"),
+            _RetryEdge(first.clip_id, second.clip_id, "semantic", 0.95, "same complete request"),
+        ],
+        protected_ids=frozenset(),
+        take_map=take_map,
+        arbiter=TableArbiter({}),
+        policy=SemanticEquivalenceGatePolicy(),
+        edge_trace=trace,
+        blocked_pairs=frozenset((frozenset((prefix.clip_id, second.clip_id)),)),
+    )
+
+    assert len(groups) == 1
+    assert set(groups[0]) == {"prefix", "first", "second"}
+    assert not any(
+        row.get("reason_rejected") == "cross_component_explicit_non_equivalence"
+        for row in trace
+    )
+
+
 # --- negative controls (D-108 directive, items 1/2/7) ---------------------
 
 def test_negative_control_1_valid_three_member_family_stays_merged():
