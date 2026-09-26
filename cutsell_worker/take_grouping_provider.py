@@ -1296,7 +1296,7 @@ def reconcile_semantic_idea_equivalence(
         coverage_bridge_confirmed = bool(
             coverage_bridge
             and coverage_safety is not None
-            and float(confidence) >= 0.95
+            and float(confidence) >= 0.90
             and coverage_safety[0] is False
             and coverage_safety[1] is True
         )
@@ -1732,6 +1732,7 @@ def _cohesive_components(
 
 _BRIDGE_MIN_COHESION_CONFIDENCE = 0.90
 _BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE = 3
+_FAILED_ATTEMPT_DIRECTIONAL_COVERAGE_MIN_CONFIDENCE = 0.90
 
 
 @dataclass(frozen=True)
@@ -2609,7 +2610,7 @@ def _bridge_aware_components(
             )
         if (
             edge.evidence == "directional_coverage"
-            and edge.confidence >= 0.95
+            and edge.confidence >= _FAILED_ATTEMPT_DIRECTIONAL_COVERAGE_MIN_CONFIDENCE
             and min(len(left_members), len(right_members)) == 1
             and not directional_coverage_cross_conflict
         ):

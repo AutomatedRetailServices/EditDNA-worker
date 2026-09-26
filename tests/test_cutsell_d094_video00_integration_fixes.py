@@ -236,14 +236,14 @@ def test_d301_directional_coverage_does_not_join_two_existing_components():
     assert bridge["component_cohesion_evaluated"] is True and bridge["accepted"] is False
 
 
-def test_d301_low_confidence_directional_label_has_no_special_authority():
+def test_d301_below_point_nine_directional_label_has_no_special_authority():
     _, take_map = _coverage_bridge_fixture()
     trace = []
     groups = _bridge_aware_components(
         ("A", "B", "C"),
         [
             _RetryEdge("B", "C", "deterministic", 1.0, "provider_members_compatible"),
-            _RetryEdge("A", "B", "directional_coverage", 0.94, "below authority floor"),
+            _RetryEdge("A", "B", "directional_coverage", 0.89, "below authority floor"),
         ],
         protected_ids=frozenset(), take_map=take_map, arbiter=TableArbiter({}),
         policy=SemanticEquivalenceGatePolicy(), edge_trace=trace,

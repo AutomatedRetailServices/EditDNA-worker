@@ -553,13 +553,26 @@ def test_directional_coverage_can_bridge_beyond_normal_time_window():
     assert diagnostics["merges"][0]["accepted_by"] == "failed_attempt_directional_coverage"
 
 
+def test_directional_coverage_accepts_point_nine_with_all_safety_fields():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    merged, diagnostics = reconcile_semantic_idea_equivalence(
+        (("failed",), ("clean",)),
+        (failed, clean),
+        CoverageArbiter(confidence=0.90),
+        failed_retry_coverage_pairs=frozenset({("failed", "clean")}),
+    )
+    assert merged == (("failed", "clean"),)
+    assert diagnostics["merges"][0]["accepted_by"] == "failed_attempt_directional_coverage"
+
+
 def test_directional_bridge_fails_closed_on_conflict_low_confidence_or_missing_coverage():
     failed = take("failed", FAILED_TEXT, 0, 10)
     clean = take("clean", CLEAN_TEXT, 50, 65)
     for arbiter in (
         CoverageArbiter(conflict=True),
         CoverageArbiter(conflict=True, same_idea=True),
-        CoverageArbiter(confidence=0.94),
+        CoverageArbiter(confidence=0.89),
         CoverageArbiter(left_covered=False),
     ):
         merged, diagnostics = reconcile_semantic_idea_equivalence(
