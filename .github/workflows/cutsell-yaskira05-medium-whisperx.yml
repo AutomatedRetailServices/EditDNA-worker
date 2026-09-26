@@ -1,0 +1,52 @@
+name: CutSell Yaskira 05 Medium WhisperX one-shot
+on:
+  push:
+    branches:
+      - benchmark/yaskira05-medium-whisperx-20260925
+permissions:
+  contents: read
+concurrency:
+  group: cutsell-yaskira05-medium-whisperx-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: github.run_attempt == 1 && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 105
+    env:
+      CUTSELL_QUALIFY_NATIVE_AV: "1"
+      UPLOAD_SINGLE_PROVIDER: medium-whisperx
+      UPLOAD_EXPECTED_SHA: 00f3349f6150879464341c6ba53ace2e2727ce0c594c67a781354430e3a6127d
+      UPLOAD_EXPECTED_BYTES: "14847667"
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install transport and media tools
+        run: |
+          pip install -q modal boto3 requests cryptography
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Prepare existing source configuration
+        run: python benchmarks/run_uploaded_asr_comparison.py prepare-existing Yaskira/05.MP4
+      - name: Verify exact source before GPU
+        id: source
+        run: python benchmarks/run_uploaded_asr_comparison.py await-upload
+      - name: One full-engine medium-whisperx run
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run medium-whisperx
+      - name: Preserve full comparison artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yaskira05-medium-whisperx-artifacts
+          path: uploaded-comparison-artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Remove private runtime files
+        if: always()
+        run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'

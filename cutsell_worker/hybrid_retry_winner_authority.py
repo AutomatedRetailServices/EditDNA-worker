@@ -102,14 +102,31 @@ def _retry_setup_confidence(
 def _same_retry_attempt(failed: CandidateTake, winner: CandidateTake) -> tuple[bool, dict]:
     left = _content(failed.text)
     right = _content(winner.text)
-    # A short abandoned opening can have only two content words. Require a
-    # literal ordered prefix (not bag-of-words/topic similarity) for this case.
-    # Local retry confirmation + full coverage remain required by the caller.
+    # A short abandoned phrase may be embedded in a longer clean delivery, but
+    # only its exact trailing sequence can identify where the take stopped.
+    # Require every content token from the failed fragment to survive too;
+    # otherwise a common suffix (e.g. "this backpack can hold") could erase
+    # an unrelated opening about price. The caller still requires a confirmed
+    # local retry, chronology, same partition and directional claim coverage.
     left_words, right_words = _tokens(failed.text), _tokens(winner.text)
-    if (not failed.complete_idea and winner.complete_idea and len(left) >= 2
-            and len(left_words) >= 4 and len(right_words) > len(left_words)
-            and right_words[:len(left_words)] == left_words):
-        return True, {'exact_abandoned_prefix': True, 'prefix_word_count': len(left_words)}
+    if not failed.complete_idea and winner.complete_idea and len(left) >= 2:
+        for width in range(min(len(left_words), len(right_words)), 3, -1):
+            left_start = len(left_words) - width
+            sequence = left_words[left_start:]
+            meaningful = sum(token in left for token in sequence)
+            if meaningful < 2 or not left.issubset(right):
+                continue
+            for right_start in range(len(right_words) - width + 1):
+                if right_words[right_start:right_start + width] == sequence:
+                    return True, {
+                        "exact_abandoned_sequence": True,
+                        "sequence_anchored_at_failed_suffix": True,
+                        "all_failed_content_tokens_present": True,
+                        "sequence_word_count": width,
+                        "sequence_content_word_count": meaningful,
+                        "failed_word_range": [left_start, left_start + width - 1],
+                        "winner_word_range": [right_start, right_start + width - 1],
+                    }
     if len(left) < 3 or len(right) < 3:
         return False, {}
     shared = left & right
