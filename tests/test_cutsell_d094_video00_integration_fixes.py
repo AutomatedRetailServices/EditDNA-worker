@@ -312,6 +312,46 @@ def test_d301_exact_pair_lexical_negation_false_positive_does_not_override_seman
     assert bridge["accepted"] is True
 
 
+def test_corroborated_failed_attempt_structured_coverage_becomes_directional_edge_before_component_growth():
+    takes = (
+        _take("F", 5.0, 12.0, "Salons gave me fungus and I have the solution", complete=True),
+        _take("A", 27.0, 46.0, "Salons gave me fungus use the treatment", complete=True),
+        _take("B", 58.0, 64.0, "Salons gave you fungus use the treatment", complete=True),
+        _take("W", 101.0, 132.0, "Salons gave me fungus so use the treatment every night and order today", complete=True),
+    )
+    arbiter = TableArbiter({
+        (takes[0].text, takes[3].text): (True, .90, "failed opening covered", False, True, False),
+        (takes[1].text, takes[3].text): (True, .95, "same retry", False, True, False),
+        (takes[2].text, takes[3].text): (True, .95, "same retry", False, True, False),
+        (takes[0].text, takes[1].text): (True, .90, "same opening", False, True, False),
+        (takes[0].text, takes[2].text): (True, .90, "same opening", False, True, False),
+        (takes[1].text, takes[2].text): (True, .95, "same retry", False, True, False),
+    })
+    groups, diag = split_incohesive_retry_groups(
+        (("F", "A", "B", "W"),), takes, arbiter,
+        corroborated_failed_ids=frozenset({"F"}),
+    )
+    assert len(groups) == 1 and set(groups[0]) == {"F", "A", "B", "W"}
+    row = next(r for r in diag["arbiter_confirmed_pairs"] if {r["left_clip_id"], r["right_clip_id"]} == {"F", "W"})
+    assert row["accepted_by"] == "corroborated_failed_attempt_directional_coverage"
+
+
+def test_failed_label_without_complete_structured_coverage_has_no_directional_authority():
+    takes = (
+        _take("F", 5.0, 12.0, "A distinct fact from the abandoned opening", complete=True),
+        _take("W", 101.0, 132.0, "A clean later delivery about another fact", complete=True),
+    )
+    arbiter = TableArbiter({
+        (takes[0].text, takes[1].text): (True, .95, "same broad topic", False, False, False),
+    })
+    _, diag = split_incohesive_retry_groups(
+        (("F", "W"),), takes, arbiter,
+        corroborated_failed_ids=frozenset({"F"}),
+    )
+    row = next(r for r in diag["arbiter_confirmed_pairs"] if {r["left_clip_id"], r["right_clip_id"]} == {"F", "W"})
+    assert "accepted_by" not in row
+
+
 # ---------------------------------------------------------------------------
 # F4: bridge contradiction is cross-component only
 # ---------------------------------------------------------------------------

@@ -2087,6 +2087,12 @@ def build_flow_b_draft(
         # BestTake/StoryValidator use, for the contained-restatement
         # preservation proof (see take_grouping_provider's D-289 comment).
         claim_equivalence_arbiter=claim_equivalence_arbiter,
+        corroborated_failed_ids=frozenset(
+            clip_id for clip_id, (label, confidence) in hybrid_semantic_decisions.items()
+            if label == "failed"
+            and confidence >= 0.75
+            and hybrid_local_failure_corroborated.get(clip_id, False)
+        ),
         # D-094.2: runtime-config only (default OFF); see the policy field.
         policy=SemanticEquivalenceGatePolicy(
             accept_complete_pairwise_singleton_bridge=_env_flag_enabled(

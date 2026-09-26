@@ -2724,6 +2724,7 @@ def split_incohesive_retry_groups(
     protected_ids: frozenset[str] = frozenset(),
     prior_confirmations: Mapping[frozenset, tuple] | None = None,
     claim_equivalence_arbiter=None,
+    corroborated_failed_ids: frozenset[str] = frozenset(),
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """D-058 Phase 1 + D-085: require evidence of shared communicative intent
     before an already-multi-member group is trusted as one mutually-
@@ -2896,6 +2897,7 @@ def split_incohesive_retry_groups(
         ))
         result = safe_check_idea_equivalence(arbiter, request, policy)
         decisions = same_idea_by_pair_index(result)
+        pair_safety = pair_safety_by_pair_index(result)
         for pair_index, (left_id, right_id) in enumerate(truncated):
             decision = decisions.get(pair_index)
             if decision is None:
@@ -2920,13 +2922,34 @@ def split_incohesive_retry_groups(
                     "confidence": round(confidence, 4), "reason": reason,
                 })
                 continue
-            edges_by_group[weak_pair_group[(left_id, right_id)]].append(
-                _RetryEdge(left_id, right_id, "semantic", confidence, reason)
+            safety = pair_safety.get(pair_index)
+            # A locally corroborated failed attempt plus this SAME call's
+            # structured no-conflict + directional-coverage verdict is the
+            # same authority used by failed_retry_coverage_pairs. Preserve
+            # that authority before component growth turns the exact pair
+            # into an incomplete synthetic component probe. This grants no
+            # authority to an ordinary semantic match or to an unconfirmed
+            # failed label.
+            structured_failed_coverage = bool(
+                left_id in corroborated_failed_ids
+                and take_map[left_id].start < take_map[right_id].start
+                and take_map[right_id].complete_idea
+                and float(confidence) >= _FAILED_ATTEMPT_DIRECTIONAL_COVERAGE_MIN_CONFIDENCE
+                and safety is not None
+                and safety[0] is False
+                and safety[1] is True
             )
-            confirmed_pairs.append({
+            evidence = "directional_coverage" if structured_failed_coverage else "semantic"
+            edges_by_group[weak_pair_group[(left_id, right_id)]].append(
+                _RetryEdge(left_id, right_id, evidence, confidence, reason)
+            )
+            confirmed_row = {
                 "left_clip_id": left_id, "right_clip_id": right_id,
                 "confidence": round(confidence, 4), "reason": reason,
-            })
+            }
+            if structured_failed_coverage:
+                confirmed_row["accepted_by"] = "corroborated_failed_attempt_directional_coverage"
+            confirmed_pairs.append(confirmed_row)
 
     # D-108: explicit, already-computed non-equivalence evidence this SAME
     # pass produced. Reused verbatim (never a new heuristic) as a hard veto
