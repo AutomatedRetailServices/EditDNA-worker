@@ -1,0 +1,54 @@
+name: CutSell Video00 after Yaskira05 Run31
+# Isolated cross-video evaluation of the approved Yaskira05 Run31 engine.
+on:
+  push:
+    branches:
+      - benchmark/video00-after-y05-run31-20260926
+permissions:
+  contents: read
+concurrency:
+  group: cutsell-video00-after-y05-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  compare:
+    if: github.run_attempt == 1 && github.event_name == 'push' && github.event.head_commit.message == 'benchmark: run Video00 once after Yaskira05 approval'
+    runs-on: ubuntu-latest
+    timeout-minutes: 105
+    env:
+      CUTSELL_QUALIFY_NATIVE_AV: "1"
+      CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED: "1"
+      UPLOAD_SINGLE_PROVIDER: medium-whisperx
+      UPLOAD_EXPECTED_SHA: b37059b1790cf3eb0447bb54595cc99f6668aadc5f65dafa9cdf6181621ef9f5
+      UPLOAD_EXPECTED_BYTES: "38700219"
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install transport and media tools
+        run: |
+          pip install -q modal boto3 requests cryptography
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Prepare existing source configuration
+        run: python benchmarks/run_uploaded_asr_comparison.py prepare-existing 'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4'
+      - name: Verify exact source before GPU
+        id: source
+        run: python benchmarks/run_uploaded_asr_comparison.py await-upload
+      - name: One full-engine medium-whisperx run
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        continue-on-error: true
+        run: python benchmarks/run_uploaded_asr_comparison.py run medium-whisperx
+      - name: Preserve full comparison artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-after-y05-run31-artifacts
+          path: uploaded-comparison-artifacts/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Remove private runtime files
+        if: always()
+        run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'
