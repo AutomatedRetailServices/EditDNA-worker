@@ -34,6 +34,9 @@ _DANGLING_TERMINALS = frozenset({
     "of", "or", "para", "pero", "por", "porque", "que", "si", "so", "the", "to",
     "with", "y",
 })
+_DEPENDENT_OPENERS = frozenset({
+    "cuando", "whereas", "while",
+})
 _ASSERTION_FRAMING = frozenset({
     "afirmo", "afirma", "avala", "avalado", "ciencia", "cientifica", "cientifico",
     "cientificamente", "comprobado", "convencida", "convencido", "creo", "dice",
@@ -1142,6 +1145,188 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
     return move, audit
 
 
+def dependent_opening_retry_resolution(selected, alternates, discarded, diagnostics: dict):
+    """Replace a selected orphan clause with its complete retry-family peer.
+
+    Provider performance judgments cannot make a delivery beginning with a
+    bare dependent opener structurally self-contained.  This repair is
+    intentionally confined to an existing take-judge family and requires the
+    selected delivery's opening sequence and every critical marker to survive
+    in a complete peer.  Explicit delete/unusable evidence still fails closed.
+    """
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    all_by_id = {clip.clip_id: clip for clip in (*selected, *alternates, *discarded)}
+    complete = _attempt_completeness(diagnostics)
+    move: set[str] = set()
+    add: set[str] = set()
+    audit: list[dict] = []
+
+    for group in diagnostics.get("take_judge_groups") or ():
+        if not isinstance(group, dict):
+            continue
+        member_ids = [
+            str(row.get("clip_id") or "")
+            for row in group.get("ranked") or ()
+            if isinstance(row, dict)
+        ]
+        member_evidence = group.get("member_usability") or {}
+        for current_id in member_ids:
+            current = selected_by_id.get(current_id)
+            if current is None:
+                continue
+            current_tokens = _tokens(current.text)
+            if not current_tokens or current_tokens[0] not in _DEPENDENT_OPENERS:
+                continue
+            opening = current_tokens[: min(5, len(current_tokens))]
+            current_content = _substantive(current.text)
+            eligible = []
+            for peer_id in member_ids:
+                if peer_id == current_id or peer_id in selected_by_id:
+                    continue
+                peer = all_by_id.get(peer_id)
+                if peer is None or peer.source_asset_id != current.source_asset_id:
+                    continue
+                peer_tokens = _tokens(peer.text)
+                if not peer_tokens or peer_tokens[0] in _DEPENDENT_OPENERS:
+                    continue
+                evidence = member_evidence.get(peer_id) or {}
+                if (
+                    evidence.get("delete_recommended") is True
+                    or evidence.get("deterministic_unusable") is True
+                    or complete.get(peer_id) is False
+                ):
+                    continue
+                if not _is_contiguous_subsequence(opening, peer_tokens):
+                    continue
+                peer_content = _substantive(peer.text)
+                coverage = len(current_content & peer_content) / max(1, len(current_content))
+                if coverage < 0.80:
+                    continue
+                if not _critical(current.text).issubset(_critical(peer.text)):
+                    continue
+                eligible.append((coverage, len(peer_tokens), float(peer.end) - float(peer.start), peer))
+            if not eligible:
+                continue
+            coverage, _token_count, _duration, winner = max(eligible, key=lambda row: row[:3])
+            move.add(current_id)
+            add.add(winner.clip_id)
+            audit.append({
+                "clip_id": current_id,
+                "winner_clip_id": winner.clip_id,
+                "reason": "dependent_opening_yields_to_complete_family_peer",
+                "opening_tokens": list(opening),
+                "substantive_coverage": round(coverage, 4),
+            })
+    return move, add, audit
+
+
+def redundant_selected_restatement_ids(selected, diagnostics: dict):
+    """Remove a later provider-rejected restatement already fully delivered."""
+    ordered = tuple(sorted(
+        selected,
+        key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id),
+    ))
+    votes = _hybrid_votes(diagnostics)
+    move: set[str] = set()
+    audit: list[dict] = []
+    for later_index, later in enumerate(ordered):
+        later_negative = _strongest(votes, later.clip_id, {"alternate", "failed"})
+        later_content = _substantive(later.text)
+        later_critical = _critical(later.text)
+        if later_negative < 0.80 or len(later_content) < 2 or not later_critical:
+            continue
+        for prior in reversed(ordered[max(0, later_index - 4):later_index]):
+            if prior.source_asset_id != later.source_asset_id:
+                continue
+            gap = float(later.start) - float(prior.end)
+            if gap < 0.0 or gap > 45.0:
+                continue
+            prior_positive = _strongest(votes, prior.clip_id, {"winner", "keep"})
+            prior_negative = _strongest(votes, prior.clip_id, {"alternate", "failed"})
+            if prior_positive < 0.90 or prior_positive - prior_negative < 0.05 - 1e-9:
+                continue
+            prior_content = _substantive(prior.text)
+            coverage = len(later_content & prior_content) / max(1, len(later_content))
+            if coverage < 0.80 or not later_critical.issubset(_critical(prior.text)):
+                continue
+            if float(later.end) - float(later.start) > float(prior.end) - float(prior.start):
+                continue
+            move.add(later.clip_id)
+            audit.append({
+                "clip_id": later.clip_id,
+                "winner_clip_id": prior.clip_id,
+                "reason": "provider_rejected_restatement_already_fully_delivered",
+                "substantive_coverage": round(coverage, 4),
+                "critical_markers": sorted(later_critical),
+                "source_gap_sec": round(gap, 3),
+                "loser_negative_confidence": round(later_negative, 4),
+                "winner_positive_confidence": round(prior_positive, 4),
+            })
+            break
+    return move, audit
+
+
+def borderline_subspan_reconstruction_ids(selected, alternates, discarded, diagnostics: dict):
+    """Restore a safe prefix when authority selected only its sibling suffix.
+
+    Attempt reconstruction explicitly records these rows when a complete
+    parent was split into two independently usable borderline subspans.  If
+    the suffix survives authority but the adjacent prefix does not, retaining
+    only the suffix can silently drop the parent's opening claim.  Rejoin the
+    pair only with full lexical coverage, tight source adjacency, audience
+    evidence, and no terminal delete/unusable finding for the prefix.
+    """
+    selected_ids = {clip.clip_id for clip in selected}
+    all_by_id = {clip.clip_id: clip for clip in (*selected, *alternates, *discarded)}
+    complete = _attempt_completeness(diagnostics)
+    _status, member_usability = _take_judge_usability(diagnostics)
+    add: set[str] = set()
+    audit: list[dict] = []
+    reconstruction = diagnostics.get("attempt_reconstruction") or {}
+    for row in reconstruction.get("preserved_borderline_subspans") or ():
+        if not isinstance(row, dict):
+            continue
+        parent_id = str(row.get("parent_clip_id") or "")
+        prefix_id = str(row.get("prefix_clip_id") or "")
+        suffix_id = str(row.get("suffix_clip_id") or "")
+        if suffix_id not in selected_ids or prefix_id in selected_ids:
+            continue
+        parent = all_by_id.get(parent_id)
+        prefix = all_by_id.get(prefix_id)
+        suffix = all_by_id.get(suffix_id)
+        if parent is None or prefix is None or suffix is None:
+            continue
+        if len({parent.source_asset_id, prefix.source_asset_id, suffix.source_asset_id}) != 1:
+            continue
+        gap = float(suffix.start) - float(prefix.end)
+        if float(prefix.start) < float(parent.start) - 1e-3 or gap < 0.0 or gap > 0.8:
+            continue
+        if float(suffix.end) > float(parent.end) + 1e-3 or complete.get(parent_id) is False:
+            continue
+        evidence = member_usability.get(prefix_id) or {}
+        if evidence.get("delete_recommended") is True or evidence.get("deterministic_unusable") is True:
+            continue
+        if _audience_support(diagnostics, prefix_id) < 0.80:
+            continue
+        parent_content = _substantive(parent.text)
+        combined_content = _substantive(prefix.text + " " + suffix.text)
+        coverage = len(parent_content & combined_content) / max(1, len(parent_content))
+        if coverage < 0.90 or not _critical(parent.text).issubset(
+            _critical(prefix.text + " " + suffix.text)
+        ):
+            continue
+        add.add(prefix_id)
+        audit.append({
+            "clip_id": prefix_id,
+            "suffix_clip_id": suffix_id,
+            "parent_clip_id": parent_id,
+            "reason": "complete_parent_borderline_prefix_restored",
+            "source_gap_sec": round(gap, 3),
+            "parent_content_coverage": round(coverage, 4),
+        })
+    return add, audit
+
+
 def terminally_incomplete_selected_ids(selected, diagnostics: dict):
     """Discard tiny attempt fragments proven incomplete upstream."""
     selected_ids = {clip.clip_id for clip in selected}
@@ -1184,6 +1369,15 @@ def apply_selection_conflicted_bridge_guard(draft):
     failed_retry_ids, failed_retry_audit = failed_retry_component_ids(
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
+    dependent_ids, dependent_add_ids, dependent_audit = dependent_opening_retry_resolution(
+        draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
+    restatement_ids, restatement_audit = redundant_selected_restatement_ids(
+        draft.selected, diagnostics
+    )
+    borderline_add_ids, borderline_audit = borderline_subspan_reconstruction_ids(
+        draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
     retry_ids, retry_add_ids, retry_audit = deterministic_retry_resolution(
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
@@ -1208,11 +1402,17 @@ def apply_selection_conflicted_bridge_guard(draft):
 
     move_ids = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
+        | dependent_ids | restatement_ids
         | retry_ids | unmerged_retry_ids | proxy_ids | contained_ids | chain_ids
     )
-    add_ids = (retry_add_ids | unmerged_retry_add_ids | continuation_add_ids) - move_ids
+    add_ids = (
+        retry_add_ids | unmerged_retry_add_ids | continuation_add_ids | dependent_add_ids
+        | borderline_add_ids
+    ) - move_ids
     audit = (
         bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
+        + dependent_audit + restatement_audit
+        + borderline_audit
         + retry_audit + unmerged_retry_audit
         + proxy_audit + contained_audit + continuation_add_audit + chain_audit
     )

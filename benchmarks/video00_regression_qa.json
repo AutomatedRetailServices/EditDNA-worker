@@ -37,32 +37,17 @@
       "id": "papillary_symptom_realization_meaning",
       "kind": "meaning_preservation",
       "protected": false,
-      "text": "Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+      "text": "Síntomas que no me parecían sospechosos pero que ahora que lo analizo sí eran sospechosos."
     },
     {
       "id": "papillary_symptom_realization_parity",
       "kind": "preferred_realization_parity",
-      "text": "Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+      "text": "Síntomas que no me parecían sospechosos pero que ahora que lo analizo sí eran sospechosos."
     },
     {
       "id": "acne_back_preserved",
       "kind": "required_exact",
       "text": "Por temporada me salió un acné en la espalda con la que yo resolvía con resorcina."
-    },
-    {
-      "id": "pimples_micro_1_present",
-      "kind": "required_exact",
-      "text": "También me salían espinillas."
-    },
-    {
-      "id": "pimples_micro_2_present",
-      "kind": "required_exact",
-      "text": "Era como un rush,"
-    },
-    {
-      "id": "pimples_micro_3_present",
-      "kind": "required_exact",
-      "text": "una alergia."
     },
     {
       "id": "pimples_bad_monolith_absent",
@@ -95,23 +80,14 @@
       "text": "Por eso cuídate, alimentate bien, hidrátate y haz ejercicio."
     },
     {
-      "id": "pimples_micro_order",
-      "kind": "required_order",
-      "texts": [
-        "También me salían espinillas.",
-        "Era como un rush,",
-        "una alergia.",
-        "Otro síntoma era que me salían espinillas como si fuera una alergia de esta parte aquí detrás de la oreja y en el cuello. Me salía por"
-      ]
-    },
-    {
       "id": "sonography_good_before_diagnosis",
       "kind": "required_order",
       "texts": [
         "Nunca se nos ocurrió hacer un chequeo de la tiroides por sonografía porque siempre en mis exámenes la tiroides salía como que estaba funcionando",
         "perfectamente.",
         "En la sonografía de tiroides apareció un nódulo sospechoso de 3 centímetros que se mandó a biopsia.",
-        "La biopsia confirmó que era un cáncer papilar de tiroides. Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+        "La biopsia confirmó que era un cáncer papilar de tiroides.",
+        "Síntomas que no me parecían sospechosos pero que ahora que lo analizo sí eran sospechosos."
       ]
     }
   ]

@@ -168,3 +168,98 @@ def test_final_membership_winner_is_not_resurrected_by_authoritative_resolver():
     ledger = build_semantic_ledger_shadow(draft)
     resolution = resolve_realizations_shadow(ledger).idea_resolutions["idea_retry"]
     assert resolution.winner_realization_id == "real_good"
+
+
+def test_orphan_dependent_opening_yields_to_complete_peer_in_same_family():
+    full = _draft_clip(
+        "full", 10.0, 14.0,
+        "Ahí fue cuando me mandaron a hacer los estudios completos.",
+        selected=False,
+    )
+    orphan = _draft_clip(
+        "orphan", 18.0, 21.0,
+        "cuando me mandaron a hacer los estudios completos.",
+    )
+    draft = DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        (orphan,), (), (full,),
+        {
+            "attempt_reconstruction": {"attempts": [
+                {"clip_id": "full", "complete_idea": True},
+                {"clip_id": "orphan", "complete_idea": True},
+            ]},
+            "take_judge_groups": [{
+                "ranked": [{"clip_id": "orphan"}, {"clip_id": "full"}],
+                "member_usability": {
+                    "orphan": {"deterministic_unusable": False, "delete_recommended": False},
+                    "full": {"deterministic_unusable": False, "delete_recommended": False},
+                },
+            }],
+        },
+    )
+    repaired = apply_selection_conflicted_bridge_guard(draft)
+    assert [clip.clip_id for clip in repaired.selected] == ["full"]
+
+
+def test_provider_rejected_numeric_restatement_is_removed_after_full_delivery():
+    prior = _draft_clip(
+        "prior", 10.0, 20.0,
+        "Está comprobado que solo un 5-10% de los cánceres son hereditarios y el resto depende de elecciones de vida.",
+    )
+    repeated = _draft_clip(
+        "repeated", 30.0, 36.0,
+        "Estoy convencida y la ciencia avala que solo un 5-10% de los cánceres son hereditarios.",
+    )
+    draft = DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        (prior, repeated), (), (),
+        {"hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "prior", "label": "winner", "confidence": 0.95},
+            {"clip_id": "repeated", "label": "alternate", "confidence": 0.85},
+        ]}]},
+    )
+    repaired = apply_selection_conflicted_bridge_guard(draft)
+    assert [clip.clip_id for clip in repaired.selected] == ["prior"]
+
+
+def test_selected_borderline_suffix_restores_safe_complete_parent_prefix():
+    prefix = _draft_clip(
+        "prefix", 10.0, 14.0,
+        "Esta es mi experiencia y soy la única persona de mi familia con este cáncer.",
+        selected=False,
+    )
+    suffix = _draft_clip(
+        "suffix", 14.5, 23.0,
+        "Por eso comparto esta conclusión y las elecciones que aprendí a cuidar.",
+    )
+    parent = _draft_clip(
+        "parent", 10.0, 23.0,
+        prefix.text + " " + suffix.text,
+        selected=False,
+    )
+    draft = DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        (suffix,), (), (prefix, parent),
+        {
+            "attempt_reconstruction": {
+                "attempts": [{"clip_id": "parent", "complete_idea": True}],
+                "preserved_borderline_subspans": [{
+                    "parent_clip_id": "parent",
+                    "prefix_clip_id": "prefix",
+                    "suffix_clip_id": "suffix",
+                }],
+            },
+            "hybrid_editorial_chunks": [{"decisions": [{
+                "clip_id": "prefix", "label": "alternate", "confidence": 0.8,
+                "content_role": "audience",
+            }]}],
+            "take_judge_groups": [{
+                "ranked": [{"clip_id": "prefix"}, {"clip_id": "suffix"}],
+                "member_usability": {
+                    "prefix": {"deterministic_unusable": False, "delete_recommended": False},
+                },
+            }],
+        },
+    )
+    repaired = apply_selection_conflicted_bridge_guard(draft)
+    assert [clip.clip_id for clip in repaired.selected] == ["prefix", "suffix"]

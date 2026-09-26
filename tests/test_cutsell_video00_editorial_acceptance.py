@@ -151,6 +151,17 @@ def test_negation_must_stay_with_its_sentence_in_one_delivery(tmp_path):
     assert report["qa_pass"]
 
 
+def test_contiguous_phrase_tolerates_asr_morphology_inside_one_delivery(tmp_path):
+    check = _check("sonography_opening_complete")
+    _, report = _run(tmp_path, [
+        _row(
+            "Ahí fue cuando me mandaron a hacer sonografías de tiroides y otros.",
+            109.0, 112.3,
+        ),
+    ], manifest={"checks": [check]})
+    assert report["qa_pass"]
+
+
 def test_repeated_closing_is_found_even_with_four_intervening_clips(tmp_path):
     check = next(c for c in _manifest()["checks"] if c["id"] == "closing_exhortation_not_reopened")
     rows = [

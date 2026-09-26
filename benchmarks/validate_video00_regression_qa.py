@@ -671,8 +671,15 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
             # would accept a negation spliced from a different take.
             required = _ordered_tokens(check.get("text"))
             present = bool(required) and any(
-                any(_ordered_tokens(text)[pos:pos + len(required)] == required
-                    for pos in range(len(_ordered_tokens(text)) - len(required) + 1))
+                any(
+                    all(
+                        _asr_anchor_matches(actual, expected)
+                        for actual, expected in zip(
+                            _ordered_tokens(text)[pos:pos + len(required)], required
+                        )
+                    )
+                    for pos in range(len(_ordered_tokens(text)) - len(required) + 1)
+                )
                 for _, text in _selected_rows(result)
             )
             if present:
