@@ -272,6 +272,162 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             "loser_positive_confidence": round(_strongest(votes, loser_id, {"winner", "keep"}), 4),
             "winner_positive_confidence": round(winner_positive, 4),
         })
+
+    # Some retry families are expressed as two deterministic edges through
+    # the same abandoned attempt: A->B (a short failed correction) and A->C
+    # (the complete audience delivery).  B and C therefore compete even when
+    # no direct B/C edge was emitted.  Resolve only the unambiguous case: one
+    # strong audience winner and a short selected peer that Hybrid strongly
+    # classified as failed/non-audience recording debris.
+    graph: dict[str, set[str]] = {}
+    for row in _deterministic_retry_rows(diagnostics):
+        left_id = str(row.get("left_clip_id") or "")
+        right_id = str(row.get("right_clip_id") or "")
+        if left_id in all_by_id and right_id in all_by_id:
+            graph.setdefault(left_id, set()).add(right_id)
+            graph.setdefault(right_id, set()).add(left_id)
+    visited: set[str] = set()
+    for root in graph:
+        if root in visited:
+            continue
+        component: set[str] = set()
+        pending = [root]
+        while pending:
+            clip_id = pending.pop()
+            if clip_id in component:
+                continue
+            component.add(clip_id)
+            pending.extend(graph.get(clip_id, ()))
+        visited.update(component)
+        if component & move:
+            continue
+        winner_ids = [
+            clip_id for clip_id in component
+            if _strongest(votes, clip_id, {"winner", "keep"}) >= 0.90
+            and _strongest(votes, clip_id, {"alternate", "failed"}) < 0.80
+            and _audience_support(diagnostics, clip_id) >= 0.80
+            and complete.get(clip_id) is not False
+        ]
+        if len(winner_ids) != 1:
+            continue
+        winner_id = winner_ids[0]
+        winner = all_by_id[winner_id]
+        for loser_id in sorted(component & set(selected_by_id)):
+            if loser_id == winner_id:
+                continue
+            loser = all_by_id[loser_id]
+            duration = max(0.0, float(loser.end) - float(loser.start))
+            if (
+                duration > 4.0
+                or _strongest(votes, loser_id, {"alternate", "failed"}) < 0.90
+                or _audience_support(diagnostics, loser_id) >= 0.80
+            ):
+                continue
+            move.add(loser_id)
+            if winner_id not in selected_by_id:
+                add.add(winner_id)
+            audit.append({
+                "clip_id": loser_id,
+                "winner_clip_id": winner_id,
+                "reason": "deterministic_retry_component_failed_debris",
+                "component_clip_ids": sorted(component),
+                "loser_duration_sec": round(duration, 3),
+                "loser_negative_confidence": round(
+                    _strongest(votes, loser_id, {"alternate", "failed"}), 4,
+                ),
+                "winner_positive_confidence": round(
+                    _strongest(votes, winner_id, {"winner", "keep"}), 4,
+                ),
+            })
+
+    # A delivery can be grammatically plausible yet still be only the shared
+    # opening of the creator's completed retry.  In that case the ranker may
+    # prefer the very short delivery because it has fewer motion events, even
+    # though the longer peer carries the actual requested/actionable detail.
+    # Settle only a deterministic retry component with exactly one selected
+    # member and a much fuller peer that begins with the same four words,
+    # preserves every numeric/negation marker, overlaps most of the selected
+    # member's substantive vocabulary, and has explicit take-judge evidence
+    # that it was not deterministically unusable or delete-worthy.  Semantic
+    # completeness therefore precedes delivery polish without treating a
+    # generic longer take as automatically better.
+    _usability, member_usability = _take_judge_usability(diagnostics)
+    visited.clear()
+    for root in graph:
+        if root in visited:
+            continue
+        component: set[str] = set()
+        pending = [root]
+        while pending:
+            clip_id = pending.pop()
+            if clip_id in component:
+                continue
+            component.add(clip_id)
+            pending.extend(graph.get(clip_id, ()))
+        visited.update(component)
+        if component & move:
+            continue
+        selected_ids = component & set(selected_by_id)
+        if len(selected_ids) != 1:
+            continue
+        current_id = next(iter(selected_ids))
+        current = selected_by_id[current_id]
+        current_tokens = _tokens(current.text)
+        current_content = _substantive(current.text)
+        current_duration = max(0.001, float(current.end) - float(current.start))
+        if (
+            len(current_tokens) < 6
+            or len(current_content) < 3
+            or _strongest(votes, current_id, {"winner", "keep"}) < 0.90
+            or _strongest(votes, current_id, {"alternate", "failed"}) >= 0.80
+        ):
+            continue
+
+        eligible = []
+        for peer_id in component - selected_ids:
+            peer = all_by_id[peer_id]
+            evidence = member_usability.get(peer_id)
+            if (
+                peer.source_asset_id != current.source_asset_id
+                or complete.get(peer_id) is False
+                or not evidence
+                or bool(evidence.get("deterministic_unusable"))
+                or bool(evidence.get("delete_recommended"))
+                or _strongest(votes, peer_id, {"alternate", "failed"}) >= 0.80
+            ):
+                continue
+            peer_tokens = _tokens(peer.text)
+            peer_content = _substantive(peer.text)
+            peer_duration = max(0.0, float(peer.end) - float(peer.start))
+            if current_tokens[:4] != peer_tokens[:4]:
+                continue
+            overlap = len(current_content & peer_content) / max(1, len(current_content))
+            if (
+                overlap < 0.65
+                or len(peer_tokens) < 1.50 * len(current_tokens)
+                or peer_duration < 1.50 * current_duration
+                or _critical(current.text) != _critical(peer.text)
+            ):
+                continue
+            eligible.append((len(peer_content), len(peer_tokens), peer_duration, float(peer.start), peer, overlap))
+        if not eligible:
+            continue
+        _richness, _token_count, _duration, _start, winner, overlap = max(
+            eligible, key=lambda row: row[:4]
+        )
+        move.add(current_id)
+        add.add(winner.clip_id)
+        audit.append({
+            "clip_id": current_id,
+            "winner_clip_id": winner.clip_id,
+            "reason": "deterministic_retry_semantic_superset_dominance",
+            "component_clip_ids": sorted(component),
+            "opening_token_count": 4,
+            "substantive_overlap": round(overlap, 4),
+            "loser_token_count": len(current_tokens),
+            "winner_token_count": len(_tokens(winner.text)),
+            "winner_duration_sec": round(_duration, 3),
+        })
     return move, add, audit
 
 

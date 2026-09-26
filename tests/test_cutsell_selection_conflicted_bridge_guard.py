@@ -513,6 +513,142 @@ def test_failed_complete_peer_is_not_resurrected_over_incomplete_selection():
     assert move == set() and add == set() and audit == []
 
 
+def test_shared_abandoned_attempt_resolves_short_failed_component_debris():
+    abandoned = _clip("abandoned", 10.0, 16.0, "I had stomach trouble and was diagnosed with...")
+    correction = _clip("correction", 18.0, 19.6, "I had stomach trouble, no.")
+    complete = _clip(
+        "complete", 24.0, 33.5,
+        "I had digestive trouble and the endoscopy showed gastritis.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "abandoned", "right_clip_id": "correction",
+             "confidence": 1.0, "accepted_by": "multimodal_corroborated_retry"},
+            {"left_clip_id": "abandoned", "right_clip_id": "complete",
+             "confidence": 1.0, "accepted_by": "incomplete_attempt_completed_by_retry"},
+        ]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "abandoned", "complete_idea": False},
+            {"clip_id": "correction", "complete_idea": True},
+            {"clip_id": "complete", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "correction", "label": "failed", "confidence": 0.90,
+             "content_role": "mixed"},
+            {"clip_id": "complete", "label": "winner", "confidence": 0.95,
+             "content_role": "audience"},
+        ]}],
+    }
+    move, add, audit = deterministic_retry_resolution(
+        (correction, complete), (), (abandoned,), diagnostics,
+    )
+    assert move == {"correction"} and add == set()
+    assert audit[0]["reason"] == "deterministic_retry_component_failed_debris"
+
+
+def test_deterministic_retry_prefers_semantically_full_delivery_over_clean_prefix():
+    first_full = _clip(
+        "first_full", 10.0, 16.5,
+        "After my contract I spoke with my doctor and requested every available test.",
+    )
+    clean_prefix = _clip(
+        "clean_prefix", 18.0, 20.3,
+        "After my contract I asked my doctor",
+    )
+    final_full = _clip(
+        "final_full", 23.0, 30.0,
+        "After my contract I changed my doctor and requested every test she could provide.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "first_full", "right_clip_id": "clean_prefix",
+             "accepted_by": "same_opening_abandoned_start", "confidence": 1.0},
+            {"left_clip_id": "final_full", "right_clip_id": "clean_prefix",
+             "accepted_by": "same_opening_abandoned_start", "confidence": 1.0},
+        ]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first_full", "complete_idea": True},
+            {"clip_id": "clean_prefix", "complete_idea": True},
+            {"clip_id": "final_full", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "clean_prefix", "label": "keep", "confidence": 0.95},
+        ]}],
+        "take_judge_groups": [{
+            "member_usability": {
+                "first_full": {"deterministic_unusable": False, "delete_recommended": False},
+                "clean_prefix": {"deterministic_unusable": False, "delete_recommended": False},
+                "final_full": {"deterministic_unusable": False, "delete_recommended": False},
+            },
+        }],
+    }
+
+    move, add, audit = deterministic_retry_resolution(
+        (clean_prefix,), (), (first_full, final_full), diagnostics,
+    )
+
+    assert move == {"clean_prefix"}
+    assert add == {"final_full"}
+    assert audit[0]["reason"] == "deterministic_retry_semantic_superset_dominance"
+
+
+def test_semantic_superset_retry_preserves_changed_number():
+    prefix = _clip("prefix", 10.0, 12.0, "After my contract I requested 5 tests")
+    fuller = _clip(
+        "fuller", 15.0, 22.0,
+        "After my contract I requested 10 tests from every available specialist.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "prefix", "right_clip_id": "fuller",
+            "accepted_by": "same_opening_restart", "confidence": 1.0,
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "prefix", "complete_idea": True},
+            {"clip_id": "fuller", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "prefix", "label": "keep", "confidence": 0.95},
+        ]}],
+        "take_judge_groups": [{"member_usability": {
+            "fuller": {"deterministic_unusable": False, "delete_recommended": False},
+        }}],
+    }
+
+    move, add, audit = deterministic_retry_resolution((prefix,), (), (fuller,), diagnostics)
+
+    assert move == set()
+    assert add == set()
+    assert audit == []
+
+
+def test_semantic_superset_retry_requires_explicit_nonfailure_evidence():
+    prefix = _clip("prefix", 10.0, 12.0, "After my contract I asked my doctor")
+    fuller = _clip(
+        "fuller", 15.0, 22.0,
+        "After my contract I asked my doctor for every available test.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "prefix", "right_clip_id": "fuller",
+            "accepted_by": "same_opening_restart", "confidence": 1.0,
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "prefix", "complete_idea": True},
+            {"clip_id": "fuller", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "prefix", "label": "keep", "confidence": 0.95},
+        ]}],
+    }
+
+    move, add, audit = deterministic_retry_resolution((prefix,), (), (fuller,), diagnostics)
+
+    assert move == set()
+    assert add == set()
+    assert audit == []
+
+
 def test_selected_suffix_of_confirmed_duplicate_is_removed():
     suffix = _clip("suffix", 18.0, 20.5, "for customers with annual plans.")
     full = _clip("full", 10.0, 20.0, "This offer is for customers with annual plans.")
