@@ -319,9 +319,15 @@ def complete_window_outcomes(
 
 def _outcome_signature(outcome: Mapping) -> tuple:
     """The comparison key two complete windows must match on to AGREE:
-    the same normalized winner set AND the same normalized alternate set.
-    Never compares raw prose/confidence -- structured fields only."""
-    return (outcome["normalized_winner_ids"], outcome["normalized_alternate_ids"])
+    a shared non-empty winner set is decisive even when the windows differ
+    only on whether a losing take is ``alternate`` or ``failed``.  When no
+    winner exists, alternate differences remain material: they distinguish
+    a viable fallback from an all-failed family.  Never compares prose or
+    confidence -- structured fields only."""
+    winners = outcome["normalized_winner_ids"]
+    if winners:
+        return ("winner", winners)
+    return ("no_winner", winners, outcome["normalized_alternate_ids"])
 
 
 def complete_window_agreement(
