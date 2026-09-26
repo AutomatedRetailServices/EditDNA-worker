@@ -16,6 +16,45 @@ from .contracts import CandidateTake
 from .hybrid_retry_winner_authority import _same_retry_attempt
 
 
+def _internal_restart_suffix_covered(anchor: CandidateTake, delivery: CandidateTake) -> bool:
+    """Recognize a spoken restart inside one ASR take, for comparison only.
+
+    A long pause/restart is sometimes retained in the same candidate and the
+    candidate is consequently marked ``complete_idea=True`` even though its
+    final clause is an abandoned attempt.  When an explicit ellipsis marks
+    that restart, admit the trailing clause only if nearly its entire word
+    sequence occurs, in order, inside the later complete delivery.  This
+    grants no deletion authority; the semantic directional-coverage arbiter
+    still has to prove that the later delivery preserves the failed attempt.
+    """
+    text = str(anchor.text or "")
+    marker = max(text.rfind("..."), text.rfind("…"))
+    if marker < 0 or not delivery.complete_idea:
+        return False
+    from .hybrid_retry_winner_authority import _content, _numbers, _tokens
+    suffix_words = _tokens(text[marker + (1 if text[marker] == "…" else 3):])
+    delivery_words = _tokens(delivery.text)
+    suffix_content = _content(" ".join(suffix_words))
+    if len(suffix_words) < 6 or len(suffix_content) < 2:
+        return False
+    left_numbers = _numbers(" ".join(suffix_words))
+    right_numbers = _numbers(delivery.text)
+    if left_numbers and right_numbers and left_numbers != right_numbers:
+        return False
+    # Ordered-subsequence coverage tolerates words inserted by the cleaner,
+    # fuller retake but never reordered or substituted words.
+    cursor = 0
+    matched = 0
+    for word in suffix_words:
+        while cursor < len(delivery_words) and delivery_words[cursor] != word:
+            cursor += 1
+        if cursor >= len(delivery_words):
+            continue
+        matched += 1
+        cursor += 1
+    return matched >= 6 and matched / len(suffix_words) >= 0.80 and suffix_content.issubset(_content(delivery.text))
+
+
 def failed_retry_coverage_pairs(
     takes: Iterable[CandidateTake],
     session_diagnostics: Iterable[dict],
@@ -249,7 +288,11 @@ def failed_retry_coverage_pairs(
                         or len(delivery.text.split()) >= len(anchor.text.split()) + 12
                     )
                 )
-                if same_attempt or shared_core_candidate:
+                internal_restart_candidate = bool(
+                    not same_attempt
+                    and _internal_restart_suffix_covered(anchor, delivery)
+                )
+                if same_attempt or shared_core_candidate or internal_restart_candidate:
                     left_id = anchor_id if anchor_id in group_anchor_ids else failed_id
                     pairs.add((left_id, delivery_id))
     return frozenset(pairs)

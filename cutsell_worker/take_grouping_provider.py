@@ -1877,10 +1877,13 @@ def _evaluate_bridge_cohesion(
     record["component_cohesion_evaluated"] = True
     record["cohesion_confidence"] = round(cohesion_confidence, 4)
     if deterministic_cross_component_conflict:
-        # D-292: the lexical negation/number primitive remains the default
-        # safety gate. It may be overridden only by the SAME bounded pair
-        # judgment explicitly answering all three missing semantic questions:
-        # same retry family, no factual conflict, and directional coverage.
+    # D-292: the lexical negation/number primitive remains the default
+    # safety gate. It may be overridden only by the SAME bounded pair
+    # judgment explicitly answering all three missing semantic questions:
+    # same retry family, no factual conflict, and directional coverage.
+    # A confirmed same-family answer uses the ordinary component bridge
+    # floor (0.90); a directional-coverage-only answer retains the stricter
+    # 0.95 floor. Incomplete structured answers remain blocked.
         # Older/malformed/provider-unavailable responses have no `safety`
         # record and therefore remain blocked byte-for-byte.
         if safety is None:
@@ -1891,10 +1894,12 @@ def _evaluate_bridge_cohesion(
         record["semantic_meaning_conflict"] = meaning_conflict
         record["semantic_left_covered_by_right"] = left_covered_by_right
         record["semantic_right_covered_by_left"] = right_covered_by_left
+        semantic_override_floor = (
+            _BRIDGE_MIN_COHESION_CONFIDENCE if same_retry_family else 0.95
+        )
         if (
             not component_probe_complete
-            or not same_retry_family
-            or cohesion_confidence < 0.95
+            or cohesion_confidence < semantic_override_floor
             or meaning_conflict
             or not (left_covered_by_right or right_covered_by_left)
         ):

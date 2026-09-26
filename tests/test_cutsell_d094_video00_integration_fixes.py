@@ -59,8 +59,19 @@ class TableArbiter:
         for i, pair in enumerate(request.pairs):
             self.pairs_asked.append((pair.left_text, pair.right_text))
             entry = self.table.get((pair.left_text, pair.right_text)) or self.table.get((pair.right_text, pair.left_text))
-            same, conf, reason = entry if entry else (False, 0.0, "unconfigured_pair_declined")
-            decisions.append(IdeaEquivalenceDecision(pair_index=i, same_idea=same, confidence=conf, reason=reason))
+            values = entry if entry else (False, 0.0, "unconfigured_pair_declined")
+            same, conf, reason = values[:3]
+            safety = values[3:] if len(values) > 3 else ()
+            kwargs = {}
+            if safety:
+                kwargs = {
+                    "meaning_conflict": safety[0],
+                    "left_covered_by_right": safety[1],
+                    "right_covered_by_left": safety[2],
+                }
+            decisions.append(IdeaEquivalenceDecision(
+                pair_index=i, same_idea=same, confidence=conf, reason=reason, **kwargs,
+            ))
         return IdeaEquivalenceResult(decisions=tuple(decisions), provider="fake", model="fake", requested=True, available=True,
                                      estimated_input_tokens=50, estimated_output_tokens=10)
 
@@ -313,6 +324,38 @@ def test_f4_cross_component_contradiction_still_rejects():
         arbiter=TableArbiter({}), policy=SemanticEquivalenceGatePolicy(),
     )
     assert accepted is False and record["reason_rejected"] == "cross_component_contradiction"
+
+
+def test_f4_structured_same_family_coverage_can_clear_false_lexical_conflict_at_bridge_floor():
+    left = _take("A", 0, 5, "This cream is safe for children.")
+    right = _take("B", 10, 20, "This cream is not unsafe for children and works quickly.")
+    arbiter = TableArbiter({
+        (left.text, right.text): (True, 0.90, "same retry; later delivery covers earlier", False, True, False),
+    })
+    accepted, record = _evaluate_bridge_cohesion(
+        left_members=("A",), right_members=("B",),
+        edge=_RetryEdge("A", "B", "semantic", 0.90, "same retry"),
+        take_map={"A": left, "B": right}, arbiter=arbiter,
+        policy=SemanticEquivalenceGatePolicy(),
+    )
+    assert accepted is True
+    assert record["deterministic_contradiction_overridden"] is True
+
+
+def test_f4_structured_conflict_override_below_bridge_floor_still_rejects():
+    left = _take("A", 0, 5, "This cream is safe for children.")
+    right = _take("B", 10, 20, "This cream is not unsafe for children and works quickly.")
+    arbiter = TableArbiter({
+        (left.text, right.text): (True, 0.89, "low confidence", False, True, False),
+    })
+    accepted, record = _evaluate_bridge_cohesion(
+        left_members=("A",), right_members=("B",),
+        edge=_RetryEdge("A", "B", "semantic", 0.90, "same retry"),
+        take_map={"A": left, "B": right}, arbiter=arbiter,
+        policy=SemanticEquivalenceGatePolicy(),
+    )
+    assert accepted is False
+    assert record["reason_rejected"] == "cross_component_contradiction"
 
 
 def test_f4_full_split_pass_keeps_the_hereditary_family_together():

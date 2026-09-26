@@ -1,5 +1,8 @@
 from cutsell_worker.contracts import CandidateTake
-from cutsell_worker.failed_retry_coverage_bridge import failed_retry_coverage_pairs
+from cutsell_worker.failed_retry_coverage_bridge import (
+    _internal_restart_suffix_covered,
+    failed_retry_coverage_pairs,
+)
 from cutsell_worker.hybrid_retry_winner_authority import _same_retry_attempt
 from cutsell_worker.semantic_idea_equivalence import IdeaEquivalenceDecision, IdeaEquivalenceResult
 from cutsell_worker.take_grouping_provider import reconcile_semantic_idea_equivalence
@@ -121,6 +124,42 @@ def test_complete_failed_pitch_with_large_shared_core_can_reach_coverage_arbiter
     )
     assert merged == (("failed", "clean"),)
     assert diagnostics["merges"][0]["accepted_by"] == "failed_attempt_directional_coverage"
+
+
+def test_complete_candidate_with_internal_restart_suffix_can_reach_coverage_arbiter():
+    failed = take(
+        "failed",
+        "if you are like me that you... if this happened to you from visiting different salons",
+        20, 28, complete=True,
+    )
+    clean = take(
+        "clean",
+        "if this happened to you because they infected you with fungus from visiting different salons use your own kit",
+        70, 92, complete=True,
+    )
+    windows = ({"partition_index": 0, "member_ids": ["failed", "clean"], "decisions": [
+        row("failed", confidence=0.90),
+        row("clean", label="winner", proposed_label="winner", confidence=0.95,
+            semantic_delete_recommended=False),
+    ]},)
+    assert failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    ) == frozenset({("failed", "clean")})
+
+
+def test_internal_restart_suffix_requires_long_ordered_coverage_and_preserves_numbers():
+    clean = take(
+        "clean", "if this happened to you from visiting two different salons use your own kit tonight",
+        70, 92, complete=True,
+    )
+    unsafe = (
+        "unrelated setup... if this happened",  # generic short suffix
+        "unrelated setup... salons different visiting from you to happened this if",  # reordered
+        "unrelated setup... if this happened to you from visiting three different salons",  # changed fact
+    )
+    for index, text in enumerate(unsafe):
+        failed = take(f"failed-{index}", text, 20, 28, complete=True)
+        assert _internal_restart_suffix_covered(failed, clean) is False
 
 
 def test_shared_core_fallback_is_not_available_for_small_overlap_or_numeric_conflict():
