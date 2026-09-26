@@ -334,7 +334,14 @@ def _find_semantic(texts: list[str], target: str, *, start: int = 0) -> tuple[in
     for window in range(1, _PRECISE_SEARCH_MAX_WINDOW + 1):
         for c_start in range(start, len(candidate_tokens) - window + 1):
             available = frozenset().union(*candidate_tokens[c_start:c_start + window])
-            if _coverage(target_tokens, available) >= _PRECISE_SEARCH_MIN_COVERAGE:
+            exact = _coverage(target_tokens, available)
+            asr_tolerant = (
+                sum(
+                    any(_asr_anchor_matches(token, candidate) for candidate in available)
+                    for token in target_tokens
+                ) / max(1, len(target_tokens))
+            )
+            if max(exact, asr_tolerant) >= _PRECISE_SEARCH_MIN_COVERAGE:
                 return c_start, c_start + window
     return None
 
@@ -384,14 +391,23 @@ def _asr_anchor_matches(token: str, anchor: str) -> bool:
     token, anchor = _asr_anchor_token(token), _asr_anchor_token(anchor)
     if token == anchor:
         return True
-    # Allow one ASR insertion/deletion/substitution in a LONG content word.
-    # A one-letter change in "no" or a number must never get this credit.
-    if min(len(token), len(anchor)) < 8 or abs(len(token) - len(anchor)) > 1:
+    # Allow up to two ASR insertions/deletions/substitutions in a long
+    # content word (for example Spanish imperative morphology transcribed as
+    # ``hidrátate``/``hídrate``).  Short polarity words and numbers never get
+    # fuzzy credit.
+    if min(len(token), len(anchor)) < 7 or abs(len(token) - len(anchor)) > 2:
         return False
-    if len(token) == len(anchor):
-        return sum(a != b for a, b in zip(token, anchor)) == 1
-    shorter, longer = sorted((token, anchor), key=len)
-    return any(longer[:pos] + longer[pos + 1:] == shorter for pos in range(len(longer)))
+    previous = list(range(len(anchor) + 1))
+    for row_index, left in enumerate(token, start=1):
+        current = [row_index]
+        for column_index, right in enumerate(anchor, start=1):
+            current.append(min(
+                current[-1] + 1,
+                previous[column_index] + 1,
+                previous[column_index - 1] + (left != right),
+            ))
+        previous = current
+    return previous[-1] <= 2
 
 
 def _has_ordered_anchors(text: str, anchors: list[str], *, max_span_tokens: int) -> bool:

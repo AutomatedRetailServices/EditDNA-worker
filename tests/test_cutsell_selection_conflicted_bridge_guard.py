@@ -179,6 +179,23 @@ def test_directly_confirmed_selected_duplicate_keeps_semantic_winner():
     assert audit[0]["winner_clip_id"] == "later"
 
 
+def test_equal_safe_confirmed_duplicates_keep_only_later_delivery():
+    earlier = _clip("earlier", 10.0, 18.0, "A rash appeared behind my ear and neck.")
+    later = _clip("later", 21.0, 28.0, "The rash appeared behind my ear and on my neck.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "earlier", "right_clip_id": "later", "confidence": 0.95,
+        }]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "earlier", "label": "keep", "confidence": 0.90},
+            {"clip_id": "later", "label": "keep", "confidence": 0.90},
+        ]}],
+    }
+    move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
+    assert move == {"earlier"}
+    assert audit[0]["winner_clip_id"] == "later"
+
+
 def test_confirmed_duplicate_with_unique_negation_fails_open():
     earlier = _clip("earlier", 1.0, 4.0, "No tuve ese síntoma.")
     later = _clip("later", 5.0, 8.0, "Tuve ese síntoma.")
@@ -240,6 +257,31 @@ def test_deterministic_restart_can_swap_to_stronger_positive_peer():
     assert audit[0]["accepted_by"] == "same_opening_restart"
 
 
+def test_equal_positive_restart_prefers_substantially_fuller_later_delivery():
+    first = _clip("first", 10.0, 16.0, "We checked the thyroid every year and stopped.")
+    retry = _clip(
+        "retry", 20.0, 29.0,
+        "We checked the thyroid every year and the results always worked perfectly.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "first", "right_clip_id": "retry",
+            "confidence": 1.0, "accepted_by": "same_opening_restart",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first", "label": "winner", "confidence": 0.95},
+            {"clip_id": "retry", "label": "winner", "confidence": 0.95},
+        ]}],
+    }
+    move, add, audit = deterministic_retry_resolution((first,), (), (retry,), diagnostics)
+    assert move == {"first"} and add == {"retry"}
+    assert audit[0]["winner_clip_id"] == "retry"
+
+
 def test_failed_complete_peer_is_not_resurrected_over_incomplete_selection():
     incomplete = _clip("incomplete", 10.0, 16.0, "I had trouble with...")
     failed = _clip("failed", 20.0, 22.0, "I had trouble, no.")
@@ -287,6 +329,31 @@ def test_positive_incomplete_bridge_between_selected_neighbors_is_restored():
     add, audit = missing_continuation_bridge_ids((left, right), (), (bridge,), diagnostics)
     assert add == {"bridge"}
     assert audit[0]["terminal_token"] == "from"
+
+
+def test_audience_bridge_with_negative_fragment_vote_uses_later_duplicate_witness():
+    left = _clip("left", 10.0, 15.0, "Most outcomes reflect our choices.")
+    bridge = _clip("bridge", 15.2, 16.5, "Only 7% are from")
+    right = _clip("right", 17.5, 20.0, "hereditary cases, so take care.")
+    repeat_a = _clip("repeat_a", 24.0, 27.0, "Science confirms only 7% of")
+    repeat_b = _clip("repeat_b", 28.0, 30.0, "cases are hereditary.")
+    diagnostics = {
+        "attempt_reconstruction": {"attempts": [{"clip_id": "bridge", "complete_idea": False}]},
+        "hybrid_editorial_chunks": [{"decisions": [{
+            "clip_id": "bridge", "label": "failed", "confidence": 0.90,
+            "content_role": "audience",
+        }]}],
+        "semantic_idea_equivalence": {"continuation_merges": [{
+            "left_clip_id": "repeat_a", "right_clip_id": "repeat_b",
+            "accepted_by": "sentence_continuation", "confidence": 1.0,
+        }]},
+    }
+    add, audit = missing_continuation_bridge_ids(
+        (left, right, repeat_a, repeat_b), (), (bridge,), diagnostics,
+    )
+    assert add == {"bridge"}
+    assert audit[0]["reason"] == "audience_continuation_bridge_restored_from_duplicate_witness"
+    assert audit[0]["duplicate_witness_clip_ids"] == ["repeat_a", "repeat_b"]
 
 
 def test_incomplete_bridge_with_stronger_negative_evidence_fails_open():

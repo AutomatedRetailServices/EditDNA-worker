@@ -37,7 +37,7 @@ _DANGLING_TERMINALS = frozenset({
 _ASSERTION_FRAMING = frozenset({
     "afirmo", "afirma", "avala", "avalado", "ciencia", "cientifica", "cientifico",
     "cientificamente", "comprobado", "convencida", "convencido", "creo", "dice",
-    "evidence", "evidencia", "proven", "science", "scientific", "think", "believe",
+    "am", "estoy", "evidence", "evidencia", "proven", "science", "scientific", "think", "believe",
 })
 _DETERMINISTIC_RETRY_KINDS = frozenset({
     "same_opening_restart",
@@ -113,6 +113,22 @@ def _hybrid_votes(diagnostics: dict) -> dict[str, list[tuple[str, float]]]:
     return votes
 
 
+def _audience_support(diagnostics: dict, clip_id: str) -> float:
+    """Strongest Hybrid observation that classified the clip as audience speech."""
+    best = 0.0
+    for chunk in diagnostics.get("hybrid_editorial_chunks") or ():
+        for row in chunk.get("decisions") or ():
+            if str(row.get("clip_id") or "") != clip_id:
+                continue
+            if str(row.get("content_role") or "") != "audience":
+                continue
+            try:
+                best = max(best, float(row.get("confidence") or 0.0))
+            except (TypeError, ValueError):
+                continue
+    return best
+
+
 def _strongest(votes, clip_id: str, labels: set[str]) -> float:
     return max(
         (confidence for label, confidence in votes.get(str(clip_id), ()) if label in labels),
@@ -175,6 +191,30 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
             if peer_positive >= 0.90 and peer_positive - current_positive >= 0.05 - 1e-9:
                 winner_id, loser_id = peer_id, current_id
+            else:
+                # A deterministic restart relation already proves these two
+                # deliveries compete.  Provider ties must not leave the shorter
+                # earlier attempt selected beside a substantially longer clean
+                # retry merely because both received the same positive label.
+                # This is deliberately limited to a later same-source retry,
+                # strong audience evidence, no strong negative verdict and an
+                # appreciably fuller physical delivery.  Critical facts remain
+                # protected by the subset check below.
+                current, peer = all_by_id[current_id], all_by_id[peer_id]
+                peer_negative = _strongest(votes, peer_id, {"alternate", "failed"})
+                later_fuller_retry = (
+                    float(peer.start) > float(current.start)
+                    and float(peer.end) - float(peer.start)
+                    >= 1.15 * max(0.001, float(current.end) - float(current.start))
+                )
+                if (
+                    peer_positive >= 0.90
+                    and peer_positive + 1e-9 >= current_positive
+                    and peer_negative < 0.80
+                    and complete.get(peer_id) is not False
+                    and later_fuller_retry
+                ):
+                    winner_id, loser_id = peer_id, current_id
         if not winner_id or loser_id not in selected_by_id:
             continue
 
@@ -257,6 +297,16 @@ def missing_continuation_bridge_ids(selected, alternates, discarded, diagnostics
     complete = _attempt_completeness(diagnostics)
     votes = _hybrid_votes(diagnostics)
     candidates = tuple((*alternates, *discarded))
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    continuation_units: list[tuple[tuple[object, ...], str]] = []
+    equivalence = diagnostics.get("semantic_idea_equivalence") or {}
+    for row in equivalence.get("continuation_merges") or ():
+        if not isinstance(row, dict) or str(row.get("accepted_by") or "") != "sentence_continuation":
+            continue
+        ids = (str(row.get("left_clip_id") or ""), str(row.get("right_clip_id") or ""))
+        if all(clip_id in selected_by_id for clip_id in ids):
+            clips = tuple(selected_by_id[clip_id] for clip_id in ids)
+            continuation_units.append((clips, " ".join(clip.text for clip in clips)))
     add: set[str] = set()
     audit: list[dict] = []
     for left, right in zip(ordered, ordered[1:]):
@@ -276,19 +326,50 @@ def missing_continuation_bridge_ids(selected, alternates, discarded, diagnostics
                 continue
             positive = _strongest(votes, bridge.clip_id, {"winner", "keep"})
             negative = _strongest(votes, bridge.clip_id, {"alternate", "failed"})
-            if positive < 0.80 or positive + 1e-9 < negative:
+            ordinary_positive_bridge = positive >= 0.80 and positive + 1e-9 >= negative
+            # Per-fragment Hybrid may call a grammatically open bridge a
+            # performance failure even when it is plainly audience speech and
+            # the selected next delivery closes it.  Override that fragment-
+            # local verdict only when a later deterministic continuation unit
+            # independently repeats the same protected claim.  The later unit
+            # then supplies a lossless duplicate witness; the ordinary chain
+            # collapse below still has to prove the earlier realization covers
+            # it before anything is removed.
+            protected = _critical(bridge.text)
+            combined_content = _substantive(bridge.text + " " + right.text)
+            duplicate_unit = next((
+                (clips, text) for clips, text in continuation_units
+                if min(float(clip.start) for clip in clips) > float(right.end)
+                and protected
+                and protected.issubset(_critical(text))
+                and len(_substantive(text)) >= 2
+                and len(combined_content & _substantive(text)) / len(_substantive(text)) >= 0.65
+            ), None)
+            witnessed_audience_bridge = (
+                not ordinary_positive_bridge
+                and _audience_support(diagnostics, bridge.clip_id) >= 0.80
+                and duplicate_unit is not None
+            )
+            if not (ordinary_positive_bridge or witnessed_audience_bridge):
                 continue
             add.add(bridge.clip_id)
             audit.append({
                 "clip_id": bridge.clip_id,
                 "left_clip_id": left.clip_id,
                 "right_clip_id": right.clip_id,
-                "reason": "missing_positive_continuation_bridge_restored",
+                "reason": (
+                    "missing_positive_continuation_bridge_restored"
+                    if ordinary_positive_bridge
+                    else "audience_continuation_bridge_restored_from_duplicate_witness"
+                ),
                 "left_gap_sec": round(left_gap, 3),
                 "right_gap_sec": round(right_gap, 3),
                 "terminal_token": tokens[-1],
                 "positive_confidence": round(positive, 4),
                 "negative_confidence": round(negative, 4),
+                "duplicate_witness_clip_ids": (
+                    [clip.clip_id for clip in duplicate_unit[0]] if duplicate_unit else []
+                ),
             })
     return add, audit
 
@@ -468,6 +549,20 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
             loser_id, winner_id = left_id, right_id
         elif left_positive >= 0.90 and right_negative >= 0.80 and right_positive < 0.90:
             loser_id, winner_id = right_id, left_id
+        elif (
+            confidence >= 0.95
+            and left_positive >= 0.90
+            and right_positive >= 0.90
+            and left_negative < 0.80
+            and right_negative < 0.80
+        ):
+            # Both selected winners are already proven equivalent and equally
+            # audience-safe.  Resolve the tie once, using the normal retake
+            # convention (later delivery), instead of rendering both.
+            left, right = selected_by_id[left_id], selected_by_id[right_id]
+            if left.source_asset_id == right.source_asset_id:
+                winner, loser = (right, left) if float(right.start) > float(left.start) else (left, right)
+                winner_id, loser_id = winner.clip_id, loser.clip_id
         if not loser_id or loser_id in move:
             continue
         loser = selected_by_id[loser_id]

@@ -191,6 +191,11 @@ def test_closing_keeps_instructions_and_says_cuidate_exactly_once(tmp_path):
     ], manifest={"checks": checks})
     assert report["qa_pass"]  # The pre-Freeze CTA trim may remove its duplicate prefix.
     _, report = _run(tmp_path, [
+        _row("Mi experiencia terminó. Así que cuídate.", 300.0, 311.0),
+        _row("Alimentate bien, hídrate y haz ejercicio.", 356.13, 361.55),
+    ], manifest={"checks": checks})
+    assert report["qa_pass"]  # Common accent and imperative-morphology ASR drift.
+    _, report = _run(tmp_path, [
         _row("Mi experiencia terminó sin exhortación.", 300.0, 311.0),
         _row("Por eso cuídate. Alimbentate bien, hídratate y haz ejercicio.",
              356.13, 361.55),
