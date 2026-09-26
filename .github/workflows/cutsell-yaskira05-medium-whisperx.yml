@@ -1,4 +1,5 @@
 name: CutSell Yaskira 05 Medium WhisperX one-shot
+# Authorized rerun after editorial-boundary correction ce49e31.
 on:
   push:
     branches:
