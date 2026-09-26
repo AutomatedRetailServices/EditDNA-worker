@@ -572,10 +572,7 @@ def process_universal_clean_cut_sources(
             # set.
             authoritative_result = replace(
                 authoritative_result,
-                draft=apply_selection_conflicted_bridge_guard(
-                    authoritative_result.draft,
-                    allow_membership_additions=False,
-                ),
+                draft=apply_selection_conflicted_bridge_guard(authoritative_result.draft),
             )
             # D-092 (D-090 QA_ENGINE P2): KEEP/DISCARD normalization at the
             # authority boundary. The resolver's application may park a

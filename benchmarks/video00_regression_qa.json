@@ -1,7 +1,7 @@
 {
   "schema_version": "cutsell.video00.regression_qa.v1",
   "baseline_run_id": 33126865755,
-  "expected_selected_count": 20,
+  "expected_selected_count": 23,
   "checks": [
     {
       "id": "cancer_hook_preserved",

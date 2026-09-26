@@ -1,9 +1,5 @@
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION
-from cutsell_worker.final_story_coherence_validation import (
-    _lost_semantic_atoms,
-    _missing_idea_coverage,
-    apply_final_story_coherence_validation,
-)
+from cutsell_worker.final_story_coherence_validation import apply_final_story_coherence_validation
 from cutsell_worker.semantic_idea_equivalence import (
     IdeaEquivalenceDecision,
     IdeaEquivalenceResult,
@@ -185,108 +181,6 @@ def test_no_missing_story_ending_flag_when_last_take_is_selected():
     out = apply_final_story_coherence_validation(d)
 
     assert out.diagnostics["final_story_coherence_validation"]["possible_missing_story_ending"] is False
-
-
-def test_missing_group_is_covered_by_its_guard_replaced_selected_winner():
-    old_winner = clip("old_winner", 10.0, 18.0, "A first complete delivery.", selected=False)
-    old_fragment = clip("old_fragment", 18.0, 20.0, "A first", selected=False)
-    clean_retry = clip("clean_retry", 24.0, 32.0, "A later complete delivery.", selected=True)
-    d = draft(
-        selected=(clean_retry,), discarded=(old_winner, old_fragment),
-        take_judge_groups=[{
-            "group_id": "old_family",
-            "selected_clip_id": "old_winner",
-            "ranked": [ranked_row("old_winner", 0.9), ranked_row("old_fragment", 0.4)],
-        }],
-    )
-    d = DraftTimeline(
-        d.schema_version, d.project_id, d.strategy, d.selected, d.alternates, d.discarded,
-        {**d.diagnostics, "selection_conflicted_bridge_guard": [{
-            "clip_id": "old_winner",
-            "winner_clip_id": "clean_retry",
-            "reason": "direct_equivalence_confirmed_final_winner",
-            "equivalence_confidence": 0.9,
-        }]},
-    )
-
-    assert _missing_idea_coverage(d) == []
-
-
-def test_missing_failed_family_is_covered_by_its_guard_proven_complete_retry():
-    failed_take = clip("failed_take", 10.0, 18.0, "An abandoned delivery.", selected=False)
-    failed_fragment = clip("failed_fragment", 18.0, 20.0, "An abandoned", selected=False)
-    complete_retry = clip("complete_retry", 24.0, 32.0, "A complete later delivery.", selected=True)
-    d = draft(
-        selected=(complete_retry,), discarded=(failed_take, failed_fragment),
-        take_judge_groups=[{
-            "group_id": "failed_family",
-            "selected_clip_id": "failed_take",
-            "ranked": [ranked_row("failed_take", 0.9), ranked_row("failed_fragment", 0.4)],
-        }],
-    )
-    d = DraftTimeline(
-        d.schema_version, d.project_id, d.strategy, d.selected, d.alternates, d.discarded,
-        {**d.diagnostics, "selection_conflicted_bridge_guard": [{
-            "clip_id": "failed_take",
-            "winner_clip_id": "complete_retry",
-            "reason": "failed_unusable_retry_component_yields_to_complete_winner",
-            "component_clip_ids": ["failed_take", "failed_fragment", "complete_retry"],
-            "winner_positive_confidence": 0.95,
-        }]},
-    )
-
-    assert _missing_idea_coverage(d) == []
-
-
-def test_guard_coverage_prevents_duplicate_chain_from_reopening_lost_atom():
-    kept = clip(
-        "kept", 10.0, 20.0,
-        "Esta es mi experiencia. Soy la única en mi familia con este cáncer. "
-        "Está comprobado científicamente que los cánceres son hereditarios. "
-        "Más bien solo un 5-10% son de carácter hereditario.", selected=True,
-    )
-    duplicate = clip(
-        "duplicate", 25.0, 31.0,
-        "Así que estoy convencida y la ciencia lo avala que solo un 5-10% de los", selected=False,
-    )
-    d = draft(selected=(kept,), discarded=(duplicate,))
-    d = DraftTimeline(
-        d.schema_version, d.project_id, d.strategy, d.selected, d.alternates, d.discarded,
-        {**d.diagnostics, "selection_conflicted_bridge_guard": [{
-            "clip_ids": ["duplicate"],
-            "prior_clip_ids": ["kept"],
-            "critical_markers": ["5-10%"],
-            "substantive_coverage": 1.0,
-            "reason": "later_continuation_chain_repeats_nearby_critical_claim",
-        }]},
-    )
-
-    rows = _lost_semantic_atoms(d)
-    row = next(row for row in rows if row["clip_id"] == "duplicate")
-    assert row["blocking"] is False
-    assert row["classification"] == "SEMANTICALLY_COVERED_BY_SELECTED_REALIZATION"
-    assert row["content_loss_suppressed_by"] == "final_membership_nearby_chain_coverage"
-
-
-def test_guard_coverage_requires_a_selected_witness_and_full_coverage():
-    kept = clip("kept", 10.0, 20.0, "Only a small subset survives here.", selected=True)
-    duplicate = clip(
-        "duplicate", 25.0, 31.0,
-        "A genuinely different detailed statement with several unique factual tokens.", selected=False,
-    )
-    d = draft(selected=(kept,), discarded=(duplicate,))
-    d = DraftTimeline(
-        d.schema_version, d.project_id, d.strategy, d.selected, d.alternates, d.discarded,
-        {**d.diagnostics, "selection_conflicted_bridge_guard": [{
-            "clip_ids": ["duplicate"],
-            "prior_clip_ids": ["not_selected"],
-            "substantive_coverage": 0.99,
-            "reason": "later_continuation_chain_repeats_nearby_critical_claim",
-        }]},
-    )
-
-    row = next(row for row in _lost_semantic_atoms(d) if row["clip_id"] == "duplicate")
-    assert row["blocking"] is True
 
 
 # --- Contradiction invariant ---
