@@ -51,6 +51,9 @@ jobs:
           path: uploaded-comparison-artifacts/
           retention-days: 14
           if-no-files-found: warn
+      - name: Require successful engine result
+        if: always()
+        run: python -c 'import glob,json;p=glob.glob("uploaded-comparison-artifacts/*/reports/summary.json");assert p,"benchmark summary missing";s=json.load(open(p[0]));assert s.get("engine_ok"),s'
       - name: Remove private runtime files
         if: always()
         run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'
