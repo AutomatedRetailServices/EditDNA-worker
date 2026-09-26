@@ -153,7 +153,7 @@ def run(provider):
     config = PRIVATE / f"{provider}.json"
     write_json(config, env)
     key = json.loads((PRIVATE / "source.json").read_text())["key"]
-    bid = f"uploaded-asr-{os.environ['GITHUB_RUN_ID']}-{provider}"
+    bid = f"uploaded-asr-{os.environ['GITHUB_RUN_ID']}-{EXPECTED_SHA[:12]}-{provider}"
     output = OUT / provider
     reports = output / "reports"
     reports.mkdir(parents=True)
