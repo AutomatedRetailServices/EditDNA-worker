@@ -255,13 +255,29 @@ def test_ten_minute_source_uses_bounded_windows_and_original_timestamps(tmp_path
     context=safe_whole_video_analyze(av,(replace(source(),duration_sec=600),),(),(),
         local_paths={'source':str(raw)})
     assert context.status.available
-    assert slices==[(i*45,min(45,600-i*45)) for i in range(14)]
-    assert len(session.calls)==28
+    assert slices==[(i*45,45 if i<12 else 60) for i in range(13)]
+    assert len(session.calls)==26
     evidence=json.loads(context.sources[0].audiovisual_evidence)
-    assert evidence['window_count']==14
+    assert evidence['window_count']==13
     assert [(x['start'],x['end']) for x in evidence['regions']]==[
-        (1+i*45,2+i*45) for i in range(14)]
-    assert [a['window_index'] for a in context.diagnostics['native_av']]==list(range(14))
+        (1+i*45,2+i*45) for i in range(13)]
+    assert [a['window_index'] for a in context.diagnostics['native_av']]==list(range(13))
+
+
+def test_seven_second_tail_is_included_in_previous_window(tmp_path):
+    raw=tmp_path/'raw.mp4';raw.write_bytes(b'source marker')
+    def prepare(path,target):target.write_bytes(b'prepared');return 367.167
+    slices=[]
+    def slice_media(path,target,start,length):
+        slices.append((start,length));target.write_bytes(b'window');return length
+    av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
+        session=Session(),media_preparer=prepare,media_slicer=slice_media)
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=366.997),),(),(),
+        local_paths={'source':str(raw)})
+    assert context.status.available
+    assert len(slices)==8
+    assert slices[-1][0]==315 and slices[-1][1]==pytest.approx(51.997)
+    assert json.loads(context.sources[0].audiovisual_evidence)['window_count']==8
 
 
 def test_bad_second_window_fails_closed_without_partial_context(tmp_path):
