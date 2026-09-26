@@ -64,3 +64,12 @@ def test_usage_guard_rejects_oversized_source(monkeypatch):
     result = check_processing_allowance(user_id="usr_1", durations_sec=[301])
     assert result.allowed is False
     assert result.reason == "source_duration_limit"
+
+
+def test_ten_minute_limit_applies_per_source(monkeypatch):
+    monkeypatch.setenv("CUTSELL_MAX_SOURCE_MINUTES", "0")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    assert check_processing_allowance(user_id="usr_1", durations_sec=[600, 600]).allowed
+    result = check_processing_allowance(user_id="usr_1", durations_sec=[600.01])
+    assert result.allowed is False
+    assert result.reason == "source_duration_limit"
