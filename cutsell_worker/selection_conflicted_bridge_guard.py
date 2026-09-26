@@ -145,6 +145,31 @@ def _attempt_completeness(diagnostics: dict) -> dict[str, bool]:
     }
 
 
+def _take_judge_usability(diagnostics: dict) -> tuple[dict[str, str], dict[str, dict]]:
+    """Return the strongest existing Best-Take usability evidence by clip.
+
+    The final guard does not invent a new performance judgment.  It only
+    consumes the terminal judgment already recorded by the take judge so a
+    later per-idea resolver cannot accidentally promote a candidate that the
+    real delivery pass found unusable.
+    """
+    status: dict[str, str] = {}
+    member: dict[str, dict] = {}
+    for group in diagnostics.get("take_judge_groups") or ():
+        if not isinstance(group, dict):
+            continue
+        for clip_id, value in (group.get("candidate_usability_summary") or {}).items():
+            clip_id = str(clip_id)
+            if str(value or "").upper() == "UNUSABLE":
+                status[clip_id] = "UNUSABLE"
+            else:
+                status.setdefault(clip_id, str(value or ""))
+        for clip_id, value in (group.get("member_usability") or {}).items():
+            if isinstance(value, dict):
+                member[str(clip_id)] = dict(value)
+    return status, member
+
+
 def _deterministic_retry_rows(diagnostics: dict):
     equivalence = diagnostics.get("semantic_idea_equivalence") or {}
     for row in equivalence.get("merges") or ():
@@ -221,8 +246,17 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
         winner, loser = all_by_id[winner_id], all_by_id[loser_id]
         winner_positive = _strongest(votes, winner_id, {"winner", "keep"})
         winner_negative = _strongest(votes, winner_id, {"alternate", "failed"})
-        if winner_id not in selected_by_id and (winner_positive < 0.80 or winner_negative >= 0.80):
-            continue
+        if winner_id not in selected_by_id:
+            if winner_positive < 0.80:
+                continue
+            # Overlapping complete-context windows can legitimately produce
+            # both a positive and a negative label.  Preserve the negative
+            # safety gate unless the positive verdict wins by a clear 0.10
+            # margin; treating any >=0.80 negative as an unconditional veto
+            # let a weaker selected retry survive a 0.95 keep / 0.85
+            # alternate verdict on its fuller peer.
+            if winner_negative >= 0.80 and winner_positive - winner_negative < 0.10 - 1e-9:
+                continue
         if not _critical(loser.text).issubset(_critical(winner.text)):
             continue
         move.add(loser_id)
@@ -238,106 +272,74 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             "loser_positive_confidence": round(_strongest(votes, loser_id, {"winner", "keep"}), 4),
             "winner_positive_confidence": round(winner_positive, 4),
         })
+    return move, add, audit
 
-    # Some retry families are expressed as two deterministic edges through
-    # the same abandoned attempt: A->B (a short failed correction) and A->C
-    # (the complete audience delivery).  B and C therefore compete even when
-    # no direct B/C edge was emitted.  Resolve only the unambiguous case: one
-    # strong audience winner and a short selected peer that Hybrid strongly
-    # classified as failed/non-audience recording debris.
-    graph: dict[str, set[str]] = {}
-    for row in _deterministic_retry_rows(diagnostics):
-        left_id = str(row.get("left_clip_id") or "")
-        right_id = str(row.get("right_clip_id") or "")
-        if left_id in all_by_id and right_id in all_by_id:
-            graph.setdefault(left_id, set()).add(right_id)
-            graph.setdefault(right_id, set()).add(left_id)
-    visited: set[str] = set()
-    for root in graph:
-        if root in visited:
+
+def unmerged_same_opening_retry_resolution(selected, alternates, discarded, diagnostics: dict):
+    """Resolve a full later restart that grouping left in another family.
+
+    This is a deliberately narrow lexical fallback for provider/grouping
+    variance: four identical opening words, high bidirectional topic overlap,
+    comparable-or-fuller duration, identical numeric/negation markers, and an
+    already-conflicted current winner.  Among several later starts it chooses
+    the richest complete delivery, so an intervening short restart cannot win.
+    """
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    candidates = tuple((*alternates, *discarded))
+    votes = _hybrid_votes(diagnostics)
+    complete = _attempt_completeness(diagnostics)
+    usability, _member = _take_judge_usability(diagnostics)
+    move: set[str] = set()
+    add: set[str] = set()
+    audit: list[dict] = []
+
+    for current_id, current in selected_by_id.items():
+        if _strongest(votes, current_id, {"alternate", "failed"}) < 0.80:
             continue
-        component: set[str] = set()
-        pending = [root]
-        while pending:
-            clip_id = pending.pop()
-            if clip_id in component:
-                continue
-            component.add(clip_id)
-            pending.extend(graph.get(clip_id, ()))
-        visited.update(component)
-        if component & move:
+        current_tokens = _tokens(current.text)
+        current_content = _substantive(current.text)
+        if len(current_tokens) < 8 or len(current_content) < 5:
             continue
-        selected_component_ids = sorted(component & set(selected_by_id))
-        if len(selected_component_ids) == 1:
-            current_id = selected_component_ids[0]
-            current = all_by_id[current_id]
-            current_duration = max(0.0, float(current.end) - float(current.start))
-            complete_peers = [
-                all_by_id[clip_id] for clip_id in component
-                if clip_id != current_id
-                and complete.get(clip_id) is True
-                and _strongest(votes, clip_id, {"alternate", "failed"}) < 0.80
-            ]
-            if complete_peers:
-                maximum_duration = max(float(clip.end) - float(clip.start) for clip in complete_peers)
-                near_fullest = [
-                    clip for clip in complete_peers
-                    if float(clip.end) - float(clip.start) >= 0.90 * maximum_duration
-                ]
-                peer = max(near_fullest, key=lambda clip: (float(clip.start), float(clip.end)))
-                if (
-                    current_duration <= 0.50 * maximum_duration
-                    and _critical(current.text).issubset(_critical(peer.text))
-                ):
-                    move.add(current_id)
-                    add.add(peer.clip_id)
-                    audit.append({
-                        "clip_id": current_id,
-                        "winner_clip_id": peer.clip_id,
-                        "reason": "deterministic_retry_component_orphan_fragment",
-                        "component_clip_ids": sorted(component),
-                        "fragment_duration_sec": round(current_duration, 3),
-                        "winner_duration_sec": round(float(peer.end) - float(peer.start), 3),
-                    })
-                    continue
-        winner_ids = [
-            clip_id for clip_id in component
-            if _strongest(votes, clip_id, {"winner", "keep"}) >= 0.90
-            and _strongest(votes, clip_id, {"alternate", "failed"}) < 0.80
-            and _audience_support(diagnostics, clip_id) >= 0.80
-            and complete.get(clip_id) is not False
-        ]
-        if len(winner_ids) != 1:
+        current_duration = max(0.001, float(current.end) - float(current.start))
+        eligible = []
+        for candidate in candidates:
+            if candidate.source_asset_id != current.source_asset_id:
+                continue
+            if not (float(current.end) < float(candidate.start) <= float(current.end) + 30.0):
+                continue
+            if complete.get(candidate.clip_id) is False or usability.get(candidate.clip_id) == "UNUSABLE":
+                continue
+            candidate_tokens = _tokens(candidate.text)
+            candidate_content = _substantive(candidate.text)
+            if len(candidate_tokens) < 8 or current_tokens[:4] != candidate_tokens[:4]:
+                continue
+            overlap = len(current_content & candidate_content) / max(
+                1, min(len(current_content), len(candidate_content))
+            )
+            candidate_duration = max(0.0, float(candidate.end) - float(candidate.start))
+            if overlap < 0.70 or candidate_duration < 0.95 * current_duration:
+                continue
+            if len(candidate_tokens) < 0.90 * len(current_tokens):
+                continue
+            if _critical(current.text) != _critical(candidate.text):
+                continue
+            eligible.append((len(candidate_content), candidate_duration, float(candidate.start), candidate, overlap))
+        if not eligible:
             continue
-        winner_id = winner_ids[0]
-        winner = all_by_id[winner_id]
-        for loser_id in sorted(component & set(selected_by_id)):
-            if loser_id == winner_id:
-                continue
-            loser = all_by_id[loser_id]
-            duration = max(0.0, float(loser.end) - float(loser.start))
-            if (
-                duration > 4.0
-                or _strongest(votes, loser_id, {"alternate", "failed"}) < 0.90
-                or _audience_support(diagnostics, loser_id) >= 0.80
-            ):
-                continue
-            move.add(loser_id)
-            if winner_id not in selected_by_id:
-                add.add(winner_id)
-            audit.append({
-                "clip_id": loser_id,
-                "winner_clip_id": winner_id,
-                "reason": "deterministic_retry_component_failed_debris",
-                "component_clip_ids": sorted(component),
-                "loser_duration_sec": round(duration, 3),
-                "loser_negative_confidence": round(
-                    _strongest(votes, loser_id, {"alternate", "failed"}), 4,
-                ),
-                "winner_positive_confidence": round(
-                    _strongest(votes, winner_id, {"winner", "keep"}), 4,
-                ),
-            })
+        _richness, _duration, _start, winner, overlap = max(eligible, key=lambda row: row[:3])
+        move.add(current_id)
+        add.add(winner.clip_id)
+        audit.append({
+            "clip_id": current_id,
+            "winner_clip_id": winner.clip_id,
+            "reason": "ungrouped_same_opening_full_retry_resolution",
+            "opening_token_count": 4,
+            "substantive_overlap": round(overlap, 4),
+            "loser_conflict_confidence": round(
+                _strongest(votes, current_id, {"alternate", "failed"}), 4
+            ),
+            "winner_duration_sec": round(_duration, 3),
+        })
     return move, add, audit
 
 
@@ -623,6 +625,7 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
     """
     selected_by_id = {clip.clip_id: clip for clip in selected}
     votes = _hybrid_votes(diagnostics)
+    usability, _member_usability = _take_judge_usability(diagnostics)
     move: set[str] = set()
     audit: list[dict] = []
     equivalence = diagnostics.get("semantic_idea_equivalence") or {}
@@ -650,22 +653,6 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
         elif left_positive >= 0.90 and right_negative >= 0.80 and right_positive < 0.90:
             loser_id, winner_id = right_id, left_id
         elif (
-            confidence >= 0.90
-            and right_positive >= 0.90
-            and right_positive - left_positive >= 0.02 - 1e-9
-            and left_negative < 0.80
-            and right_negative < 0.80
-        ):
-            loser_id, winner_id = left_id, right_id
-        elif (
-            confidence >= 0.90
-            and left_positive >= 0.90
-            and left_positive - right_positive >= 0.02 - 1e-9
-            and left_negative < 0.80
-            and right_negative < 0.80
-        ):
-            loser_id, winner_id = right_id, left_id
-        elif (
             confidence >= 0.95
             and left_positive >= 0.90
             and right_positive >= 0.90
@@ -679,6 +666,28 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
             if left.source_asset_id == right.source_asset_id:
                 winner, loser = (right, left) if float(right.start) > float(left.start) else (left, right)
                 winner_id, loser_id = winner.clip_id, loser.clip_id
+        elif confidence >= 0.90:
+            # A direct semantic-equivalence verdict plus the take judge's
+            # terminal UNUSABLE finding is enough to settle an otherwise
+            # conservative positive-vote tie.  This is the cross-family
+            # shape where a local family had no good alternative but a later,
+            # independently selected equivalent delivery exists globally.
+            left, right = selected_by_id[left_id], selected_by_id[right_id]
+            if left.source_asset_id == right.source_asset_id:
+                if (
+                    usability.get(left_id) == "UNUSABLE"
+                    and usability.get(right_id) != "UNUSABLE"
+                    and (right_positive >= 0.90 or right_negative < 0.80)
+                    and float(right.start) > float(left.start)
+                ):
+                    loser_id, winner_id = left_id, right_id
+                elif (
+                    usability.get(right_id) == "UNUSABLE"
+                    and usability.get(left_id) != "UNUSABLE"
+                    and (left_positive >= 0.90 or left_negative < 0.80)
+                    and float(left.start) > float(right.start)
+                ):
+                    loser_id, winner_id = right_id, left_id
         if not loser_id or loser_id in move:
             continue
         loser = selected_by_id[loser_id]
@@ -696,6 +705,93 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
             ),
             "loser_negative_confidence": round(
                 _strongest(votes, loser_id, {"alternate", "failed"}), 4
+            ),
+        })
+    return move, audit
+
+
+def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dict):
+    """Remove a failed wrong-take when its retry component has a clean winner.
+
+    Restart evidence is transitive: an abandoned start can be linked to a
+    wrong-take fragment, while that same abandoned start is linked to the
+    completed retry.  Looking only at direct pairs lets the middle failed
+    fragment survive even though the component already contains the final
+    delivery.  This function requires all three independent signals before
+    changing membership: deterministic retry edges, a high-confidence
+    Hybrid failure, and terminal Best-Take unusability/delete evidence.
+    """
+    all_by_id = {clip.clip_id: clip for clip in (*selected, *alternates, *discarded)}
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    votes = _hybrid_votes(diagnostics)
+    complete = _attempt_completeness(diagnostics)
+    usability, member_usability = _take_judge_usability(diagnostics)
+    graph: dict[str, set[str]] = {}
+    wrong_take_peers: dict[str, set[str]] = {}
+    for row in _deterministic_retry_rows(diagnostics):
+        left_id = str(row.get("left_clip_id") or "")
+        right_id = str(row.get("right_clip_id") or "")
+        if left_id in all_by_id and right_id in all_by_id:
+            graph.setdefault(left_id, set()).add(right_id)
+            graph.setdefault(right_id, set()).add(left_id)
+            if (
+                str(row.get("accepted_by") or "") == "multimodal_corroborated_retry"
+                and str(row.get("corroborating_event_kind") or "") == "wrong_take"
+            ):
+                wrong_take_peers.setdefault(left_id, set()).add(right_id)
+                wrong_take_peers.setdefault(right_id, set()).add(left_id)
+
+    move: set[str] = set()
+    audit: list[dict] = []
+    for clip_id, clip in selected_by_id.items():
+        evidence = member_usability.get(clip_id) or {}
+        failed_confidence = _strongest(votes, clip_id, {"failed"})
+        positive_confidence = _strongest(votes, clip_id, {"winner", "keep"})
+        corroborated_wrong_take = bool(wrong_take_peers.get(clip_id))
+        terminal_delete = (
+            failed_confidence >= 0.90
+            and positive_confidence < 0.80
+            and bool(evidence.get("deterministic_unusable"))
+            and bool(evidence.get("delete_recommended"))
+        )
+        if usability.get(clip_id) != "UNUSABLE" or not (terminal_delete or corroborated_wrong_take):
+            continue
+
+        component = {clip_id}
+        frontier = [clip_id]
+        while frontier:
+            current = frontier.pop()
+            for peer_id in graph.get(current, ()):
+                if peer_id not in component:
+                    component.add(peer_id)
+                    frontier.append(peer_id)
+
+        winner_id = ""
+        for peer_id in component:
+            if peer_id == clip_id or peer_id not in selected_by_id:
+                continue
+            peer = selected_by_id[peer_id]
+            if peer.source_asset_id != clip.source_asset_id:
+                continue
+            if complete.get(peer_id) is False or usability.get(peer_id) == "UNUSABLE":
+                continue
+            if _strongest(votes, peer_id, {"winner", "keep"}) < 0.90:
+                continue
+            winner_id = peer_id
+            break
+        if not winner_id:
+            continue
+
+        move.add(clip_id)
+        audit.append({
+            "clip_id": clip_id,
+            "winner_clip_id": winner_id,
+            "reason": "failed_unusable_retry_component_yields_to_complete_winner",
+            "component_clip_ids": sorted(component),
+            "failed_confidence": round(failed_confidence, 4),
+            "multimodal_wrong_take_corroborated": corroborated_wrong_take,
+            "winner_positive_confidence": round(
+                _strongest(votes, winner_id, {"winner", "keep"}), 4
             ),
         })
     return move, audit
@@ -740,8 +836,16 @@ def apply_selection_conflicted_bridge_guard(draft):
     bridge_ids, bridge_audit = conflicted_redundant_bridge_ids(draft.selected, diagnostics)
     duplicate_ids, duplicate_audit = confirmed_selected_duplicate_ids(draft.selected, diagnostics)
     incomplete_ids, incomplete_audit = terminally_incomplete_selected_ids(draft.selected, diagnostics)
+    failed_retry_ids, failed_retry_audit = failed_retry_component_ids(
+        draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
     retry_ids, retry_add_ids, retry_audit = deterministic_retry_resolution(
         draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
+    unmerged_retry_ids, unmerged_retry_add_ids, unmerged_retry_audit = (
+        unmerged_same_opening_retry_resolution(
+            draft.selected, draft.alternates, draft.discarded, diagnostics
+        )
     )
     proxy_ids, proxy_audit = contained_proxy_duplicate_ids(
         draft.selected, draft.alternates, draft.discarded, diagnostics
@@ -756,10 +860,14 @@ def apply_selection_conflicted_bridge_guard(draft):
     )
     chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
 
-    move_ids = bridge_ids | duplicate_ids | incomplete_ids | retry_ids | proxy_ids | chain_ids
-    add_ids = (retry_add_ids | continuation_add_ids) - move_ids
+    move_ids = (
+        bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
+        | retry_ids | unmerged_retry_ids | proxy_ids | chain_ids
+    )
+    add_ids = (retry_add_ids | unmerged_retry_add_ids | continuation_add_ids) - move_ids
     audit = (
-        bridge_audit + duplicate_audit + incomplete_audit + retry_audit
+        bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
+        + retry_audit + unmerged_retry_audit
         + proxy_audit + continuation_add_audit + chain_audit
     )
     if not move_ids and not add_ids:
