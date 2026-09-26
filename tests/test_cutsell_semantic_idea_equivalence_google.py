@@ -116,6 +116,14 @@ def test_build_request_never_includes_clip_or_video_identity():
     assert '"pair_index":0' in prompt_text.replace(" ", "")
 
 
+def test_build_request_excludes_recording_process_from_audience_fact_coverage():
+    body = build_semantic_equivalence_request(_request(1), max_output_tokens=400)
+    prompt_text = body["contents"][0]["parts"][0]["text"]
+    assert "Recording-process speech is not an audience-facing fact" in prompt_text
+    assert "every genuine claim intended for the audience still" in prompt_text
+    assert "Intentional audience-facing humor remains content" in prompt_text
+
+
 def test_parse_response_happy_path():
     body = gemini_response(decisions_json(2))
     decisions, output_tokens, finish_reason = parse_semantic_equivalence_response(body)
