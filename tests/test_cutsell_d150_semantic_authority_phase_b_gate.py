@@ -146,6 +146,26 @@ def test_complete_windows_agree_when_same_winner_has_alternate_failed_variance()
     assert agreement["complete_context_conflict"] is False
 
 
+def test_broad_winner_set_and_narrow_keep_agree_on_shared_candidate():
+    rows = [
+        _row("w1", ("A", "B"), [("A", "winner", .95), ("B", "winner", .95)]),
+        _row("w2", ("A", "B"), [("A", "alternate", .85), ("B", "keep", .95)]),
+    ]
+    agreement = complete_window_agreement(("A", "B"), rows)
+    assert agreement["complete_window_agreement_status"] == "MULTIPLE_COMPLETE_WINDOWS_AGREE"
+    assert agreement["complete_context_conflict"] is False
+
+
+def test_disjoint_complete_winners_remain_a_conflict():
+    rows = [
+        _row("w1", ("A", "B"), [("A", "winner", .95), ("B", "alternate", .80)]),
+        _row("w2", ("A", "B"), [("A", "alternate", .80), ("B", "winner", .95)]),
+    ]
+    agreement = complete_window_agreement(("A", "B"), rows)
+    assert agreement["complete_window_agreement_status"] == "MULTIPLE_COMPLETE_WINDOWS_DISAGREE"
+    assert agreement["complete_context_conflict"] is True
+
+
 def test_no_winner_windows_keep_alternate_failed_variance_as_conflict():
     rows = [
         _row("w1", ("A", "B"), [("A", "alternate", .80), ("B", "keep", .85)]),
