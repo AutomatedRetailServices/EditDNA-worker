@@ -1096,13 +1096,17 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
         failed_confidence = _strongest(votes, clip_id, {"failed"})
         positive_confidence = _strongest(votes, clip_id, {"winner", "keep"})
         corroborated_wrong_take = bool(wrong_take_peers.get(clip_id))
+        duration = max(0.0, float(clip.end) - float(clip.start))
+        short_wrong_take_tail = corroborated_wrong_take and duration <= 2.5
         terminal_delete = (
             failed_confidence >= 0.90
             and positive_confidence < 0.80
             and bool(evidence.get("deterministic_unusable"))
             and bool(evidence.get("delete_recommended"))
         )
-        if usability.get(clip_id) != "UNUSABLE" or not (terminal_delete or corroborated_wrong_take):
+        if not (terminal_delete or corroborated_wrong_take):
+            continue
+        if usability.get(clip_id) != "UNUSABLE" and not short_wrong_take_tail:
             continue
 
         component = {clip_id}
@@ -1121,9 +1125,23 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
             peer = selected_by_id[peer_id]
             if peer.source_asset_id != clip.source_asset_id:
                 continue
-            if complete.get(peer_id) is False or usability.get(peer_id) == "UNUSABLE":
+            if complete.get(peer_id) is False:
                 continue
-            if _strongest(votes, peer_id, {"winner", "keep"}) < 0.90:
+            winner_positive = _strongest(votes, peer_id, {"winner", "keep"})
+            audience_support = _audience_support(diagnostics, peer_id)
+            if usability.get(peer_id) == "UNUSABLE" and not (
+                short_wrong_take_tail
+                and winner_positive >= 0.85
+                and audience_support >= 0.80
+            ):
+                continue
+            if winner_positive < (0.85 if short_wrong_take_tail else 0.90):
+                continue
+            if (
+                short_wrong_take_tail
+                and winner_positive < 0.90
+                and audience_support < 0.80
+            ):
                 continue
             winner_id = peer_id
             break
@@ -1138,6 +1156,7 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
             "component_clip_ids": sorted(component),
             "failed_confidence": round(failed_confidence, 4),
             "multimodal_wrong_take_corroborated": corroborated_wrong_take,
+            "short_wrong_take_tail": short_wrong_take_tail,
             "winner_positive_confidence": round(
                 _strongest(votes, winner_id, {"winner", "keep"}), 4
             ),
@@ -1327,6 +1346,71 @@ def borderline_subspan_reconstruction_ids(selected, alternates, discarded, diagn
     return add, audit
 
 
+def orphaned_family_continuation_head_ids(
+    selected, alternates, discarded, diagnostics: dict, planned_move_ids: set[str],
+):
+    """Restore a safe sentence head when its family winner is removed globally.
+
+    A grouping pass can rank a short sentence head as a material prefix of a
+    longer bad take.  If the longer family winner is later removed as a
+    confirmed duplicate, dropping the head as well can orphan an immediately
+    adjacent selected copular continuation ("Era..." / "It was...") and make
+    the whole family disappear.  Restore only the narrow, fully evidenced
+    shape: the removed family winner is already in ``planned_move_ids``; the
+    candidate's sole negative is the prefix-fragment rank penalty; no delete
+    or local-failure evidence exists; it ends as a sentence; and a selected
+    anaphoric continuation begins within half a second.
+    """
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    all_by_id = {clip.clip_id: clip for clip in (*selected, *alternates, *discarded)}
+    delete_recommended = _semantic_delete_recommended_ids(diagnostics)
+    add: set[str] = set()
+    audit: list[dict] = []
+    continuation_starts = {"era", "eran", "es", "fue", "it", "was", "were", "is", "are"}
+    ordered_selected = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), c.clip_id)))
+    for group in diagnostics.get("take_judge_groups") or ():
+        if not isinstance(group, dict):
+            continue
+        removed_winner_id = str(group.get("selected_clip_id") or "")
+        if removed_winner_id not in planned_move_ids:
+            continue
+        usability = group.get("member_usability") or {}
+        for candidate_id, evidence in usability.items():
+            candidate_id = str(candidate_id)
+            candidate = all_by_id.get(candidate_id)
+            if (
+                candidate is None
+                or candidate_id in selected_by_id
+                or candidate_id in planned_move_ids
+                or candidate_id in delete_recommended
+                or not isinstance(evidence, dict)
+                or bool(evidence.get("delete_recommended"))
+                or bool(evidence.get("local_failure_corroborated"))
+                or "material_prefix_fragment_penalty" not in str(evidence.get("ranker_reason") or "")
+                or not str(candidate.text or "").rstrip().endswith((".", "?", "!", "…"))
+                or len(_tokens(candidate.text)) < 3
+            ):
+                continue
+            right = next((
+                clip for clip in ordered_selected
+                if clip.source_asset_id == candidate.source_asset_id
+                and 0 <= float(clip.start) - float(candidate.end) <= 0.5
+                and _tokens(clip.text)
+                and _tokens(clip.text)[0] in continuation_starts
+            ), None)
+            if right is None:
+                continue
+            add.add(candidate_id)
+            audit.append({
+                "clip_id": candidate_id,
+                "removed_family_winner_id": removed_winner_id,
+                "right_clip_id": right.clip_id,
+                "reason": "orphaned_family_sentence_head_restored_before_continuation",
+                "right_gap_sec": round(float(right.start) - float(candidate.end), 3),
+            })
+    return add, audit
+
+
 def terminally_incomplete_selected_ids(selected, diagnostics: dict):
     """Discard tiny attempt fragments proven incomplete upstream."""
     selected_ids = {clip.clip_id for clip in selected}
@@ -1400,14 +1484,19 @@ def apply_selection_conflicted_bridge_guard(draft):
     )
     chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
 
-    move_ids = (
+    planned_move_ids = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
         | dependent_ids | restatement_ids
         | retry_ids | unmerged_retry_ids | proxy_ids | contained_ids | chain_ids
     )
+    orphan_head_add_ids, orphan_head_audit = orphaned_family_continuation_head_ids(
+        draft.selected, draft.alternates, draft.discarded, diagnostics, planned_move_ids
+    )
+
+    move_ids = planned_move_ids
     add_ids = (
         retry_add_ids | unmerged_retry_add_ids | continuation_add_ids | dependent_add_ids
-        | borderline_add_ids
+        | borderline_add_ids | orphan_head_add_ids
     ) - move_ids
     audit = (
         bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
@@ -1415,6 +1504,7 @@ def apply_selection_conflicted_bridge_guard(draft):
         + borderline_audit
         + retry_audit + unmerged_retry_audit
         + proxy_audit + contained_audit + continuation_add_audit + chain_audit
+        + orphan_head_audit
     )
     if not move_ids and not add_ids:
         return draft

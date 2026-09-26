@@ -636,6 +636,36 @@ def _structured_component_coverage_credit(
     return False
 
 
+def _final_membership_coverage_credit(
+    diagnostics, discarded_id: str, selected_ids: set[str],
+) -> tuple[bool, str | None]:
+    """Credit a final guard removal that already proved selected coverage.
+
+    The final membership guard can collapse a continuation chain whose
+    protected markers and substantive content are fully covered by nearby
+    selected clips even when grouping placed the chain in its own family.
+    Story validation must consume that explicit final-membership evidence or
+    it reclassifies the intentionally removed restatement as unique loss and
+    blocks Boundary from trimming the resulting repeated close.
+    """
+    for row in (diagnostics or {}).get("selection_conflicted_bridge_guard") or ():
+        if not isinstance(row, dict):
+            continue
+        reason = str(row.get("reason") or "")
+        if reason == "later_continuation_chain_repeats_nearby_critical_claim":
+            removed_ids = {str(value) for value in row.get("clip_ids") or ()}
+            witnesses = {str(value) for value in row.get("prior_clip_ids") or ()}
+            if discarded_id in removed_ids and witnesses and witnesses.issubset(selected_ids):
+                return True, "final_membership_nearby_chain_coverage"
+        if reason == "later_selected_realization_fully_contained_in_nearby_delivery":
+            if (
+                discarded_id == str(row.get("clip_id") or "")
+                and str(row.get("winner_clip_id") or "") in selected_ids
+            ):
+                return True, "final_membership_contained_realization_coverage"
+    return False, None
+
+
 def _same_idea_paraphrase_credit(
     clip, member_ids: tuple[str, ...], selected_ids: set, diagnostics,
 ) -> tuple[bool, str | None]:
@@ -645,6 +675,11 @@ def _same_idea_paraphrase_credit(
     module comment above for why this is the only evidence source
     consulted (a deterministic idea-scoped overlap fallback is inert by
     construction and is deliberately not implemented)."""
+    final_credit, final_reason = _final_membership_coverage_credit(
+        diagnostics, clip.clip_id, selected_ids,
+    )
+    if final_credit:
+        return True, final_reason
     winner_ids = [cid for cid in member_ids if cid != clip.clip_id and cid in selected_ids]
     if not winner_ids:
         return False, None

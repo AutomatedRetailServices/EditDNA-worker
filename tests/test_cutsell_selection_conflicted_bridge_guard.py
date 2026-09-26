@@ -6,6 +6,7 @@ from cutsell_worker.selection_conflicted_bridge_guard import (
     deterministic_retry_resolution,
     failed_retry_component_ids,
     missing_continuation_bridge_ids,
+    orphaned_family_continuation_head_ids,
     redundant_continuation_chain_ids,
     terminally_incomplete_selected_ids,
     unmerged_same_opening_retry_resolution,
@@ -313,6 +314,85 @@ def test_multimodal_wrong_take_can_settle_component_without_hybrid_failure_vote(
 
     assert move == {"false_start"}
     assert audit[0]["multimodal_wrong_take_corroborated"] is True
+
+
+def test_short_multimodal_wrong_take_tail_uses_native_av_audience_winner():
+    abandoned = _clip("abandoned", 10.0, 16.0, "Tuve problemas de estómago y me diagnosticaron con...")
+    false_start = _clip("false_start", 20.0, 21.6, "Tuve problemas de estómago, no.")
+    complete = _clip("complete", 27.0, 36.0, "Tuve problemas de digestión y me diagnosticaron gastritis.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "abandoned", "right_clip_id": "false_start",
+             "accepted_by": "multimodal_corroborated_retry", "confidence": 1.0,
+             "corroborating_event_kind": "wrong_take"},
+            {"left_clip_id": "abandoned", "right_clip_id": "complete",
+             "accepted_by": "incomplete_attempt_completed_by_retry", "confidence": 1.0},
+        ]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "abandoned", "complete_idea": False},
+            {"clip_id": "false_start", "complete_idea": True},
+            {"clip_id": "complete", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "complete", "label": "keep", "confidence": 0.85,
+             "content_role": "audience"},
+        ]}],
+        "take_judge_groups": [{
+            "candidate_usability_summary": {"complete": "UNUSABLE"},
+            "member_usability": {"complete": {
+                "deterministic_unusable": False, "delete_recommended": False,
+            }},
+        }],
+    }
+
+    move, audit = failed_retry_component_ids((false_start, complete), (), (abandoned,), diagnostics)
+
+    assert move == {"false_start"}
+    assert audit[0]["short_wrong_take_tail"] is True
+    assert audit[0]["winner_positive_confidence"] == 0.85
+
+
+def test_orphaned_sentence_head_is_restored_before_selected_continuation():
+    head = _clip("head", 192.306, 194.718, "También me salían espinillas.")
+    removed_winner = _clip(
+        "removed_winner", 198.832, 210.315,
+        "También me salían espinillas detrás de la oreja y en el cuello.",
+    )
+    continuation = _clip("continuation", 194.90, 198.50, "Era como una alergia recurrente.")
+    diagnostics = {"take_judge_groups": [{
+        "selected_clip_id": "removed_winner",
+        "member_usability": {
+            "head": {
+                "ranker_reason": "material_prefix_fragment_penalty",
+                "delete_recommended": False,
+                "local_failure_corroborated": False,
+            },
+        },
+    }]}
+
+    add, audit = orphaned_family_continuation_head_ids(
+        (removed_winner, continuation), (), (head,), diagnostics, {"removed_winner"},
+    )
+
+    assert add == {"head"}
+    assert audit[0]["right_clip_id"] == "continuation"
+
+
+def test_orphaned_sentence_head_fails_open_without_adjacent_anaphoric_continuation():
+    head = _clip("head", 10.0, 12.0, "También me salían espinillas.")
+    removed_winner = _clip("removed_winner", 15.0, 20.0, "También me salían espinillas en el cuello.")
+    unrelated = _clip("unrelated", 12.1, 14.0, "Después visité a mi doctora.")
+    diagnostics = {"take_judge_groups": [{
+        "selected_clip_id": "removed_winner",
+        "member_usability": {"head": {"ranker_reason": "material_prefix_fragment_penalty"}},
+    }]}
+
+    add, audit = orphaned_family_continuation_head_ids(
+        (removed_winner, unrelated), (), (head,), diagnostics, {"removed_winner"},
+    )
+
+    assert add == set()
+    assert audit == []
 
 
 def test_failed_retry_component_preserves_negation_without_full_failure_evidence():

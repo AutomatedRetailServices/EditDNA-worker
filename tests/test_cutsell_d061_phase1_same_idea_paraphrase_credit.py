@@ -30,7 +30,10 @@ all of those.
 Entirely generic -- no Video00 clip ids or phrases.
 """
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION
-from cutsell_worker.final_story_coherence_validation import apply_final_story_coherence_validation
+from cutsell_worker.final_story_coherence_validation import (
+    _final_membership_coverage_credit,
+    apply_final_story_coherence_validation,
+)
 
 
 def clip(clip_id, start, end, text, *, selected, source="src"):
@@ -304,3 +307,37 @@ def test_selected_semantic_paraphrase_not_blocking():
     row = _row_for(diag, "discard")
 
     assert row is None or row["blocking"] is False
+
+
+def test_final_membership_chain_credit_requires_all_selected_witnesses():
+    diagnostics = {"selection_conflicted_bridge_guard": [{
+        "reason": "later_continuation_chain_repeats_nearby_critical_claim",
+        "clip_ids": ["discard", "discard_2"],
+        "prior_clip_ids": ["prior_a", "prior_b"],
+    }]}
+
+    credited, reason = _final_membership_coverage_credit(
+        diagnostics, "discard", {"prior_a", "prior_b"},
+    )
+    missing_witness, _ = _final_membership_coverage_credit(
+        diagnostics, "discard", {"prior_a"},
+    )
+
+    assert credited is True
+    assert reason == "final_membership_nearby_chain_coverage"
+    assert missing_witness is False
+
+
+def test_final_membership_contained_realization_credit_requires_selected_winner():
+    diagnostics = {"selection_conflicted_bridge_guard": [{
+        "reason": "later_selected_realization_fully_contained_in_nearby_delivery",
+        "clip_id": "discard",
+        "winner_clip_id": "winner",
+    }]}
+
+    credited, reason = _final_membership_coverage_credit(diagnostics, "discard", {"winner"})
+    missing_winner, _ = _final_membership_coverage_credit(diagnostics, "discard", set())
+
+    assert credited is True
+    assert reason == "final_membership_contained_realization_coverage"
+    assert missing_winner is False
