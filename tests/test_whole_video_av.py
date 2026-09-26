@@ -128,7 +128,7 @@ def test_timeout_retry_requires_explicit_flag_and_reserves_second_attempt(tmp_pa
         av,(source(),),(),(),local_paths={'source':str(raw)},
     )
     assert context.status.available
-    assert [call[2] for call in session.calls]==[60,60,120]
+    assert [call[2] for call in session.calls]==[60,60,300]
     record=context.diagnostics['native_av'][0]
     assert record['status']=='validated'
     assert record['generation_attempts']==2
@@ -157,7 +157,7 @@ def test_invalid_response_retry_requires_flag_and_second_budget(tmp_path):
         av,(source(),),(),(),local_paths={'source':str(raw)},
     )
     assert context.status.available
-    assert [call[2] for call in session.calls]==[60,60,120]
+    assert [call[2] for call in session.calls]==[60,60,300]
     record=context.diagnostics['native_av'][0]
     assert record['status']=='validated'
     assert record['generation_attempts']==2
@@ -191,7 +191,7 @@ def test_second_invalid_response_fails_closed_after_two_generations(tmp_path):
         av,(source(),),(),(),local_paths={'source':str(raw)},
     )
     assert not context.status.available
-    assert [call[2] for call in session.calls]==[60,60,120]
+    assert [call[2] for call in session.calls]==[60,60,300]
     record=context.diagnostics['native_av'][0]
     assert record['generation_attempts']==2
     assert record['status']=='generation_retry_failed'
@@ -208,7 +208,7 @@ def test_timeout_then_invalid_response_never_sends_third_generation(tmp_path):
         av,(source(),),(),(),local_paths={'source':str(raw)},
     )
     assert not context.status.available
-    assert [call[2] for call in session.calls]==[60,60,120]
+    assert [call[2] for call in session.calls]==[60,60,300]
     record=context.diagnostics['native_av'][0]
     assert record['generation_attempts']==2
     assert record['status']=='rejected'
@@ -239,6 +239,70 @@ def test_missing_actual_source_does_not_fall_back_to_text(tmp_path):
     av,raw,session=provider(tmp_path)
     context=safe_whole_video_analyze(av,(source(),),(),())
     assert not context.status.available and not session.calls
+
+
+def test_ten_minute_source_uses_bounded_windows_and_original_timestamps(tmp_path):
+    raw=tmp_path/'raw.mp4';raw.write_bytes(b'large input marker')
+    def prepare(path,target):
+        target.write_bytes(b'compressed source');return 600
+    slices=[]
+    def slice_media(path,target,start,length):
+        slices.append((start,length));target.write_bytes(b'compressed AV window')
+        return length
+    session=Session()
+    av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
+        session=session,media_preparer=prepare,media_slicer=slice_media)
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=600),),(),(),
+        local_paths={'source':str(raw)})
+    assert context.status.available
+    assert slices==[(0,90),(90,90),(180,90),(270,90),(360,90),(450,90),(540,60)]
+    assert len(session.calls)==14
+    evidence=json.loads(context.sources[0].audiovisual_evidence)
+    assert evidence['window_count']==7
+    assert [(x['start'],x['end']) for x in evidence['regions']]==[
+        (1,2),(91,92),(181,182),(271,272),(361,362),(451,452),(541,542)]
+    assert [a['window_index'] for a in context.diagnostics['native_av']]==list(range(7))
+
+
+def test_bad_second_window_fails_closed_without_partial_context(tmp_path):
+    raw=tmp_path/'raw.mp4';raw.write_bytes(b'input')
+    def prepare(path,target):target.write_bytes(b'compressed');return 180
+    def slice_media(path,target,start,length):target.write_bytes(b'window');return length
+    class BadSecond(Session):
+        def post(self,url,headers,json,timeout):
+            if url.endswith('generateContent') and sum(x[0].endswith('generateContent') for x in self.calls)==1:
+                self.data={**result(),'regions':[{**result()['regions'][0],'start':81,'end':2}]}
+            return super().post(url,headers,json,timeout)
+    session=BadSecond()
+    av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
+        session=session,media_preparer=prepare,media_slicer=slice_media)
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=180),),(),(),
+        local_paths={'source':str(raw)})
+    assert not context.status.available
+    assert not context.sources
+    assert len([c for c in session.calls if c[0].endswith('generateContent')])==2
+
+
+def test_over_ten_minutes_rejected_before_media_processing(tmp_path):
+    av,raw,session=provider(tmp_path)
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=601),),(),(),
+        local_paths={'source':str(raw)})
+    assert not context.status.available and not session.calls
+
+
+def test_native_window_keeps_audio_video_and_local_duration(tmp_path):
+    import subprocess
+    from cutsell_worker.whole_video_av import slice_prepared_av
+    source_path=tmp_path/'source.mp4';window=tmp_path/'window.mp4'
+    subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y',
+        '-f','lavfi','-i','testsrc=size=160x120:rate=12',
+        '-f','lavfi','-i','sine=frequency=600:sample_rate=16000',
+        '-t','3','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',
+        str(source_path)],check=True,capture_output=True)
+    assert abs(slice_prepared_av(source_path,window,1,1)-1)<.35
+    streams=json.loads(subprocess.run(['ffprobe','-v','error','-show_streams',
+        '-of','json',str(window)],check=True,capture_output=True,text=True).stdout)['streams']
+    assert {'audio','video'} <= {s['codec_type'] for s in streams}
 
 
 def test_explicit_budget_required_and_no_automatic_spending():
