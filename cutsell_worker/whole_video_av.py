@@ -223,8 +223,11 @@ class GeminiWholeVideoAVProvider:
                 prepared_duration = self.media_preparer(path, prepared)
                 if not math.isfinite(prepared_duration) or abs(prepared_duration-source.duration_sec) > .3:
                     raise ValueError('AV input timeline does not match source duration')
-                starts = [i * self.window_sec for i in range(
-                    math.ceil(source.duration_sec / self.window_sec))]
+                # Keep the previously qualified short-source path intact.
+                # Long creator RAWs need local timelines to prevent model time wraps.
+                starts = ([0] if source.duration_sec <= 180 else
+                          [i * self.window_sec for i in range(
+                              math.ceil(source.duration_sec / self.window_sec))])
                 # A tiny last request makes relative timestamps unreliable;
                 # keep the source fully covered by extending the prior window.
                 if len(starts) > 1 and source.duration_sec - starts[-1] < self.window_sec / 2:
