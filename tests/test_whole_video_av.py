@@ -255,13 +255,13 @@ def test_ten_minute_source_uses_bounded_windows_and_original_timestamps(tmp_path
     context=safe_whole_video_analyze(av,(replace(source(),duration_sec=600),),(),(),
         local_paths={'source':str(raw)})
     assert context.status.available
-    assert slices==[(0,90),(90,90),(180,90),(270,90),(360,90),(450,90),(540,60)]
-    assert len(session.calls)==14
+    assert slices==[(i*45,min(45,600-i*45)) for i in range(14)]
+    assert len(session.calls)==28
     evidence=json.loads(context.sources[0].audiovisual_evidence)
-    assert evidence['window_count']==7
+    assert evidence['window_count']==14
     assert [(x['start'],x['end']) for x in evidence['regions']]==[
-        (1,2),(91,92),(181,182),(271,272),(361,362),(451,452),(541,542)]
-    assert [a['window_index'] for a in context.diagnostics['native_av']]==list(range(7))
+        (1+i*45,2+i*45) for i in range(14)]
+    assert [a['window_index'] for a in context.diagnostics['native_av']]==list(range(14))
 
 
 def test_bad_second_window_fails_closed_without_partial_context(tmp_path):
