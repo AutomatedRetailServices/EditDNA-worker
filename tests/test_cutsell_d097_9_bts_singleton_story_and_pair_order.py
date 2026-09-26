@@ -35,7 +35,7 @@ from cutsell_worker.final_story_coherence_validation import (
     _no_usable_realization_groups,
     apply_final_story_coherence_validation,
 )
-from cutsell_worker.pipeline import _is_corroborated_failed_singleton
+from cutsell_worker.pipeline import _conflicted_semantic_role_ids, _is_corroborated_failed_singleton
 from cutsell_worker.semantic_idea_equivalence import (
     IdeaEquivalenceDecision,
     IdeaEquivalenceResult,
@@ -189,6 +189,31 @@ def test_failed_singleton_still_fails_open_without_independent_local_support():
         (member,), {"failed": ("failed", 0.95)}, {"failed": True},
         {"failed": False}, {"failed": True},
     )
+
+
+def test_conflicted_complete_windows_cannot_delete_corroborated_singleton():
+    member = _take("failed", 1.0, 5.0, "A complete audience-facing statement")
+    assert not _is_corroborated_failed_singleton(
+        (member,), {"failed": ("failed", 0.90)}, {"failed": True},
+        {"failed": True}, {"failed": True},
+        semantic_comparative_authority="ABSTAIN_CONFLICT",
+    )
+
+
+def test_strong_winner_and_failed_votes_are_recorded_as_role_conflict():
+    diagnostics = [
+        {"decisions": [{"clip_id": "take", "label": "winner", "confidence": 0.95}]},
+        {"decisions": [{"clip_id": "take", "label": "failed", "confidence": 0.90}]},
+    ]
+    assert _conflicted_semantic_role_ids(diagnostics) == frozenset({"take"})
+
+
+def test_weak_positive_vote_does_not_veto_delete_recommendation():
+    diagnostics = [
+        {"decisions": [{"clip_id": "take", "label": "keep", "confidence": 0.70}]},
+        {"decisions": [{"clip_id": "take", "label": "failed", "confidence": 0.90}]},
+    ]
+    assert _conflicted_semantic_role_ids(diagnostics) == frozenset()
 
 
 HAIR = _take("hair", 226.7, 233.2, "My hair was falling out whenever I washed it and I blamed the stress.")
