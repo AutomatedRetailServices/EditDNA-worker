@@ -44,13 +44,34 @@ def prepare_av(source_path, destination):
         '-map','0:v:0','-map','0:a:0','-vf','scale=480:-2','-r','12',
         '-c:v','libx264','-preset','fast','-crf','30','-c:a','aac','-ac','1','-ar','16000',
         '-b:a','48k','-movflags','+faststart',str(destination),
-    ],check=True,capture_output=True,timeout=180)
+    ],check=True,capture_output=True,timeout=900)
     probe = json.loads(subprocess.run([
         'ffprobe','-v','error','-show_streams','-show_format','-of','json',str(destination),
     ],check=True,capture_output=True,text=True,timeout=30).stdout)
     if not {'audio','video'} <= {s.get('codec_type') for s in probe['streams']}:
         raise ValueError('audiovisual input requires actual audio and video')
     return float(probe['format']['duration'])
+
+
+def slice_prepared_av(source_path, destination, start, length):
+    """Decode a bounded window from the compressed source with its real audio."""
+    subprocess.run([
+        'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source_path),
+        '-ss', str(start), '-t', str(length), '-map', '0:v:0', '-map', '0:a:0',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '30',
+        '-c:a', 'aac', '-ac', '1', '-ar', '16000', '-b:a', '48k',
+        '-movflags', '+faststart', str(destination),
+    ], check=True, capture_output=True, timeout=180)
+    probe = json.loads(subprocess.run([
+        'ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json',
+        str(destination),
+    ], check=True, capture_output=True, text=True, timeout=30).stdout)
+    if not {'audio', 'video'} <= {s.get('codec_type') for s in probe['streams']}:
+        raise ValueError('AV window requires actual audio and video')
+    duration = float(probe['format']['duration'])
+    if not math.isfinite(duration) or abs(duration - length) > .35:
+        raise ValueError('AV window timeline mismatch')
+    return duration
 
 
 @dataclass
@@ -62,6 +83,8 @@ class GeminiWholeVideoAVProvider:
     output_usd_per_million: float
     session: object = requests
     media_preparer: object = prepare_av
+    media_slicer: object = slice_prepared_av
+    window_sec: int = 90
     max_output_tokens: int = 2048
     max_media_bytes: int = 12_000_000
     retry_generation_timeout: bool = False
@@ -73,6 +96,8 @@ class GeminiWholeVideoAVProvider:
                 raise ValueError('AV budget and conservative multimodal prices must be explicitly configured')
         if not self.api_key or not self.model:
             raise ValueError('AV requires configured Gemini credentials and model')
+        if not 30 <= self.window_sec <= 120:
+            raise ValueError('AV window must be between 30 and 120 seconds')
 
     def analyze(self, sources, transcripts, samples):
         raise ValueError('Watch + Listen requires local source media, not sampled images alone')
@@ -85,126 +110,174 @@ class GeminiWholeVideoAVProvider:
         response.raise_for_status()
         return response.json()
 
+    def _observe_window(self, contents, source, source_sha256, duration,
+                        prepared_duration, window_start, window_index):
+        counted=self._post('countTokens',{'contents':contents})
+        tokens=counted.get('totalTokens')
+        if type(tokens) is not int or tokens <= 0:
+            raise ValueError('AV token preflight unavailable')
+        reserved=(tokens*self.input_usd_per_million+self.max_output_tokens*self.output_usd_per_million)/1e6
+        if not self.ledger.reserve(reserved):
+            raise ValueError('AV budget exhausted before generation')
+        # Keep the reservation on timeout/failure: the server may have billed it.
+        audit = dict(contract_version='cutsell.av.v1', source_asset_id=source.source_asset_id,
+                     source_sha256=source_sha256, source_duration_sec=source.duration_sec,
+                     window_start_sec=window_start, window_index=window_index,
+                     window_duration_sec=duration,
+                     prepared_duration_sec=prepared_duration, model=self.model, reserved_usd=reserved,
+                     input_tokens_preflight=tokens, status='generation_requested',
+                     generation_attempts=1)
+        self.audit_records.append(audit)
+        generation_body={'contents':contents,'generationConfig':{
+            # Remove avoidable sampling variance from identical
+            # full-video qualification inputs. Provider execution may
+            # still vary and is measured by the live regressions.
+            'temperature':0.0,
+            'responseMimeType':'application/json','maxOutputTokens':self.max_output_tokens,
+            'responseJsonSchema': response_schema(duration),
+        }}
+        try:
+            raw=self._post('generateContent',generation_body)
+        except requests.exceptions.ReadTimeout:
+            if not self.retry_generation_timeout:
+                raise
+            if not self.ledger.reserve(reserved):
+                audit.update(status='retry_budget_exhausted', retry_reason='read_timeout')
+                raise ValueError('AV timeout retry budget exhausted')
+            audit.update(
+                status='generation_retry_requested',
+                retry_reason='read_timeout',
+                generation_attempts=2,
+                reserved_usd=reserved * 2,
+            )
+            try:
+                raw=self._post('generateContent',generation_body,timeout_sec=300)
+            except Exception as exc:
+                audit.update(
+                    status='generation_retry_failed',
+                    retry_failure_type=type(exc).__name__,
+                )
+                raise
+        usage = raw.get('usageMetadata') or {}
+        logging.getLogger(__name__).info(
+            'AV response source=%s input_tokens=%s output_tokens=%s thinking_tokens=%s total_reserved_usd=%.6f',
+            source.source_asset_id, usage.get('promptTokenCount'), usage.get('candidatesTokenCount'),
+            usage.get('thoughtsTokenCount'), audit['reserved_usd'],
+        )
+        audit['response'] = captured_response(raw)
+        try:
+            data = parse_response(audit['response'], duration, prepared_duration)
+        except Exception as exc:
+            # D-306: a syntactically valid provider response can still
+            # violate the strict AV contract (for example end < start).
+            # Under the same explicit, budgeted benchmark retry
+            # capability, replace that response once; never guess or
+            # repair model timestamps locally, and never exceed two paid
+            # generation attempts total.
+            if not self.retry_generation_timeout or audit['generation_attempts'] != 1:
+                audit.update(status='rejected', rejection=str(exc))
+                raise
+            if not self.ledger.reserve(reserved):
+                audit.update(
+                    status='retry_budget_exhausted',
+                    retry_reason='invalid_response',
+                    rejection=str(exc),
+                )
+                raise ValueError('AV invalid-response retry budget exhausted')
+            audit.update(
+                status='generation_retry_requested',
+                retry_reason='invalid_response',
+                retry_initial_rejection=str(exc),
+                generation_attempts=2,
+                reserved_usd=reserved * 2,
+            )
+            try:
+                raw=self._post('generateContent',generation_body,timeout_sec=300)
+                audit['response'] = captured_response(raw)
+                data = parse_response(audit['response'], duration, prepared_duration)
+            except Exception as retry_exc:
+                audit.update(
+                    status='generation_retry_failed',
+                    retry_failure_type=type(retry_exc).__name__,
+                    rejection=str(retry_exc),
+                )
+                raise
+        audit['status'] = 'validated'
+        return data
+
     def analyze_media(self, sources, transcripts, samples, local_paths):
         self.audit_records = []
-        contexts=[]
+        contexts = []
         for source in sources:
-            path=Path(local_paths[source.source_asset_id])
-            digest=hashlib.sha256()
+            if not 0 < source.duration_sec <= 600.5:
+                raise ValueError('AV source must be at most 10 minutes')
+            path = Path(local_paths[source.source_asset_id])
+            digest = hashlib.sha256()
             with path.open('rb') as stream:
-                for chunk in iter(lambda:stream.read(1024*1024),b''):
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                     digest.update(chunk)
+            source_sha256 = digest.hexdigest()
+            regions, summaries, intents, stories = [], [], [], []
             with tempfile.TemporaryDirectory(prefix='cutsell-av-') as directory:
-                prepared=Path(directory)/'source.mp4'
-                duration=self.media_preparer(path,prepared)
-                if not math.isfinite(duration) or abs(duration-source.duration_sec) > .3:
+                prepared = Path(directory) / 'source.mp4'
+                prepared_duration = self.media_preparer(path, prepared)
+                if not math.isfinite(prepared_duration) or abs(prepared_duration-source.duration_sec) > .3:
                     raise ValueError('AV input timeline does not match source duration')
-                if prepared.stat().st_size > self.max_media_bytes:
-                    raise ValueError('AV inline size exceeded; refusing partial source or text fallback')
-                encoded=base64.b64encode(prepared.read_bytes()).decode('ascii')
-            contents=[{'role':'user','parts':[
-                {'inline_data':{'mime_type':'video/mp4','data':encoded}},
-                {'text':PROMPT+f'\nOriginal source ends at {source.duration_sec:.6f} seconds. All regions must end at or before that time; ignore any encoder padding.'},
-            ]}]
-            counted=self._post('countTokens',{'contents':contents})
-            tokens=counted.get('totalTokens')
-            if type(tokens) is not int or tokens <= 0:
-                raise ValueError('AV token preflight unavailable')
-            reserved=(tokens*self.input_usd_per_million+self.max_output_tokens*self.output_usd_per_million)/1e6
-            if not self.ledger.reserve(reserved):
-                raise ValueError('AV budget exhausted before generation')
-            # Keep the reservation on timeout/failure: the server may have billed it.
-            audit = dict(contract_version='cutsell.av.v1', source_asset_id=source.source_asset_id,
-                         source_sha256=digest.hexdigest(), source_duration_sec=source.duration_sec,
-                         prepared_duration_sec=duration, model=self.model, reserved_usd=reserved,
-                         input_tokens_preflight=tokens, status='generation_requested',
-                         generation_attempts=1)
-            self.audit_records.append(audit)
-            generation_body={'contents':contents,'generationConfig':{
-                # Remove avoidable sampling variance from identical
-                # full-video qualification inputs. Provider execution may
-                # still vary and is measured by the live regressions.
-                'temperature':0.0,
-                'responseMimeType':'application/json','maxOutputTokens':self.max_output_tokens,
-                'responseJsonSchema': response_schema(source.duration_sec),
-            }}
-            try:
-                raw=self._post('generateContent',generation_body)
-            except requests.exceptions.ReadTimeout:
-                if not self.retry_generation_timeout:
-                    raise
-                if not self.ledger.reserve(reserved):
-                    audit.update(status='retry_budget_exhausted', retry_reason='read_timeout')
-                    raise ValueError('AV timeout retry budget exhausted')
-                audit.update(
-                    status='generation_retry_requested',
-                    retry_reason='read_timeout',
-                    generation_attempts=2,
-                    reserved_usd=reserved * 2,
-                )
-                try:
-                    raw=self._post('generateContent',generation_body,timeout_sec=300)
-                except Exception as exc:
-                    audit.update(
-                        status='generation_retry_failed',
-                        retry_failure_type=type(exc).__name__,
+                window_count = math.ceil(source.duration_sec / self.window_sec)
+                for window_index in range(window_count):
+                    start = window_index * self.window_sec
+                    duration = min(self.window_sec, source.duration_sec - start)
+                    if window_count == 1:
+                        piece, piece_duration = prepared, prepared_duration
+                    else:
+                        piece = Path(directory) / f'window-{window_index:02d}.mp4'
+                        piece_duration = self.media_slicer(prepared, piece, start, duration)
+                    if piece.stat().st_size > self.max_media_bytes:
+                        raise ValueError('AV inline window size exceeded; refusing partial source')
+                    encoded = base64.b64encode(piece.read_bytes()).decode('ascii')
+                    if window_count > 1:
+                        piece.unlink()
+                    prompt = PROMPT + (
+                        f'\nThis is window {window_index+1}/{window_count} of one source. '
+                        f'Its local timeline is 0 to {duration:.6f} seconds; report only local '
+                        'times within this window. The full story may continue outside the window. '
+                        'Do not invent observations for unseen portions.'
+                        if window_count > 1 else
+                        f'\nOriginal source ends at {source.duration_sec:.6f} seconds. '
+                        'All regions must end at or before that time; ignore encoder padding.'
                     )
-                    raise
-            usage = raw.get('usageMetadata') or {}
-            logging.getLogger(__name__).info(
-                'AV response source=%s input_tokens=%s output_tokens=%s thinking_tokens=%s total_reserved_usd=%.6f',
-                source.source_asset_id, usage.get('promptTokenCount'), usage.get('candidatesTokenCount'),
-                usage.get('thoughtsTokenCount'), audit['reserved_usd'],
-            )
-            audit['response'] = captured_response(raw)
-            try:
-                data = parse_response(audit['response'], source.duration_sec, duration)
-            except Exception as exc:
-                # D-306: a syntactically valid provider response can still
-                # violate the strict AV contract (for example end < start).
-                # Under the same explicit, budgeted benchmark retry
-                # capability, replace that response once; never guess or
-                # repair model timestamps locally, and never exceed two paid
-                # generation attempts total.
-                if not self.retry_generation_timeout or audit['generation_attempts'] != 1:
-                    audit.update(status='rejected', rejection=str(exc))
-                    raise
-                if not self.ledger.reserve(reserved):
-                    audit.update(
-                        status='retry_budget_exhausted',
-                        retry_reason='invalid_response',
-                        rejection=str(exc),
-                    )
-                    raise ValueError('AV invalid-response retry budget exhausted')
-                audit.update(
-                    status='generation_retry_requested',
-                    retry_reason='invalid_response',
-                    retry_initial_rejection=str(exc),
-                    generation_attempts=2,
-                    reserved_usd=reserved * 2,
-                )
-                try:
-                    raw=self._post('generateContent',generation_body,timeout_sec=300)
-                    audit['response'] = captured_response(raw)
-                    data = parse_response(audit['response'], source.duration_sec, duration)
-                except Exception as retry_exc:
-                    audit.update(
-                        status='generation_retry_failed',
-                        retry_failure_type=type(retry_exc).__name__,
-                        rejection=str(retry_exc),
-                    )
-                    raise
-            audit['status'] = 'validated'
-            regions = data['regions']
-            evidence=json.dumps({'kind':'audiovisual_observations_v1','source_sha256':digest.hexdigest(),
-                'input_modalities':['video','audio'],'input_duration_sec':duration,'model':self.model,
+                    contents = [{'role':'user','parts':[
+                        {'inline_data':{'mime_type':'video/mp4','data':encoded}},
+                        {'text':prompt},
+                    ]}]
+                    data = self._observe_window(contents, source, source_sha256,
+                                                duration, piece_duration, start, window_index)
+                    for region in data['regions']:
+                        mapped = dict(region)
+                        mapped['start'] = round(start + region['start'], 6)
+                        mapped['end'] = round(start + region['end'], 6)
+                        if mapped['end'] > source.duration_sec + .001 or mapped['start'] >= mapped['end']:
+                            raise ValueError('AV mapped region exceeds original source timeline')
+                        regions.append(mapped)
+                    summaries.append(data['summary'])
+                    intents.append(data['creator_intent'])
+                    stories.append(data['story_logic'])
+            if not regions:
+                raise ValueError('AV source returned no observations')
+            evidence = json.dumps({'kind':'audiovisual_observations_v1',
+                'source_sha256':source_sha256,'input_modalities':['video','audio'],
+                'input_duration_sec':prepared_duration,'model':self.model,
+                'window_count':window_count,
                 'rule':'Advisory; corroborate before deletion; regions are not cut boundaries.',
                 'regions':regions},separators=(',',':'))
-            contexts.append(SourceVideoContext(source.source_asset_id,data['summary'][:2400],
-                'creator_raw',data['creator_intent'][:500],story_logic=data['story_logic'][:900],
+            contexts.append(SourceVideoContext(source.source_asset_id,
+                ' '.join(summaries)[:2400], 'creator_raw',
+                ' '.join(intents)[:500], story_logic=' '.join(stories)[:900],
                 audiovisual_evidence=evidence))
         return WholeVideoContext(tuple(contexts),ProviderStatus(
-            'gemini_whole_video_av',True,True,'applied','full_source_audio_video_received_and_parsed'), diagnostics={'native_av': self.audit_records})
+            'gemini_whole_video_av',True,True,'applied',
+            'full_source_audio_video_received_and_parsed'),
+            diagnostics={'native_av':self.audit_records})
 
 
 def build_av_provider(settings, values):
