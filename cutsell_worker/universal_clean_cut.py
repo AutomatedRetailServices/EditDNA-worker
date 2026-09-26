@@ -377,15 +377,6 @@ def process_universal_clean_cut_sources(
                     exact_p1_target_evidence_by_clip_id=_p1_target_lookup_evidence_by_clip_id,
                 ),
             )
-            # Story coherence may conservatively restore a realization that
-            # the earlier membership guard removed while preserving an idea.
-            # Reconcile once more at the last pre-plan Selection seam so the
-            # Semantic Ledger and authoritative resolver consume the settled
-            # retry/duplicate membership instead of resurrecting stale peers.
-            result = replace(
-                result,
-                draft=apply_selection_conflicted_bridge_guard(result.draft),
-            )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
             semantic_status = "clean_cut_core_v1_idea_first"
             reasoner_status_label = "disabled_clean_cut_core_v1"
@@ -560,6 +551,20 @@ def process_universal_clean_cut_sources(
             authoritative_result = apply_authoritative_realization_resolution(
                 result.draft, ledger, resolver_report, claim_equivalence_arbiter=claim_equivalence_arbiter,
             )
+            # The resolver is intentionally scoped per semantic idea.  The
+            # conflicted-bridge guard owns the complementary, whole-timeline
+            # checks (cross-idea continuation duplication, witnessed missing
+            # bridges, and deterministic restart ties).  Applying it only
+            # before the resolver let the per-idea application resurrect the
+            # exact losers that the global check had already settled.  Fold
+            # that global reconciliation into the authoritative application
+            # itself, before the D-090 signature is captured, so every
+            # downstream consumer validates and freezes the same final KEEP
+            # set.
+            authoritative_result = replace(
+                authoritative_result,
+                draft=apply_selection_conflicted_bridge_guard(authoritative_result.draft),
+            )
             # D-092 (D-090 QA_ENGINE P2): KEEP/DISCARD normalization at the
             # authority boundary. The resolver's application may park a
             # candidate it refuses to silently drop (`retained_for_
@@ -583,19 +588,6 @@ def process_universal_clean_cut_sources(
                     authoritative_result,
                     draft=fold_alternates_into_discarded(authoritative_result.draft),
                 )
-
-            # The resolver may choose a family realization from its canonical
-            # idea model that reopens an already-settled deterministic retry or
-            # duplicate.  Reapply the evidence-only membership settlement at
-            # the authority boundary, before its semantic signature is captured,
-            # so every downstream validation and Freeze operation sees one
-            # coherent authoritative keep set.  This adds no new judgment: it
-            # consumes only retry/equivalence/Hybrid evidence already present
-            # in the resolver input ledger.
-            authoritative_result = replace(
-                authoritative_result,
-                draft=apply_selection_conflicted_bridge_guard(authoritative_result.draft),
-            )
 
             pre_authority_diagnostics = dict(result.draft.diagnostics or {})
             legacy_evidence_keys = (
