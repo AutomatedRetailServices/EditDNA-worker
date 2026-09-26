@@ -5,7 +5,8 @@ from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.hybrid_editorial import EditorialCandidate, EditorialSession, EditorialDecision, EditorialJudgeResult, validate_editorial_result
 from cutsell_worker.hybrid_session_cleanup import apply_hybrid_session_cleanup
 from cutsell_worker.hybrid_retry_winner_authority import enforce_proven_retry_winners
-from cutsell_worker.retry_replacement_coverage import replacement_semantics
+from cutsell_worker.hybrid_retry_winner_authority import _same_retry_attempt
+from cutsell_worker.retry_replacement_coverage import replacement_semantics, replacement_coverage
 from cutsell_worker.whole_video_analysis import WholeVideoContext, SourceVideoContext, TemporalEvent
 from cutsell_worker.providers import ProviderStatus
 
@@ -70,12 +71,102 @@ def test_clean_keep_across_windows_reaches_existing_retry_authority(text):
     ('This backpack can hold', 'This backpack can hold two laptops.'),
     ('Esta mochila puede guardar', 'Esta mochila puede guardar dos computadoras.'),
 ])
-def test_short_abandoned_opening_can_compete_only_with_exact_completion(prefix, full):
+def test_short_abandoned_sequence_can_compete_only_with_exact_completion(prefix, full):
     a, b = take('a', prefix, complete=False), take('b', full, 5)
     kept, removed, rows = enforce_proven_retry_winners((a,b), (('a','failed',.95),('b','winner',.95)), context())
     assert removed == (a,) and kept == (b,)
-    assert rows[-1]['exact_abandoned_prefix']
+    assert rows[-1]['exact_abandoned_sequence']
     assert enforce_proven_retry_winners((a,b), (('a','failed',.95),('b','winner',.95)), None)[1] == ()
+
+
+@pytest.mark.parametrize('fragment,full', [
+    ('and she started the product', 'the strap is easy to use and she started the product demonstration again'),
+    ('y ella comenzó con el producto', 'la correa es fácil de usar y ella comenzó con el producto otra vez'),
+])
+def test_abandoned_sequence_may_appear_inside_later_complete_delivery(fragment,full):
+    a,b=take('a',fragment,complete=False),take('b',full,5)
+    same,evidence=_same_retry_attempt(a,b)
+    assert same and evidence['exact_abandoned_sequence']
+    assert evidence['winner_word_range'][0] > 0
+    # Text coincidence alone never deletes: local retry setup is still required.
+    assert enforce_proven_retry_winners((a,b),(('a','failed',.95),('b','winner',.95)),None)[1] == ()
+
+
+def test_abandoned_sequence_requires_contiguous_exact_words():
+    a=take('a','and she started the product',complete=False)
+    b=take('b','she described the product after beginning',5)
+    assert _same_retry_attempt(a,b)[0] is False
+
+
+def test_short_common_phrase_is_not_an_abandoned_attempt_identity():
+    a=take('a','and the product',complete=False)
+    b=take('b','this shows a new product for the first time',5)
+    assert _same_retry_attempt(a,b)[0] is False
+
+
+def test_unanchored_common_suffix_cannot_erase_an_unrelated_price_fragment():
+    a=take('a','and the price this backpack can hold',complete=False)
+    b=take('b','It comes in two colors. This backpack can hold two laptops and ships tomorrow.',5)
+    assert _same_retry_attempt(a,b)[0] is False
+    kept,removed,_=enforce_proven_retry_winners((a,b),(('a','failed',.95),('b','winner',.95)),context())
+    assert not removed and kept==(a,b)
+
+
+def test_equal_length_exact_incomplete_text_can_still_match_complete_winner():
+    a=take('a','This backpack can hold two laptops',complete=False)
+    b=take('b','This backpack can hold two laptops',5,complete=True)
+    same,evidence=_same_retry_attempt(a,b)
+    assert same and evidence['sequence_anchored_at_failed_suffix']
+
+
+@pytest.mark.parametrize('failed_text,winner_text', [
+    ('this backpack can hold three laptops','this backpack can hold two laptops'),
+    ('esta mochila puede guardar tres laptops','esta mochila puede guardar dos laptops'),
+])
+def test_changed_spoken_number_blocks_retry_replacement(failed_text,winner_text):
+    a=take('a',failed_text,complete=False)
+    b=take('b',winner_text,5,complete=True)
+    kept,removed,rows=enforce_proven_retry_winners((a,b),(('a','failed',.95),('b','winner',.95)),context())
+    assert not removed and kept==(a,b)
+    assert not replacement_coverage(a,b)['coverage_verified']
+
+
+def test_retry_audit_explains_chronology_and_relation_gates():
+    from cutsell_worker.retry_replacement_coverage import review_retry_pool
+    failed=take('failed','and she started the product',0,complete=False)
+    distant=take('distant','the strap is easy to use and she started the product again',40)
+    unrelated=take('unrelated','we have another option for the customer',8)
+    windows=({'partition_index':0,'member_ids':['failed','distant','unrelated'],
+              'decisions':[{'clip_id':'failed','label':'failed','confidence':.95},
+                           {'clip_id':'distant','label':'winner','confidence':.95},
+                           {'clip_id':'unrelated','label':'keep','confidence':.95}]},)
+    report=review_retry_pool((failed,distant,unrelated),windows)[0]['comparisons']
+    by_peer={r['proposed_replacement_id']:r for r in report}
+    assert by_peer['distant']['reason']=='attempt_claims_covered_by_complete_replacement'
+    assert by_peer['distant']['gap_sec']>24
+    assert by_peer['distant']['comparison_status']=='coverage_checked'
+    assert by_peer['unrelated']['reason']=='relation_test'
+    assert by_peer['unrelated']['authority']=='comparison_only'
+
+
+def test_retry_audit_reports_partition_mismatch_and_prior_chronology_peer():
+    from cutsell_worker.retry_replacement_coverage import review_retry_pool
+    failed=take('failed','and she started the product',10,complete=False)
+    prior=take('prior','and she started the product',0,complete=True)
+    other_partition=take('partition','and she started the product',20,complete=True)
+    windows=({'partition_index':0,'member_ids':['failed','prior'],
+              'decisions':[{'clip_id':'failed','label':'failed','confidence':.95}]},
+             {'partition_index':1,'member_ids':['partition'],
+              'decisions':[{'clip_id':'partition','label':'winner','confidence':.95}]},
+             {'partition_index':0,'member_ids':['prior'],
+              'decisions':[{'clip_id':'prior','label':'winner','confidence':.95}]})
+    report=review_retry_pool((failed,prior,other_partition),windows)[0]
+    by_peer={r['proposed_replacement_id']:r for r in report['comparisons']}
+    assert by_peer['prior']['reason']=='chronology_order'
+    assert by_peer['prior']['gap_sec']<0
+    assert by_peer['partition']['reason']=='creator_session_partition_mismatch'
+    assert report['status']=='blocked_or_unrelated'
+    assert report['comparison_status']=='blocked_or_unrelated'
 
 
 @pytest.mark.parametrize('role,label', [('mixed','keep'), ('audience','failed'), ('recording_only','winner'), ('uncertain','uncertain')])

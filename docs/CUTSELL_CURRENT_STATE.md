@@ -1,5 +1,23 @@
 # CutSell.ai — Current State
 
+## 2026-09-25 AssemblyAI ASR-only probe completed
+
+`benchmarks/run_assemblyai_asr_probe.py` is a manual, opt-in comparison probe
+for Universal-3.5 Pro with disfluencies enabled and no model fallback. Video00
+source SHA `b37059b1790cf3eb0447bb54595cc99f6668aadc5f65dafa9cdf6181621ef9f5`
+passed a dry run: mono 16 kHz WAV, 11,742,270 bytes, SHA
+`91ec5fd32800de6dc52ac7430067d039e688c437c25090af4d8fa94949480e4d`.
+After the Product Owner supplied a key, the billable `--execute` path completed
+exactly ONE `universal-3-5-pro` transcription with `disfluencies=true` and
+638 word records, model identity checked. It saved raw response privately and
+never logged the key; no fallback, retry, Gemini call, GPU run, render or
+production change occurred. This is not a controlled engine comparison or
+proof of editorial improvement. Spot checks against the available GPT +
+WhisperX source replay found the truncated sonography opening absent and one
+word stretched across ~5.1 s; `no` in the abandoned stomach take is placed
+~2.3 s differently. Full evidence and limitations are in
+`docs/evidence/VIDEO00_ASSEMBLYAI_ASR_PROBE_20260925.md`.
+
 ## 2026-09-25 Video00 automatic Watch + Listen live qualification
 
 Run `36086441487`, tested SHA `9066b43ab40b569391aee297534346196589f2f1`,
@@ -1490,3 +1508,29 @@ No additional provider calls, paid render, production or main change.
 verified repairs to partition crossing and inconsistent winner consensus. Actual
 MOV/Gemini quality is NOT yet qualified; false audience labels remain possible.
 See CUTSELL_ATTEMPT_RESOLUTION_FIX.md for evidence, old-fixture changes and limits.
+
+## 2026-09-25 embedded short-retry safety follow-up (local, not pushed)
+
+Review found that matching any exact four-word subsequence could link a failed
+fragment to a clean take through a common phrase, dropping unique opening
+content. Matching now requires the exact sequence to anchor at the failed
+fragment's ending and every content token from that fragment to occur in the
+winner. Coverage also compares common spoken number words in English and
+Spanish, so “three” versus “two” is a protected fact. Equal-length exact
+transcripts remain eligible.
+
+Retry-pool diagnostics now explain earlier-in-time peers and partition blocks.
+They preserve the legacy `status: compared` field and add a more precise
+`comparison_status`; diagnostics remain comparison-only. Directed regression:
+83 passed. The relevant broader set has 181 passing tests and the same known
+incomplete-story-coverage failure remains on baseline. No paid call, GPU run,
+render, deploy or push. This does not establish MOV
+visual quality; the commit remains local and unpushed.
+
+## 2026-09-26 — Yaskira 05 failure: bounded offline correction
+
+The first Yaskira 05 Medium + WhisperX qualification produced a 52.034 s diagnostic cut and was not deliverable against the confirmed human reference (keep only 1:38–2:17). Offline evidence exposed three general integration defects: same-session retry comparison stopped at a fixed 20/24 s distance, an uncertain/mixed shadow window could hide a later authoritative audience winner, and final complete-idea expansion could restore an already discarded adjacent or overlapping source interval.
+
+The correction removes the elapsed-time veto only after creator-session partitioning; retry_setup, exact attempt relation, complete replacement, directional claim coverage, numeric/negation safety and winner consistency remain mandatory. Only `uncertain + mixed` may yield to a later >=.95 `winner + audience`; positive `keep/alternate` mixed or recording-only rows, and failed/BTS rows, remain vetoes. Final boundary recovery now intersects its newly added edge with all discarded spans and restores the original selected edge when they overlap.
+
+Independent QA rejected two broader proposals (audience-prefix inference and Native AV self-corroboration) because they could delete unique information; both were removed. This patch does not yet prove that the Yaskira 05 dog interruption or the long mixed failed take will be deleted, because the saved run lacks the independent evidence required by the retained safety gates. Offline relevant regression: 188 passed; independent QA: 79 passed. No additional provider call, GPU run or render was made.

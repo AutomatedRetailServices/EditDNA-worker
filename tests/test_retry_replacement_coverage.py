@@ -67,6 +67,78 @@ def test_pool_review_crosses_classification_windows_without_deleting():
     review=review_retry_pool((a,b),windows)
     assert review[0]['comparisons'][0]['coverage_verified']
     assert review[0]['authority']=='comparison_only'
+    assert review[0]['status']=='compared'  # retain the existing v1 reader value
+    assert review[0]['comparison_status']=='coverage_checked'
+
+
+def test_retry_comparison_crosses_long_same_session_gap_when_identity_and_coverage_hold():
+    text='This sturdy backpack holds two laptops.'
+    a=take('a',text,start=0,complete=False)
+    b=take('b',text,start=85,complete=True)
+    windows=({'partition_index':0,'member_ids':['a'],
+              'decisions':[{'clip_id':'a','label':'failed','confidence':.95}]},
+             {'partition_index':0,'member_ids':['b'],
+              'decisions':[{'clip_id':'b','label':'winner','confidence':.95,'content_role':'audience'}]})
+    review=review_retry_pool((a,b),windows)
+    comparison=review[0]['comparisons'][0]
+    assert comparison['gap_sec'] > 24
+    assert comparison['comparison_status']=='coverage_checked'
+    assert comparison['coverage_verified'] is True
+
+
+def test_retry_authority_crosses_long_same_session_gap_but_keeps_safety_gates():
+    text='This sturdy backpack holds two laptops.'
+    a=take('a',text,start=0,complete=False)
+    b=take('b',text,start=85,complete=True)
+    kept,removed,diag=enforce_proven_retry_winners(
+        (a,b),(('a','failed',.95),('b','winner',.95)),context())
+    assert kept==(b,) and removed==(a,)
+    assert diag[-1]['gap_sec'] > 20
+
+
+def test_authoritative_audience_winner_survives_an_earlier_uncertain_mixed_window():
+    text='This sturdy backpack holds two laptops.'
+    failed=take('failed',text,start=0,complete=False)
+    winner=take('winner',text,start=40,complete=True)
+    windows=({'decisions':[
+        {'clip_id':'failed','label':'failed','confidence':.95},
+        {'clip_id':'winner','label':'uncertain','confidence':.9,'content_role':'mixed'},
+    ]},{'decisions':[
+        {'clip_id':'winner','label':'winner','confidence':.95,'content_role':'audience'},
+    ]})
+    assert replacement_coverage(failed,winner,windows)['coverage_verified'] is True
+
+
+def test_uncertain_mixed_alone_never_certifies_a_replacement():
+    text='This sturdy backpack holds two laptops.'
+    failed=take('failed',text,start=0,complete=False)
+    peer=take('peer',text,start=40,complete=True)
+    windows=({'decisions':[
+        {'clip_id':'peer','label':'uncertain','confidence':.99,'content_role':'mixed'},
+    ]},)
+    verdict=replacement_coverage(failed,peer,windows)
+    assert verdict['coverage_verified'] is False
+    assert verdict['reason']=='replacement_contains_recording_process'
+
+
+@pytest.mark.parametrize('shadow_label,shadow_role', [
+    ('keep','mixed'), ('keep','recording_only'),
+    ('alternate','mixed'), ('alternate','recording_only'),
+])
+def test_authoritative_winner_never_overrides_positive_recording_role_conflict(
+    shadow_label, shadow_role,
+):
+    text='This sturdy backpack holds two laptops.'
+    failed=take('failed',text,start=0,complete=False)
+    winner=take('winner',text,start=40,complete=True)
+    windows=({'decisions':[
+        {'clip_id':'winner','label':shadow_label,'confidence':.95,'content_role':shadow_role},
+    ]},{'decisions':[
+        {'clip_id':'winner','label':'winner','confidence':.99,'content_role':'audience'},
+    ]})
+    verdict=replacement_coverage(failed,winner,windows)
+    assert verdict['coverage_verified'] is False
+    assert verdict['reason']=='replacement_not_consistently_usable'
 
 
 def test_similar_topic_does_not_prove_coverage_of_all_claims():

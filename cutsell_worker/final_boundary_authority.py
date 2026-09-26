@@ -485,6 +485,10 @@ def enforce_complete_idea_boundaries(
 
     source_map = _source_words(local_paths, asr_provider)
     originals = tuple(result.draft.selected)
+    discarded_by_source: dict[str, tuple[DraftClip, ...]] = {}
+    for discarded in tuple(getattr(result.draft, "discarded", ()) or ()):
+        discarded_by_source.setdefault(discarded.source_asset_id, tuple())
+        discarded_by_source[discarded.source_asset_id] += (discarded,)
     selected: list[DraftClip] = []
     diagnostics: list[dict] = []
     for clip in originals:
@@ -499,6 +503,31 @@ def enforce_complete_idea_boundaries(
             })
             continue
         updated, row = _clip_from_envelope(clip, words)
+        # Complete-idea recovery cannot resurrect source speech that selection
+        # already rejected.  Bound only the newly-added edge; the selected
+        # clip's original words and timing remain untouched.
+        blocked = discarded_by_source.get(clip.source_asset_id, ())
+        blocked_left = any(
+            float(item.end) > float(updated.start) + 1e-6
+            and float(item.start) < float(clip.start) - 1e-6
+            for item in blocked
+        )
+        blocked_right = any(
+            float(item.end) > float(clip.end) + 1e-6
+            and float(item.start) < float(updated.end) - 1e-6
+            for item in blocked
+        )
+        if blocked_left or blocked_right:
+            safe_start = float(clip.start) if blocked_left else float(updated.start)
+            safe_end = float(clip.end) if blocked_right else float(updated.end)
+            updated = _rebuild_clip(updated, words, safe_start, safe_end)
+            row.update({
+                "action": "limit_envelope_at_discarded_selection",
+                "result_start": round(float(updated.start), 3),
+                "result_end": round(float(updated.end), 3),
+                "blocked_leading_recovery": blocked_left,
+                "blocked_trailing_recovery": blocked_right,
+            })
         selected.append(updated)
         diagnostics.append(row)
 

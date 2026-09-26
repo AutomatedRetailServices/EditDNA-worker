@@ -52,8 +52,27 @@ def replacement_semantics(windows):
             by_id.setdefault(row['clip_id'], []).append(row)
     result = {}
     for cid, rows in by_id.items():
-        if any(r.get('content_role') in {'mixed', 'recording_only'}
-               or r.get('label') not in {'winner', 'keep', 'alternate'} for r in rows):
+        authoritative_winner = any(
+            r.get('label') == 'winner'
+            and r.get('content_role') == 'audience'
+            and float(r.get('confidence', 0)) >= .95
+            for r in rows
+        )
+        conflicting_failure = any(r.get('label') in {'failed', 'bts'} for r in rows)
+        compatible_shadow = all(
+            r.get('label') in {'winner', 'keep', 'alternate'}
+            or (r.get('label') == 'uncertain' and r.get('content_role') == 'mixed')
+            for r in rows
+        )
+        conflicting_role = any(
+            r.get('content_role') in {'mixed', 'recording_only'}
+            and not (r.get('label') == 'uncertain' and r.get('content_role') == 'mixed')
+            for r in rows
+        )
+        if conflicting_failure or not compatible_shadow or conflicting_role or (
+            not authoritative_winner
+            and any(r.get('content_role') in {'mixed', 'recording_only'} for r in rows)
+        ):
             continue
         result[cid] = ('winner' if any(r['label'] == 'winner' for r in rows) else 'keep',
                        min(float(r.get('confidence', 0)) for r in rows))
@@ -78,7 +97,28 @@ def replacement_coverage(failed, winner, session_diagnostics=()):
     else:
         rows = [r for window in session_diagnostics for r in window.get("decisions", ())
                 if r.get("clip_id") == winner.clip_id]
-        if any(r.get("content_role") in {"mixed", "recording_only"} for r in rows):
+        authoritative_winner = any(
+            r.get("label") == "winner"
+            and r.get("content_role") == "audience"
+            and float(r.get("confidence", 0)) >= .95
+            for r in rows
+        )
+        incompatible_shadow = any(
+            r.get("label") not in {"winner", "keep", "alternate"}
+            and not (r.get("label") == "uncertain" and r.get("content_role") == "mixed")
+            for r in rows
+        )
+        conflicting_role = any(
+            r.get("content_role") in {"mixed", "recording_only"}
+            and not (r.get("label") == "uncertain" and r.get("content_role") == "mixed")
+            for r in rows
+        )
+        if incompatible_shadow or (authoritative_winner and conflicting_role):
+            reason = "replacement_not_consistently_usable"
+        elif conflicting_role:
+            reason = "replacement_contains_recording_process"
+        elif (not authoritative_winner
+                and any(r.get("content_role") in {"mixed", "recording_only"} for r in rows)):
             reason = "replacement_contains_recording_process"
         elif any(r.get("label") in {"failed", "bts"} for r in rows):
             reason = "replacement_has_conflicting_failure_evidence"
@@ -155,22 +195,9 @@ def review_retry_pool(takes, windows):
                     "authority": "comparison_only",
                 })
                 continue
-            if gap > 24:
-                comparisons.append({
-                    "candidate_clip_id": failed.clip_id,
-                    "proposed_replacement_id": peer.clip_id,
-                    "coverage_verified": False,
-                    "reason": "chronology_window",
-                    "gap_sec": round(gap, 3),
-                    "failed_start_sec": round(float(failed.start), 3),
-                    "failed_end_sec": round(float(failed.end), 3),
-                    "peer_start_sec": round(float(peer.start), 3),
-                    "peer_end_sec": round(float(peer.end), 3),
-                    "peer_complete_idea": bool(peer.complete_idea),
-                    "comparison_status": "blocked_before_relation_test",
-                    "authority": "comparison_only",
-                })
-                continue
+            # Observe all later candidates in the same creator-session
+            # partition.  The relation and claim-coverage checks below remain
+            # mandatory; chronology distance is diagnostic, not a veto.
             same, relation = _same_retry_attempt(failed, peer)
             if not same:
                 comparisons.append({

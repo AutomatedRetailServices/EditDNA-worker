@@ -168,7 +168,7 @@ def enforce_proven_retry_winners(
     failed_confidence: float = 0.80,
     winner_confidence: float = 0.90,
     retry_setup_confidence: float = 0.84,
-    maximum_gap_sec: float = 20.0,
+    maximum_gap_sec: float | None = None,
 ) -> tuple[tuple[CandidateTake, ...], tuple[CandidateTake, ...], tuple[dict, ...]]:
     kept_tuple = tuple(kept)
     session_diagnostics = tuple(session_diagnostics)
@@ -198,8 +198,6 @@ def enforce_proven_retry_winners(
         if label != "failed" or confidence < failed_confidence:
             continue
         retry_conf = _retry_setup_confidence(failed, context)
-        if retry_conf < retry_setup_confidence:
-            continue
 
         candidates = []
         for winner in kept_tuple:
@@ -215,7 +213,12 @@ def enforce_proven_retry_winners(
             if winner.start < failed.end:
                 continue
             gap = float(winner.start - failed.end)
-            if gap > maximum_gap_sec:
+            # Session partition, directional coverage, retry evidence and the
+            # exact-attempt relation are the safety gates.  Creators often do
+            # several failed takes before returning to the clean delivery much
+            # later in the same recording session, so elapsed time alone must
+            # not make that valid retake invisible.
+            if maximum_gap_sec is not None and gap > maximum_gap_sec:
                 continue
             winner_label, winner_conf = semantic.get(winner.clip_id, ("", 0.0))
             # A clean independent delivery is often labelled KEEP in a window
@@ -228,14 +231,20 @@ def enforce_proven_retry_winners(
                                   if r.get('clip_id') == winner.clip_id))
             if (winner_label != "winner" and not clean_keep) or winner_conf < winner_confidence:
                 continue
+            if retry_conf < retry_setup_confidence:
+                continue
             same, evidence = _same_retry_attempt(failed, winner)
             if not same:
                 continue
-            candidates.append((gap, -winner_conf, winner.start, winner, winner_conf, evidence))
+            candidates.append((
+                gap, -winner_conf, winner.start, winner, winner_conf, evidence,
+            ))
 
         if not candidates:
             continue
-        for gap, _, _, winner, winner_conf, evidence in sorted(candidates, key=lambda item: item[:3]):
+        for gap, _, _, winner, winner_conf, evidence in sorted(
+            candidates, key=lambda item: item[:3]
+        ):
             # D-109/D-110: this run's own complete_retry_identity_guard evidence
             # already rejected THIS EXACT (failed, winner) pair as a valid
             # replacement -- an earlier, stricter authority's explicit finding.
