@@ -10,6 +10,13 @@
       "text": "También me salían espinillas en esta parte de aquí detrás de la oreja y todo el cuello"
     },
     {
+      "id": "pimples_abandoned_micro_attempt_absent",
+      "kind": "forbidden_source_overlap",
+      "source_start_sec": 192.3,
+      "source_end_sec": 198.0,
+      "min_overlap_sec": 0.5
+    },
+    {
       "id": "pimples_bad_source_absent",
       "kind": "forbidden_source_overlap",
       "source_start_sec": 198.86,

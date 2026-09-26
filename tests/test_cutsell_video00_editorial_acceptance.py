@@ -271,7 +271,7 @@ def test_complete_target_can_pass_all_checks_without_changing_historical_oracle(
     historical = json.loads(HISTORICAL_MANIFEST.read_text(encoding="utf-8"))
     assert next(c for c in historical["checks"] if c["id"] == "pimples_later_winner_present")["kind"] == "required_exact"
     manifest = _manifest()
-    assert len(manifest["checks"]) == 14
+    assert len(manifest["checks"]) == 15
     good = (
         "Otro síntoma era que me salían espinillas como si fuera una alergia de "
         "esta parte aquí detrás de la oreja y en el cuello. Me salía por temporadas."

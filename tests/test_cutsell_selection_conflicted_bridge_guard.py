@@ -1,5 +1,6 @@
 from cutsell_worker.contracts import DraftClip
 from cutsell_worker.selection_conflicted_bridge_guard import (
+    abandoned_negated_restart_ids,
     contained_proxy_duplicate_ids,
     confirmed_selected_duplicate_ids,
     conflicted_redundant_bridge_ids,
@@ -10,6 +11,7 @@ from cutsell_worker.selection_conflicted_bridge_guard import (
     terminally_incomplete_selected_ids,
     unmerged_same_opening_retry_resolution,
     nearby_contained_selected_realization_ids,
+    orphaned_anaphoric_retry_fragment_ids,
 )
 
 
@@ -903,4 +905,68 @@ def test_numeric_chain_with_a_new_number_fails_open():
         "accepted_by": "sentence_continuation", "confidence": 1.0,
     }]}}
     move, audit = redundant_continuation_chain_ids((earlier, repeat_a, repeat_b), diagnostics)
+    assert move == set() and audit == []
+
+
+def test_terminal_negation_attempt_yields_to_full_audience_retry():
+    abandoned = _clip("abandoned", 10.0, 11.6, "Tuve problemas de estómago, no.")
+    retry = _clip(
+        "retry", 16.8, 26.3,
+        "Tuve problemas de digestión en donde me hicieron una endoscopía y dijeron que tenía gastritis.",
+    )
+    diagnostics = {
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "abandoned", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "clean_cut_judge": [
+            {"clip_id": "abandoned", "audiovisual": {"observations": [
+                {"role": "mixed", "confidence": 0.85},
+            ]}},
+            {"clip_id": "retry", "audiovisual": {"observations": [
+                {"role": "audience", "confidence": 0.95},
+            ]}},
+        ],
+    }
+
+    move, audit = abandoned_negated_restart_ids((abandoned, retry), diagnostics)
+    assert move == {"abandoned"}
+    assert audit[0]["reason"] == "terminal_negation_abandoned_restart"
+
+
+def test_terminal_negation_without_independent_roles_fails_open():
+    abandoned = _clip("abandoned", 10.0, 11.6, "I had stomach trouble, no.")
+    retry = _clip(
+        "retry", 16.8, 26.3,
+        "I had digestive trouble and the endoscopy confirmed a mild gastritis diagnosis.",
+    )
+    move, audit = abandoned_negated_restart_ids((abandoned, retry), {})
+    assert move == set() and audit == []
+
+
+def test_orphaned_anaphoric_fragment_uses_confirmed_retry_proxy():
+    fragment = _clip("fragment", 10.0, 12.5, "Era como un rash, una alergia.")
+    proxy = _clip(
+        "proxy", 13.8, 22.0,
+        "También aparecía una alergia detrás de la oreja y en el cuello.",
+    )
+    winner = _clip(
+        "winner", 25.0, 34.0,
+        "Otro síntoma era una alergia detrás de la oreja y en todo el cuello por temporadas.",
+    )
+    diagnostics = {"semantic_idea_equivalence": {"merges": [{
+        "left_clip_id": "proxy", "right_clip_id": "winner", "confidence": 0.90,
+    }]}}
+
+    move, audit = orphaned_anaphoric_retry_fragment_ids(
+        (fragment, winner), (), (proxy,), diagnostics,
+    )
+    assert move == {"fragment"}
+    assert audit[0]["reason"] == "orphaned_anaphoric_fragment_of_confirmed_retry"
+
+
+def test_anaphoric_fragment_without_confirmed_proxy_fails_open():
+    fragment = _clip("fragment", 10.0, 12.5, "It was like an unusual rash.")
+    winner = _clip("winner", 25.0, 34.0, "A later explanation of a different event.")
+    move, audit = orphaned_anaphoric_retry_fragment_ids((fragment, winner), (), (), {})
     assert move == set() and audit == []

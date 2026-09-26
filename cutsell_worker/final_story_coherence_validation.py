@@ -1023,6 +1023,11 @@ def _lost_semantic_atoms(
         suppressed_reason = None
         restart_consultations: list[dict] = []
         if content_loss:
+            # This evidence is emitted by the final membership guard and is
+            # valid independently of whether grouping happened to place the
+            # removed continuation in a retry family.  Consult it first so a
+            # separately grouped (or pre-group) duplicate chain is not
+            # reopened here as unique content loss.
             credited, evidence_kind = _final_membership_coverage_credit(
                 draft.diagnostics, clip.clip_id, selected_ids,
             )

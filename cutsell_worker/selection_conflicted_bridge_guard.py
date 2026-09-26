@@ -141,6 +141,23 @@ def _audience_support(diagnostics: dict, clip_id: str) -> float:
     return best
 
 
+def _clean_cut_role_support(diagnostics: dict, clip_id: str, roles: set[str]) -> float:
+    """Strongest already-recorded AV role support from the clean-cut judge."""
+    best = 0.0
+    for row in diagnostics.get("clean_cut_judge") or ():
+        if not isinstance(row, dict) or str(row.get("clip_id") or "") != clip_id:
+            continue
+        audiovisual = row.get("audiovisual") or {}
+        for observation in audiovisual.get("observations") or ():
+            if str(observation.get("role") or "") not in roles:
+                continue
+            try:
+                best = max(best, float(observation.get("confidence") or 0.0))
+            except (TypeError, ValueError):
+                continue
+    return best
+
+
 def _strongest(votes, clip_id: str, labels: set[str]) -> float:
     return max(
         (confidence for label, confidence in votes.get(str(clip_id), ()) if label in labels),
@@ -876,6 +893,133 @@ def nearby_contained_selected_realization_ids(selected):
     return move, audit
 
 
+def abandoned_negated_restart_ids(selected, diagnostics: dict):
+    """Remove a short spoken correction immediately before its clean retry.
+
+    A creator may begin a sentence, negate that wording ("..., no." /
+    "..., not."), pause, and restart with the completed delivery.  This path
+    requires the literal terminal negation, the same multiword opening, a
+    materially fuller nearby retry, and independent AV evidence that the
+    short attempt is mixed/recording-process while the retry is audience
+    speech.  It does not infer corrections from negation alone.
+    """
+    ordered = tuple(sorted(
+        selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)
+    ))
+    complete = _attempt_completeness(diagnostics)
+    move: set[str] = set()
+    audit: list[dict] = []
+    for current, retry in zip(ordered, ordered[1:]):
+        if current.source_asset_id != retry.source_asset_id:
+            continue
+        current_tokens = _tokens(current.text)
+        retry_tokens = _tokens(retry.text)
+        current_duration = max(0.001, float(current.end) - float(current.start))
+        retry_duration = max(0.0, float(retry.end) - float(retry.start))
+        gap = float(retry.start) - float(current.end)
+        if not (3 <= len(current_tokens) <= 6 and current_tokens[-1] in _NEGATION):
+            continue
+        if len(retry_tokens) < 9 or current_tokens[:2] != retry_tokens[:2]:
+            continue
+        if gap < 0.0 or gap > 8.0 or retry_duration < 2.0 * current_duration:
+            continue
+        if complete.get(retry.clip_id) is False:
+            continue
+        current_mixed = _clean_cut_role_support(
+            diagnostics, current.clip_id, {"mixed", "recording_process"}
+        )
+        retry_audience = max(
+            _audience_support(diagnostics, retry.clip_id),
+            _clean_cut_role_support(diagnostics, retry.clip_id, {"audience"}),
+        )
+        if current_mixed < 0.80 or retry_audience < 0.80:
+            continue
+        move.add(current.clip_id)
+        audit.append({
+            "clip_id": current.clip_id,
+            "winner_clip_id": retry.clip_id,
+            "reason": "terminal_negation_abandoned_restart",
+            "opening_token_count": 2,
+            "gap_sec": round(gap, 3),
+            "loser_mixed_confidence": round(current_mixed, 4),
+            "winner_audience_confidence": round(retry_audience, 4),
+        })
+    return move, audit
+
+
+_ANAPHORIC_FRAGMENT_OPENINGS = frozenset({
+    ("era", "como"), ("fue", "como"), ("es", "como"),
+    ("was", "like"), ("is", "like"), ("it", "was"),
+})
+
+
+def orphaned_anaphoric_retry_fragment_ids(selected, alternates, discarded, diagnostics: dict):
+    """Remove a short anaphoric fragment orphaned from a replaced retry.
+
+    The fragment is removable only when it sits immediately before an
+    unselected continuation that has an explicit high-confidence equivalence
+    to a later selected, materially fuller winner.  This lets an existing
+    semantic decision cover a segmentation split without treating arbitrary
+    short phrases as duplicates.
+    """
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    unselected_by_id = {clip.clip_id: clip for clip in (*alternates, *discarded)}
+    move: set[str] = set()
+    audit: list[dict] = []
+    equivalence = diagnostics.get("semantic_idea_equivalence") or {}
+    for row in equivalence.get("merges") or ():
+        if not isinstance(row, dict):
+            continue
+        try:
+            confidence = float(row.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if confidence < 0.85:
+            continue
+        left_id = str(row.get("left_clip_id") or "")
+        right_id = str(row.get("right_clip_id") or "")
+        for proxy_id, winner_id in ((left_id, right_id), (right_id, left_id)):
+            proxy = unselected_by_id.get(proxy_id)
+            winner = selected_by_id.get(winner_id)
+            if proxy is None or winner is None or proxy.source_asset_id != winner.source_asset_id:
+                continue
+            if not (float(proxy.end) <= float(winner.start) + 1e-3):
+                continue
+            winner_content = _substantive(winner.text)
+            if len(winner_content) < 3:
+                continue
+            for fragment in selected:
+                if fragment.clip_id == winner_id or fragment.source_asset_id != proxy.source_asset_id:
+                    continue
+                fragment_tokens = _tokens(fragment.text)
+                fragment_content = _substantive(fragment.text)
+                if (
+                    len(fragment_tokens) > 7
+                    or tuple(fragment_tokens[:2]) not in _ANAPHORIC_FRAGMENT_OPENINGS
+                    or _critical(fragment.text)
+                    or not fragment_content
+                ):
+                    continue
+                leading_gap = float(proxy.start) - float(fragment.end)
+                winner_gap = float(winner.start) - float(proxy.end)
+                if leading_gap < 0.0 or leading_gap > 3.0 or winner_gap < 0.0 or winner_gap > 6.0:
+                    continue
+                covered = fragment_content & (_substantive(proxy.text) | winner_content)
+                coverage = len(covered) / len(fragment_content)
+                if coverage < 0.50 or len(winner_content) < 2 * len(fragment_content):
+                    continue
+                move.add(fragment.clip_id)
+                audit.append({
+                    "clip_id": fragment.clip_id,
+                    "proxy_clip_id": proxy_id,
+                    "winner_clip_id": winner_id,
+                    "reason": "orphaned_anaphoric_fragment_of_confirmed_retry",
+                    "equivalence_confidence": round(confidence, 4),
+                    "substantive_coverage": round(coverage, 4),
+                })
+    return move, audit
+
+
 def conflicted_redundant_bridge_ids(selected, diagnostics: dict):
     """Return selected clip ids that should become Alternates/SWAP.
 
@@ -1439,6 +1583,10 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
     contained_ids, contained_audit = nearby_contained_selected_realization_ids(draft.selected)
+    abandoned_ids, abandoned_audit = abandoned_negated_restart_ids(draft.selected, diagnostics)
+    anaphoric_ids, anaphoric_audit = orphaned_anaphoric_retry_fragment_ids(
+        draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
     continuation_add_ids, continuation_add_audit = missing_continuation_bridge_ids(
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
@@ -1455,6 +1603,7 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
     independent_move_ids = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
         | restatement_ids | proxy_ids | contained_ids | chain_ids
+        | abandoned_ids | anaphoric_ids
     )
     replacement_move_ids = dependent_ids | retry_ids | unmerged_retry_ids
     move_ids = independent_move_ids | (
@@ -1471,6 +1620,7 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         + borderline_audit
         + retry_audit + unmerged_retry_audit
         + proxy_audit + contained_audit + continuation_add_audit + chain_audit
+        + abandoned_audit + anaphoric_audit
     )
     if not move_ids and not add_ids:
         if requested_add_ids and not allow_membership_additions:
@@ -1497,7 +1647,16 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
             alternates.append(replace(clip, selected=False))
     alternates.sort(key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id))
 
-    diagnostics["selection_conflicted_bridge_guard"] = list(audit)
+    # Preserve earlier audited membership proofs if this guard is invoked
+    # again on an already-guarded draft.  StoryValidator consumes those
+    # proofs; replacing them with only the second pass's delta would make an
+    # otherwise idempotent reapplication reopen resolved coverage findings.
+    prior_audit = list(diagnostics.get("selection_conflicted_bridge_guard") or ())
+    combined_audit = prior_audit[:]
+    for row in audit:
+        if row not in combined_audit:
+            combined_audit.append(row)
+    diagnostics["selection_conflicted_bridge_guard"] = combined_audit
     if not allow_membership_additions:
         diagnostics["selection_conflicted_bridge_guard_post_authority"] = {
             "membership_additions_allowed": False,
