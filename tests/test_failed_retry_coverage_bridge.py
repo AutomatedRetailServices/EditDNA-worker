@@ -245,6 +245,152 @@ def test_lower_confidence_alternate_nominates_fragment_for_later_covered_retry()
     ) == frozenset({("failed", "clean")})
 
 
+def test_failed_family_member_can_use_safe_sibling_as_relation_anchor():
+    failed = take(
+        "failed", "this product attempt contains several unique broken words",
+        20, 35,
+    )
+    anchor = take(
+        "anchor", "different salons gave me foot fungus and I recommend this treatment",
+        40, 48,
+    )
+    clean = take("clean", CLEAN_TEXT, 80, 95)
+    windows = ({"partition_index": 0, "member_ids": ["failed", "anchor", "clean"], "decisions": [
+        row("failed", confidence=0.90),
+        row(
+            "anchor", label="alternate", proposed_label="alternate",
+            confidence=0.85, semantic_delete_recommended=False,
+        ),
+        row(
+            "clean", label="uncertain", proposed_label="winner",
+            confidence=0.95, semantic_delete_recommended=False,
+        ),
+    ]},)
+    assert failed_retry_coverage_pairs(
+        (failed, anchor, clean), windows,
+        partition_by_id={"failed": 0, "anchor": 0, "clean": 0},
+        retry_groups=(("failed", "anchor"), ("clean",)),
+    ) == frozenset({("anchor", "clean")})
+
+
+def test_winner_consensus_allows_one_point_nine_view_with_point_nine_five_peak():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    windows = (
+        {"decisions": [
+            row("failed"),
+            row(
+                "clean", label="uncertain", proposed_label="winner",
+                confidence=0.90, semantic_delete_recommended=False,
+            ),
+        ]},
+        {"decisions": [
+            row("failed"),
+            row(
+                "clean", label="uncertain", proposed_label="winner",
+                confidence=0.95, semantic_delete_recommended=False,
+            ),
+        ]},
+    )
+    assert failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    ) == frozenset({("failed", "clean")})
+
+
+def test_family_relation_anchor_cannot_be_winner_bts_or_uncorroborated():
+    failed = take("failed", "broken words with no literal relation", 20, 35)
+    anchor = take("anchor", FAILED_TEXT, 40, 48)
+    clean = take("clean", CLEAN_TEXT, 80, 95)
+    clean_row = row(
+        "clean", label="uncertain", proposed_label="winner",
+        confidence=0.95, semantic_delete_recommended=False,
+    )
+    for overrides in (
+        {"label": "winner", "proposed_label": "winner"},
+        {"label": "bts", "proposed_label": "bts"},
+        {"local_failure_corroborated": False},
+        {"dense_semantic_failure_cluster": False},
+    ):
+        anchor_overrides = {
+            "label": "alternate",
+            "proposed_label": "alternate",
+            "semantic_delete_recommended": False,
+            **overrides,
+        }
+        windows = ({"decisions": [
+            row("failed"),
+            row("anchor", **anchor_overrides),
+            clean_row,
+        ]},)
+        assert not failed_retry_coverage_pairs(
+            (failed, anchor, clean), windows,
+            partition_by_id={"failed": 0, "anchor": 0, "clean": 0},
+            retry_groups=(("failed", "anchor"), ("clean",)),
+        )
+
+
+def test_winner_consensus_still_requires_one_point_nine_five_peak():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    windows = tuple({"decisions": [
+        row("failed"),
+        row(
+            "clean", label="uncertain", proposed_label="winner",
+            confidence=0.90, semantic_delete_recommended=False,
+        ),
+    ]} for _ in range(2))
+    assert not failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    )
+
+
+def test_family_anchor_cannot_inherit_failure_from_other_source_session_or_future():
+    anchor = take("anchor", FAILED_TEXT, 40, 48)
+    clean = take("clean", CLEAN_TEXT, 80, 95)
+    clean_row = row(
+        "clean", label="uncertain", proposed_label="winner",
+        confidence=0.95, semantic_delete_recommended=False,
+    )
+    windows = ({"partition_index": 0, "member_ids": ["anchor", "clean"], "decisions": [
+        row("failed"),
+        row(
+            "anchor", label="alternate", proposed_label="alternate",
+            confidence=0.85, semantic_delete_recommended=False,
+        ),
+        clean_row,
+    ]},)
+    for failed, failed_partition in (
+        (take("failed", "broken words", 20, 35, source="other"), 0),
+        (take("failed", "broken words", 20, 35), 1),
+        (take("failed", "broken words", 140, 150), 0),
+    ):
+        assert not failed_retry_coverage_pairs(
+            (failed, anchor, clean), windows,
+            partition_by_id={
+                "failed": failed_partition, "anchor": 0, "clean": 0,
+            },
+            retry_groups=(("failed", "anchor"), ("clean",)),
+        )
+    recorded_partition_mismatch = (
+        {"partition_index": 1, "member_ids": ["failed"], "decisions": [
+            row("failed"),
+        ]},
+        {"partition_index": 0, "member_ids": ["anchor", "clean"], "decisions": [
+            row(
+                "anchor", label="alternate", proposed_label="alternate",
+                confidence=0.85, semantic_delete_recommended=False,
+            ),
+            clean_row,
+        ]},
+    )
+    assert not failed_retry_coverage_pairs(
+        (take("failed", "broken words", 20, 35), anchor, clean),
+        recorded_partition_mismatch,
+        partition_by_id={"failed": 0, "anchor": 0, "clean": 0},
+        retry_groups=(("failed", "anchor"), ("clean",)),
+    )
+
+
 def test_original_recorded_partition_cannot_be_erased_by_reduced_pool_repartitioning():
     failed = take("failed", FAILED_TEXT, 0, 10)
     clean = take("clean", CLEAN_TEXT, 50, 65)
