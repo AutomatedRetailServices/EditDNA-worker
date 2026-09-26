@@ -391,6 +391,68 @@ def test_family_anchor_cannot_inherit_failure_from_other_source_session_or_futur
     )
 
 
+def test_incomplete_failed_take_can_use_discarded_immediate_continuation_as_relation_evidence():
+    failed = take(
+        "failed", "has this happened to you after visiting different",
+        49.0, 56.0, complete=False,
+    )
+    continuation = take(
+        "continuation",
+        "different salons gave me foot fungus and I recommend this treatment",
+        58.0, 64.0, complete=False,
+    )
+    clean = take("clean", CLEAN_TEXT, 101.0, 132.0)
+    windows = ({"partition_index": 0, "member_ids": [
+        "failed", "continuation", "clean",
+    ], "decisions": [
+        row("failed", confidence=0.90),
+        row("continuation", confidence=0.90),
+        row(
+            "clean", label="winner", proposed_label="winner",
+            confidence=0.95, semantic_delete_recommended=False,
+        ),
+    ]},)
+    assert failed_retry_coverage_pairs(
+        (failed, clean), windows,
+        partition_by_id={"failed": 0, "clean": 0},
+        relation_takes=(failed, continuation, clean),
+        relation_partition_by_id={"failed": 0, "continuation": 0, "clean": 0},
+    ) == frozenset({("failed", "clean")})
+
+
+def test_discarded_continuation_bridge_rejects_complete_donor_large_gap_or_wrong_session():
+    clean = take("clean", CLEAN_TEXT, 101.0, 132.0)
+    clean_row = row(
+        "clean", label="winner", proposed_label="winner",
+        confidence=0.95, semantic_delete_recommended=False,
+    )
+    for failed, continuation, continuation_partition in (
+        (
+            take("failed", "valid complete statement", 49, 56, complete=True),
+            take("continuation", FAILED_TEXT, 58, 64, complete=False), 0,
+        ),
+        (
+            take("failed", "incomplete statement", 49, 56, complete=False),
+            take("continuation", FAILED_TEXT, 61, 67, complete=False), 0,
+        ),
+        (
+            take("failed", "incomplete statement", 49, 56, complete=False),
+            take("continuation", FAILED_TEXT, 58, 64, complete=False), 1,
+        ),
+    ):
+        windows = ({"decisions": [
+            row("failed"), row("continuation"), clean_row,
+        ]},)
+        assert not failed_retry_coverage_pairs(
+            (failed, clean), windows,
+            partition_by_id={"failed": 0, "clean": 0},
+            relation_takes=(failed, continuation, clean),
+            relation_partition_by_id={
+                "failed": 0, "continuation": continuation_partition, "clean": 0,
+            },
+        )
+
+
 def test_original_recorded_partition_cannot_be_erased_by_reduced_pool_repartitioning():
     failed = take("failed", FAILED_TEXT, 0, 10)
     clean = take("clean", CLEAN_TEXT, 50, 65)

@@ -21,6 +21,8 @@ def failed_retry_coverage_pairs(
     *,
     partition_by_id: Mapping[str, int],
     retry_groups: Iterable[Iterable[str]] = (),
+    relation_takes: Iterable[CandidateTake] = (),
+    relation_partition_by_id: Mapping[str, int] | None = None,
 ) -> frozenset[tuple[str, str]]:
     """Return directed ``(failed, later_delivery)`` comparison candidates.
 
@@ -35,6 +37,9 @@ def failed_retry_coverage_pairs(
     """
     take_tuple = tuple(takes)
     by_id = {take.clip_id: take for take in take_tuple}
+    relation_by_id = dict(by_id)
+    relation_by_id.update({take.clip_id: take for take in relation_takes})
+    relation_partitions = relation_partition_by_id or partition_by_id
     group_by_id: dict[str, frozenset[str]] = {}
     for group in retry_groups:
         known = frozenset(str(clip_id) for clip_id in group if str(clip_id) in by_id)
@@ -46,11 +51,11 @@ def failed_retry_coverage_pairs(
         partition = window.get("partition_index")
         if type(partition) is int:
             for clip_id in window.get("member_ids") or ():
-                if str(clip_id) in by_id:
+                if str(clip_id) in relation_by_id:
                     recorded_partitions[str(clip_id)].add(partition)
         for row in window.get("decisions") or ():
             clip_id = str(row.get("clip_id") or "")
-            if clip_id in by_id:
+            if clip_id in relation_by_id:
                 rows_by_id[clip_id].append(row)
 
     failed_ids: list[str] = []
@@ -93,7 +98,12 @@ def failed_retry_coverage_pairs(
             or row.get("dense_semantic_failure_cluster") is not True
             for row in rows
         )
-        if failed_votes and not unsafe_view and strongest_failed > protective_confidence:
+        if (
+            clip_id in by_id
+            and failed_votes
+            and not unsafe_view
+            and strongest_failed > protective_confidence
+        ):
             failed_ids.append(clip_id)
         if rows and all(
             row.get("proposed_label") == "winner"
@@ -104,7 +114,9 @@ def failed_retry_coverage_pairs(
             and int(row.get("recording_suffix_words") or 0) == 0
             and row.get("label") not in {"failed", "bts"}
             for row in rows
-        ) and any(float(row.get("confidence") or 0.0) >= 0.95 for row in rows):
+        ) and clip_id in by_id and any(
+            float(row.get("confidence") or 0.0) >= 0.95 for row in rows
+        ):
             delivery_ids.append(clip_id)
 
     pairs: set[tuple[str, str]] = set()
@@ -117,7 +129,15 @@ def failed_retry_coverage_pairs(
         # phrase that matches the later clean delivery. The family supplies
         # eligibility; a locally corroborated, non-winner/non-BTS member may
         # supply the exact-attempt anchor. This still grants comparison only.
-        anchor_ids = group_by_id.get(failed_id, frozenset({failed_id}))
+        group_anchor_ids = group_by_id.get(failed_id, frozenset({failed_id}))
+        anchor_ids = set(group_anchor_ids)
+        if not failed.complete_idea:
+            anchor_ids.update(
+                anchor_id for anchor_id, anchor in relation_by_id.items()
+                if anchor_id != failed_id
+                and anchor.source_asset_id == failed.source_asset_id
+                and 0.0 <= anchor.start - failed.end <= 4.0
+            )
         safe_anchor_ids = [
             anchor_id for anchor_id in anchor_ids
             if rows_by_id.get(anchor_id)
@@ -144,16 +164,16 @@ def failed_retry_coverage_pairs(
             ):
                 continue
             for anchor_id in safe_anchor_ids:
-                anchor = by_id[anchor_id]
+                anchor = relation_by_id[anchor_id]
                 anchor_recorded = recorded_partitions.get(anchor_id, set())
                 if (
                     anchor.source_asset_id != delivery.source_asset_id
                     or anchor.source_asset_id != failed.source_asset_id
                     or delivery.start < anchor.end
                     or not delivery.complete_idea
-                    or partition_by_id.get(anchor_id) is None
-                    or partition_by_id.get(anchor_id) != partition_by_id.get(delivery_id)
-                    or partition_by_id.get(anchor_id) != partition_by_id.get(failed_id)
+                    or relation_partitions.get(anchor_id) is None
+                    or relation_partitions.get(anchor_id) != relation_partitions.get(delivery_id)
+                    or relation_partitions.get(anchor_id) != relation_partitions.get(failed_id)
                     or (bool(anchor_recorded or delivery_recorded) and (
                         len(anchor_recorded) != 1
                         or anchor_recorded != delivery_recorded
@@ -166,5 +186,6 @@ def failed_retry_coverage_pairs(
                     continue
                 same_attempt, _ = _same_retry_attempt(anchor, delivery)
                 if same_attempt:
-                    pairs.add((anchor_id, delivery_id))
+                    left_id = anchor_id if anchor_id in group_anchor_ids else failed_id
+                    pairs.add((left_id, delivery_id))
     return frozenset(pairs)

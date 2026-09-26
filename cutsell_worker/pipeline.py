@@ -1943,11 +1943,20 @@ def build_flow_b_draft(
         for partition_index, partition in enumerate(partition_takes_by_sessions(kept, whole_video_context))
         for take in partition
     }
+    relation_partition_by_id = {
+        take.clip_id: partition_index
+        for partition_index, partition in enumerate(
+            partition_takes_by_sessions(take_tuple, whole_video_context)
+        )
+        for take in partition
+    }
     failed_retry_coverage_candidates = build_failed_retry_coverage_pairs(
         kept,
         hybrid_cleanup.diagnostics,
         partition_by_id=retry_partition_by_id,
         retry_groups=grouping.groups,
+        relation_takes=take_tuple,
+        relation_partition_by_id=relation_partition_by_id,
     )
     # D-150 (Gate 6 correction, real RAW #118 audit): same bridge pattern as
     # `confirmed_recording_evidence` immediately above, for measured source
