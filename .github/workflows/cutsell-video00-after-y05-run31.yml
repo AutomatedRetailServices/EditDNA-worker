@@ -12,7 +12,7 @@ concurrency:
 jobs:
   compare:
     if: >-
-      github.run_attempt == 1 && github.event_name == 'push' && github.event.head_commit.message == 'benchmark: execute Video00 after Yaskira05 approval'
+      github.run_attempt == 1 && github.event_name == 'push' && github.event.head_commit.message == 'benchmark: retry Video00 with bounded long-form timeout'
     runs-on: ubuntu-latest
     timeout-minutes: 105
     env:
