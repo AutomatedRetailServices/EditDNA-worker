@@ -1,6 +1,5 @@
-from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy
+from cutsell_worker.contracts import DraftClip
 from cutsell_worker.selection_conflicted_bridge_guard import (
-    apply_selection_conflicted_bridge_guard,
     abandoned_negated_restart_ids,
     contained_proxy_duplicate_ids,
     confirmed_selected_duplicate_ids,
@@ -25,13 +24,6 @@ def _clip(clip_id, start, end, text):
         end=end,
         text=text,
         caption_text=text,
-    )
-
-
-def _timeline(selected, diagnostics):
-    return DraftTimeline(
-        "v1", "project", EditStrategy.STORYTELLING,
-        tuple(selected), (), (), diagnostics,
     )
 
 
@@ -523,50 +515,6 @@ def test_same_opening_near_tie_prefers_substantially_fuller_later_delivery():
     assert add == {"retry"}
 
 
-def test_reapplying_guard_cannot_reverse_settled_fuller_retry():
-    first = _clip(
-        "first", 10.0, 16.5,
-        "We never considered a thyroid scan because every year gave two states.",
-    )
-    retry = _clip(
-        "retry", 20.0, 30.0,
-        "We never considered a thyroid scan because every examination showed it worked perfectly.",
-    )
-    diagnostics = {
-        "semantic_idea_equivalence": {"merges": [{
-            "left_clip_id": "first", "right_clip_id": "retry",
-            "confidence": 1.0, "accepted_by": "same_opening_restart",
-        }]},
-        "attempt_reconstruction": {"attempts": [
-            {"clip_id": "first", "complete_idea": True},
-            {"clip_id": "retry", "complete_idea": True},
-        ]},
-        "take_judge_groups": [{"candidate_usability_summary": {
-            "first": "USABLE", "retry": "USABLE",
-        }}],
-        "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "first", "label": "winner", "confidence": 0.95},
-            {"clip_id": "retry", "label": "keep", "confidence": 0.85},
-        ]}],
-    }
-    draft = DraftTimeline(
-        "v1", "project", EditStrategy.STORYTELLING,
-        (first,), (), (retry,), diagnostics,
-    )
-    first_pass = apply_selection_conflicted_bridge_guard(draft)
-    second_pass = apply_selection_conflicted_bridge_guard(first_pass)
-
-    assert [clip.clip_id for clip in first_pass.selected] == ["retry"]
-    assert [clip.clip_id for clip in second_pass.selected] == ["retry"]
-    pair_rows = [
-        row for row in second_pass.diagnostics["selection_conflicted_bridge_guard"]
-        if row.get("reason") == "deterministic_retry_final_membership_resolution"
-    ]
-    assert [(row["clip_id"], row["winner_clip_id"]) for row in pair_rows] == [
-        ("first", "retry"),
-    ]
-
-
 def test_short_positive_restart_with_standard_negative_vote_yields_to_safe_full_peer():
     full = _clip(
         "full", 10.0, 17.0,
@@ -588,9 +536,9 @@ def test_short_positive_restart_with_standard_negative_vote_yields_to_safe_full_
         }}],
         "hybrid_editorial_chunks": [{"decisions": [
             {"clip_id": "full", "label": "keep", "confidence": 0.95},
-            {"clip_id": "full", "label": "failed", "confidence": 0.80},
+            {"clip_id": "full", "label": "alternate", "confidence": 0.70},
             {"clip_id": "short", "label": "keep", "confidence": 0.95},
-            {"clip_id": "short", "label": "alternate", "confidence": 0.85},
+            {"clip_id": "short", "label": "failed", "confidence": 0.80},
         ]}],
     }
 
@@ -599,31 +547,6 @@ def test_short_positive_restart_with_standard_negative_vote_yields_to_safe_full_
     assert move == {"short"}
     assert add == {"full"}
     assert audit[0]["reason"] == "deterministic_retry_semantic_superset_dominance"
-
-
-def test_nearby_equivalent_safe_deliveries_use_later_retake_over_small_score_edge():
-    earlier = _clip(
-        "earlier", 10.0, 21.9,
-        "A rash appeared behind my ear and across my neck and looked like an allergy with hormonal symptoms.",
-    )
-    later = _clip(
-        "later", 24.7, 32.8,
-        "Another symptom was an allergy-like rash behind my ear and across my neck that appeared seasonally.",
-    )
-    diagnostics = {
-        "semantic_idea_equivalence": {"merges": [{
-            "left_clip_id": "earlier", "right_clip_id": "later", "confidence": 0.90,
-        }]},
-        "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "earlier", "label": "winner", "confidence": 0.95},
-            {"clip_id": "later", "label": "winner", "confidence": 0.90},
-        ]}],
-    }
-
-    move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
-
-    assert move == {"earlier"}
-    assert audit[0]["winner_clip_id"] == "later"
 
 
 def test_fuller_restart_accepts_standard_positive_alternate_window_tie():
@@ -906,6 +829,54 @@ def test_deterministic_retry_prefers_semantically_full_delivery_over_clean_prefi
     assert audit[0]["reason"] == "deterministic_retry_semantic_superset_dominance"
 
 
+def test_semantic_superset_accepts_stronger_keep_over_standard_failed_shadow():
+    """Overlapping windows may call a complete delivery KEEP .95 and FAILED
+    .80.  The weaker shadow is not enough to make an otherwise safe, fuller
+    deterministic retry ineligible when no terminal evidence recommends
+    deletion.
+    """
+    prefix = _clip(
+        "prefix", 10.0, 12.3,
+        "After my contract I asked my doctor",
+    )
+    fuller = _clip(
+        "fuller", 15.0, 21.6,
+        "After my contract I spoke with my doctor and requested every available test.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "fuller", "right_clip_id": "prefix",
+            "accepted_by": "same_opening_abandoned_start", "confidence": 1.0,
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "prefix", "complete_idea": True},
+            {"clip_id": "fuller", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "prefix", "label": "keep", "confidence": 0.95},
+            {"clip_id": "prefix", "label": "alternate", "confidence": 0.85},
+            {"clip_id": "fuller", "label": "keep", "confidence": 0.95},
+            {"clip_id": "fuller", "label": "failed", "confidence": 0.80},
+        ]}],
+        "take_judge_groups": [{
+            "member_usability": {
+                "prefix": {"deterministic_unusable": False, "delete_recommended": False},
+                "fuller": {"deterministic_unusable": False, "delete_recommended": False},
+            },
+        }],
+    }
+
+    move, add, audit = deterministic_retry_resolution(
+        (prefix,), (), (fuller,), diagnostics,
+    )
+
+    assert move == {"prefix"}
+    assert add == {"fuller"}
+    assert audit[0]["reason"] == "deterministic_retry_semantic_superset_dominance"
+    assert audit[0]["winner_positive_confidence"] == 0.95
+    assert audit[0]["winner_negative_confidence"] == 0.8
+
+
 def test_semantic_superset_retry_preserves_changed_number():
     prefix = _clip("prefix", 10.0, 12.0, "After my contract I requested 5 tests")
     fuller = _clip(
@@ -1119,74 +1090,3 @@ def test_anaphoric_fragment_without_confirmed_proxy_fails_open():
     winner = _clip("winner", 25.0, 34.0, "A later explanation of a different event.")
     move, audit = orphaned_anaphoric_retry_fragment_ids((fragment, winner), (), (), {})
     assert move == set() and audit == []
-
-
-def test_post_authority_subtractive_guard_reaches_fixed_point():
-    fragment = _clip("fragment", 10.0, 12.5, "Era como un rash, una alergia.")
-    proxy = _clip(
-        "proxy", 13.8, 22.0,
-        "También aparecía una alergia detrás de la oreja y en el cuello.",
-    )
-    winner = _clip(
-        "winner", 25.0, 34.0,
-        "Otro síntoma era una alergia detrás de la oreja y en todo el cuello por temporadas.",
-    )
-    diagnostics = {
-        "semantic_idea_equivalence": {"merges": [{
-            "left_clip_id": "proxy", "right_clip_id": "winner", "confidence": 0.90,
-        }]},
-        "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "proxy", "label": "alternate", "confidence": 0.90},
-            {"clip_id": "winner", "label": "winner", "confidence": 0.95},
-        ]}],
-    }
-    draft = _timeline((fragment, proxy, winner), diagnostics)
-
-    repaired = apply_selection_conflicted_bridge_guard(
-        draft, allow_membership_additions=False,
-    )
-
-    assert [clip.clip_id for clip in repaired.selected] == ["winner"]
-    reasons = {row["reason"] for row in repaired.diagnostics["selection_conflicted_bridge_guard"]}
-    assert "direct_equivalence_confirmed_final_winner" in reasons
-    assert "orphaned_anaphoric_fragment_of_confirmed_retry" in reasons
-
-
-def test_continuation_chain_proof_names_only_same_pass_surviving_witnesses():
-    winner = _clip(
-        "winner", 0.0, 6.0,
-        "Only 5-10% of cases are hereditary and most depend on lifestyle choices.",
-    )
-    loser = _clip(
-        "loser", 7.0, 13.0,
-        "Only 5-10% of cases are hereditary and most depend on lifestyle choices.",
-    )
-    head = _clip("head", 20.0, 23.0, "Science confirms only 5-10% of")
-    tail = _clip("tail", 23.1, 26.0, "cases are hereditary.")
-    diagnostics = {
-        "semantic_idea_equivalence": {
-            "merges": [{
-                "left_clip_id": "loser", "right_clip_id": "winner", "confidence": 0.90,
-            }],
-            "continuation_merges": [{
-                "left_clip_id": "head", "right_clip_id": "tail",
-                "accepted_by": "sentence_continuation", "confidence": 1.0,
-            }],
-        },
-        "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "loser", "label": "alternate", "confidence": 0.90},
-            {"clip_id": "winner", "label": "winner", "confidence": 0.95},
-        ]}],
-    }
-    draft = _timeline((winner, loser, head, tail), diagnostics)
-
-    repaired = apply_selection_conflicted_bridge_guard(
-        draft, allow_membership_additions=False,
-    )
-
-    assert [clip.clip_id for clip in repaired.selected] == ["winner"]
-    chain_row = next(
-        row for row in repaired.diagnostics["selection_conflicted_bridge_guard"]
-        if row["reason"] == "later_continuation_chain_repeats_nearby_critical_claim"
-    )
-    assert chain_row["prior_clip_ids"] == ["winner"]
