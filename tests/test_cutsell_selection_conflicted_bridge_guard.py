@@ -1,10 +1,8 @@
 from cutsell_worker.contracts import DraftClip
 from cutsell_worker.selection_conflicted_bridge_guard import (
     contained_proxy_duplicate_ids,
-    contained_selected_duplicate_ids,
     confirmed_selected_duplicate_ids,
     conflicted_redundant_bridge_ids,
-    dangling_retry_fragment_ids,
     deterministic_retry_resolution,
     missing_continuation_bridge_ids,
     redundant_continuation_chain_ids,
@@ -220,14 +218,6 @@ def test_complete_or_long_open_delivery_fails_open():
     assert audit == []
 
 
-def test_selected_interval_contained_by_selected_delivery_is_removed():
-    outer = _clip("outer", 10.0, 20.0, "A complete delivery with every required word.")
-    inner = _clip("inner", 14.0, 20.0, "with every required word.")
-    move, audit = contained_selected_duplicate_ids((outer, inner))
-    assert move == {"inner"}
-    assert audit[0]["winner_clip_id"] == "outer"
-
-
 def test_deterministic_restart_can_swap_to_stronger_positive_peer():
     first = _clip("first", 10.0, 16.0, "The machine worked perfectly last year.")
     retry = _clip("retry", 20.0, 27.0, "The machine worked perfectly throughout last year.")
@@ -283,20 +273,6 @@ def test_selected_suffix_of_confirmed_duplicate_is_removed():
     assert audit[0]["proxy_clip_id"] == "full"
 
 
-def test_dangling_take_is_removed_only_with_an_incomplete_retry_peer():
-    fragment = _clip("fragment", 10.0, 15.0, "I handled the issue with")
-    diagnostics = {
-        "take_group_members": [["earlier", "fragment"]],
-        "attempt_reconstruction": {"attempts": [
-            {"clip_id": "earlier", "complete_idea": False},
-            {"clip_id": "fragment", "complete_idea": True},
-        ]},
-    }
-    move, audit = dangling_retry_fragment_ids((fragment,), diagnostics)
-    assert move == {"fragment"}
-    assert audit[0]["terminal_token"] == "with"
-
-
 def test_positive_incomplete_bridge_between_selected_neighbors_is_restored():
     left = _clip("left", 10.0, 15.0, "The first explanation is complete.")
     bridge = _clip("bridge", 15.2, 16.5, "Only 7% are from")
@@ -305,11 +281,27 @@ def test_positive_incomplete_bridge_between_selected_neighbors_is_restored():
         "attempt_reconstruction": {"attempts": [{"clip_id": "bridge", "complete_idea": False}]},
         "hybrid_editorial_chunks": [{"decisions": [
             {"clip_id": "bridge", "label": "keep", "confidence": 0.80},
+            {"clip_id": "bridge", "label": "failed", "confidence": 0.80},
         ]}],
     }
     add, audit = missing_continuation_bridge_ids((left, right), (), (bridge,), diagnostics)
     assert add == {"bridge"}
     assert audit[0]["terminal_token"] == "from"
+
+
+def test_incomplete_bridge_with_stronger_negative_evidence_fails_open():
+    left = _clip("left", 10.0, 15.0, "The first explanation is complete.")
+    bridge = _clip("bridge", 15.2, 16.5, "Only 7% are from")
+    right = _clip("right", 17.5, 20.0, "that category; choices matter.")
+    diagnostics = {
+        "attempt_reconstruction": {"attempts": [{"clip_id": "bridge", "complete_idea": False}]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "bridge", "label": "keep", "confidence": 0.80},
+            {"clip_id": "bridge", "label": "failed", "confidence": 0.90},
+        ]}],
+    }
+    add, audit = missing_continuation_bridge_ids((left, right), (), (bridge,), diagnostics)
+    assert add == set() and audit == []
 
 
 def test_later_numeric_continuation_chain_is_removed_when_facts_already_covered():

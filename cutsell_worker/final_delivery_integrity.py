@@ -146,6 +146,50 @@ def _visual_prefers_later(earlier: CandidateTake, later: CandidateTake) -> bool:
     return False
 
 
+def collapse_overlapping_contained_deliveries(
+    kept: Iterable[CandidateTake],
+) -> tuple[tuple[CandidateTake, ...], tuple[CandidateTake, ...], tuple[dict, ...]]:
+    """Remove a physically contained restatement of an already selected delivery.
+
+    Attempt reconstruction can emit both a full take and a suffix cut from the same
+    physical words.  Provider labels cannot make both valid: rendering both repeats the
+    overlapping source audio.  This authority is deliberately limited to same-source
+    physical containment plus lexical containment; adjacent paraphrases are untouched.
+    """
+    ordered = tuple(sorted(kept, key=lambda t: (t.source_order, t.start, t.end, t.clip_id)))
+    removed_ids: set[str] = set()
+    diagnostics: list[dict] = []
+    for outer in ordered:
+        if outer.clip_id in removed_ids:
+            continue
+        outer_content = _content(outer.text)
+        if len(outer_content) < 4:
+            continue
+        for inner in ordered:
+            if inner.clip_id == outer.clip_id or inner.clip_id in removed_ids:
+                continue
+            if inner.source_asset_id != outer.source_asset_id:
+                continue
+            if float(inner.start) < float(outer.start) - 0.04 or float(inner.end) > float(outer.end) + 0.04:
+                continue
+            inner_content = _content(inner.text)
+            if len(inner_content) < 3 or not inner_content.issubset(outer_content):
+                continue
+            if len(inner_content) >= len(outer_content):
+                continue
+            removed_ids.add(inner.clip_id)
+            diagnostics.append({
+                "reason": "overlapping_contained_delivery_yields_to_full_span",
+                "removed_clip_id": inner.clip_id,
+                "winner_clip_id": outer.clip_id,
+                "removed_text": inner.text,
+                "winner_text": outer.text,
+            })
+    survivors = tuple(t for t in ordered if t.clip_id not in removed_ids)
+    removed = tuple(t for t in ordered if t.clip_id in removed_ids)
+    return survivors, removed, tuple(diagnostics)
+
+
 def collapse_proven_retry_transitions(
     kept: Iterable[CandidateTake],
     semantic_decisions: Iterable[tuple[str, str, float]],
@@ -456,12 +500,15 @@ def install_final_delivery_integrity() -> None:
         if not result.kept or not result.semantic_decisions:
             return result
 
+        kept, overlap_removed, overlap_diag = collapse_overlapping_contained_deliveries(result.kept)
+
         kept, retry_removed, retry_diag = collapse_proven_retry_transitions(
-            result.kept,
+            kept,
             result.semantic_decisions,
             context,
         )
         deleted_ids = {take.clip_id for take in result.deleted}
+        deleted_ids.update(take.clip_id for take in overlap_removed)
         deleted_ids.update(take.clip_id for take in retry_removed)
         deleted_pool = tuple(take for take in source_takes if take.clip_id in deleted_ids)
 
@@ -482,10 +529,11 @@ def install_final_delivery_integrity() -> None:
         remaining_deleted_ids = {take.clip_id for take in deleted_pool}
         deleted = tuple(take for take in source_takes if take.clip_id in remaining_deleted_ids)
 
-        if not retry_diag and not open_diag and not rescue_diag:
+        if not overlap_diag and not retry_diag and not open_diag and not rescue_diag:
             return result
         diagnostics = tuple(result.diagnostics) + ({
             "final_delivery_integrity": [
+                *list(overlap_diag),
                 *list(retry_diag),
                 *list(open_diag),
                 *list(rescue_diag),

@@ -543,6 +543,21 @@ def _merge_attempt(members: tuple[CandidateTake, ...]) -> CandidateTake:
 # internal gap), so this cannot fragment-explode a long multi-member
 # bucket with several ordinary internal pauses.
 _SUBSPAN_MIN_CONTENT_TOKENS = 3
+_DEPENDENT_SUBSPAN_OPENERS = frozenset({"de", "del", "of"})
+
+
+def _can_stand_alone_as_delivery(take: CandidateTake) -> bool:
+    """Reject a grammatically dependent tail as an audience-facing candidate.
+
+    Borderline preservation exists to recover two independently usable deliveries,
+    not to promote a prepositional tail (for example ``de personas...`` or
+    ``of people...``) into its own edit.  Keep this deliberately narrow: broader
+    conjunctions and discourse markers can legitimately begin a sentence.
+    """
+    words = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", str(take.text or "").strip())
+    if not words:
+        return False
+    return words[0].casefold() not in _DEPENDENT_SUBSPAN_OPENERS
 
 
 def _borderline_split_index(
@@ -568,6 +583,8 @@ def _borderline_split_index(
         if len(_content_tokens(left.text)) < _SUBSPAN_MIN_CONTENT_TOKENS:
             continue
         if len(_content_tokens(right.text)) < _SUBSPAN_MIN_CONTENT_TOKENS:
+            continue
+        if not (_can_stand_alone_as_delivery(left) and _can_stand_alone_as_delivery(right)):
             continue
         if gap > best_gap:
             best_gap = gap

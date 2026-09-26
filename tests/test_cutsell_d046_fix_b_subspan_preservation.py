@@ -195,3 +195,41 @@ def test_preserved_subspan_candidates_returns_nothing_for_an_unsplit_pool():
     preserved, audit = preserved_subspan_candidates((single,), diagnostics)
     assert preserved == ()
     assert audit == []
+
+
+def test_dependent_prepositional_tail_is_not_promoted_to_a_delivery():
+    parent_head = take(
+        "head",
+        "También me salían espinillas detrás de la oreja que parecían alergia.",
+        0.0,
+        8.0,
+    )
+    dependent_tail = take(
+        "tail",
+        "de personas con problemas hormonales.",
+        8.75,
+        10.5,
+    )
+    attempts, diagnostics = reconstruct_delivery_attempts(
+        (parent_head, dependent_tail), context(),
+    )
+    assert len(attempts) == 1
+    preserved, audit = preserved_subspan_candidates(
+        (parent_head, dependent_tail), diagnostics,
+    )
+    assert preserved == ()
+    assert audit == []
+
+
+def test_dependent_english_tail_is_not_promoted_to_a_delivery():
+    parent_head = take("head", "She described the symptoms she experienced.", 0.0, 5.0)
+    dependent_tail = take("tail", "of people with hormonal problems.", 5.75, 7.5)
+    attempts, diagnostics = reconstruct_delivery_attempts(
+        (parent_head, dependent_tail), context(),
+    )
+    assert len(attempts) == 1
+    preserved, audit = preserved_subspan_candidates(
+        (parent_head, dependent_tail), diagnostics,
+    )
+    assert preserved == ()
+    assert audit == []

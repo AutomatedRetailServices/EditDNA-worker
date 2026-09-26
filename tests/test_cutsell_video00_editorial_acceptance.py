@@ -250,13 +250,17 @@ def test_complete_target_can_pass_all_checks_without_changing_historical_oracle(
     historical = json.loads(HISTORICAL_MANIFEST.read_text(encoding="utf-8"))
     assert next(c for c in historical["checks"] if c["id"] == "pimples_later_winner_present")["kind"] == "required_exact"
     manifest = _manifest()
-    assert len(manifest["checks"]) == 11
+    assert len(manifest["checks"]) == 14
     good = (
         "Otro síntoma era que me salían espinillas como si fuera una alergia de "
         "esta parte aquí detrás de la oreja y en el cuello. Me salía por temporadas."
     )
     rows = [
-        _row("Al terminar mi contrato, cambié de ginecóloga.", 95.58, 104.02),
+        _row(
+            "Tenía como costumbre cada vez que terminaba un contrato hacerme un chequeo "
+            "de rutina con mi ginecóloga.",
+            95.58, 104.02,
+        ),
         _row("Ahí fue cuando me mandaron a hacer sonografía.", 120.03, 124.34),
         _row(good, 213.44, 222.38),
         _row("Tuve problemas de digestión y me diagnosticaron gastritis.", 258.85, 268.47),

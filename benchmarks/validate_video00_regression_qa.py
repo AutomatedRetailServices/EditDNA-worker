@@ -479,11 +479,14 @@ def _locate_target_row(rows: list[tuple[str, str]], target: str) -> int | None:
     span = _find_semantic([text for _, text in rows], target)
     if span is not None:
         return span[0]
-    # A boundary authority may legitimately remove a repeated leading
-    # exhortation from the target row.  Locate that remaining realization
-    # with the same coverage floor, while treating accent-only ASR drift as
-    # spelling rather than missing content.  This is presence detection for
-    # QA only; the independent repeated-closing scan still decides uniqueness.
+
+    # A final-boundary repair may deliberately remove only the repeated
+    # leading closing phrase while preserving the unique payload of the
+    # required segment.  In that case the bidirectional realization test
+    # above correctly rejects the shortened row, but this check still needs
+    # to locate the payload so it can verify that the closing was not
+    # reopened.  Use the same semantic-content coverage floor as the other
+    # precise searches and keep the match confined to one row.
     target_tokens = {_asr_anchor_token(token) for token in _content_tokens(target)}
     for index, (_, text) in enumerate(rows):
         row_tokens = {_asr_anchor_token(token) for token in _content_tokens(text)}

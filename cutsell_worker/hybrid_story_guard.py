@@ -25,6 +25,8 @@ _AUTHORITATIVE_DELETE_BASES = frozenset({
     "semantic_failed_plus_local_performance",
 })
 _NEGATIONS = frozenset({"no", "not", "never", "nunca", "nadie", "ningun", "ninguna", "sin"})
+_EXCLUSIVITY = frozenset({"nadie", "ningun", "ninguna", "nobody", "none", "only", "solo", "unica", "unico"})
+_PURE_NEGATIONS = _NEGATIONS - {"nadie", "ningun", "ninguna"}
 
 
 def _normalized_tokens(text: str) -> set[str]:
@@ -41,7 +43,13 @@ def _critical_tokens(text: str) -> set[str]:
     normalized = normalized.encode("ascii", "ignore").decode("ascii")
     tokens = set(re.findall(r"[a-z0-9%]+", normalized))
     critical = {token for token in tokens if any(ch.isdigit() for ch in token)}
-    critical.update(token for token in tokens if token in _NEGATIONS)
+    # Polarity and exclusivity are protected facts, not exact surface words.  Keep
+    # ordinary negation separate from exclusivity so generic ``no`` cannot be treated
+    # as equivalent to ``only``; ``nadie``/``nobody`` belong to the latter class.
+    if any(token in _PURE_NEGATIONS for token in tokens):
+        critical.add("__negation__")
+    if any(token in _EXCLUSIVITY for token in tokens):
+        critical.add("__exclusivity__")
     return critical
 
 

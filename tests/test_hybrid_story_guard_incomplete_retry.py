@@ -31,6 +31,23 @@ def test_incomplete_failed_retry_is_covered_when_prior_delivery_preserves_number
     assert _covered_by_kept_delivery(retry, (kept,)) is True
 
 
+def test_incomplete_english_retry_accepts_equivalent_negative_wording():
+    kept = _take(
+        "kept",
+        10.0,
+        20.0,
+        "I am the only person in my family with this cancer. Only 5-10% are hereditary.",
+    )
+    retry = _take(
+        "retry",
+        21.0,
+        28.0,
+        "Nobody else in my family has this cancer. Only 5-10% of the",
+        complete=False,
+    )
+    assert _covered_by_kept_delivery(retry, (kept,)) is True
+
+
 def test_incomplete_retry_with_new_number_is_not_treated_as_covered():
     kept = _take(
         "kept",

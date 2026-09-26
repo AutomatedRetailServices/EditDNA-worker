@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - benchmark/yaskira05-medium-whisperx-20260925
+      - benchmark/video00-after-y05-run31-20260926
 permissions:
   contents: read
 concurrency:
@@ -11,7 +12,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   compare:
-    if: github.run_attempt == 1 && github.event_name == 'push'
+    if: >-
+      github.run_attempt == 1 && github.event_name == 'push' && github.event.head_commit.message == 'benchmark: reconfirm Yaskira05 after Video00 qualification'
     runs-on: ubuntu-latest
     timeout-minutes: 105
     env:
