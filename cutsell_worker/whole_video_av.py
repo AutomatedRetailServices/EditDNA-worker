@@ -223,10 +223,16 @@ class GeminiWholeVideoAVProvider:
                 prepared_duration = self.media_preparer(path, prepared)
                 if not math.isfinite(prepared_duration) or abs(prepared_duration-source.duration_sec) > .3:
                     raise ValueError('AV input timeline does not match source duration')
-                window_count = math.ceil(source.duration_sec / self.window_sec)
-                for window_index in range(window_count):
-                    start = window_index * self.window_sec
-                    duration = min(self.window_sec, source.duration_sec - start)
+                starts = [i * self.window_sec for i in range(
+                    math.ceil(source.duration_sec / self.window_sec))]
+                # A tiny last request makes relative timestamps unreliable;
+                # keep the source fully covered by extending the prior window.
+                if len(starts) > 1 and source.duration_sec - starts[-1] < self.window_sec / 2:
+                    starts.pop()
+                window_count = len(starts)
+                for window_index, start in enumerate(starts):
+                    duration = (source.duration_sec - start if window_index == window_count - 1
+                                else self.window_sec)
                     if window_count == 1:
                         piece, piece_duration = prepared, prepared_duration
                     else:
