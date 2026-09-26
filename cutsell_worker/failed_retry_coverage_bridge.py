@@ -46,12 +46,17 @@ def _internal_restart_suffix_covered(anchor: CandidateTake, delivery: CandidateT
     cursor = 0
     matched = 0
     for word in suffix_words:
-        while cursor < len(delivery_words) and delivery_words[cursor] != word:
-            cursor += 1
-        if cursor >= len(delivery_words):
+        # A missing filler/opening token must not consume the rest of the
+        # delivery.  The previous loop advanced ``cursor`` to EOF on the
+        # first miss, so a suffix such as "si te ha pasado ..." could never
+        # match the later clean delivery when only the initial "si" was
+        # omitted. Search from the current cursor and advance only on a hit.
+        try:
+            found = delivery_words.index(word, cursor)
+        except ValueError:
             continue
         matched += 1
-        cursor += 1
+        cursor = found + 1
     return matched >= 6 and matched / len(suffix_words) >= 0.80 and suffix_content.issubset(_content(delivery.text))
 
 

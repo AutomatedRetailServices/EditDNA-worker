@@ -162,6 +162,18 @@ def test_internal_restart_suffix_requires_long_ordered_coverage_and_preserves_nu
         assert _internal_restart_suffix_covered(failed, clean) is False
 
 
+def test_internal_restart_suffix_tolerates_unmatched_opening_filler_without_losing_later_matches():
+    failed = take(
+        "failed", "preparacion... si te ha pasado como a mi que por ir a diferentes salones",
+        49, 56, complete=True,
+    )
+    clean = take(
+        "clean", "te ha pasado como a mi que por ir a diferentes salones te contagiaron hongos usa tu propio kit",
+        101, 132, complete=True,
+    )
+    assert _internal_restart_suffix_covered(failed, clean) is True
+
+
 def test_confirmed_retry_family_can_supply_anchor_for_second_pass_clean_delivery():
     intro = take("intro", "many salons can give your feet fungus and I have a solution", 5, 13)
     failed = take(

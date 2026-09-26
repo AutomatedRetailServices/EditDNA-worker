@@ -551,6 +551,7 @@ def _missing_idea_coverage(draft) -> list[dict]:
 # additive fact inside the same idea group also clears nothing (no pairwise
 # arbiter record confirms it) and remains blocking, unchanged.
 _SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD = SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD  # D-058 Phase 2's own bar, shared (D-289.1)
+_STRUCTURED_COMPONENT_COVERAGE_MIN_CONFIDENCE = 0.90
 
 
 def _clip_id_to_group_members(groups) -> dict[str, tuple[str, tuple[str, ...]]]:
@@ -591,6 +592,50 @@ def _semantic_equivalence_confidence(diagnostics, left_id: str, right_id: str) -
     return best
 
 
+def _structured_component_coverage_credit(
+    diagnostics, discarded_id: str, selected_ids: set[str],
+) -> bool:
+    """Reuse a completed grouping-safety coverage verdict.
+
+    A bridge may have been admitted only after the semantic arbiter checked
+    the *complete components*, rather than emitting a direct pairwise merge
+    for every member.  Story validation must not later call one of those
+    proven-covered members unique content.  Credit remains fail-closed: the
+    accepted probe must be complete, high-confidence, conflict-free, and
+    explicitly cover the discarded side in the selected side's direction.
+    """
+    trace = ((diagnostics or {}).get("distinct_idea_grouping_safety") or {}).get("edge_trace") or ()
+    for row in trace:
+        if not (
+            row.get("accepted") is True
+            and row.get("component_cohesion_evaluated") is True
+            and row.get("component_probe_complete") is True
+            and row.get("semantic_meaning_conflict") is False
+        ):
+            continue
+        try:
+            confidence = float(row.get("cohesion_confidence") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if confidence < _STRUCTURED_COMPONENT_COVERAGE_MIN_CONFIDENCE:
+            continue
+        left = {str(cid) for cid in (row.get("left_component_members") or ())}
+        right = {str(cid) for cid in (row.get("right_component_members") or ())}
+        if (
+            discarded_id in left
+            and bool(right & selected_ids)
+            and row.get("semantic_left_covered_by_right") is True
+        ):
+            return True
+        if (
+            discarded_id in right
+            and bool(left & selected_ids)
+            and row.get("semantic_right_covered_by_left") is True
+        ):
+            return True
+    return False
+
+
 def _same_idea_paraphrase_credit(
     clip, member_ids: tuple[str, ...], selected_ids: set, diagnostics,
 ) -> tuple[bool, str | None]:
@@ -610,6 +655,8 @@ def _same_idea_paraphrase_credit(
             diagnostics, clip.clip_id, winner_id
         ) >= _SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD:
             return True, "same_idea_semantic_equivalence"
+    if _structured_component_coverage_credit(diagnostics, clip.clip_id, selected_ids):
+        return True, "grouping_safety_structured_component_coverage"
     return False, None
 
 

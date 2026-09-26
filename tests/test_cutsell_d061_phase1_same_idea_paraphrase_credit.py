@@ -44,10 +44,12 @@ def ranked_row(clip_id, score):
     return {"clip_id": clip_id, "score": score, "reason": "watch_listen_baseline"}
 
 
-def draft(*, selected, discarded, take_judge_groups=(), merges=()):
+def draft(*, selected, discarded, take_judge_groups=(), merges=(), edge_trace=()):
     diagnostics = {"take_judge_groups": list(take_judge_groups)}
     if merges:
         diagnostics["semantic_idea_equivalence"] = {"status": "applied", "merges": list(merges)}
+    if edge_trace:
+        diagnostics["distinct_idea_grouping_safety"] = {"edge_trace": list(edge_trace)}
     return DraftTimeline(
         schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
         selected=selected, alternates=(), discarded=discarded, diagnostics=diagnostics,
@@ -227,6 +229,58 @@ def test_selected_exact_duplicate_not_blocking():
     row = _row_for(diag, "discard")
 
     assert row is None or row["blocking"] is False
+
+
+def _coverage_edge(**overrides):
+    row = {
+        "accepted": True,
+        "component_cohesion_evaluated": True,
+        "component_probe_complete": True,
+        "cohesion_confidence": 0.90,
+        "semantic_meaning_conflict": False,
+        "semantic_left_covered_by_right": True,
+        "semantic_right_covered_by_left": False,
+        "left_component_members": ["discard", "sibling"],
+        "right_component_members": ["winner"],
+    }
+    row.update(overrides)
+    return row
+
+
+def test_complete_directional_component_coverage_prevents_false_content_loss():
+    winner = clip("winner", 10, 14, "Use your own pedicure kit so every tool touching your feet is clean.", selected=True)
+    discard = clip("discard", 0, 4, "Different salons made me worry about how their pedicure tools were disinfected.", selected=False)
+    d = draft(
+        selected=(winner,), discarded=(discard,),
+        take_judge_groups=[{"group_id": "g", "ranked": [ranked_row("discard", .5), ranked_row("sibling", .6), ranked_row("winner", .9)]}],
+        edge_trace=[_coverage_edge()],
+    )
+    out = apply_final_story_coherence_validation(d)
+    row = _row_for(out.diagnostics["final_story_coherence_validation"], "discard")
+    assert row is not None
+    assert row["blocking"] is False
+    assert row["content_loss_suppressed_by"] == "grouping_safety_structured_component_coverage"
+
+
+def test_component_coverage_credit_fails_closed_for_unsafe_or_wrong_direction_evidence():
+    winner = clip("winner", 10, 14, "Use your own pedicure kit so every tool touching your feet is clean.", selected=True)
+    discard = clip("discard", 0, 4, "Different salons made me worry about how their pedicure tools were disinfected.", selected=False)
+    unsafe_edges = (
+        _coverage_edge(component_probe_complete=False),
+        _coverage_edge(cohesion_confidence=.89),
+        _coverage_edge(semantic_meaning_conflict=True),
+        _coverage_edge(semantic_left_covered_by_right=False, semantic_right_covered_by_left=True),
+        _coverage_edge(right_component_members=["not-selected"]),
+    )
+    for edge in unsafe_edges:
+        d = draft(
+            selected=(winner,), discarded=(discard,),
+            take_judge_groups=[{"group_id": "g", "ranked": [ranked_row("discard", .5), ranked_row("winner", .9)]}],
+            edge_trace=[edge],
+        )
+        out = apply_final_story_coherence_validation(d)
+        row = _row_for(out.diagnostics["final_story_coherence_validation"], "discard")
+        assert row is not None and row["blocking"] is True
 
 
 def test_selected_semantic_paraphrase_not_blocking():
