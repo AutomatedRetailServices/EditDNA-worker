@@ -69,6 +69,11 @@ def test_product_source_uri_must_use_configured_bucket_and_prefix(monkeypatch):
 
 def test_mobile_upload_rejects_oversize_file(monkeypatch):
     monkeypatch.setattr(uploads, "load_runtime_config", _config)
+    assert uploads.MAX_UPLOAD_BYTES == 1024 ** 3
+    assert uploads.prepare_upload_target(
+        project_id="project-1", user_id="user-1", original_name="video.mp4",
+        content_type="video/mp4", size_bytes=1024 ** 3,
+    )["size_bytes"] == 1024 ** 3
     with pytest.raises(ValueError, match="outside allowed range"):
         uploads.create_presigned_upload(
             project_id="project-1",
