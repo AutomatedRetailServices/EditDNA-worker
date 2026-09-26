@@ -276,10 +276,11 @@ FRAGMENT_PENALTY_MARKERS = (
 #   QC's own LINGERING_ACCIDENTAL_SILENCE threshold. Shorter pauses are
 #   never penalised (an intentional beat or a breath is not an error).
 # - MULTIMODAL RESET inside the take: a strong body/hand reset candidate
-#   (>= 0.88) AND an independent disengagement/face break (>= 0.76) both
-#   inside the take's interior (the same two-signal pattern
-#   hybrid_session_cleanup._failed_local_evidence already requires). One
-#   gesture, one glance or one reset alone is NOT evidence -- negative
+#   (>= 0.88) AND either camera disengagement (>= 0.76), or a facial shift
+#   (>= 0.76) with measured nearby silence, inside the take's interior (the
+#   same corroborated pattern hybrid_session_cleanup._failed_local_evidence
+#   requires). A gesture plus an expression change during continuous speech,
+#   one glance, or one reset alone is NOT evidence -- negative
 #   controls in tests/test_cutsell_d097_delivery_cleanliness_evidence.py.
 ACCIDENTAL_DEAD_AIR_SEC = 1.20
 _DEAD_AIR_PENALTY = 0.12
@@ -289,6 +290,7 @@ _CLEANLINESS_EDGE_MARGIN_SEC = 0.35
 _RESET_KINDS = frozenset({"hand_motion_reset_candidate", "body_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
 _AUDIO_SILENCE_KIND = "audio_silence_interval"
+_RESET_PAUSE_PROXIMITY_SEC = 0.50
 
 
 def _event_field(event, name: str, default=None):
@@ -335,11 +337,34 @@ def delivery_cleanliness_evidence(take: CandidateTake, events) -> dict:
         e for e in inside
         if str(_event_field(e, "kind", "")) in _BREAK_KINDS and float(_event_field(e, "confidence", 0.0)) >= 0.76
     ]
+    silences = [
+        e for e in inside
+        if str(_event_field(e, "kind", "")) == _AUDIO_SILENCE_KIND
+    ]
+    camera_disengagement_count = sum(
+        1 for e in breaks
+        if str(_event_field(e, "kind", "")) == "camera_disengagement_candidate"
+    )
+    pause_corroborated_reset_count = sum(
+        1 for reset in resets
+        if any(
+            float(_event_field(silence, "end", 0.0))
+            >= float(_event_field(reset, "start", 0.0)) - _RESET_PAUSE_PROXIMITY_SEC
+            and float(_event_field(silence, "start", 0.0))
+            <= float(_event_field(reset, "end", 0.0)) + _RESET_PAUSE_PROXIMITY_SEC
+            for silence in silences
+        )
+    )
+    actionable_multimodal_reset = bool(
+        resets
+        and breaks
+        and (camera_disengagement_count or pause_corroborated_reset_count)
+    )
     penalty = min(_DEAD_AIR_PENALTY_CAP, _DEAD_AIR_PENALTY * len(dead_air))
     reasons = []
     if dead_air:
         reasons.append("interior_dead_air_penalty")
-    if resets and breaks:
+    if actionable_multimodal_reset:
         penalty += _MULTIMODAL_RESET_PENALTY
         reasons.append("multimodal_reset_penalty")
     return {
@@ -349,7 +374,9 @@ def delivery_cleanliness_evidence(take: CandidateTake, events) -> dict:
         "interior_dead_air_intervals": [[round(s, 3), round(e, 3)] for s, e in dead_air],
         "strong_reset_count": len(resets),
         "break_count": len(breaks),
-        "multimodal_reset": bool(resets and breaks),
+        "camera_disengagement_count": camera_disengagement_count,
+        "pause_corroborated_reset_count": pause_corroborated_reset_count,
+        "multimodal_reset": actionable_multimodal_reset,
         "penalty": round(penalty, 4),
         "reasons": reasons,
     }

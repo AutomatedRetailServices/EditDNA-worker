@@ -80674,3 +80674,41 @@ Validation: 623 relevant tests passed, independent QA 126 passed; new tests
 retain the older abbreviated-referral example as a negative preservation case.
 Offline integration verified; Gemini perception and rendered MOV quality remain
 unverified. Existing doctrine, freeze, paid-run approval and release gates stand.
+
+## 2026-09-26 — Final-membership convergence and continuous-speech reset evidence
+
+Video00 run #92 (36277670133) reached technical engine success and passed the
+historical regression suite, but real editorial acceptance remained 11/15 and
+Freeze blocked. The saved result showed four general defects: the post-authority
+guard removed a retry proxy but did not make a second subtractive pass to remove
+the now-orphaned anaphoric fragment; continuation-chain coverage cited a witness
+removed by the same pass; CanonicalEditPlan ignored the guard's explicit selected
+equivalent while StoryValidator accepted it; and the authoritative diagnostic
+handoff erased the post-authority proof while retaining its membership mutation.
+
+Final membership now converges to a subtractive fixed point after authority, with
+membership additions still structurally disabled. Continuation redundancy is
+computed only after other same-pass removals/additions, so every recorded witness
+belongs to the membership the pass actually emits. StoryValidator and
+CanonicalEditPlan consume one shared, explicit coverage-proof contract; the plan
+may represent a selected cross-group equivalent only when the guard names it and
+it still exists in final Selection. The handoff begins from the applied
+authoritative draft, preserving these proofs. No new similarity inference or
+post-authority replacement authority was added.
+
+The same run marked a complete gynecologist delivery unusable and penalized it
+because hand/body motion plus a facial-expression shift was treated as a
+recording reset despite continuous speech and no pause. Kinematic motion plus a
+facial shift is now actionable only with a nearby measured silence; camera
+disengagement remains independent corroboration. This rule is shared by cleanup
+and Best-Take cleanliness scoring. Genuine pause-corroborated resets, camera
+disengagement, dead air, short abandoned starts and all existing safety gates
+remain active.
+
+Offline verification: 163 directly relevant regression tests passed, including
+new fixed-point, same-pass-witness, authoritative-plan, continuous-speech
+negative-control and pause/camera positive-control cases. Repository-wide
+collection still has the pre-existing optional `modal` dependency error and
+legacy `test_semantic_stitch.py` import-time API mismatch; the broader test run
+was therefore not claimed all-green. A new paid benchmark/render is required
+before any Video00 or Yaskira05 quality claim.

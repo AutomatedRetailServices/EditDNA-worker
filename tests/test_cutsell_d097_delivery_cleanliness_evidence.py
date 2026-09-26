@@ -3,8 +3,9 @@
 "A missing signal is not a confirmed clean take." Two takes carrying the
 same message: the one with a REAL delivery failure (accidental interior
 dead air >= 1.2 s, the post-render QC's own threshold, or a multimodal
-reset -- strong body/hand reset AND an independent disengagement/face break
-inside the take) must lose to the clean one. Negative controls: a single
+reset -- strong body/hand reset AND camera disengagement or a pause-
+corroborated facial break inside the take) must lose to the clean one.
+Negative controls: a single
 gesture, a single glance, a natural pause under the threshold, silence at
 the take's edges, or an event from another source never penalise.
 Generic fixtures only.
@@ -42,11 +43,40 @@ def test_multimodal_reset_inside_the_take_penalises_it():
     dirty, clean = _take("dirty", 0.0), _take("clean", 20.0)
     events = [
         _event("body_reset_candidate", 3.0, 3.4, 0.92),
-        _event("facial_expression_shift_candidate", 3.5, 3.9, 0.80),
+        _event("camera_disengagement_candidate", 3.5, 3.9, 0.80),
     ]
     ranked, rows = apply_delivery_cleanliness_evidence(rank_takes((dirty, clean)), (dirty, clean), events)
     assert ranked[0].clip_id == "clean"
     assert next(r for r in rows if r["clip_id"] == "dirty")["multimodal_reset"] is True
+
+
+def test_gesture_plus_facial_shift_during_continuous_speech_is_not_a_reset():
+    take = _take("t", 0.0)
+    events = [
+        _event("body_reset_candidate", 2.0, 2.2, 0.95),
+        _event("hand_motion_reset_candidate", 3.0, 3.2, 0.95),
+        _event("facial_expression_shift_candidate", 3.3, 3.5, 0.90),
+    ]
+    row = delivery_cleanliness_evidence(take, events)
+    assert row["strong_reset_count"] == 2
+    assert row["break_count"] == 1
+    assert row["pause_corroborated_reset_count"] == 0
+    assert row["camera_disengagement_count"] == 0
+    assert row["multimodal_reset"] is False
+    assert row["penalty"] == 0.0
+
+
+def test_pause_corroborates_facial_shift_reset_cluster():
+    take = _take("t", 0.0)
+    events = [
+        _event("body_reset_candidate", 2.0, 2.2, 0.95),
+        _event("facial_expression_shift_candidate", 2.3, 2.5, 0.90),
+        _event("audio_silence_interval", 1.8, 2.6, 1.0),
+    ]
+    row = delivery_cleanliness_evidence(take, events)
+    assert row["pause_corroborated_reset_count"] == 1
+    assert row["multimodal_reset"] is True
+    assert "multimodal_reset_penalty" in row["reasons"]
 
 
 def test_negative_controls_never_penalise():

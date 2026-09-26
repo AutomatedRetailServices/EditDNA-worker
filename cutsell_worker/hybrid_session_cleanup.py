@@ -415,13 +415,23 @@ def _performance_event_summary(take: CandidateTake, context: WholeVideoContext |
     )
     resets = [event for event in events if str(event.kind) in _RESET_CANDIDATES and event.confidence >= 0.88]
     breaks = [event for event in events if str(event.kind) in _BREAK_CANDIDATES and event.confidence >= 0.76]
+    camera_disengagement_count = sum(
+        1 for event in breaks if str(event.kind) == "camera_disengagement_candidate"
+    )
+    pause_corroborated_reset_count = _pause_corroborated_reset_count(events, resets)
+    actionable_multimodal_reset = bool(
+        resets
+        and breaks
+        and (camera_disengagement_count or pause_corroborated_reset_count)
+    )
     return {
         "strong_reset_count": len(resets),
         "strong_break_count": len(breaks),
-        "pause_corroborated_reset_count": _pause_corroborated_reset_count(events, resets),
+        "camera_disengagement_count": camera_disengagement_count,
+        "pause_corroborated_reset_count": pause_corroborated_reset_count,
         "max_reset_confidence": round(max((float(event.confidence) for event in resets), default=0.0), 4),
         "max_break_confidence": round(max((float(event.confidence) for event in breaks), default=0.0), 4),
-        "multimodal_reset": bool(resets and breaks),
+        "multimodal_reset": actionable_multimodal_reset,
     }
 
 
@@ -493,7 +503,7 @@ def _failed_local_evidence(
     reset_count = int(performance["strong_reset_count"])
     break_count = int(performance["strong_break_count"])
     pause_corroborated_reset_count = int(performance["pause_corroborated_reset_count"])
-    if reset_count >= 2 and break_count >= 1:
+    if reset_count >= 2 and break_count >= 1 and bool(performance["multimodal_reset"]):
         reasons.append(f"multimodal_reset_cluster:{reset_count}:{break_count}")
     # A very short take that reaches a strong physical reset exactly where
     # measured silence begins is the local signature of an aborted start.

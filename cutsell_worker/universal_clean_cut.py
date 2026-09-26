@@ -606,8 +606,15 @@ def process_universal_clean_cut_sources(
                 "canonical_edit_plan", "final_edit_reviewer", "repair_loop",
                 "final_story_coherence_validation",
             )
+            # Start from the actually-applied authoritative draft.  The
+            # subtractive final-membership guard runs immediately above and
+            # records the proof for every removal there; rebuilding from the
+            # pre-authority draft used to erase those proofs while retaining
+            # the membership mutation, leaving validators unable to explain
+            # the final KEEP set.
+            applied_authority_diagnostics = dict(authoritative_result.draft.diagnostics or {})
             authoritative_diagnostics = {
-                key: value for key, value in pre_authority_diagnostics.items()
+                key: value for key, value in applied_authority_diagnostics.items()
                 if key not in legacy_evidence_keys
             }
             for key in legacy_evidence_keys:

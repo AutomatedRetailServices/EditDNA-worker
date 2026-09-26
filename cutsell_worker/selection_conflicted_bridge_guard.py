@@ -1643,36 +1643,9 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
     )
 
     all_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.alternates, *draft.discarded)}
-    effective_continuation_add_ids = (
-        continuation_add_ids if allow_membership_additions else set()
-    )
-    # Build the continuation-chain proof from the membership that will
-    # actually survive the other independently proven removals in this same
-    # pass.  Recording every pre-pass neighbour as a required witness made a
-    # valid coverage proof stale whenever one of those neighbours was itself
-    # a duplicate removed concurrently.
-    pre_chain_move_ids = (
+    independent_move_ids_without_chain = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | restatement_ids | proxy_ids | contained_ids | abandoned_ids | anaphoric_ids
-    )
-    if allow_membership_additions:
-        pre_chain_move_ids |= dependent_ids | retry_ids | unmerged_retry_ids
-    provisional = tuple(
-        (
-            clip for clip in draft.selected
-            if clip.clip_id not in pre_chain_move_ids
-        )
-    ) + tuple(
-        (
-            all_by_id[clip_id] for clip_id in effective_continuation_add_ids
-            if clip_id in all_by_id
-        )
-    )
-    chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
-
-    independent_move_ids = (
-        bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | restatement_ids | proxy_ids | contained_ids | chain_ids
+        | restatement_ids | proxy_ids | contained_ids
         | abandoned_ids | anaphoric_ids
     )
     replacement_move_ids = dependent_ids | retry_ids | unmerged_retry_ids
@@ -1692,7 +1665,7 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         "orphaned_anaphoric_fragment_of_confirmed_retry",
     }
     selected_ids_now = {clip.clip_id for clip in draft.selected}
-    already_planned = independent_move_ids | (
+    already_planned = independent_move_ids_without_chain | (
         replacement_move_ids if allow_membership_additions else set()
     )
     replayed_independent_ids = {
@@ -1704,14 +1677,31 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         and str(row.get("winner_clip_id") or "") in selected_ids_now
         and str(row.get("winner_clip_id") or "") not in already_planned
     }
-    independent_move_ids |= replayed_independent_ids
-    move_ids = independent_move_ids | (
+    preliminary_move_ids = independent_move_ids_without_chain | replayed_independent_ids | (
         replacement_move_ids if allow_membership_additions else set()
     )
     requested_add_ids = (
         retry_add_ids | unmerged_retry_add_ids | continuation_add_ids | dependent_add_ids
         | borderline_add_ids
     )
+    preliminary_add_ids = (
+        requested_add_ids - preliminary_move_ids
+        if allow_membership_additions else set()
+    )
+
+    # Compute chain redundancy against the membership that will actually
+    # survive every other decision in this pass.  Previously a chain could
+    # cite a nearby witness that this same pass also removed, producing a
+    # proof that was true only for the transient input membership.
+    provisional = tuple(
+        clip for clip in draft.selected
+        if clip.clip_id not in preliminary_move_ids
+    ) + tuple(
+        all_by_id[clip_id] for clip_id in preliminary_add_ids
+        if clip_id in all_by_id
+    )
+    chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
+    move_ids = preliminary_move_ids | chain_ids
     add_ids = (requested_add_ids - move_ids) if allow_membership_additions else set()
     audit = (
         bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
@@ -1761,10 +1751,21 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
             "membership_additions_allowed": False,
             "suppressed_add_clip_ids": sorted(requested_add_ids),
         }
-    return replace(
+    updated = replace(
         draft,
         selected=tuple(selected),
         alternates=tuple(alternates),
         discarded=tuple(clip for clip in draft.discarded if clip.clip_id not in add_ids),
         diagnostics=diagnostics,
     )
+    # A subtractive post-authority pass can expose a second-order fragment:
+    # for example, pass 1 removes a proxy realization and only then is its
+    # short anaphoric lead-in provably orphaned.  Iterate to a fixed point;
+    # the selected set strictly shrinks on every recursion, so convergence
+    # is bounded by the input clip count and no membership addition is ever
+    # possible at this authority boundary.
+    if not allow_membership_additions and len(updated.selected) < len(draft.selected):
+        return apply_selection_conflicted_bridge_guard(
+            updated, allow_membership_additions=False,
+        )
+    return updated

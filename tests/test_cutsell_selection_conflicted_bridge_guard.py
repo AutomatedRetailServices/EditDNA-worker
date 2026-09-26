@@ -1,5 +1,6 @@
-from cutsell_worker.contracts import DraftClip
+from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy
 from cutsell_worker.selection_conflicted_bridge_guard import (
+    apply_selection_conflicted_bridge_guard,
     abandoned_negated_restart_ids,
     contained_proxy_duplicate_ids,
     confirmed_selected_duplicate_ids,
@@ -24,6 +25,13 @@ def _clip(clip_id, start, end, text):
         end=end,
         text=text,
         caption_text=text,
+    )
+
+
+def _timeline(selected, diagnostics):
+    return DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        tuple(selected), (), (), diagnostics,
     )
 
 
@@ -1067,3 +1075,74 @@ def test_anaphoric_fragment_without_confirmed_proxy_fails_open():
     winner = _clip("winner", 25.0, 34.0, "A later explanation of a different event.")
     move, audit = orphaned_anaphoric_retry_fragment_ids((fragment, winner), (), (), {})
     assert move == set() and audit == []
+
+
+def test_post_authority_subtractive_guard_reaches_fixed_point():
+    fragment = _clip("fragment", 10.0, 12.5, "Era como un rash, una alergia.")
+    proxy = _clip(
+        "proxy", 13.8, 22.0,
+        "También aparecía una alergia detrás de la oreja y en el cuello.",
+    )
+    winner = _clip(
+        "winner", 25.0, 34.0,
+        "Otro síntoma era una alergia detrás de la oreja y en todo el cuello por temporadas.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "proxy", "right_clip_id": "winner", "confidence": 0.90,
+        }]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "proxy", "label": "alternate", "confidence": 0.90},
+            {"clip_id": "winner", "label": "winner", "confidence": 0.95},
+        ]}],
+    }
+    draft = _timeline((fragment, proxy, winner), diagnostics)
+
+    repaired = apply_selection_conflicted_bridge_guard(
+        draft, allow_membership_additions=False,
+    )
+
+    assert [clip.clip_id for clip in repaired.selected] == ["winner"]
+    reasons = {row["reason"] for row in repaired.diagnostics["selection_conflicted_bridge_guard"]}
+    assert "direct_equivalence_confirmed_final_winner" in reasons
+    assert "orphaned_anaphoric_fragment_of_confirmed_retry" in reasons
+
+
+def test_continuation_chain_proof_names_only_same_pass_surviving_witnesses():
+    winner = _clip(
+        "winner", 0.0, 6.0,
+        "Only 5-10% of cases are hereditary and most depend on lifestyle choices.",
+    )
+    loser = _clip(
+        "loser", 7.0, 13.0,
+        "Only 5-10% of cases are hereditary and most depend on lifestyle choices.",
+    )
+    head = _clip("head", 20.0, 23.0, "Science confirms only 5-10% of")
+    tail = _clip("tail", 23.1, 26.0, "cases are hereditary.")
+    diagnostics = {
+        "semantic_idea_equivalence": {
+            "merges": [{
+                "left_clip_id": "loser", "right_clip_id": "winner", "confidence": 0.90,
+            }],
+            "continuation_merges": [{
+                "left_clip_id": "head", "right_clip_id": "tail",
+                "accepted_by": "sentence_continuation", "confidence": 1.0,
+            }],
+        },
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "loser", "label": "alternate", "confidence": 0.90},
+            {"clip_id": "winner", "label": "winner", "confidence": 0.95},
+        ]}],
+    }
+    draft = _timeline((winner, loser, head, tail), diagnostics)
+
+    repaired = apply_selection_conflicted_bridge_guard(
+        draft, allow_membership_additions=False,
+    )
+
+    assert [clip.clip_id for clip in repaired.selected] == ["winner"]
+    chain_row = next(
+        row for row in repaired.diagnostics["selection_conflicted_bridge_guard"]
+        if row["reason"] == "later_continuation_chain_repeats_nearby_critical_claim"
+    )
+    assert chain_row["prior_clip_ids"] == ["winner"]

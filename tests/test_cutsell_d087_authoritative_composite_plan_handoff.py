@@ -431,6 +431,45 @@ def test_section10_extra_selected_member_not_named_by_composite_fails_closed():
     _assert_failed_closed(plan, "selected_members_outside_composite:C")
 
 
+def test_post_authority_explicit_equivalent_winner_satisfies_plan_coverage():
+    removed_winner = _clip(
+        "A", TEXT_A, start=10.0, end=20.0, selected=False,
+        realization_id="real_A",
+    )
+    alternate = _clip(
+        "B", "A shorter retry of the same idea.", start=21.0, end=25.0,
+        selected=False, realization_id="real_B",
+    )
+    external_winner = _clip(
+        "E", "A complete equivalent delivery selected in another family.",
+        start=30.0, end=38.0, selected=True, realization_id="real_E",
+        semantic_idea_id="idea_external",
+    )
+    draft = _draft(
+        selected=(external_winner,),
+        discarded=(removed_winner, alternate),
+        groups=[_group(GROUP, ("A", 0.7), ("B", 0.6))],
+        extra={"selection_conflicted_bridge_guard": [{
+            "clip_id": "A",
+            "winner_clip_id": "E",
+            "reason": "direct_equivalence_confirmed_final_winner",
+        }]},
+    )
+    source = _source(_decision(
+        status=RESOLVED_WINNER, composite=(), winner="real_A",
+        candidates=("real_A", "real_B"), covered=("cclaim_diag",),
+        reason="single_realization_full_critical_coverage",
+    ))
+
+    plan = build_canonical_edit_plan(draft, authoritative_source=source)
+    idea = _idea_by_id(plan, GROUP)
+    assert idea.coverage_status == "complete"
+    assert idea.winning_clip_ids == ("E",)
+    assert idea.structural_validation_passed is True
+    assert idea.structural_validation_failures == ()
+    assert review(plan).status == "PASS"
+
+
 # ---------------------------------------------------------------------------
 # Section 11: fragment / provenance support (D-046 / D-050A)
 # ---------------------------------------------------------------------------

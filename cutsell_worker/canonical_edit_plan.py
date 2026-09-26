@@ -36,6 +36,7 @@ from typing import Mapping
 from .canonical_identity import mint_semantic_idea_id
 from .contracts import effective_parent_semantic_clip_id
 from .contradiction_signal import any_pair_contradicts
+from .final_membership_coverage import final_membership_coverage_credit
 from .selection_boundary_contract import semantic_token_stream
 
 # D-087 SINGLE-TRUTH CONTRACT (docs/CUTSELL_DECISIONS.md D-086/D-087):
@@ -710,6 +711,55 @@ def assess_authoritative_membership(
         elif authoritative_source is not None:
             structural_passed = None
             structural_failures = ("no_authoritative_decision_recorded_for_group",)
+
+        # The post-authority final-membership guard may remove the resolver's
+        # winner only when it records an explicit, still-selected equivalent
+        # winner.  Represent that proof instead of falsely declaring this
+        # family missing merely because its equivalent realization lives in
+        # another legacy group.  This is evidence consumption, not a second
+        # semantic decision: no lexical/similarity inference happens here.
+        credit_targets = tuple(member_ids)
+        if decision is not None and decision.decision_status == _RESOLVED_WINNER:
+            credit_targets = tuple(
+                cid for cid in member_ids
+                if decision.winner_realization_id in _rids_for_member(cid)
+            )
+        credit_allowed = (
+            not winning
+            and coverage_status == "missing"
+            and (
+                decision is None
+                or (
+                    decision.decision_status == _RESOLVED_WINNER
+                    and structural_failures
+                    and all(
+                        failure.startswith("realization_not_selected:")
+                        for failure in structural_failures
+                    )
+                )
+            )
+        )
+        if credit_allowed:
+            witness_ids: list[str] = []
+            for cid in credit_targets:
+                credit = final_membership_coverage_credit(
+                    diagnostics, cid, selected_ids,
+                )
+                if credit is not None:
+                    witness_ids.extend(credit.witness_clip_ids)
+            witness_set = set(witness_ids)
+            credited_winners = tuple(
+                clip.clip_id for clip in draft.selected
+                if clip.clip_id in witness_set
+            )
+            if credited_winners:
+                winning = credited_winners
+                coverage_status = "complete"
+                resolved_clip_ids = credited_winners
+                if decision is not None:
+                    structural_passed = True
+                    structural_failures = ()
+                    accepted_as_resolved = True
         assessments[group_id] = AuthoritativeGroupAssessment(
             group_id=group_id,
             semantic_idea_id=semantic_idea_id,

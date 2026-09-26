@@ -14,8 +14,9 @@ the one path in `_failed_local_evidence` with no independent break/
 disengagement corroboration, so it is the one branch a natural gesture
 during continuous speech can trip on its own. Fix: only PAUSE-CORROBORATED
 resets count toward that branch's threshold. The `multimodal_reset_cluster`
-branch (reset + independent break) is untouched and still fires on raw
-counts -- it already has its own corroboration. Generic fixtures only.
+branch still accepts camera disengagement as independent corroboration; a
+facial-expression shift requires measured pause evidence because expression
+movement during continuous speech is not a recording break. Generic fixtures only.
 """
 from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.hybrid_session_cleanup import (
@@ -83,6 +84,31 @@ def test_multimodal_reset_cluster_branch_is_unaffected_by_the_fix():
     failed, reasons = _failed_local_evidence(take, _context(*events))
     assert failed is True
     assert any("multimodal_reset_cluster" in r for r in reasons)
+
+
+def test_uncorroborated_facial_shift_during_gestures_is_not_a_recording_break():
+    take = _take()
+    events = [
+        _event("hand_motion_reset_candidate", 303.0, 303.1, 0.95),
+        _event("hand_motion_reset_candidate", 304.0, 304.1, 0.95),
+        _event("facial_expression_shift_candidate", 305.0, 305.2, 0.90),
+    ]
+    failed, reasons = _failed_local_evidence(take, _context(*events))
+    assert failed is False
+    assert not any("multimodal_reset_cluster" in reason for reason in reasons)
+
+
+def test_measured_pause_corroborates_facial_shift_reset_cluster():
+    take = _take()
+    events = [
+        _event("hand_motion_reset_candidate", 303.0, 303.1, 0.95),
+        _event("hand_motion_reset_candidate", 304.0, 304.1, 0.95),
+        _event("facial_expression_shift_candidate", 304.2, 304.4, 0.90),
+        _event("audio_silence_interval", 303.8, 304.4, 1.0),
+    ]
+    failed, reasons = _failed_local_evidence(take, _context(*events))
+    assert failed is True
+    assert any("multimodal_reset_cluster" in reason for reason in reasons)
 
 
 def test_pause_corroborated_reset_count_is_visible_in_the_summary():

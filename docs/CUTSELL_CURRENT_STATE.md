@@ -1564,3 +1564,27 @@ engine suite: 8,210 passed / 10 skipped; all six functional failures reproduce a
 parent 088540d, two missing-SQLAlchemy failures pass once the declared dependency
 is present, and one old D-174 test is a path-diff sentinel incompatible with any
 intentional Final Boundary change. No live success or release-ready claim yet.
+
+## 2026-09-26 — Run #92 diagnosed; general correction ready for qualification
+
+Video00 run #92 (36277670133) is not approved. It passed the historical checks
+but failed 4 of 15 real editorial checks: an orphan acne fragment remained, the
+full gynecologist delivery lost to a partial take, and the closing exhortation was
+reopened/duplicated. Freeze also blocked on two cross-group equivalent winners
+and one continuation-chain proof whose witness was removed in the same pass, so
+no rendered acceptance artifact was produced.
+
+The branch now: (1) converges the subtractive post-authority membership guard to
+a fixed point; (2) calculates continuation coverage from same-pass surviving
+witnesses; (3) preserves and shares explicit final-membership coverage evidence
+between StoryValidator and CanonicalEditPlan; and (4) stops treating gesture plus
+facial movement during uninterrupted speech as a recording break without either
+measured silence or camera disengagement. These are general evidence/authority
+corrections; no Video00 phrase, clip ID, timestamp or source hash is encoded, and
+no safety control is disabled.
+
+Offline targeted regression is green (163 passed). Live status remains pending:
+the next authorized workflow must pass all Video00 editorial checks, render and
+beat Human Gold without truncations, false starts or duplicates, then rerun
+Yaskira05 and match the approved #31 two-span/33.234 s/QC contract. No release or
+production-readiness claim is made before those artifacts are inspected.

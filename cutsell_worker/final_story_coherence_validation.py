@@ -119,6 +119,7 @@ from .complete_lost_semantic_atom_materiality import (
     assess_complete_lost_semantic_atom_materiality,
 )
 from .contracts import effective_parent_semantic_clip_id
+from .final_membership_coverage import final_membership_coverage_credit
 # D-239: an optional, caller-supplied input type only -- this module never
 # imports pipeline.py, never constructs an ExactLostAtomOwnership itself,
 # never touches AUTHORITATIVE_RELATIONSHIP_STATUSES. See
@@ -655,38 +656,10 @@ def _final_membership_coverage_credit(
     it reclassifies the intentionally removed restatement as unique loss and
     blocks Boundary from trimming the resulting repeated close.
     """
-    for row in (diagnostics or {}).get("selection_conflicted_bridge_guard") or ():
-        if not isinstance(row, dict):
-            continue
-        reason = str(row.get("reason") or "")
-        if reason == "later_continuation_chain_repeats_nearby_critical_claim":
-            removed_ids = {str(value) for value in row.get("clip_ids") or ()}
-            witnesses = {str(value) for value in row.get("prior_clip_ids") or ()}
-            if discarded_id in removed_ids and witnesses and witnesses.issubset(selected_ids):
-                return True, "final_membership_nearby_chain_coverage"
-        if reason == "later_selected_realization_fully_contained_in_nearby_delivery":
-            if (
-                discarded_id == str(row.get("clip_id") or "")
-                and str(row.get("winner_clip_id") or "") in selected_ids
-            ):
-                return True, "final_membership_contained_realization_coverage"
-        if reason in {
-            "direct_equivalence_confirmed_final_winner",
-            "deterministic_retry_final_membership_resolution",
-            "failed_unusable_retry_component_yields_to_complete_winner",
-            "deterministic_retry_component_failed_debris",
-            "provider_rejected_restatement_already_fully_delivered",
-            "dependent_opening_yields_to_complete_family_peer",
-            "contained_fragment_of_confirmed_duplicate",
-            "terminal_negation_abandoned_restart",
-            "orphaned_anaphoric_fragment_of_confirmed_retry",
-        }:
-            if (
-                discarded_id == str(row.get("clip_id") or "")
-                and str(row.get("winner_clip_id") or "") in selected_ids
-            ):
-                return True, "final_membership_explicit_winner_coverage"
-    return False, None
+    credit = final_membership_coverage_credit(
+        diagnostics, discarded_id, selected_ids,
+    )
+    return (credit is not None, credit.reason if credit is not None else None)
 
 
 def _same_idea_paraphrase_credit(
