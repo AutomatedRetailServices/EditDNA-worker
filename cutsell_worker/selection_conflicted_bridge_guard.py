@@ -653,6 +653,22 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
         elif left_positive >= 0.90 and right_negative >= 0.80 and right_positive < 0.90:
             loser_id, winner_id = right_id, left_id
         elif (
+            confidence >= 0.90
+            and right_positive >= 0.90
+            and right_positive - left_positive >= 0.02 - 1e-9
+            and left_negative < 0.80
+            and right_negative < 0.80
+        ):
+            loser_id, winner_id = left_id, right_id
+        elif (
+            confidence >= 0.90
+            and left_positive >= 0.90
+            and left_positive - right_positive >= 0.02 - 1e-9
+            and left_negative < 0.80
+            and right_negative < 0.80
+        ):
+            loser_id, winner_id = right_id, left_id
+        elif (
             confidence >= 0.95
             and left_positive >= 0.90
             and right_positive >= 0.90
