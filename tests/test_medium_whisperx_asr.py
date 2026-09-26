@@ -65,3 +65,27 @@ def test_unknown_language_stops(monkeypatch,tmp_path):
 def test_fingerprint_tracks_language_and_decode():
     p=mw.MediumWhisperXASR(Base())
     assert p.config_fingerprint(language_hint='es').fingerprint()!=p.config_fingerprint(language_hint='en').fingerprint()
+
+
+def test_impossible_duplicate_microtail_is_dropped_before_alignment():
+    complete = TranscriptSegment('source', 356.21, 361.61,
+        'Por eso cuídate, alimentate bien, hidrata y haz ejercicio.', ())
+    phantom = TranscriptSegment('source', 362.05, 362.07, complete.text, ())
+    kept, dropped = mw._drop_degenerate_duplicate_tail((complete, phantom))
+    assert kept == (complete,)
+    assert dropped == [{'start': 362.05, 'end': 362.07,
+                        'reason': 'degenerate_duplicate_tail'}]
+
+
+@pytest.mark.parametrize('start,end,text', [
+    (362.05, 362.20, 'Por eso cuídate, alimentate bien, hidrata y haz ejercicio.'),
+    (362.05, 362.07, 'Una idea nueva que debe conservarse.'),
+    (363.00, 363.02, 'Por eso cuídate, alimentate bien, hidrata y haz ejercicio.'),
+])
+def test_distinct_or_plausible_tail_remains_strictly_aligned(start,end,text):
+    complete = TranscriptSegment('source', 356.21, 361.61,
+        'Por eso cuídate, alimentate bien, hidrata y haz ejercicio.', ())
+    tail = TranscriptSegment('source', start, end, text, ())
+    kept, dropped = mw._drop_degenerate_duplicate_tail((complete, tail))
+    assert kept == (complete, tail)
+    assert dropped == []
