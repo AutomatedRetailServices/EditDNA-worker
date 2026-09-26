@@ -98,6 +98,33 @@ def test_impossible_duplicate_microtail_ignores_accent_orthography():
                         'reason': 'degenerate_duplicate_tail'}]
 
 
+def test_impossible_terminal_duplicate_chain_allows_minor_inflection_drift():
+    complete = TranscriptSegment('source', 356.21, 360.53,
+        'Por eso cuidate, aliméntate bien, hídratate y haz ejercicio.', ())
+    first = TranscriptSegment('source', 360.53, 361.07,
+        'Por eso cuídate, alimentate bien, hídrata y haz ejercicio.', ())
+    second = TranscriptSegment('source', 361.07, 361.45,
+        'Por eso cuídate, aliméntate bien, hídrata y hacer ejercicio.', ())
+    kept, dropped = mw._drop_degenerate_duplicate_tail((complete, first, second))
+    assert kept == (complete,)
+    assert dropped == [
+        {'start': 360.53, 'end': 361.07, 'reason': 'degenerate_duplicate_tail_chain'},
+        {'start': 361.07, 'end': 361.45, 'reason': 'degenerate_duplicate_tail_chain'},
+    ]
+
+
+def test_terminal_duplicate_chain_handles_microsegment_plus_compressed_copy():
+    complete = TranscriptSegment('source', 356.21, 361.43,
+        'Por eso cuídate, alimentate bien, hidrátate y haz ejercicio.', ())
+    micro = TranscriptSegment('source', 362.03, 362.05, complete.text, ())
+    compressed = TranscriptSegment('source', 365.76, 366.90, complete.text, ())
+    kept, dropped = mw._drop_degenerate_duplicate_tail((complete, micro, compressed))
+    assert kept == (complete,)
+    assert [row['reason'] for row in dropped] == [
+        'degenerate_duplicate_tail_chain', 'degenerate_duplicate_tail_chain',
+    ]
+
+
 def test_duplicate_microsegment_is_not_dropped_when_it_is_not_the_source_tail():
     repeated = 'Por eso cuídate, alimentate bien, hídrate y haz ejercicio.'
     complete = TranscriptSegment('source', 10.0, 15.0, repeated, ())

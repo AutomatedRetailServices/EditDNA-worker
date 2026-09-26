@@ -1,6 +1,7 @@
 """Experimental Medium text with isolated WhisperX word alignment, no fallback."""
 from dataclasses import dataclass, field
 import copy
+from difflib import SequenceMatcher
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import unicodedata
+import re
 
 from .contracts import TranscriptSegment
 from .gpt_whisperx_asr import ALIGNER_PYTHON, ALIGNER_SCRIPT, AlignmentEvidenceError, checked_segments
@@ -23,8 +25,53 @@ def _duplicate_text_key(text):
         "".join(char for char in folded if unicodedata.category(char) != "Mn").split()
     )
 
+
+def _duplicate_tokens(text):
+    return tuple(re.findall(r"[a-z0-9%]+", _duplicate_text_key(text)))
+
+
+def _near_duplicate_text(left, right):
+    left_tokens = _duplicate_tokens(left)
+    right_tokens = _duplicate_tokens(right)
+    return bool(
+        len(left_tokens) >= 3
+        and len(right_tokens) >= 3
+        and SequenceMatcher(None, left_tokens, right_tokens, autojunk=False).ratio() >= 0.75
+    )
+
 def _drop_degenerate_duplicate_tail(segments):
     """Discard only a physically impossible repeated ASR tail at the source edge."""
+    segments = tuple(segments)
+    # Faster-Whisper occasionally emits a *chain* of paraphrased copies of
+    # the final full segment, each assigning an entire sentence to a few
+    # hundred milliseconds.  Exact-string matching misses accent/inflection
+    # drift, while checking only the very last element leaves the preceding
+    # phantom to fail strict WhisperX coverage.  A chain is removable only
+    # when every remaining source-tail segment is a near-duplicate of the
+    # same earlier full delivery and every one is physically compressed
+    # beyond 0.14 seconds per word.  A lone non-micro repetition still fails
+    # open and is sent to strict alignment.
+    for start in range(1, len(segments)):
+        suffix = segments[start:]
+        if len(suffix) == 1 and suffix[0].end - suffix[0].start > 0.05:
+            continue
+        source = next((
+            previous for previous in reversed(segments[:start])
+            if all(_near_duplicate_text(previous.text, tail.text) for tail in suffix)
+        ), None)
+        if source is None or not (0 <= suffix[0].start - source.end <= 15.0):
+            continue
+        if not all(
+            0 < tail.end - tail.start <= 0.14 * max(1, len(_duplicate_tokens(tail.text)))
+            for tail in suffix
+        ):
+            continue
+        return segments[:start], [
+            {"start": tail.start, "end": tail.end,
+             "reason": "degenerate_duplicate_tail_chain" if len(suffix) > 1 else "degenerate_duplicate_tail"}
+            for tail in suffix
+        ]
+
     kept = []
     dropped = []
     for index, segment in enumerate(segments):
@@ -53,7 +100,7 @@ class AlignmentFingerprint:
 
     def fingerprint(self):
         spec = {"provider": PROVIDER, "decode": self.decode, "language": self.language,
-                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v4-terminal-duplicate-tail",
+                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v5-terminal-duplicate-tail-chain",
                 "interpolation": "ignore", "audio": "pcm_s16le-mono-16000"}
         return "asrcfg_" + hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
