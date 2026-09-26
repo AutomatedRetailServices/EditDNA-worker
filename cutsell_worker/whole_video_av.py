@@ -160,8 +160,40 @@ class GeminiWholeVideoAVProvider:
             try:
                 data = parse_response(audit['response'], source.duration_sec, duration)
             except Exception as exc:
-                audit.update(status='rejected', rejection=str(exc))
-                raise
+                # D-306: a syntactically valid provider response can still
+                # violate the strict AV contract (for example end < start).
+                # Under the same explicit, budgeted benchmark retry
+                # capability, replace that response once; never guess or
+                # repair model timestamps locally, and never exceed two paid
+                # generation attempts total.
+                if not self.retry_generation_timeout or audit['generation_attempts'] != 1:
+                    audit.update(status='rejected', rejection=str(exc))
+                    raise
+                if not self.ledger.reserve(reserved):
+                    audit.update(
+                        status='retry_budget_exhausted',
+                        retry_reason='invalid_response',
+                        rejection=str(exc),
+                    )
+                    raise ValueError('AV invalid-response retry budget exhausted')
+                audit.update(
+                    status='generation_retry_requested',
+                    retry_reason='invalid_response',
+                    retry_initial_rejection=str(exc),
+                    generation_attempts=2,
+                    reserved_usd=reserved * 2,
+                )
+                try:
+                    raw=self._post('generateContent',generation_body,timeout_sec=120)
+                    audit['response'] = captured_response(raw)
+                    data = parse_response(audit['response'], source.duration_sec, duration)
+                except Exception as retry_exc:
+                    audit.update(
+                        status='generation_retry_failed',
+                        retry_failure_type=type(retry_exc).__name__,
+                        rejection=str(retry_exc),
+                    )
+                    raise
             audit['status'] = 'validated'
             regions = data['regions']
             evidence=json.dumps({'kind':'audiovisual_observations_v1','source_sha256':digest.hexdigest(),

@@ -48,6 +48,25 @@ class TimeoutThenSuccessSession(Session):
         return Response()
 
 
+class InvalidThenSuccessSession(Session):
+    def post(self,url,headers,json,timeout):
+        self.calls.append((url,json,timeout))
+        if url.endswith('countTokens'):
+            payload={'totalTokens':100}
+        else:
+            generation_count=sum(call[0].endswith('generateContent') for call in self.calls)
+            data=(
+                {**result(), 'regions': [{**result()['regions'][0], 'start': 8, 'end': 2}]}
+                if generation_count == 1 else self.data
+            )
+            payload={'candidates':[{'finishReason':'STOP','content':{
+                'parts':[{'text':__import__('json').dumps(data)}]}}]}
+        class Response:
+            def raise_for_status(self): pass
+            def json(self): return payload
+        return Response()
+
+
 def provider(tmp_path,data=None,budget=.1):
     raw=tmp_path/'raw.mp4';raw.write_bytes(b'original media fixture')
     def prepare(path,target): target.write_bytes(b'AV input fixture');return 10
@@ -127,6 +146,73 @@ def test_timeout_does_not_retry_without_explicit_flag(tmp_path):
     assert not context.status.available
     assert [call[2] for call in session.calls]==[60,60]
     assert context.diagnostics['native_av'][0]['generation_attempts']==1
+
+
+def test_invalid_response_retry_requires_flag_and_second_budget(tmp_path):
+    av,raw,_=provider(tmp_path)
+    session=InvalidThenSuccessSession()
+    av.session=session
+    av.retry_generation_timeout=True
+    context=safe_whole_video_analyze(
+        av,(source(),),(),(),local_paths={'source':str(raw)},
+    )
+    assert context.status.available
+    assert [call[2] for call in session.calls]==[60,60,120]
+    record=context.diagnostics['native_av'][0]
+    assert record['status']=='validated'
+    assert record['generation_attempts']==2
+    assert record['retry_reason']=='invalid_response'
+    assert record['retry_initial_rejection'].startswith('AV_TIME_RANGE')
+    assert av.ledger.reserved_usd==record['reserved_usd']
+
+
+def test_invalid_response_retry_budget_exhaustion_sends_no_second_generation(tmp_path):
+    av,raw,_=provider(tmp_path,budget=.006)
+    session=InvalidThenSuccessSession()
+    av.session=session
+    av.retry_generation_timeout=True
+    context=safe_whole_video_analyze(
+        av,(source(),),(),(),local_paths={'source':str(raw)},
+    )
+    assert not context.status.available
+    assert len([call for call in session.calls if call[0].endswith('generateContent')])==1
+    record=context.diagnostics['native_av'][0]
+    assert record['status']=='retry_budget_exhausted'
+    assert record['retry_reason']=='invalid_response'
+
+
+def test_second_invalid_response_fails_closed_after_two_generations(tmp_path):
+    invalid={**result(), 'regions': [{**result()['regions'][0], 'start': 8, 'end': 2}]}
+    av,raw,_=provider(tmp_path,data=invalid)
+    session=InvalidThenSuccessSession(data=invalid)
+    av.session=session
+    av.retry_generation_timeout=True
+    context=safe_whole_video_analyze(
+        av,(source(),),(),(),local_paths={'source':str(raw)},
+    )
+    assert not context.status.available
+    assert [call[2] for call in session.calls]==[60,60,120]
+    record=context.diagnostics['native_av'][0]
+    assert record['generation_attempts']==2
+    assert record['status']=='generation_retry_failed'
+    assert record['retry_failure_type']=='ValueError'
+
+
+def test_timeout_then_invalid_response_never_sends_third_generation(tmp_path):
+    invalid={**result(), 'regions': [{**result()['regions'][0], 'start': 8, 'end': 2}]}
+    av,raw,_=provider(tmp_path)
+    session=TimeoutThenSuccessSession(data=invalid)
+    av.session=session
+    av.retry_generation_timeout=True
+    context=safe_whole_video_analyze(
+        av,(source(),),(),(),local_paths={'source':str(raw)},
+    )
+    assert not context.status.available
+    assert [call[2] for call in session.calls]==[60,60,120]
+    record=context.diagnostics['native_av'][0]
+    assert record['generation_attempts']==2
+    assert record['status']=='rejected'
+    assert record['retry_reason']=='read_timeout'
 
 
 def test_second_timeout_fails_closed_with_terminal_audit_status(tmp_path):
