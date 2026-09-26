@@ -191,6 +191,18 @@ def test_failed_singleton_still_fails_open_without_independent_local_support():
     )
 
 
+def test_failed_singleton_requires_destructive_agreement_across_windows():
+    member = _take("failed", 1.0, 6.0, "A complete audience-facing statement")
+    assert not _is_corroborated_failed_singleton(
+        (member,), {"failed": ("failed", 0.90)}, {"failed": True},
+        {"failed": True}, {"failed": True}, {"failed": False},
+    )
+    assert _is_corroborated_failed_singleton(
+        (member,), {"failed": ("failed", 0.90)}, {"failed": True},
+        {"failed": True}, {"failed": True}, {"failed": True},
+    )
+
+
 def test_conflicted_complete_windows_cannot_delete_corroborated_singleton():
     member = _take("failed", 1.0, 5.0, "A complete audience-facing statement")
     assert not _is_corroborated_failed_singleton(

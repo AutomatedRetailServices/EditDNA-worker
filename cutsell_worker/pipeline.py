@@ -1591,6 +1591,7 @@ def _is_corroborated_failed_singleton(
     semantic_delete_recommended: dict[str, bool],
     local_failure_corroborated: dict[str, bool],
     dense_failure_cluster: dict[str, bool],
+    destructive_window_consensus: dict[str, bool] | None = None,
     semantic_comparative_authority: str | None = None,
 ) -> bool:
     """A lone failed take is unusable only with two independent supports.
@@ -1620,6 +1621,15 @@ def _is_corroborated_failed_singleton(
         label == "failed"
         and confidence >= 0.80
         and local_failure_corroborated.get(clip_id, False)
+        # A singleton has no sibling realization to preserve its meaning.
+        # Destructive corroboration therefore has to agree across every
+        # Hybrid window that observed it.  OR-ing a single delete/dense flag
+        # across overlapping windows let one local visual false positive
+        # erase otherwise consistently audience-facing, complete speech.
+        and (
+            destructive_window_consensus is None
+            or destructive_window_consensus.get(clip_id, False)
+        )
         and (
             semantic_delete_recommended.get(clip_id, False)
             or dense_failure_cluster.get(clip_id, False)
@@ -1975,13 +1985,23 @@ def build_flow_b_draft(
     # label.
     hybrid_local_failure_corroborated: dict[str, bool] = {}
     hybrid_dense_failure_cluster: dict[str, bool] = {}
+    hybrid_destructive_window_rows: dict[str, list[bool]] = {}
     for diagnostic in hybrid_cleanup.diagnostics:
         for decision in diagnostic.get("decisions") or ():
             clip_id = decision.get("clip_id")
+            if clip_id:
+                hybrid_destructive_window_rows.setdefault(str(clip_id), []).append(bool(
+                    decision.get("semantic_delete_recommended")
+                    or decision.get("dense_semantic_failure_cluster")
+                ))
             if clip_id and decision.get("local_failure_corroborated"):
                 hybrid_local_failure_corroborated[clip_id] = True
             if clip_id and decision.get("dense_semantic_failure_cluster"):
                 hybrid_dense_failure_cluster[clip_id] = True
+    hybrid_destructive_window_consensus = {
+        clip_id: bool(rows) and all(rows)
+        for clip_id, rows in hybrid_destructive_window_rows.items()
+    }
 
     # Preserve contextual BTS evidence separately from deterministic local
     # unusability: it is authorized only for consistent BTS singletons.
@@ -2480,6 +2500,7 @@ def build_flow_b_draft(
             hybrid_semantic_delete_recommended,
             hybrid_local_failure_corroborated,
             hybrid_dense_failure_cluster,
+            hybrid_destructive_window_consensus,
             semantic_comparative_authority=effective_gate_status,
         )
         covered_failed_singleton = bool(

@@ -170,6 +170,18 @@ def _take_judge_usability(diagnostics: dict) -> tuple[dict[str, str], dict[str, 
     return status, member
 
 
+def _semantic_delete_recommended_ids(diagnostics: dict) -> set[str]:
+    """Candidates carrying any explicit semantic deletion recommendation."""
+    return {
+        str(row.get("clip_id"))
+        for chunk in diagnostics.get("hybrid_editorial_chunks") or ()
+        for row in (chunk.get("decisions") or ())
+        if isinstance(row, dict)
+        and row.get("clip_id")
+        and bool(row.get("semantic_delete_recommended"))
+    }
+
+
 def _deterministic_retry_rows(diagnostics: dict):
     equivalence = diagnostics.get("semantic_idea_equivalence") or {}
     for row in equivalence.get("merges") or ():
@@ -188,10 +200,12 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
     all_by_id = {clip.clip_id: clip for clip in (*selected, *alternates, *discarded)}
     votes = _hybrid_votes(diagnostics)
     complete = _attempt_completeness(diagnostics)
+    usability, _member_usability = _take_judge_usability(diagnostics)
     move: set[str] = set()
     add: set[str] = set()
     audit: list[dict] = []
     for row in _deterministic_retry_rows(diagnostics):
+        fuller_restart_tie = False
         left_id = str(row.get("left_clip_id") or "")
         right_id = str(row.get("right_clip_id") or "")
         if left_id not in all_by_id or right_id not in all_by_id:
@@ -240,6 +254,37 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
                     and later_fuller_retry
                 ):
                     winner_id, loser_id = peer_id, current_id
+                elif (
+                    str(row.get("accepted_by") or "") == "same_opening_restart"
+                    and float(peer.start) > float(current.start)
+                    and float(peer.end) - float(peer.start)
+                    >= 1.35 * max(0.001, float(current.end) - float(current.start))
+                    and len(_tokens(peer.text)) >= len(_tokens(current.text))
+                    and _tokens(peer.text)[:5] == _tokens(current.text)[:5]
+                    and peer_positive >= 0.80
+                    and current_positive - peer_positive <= 0.15 + 1e-9
+                    and peer_negative <= 0.80 + 1e-9
+                    and peer_positive + 1e-9 >= peer_negative
+                    and complete.get(peer_id) is not False
+                    and (
+                        usability.get(peer_id) != "UNUSABLE"
+                        or (
+                            usability.get(current_id) == "UNUSABLE"
+                            and not bool((_member_usability.get(peer_id) or {}).get("delete_recommended"))
+                            and not bool((_member_usability.get(peer_id) or {}).get("deterministic_unusable"))
+                            and not bool((_member_usability.get(peer_id) or {}).get("local_failure_corroborated"))
+                        )
+                    )
+                ):
+                    # Two complete same-opening deliveries can carry
+                    # different explanatory endings, so ordinary token
+                    # overlap is intentionally not treated as proof.  When
+                    # deterministic restart evidence already establishes the
+                    # contest and delivery evidence is near-tied, prefer the
+                    # substantially fuller later delivery instead of keeping
+                    # a clean but abbreviated first attempt.
+                    winner_id, loser_id = peer_id, current_id
+                    fuller_restart_tie = True
         if not winner_id or loser_id not in selected_by_id:
             continue
 
@@ -255,7 +300,11 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             # margin; treating any >=0.80 negative as an unconditional veto
             # let a weaker selected retry survive a 0.95 keep / 0.85
             # alternate verdict on its fuller peer.
-            if winner_negative >= 0.80 and winner_positive - winner_negative < 0.10 - 1e-9:
+            if (
+                winner_negative >= 0.80
+                and winner_positive - winner_negative < 0.10 - 1e-9
+                and not (fuller_restart_tie and winner_positive + 1e-9 >= winner_negative)
+            ):
                 continue
         if not _critical(loser.text).issubset(_critical(winner.text)):
             continue
@@ -499,6 +548,87 @@ def unmerged_same_opening_retry_resolution(selected, alternates, discarded, diag
     return move, add, audit
 
 
+def unmerged_same_opening_retry_resolution(selected, alternates, discarded, diagnostics: dict):
+    """Resolve a full later restart that grouping left in another family.
+
+    This is a deliberately narrow lexical fallback for provider/grouping
+    variance: four identical opening words, high bidirectional topic overlap,
+    comparable-or-fuller duration, identical numeric/negation markers, and an
+    already-conflicted current winner.  Among several later starts it chooses
+    the richest complete delivery, so an intervening short restart cannot win.
+    """
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    candidates = tuple((*alternates, *discarded))
+    votes = _hybrid_votes(diagnostics)
+    complete = _attempt_completeness(diagnostics)
+    usability, member = _take_judge_usability(diagnostics)
+    delete_recommended = _semantic_delete_recommended_ids(diagnostics)
+    move: set[str] = set()
+    add: set[str] = set()
+    audit: list[dict] = []
+
+    for current_id, current in selected_by_id.items():
+        if _strongest(votes, current_id, {"alternate", "failed"}) < 0.75:
+            continue
+        current_tokens = _tokens(current.text)
+        current_content = _substantive(current.text)
+        if len(current_tokens) < 7 or len(current_content) < 3:
+            continue
+        current_duration = max(0.001, float(current.end) - float(current.start))
+        eligible = []
+        for candidate in candidates:
+            if candidate.source_asset_id != current.source_asset_id:
+                continue
+            if candidate.clip_id in delete_recommended:
+                continue
+            if not (float(current.end) < float(candidate.start) <= float(current.end) + 30.0):
+                continue
+            candidate_positive = _strongest(votes, candidate.clip_id, {"winner", "keep"})
+            candidate_negative = _strongest(votes, candidate.clip_id, {"alternate", "failed"})
+            unusable_but_positive = (
+                usability.get(candidate.clip_id) == "UNUSABLE"
+                and not bool((member.get(candidate.clip_id) or {}).get("delete_recommended"))
+                and candidate_positive >= 0.90
+                and candidate_positive - candidate_negative >= 0.10 - 1e-9
+            )
+            if complete.get(candidate.clip_id) is False or (
+                usability.get(candidate.clip_id) == "UNUSABLE" and not unusable_but_positive
+            ):
+                continue
+            candidate_tokens = _tokens(candidate.text)
+            candidate_content = _substantive(candidate.text)
+            if len(candidate_tokens) < 8 or current_tokens[:4] != candidate_tokens[:4]:
+                continue
+            overlap = len(current_content & candidate_content) / max(
+                1, min(len(current_content), len(candidate_content))
+            )
+            candidate_duration = max(0.0, float(candidate.end) - float(candidate.start))
+            if overlap < 0.70 or candidate_duration < 0.95 * current_duration:
+                continue
+            if len(candidate_tokens) < 0.90 * len(current_tokens):
+                continue
+            if _critical(current.text) != _critical(candidate.text):
+                continue
+            eligible.append((len(candidate_content), candidate_duration, float(candidate.start), candidate, overlap))
+        if not eligible:
+            continue
+        _richness, _duration, _start, winner, overlap = max(eligible, key=lambda row: row[:3])
+        move.add(current_id)
+        add.add(winner.clip_id)
+        audit.append({
+            "clip_id": current_id,
+            "winner_clip_id": winner.clip_id,
+            "reason": "ungrouped_same_opening_full_retry_resolution",
+            "opening_token_count": 4,
+            "substantive_overlap": round(overlap, 4),
+            "loser_conflict_confidence": round(
+                _strongest(votes, current_id, {"alternate", "failed"}), 4
+            ),
+            "winner_duration_sec": round(_duration, 3),
+        })
+    return move, add, audit
+
+
 def contained_proxy_duplicate_ids(selected, alternates, discarded, diagnostics: dict):
     """Propagate a confirmed duplicate through its enclosing source interval.
 
@@ -675,6 +805,49 @@ def redundant_continuation_chain_ids(selected, diagnostics: dict):
             "substantive_coverage": round(coverage, 4),
             "critical_markers": sorted(_critical(later_text)),
         })
+    return move, audit
+
+
+def nearby_contained_selected_realization_ids(selected):
+    """Remove a later nearby statement wholly contained in an earlier one.
+
+    This is lexical-set containment, not topical similarity: every
+    substantive token and every numeric/negation marker in the later clip
+    must already occur in the earlier selected delivery.  The earlier clip
+    must also be materially richer.  It closes the grouping shape where a
+    compound delivery and one of its later restated clauses land in separate
+    families, without suppressing a later statement that adds any fact.
+    """
+    ordered = tuple(sorted(
+        selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)
+    ))
+    move: set[str] = set()
+    audit: list[dict] = []
+    for index, later in enumerate(ordered):
+        later_content = _substantive(later.text)
+        if len(later_content) < 5:
+            continue
+        for earlier in reversed(ordered[max(0, index - 4):index]):
+            if earlier.source_asset_id != later.source_asset_id:
+                continue
+            if not (0 <= float(later.start) - float(earlier.end) <= 30.0):
+                continue
+            earlier_content = _substantive(earlier.text)
+            if len(earlier_content) < 1.5 * len(later_content):
+                continue
+            if not later_content.issubset(earlier_content):
+                continue
+            if not _critical(later.text).issubset(_critical(earlier.text)):
+                continue
+            move.add(later.clip_id)
+            audit.append({
+                "clip_id": later.clip_id,
+                "winner_clip_id": earlier.clip_id,
+                "reason": "later_selected_realization_fully_contained_in_nearby_delivery",
+                "substantive_token_count": len(later_content),
+                "winner_substantive_token_count": len(earlier_content),
+            })
+            break
     return move, audit
 
 
@@ -1022,6 +1195,7 @@ def apply_selection_conflicted_bridge_guard(draft):
     proxy_ids, proxy_audit = contained_proxy_duplicate_ids(
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
+    contained_ids, contained_audit = nearby_contained_selected_realization_ids(draft.selected)
     continuation_add_ids, continuation_add_audit = missing_continuation_bridge_ids(
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
@@ -1034,13 +1208,13 @@ def apply_selection_conflicted_bridge_guard(draft):
 
     move_ids = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | retry_ids | unmerged_retry_ids | proxy_ids | chain_ids
+        | retry_ids | unmerged_retry_ids | proxy_ids | contained_ids | chain_ids
     )
     add_ids = (retry_add_ids | unmerged_retry_add_ids | continuation_add_ids) - move_ids
     audit = (
         bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
         + retry_audit + unmerged_retry_audit
-        + proxy_audit + continuation_add_audit + chain_audit
+        + proxy_audit + contained_audit + continuation_add_audit + chain_audit
     )
     if not move_ids and not add_ids:
         return draft

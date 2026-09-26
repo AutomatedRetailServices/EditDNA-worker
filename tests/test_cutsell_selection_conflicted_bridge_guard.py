@@ -9,6 +9,7 @@ from cutsell_worker.selection_conflicted_bridge_guard import (
     redundant_continuation_chain_ids,
     terminally_incomplete_selected_ids,
     unmerged_same_opening_retry_resolution,
+    nearby_contained_selected_realization_ids,
 )
 
 
@@ -412,6 +413,40 @@ def test_deterministic_restart_accepts_clear_positive_over_conflicting_alternate
     assert add == {"retry"}
 
 
+def test_same_opening_near_tie_prefers_substantially_fuller_later_delivery():
+    first = _clip(
+        "first", 10.0, 16.5,
+        "We never considered a thyroid scan because every year gave two states.",
+    )
+    retry = _clip(
+        "retry", 20.0, 30.0,
+        "We never considered a thyroid scan because every examination showed it worked perfectly.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "first", "right_clip_id": "retry",
+            "confidence": 1.0, "accepted_by": "same_opening_restart",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "take_judge_groups": [{"candidate_usability_summary": {
+            "first": "USABLE", "retry": "USABLE",
+        }}],
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first", "label": "winner", "confidence": 0.95},
+            {"clip_id": "retry", "label": "keep", "confidence": 0.85},
+            {"clip_id": "retry", "label": "alternate", "confidence": 0.80},
+        ]}],
+    }
+
+    move, add, _audit = deterministic_retry_resolution((first,), (), (retry,), diagnostics)
+
+    assert move == {"first"}
+    assert add == {"retry"}
+
+
 def test_unmerged_same_opening_restart_selects_rich_full_later_delivery():
     first = _clip(
         "first", 10.0, 16.5,
@@ -447,6 +482,36 @@ def test_unmerged_same_opening_restart_selects_rich_full_later_delivery():
     assert audit[0]["reason"] == "ungrouped_same_opening_full_retry_resolution"
 
 
+def test_unmerged_same_opening_retry_accepts_positive_non_deleting_fuller_peer():
+    first = _clip("first", 10.0, 12.2, "After my contract I asked my doctor.")
+    retry = _clip(
+        "retry", 15.0, 22.0,
+        "After my contract I changed my doctor and asked for every available test.",
+    )
+    diagnostics = {
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "take_judge_groups": [{
+            "candidate_usability_summary": {"retry": "UNUSABLE"},
+            "member_usability": {"retry": {"delete_recommended": False}},
+        }],
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first", "label": "failed", "confidence": 0.75},
+            {"clip_id": "retry", "label": "keep", "confidence": 0.95},
+            {"clip_id": "retry", "label": "alternate", "confidence": 0.80},
+        ]}],
+    }
+
+    move, add, _audit = unmerged_same_opening_retry_resolution(
+        (first,), (), (retry,), diagnostics,
+    )
+
+    assert move == {"first"}
+    assert add == {"retry"}
+
+
 def test_unmerged_same_opening_restart_preserves_changed_number():
     first = _clip("first", 10.0, 17.0, "After my contract I requested 5 medical tests from my doctor.")
     retry = _clip("retry", 20.0, 27.0, "After my contract I requested 10 medical tests from my doctor.")
@@ -464,6 +529,38 @@ def test_unmerged_same_opening_restart_preserves_changed_number():
 
     assert move == set()
     assert add == set()
+    assert audit == []
+
+
+def test_later_selected_statement_fully_contained_in_richer_nearby_delivery_is_removed():
+    earlier = _clip(
+        "earlier", 10.0, 22.0,
+        "Only five percent of cancers are hereditary and most outcomes reflect our daily choices and care.",
+    )
+    later = _clip(
+        "later", 28.0, 33.0,
+        "Only five percent of cancers are hereditary.",
+    )
+
+    move, audit = nearby_contained_selected_realization_ids((earlier, later))
+
+    assert move == {"later"}
+    assert audit[0]["winner_clip_id"] == "earlier"
+
+
+def test_nearby_statement_with_new_fact_is_preserved():
+    earlier = _clip(
+        "earlier", 10.0, 22.0,
+        "Only five percent of cancers are hereditary and most outcomes reflect our daily choices and care.",
+    )
+    later = _clip(
+        "later", 28.0, 34.0,
+        "Only ten percent are hereditary according to a new clinical study.",
+    )
+
+    move, audit = nearby_contained_selected_realization_ids((earlier, later))
+
+    assert move == set()
     assert audit == []
 
 
