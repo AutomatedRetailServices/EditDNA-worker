@@ -208,6 +208,7 @@ from .semantic_ledger import (
     ENGINE_RESOLVED_COMPOSITE,
     ENGINE_RESOLVED_WINNER,
     ENGINE_REVIEW_REQUIRED,
+    FINAL_MEMBERSHIP_WINNER,
     RealizationRecord,
     SEMANTIC_WINNER_CONFLICT_EVIDENCE,
     SEMANTIC_WINNER_OVERRIDE,
@@ -647,6 +648,18 @@ def _semantic_winner_confidence_by_realization(
     from this mapping means no such decision was ever recorded for that
     realization -- never guessed at as high confidence."""
     candidate_set = frozenset(candidate_ids)
+    final_membership_winners = {
+        decision.subject_realization_id
+        for decision in ledger.decisions()
+        if decision.decision_type == FINAL_MEMBERSHIP_WINNER
+        and decision.semantic_idea_id == idea_id
+        and decision.subject_realization_id in candidate_set
+    }
+    if final_membership_winners:
+        # This verdict is recorded at the last pre-resolver reconciliation.
+        # Older provider votes must not be treated as co-equal and resurrect
+        # the loser that the global membership guard already settled.
+        return {rid: 1.0 for rid in final_membership_winners}
     confidence_by_realization: dict[str, float] = {}
     for decision in ledger.decisions():
         # D-289.10: a complete window's own recorded winner verdict
