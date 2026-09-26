@@ -110,7 +110,7 @@ def test_consistent_failed_windows_allow_bounded_confidence_and_one_delete_vote(
     ) == frozenset({("failed", "clean")})
 
 
-def test_failed_bridge_still_rejects_no_delete_vote_or_uncorroborated_window():
+def test_failed_bridge_uses_corroborated_failed_label_for_comparison_only():
     failed = take("failed", FAILED_TEXT, 0, 10)
     clean = take("clean", CLEAN_TEXT, 50, 65)
     clean_row = row(
@@ -120,6 +120,18 @@ def test_failed_bridge_still_rejects_no_delete_vote_or_uncorroborated_window():
     no_delete = ({"decisions": [
         row("failed", confidence=0.90, semantic_delete_recommended=False), clean_row,
     ]},)
+    assert failed_retry_coverage_pairs(
+        (failed, clean), no_delete, partition_by_id={"failed": 0, "clean": 0},
+    ) == frozenset({("failed", "clean")})
+
+
+def test_failed_bridge_still_rejects_uncorroborated_or_sub_point_eight_failure():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    clean_row = row(
+        "clean", label="winner", proposed_label="winner",
+        semantic_delete_recommended=False, confidence=0.95,
+    )
     uncorroborated = ({"decisions": [
         row("failed", confidence=0.90, local_failure_corroborated=False), clean_row,
     ]},)
@@ -129,11 +141,54 @@ def test_failed_bridge_still_rejects_no_delete_vote_or_uncorroborated_window():
         row("failed", confidence=0.79, semantic_delete_recommended=False), clean_row,
     ]})
     weak_delete_vote = ({"decisions": [
-        row("failed", confidence=0.84), clean_row,
+        row("failed", confidence=0.79), clean_row,
     ]},)
-    for windows in (no_delete, uncorroborated, low_confidence_view, weak_delete_vote):
+    for windows in (uncorroborated, low_confidence_view, weak_delete_vote):
         assert not failed_retry_coverage_pairs(
             (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+        )
+
+
+def test_complete_substantially_fuller_alternate_can_be_coverage_candidate():
+    failed = take(
+        "failed", "different salons can give you foot fungus so I recommend this treatment",
+        0, 10, complete=False,
+    )
+    clean = take("clean", CLEAN_TEXT + " with complete application steps and a final call to action", 50, 75)
+    windows = ({"partition_index": 0, "member_ids": ["failed", "clean"], "decisions": [
+        row("failed", confidence=0.80, semantic_delete_recommended=False),
+        row(
+            "clean", label="alternate", proposed_label="alternate", confidence=0.75,
+            semantic_delete_recommended=False,
+            local_failure_corroborated=True, dense_semantic_failure_cluster=True,
+        ),
+    ]},)
+    assert failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    ) == frozenset({("failed", "clean")})
+
+
+def test_alternate_fallback_requires_substantial_fullness_and_no_recording_scope():
+    failed = take("failed", FAILED_TEXT, 0, 10, complete=False)
+    short = take("short", CLEAN_TEXT, 50, 61)
+    scoped = take("scoped", CLEAN_TEXT + " with complete instructions and closing", 70, 95)
+    for delivery, extra in (
+        (short, {}),
+        (scoped, {"recording_suffix_words": 2}),
+        (scoped, {"content_role": "recording_only"}),
+    ):
+        windows = ({"partition_index": 0, "member_ids": ["failed", delivery.clip_id], "decisions": [
+            row("failed", confidence=0.80, semantic_delete_recommended=False),
+            row(
+                delivery.clip_id, label="alternate", proposed_label="alternate", confidence=0.75,
+                semantic_delete_recommended=False,
+                local_failure_corroborated=True, dense_semantic_failure_cluster=True,
+                **extra,
+            ),
+        ]},)
+        assert not failed_retry_coverage_pairs(
+            (failed, delivery), windows,
+            partition_by_id={"failed": 0, delivery.clip_id: 0},
         )
 
 

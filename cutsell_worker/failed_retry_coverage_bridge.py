@@ -9,6 +9,7 @@ of a meaning conflict before the pair can become one retry family.
 from __future__ import annotations
 
 from collections import defaultdict
+import math
 from typing import Iterable, Mapping
 
 from .contracts import CandidateTake
@@ -27,11 +28,12 @@ def failed_retry_coverage_pairs(
     """Return directed ``(failed, later_delivery)`` comparison candidates.
 
     Every returned pair already has strong *eligibility* evidence, but no
-    authority: the earlier take has a dominant failed decision, is locally
-    corroborated and has at least one explicit delete recommendation; the
-    later complete take is consistently proposed as the winner, carries no
-    semantic deletion or word-scoped recording
-    process finding, and both belong to the same creator-session partition.
+    authority: the earlier take has a dominant failed decision and is locally
+    corroborated; the
+    later complete take is either consistently proposed as the winner or is
+    a substantially fuller, non-failed delivery candidate. It carries no
+    semantic deletion or word-scoped recording process finding, and both
+    belong to the same creator-session partition.
     A conservative exact-attempt relation remains mandatory.  The caller must
     still obtain explicit semantic no-conflict + directional-coverage proof.
     """
@@ -84,6 +86,7 @@ def failed_retry_coverage_pairs(
 
     failed_ids: list[str] = []
     delivery_ids: list[str] = []
+    fallback_delivery_ids: set[str] = set()
     for clip_id, rows in rows_by_id.items():
         # Overlapping whole-session windows can see the same take with
         # different context.  A lower-confidence KEEP/ALTERNATE observation
@@ -94,10 +97,9 @@ def failed_retry_coverage_pairs(
         failed_votes = [
             row for row in rows
             if row.get("label") == "failed"
-            and row.get("semantic_delete_recommended") is True
             and row.get("local_failure_corroborated") is True
             and row.get("dense_semantic_failure_cluster") is True
-            and float(row.get("confidence") or 0.0) >= 0.85
+            and float(row.get("confidence") or 0.0) >= 0.80
         ]
         strongest_failed = max(
             (float(row.get("confidence") or 0.0) for row in failed_votes),
@@ -129,7 +131,7 @@ def failed_retry_coverage_pairs(
             and strongest_failed > protective_confidence
         ):
             failed_ids.append(clip_id)
-        if rows and all(
+        strict_winner = rows and all(
             row.get("proposed_label") == "winner"
             and float(row.get("confidence") or 0.0) >= 0.90
             and row.get("semantic_delete_recommended") is not True
@@ -140,8 +142,32 @@ def failed_retry_coverage_pairs(
             for row in rows
         ) and clip_id in by_id and any(
             float(row.get("confidence") or 0.0) >= 0.95 for row in rows
-        ):
+        )
+        # D-303: a noisy contextual view may call the genuinely complete
+        # later delivery ALTERNATE even while another view correctly marks
+        # the earlier fragment FAILED.  Permit that later take to be *asked
+        # about* only when every view remains non-destructive and free of
+        # scoped recording-process words.  Substantial fullness, exact retry
+        # relation, chronology, session identity and semantic directional
+        # coverage are still checked below/beyond this function.
+        fallback_delivery = (
+            clip_id in by_id
+            and by_id[clip_id].complete_idea
+            and rows
+            and all(
+                row.get("label") not in {"failed", "bts"}
+                and row.get("content_role") != "recording_only"
+                and row.get("semantic_delete_recommended") is not True
+                and not (row.get("recording_word_ranges") or ())
+                and int(row.get("recording_prefix_words") or 0) == 0
+                and int(row.get("recording_suffix_words") or 0) == 0
+                for row in rows
+            )
+        )
+        if strict_winner or fallback_delivery:
             delivery_ids.append(clip_id)
+            if fallback_delivery and not strict_winner:
+                fallback_delivery_ids.add(clip_id)
 
     pairs: set[tuple[str, str]] = set()
     for failed_id in failed_ids:
@@ -194,6 +220,17 @@ def failed_retry_coverage_pairs(
                     )
                 ):
                     continue
+                if delivery_id in fallback_delivery_ids:
+                    anchor_words = len(anchor.text.split())
+                    delivery_words = len(delivery.text.split())
+                    if (
+                        (delivery.end - delivery.start) < max(
+                            (anchor.end - anchor.start) * 1.5,
+                            (anchor.end - anchor.start) + 3.0,
+                        )
+                        or delivery_words < max(anchor_words + 5, math.ceil(anchor_words * 1.5))
+                    ):
+                        continue
                 same_attempt, _ = _same_retry_attempt(anchor, delivery)
                 if same_attempt:
                     left_id = anchor_id if anchor_id in group_anchor_ids else failed_id
