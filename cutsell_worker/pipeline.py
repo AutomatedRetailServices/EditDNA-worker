@@ -2369,6 +2369,13 @@ def build_flow_b_draft(
         complete_window_winner_conflict["routed"] = semantic_best_take_reason == "unresolved_semantic_winner_conflict"
         _terminal_besttake_confidence_result = _terminal_confidence_out.get("terminal_besttake_confidence")
         no_usable_realization = selected_clip_id is None
+        corroborated_failed_singleton = bool(
+            len(members) == 1
+            and family_semantic_decisions.get(members[0].clip_id, ("", 0.0))[0] == "failed"
+            and family_semantic_decisions.get(members[0].clip_id, ("", 0.0))[1] >= 0.85
+            and hybrid_semantic_delete_recommended.get(members[0].clip_id, False)
+            and hybrid_local_failure_corroborated.get(members[0].clip_id, False)
+        )
         covered_failed_singleton = bool(
             len(members) == 1
             and members[0].clip_id in covered_failed_singleton_ids
@@ -2380,6 +2387,11 @@ def build_flow_b_draft(
             selected_clip_id = None
             semantic_preferred_clip_id = None
             semantic_best_take_reason = "covered_failed_singleton_unusable"
+            no_usable_realization = True
+        elif corroborated_failed_singleton:
+            selected_clip_id = None
+            semantic_preferred_clip_id = None
+            semantic_best_take_reason = "corroborated_failed_singleton_unusable"
             no_usable_realization = True
         all_delete_recommended = len(members) >= 2 and all(
             hybrid_semantic_delete_recommended.get(member.clip_id, False) for member in members

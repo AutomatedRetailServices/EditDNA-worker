@@ -77,6 +77,16 @@ def test_a_directionally_covered_failed_singleton_leaves_story_complete():
     assert story["covered_failed_singleton_ids"] == ["tg_failed_singleton"]
 
 
+def test_a_strongly_corroborated_failed_singleton_leaves_story_complete():
+    row = _row(
+        "tg_failed_singleton", "failed",
+        "corroborated_failed_singleton_unusable", label="failed",
+    )
+    story = derive_story_completeness([row])
+    assert story["story_completeness"] == "complete"
+    assert story["corroborated_failed_singleton_ids"] == ["tg_failed_singleton"]
+
+
 def test_a_dropped_idea_family_still_makes_the_story_incomplete_d097_b():
     story = derive_story_completeness([IDEA_ROW])
     assert story["story_completeness"] == "incomplete_no_usable_realization"
