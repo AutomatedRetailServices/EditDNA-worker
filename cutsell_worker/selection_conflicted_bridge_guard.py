@@ -178,10 +178,108 @@ def conflicted_redundant_bridge_ids(selected, diagnostics: dict):
     return move, audit
 
 
+def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
+    """Resolve direct, already-confirmed equivalence between final winners.
+
+    Group cohesion may conservatively keep two families separate because a
+    third member conflicts with one side.  Once the actual winners are known,
+    a direct high-confidence equivalence verdict between those two winners is
+    still valid evidence.  Move only the candidate that Hybrid independently
+    called alternate/failed when the other has a strong keep/winner verdict.
+    Numeric and negated facts remain fail-open unless the kept winner carries
+    the same critical markers.
+    """
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    votes = _hybrid_votes(diagnostics)
+    move: set[str] = set()
+    audit: list[dict] = []
+    equivalence = diagnostics.get("semantic_idea_equivalence") or {}
+    for row in equivalence.get("merges") or ():
+        if not isinstance(row, dict):
+            continue
+        left_id = str(row.get("left_clip_id") or "")
+        right_id = str(row.get("right_clip_id") or "")
+        if left_id not in selected_by_id or right_id not in selected_by_id:
+            continue
+        try:
+            confidence = float(row.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if confidence < 0.85:
+            continue
+
+        left_positive = _strongest(votes, left_id, {"winner", "keep"})
+        right_positive = _strongest(votes, right_id, {"winner", "keep"})
+        left_negative = _strongest(votes, left_id, {"alternate", "failed"})
+        right_negative = _strongest(votes, right_id, {"alternate", "failed"})
+        loser_id = winner_id = ""
+        if right_positive >= 0.90 and left_negative >= 0.80 and left_positive < 0.90:
+            loser_id, winner_id = left_id, right_id
+        elif left_positive >= 0.90 and right_negative >= 0.80 and right_positive < 0.90:
+            loser_id, winner_id = right_id, left_id
+        if not loser_id or loser_id in move:
+            continue
+        loser = selected_by_id[loser_id]
+        winner = selected_by_id[winner_id]
+        if not _critical(loser.text).issubset(_critical(winner.text)):
+            continue
+        move.add(loser_id)
+        audit.append({
+            "clip_id": loser_id,
+            "winner_clip_id": winner_id,
+            "reason": "direct_equivalence_confirmed_final_winner",
+            "equivalence_confidence": round(confidence, 4),
+            "winner_positive_confidence": round(
+                _strongest(votes, winner_id, {"winner", "keep"}), 4
+            ),
+            "loser_negative_confidence": round(
+                _strongest(votes, loser_id, {"alternate", "failed"}), 4
+            ),
+        })
+    return move, audit
+
+
+def terminally_incomplete_selected_ids(selected, diagnostics: dict):
+    """Discard tiny attempt fragments proven incomplete upstream."""
+    selected_ids = {clip.clip_id for clip in selected}
+    move: set[str] = set()
+    audit: list[dict] = []
+    reconstruction = diagnostics.get("attempt_reconstruction") or {}
+    for row in reconstruction.get("attempts") or ():
+        if not isinstance(row, dict):
+            continue
+        clip_id = str(row.get("clip_id") or "")
+        if clip_id not in selected_ids or row.get("complete_idea") is not False:
+            continue
+        try:
+            duration = float(row.get("duration_sec") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        clip = next((item for item in selected if item.clip_id == clip_id), None)
+        if clip is None:
+            continue
+        token_count = len(_TOKEN_RE.findall(str(clip.text or "")))
+        terminally_open = str(clip.text or "").rstrip().endswith(("...", "…"))
+        if duration > 2.0 or token_count > 4 or not terminally_open:
+            continue
+        move.add(clip_id)
+        audit.append({
+            "clip_id": clip_id,
+            "reason": "short_terminally_incomplete_attempt",
+            "duration_sec": round(duration, 3),
+            "token_count": token_count,
+        })
+    return move, audit
+
+
 def apply_selection_conflicted_bridge_guard(draft):
     """Move proven conflicted redundant bridges from Selected to Alternates/SWAP."""
     diagnostics = dict(draft.diagnostics or {})
-    move_ids, audit = conflicted_redundant_bridge_ids(draft.selected, diagnostics)
+    bridge_ids, bridge_audit = conflicted_redundant_bridge_ids(draft.selected, diagnostics)
+    duplicate_ids, duplicate_audit = confirmed_selected_duplicate_ids(draft.selected, diagnostics)
+    incomplete_ids, incomplete_audit = terminally_incomplete_selected_ids(draft.selected, diagnostics)
+    move_ids = bridge_ids | duplicate_ids | incomplete_ids
+    audit = bridge_audit + duplicate_audit + incomplete_audit
     if not move_ids:
         return draft
 
