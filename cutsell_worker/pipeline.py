@@ -1158,11 +1158,24 @@ def _is_incomplete_content_subset(short: CandidateTake, long: CandidateTake) -> 
         if long_tokens[start:start + window] == short_tokens:
             match_start = start
             break
-    if match_start is None:
-        return False
-    extra_tokens = long_tokens[:match_start] + long_tokens[match_start + window:]
-    extra_content = _restart_content(extra_tokens)
-    return len(extra_content) >= _SUBSET_MINIMUM_EXTRA_CONTENT_TOKENS
+    if match_start is not None:
+        extra_tokens = long_tokens[:match_start] + long_tokens[match_start + window:]
+        extra_content = _restart_content(extra_tokens)
+        return len(extra_content) >= _SUBSET_MINIMUM_EXTRA_CONTENT_TOKENS
+
+    # Attempt reconstruction can insert harmless connective/detail words
+    # into the fuller retry ("I asked my doctor" vs "I changed doctors and
+    # asked for every test").  Inside an already-proven retry family, a
+    # strict content-token subset is the same incomplete-prefix condition
+    # even when the surface words are no longer contiguous.  Require every
+    # meaningful short token plus at least two genuinely additional long
+    # tokens; contradiction checks remain at the caller.
+    short_content_set = set(short_content)
+    long_content_set = set(_restart_content(long_tokens))
+    return bool(
+        short_content_set <= long_content_set
+        and len(long_content_set - short_content_set) >= _SUBSET_MINIMUM_EXTRA_CONTENT_TOKENS
+    )
 
 
 def _exclude_incomplete_subset_losers(
@@ -1578,6 +1591,7 @@ def _is_corroborated_failed_singleton(
     semantic_delete_recommended: dict[str, bool],
     local_failure_corroborated: dict[str, bool],
     dense_failure_cluster: dict[str, bool],
+    semantic_comparative_authority: str | None = None,
 ) -> bool:
     """A lone failed take is unusable only with two independent supports.
 
@@ -1588,6 +1602,17 @@ def _is_corroborated_failed_singleton(
     evidence requirement.
     """
     if len(members) != 1:
+        return False
+    # A singleton can still appear in multiple complete Hybrid windows.
+    # If those windows disagree (for example winner 0.95 vs failed 0.90),
+    # the merged failed label is not authoritative enough to delete real
+    # audience content.  This mirrors `_semantic_best_take`'s existing
+    # abstention contract instead of letting the later singleton override
+    # silently bypass it.
+    if semantic_comparative_authority in {
+        AUTHORITY_ABSTAIN_CONFLICT,
+        AUTHORITY_ABSTAIN_INCOMPLETE_CONTEXT,
+    }:
         return False
     clip_id = members[0].clip_id
     label, confidence = semantic_decisions.get(clip_id, ("", 0.0))
@@ -1600,6 +1625,25 @@ def _is_corroborated_failed_singleton(
             or dense_failure_cluster.get(clip_id, False)
         )
     )
+
+
+def _conflicted_semantic_role_ids(diagnostics) -> frozenset[str]:
+    """Candidates strongly called both audience content and failure."""
+    positive: set[str] = set()
+    negative: set[str] = set()
+    for diagnostic in diagnostics or ():
+        for decision in diagnostic.get("decisions") or ():
+            clip_id = str(decision.get("clip_id") or "")
+            label = str(decision.get("label") or "")
+            try:
+                confidence = float(decision.get("confidence") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if clip_id and label in {"winner", "keep"} and confidence >= 0.90:
+                positive.add(clip_id)
+            if clip_id and label in {"failed", "bts"} and confidence >= 0.80:
+                negative.add(clip_id)
+    return frozenset(positive & negative)
 
 
 def build_flow_b_draft(
@@ -1909,13 +1953,18 @@ def build_flow_b_draft(
     # fallback can treat it as soft negative evidence. OR-across windows:
     # if any window flagged the candidate, that evidence is never silently
     # dropped, matching D-081's own "never discard the evidence" posture.
+    # Strong positive and negative labels for the same candidate across
+    # overlapping windows are disagreement, not deletion authority. Keep
+    # the evidence but fail open at the destructive recommendation layer;
+    # BestTake/coverage can still compare the candidate against its siblings.
+    conflicted_role_ids = _conflicted_semantic_role_ids(hybrid_cleanup.diagnostics)
     hybrid_semantic_delete_recommended: dict[str, bool] = {}
     for diagnostic in hybrid_cleanup.diagnostics:
         for decision in diagnostic.get("decisions") or ():
             clip_id = decision.get("clip_id")
             if not clip_id:
                 continue
-            if decision.get("semantic_delete_recommended"):
+            if decision.get("semantic_delete_recommended") and clip_id not in conflicted_role_ids:
                 hybrid_semantic_delete_recommended[clip_id] = True
             else:
                 hybrid_semantic_delete_recommended.setdefault(clip_id, False)
@@ -2431,6 +2480,7 @@ def build_flow_b_draft(
             hybrid_semantic_delete_recommended,
             hybrid_local_failure_corroborated,
             hybrid_dense_failure_cluster,
+            semantic_comparative_authority=effective_gate_status,
         )
         covered_failed_singleton = bool(
             len(members) == 1
