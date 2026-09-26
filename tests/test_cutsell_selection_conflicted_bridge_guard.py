@@ -4,9 +4,11 @@ from cutsell_worker.selection_conflicted_bridge_guard import (
     confirmed_selected_duplicate_ids,
     conflicted_redundant_bridge_ids,
     deterministic_retry_resolution,
+    failed_retry_component_ids,
     missing_continuation_bridge_ids,
     redundant_continuation_chain_ids,
     terminally_incomplete_selected_ids,
+    unmerged_same_opening_retry_resolution,
 )
 
 
@@ -196,23 +198,6 @@ def test_equal_safe_confirmed_duplicates_keep_only_later_delivery():
     assert audit[0]["winner_clip_id"] == "later"
 
 
-def test_confirmed_duplicate_uses_clear_positive_margin_without_negative_label():
-    earlier = _clip("earlier", 10.0, 18.0, "A rash appeared behind my ear and neck.")
-    later = _clip("later", 21.0, 28.0, "The rash appeared behind my ear and on my neck.")
-    diagnostics = {
-        "semantic_idea_equivalence": {"merges": [{
-            "left_clip_id": "earlier", "right_clip_id": "later", "confidence": 0.90,
-        }]},
-        "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "earlier", "label": "keep", "confidence": 0.90},
-            {"clip_id": "later", "label": "winner", "confidence": 0.95},
-        ]}],
-    }
-    move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
-    assert move == {"earlier"}
-    assert audit[0]["winner_clip_id"] == "later"
-
-
 def test_confirmed_duplicate_with_unique_negation_fails_open():
     earlier = _clip("earlier", 1.0, 4.0, "No tuve ese síntoma.")
     later = _clip("later", 5.0, 8.0, "Tuve ese síntoma.")
@@ -226,6 +211,134 @@ def test_confirmed_duplicate_with_unique_negation_fails_open():
         ]}],
     }
     move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
+    assert move == set()
+    assert audit == []
+
+
+def test_unusable_equivalent_take_yields_to_later_global_winner():
+    earlier = _clip(
+        "earlier", 10.0, 20.0,
+        "A rash appeared behind my ear and neck and looked hormonal.",
+    )
+    later = _clip(
+        "later", 23.0, 31.0,
+        "The rash appeared behind my ear and on my neck in seasons.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "earlier", "right_clip_id": "later", "confidence": 0.90,
+        }]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "earlier", "label": "winner", "confidence": 0.90},
+            {"clip_id": "later", "label": "winner", "confidence": 0.95},
+        ]}],
+        "take_judge_groups": [{
+            "candidate_usability_summary": {"earlier": "UNUSABLE", "later": "USABLE"},
+        }],
+    }
+
+    move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
+
+    assert move == {"earlier"}
+    assert audit[0]["winner_clip_id"] == "later"
+
+
+def test_failed_wrong_take_yields_through_transitive_retry_component():
+    abandoned = _clip("abandoned", 10.0, 16.0, "I had stomach problems and was diagnosed with...")
+    false_start = _clip("false_start", 20.0, 21.6, "I had stomach problems, no.")
+    complete = _clip("complete", 27.0, 36.0, "I had digestion problems and was diagnosed with gastritis.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "abandoned", "right_clip_id": "false_start",
+             "accepted_by": "multimodal_corroborated_retry", "confidence": 1.0},
+            {"left_clip_id": "abandoned", "right_clip_id": "complete",
+             "accepted_by": "incomplete_attempt_completed_by_retry", "confidence": 1.0},
+        ]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "abandoned", "complete_idea": False},
+            {"clip_id": "false_start", "complete_idea": True},
+            {"clip_id": "complete", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "false_start", "label": "failed", "confidence": 0.90},
+            {"clip_id": "complete", "label": "winner", "confidence": 0.95},
+        ]}],
+        "take_judge_groups": [{
+            "candidate_usability_summary": {"false_start": "UNUSABLE", "complete": "USABLE"},
+            "member_usability": {
+                "false_start": {"deterministic_unusable": True, "delete_recommended": True},
+                "complete": {"deterministic_unusable": False, "delete_recommended": False},
+            },
+        }],
+    }
+
+    move, audit = failed_retry_component_ids(
+        (false_start, complete), (), (abandoned,), diagnostics,
+    )
+
+    assert move == {"false_start"}
+    assert audit[0]["winner_clip_id"] == "complete"
+
+
+def test_multimodal_wrong_take_can_settle_component_without_hybrid_failure_vote():
+    abandoned = _clip("abandoned", 10.0, 16.0, "I had stomach problems and was diagnosed with...")
+    false_start = _clip("false_start", 20.0, 21.6, "I had stomach problems, no.")
+    complete = _clip("complete", 27.0, 36.0, "I had digestion problems and was diagnosed with gastritis.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "abandoned", "right_clip_id": "false_start",
+             "accepted_by": "multimodal_corroborated_retry", "confidence": 1.0,
+             "corroborating_event_kind": "wrong_take"},
+            {"left_clip_id": "abandoned", "right_clip_id": "complete",
+             "accepted_by": "incomplete_attempt_completed_by_retry", "confidence": 1.0},
+        ]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "abandoned", "complete_idea": False},
+            {"clip_id": "false_start", "complete_idea": True},
+            {"clip_id": "complete", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "complete", "label": "keep", "confidence": 0.95},
+        ]}],
+        "take_judge_groups": [{
+            "candidate_usability_summary": {"false_start": "UNUSABLE"},
+            "member_usability": {"false_start": {
+                "deterministic_unusable": False, "delete_recommended": False,
+            }},
+        }],
+    }
+
+    move, audit = failed_retry_component_ids((false_start, complete), (), (abandoned,), diagnostics)
+
+    assert move == {"false_start"}
+    assert audit[0]["multimodal_wrong_take_corroborated"] is True
+
+
+def test_failed_retry_component_preserves_negation_without_full_failure_evidence():
+    abandoned = _clip("abandoned", 10.0, 16.0, "I had symptoms and...")
+    negated = _clip("negated", 20.0, 22.0, "I did not have symptoms.")
+    complete = _clip("complete", 27.0, 32.0, "I had symptoms later.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "abandoned", "right_clip_id": "negated",
+             "accepted_by": "multimodal_corroborated_retry", "confidence": 1.0},
+            {"left_clip_id": "abandoned", "right_clip_id": "complete",
+             "accepted_by": "incomplete_attempt_completed_by_retry", "confidence": 1.0},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "negated", "label": "failed", "confidence": 0.89},
+            {"clip_id": "complete", "label": "winner", "confidence": 0.95},
+        ]}],
+        "take_judge_groups": [{
+            "candidate_usability_summary": {"negated": "UNUSABLE", "complete": "USABLE"},
+            "member_usability": {
+                "negated": {"deterministic_unusable": True, "delete_recommended": True},
+            },
+        }],
+    }
+
+    move, audit = failed_retry_component_ids((negated, complete), (), (abandoned,), diagnostics)
+
     assert move == set()
     assert audit == []
 
@@ -274,6 +387,86 @@ def test_deterministic_restart_can_swap_to_stronger_positive_peer():
     assert audit[0]["accepted_by"] == "same_opening_restart"
 
 
+def test_deterministic_restart_accepts_clear_positive_over_conflicting_alternate():
+    first = _clip("first", 10.0, 16.0, "The machine worked perfectly last year.")
+    retry = _clip("retry", 20.0, 27.0, "The machine worked perfectly throughout last year.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "first", "right_clip_id": "retry",
+            "confidence": 1.0, "accepted_by": "same_opening_restart",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first", "label": "keep", "confidence": 0.90},
+            {"clip_id": "retry", "label": "keep", "confidence": 0.95},
+            {"clip_id": "retry", "label": "alternate", "confidence": 0.85},
+        ]}],
+    }
+
+    move, add, _audit = deterministic_retry_resolution((first,), (), (retry,), diagnostics)
+
+    assert move == {"first"}
+    assert add == {"retry"}
+
+
+def test_unmerged_same_opening_restart_selects_rich_full_later_delivery():
+    first = _clip(
+        "first", 10.0, 16.5,
+        "After my contract I spoke with my doctor and requested every test available.",
+    )
+    short_restart = _clip(
+        "short", 18.0, 20.2,
+        "After my contract I requested my doctor",
+    )
+    full_restart = _clip(
+        "full", 23.0, 30.0,
+        "After my contract I changed my doctor and requested every test she could provide.",
+    )
+    diagnostics = {
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "short", "complete_idea": True},
+            {"clip_id": "full", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first", "label": "winner", "confidence": 0.95},
+            {"clip_id": "first", "label": "alternate", "confidence": 0.80},
+            {"clip_id": "full", "label": "failed", "confidence": 0.90},
+        ]}],
+    }
+
+    move, add, audit = unmerged_same_opening_retry_resolution(
+        (first,), (), (short_restart, full_restart), diagnostics,
+    )
+
+    assert move == {"first"}
+    assert add == {"full"}
+    assert audit[0]["reason"] == "ungrouped_same_opening_full_retry_resolution"
+
+
+def test_unmerged_same_opening_restart_preserves_changed_number():
+    first = _clip("first", 10.0, 17.0, "After my contract I requested 5 medical tests from my doctor.")
+    retry = _clip("retry", 20.0, 27.0, "After my contract I requested 10 medical tests from my doctor.")
+    diagnostics = {
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first", "label": "alternate", "confidence": 0.80},
+        ]}],
+    }
+
+    move, add, audit = unmerged_same_opening_retry_resolution((first,), (), (retry,), diagnostics)
+
+    assert move == set()
+    assert add == set()
+    assert audit == []
+
+
 def test_equal_positive_restart_prefers_substantially_fuller_later_delivery():
     first = _clip("first", 10.0, 16.0, "We checked the thyroid every year and stopped.")
     retry = _clip(
@@ -318,72 +511,6 @@ def test_failed_complete_peer_is_not_resurrected_over_incomplete_selection():
     }
     move, add, audit = deterministic_retry_resolution((incomplete,), (), (failed,), diagnostics)
     assert move == set() and add == set() and audit == []
-
-
-def test_shared_abandoned_attempt_resolves_short_failed_component_debris():
-    abandoned = _clip("abandoned", 10.0, 16.0, "I had stomach trouble and was diagnosed with...")
-    correction = _clip("correction", 18.0, 19.6, "I had stomach trouble, no.")
-    complete = _clip(
-        "complete", 24.0, 33.5,
-        "I had digestive trouble and the endoscopy showed gastritis.",
-    )
-    diagnostics = {
-        "semantic_idea_equivalence": {"merges": [
-            {"left_clip_id": "abandoned", "right_clip_id": "correction",
-             "confidence": 1.0, "accepted_by": "multimodal_corroborated_retry"},
-            {"left_clip_id": "abandoned", "right_clip_id": "complete",
-             "confidence": 1.0, "accepted_by": "incomplete_attempt_completed_by_retry"},
-        ]},
-        "attempt_reconstruction": {"attempts": [
-            {"clip_id": "abandoned", "complete_idea": False},
-            {"clip_id": "correction", "complete_idea": True},
-            {"clip_id": "complete", "complete_idea": True},
-        ]},
-        "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "correction", "label": "failed", "confidence": 0.90,
-             "content_role": "mixed"},
-            {"clip_id": "complete", "label": "winner", "confidence": 0.95,
-             "content_role": "audience"},
-        ]}],
-    }
-    move, add, audit = deterministic_retry_resolution(
-        (correction, complete), (), (abandoned,), diagnostics,
-    )
-    assert move == {"correction"} and add == set()
-    assert audit[0]["reason"] == "deterministic_retry_component_failed_debris"
-
-
-def test_retry_component_replaces_orphan_fragment_with_latest_full_delivery():
-    first_full = _clip("first_full", 10.0, 16.5, "I asked my doctor for every available test.")
-    fragment = _clip("fragment", 18.0, 20.2, "I asked my doctor")
-    later_full = _clip(
-        "later_full", 23.0, 29.8,
-        "I changed doctors and asked her to order every test she could imagine.",
-    )
-    diagnostics = {
-        "semantic_idea_equivalence": {"merges": [
-            {"left_clip_id": "first_full", "right_clip_id": "fragment",
-             "confidence": 1.0, "accepted_by": "same_opening_abandoned_start"},
-            {"left_clip_id": "later_full", "right_clip_id": "fragment",
-             "confidence": 1.0, "accepted_by": "same_opening_abandoned_start"},
-        ]},
-        "attempt_reconstruction": {"attempts": [
-            {"clip_id": "first_full", "complete_idea": True},
-            {"clip_id": "fragment", "complete_idea": True},
-            {"clip_id": "later_full", "complete_idea": True},
-        ]},
-        "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "first_full", "label": "keep", "confidence": 0.95,
-             "content_role": "audience"},
-            {"clip_id": "fragment", "label": "keep", "confidence": 0.95,
-             "content_role": "audience"},
-        ]}],
-    }
-    move, add, audit = deterministic_retry_resolution(
-        (fragment,), (), (first_full, later_full), diagnostics,
-    )
-    assert move == {"fragment"} and add == {"later_full"}
-    assert audit[0]["reason"] == "deterministic_retry_component_orphan_fragment"
 
 
 def test_selected_suffix_of_confirmed_duplicate_is_removed():
