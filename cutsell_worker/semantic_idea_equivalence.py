@@ -97,7 +97,11 @@ class SemanticEquivalenceGatePolicy:
     conservative, not a new number chosen for this phase."""
     max_pairs_per_request: int = 14
     max_estimated_input_tokens: int = 12_000
-    max_estimated_output_tokens: int = 1_000
+    # Keep the post-response acceptance ceiling aligned with the Google
+    # transport's bounded 1,500-token response budget.  A valid 14-pair JSON
+    # response must not be paid for and then discarded merely for crossing an
+    # obsolete 1,000-token validator ceiling.
+    max_estimated_output_tokens: int = 1_500
     # D-094.2 (default OFF -- Product Owner decision, D-091 stop condition B):
     # let `split_incohesive_retry_groups` accept a SINGLETON-attaches-to-
     # component bridge on complete pairwise confirmation (every cross pair

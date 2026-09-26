@@ -86,6 +86,57 @@ def test_strong_failed_take_and_later_proposed_winner_become_comparison_pair():
     assert pairs == frozenset({("failed", "clean")})
 
 
+def test_consistent_failed_windows_allow_bounded_confidence_and_one_delete_vote():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    windows = (
+        {"partition_index": 0, "member_ids": ["failed", "clean"], "decisions": [
+            row("failed", confidence=0.85),
+            row(
+                "clean", label="winner", proposed_label="winner",
+                semantic_delete_recommended=False, confidence=0.95,
+            ),
+        ]},
+        {"partition_index": 0, "member_ids": ["failed", "clean"], "decisions": [
+            row("failed", confidence=0.80, semantic_delete_recommended=False),
+            row(
+                "clean", label="winner", proposed_label="winner",
+                semantic_delete_recommended=False, confidence=0.95,
+            ),
+        ]},
+    )
+    assert failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    ) == frozenset({("failed", "clean")})
+
+
+def test_failed_bridge_still_rejects_no_delete_vote_or_uncorroborated_window():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    clean_row = row(
+        "clean", label="winner", proposed_label="winner",
+        semantic_delete_recommended=False, confidence=0.95,
+    )
+    no_delete = ({"decisions": [
+        row("failed", confidence=0.90, semantic_delete_recommended=False), clean_row,
+    ]},)
+    uncorroborated = ({"decisions": [
+        row("failed", confidence=0.90, local_failure_corroborated=False), clean_row,
+    ]},)
+    low_confidence_view = ({"decisions": [
+        row("failed", confidence=0.90), clean_row,
+    ]}, {"decisions": [
+        row("failed", confidence=0.79, semantic_delete_recommended=False), clean_row,
+    ]})
+    weak_delete_vote = ({"decisions": [
+        row("failed", confidence=0.84), clean_row,
+    ]},)
+    for windows in (no_delete, uncorroborated, low_confidence_view, weak_delete_vote):
+        assert not failed_retry_coverage_pairs(
+            (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+        )
+
+
 def test_pair_requires_consistent_failure_and_same_session():
     failed = take("failed", FAILED_TEXT, 0, 10)
     clean = take("clean", CLEAN_TEXT, 50, 65)

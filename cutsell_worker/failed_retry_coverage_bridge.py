@@ -25,7 +25,7 @@ def failed_retry_coverage_pairs(
 
     Every returned pair already has strong *eligibility* evidence, but no
     authority: the earlier take is consistently failed, locally corroborated
-    and delete-recommended; the later complete take is consistently proposed
+    and has at least one explicit delete recommendation; the later complete take is consistently proposed
     as the winner, carries no semantic deletion or word-scoped recording
     process finding, and both belong to the same creator-session partition.
     A conservative exact-attempt relation remains mandatory.  The caller must
@@ -49,13 +49,28 @@ def failed_retry_coverage_pairs(
     failed_ids: list[str] = []
     delivery_ids: list[str] = []
     for clip_id, rows in rows_by_id.items():
-        if rows and all(
-            row.get("label") == "failed"
-            and float(row.get("confidence") or 0.0) >= 0.90
-            and row.get("semantic_delete_recommended") is True
-            and row.get("local_failure_corroborated") is True
-            and row.get("dense_semantic_failure_cluster") is True
-            for row in rows
+        # Overlapping whole-session windows may legitimately vary by a few
+        # confidence points or omit the destructive recommendation in one
+        # view.  Eligibility therefore follows the stable evidence: every
+        # view calls the take failed and corroborates the same dense local
+        # failure, at least one view reaches the established 0.85 semantic
+        # floor and explicitly recommends deletion, and no view contradicts
+        # that classification.  This only buys a comparison; directional
+        # coverage from the semantic arbiter is still mandatory for removal.
+        if (
+            rows
+            and all(
+                row.get("label") == "failed"
+                and float(row.get("confidence") or 0.0) >= 0.80
+                and row.get("local_failure_corroborated") is True
+                and row.get("dense_semantic_failure_cluster") is True
+                for row in rows
+            )
+            and any(
+                float(row.get("confidence") or 0.0) >= 0.85
+                and row.get("semantic_delete_recommended") is True
+                for row in rows
+            )
         ):
             failed_ids.append(clip_id)
         if rows and all(

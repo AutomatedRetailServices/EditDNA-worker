@@ -70,6 +70,22 @@ class OverBudgetArbiter:
         )
 
 
+class OutputBudgetArbiter:
+    def __init__(self, output_tokens):
+        self.output_tokens = output_tokens
+
+    def check(self, request):
+        return IdeaEquivalenceResult(
+            decisions=(IdeaEquivalenceDecision(pair_index=0, same_idea=True, confidence=0.9),),
+            provider="fake",
+            model="bounded-output",
+            requested=True,
+            available=True,
+            estimated_input_tokens=100,
+            estimated_output_tokens=self.output_tokens,
+        )
+
+
 def test_gate_declines_empty_request():
     assert should_request_semantic_equivalence(IdeaEquivalenceRequest(pairs=())) is False
 
@@ -123,6 +139,12 @@ def test_safe_check_fails_open_on_unknown_pair_index():
 def test_safe_check_fails_open_when_over_token_budget():
     result = safe_check_idea_equivalence(OverBudgetArbiter(), _request(1))
     assert result.available is False
+
+
+def test_safe_check_accepts_transport_bounded_output_up_to_1500_tokens():
+    assert safe_check_idea_equivalence(OutputBudgetArbiter(1_200), _request(1)).available is True
+    assert safe_check_idea_equivalence(OutputBudgetArbiter(1_500), _request(1)).available is True
+    assert safe_check_idea_equivalence(OutputBudgetArbiter(1_501), _request(1)).available is False
 
 
 def test_validate_rejects_confidence_outside_unit_interval():

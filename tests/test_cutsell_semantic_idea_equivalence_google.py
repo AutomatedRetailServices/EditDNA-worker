@@ -38,6 +38,9 @@ def decisions_json(count: int, *, index_offset: int = 0) -> str:
             {
                 "pair_index": i + index_offset,
                 "same_idea": i % 2 == 0,
+                "meaning_conflict": False,
+                "left_covered_by_right": i % 2 == 0,
+                "right_covered_by_left": False,
                 "confidence": 0.8,
                 "reason": "shared topic, different wording",
             }
