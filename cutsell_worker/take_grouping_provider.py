@@ -2579,8 +2579,27 @@ def _bridge_aware_components(
                 "reason": edge.reason, "bridge_sensitive": False, "accepted": True,
             })
             continue
+        # A materially shorter exact prefix is retry debris, not a complete
+        # competing proposition.  It remains inside the family so Best Take
+        # can reject it, but its pairwise ``distinct addition`` finding must
+        # not veto a direct, high-confidence relation between the two full
+        # deliveries.  This is the same substantive-member rule already used
+        # by ``_groups_should_reconcile``; applying it here keeps the two
+        # grouping passes consistent.  Ordinary complete members are never
+        # filtered, so D-108's explicit cross-component non-equivalence veto
+        # remains unchanged for real complementary beats.
+        substantive_left = tuple(
+            take.clip_id for take in _substantive_reconcile_members(
+                [take_map[cid] for cid in left_members if cid in take_map]
+            )
+        )
+        substantive_right = tuple(
+            take.clip_id for take in _substantive_reconcile_members(
+                [take_map[cid] for cid in right_members if cid in take_map]
+            )
+        )
         blocked_pair = _cross_component_blocked_pair(
-            tuple(left_members), tuple(right_members), blocked_pairs,
+            substantive_left, substantive_right, blocked_pairs,
         )
         if blocked_pair is not None:
             left_id, right_id = tuple(blocked_pair) if len(blocked_pair) == 2 else (edge.left_id, edge.right_id)
@@ -2595,6 +2614,28 @@ def _bridge_aware_components(
                 "reason_rejected": "cross_component_explicit_non_equivalence",
                 "conflicting_pair": [left_id, right_id],
             })
+            continue
+        material_prefix_debris_neutralized = (
+            edge.evidence == "semantic"
+            and edge.confidence >= _BRIDGE_MIN_COHESION_CONFIDENCE
+            and set(substantive_left) == {edge.left_id}
+            and set(substantive_right) == {edge.right_id}
+            and (
+                len(substantive_left) < len(left_members)
+                or len(substantive_right) < len(right_members)
+            )
+        )
+        if material_prefix_debris_neutralized:
+            accepted, record = _accept_restart_singleton_bridge(
+                left_members=tuple(left_members),
+                right_members=tuple(right_members),
+                edge=edge,
+                take_map=take_map,
+                accepted_by="semantic_full_delivery_with_material_prefix_debris",
+            )
+            edge_trace.append(record)
+            if accepted:
+                union(edge.left_id, edge.right_id)
             continue
         # D-301: the upstream failed-attempt resolver has already proved an
         # *exact*, directional relation: one abandoned attempt's proposition
