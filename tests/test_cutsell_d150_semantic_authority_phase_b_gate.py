@@ -26,6 +26,7 @@ from cutsell_worker.semantic_authority_observability import (
     AUTHORITY_ABSTAIN_CONFLICT,
     AUTHORITY_ABSTAIN_INCOMPLETE_CONTEXT,
     AUTHORITY_ALLOWED,
+    complete_window_agreement,
     resolve_semantic_comparative_authority,
     semantic_authority_gate_diagnostics,
     would_be_decisive_semantic_winner,
@@ -133,6 +134,26 @@ def test_authoritative_all_failed_family_still_has_no_usable_realization():
         semantic_comparative_authority=AUTHORITY_ALLOWED,
     )
     assert (selected, preferred, reason) == (None, None, "no_usable_realization")
+
+
+def test_complete_windows_agree_when_same_winner_has_alternate_failed_variance():
+    rows = [
+        _row("w1", ("A", "B"), [("A", "winner", .95), ("B", "alternate", .80)]),
+        _row("w2", ("A", "B"), [("A", "winner", .95), ("B", "failed", .80)]),
+    ]
+    agreement = complete_window_agreement(("A", "B"), rows)
+    assert agreement["complete_window_agreement_status"] == "MULTIPLE_COMPLETE_WINDOWS_AGREE"
+    assert agreement["complete_context_conflict"] is False
+
+
+def test_no_winner_windows_keep_alternate_failed_variance_as_conflict():
+    rows = [
+        _row("w1", ("A", "B"), [("A", "alternate", .80), ("B", "keep", .85)]),
+        _row("w2", ("A", "B"), [("A", "failed", .92), ("B", "failed", .90)]),
+    ]
+    agreement = complete_window_agreement(("A", "B"), rows)
+    assert agreement["complete_window_agreement_status"] == "MULTIPLE_COMPLETE_WINDOWS_DISAGREE"
+    assert agreement["complete_context_conflict"] is True
 
 
 def test_no_complete_window_abstains():
