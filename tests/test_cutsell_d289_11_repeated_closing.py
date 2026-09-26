@@ -296,6 +296,23 @@ def test_measured_pause_counts_as_a_phrase_break_when_asr_punctuation_is_missing
     assert out[1].text == "aliméntate bien hidrátate y haz ejercicio"
 
 
+def test_segment_punctuation_trims_when_timed_words_strip_punctuation():
+    left_words = _synthetic_words("Así que cuídate", 1.0, 2.5)
+    right_words = _synthetic_words(
+        "Por eso cuídate Alimentate bien hidrátate y haz ejercicio", 4.0, 8.0
+    )
+    left = _clip(
+        "L", "Así que cuídate.", 1.0, left_words[-1].end, 0, words=left_words,
+    )
+    right = _clip(
+        "R", "Por eso cuídate. Alimentate bien, hidrátate y haz ejercicio.",
+        4.0, right_words[-1].end, 1, words=right_words,
+    )
+    out, rows = _run((left, right))
+    assert len(_trims(rows)) == 1
+    assert out[1].text == "Alimentate bien hidrátate y haz ejercicio"
+
+
 def test_remaining_delivery_below_content_floor_refuses():
     clips = (_clip("L", "Así que cuídate.", 1.0, 3.0, 0), _clip("R", "Por eso cuídate, mucho.", 4.0, 6.0, 1))
     out, rows = _run(clips)

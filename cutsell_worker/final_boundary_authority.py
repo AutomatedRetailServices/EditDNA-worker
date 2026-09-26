@@ -373,6 +373,7 @@ def _tokenized_words(words: tuple[Word, ...]) -> list[tuple[str, Word]]:
 def _reopened_closing_match(
     left_words: tuple[Word, ...],
     right_words: tuple[Word, ...],
+    left_text: str = "",
 ) -> tuple[int, int] | None:
     """Return ``(skip, width)`` when the right clip re-opens -- after at most
     ``skip`` leading connective tokens -- with the last ``width`` (1..3)
@@ -380,7 +381,8 @@ def _reopened_closing_match(
     matches are tried first: more repeated words is more evidence, never less."""
     left = _tokenized_words(left_words)
     right = _tokenized_words(right_words)
-    if not left or not right or not _terminal(left[-1][1]):
+    text_terminal = str(left_text or "").rstrip().endswith(_TERMINAL)
+    if not left or not right or not (_terminal(left[-1][1]) or text_terminal):
         return None
     left_tokens = [token for token, _ in left]
     right_tokens = [token for token, _ in right]
@@ -471,7 +473,26 @@ def _trim_exact_seam_duplicates(
     return output, rows
 
 
-def _reopened_closing_refusal(right_words: tuple[Word, ...], skip: int, width: int) -> str | None:
+def _text_prefix_has_phrase_break(text: str, removed_token_count: int) -> bool:
+    """Return whether transcript punctuation separates a removed prefix.
+
+    Some aligners retain punctuation in segment text but strip it from each
+    timed word.  Boundary timing still comes exclusively from the words; this
+    helper only recovers the already-observed phrase-break evidence.
+    """
+    spans = list(_TOKEN_RE.finditer(str(text or "")))
+    if removed_token_count <= 0 or len(spans) <= removed_token_count:
+        return False
+    separator = str(text or "")[spans[removed_token_count - 1].end():spans[removed_token_count].start()]
+    return any(mark in separator for mark in _REOPEN_PHRASE_BREAK_PUNCT)
+
+
+def _reopened_closing_refusal(
+    right_words: tuple[Word, ...],
+    skip: int,
+    width: int,
+    right_text: str = "",
+) -> str | None:
     """Why a matched re-opened closing must NOT be trimmed (fail open)."""
     right = _tokenized_words(right_words)
     removed = right[:skip + width]
@@ -489,7 +510,10 @@ def _reopened_closing_refusal(right_words: tuple[Word, ...], skip: int, width: i
         return "nothing_remains_after_repeated_closing"
     last_removed = removed[-1][1]
     first_remaining = remaining[0][1]
-    punct_break = str(last_removed.text or "").rstrip().endswith(_REOPEN_PHRASE_BREAK_PUNCT)
+    punct_break = (
+        str(last_removed.text or "").rstrip().endswith(_REOPEN_PHRASE_BREAK_PUNCT)
+        or _text_prefix_has_phrase_break(right_text, skip + width)
+    )
     pause_break = float(first_remaining.start) - float(last_removed.end) >= _REOPEN_PHRASE_BREAK_PAUSE_SEC
     if not (punct_break or pause_break):
         return "repeated_closing_not_a_separate_phrase"
@@ -538,7 +562,7 @@ def _trim_reopened_closings(
                 continue
             if float(left.end) > float(right.start) + 1e-6:
                 continue
-            match = _reopened_closing_match(tuple(left.words), right_words)
+            match = _reopened_closing_match(tuple(left.words), right_words, left.text)
             if match is None:
                 continue
             skip, width = match
@@ -551,7 +575,7 @@ def _trim_reopened_closings(
                 "repeated_tokens": [token for token, _ in tokenized[skip:skip + width]],
                 "removed_leading_tokens": [token for token, _ in tokenized[:skip + width]],
             }
-            refusal = _reopened_closing_refusal(right_words, skip, width)
+            refusal = _reopened_closing_refusal(right_words, skip, width, right.text)
             if refusal is not None:
                 rows.append({"action": "keep_reopened_closing", "reason": refusal, **base_row})
                 break
