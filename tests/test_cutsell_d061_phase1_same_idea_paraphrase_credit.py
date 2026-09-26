@@ -345,6 +345,30 @@ def test_final_membership_contained_realization_credit_requires_selected_winner(
     assert missing_winner is False
 
 
+def test_final_membership_fragment_removal_credit_requires_selected_winner():
+    for removal_reason in (
+        "contained_fragment_of_confirmed_duplicate",
+        "terminal_negation_abandoned_restart",
+        "orphaned_anaphoric_fragment_of_confirmed_retry",
+    ):
+        diagnostics = {"selection_conflicted_bridge_guard": [{
+            "reason": removal_reason,
+            "clip_id": "fragment",
+            "winner_clip_id": "winner",
+        }]}
+
+        credited, reason = _final_membership_coverage_credit(
+            diagnostics, "fragment", {"winner"},
+        )
+        missing_winner, _ = _final_membership_coverage_credit(
+            diagnostics, "fragment", set(),
+        )
+
+        assert credited is True
+        assert reason == "final_membership_explicit_winner_coverage"
+        assert missing_winner is False
+
+
 def test_pre_group_lost_atom_consumes_final_membership_chain_coverage():
     first = clip(
         "first", 0.0, 5.0,

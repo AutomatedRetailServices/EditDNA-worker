@@ -677,6 +677,9 @@ def _final_membership_coverage_credit(
             "deterministic_retry_component_failed_debris",
             "provider_rejected_restatement_already_fully_delivered",
             "dependent_opening_yields_to_complete_family_peer",
+            "contained_fragment_of_confirmed_duplicate",
+            "terminal_negation_abandoned_restart",
+            "orphaned_anaphoric_fragment_of_confirmed_retry",
         }:
             if (
                 discarded_id == str(row.get("clip_id") or "")
