@@ -39,7 +39,7 @@ def test_general_contextual_evidence_reaches_singleton_authority(text):
     {'label':'winner'}, {'label':'keep'}, {'label':'alternate'}, {'label':'failed'},
     {'confidence':.89}, {'confidence':True}, {'confidence':float('nan')},
     {'confidence':1.1}, {'dense_semantic_failure_cluster':False},
-    {'semantic_delete_recommended':False}, {'delete_basis':'high_confidence_semantic'},
+    {'semantic_delete_recommended':False},
 ])
 def test_label_or_weak_context_alone_never_deletes(changes):
     assert decide([row(**changes)])[0] == 'x'
@@ -54,6 +54,12 @@ def test_family_label_must_also_agree():
     assert decide([row()],label='failed')[0] == 'x'
     assert decide([row()],label='winner')[0] == 'x'
     assert decide([row()],confidence=.8)[0] == 'x'
+
+
+def test_dense_context_survives_generic_high_confidence_basis_precedence():
+    selected, _preferred, reason = decide([row(delete_basis='high_confidence_semantic', confidence=.95)])
+    assert selected is None
+    assert reason == 'single_bts_unusable'
 
 
 def test_recorded_mov_evidence_reaches_decision_without_phrase_matching():

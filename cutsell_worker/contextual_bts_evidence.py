@@ -25,7 +25,13 @@ def contextual_bts_ids(diagnostics):
                     and row.get("semantic_delete_recommended") is True)
         if not all(consistent(row) for row in rows):
             continue
-        if any(row.get("delete_basis") == "semantic_bts_inside_corroborated_failure_cluster"
-               and row.get("dense_semantic_failure_cluster") is True for row in rows):
+        # The dense-cluster fact is the corroboration.  A higher-confidence
+        # BTS label may have been assigned the generic
+        # ``high_confidence_semantic`` basis earlier in the cleanup ladder;
+        # that precedence must not erase the independently-computed cluster
+        # evidence before singleton resolution sees it.  Every row still
+        # has to agree on BTS >= .90, recommend deletion, and at least one
+        # row must carry the dense-cluster observation.
+        if any(row.get("dense_semantic_failure_cluster") is True for row in rows):
             supported.add(cid)
     return frozenset(supported)
