@@ -18,13 +18,16 @@ def _drop_degenerate_duplicate_tail(segments):
     """Discard only a physically impossible repeated ASR tail at the source edge."""
     kept = []
     dropped = []
-    for segment in segments:
-        previous = kept[-1] if kept else None
-        if (previous is not None
+    for index, segment in enumerate(segments):
+        normalized = " ".join(segment.text.casefold().split())
+        matching_previous = next((
+            previous for previous in reversed(kept)
+            if " ".join(previous.text.casefold().split()) == normalized
+        ), None)
+        if (matching_previous is not None
+                and index == len(segments) - 1
                 and 0 < segment.end - segment.start <= 0.05
-                and 0 <= segment.start - previous.end <= 0.5
-                and " ".join(segment.text.casefold().split())
-                    == " ".join(previous.text.casefold().split())
+                and 0 <= segment.start - matching_previous.end <= 15.0
                 and len(segment.text.split()) >= 3):
             dropped.append({"start": segment.start, "end": segment.end,
                             "reason": "degenerate_duplicate_tail"})
@@ -41,7 +44,7 @@ class AlignmentFingerprint:
 
     def fingerprint(self):
         spec = {"provider": PROVIDER, "decode": self.decode, "language": self.language,
-                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v2-degenerate-tail",
+                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v3-terminal-duplicate-tail",
                 "interpolation": "ignore", "audio": "pcm_s16le-mono-16000"}
         return "asrcfg_" + hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
