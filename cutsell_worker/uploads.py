@@ -35,7 +35,7 @@ from .config import load_runtime_config
 from .storage import parse_s3_uri
 
 DEFAULT_UPLOAD_PREFIX = "cutsell/uploads/"
-MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
 ALLOWED_CONTENT_TYPES = {
     "video/mp4",
