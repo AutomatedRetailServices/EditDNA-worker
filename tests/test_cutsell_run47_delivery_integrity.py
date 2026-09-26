@@ -263,3 +263,55 @@ def test_selected_borderline_suffix_restores_safe_complete_parent_prefix():
     )
     repaired = apply_selection_conflicted_bridge_guard(draft)
     assert [clip.clip_id for clip in repaired.selected] == ["prefix", "suffix"]
+
+
+def test_post_authority_guard_cannot_restore_discarded_prefix():
+    prefix = _draft_clip(
+        "prefix", 10.0, 14.0,
+        "Esta es mi experiencia y soy la única persona de mi familia con este cáncer.",
+        selected=False,
+    )
+    suffix = _draft_clip(
+        "suffix", 14.5, 23.0,
+        "Por eso comparto esta conclusión y las elecciones que aprendí a cuidar.",
+    )
+    parent = _draft_clip(
+        "parent", 10.0, 23.0,
+        prefix.text + " " + suffix.text,
+        selected=False,
+    )
+    draft = DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        (suffix,), (), (prefix, parent),
+        {
+            "attempt_reconstruction": {
+                "attempts": [{"clip_id": "parent", "complete_idea": True}],
+                "preserved_borderline_subspans": [{
+                    "parent_clip_id": "parent",
+                    "prefix_clip_id": "prefix",
+                    "suffix_clip_id": "suffix",
+                }],
+            },
+            "hybrid_editorial_chunks": [{"decisions": [{
+                "clip_id": "prefix", "label": "alternate", "confidence": 0.8,
+                "content_role": "audience",
+            }]}],
+            "take_judge_groups": [{
+                "ranked": [{"clip_id": "prefix"}, {"clip_id": "suffix"}],
+                "member_usability": {
+                    "prefix": {"deterministic_unusable": False, "delete_recommended": False},
+                },
+            }],
+        },
+    )
+
+    repaired = apply_selection_conflicted_bridge_guard(
+        draft, allow_membership_additions=False,
+    )
+
+    assert [clip.clip_id for clip in repaired.selected] == ["suffix"]
+    assert {clip.clip_id for clip in repaired.discarded} == {"prefix", "parent"}
+    assert repaired.diagnostics["selection_conflicted_bridge_guard_post_authority"] == {
+        "membership_additions_allowed": False,
+        "suppressed_add_clip_ids": ["prefix"],
+    }
