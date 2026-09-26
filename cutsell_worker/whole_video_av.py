@@ -84,7 +84,7 @@ class GeminiWholeVideoAVProvider:
     session: object = requests
     media_preparer: object = prepare_av
     media_slicer: object = slice_prepared_av
-    window_sec: int = 90
+    window_sec: int = 45
     max_output_tokens: int = 2048
     max_media_bytes: int = 12_000_000
     retry_generation_timeout: bool = False
@@ -237,10 +237,15 @@ class GeminiWholeVideoAVProvider:
                     encoded = base64.b64encode(piece.read_bytes()).decode('ascii')
                     if window_count > 1:
                         piece.unlink()
-                    prompt = PROMPT + (
+                    prompt = PROMPT.replace(
+                        'Use at most 12 significant regions',
+                        'Use at most 6 significant regions'
+                    ) if window_count > 1 else PROMPT
+                    prompt += (
                         f'\nThis is window {window_index+1}/{window_count} of one source. '
                         f'Its local timeline is 0 to {duration:.6f} seconds; report only local '
-                        'times within this window. The full story may continue outside the window. '
+                        'times within this window. Each end must exceed its start. Never wrap '
+                        'timestamps or use absolute source times. The full story may continue outside the window. '
                         'Do not invent observations for unseen portions.'
                         if window_count > 1 else
                         f'\nOriginal source ends at {source.duration_sec:.6f} seconds. '
