@@ -233,22 +233,6 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
     move: set[str] = set()
     add: set[str] = set()
     audit: list[dict] = []
-    # This guard can run more than once around authoritative resolution.
-    # A prior deterministic retry verdict is the last membership decision
-    # over that exact pair, not another co-equal provider vote.  Without
-    # this monotonicity check a near-tied fuller-retry decision could flip
-    # back on the second invocation, leaving reciprocal A->B and B->A
-    # audit rows and making the resolver correctly refuse the contradiction.
-    settled_retry_pairs = {
-        (
-            str(prior.get("clip_id") or prior.get("removed_clip_id") or ""),
-            str(prior.get("winner_clip_id") or ""),
-        )
-        for prior in diagnostics.get("selection_conflicted_bridge_guard") or ()
-        if isinstance(prior, dict)
-        and str(prior.get("reason") or "")
-        == "deterministic_retry_final_membership_resolution"
-    }
     for row in _deterministic_retry_rows(diagnostics):
         fuller_restart_tie = False
         left_id = str(row.get("left_clip_id") or "")
@@ -271,10 +255,6 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             winner_id, loser_id = left_id, right_id
         elif left_selected != right_selected:
             current_id, peer_id = (left_id, right_id) if left_selected else (right_id, left_id)
-            if (peer_id, current_id) in settled_retry_pairs:
-                # The current member is already the settled winner over this
-                # peer. Reapplying the same unchanged evidence is idempotent.
-                continue
             current_positive = _strongest(votes, current_id, {"winner", "keep"})
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
             current, peer = all_by_id[current_id], all_by_id[peer_id]
@@ -495,10 +475,25 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
         current_content = _substantive(current.text)
         current_duration = max(0.001, float(current.end) - float(current.start))
         current_positive = _strongest(votes, current_id, {"winner", "keep"})
+        current_negative = _strongest(votes, current_id, {"alternate", "failed"})
+        current_negative_blocks = (
+            current_negative >= 0.80
+            and not (
+                current_positive >= 0.90
+                and current_positive - current_negative >= 0.10 - 1e-9
+                and current_negative <= 0.85 + 1e-9
+            )
+        )
         if (
             len(current_tokens) < 6
             or len(current_content) < 3
             or current_positive < 0.90
+            # A standard-confidence negative observation from an
+            # overlapping window does not make a punctuation-open, very
+            # short winner complete.  Preserve the safety veto when the
+            # negative is stronger than that standard value, or when the
+            # positive verdict lacks a clear margin.
+            or current_negative_blocks
         ):
             continue
 
@@ -508,17 +503,21 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             evidence = member_usability.get(peer_id)
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
             peer_negative = _strongest(votes, peer_id, {"alternate", "failed"})
+            peer_negative_blocks = (
+                peer_negative >= 0.80
+                and not (
+                    peer_positive >= 0.90
+                    and peer_positive - peer_negative >= 0.10 - 1e-9
+                    and peer_negative <= 0.85 + 1e-9
+                )
+            )
             if (
                 peer.source_asset_id != current.source_asset_id
                 or complete.get(peer_id) is False
                 or not evidence
                 or bool(evidence.get("deterministic_unusable"))
                 or bool(evidence.get("delete_recommended"))
-                or peer_negative > 0.80 + 1e-9
-                or (
-                    peer_negative >= 0.80 - 1e-9
-                    and peer_positive - peer_negative < 0.10 - 1e-9
-                )
+                or peer_negative_blocks
             ):
                 continue
             peer_tokens = _tokens(peer.text)
@@ -552,6 +551,12 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             "loser_token_count": len(current_tokens),
             "winner_token_count": len(_tokens(winner.text)),
             "winner_duration_sec": round(_duration, 3),
+            "winner_positive_confidence": round(
+                _strongest(votes, winner.clip_id, {"winner", "keep"}), 4,
+            ),
+            "winner_negative_confidence": round(
+                _strongest(votes, winner.clip_id, {"alternate", "failed"}), 4,
+            ),
         })
     return move, add, audit
 
@@ -1186,43 +1191,6 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
             loser_id, winner_id = right_id, left_id
         elif (
             confidence >= 0.90
-            and left_positive >= 0.90
-            and right_positive >= 0.90
-            and left_negative < 0.80
-            and right_negative < 0.80
-        ):
-            # When two nearby audience-safe deliveries are already proven
-            # equivalent, use the normal retake convention even if an
-            # overlapping provider window gave the earlier take a slightly
-            # higher score.  Require the later delivery to remain a
-            # substantial realization (not a tiny retry), to be separated
-            # by a real cut-sized gap, and to retain the same protected
-            # markers.  This resolves provider variance without making
-            # "later" a general ranking signal.
-            left, right = selected_by_id[left_id], selected_by_id[right_id]
-            earlier, later = (
-                (left, right) if float(left.start) <= float(right.start)
-                else (right, left)
-            )
-            earlier_duration = max(0.001, float(earlier.end) - float(earlier.start))
-            later_duration = max(0.0, float(later.end) - float(later.start))
-            gap = float(later.start) - float(earlier.end)
-            earlier_content = _substantive(earlier.text)
-            later_content = _substantive(later.text)
-            overlap = len(earlier_content & later_content) / max(
-                1, min(len(earlier_content), len(later_content))
-            )
-            if (
-                earlier.source_asset_id == later.source_asset_id
-                and 0.0 <= gap <= 8.0
-                and later_duration >= 0.60 * earlier_duration
-                and len(_tokens(later.text)) >= 0.65 * len(_tokens(earlier.text))
-                and overlap >= 0.60
-                and _critical(earlier.text).issubset(_critical(later.text))
-            ):
-                loser_id, winner_id = earlier.clip_id, later.clip_id
-        elif (
-            confidence >= 0.90
             and right_positive >= 0.90
             and right_positive - left_positive >= 0.02 - 1e-9
             and left_negative < 0.80
@@ -1663,9 +1631,36 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
     )
 
     all_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.alternates, *draft.discarded)}
-    independent_move_ids_without_chain = (
+    effective_continuation_add_ids = (
+        continuation_add_ids if allow_membership_additions else set()
+    )
+    # Build the continuation-chain proof from the membership that will
+    # actually survive the other independently proven removals in this same
+    # pass.  Recording every pre-pass neighbour as a required witness made a
+    # valid coverage proof stale whenever one of those neighbours was itself
+    # a duplicate removed concurrently.
+    pre_chain_move_ids = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | restatement_ids | proxy_ids | contained_ids
+        | restatement_ids | proxy_ids | contained_ids | abandoned_ids | anaphoric_ids
+    )
+    if allow_membership_additions:
+        pre_chain_move_ids |= dependent_ids | retry_ids | unmerged_retry_ids
+    provisional = tuple(
+        (
+            clip for clip in draft.selected
+            if clip.clip_id not in pre_chain_move_ids
+        )
+    ) + tuple(
+        (
+            all_by_id[clip_id] for clip_id in effective_continuation_add_ids
+            if clip_id in all_by_id
+        )
+    )
+    chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
+
+    independent_move_ids = (
+        bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
+        | restatement_ids | proxy_ids | contained_ids | chain_ids
         | abandoned_ids | anaphoric_ids
     )
     replacement_move_ids = dependent_ids | retry_ids | unmerged_retry_ids
@@ -1685,7 +1680,7 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         "orphaned_anaphoric_fragment_of_confirmed_retry",
     }
     selected_ids_now = {clip.clip_id for clip in draft.selected}
-    already_planned = independent_move_ids_without_chain | (
+    already_planned = independent_move_ids | (
         replacement_move_ids if allow_membership_additions else set()
     )
     replayed_independent_ids = {
@@ -1697,31 +1692,14 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         and str(row.get("winner_clip_id") or "") in selected_ids_now
         and str(row.get("winner_clip_id") or "") not in already_planned
     }
-    preliminary_move_ids = independent_move_ids_without_chain | replayed_independent_ids | (
+    independent_move_ids |= replayed_independent_ids
+    move_ids = independent_move_ids | (
         replacement_move_ids if allow_membership_additions else set()
     )
     requested_add_ids = (
         retry_add_ids | unmerged_retry_add_ids | continuation_add_ids | dependent_add_ids
         | borderline_add_ids
     )
-    preliminary_add_ids = (
-        requested_add_ids - preliminary_move_ids
-        if allow_membership_additions else set()
-    )
-
-    # Compute chain redundancy against the membership that will actually
-    # survive every other decision in this pass.  Previously a chain could
-    # cite a nearby witness that this same pass also removed, producing a
-    # proof that was true only for the transient input membership.
-    provisional = tuple(
-        clip for clip in draft.selected
-        if clip.clip_id not in preliminary_move_ids
-    ) + tuple(
-        all_by_id[clip_id] for clip_id in preliminary_add_ids
-        if clip_id in all_by_id
-    )
-    chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
-    move_ids = preliminary_move_ids | chain_ids
     add_ids = (requested_add_ids - move_ids) if allow_membership_additions else set()
     audit = (
         bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
@@ -1771,21 +1749,10 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
             "membership_additions_allowed": False,
             "suppressed_add_clip_ids": sorted(requested_add_ids),
         }
-    updated = replace(
+    return replace(
         draft,
         selected=tuple(selected),
         alternates=tuple(alternates),
         discarded=tuple(clip for clip in draft.discarded if clip.clip_id not in add_ids),
         diagnostics=diagnostics,
     )
-    # A subtractive post-authority pass can expose a second-order fragment:
-    # for example, pass 1 removes a proxy realization and only then is its
-    # short anaphoric lead-in provably orphaned.  Iterate to a fixed point;
-    # the selected set strictly shrinks on every recursion, so convergence
-    # is bounded by the input clip count and no membership addition is ever
-    # possible at this authority boundary.
-    if not allow_membership_additions and len(updated.selected) < len(draft.selected):
-        return apply_selection_conflicted_bridge_guard(
-            updated, allow_membership_additions=False,
-        )
-    return updated
