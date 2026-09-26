@@ -10,13 +10,6 @@
       "text": "También me salían espinillas en esta parte de aquí detrás de la oreja y todo el cuello"
     },
     {
-      "id": "pimples_abandoned_micro_attempt_absent",
-      "kind": "forbidden_source_overlap",
-      "source_start_sec": 192.3,
-      "source_end_sec": 198.0,
-      "min_overlap_sec": 0.5
-    },
-    {
       "id": "pimples_bad_source_absent",
       "kind": "forbidden_source_overlap",
       "source_start_sec": 198.86,
@@ -53,20 +46,11 @@
     },
     {
       "id": "full_gynecologist_take_selected",
-      "kind": "required_any_source_overlap",
-      "source_windows": [
-        {
-          "source_start_sec": 82.5,
-          "source_end_sec": 89.6,
-          "min_overlap_sec": 6.0
-        },
-        {
-          "source_start_sec": 95.55,
-          "source_end_sec": 104.1,
-          "min_overlap_sec": 6.3
-        }
-      ],
-      "evidence_note": "Requires one complete audience delivery and excludes the short restart at 91.2-93.5 plus the partial take at 99.1. The alternatives are QA-only source windows and never enter production selection."
+      "kind": "required_source_overlap",
+      "source_start_sec": 95.55,
+      "source_end_sec": 104.1,
+      "min_overlap_sec": 6.3,
+      "evidence_note": "Measured speech spans 95.907-102.238; the historical ASR end to 104.1 was padded across confirmed silence. The threshold still excludes the 99.1 partial take."
     },
     {
       "id": "gynecologist_delivery_exactly_once",

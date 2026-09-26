@@ -124,35 +124,9 @@ def _audience_support(diagnostics: dict, clip_id: str) -> float:
             if str(row.get("clip_id") or "") != clip_id:
                 continue
             if str(row.get("content_role") or "") != "audience":
-                pass
-            else:
-                try:
-                    best = max(best, float(row.get("confidence") or 0.0))
-                except (TypeError, ValueError):
-                    pass
-            audiovisual = row.get("audiovisual") or {}
-            for observation in audiovisual.get("observations") or ():
-                if not isinstance(observation, dict) or str(observation.get("role") or "") != "audience":
-                    continue
-                try:
-                    best = max(best, float(observation.get("confidence") or 0.0))
-                except (TypeError, ValueError):
-                    continue
-    return best
-
-
-def _clean_cut_role_support(diagnostics: dict, clip_id: str, roles: set[str]) -> float:
-    """Strongest already-recorded AV role support from the clean-cut judge."""
-    best = 0.0
-    for row in diagnostics.get("clean_cut_judge") or ():
-        if not isinstance(row, dict) or str(row.get("clip_id") or "") != clip_id:
-            continue
-        audiovisual = row.get("audiovisual") or {}
-        for observation in audiovisual.get("observations") or ():
-            if str(observation.get("role") or "") not in roles:
                 continue
             try:
-                best = max(best, float(observation.get("confidence") or 0.0))
+                best = max(best, float(row.get("confidence") or 0.0))
             except (TypeError, ValueError):
                 continue
     return best
@@ -257,21 +231,7 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             current_id, peer_id = (left_id, right_id) if left_selected else (right_id, left_id)
             current_positive = _strongest(votes, current_id, {"winner", "keep"})
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
-            current, peer = all_by_id[current_id], all_by_id[peer_id]
-            peer_is_short_open_restart = (
-                str(row.get("accepted_by") or "") in {
-                    "same_opening_restart", "same_opening_abandoned_start",
-                }
-                and float(peer.end) - float(peer.start) <= 3.0
-                and float(current.end) - float(current.start)
-                >= 1.5 * max(0.001, float(peer.end) - float(peer.start))
-                and not str(peer.text or "").rstrip().endswith((".", "?", "!", "…"))
-            )
-            if (
-                peer_positive >= 0.90
-                and peer_positive - current_positive >= 0.05 - 1e-9
-                and not peer_is_short_open_restart
-            ):
+            if peer_positive >= 0.90 and peer_positive - current_positive >= 0.05 - 1e-9:
                 winner_id, loser_id = peer_id, current_id
             else:
                 # A deterministic restart relation already proves these two
@@ -282,6 +242,7 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
                 # strong audience evidence, no strong negative verdict and an
                 # appreciably fuller physical delivery.  Critical facts remain
                 # protected by the subset check below.
+                current, peer = all_by_id[current_id], all_by_id[peer_id]
                 peer_negative = _strongest(votes, peer_id, {"alternate", "failed"})
                 later_fuller_retry = (
                     float(peer.start) > float(current.start)
@@ -305,15 +266,7 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
                     and _tokens(peer.text)[:5] == _tokens(current.text)[:5]
                     and peer_positive >= 0.80
                     and current_positive - peer_positive <= 0.15 + 1e-9
-                    # Overlapping provider windows commonly describe the
-                    # same delivery once as a positive audience take and
-                    # once as an alternate at the provider's standard 0.85
-                    # confidence.  That exact tie is not independent proof
-                    # of failure.  The much fuller retry, deterministic
-                    # same-opening relation, critical-fact parity, and the
-                    # non-deleting terminal evidence below still all have to
-                    # agree before membership changes.
-                    and peer_negative <= 0.85 + 1e-9
+                    and peer_negative <= 0.80 + 1e-9
                     and peer_positive + 1e-9 >= peer_negative
                     and complete.get(peer_id) is not False
                     and (
@@ -474,22 +427,11 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
         current_tokens = _tokens(current.text)
         current_content = _substantive(current.text)
         current_duration = max(0.001, float(current.end) - float(current.start))
-        current_positive = _strongest(votes, current_id, {"winner", "keep"})
-        current_negative = _strongest(votes, current_id, {"alternate", "failed"})
         if (
             len(current_tokens) < 6
             or len(current_content) < 3
-            or current_positive < 0.90
-            # A standard-confidence negative observation from an
-            # overlapping window does not make a punctuation-open, very
-            # short winner complete.  Preserve the safety veto when the
-            # negative is stronger than that standard value, or when the
-            # positive verdict lacks a clear margin.
-            or current_negative > 0.80 + 1e-9
-            or (
-                current_negative >= 0.80 - 1e-9
-                and current_positive - current_negative < 0.10 - 1e-9
-            )
+            or _strongest(votes, current_id, {"winner", "keep"}) < 0.90
+            or _strongest(votes, current_id, {"alternate", "failed"}) >= 0.80
         ):
             continue
 
@@ -912,133 +854,6 @@ def nearby_contained_selected_realization_ids(selected):
     return move, audit
 
 
-def abandoned_negated_restart_ids(selected, diagnostics: dict):
-    """Remove a short spoken correction immediately before its clean retry.
-
-    A creator may begin a sentence, negate that wording ("..., no." /
-    "..., not."), pause, and restart with the completed delivery.  This path
-    requires the literal terminal negation, the same multiword opening, a
-    materially fuller nearby retry, and independent AV evidence that the
-    short attempt is mixed/recording-process while the retry is audience
-    speech.  It does not infer corrections from negation alone.
-    """
-    ordered = tuple(sorted(
-        selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)
-    ))
-    complete = _attempt_completeness(diagnostics)
-    move: set[str] = set()
-    audit: list[dict] = []
-    for current, retry in zip(ordered, ordered[1:]):
-        if current.source_asset_id != retry.source_asset_id:
-            continue
-        current_tokens = _tokens(current.text)
-        retry_tokens = _tokens(retry.text)
-        current_duration = max(0.001, float(current.end) - float(current.start))
-        retry_duration = max(0.0, float(retry.end) - float(retry.start))
-        gap = float(retry.start) - float(current.end)
-        if not (3 <= len(current_tokens) <= 6 and current_tokens[-1] in _NEGATION):
-            continue
-        if len(retry_tokens) < 9 or current_tokens[:2] != retry_tokens[:2]:
-            continue
-        if gap < 0.0 or gap > 8.0 or retry_duration < 2.0 * current_duration:
-            continue
-        if complete.get(retry.clip_id) is False:
-            continue
-        current_mixed = _clean_cut_role_support(
-            diagnostics, current.clip_id, {"mixed", "recording_process"}
-        )
-        retry_audience = max(
-            _audience_support(diagnostics, retry.clip_id),
-            _clean_cut_role_support(diagnostics, retry.clip_id, {"audience"}),
-        )
-        if current_mixed < 0.80 or retry_audience < 0.80:
-            continue
-        move.add(current.clip_id)
-        audit.append({
-            "clip_id": current.clip_id,
-            "winner_clip_id": retry.clip_id,
-            "reason": "terminal_negation_abandoned_restart",
-            "opening_token_count": 2,
-            "gap_sec": round(gap, 3),
-            "loser_mixed_confidence": round(current_mixed, 4),
-            "winner_audience_confidence": round(retry_audience, 4),
-        })
-    return move, audit
-
-
-_ANAPHORIC_FRAGMENT_OPENINGS = frozenset({
-    ("era", "como"), ("fue", "como"), ("es", "como"),
-    ("was", "like"), ("is", "like"), ("it", "was"),
-})
-
-
-def orphaned_anaphoric_retry_fragment_ids(selected, alternates, discarded, diagnostics: dict):
-    """Remove a short anaphoric fragment orphaned from a replaced retry.
-
-    The fragment is removable only when it sits immediately before an
-    unselected continuation that has an explicit high-confidence equivalence
-    to a later selected, materially fuller winner.  This lets an existing
-    semantic decision cover a segmentation split without treating arbitrary
-    short phrases as duplicates.
-    """
-    selected_by_id = {clip.clip_id: clip for clip in selected}
-    unselected_by_id = {clip.clip_id: clip for clip in (*alternates, *discarded)}
-    move: set[str] = set()
-    audit: list[dict] = []
-    equivalence = diagnostics.get("semantic_idea_equivalence") or {}
-    for row in equivalence.get("merges") or ():
-        if not isinstance(row, dict):
-            continue
-        try:
-            confidence = float(row.get("confidence") or 0.0)
-        except (TypeError, ValueError):
-            continue
-        if confidence < 0.85:
-            continue
-        left_id = str(row.get("left_clip_id") or "")
-        right_id = str(row.get("right_clip_id") or "")
-        for proxy_id, winner_id in ((left_id, right_id), (right_id, left_id)):
-            proxy = unselected_by_id.get(proxy_id)
-            winner = selected_by_id.get(winner_id)
-            if proxy is None or winner is None or proxy.source_asset_id != winner.source_asset_id:
-                continue
-            if not (float(proxy.end) <= float(winner.start) + 1e-3):
-                continue
-            winner_content = _substantive(winner.text)
-            if len(winner_content) < 3:
-                continue
-            for fragment in selected:
-                if fragment.clip_id == winner_id or fragment.source_asset_id != proxy.source_asset_id:
-                    continue
-                fragment_tokens = _tokens(fragment.text)
-                fragment_content = _substantive(fragment.text)
-                if (
-                    len(fragment_tokens) > 7
-                    or tuple(fragment_tokens[:2]) not in _ANAPHORIC_FRAGMENT_OPENINGS
-                    or _critical(fragment.text)
-                    or not fragment_content
-                ):
-                    continue
-                leading_gap = float(proxy.start) - float(fragment.end)
-                winner_gap = float(winner.start) - float(proxy.end)
-                if leading_gap < 0.0 or leading_gap > 3.0 or winner_gap < 0.0 or winner_gap > 6.0:
-                    continue
-                covered = fragment_content & (_substantive(proxy.text) | winner_content)
-                coverage = len(covered) / len(fragment_content)
-                if coverage < 0.50 or len(winner_content) < 2 * len(fragment_content):
-                    continue
-                move.add(fragment.clip_id)
-                audit.append({
-                    "clip_id": fragment.clip_id,
-                    "proxy_clip_id": proxy_id,
-                    "winner_clip_id": winner_id,
-                    "reason": "orphaned_anaphoric_fragment_of_confirmed_retry",
-                    "equivalence_confidence": round(confidence, 4),
-                    "substantive_coverage": round(coverage, 4),
-                })
-    return move, audit
-
-
 def conflicted_redundant_bridge_ids(selected, diagnostics: dict):
     """Return selected clip ids that should become Alternates/SWAP.
 
@@ -1281,17 +1096,13 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
         failed_confidence = _strongest(votes, clip_id, {"failed"})
         positive_confidence = _strongest(votes, clip_id, {"winner", "keep"})
         corroborated_wrong_take = bool(wrong_take_peers.get(clip_id))
-        duration = max(0.0, float(clip.end) - float(clip.start))
-        short_wrong_take_tail = corroborated_wrong_take and duration <= 2.5
         terminal_delete = (
             failed_confidence >= 0.90
             and positive_confidence < 0.80
             and bool(evidence.get("deterministic_unusable"))
             and bool(evidence.get("delete_recommended"))
         )
-        if not (terminal_delete or corroborated_wrong_take):
-            continue
-        if usability.get(clip_id) != "UNUSABLE" and not short_wrong_take_tail:
+        if usability.get(clip_id) != "UNUSABLE" or not (terminal_delete or corroborated_wrong_take):
             continue
 
         component = {clip_id}
@@ -1310,23 +1121,9 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
             peer = selected_by_id[peer_id]
             if peer.source_asset_id != clip.source_asset_id:
                 continue
-            if complete.get(peer_id) is False:
+            if complete.get(peer_id) is False or usability.get(peer_id) == "UNUSABLE":
                 continue
-            winner_positive = _strongest(votes, peer_id, {"winner", "keep"})
-            audience_support = _audience_support(diagnostics, peer_id)
-            if usability.get(peer_id) == "UNUSABLE" and not (
-                short_wrong_take_tail
-                and winner_positive >= 0.80
-                and audience_support >= 0.85
-            ):
-                continue
-            if winner_positive < (0.80 if short_wrong_take_tail else 0.90):
-                continue
-            if (
-                short_wrong_take_tail
-                and winner_positive < 0.90
-                and audience_support < 0.85
-            ):
+            if _strongest(votes, peer_id, {"winner", "keep"}) < 0.90:
                 continue
             winner_id = peer_id
             break
@@ -1341,7 +1138,6 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
             "component_clip_ids": sorted(component),
             "failed_confidence": round(failed_confidence, 4),
             "multimodal_wrong_take_corroborated": corroborated_wrong_take,
-            "short_wrong_take_tail": short_wrong_take_tail,
             "winner_positive_confidence": round(
                 _strongest(votes, winner_id, {"winner", "keep"}), 4
             ),
@@ -1564,16 +1360,8 @@ def terminally_incomplete_selected_ids(selected, diagnostics: dict):
     return move, audit
 
 
-def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions: bool = True):
-    """Reconcile proven conflicted/redundant final membership.
-
-    ``allow_membership_additions`` is disabled after authoritative realization
-    resolution.  At that boundary this guard may still remove independently
-    proven duplicate/failed material, but it must not restore an alternate or
-    discarded realization, nor perform a replacement whose winning peer would
-    have to be restored.  The authoritative resolver is the sole owner of
-    additions to the final KEEP set.
-    """
+def apply_selection_conflicted_bridge_guard(draft):
+    """Move proven conflicted redundant bridges from Selected to Alternates/SWAP."""
     diagnostics = dict(draft.diagnostics or {})
     bridge_ids, bridge_audit = conflicted_redundant_bridge_ids(draft.selected, diagnostics)
     duplicate_ids, duplicate_audit = confirmed_selected_duplicate_ids(draft.selected, diagnostics)
@@ -1602,100 +1390,33 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
     contained_ids, contained_audit = nearby_contained_selected_realization_ids(draft.selected)
-    abandoned_ids, abandoned_audit = abandoned_negated_restart_ids(draft.selected, diagnostics)
-    anaphoric_ids, anaphoric_audit = orphaned_anaphoric_retry_fragment_ids(
-        draft.selected, draft.alternates, draft.discarded, diagnostics
-    )
     continuation_add_ids, continuation_add_audit = missing_continuation_bridge_ids(
         draft.selected, draft.alternates, draft.discarded, diagnostics
     )
 
     all_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.alternates, *draft.discarded)}
-    effective_continuation_add_ids = (
-        continuation_add_ids if allow_membership_additions else set()
-    )
-    # Build the continuation-chain proof from the membership that will
-    # actually survive the other independently proven removals in this same
-    # pass.  Recording every pre-pass neighbour as a required witness made a
-    # valid coverage proof stale whenever one of those neighbours was itself
-    # a duplicate removed concurrently.
-    pre_chain_move_ids = (
-        bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | restatement_ids | proxy_ids | contained_ids | abandoned_ids | anaphoric_ids
-    )
-    if allow_membership_additions:
-        pre_chain_move_ids |= dependent_ids | retry_ids | unmerged_retry_ids
     provisional = tuple(
-        (
-            clip for clip in draft.selected
-            if clip.clip_id not in pre_chain_move_ids
-        )
-    ) + tuple(
-        (
-            all_by_id[clip_id] for clip_id in effective_continuation_add_ids
-            if clip_id in all_by_id
-        )
+        (*draft.selected, *(all_by_id[clip_id] for clip_id in continuation_add_ids if clip_id in all_by_id))
     )
     chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
 
-    independent_move_ids = (
+    move_ids = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | restatement_ids | proxy_ids | contained_ids | chain_ids
-        | abandoned_ids | anaphoric_ids
+        | dependent_ids | restatement_ids
+        | retry_ids | unmerged_retry_ids | proxy_ids | contained_ids | chain_ids
     )
-    replacement_move_ids = dependent_ids | retry_ids | unmerged_retry_ids
-    # A later authority stage can resurrect a loser that this guard already
-    # removed.  Reapply only removal-only proofs whose selected winner still
-    # exists and is not itself being removed now.  This never restores or
-    # substitutes membership, so resolver ownership of additions remains
-    # intact.
-    replayable_reasons = {
-        "direct_equivalence_confirmed_final_winner",
-        "failed_unusable_retry_component_yields_to_complete_winner",
-        "deterministic_retry_component_failed_debris",
-        "provider_rejected_restatement_already_fully_delivered",
-        "later_selected_realization_fully_contained_in_nearby_delivery",
-        "contained_fragment_of_confirmed_duplicate",
-        "terminal_negation_abandoned_restart",
-        "orphaned_anaphoric_fragment_of_confirmed_retry",
-    }
-    selected_ids_now = {clip.clip_id for clip in draft.selected}
-    already_planned = independent_move_ids | (
-        replacement_move_ids if allow_membership_additions else set()
-    )
-    replayed_independent_ids = {
-        str(row.get("clip_id") or row.get("removed_clip_id") or "")
-        for row in (diagnostics.get("selection_conflicted_bridge_guard") or ())
-        if isinstance(row, dict)
-        and str(row.get("reason") or "") in replayable_reasons
-        and str(row.get("clip_id") or row.get("removed_clip_id") or "") in selected_ids_now
-        and str(row.get("winner_clip_id") or "") in selected_ids_now
-        and str(row.get("winner_clip_id") or "") not in already_planned
-    }
-    independent_move_ids |= replayed_independent_ids
-    move_ids = independent_move_ids | (
-        replacement_move_ids if allow_membership_additions else set()
-    )
-    requested_add_ids = (
+    add_ids = (
         retry_add_ids | unmerged_retry_add_ids | continuation_add_ids | dependent_add_ids
         | borderline_add_ids
-    )
-    add_ids = (requested_add_ids - move_ids) if allow_membership_additions else set()
+    ) - move_ids
     audit = (
         bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
         + dependent_audit + restatement_audit
         + borderline_audit
         + retry_audit + unmerged_retry_audit
         + proxy_audit + contained_audit + continuation_add_audit + chain_audit
-        + abandoned_audit + anaphoric_audit
     )
     if not move_ids and not add_ids:
-        if requested_add_ids and not allow_membership_additions:
-            diagnostics["selection_conflicted_bridge_guard_post_authority"] = {
-                "membership_additions_allowed": False,
-                "suppressed_add_clip_ids": sorted(requested_add_ids),
-            }
-            return replace(draft, diagnostics=diagnostics)
         return draft
 
     selected_by_id = {clip.clip_id: clip for clip in draft.selected}
@@ -1714,21 +1435,7 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
             alternates.append(replace(clip, selected=False))
     alternates.sort(key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id))
 
-    # Preserve earlier audited membership proofs if this guard is invoked
-    # again on an already-guarded draft.  StoryValidator consumes those
-    # proofs; replacing them with only the second pass's delta would make an
-    # otherwise idempotent reapplication reopen resolved coverage findings.
-    prior_audit = list(diagnostics.get("selection_conflicted_bridge_guard") or ())
-    combined_audit = prior_audit[:]
-    for row in audit:
-        if row not in combined_audit:
-            combined_audit.append(row)
-    diagnostics["selection_conflicted_bridge_guard"] = combined_audit
-    if not allow_membership_additions:
-        diagnostics["selection_conflicted_bridge_guard_post_authority"] = {
-            "membership_additions_allowed": False,
-            "suppressed_add_clip_ids": sorted(requested_add_ids),
-        }
+    diagnostics["selection_conflicted_bridge_guard"] = list(audit)
     return replace(
         draft,
         selected=tuple(selected),
