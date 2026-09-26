@@ -114,10 +114,14 @@ def test_source_windows_catch_failed_attempt_and_do_not_treat_absent_timing_as_p
     ], manifest={"checks": [stomach, gyn]})
     assert _failures(report) == {"abandoned_stomach_attempt_absent": "forbidden_source_overlap_selected"}
     _, report = _run(tmp_path, [
-        _row("An earlier, different realization", 82.82, 89.36, "earlier_gyn"),
+        _row("An earlier complete delivery", 82.82, 89.36, "earlier_gyn"),
         _row("An abandoned attempt", 245.39, 251.61, "attempt_124"),
     ], manifest={"checks": [stomach, gyn]})
-    assert set(_failures(report)) == {"abandoned_stomach_attempt_absent", "full_gynecologist_take_selected"}
+    assert set(_failures(report)) == {"abandoned_stomach_attempt_absent"}
+    _, report = _run(tmp_path, [
+        _row("Only the short restart", 91.24, 93.52, "short_gyn"),
+    ], manifest={"checks": [gyn]})
+    assert _failures(report) == {"full_gynecologist_take_selected": "source_overlap_missing"}
     _, report = _run(tmp_path, [
         _row("Only a partial gynecologist take", 99.1, 104.1, "partial_gyn"),
     ], manifest={"checks": [gyn]})
@@ -271,7 +275,7 @@ def test_complete_target_can_pass_all_checks_without_changing_historical_oracle(
     historical = json.loads(HISTORICAL_MANIFEST.read_text(encoding="utf-8"))
     assert next(c for c in historical["checks"] if c["id"] == "pimples_later_winner_present")["kind"] == "required_exact"
     manifest = _manifest()
-    assert len(manifest["checks"]) == 14
+    assert len(manifest["checks"]) == 15
     good = (
         "Otro síntoma era que me salían espinillas como si fuera una alergia de "
         "esta parte aquí detrás de la oreja y en el cuello. Me salía por temporadas."

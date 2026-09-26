@@ -1,6 +1,6 @@
 name: CutSell Video00 after Yaskira05 Run31
 # Isolated cross-video evaluation of the approved Yaskira05 Run31 engine.
-# Manual qualification trigger: 2026-09-26T22:01Z.
+# Manual qualification trigger: 2026-09-26T23:12Z.
 on:
   push:
     branches:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 concurrency:
   group: cutsell-video00-after-y05-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   compare:
     if: >-

@@ -495,6 +495,13 @@ def _missing_idea_coverage(draft) -> list[dict]:
             cid in selected_ids or cid in selected_parent_ids
             for cid in member_ids
         )
+        if not covered:
+            covered = any(
+                _final_membership_coverage_credit(
+                    draft.diagnostics, cid, selected_ids,
+                )[0]
+                for cid in member_ids
+            )
         if member_ids and not covered:
             missing.append({"group_id": group.get("group_id"), "member_clip_ids": member_ids})
     return missing
@@ -636,6 +643,52 @@ def _structured_component_coverage_credit(
     return False
 
 
+def _final_membership_coverage_credit(
+    diagnostics, discarded_id: str, selected_ids: set[str],
+) -> tuple[bool, str | None]:
+    """Credit a final guard removal that already proved selected coverage.
+
+    The final membership guard can collapse a continuation chain whose
+    protected markers and substantive content are fully covered by nearby
+    selected clips even when grouping placed the chain in its own family.
+    Story validation must consume that explicit final-membership evidence or
+    it reclassifies the intentionally removed restatement as unique loss and
+    blocks Boundary from trimming the resulting repeated close.
+    """
+    for row in (diagnostics or {}).get("selection_conflicted_bridge_guard") or ():
+        if not isinstance(row, dict):
+            continue
+        reason = str(row.get("reason") or "")
+        if reason == "later_continuation_chain_repeats_nearby_critical_claim":
+            removed_ids = {str(value) for value in row.get("clip_ids") or ()}
+            witnesses = {str(value) for value in row.get("prior_clip_ids") or ()}
+            if discarded_id in removed_ids and witnesses and witnesses.issubset(selected_ids):
+                return True, "final_membership_nearby_chain_coverage"
+        if reason == "later_selected_realization_fully_contained_in_nearby_delivery":
+            if (
+                discarded_id == str(row.get("clip_id") or "")
+                and str(row.get("winner_clip_id") or "") in selected_ids
+            ):
+                return True, "final_membership_contained_realization_coverage"
+        if reason in {
+            "direct_equivalence_confirmed_final_winner",
+            "deterministic_retry_final_membership_resolution",
+            "failed_unusable_retry_component_yields_to_complete_winner",
+            "deterministic_retry_component_failed_debris",
+            "provider_rejected_restatement_already_fully_delivered",
+            "dependent_opening_yields_to_complete_family_peer",
+            "contained_fragment_of_confirmed_duplicate",
+            "terminal_negation_abandoned_restart",
+            "orphaned_anaphoric_fragment_of_confirmed_retry",
+        }:
+            if (
+                discarded_id == str(row.get("clip_id") or "")
+                and str(row.get("winner_clip_id") or "") in selected_ids
+            ):
+                return True, "final_membership_explicit_winner_coverage"
+    return False, None
+
+
 def _same_idea_paraphrase_credit(
     clip, member_ids: tuple[str, ...], selected_ids: set, diagnostics,
 ) -> tuple[bool, str | None]:
@@ -645,6 +698,11 @@ def _same_idea_paraphrase_credit(
     module comment above for why this is the only evidence source
     consulted (a deterministic idea-scoped overlap fallback is inert by
     construction and is deliberately not implemented)."""
+    final_credit, final_reason = _final_membership_coverage_credit(
+        diagnostics, clip.clip_id, selected_ids,
+    )
+    if final_credit:
+        return True, final_reason
     winner_ids = [cid for cid in member_ids if cid != clip.clip_id and cid in selected_ids]
     if not winner_ids:
         return False, None
@@ -968,8 +1026,19 @@ def _lost_semantic_atoms(
         suppressed_reason = None
         restart_consultations: list[dict] = []
         if content_loss:
+            # This evidence is emitted by the final membership guard and is
+            # valid independently of whether grouping happened to place the
+            # removed continuation in a retry family.  Consult it first so a
+            # separately grouped (or pre-group) duplicate chain is not
+            # reopened here as unique content loss.
+            credited, evidence_kind = _final_membership_coverage_credit(
+                draft.diagnostics, clip.clip_id, selected_ids,
+            )
+            if credited:
+                content_loss = False
+                suppressed_reason = evidence_kind
             group = clip_id_to_group.get(clip.clip_id)
-            if group is not None:
+            if content_loss and group is not None:
                 _group_id, member_ids = group
                 credited, evidence_kind = _same_idea_paraphrase_credit(
                     clip, member_ids, selected_ids, draft.diagnostics,
@@ -977,7 +1046,7 @@ def _lost_semantic_atoms(
                 if credited:
                     content_loss = False
                     suppressed_reason = evidence_kind
-            else:
+            elif content_loss:
                 # D-097.7: the multimodal layer's own wrong_take rejection
                 # (recording-process evidence) is consulted first.
                 credited, restart_consultations = _pre_group_wrong_take_credit(
@@ -1257,6 +1326,28 @@ def _lost_critical_claims(
                         "owning_authority": "BestTakeResolver",
                         "resolution": "claim_equivalence_arbiter_confirmed",
                     })
+                continue
+            semantic_winner_id = next((
+                winner_id for winner_id in winners
+                if _semantic_equivalence_confidence(
+                    draft.diagnostics, claim.source_clip_id, winner_id,
+                ) >= _SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD
+            ), None)
+            if semantic_winner_id is not None:
+                confirmations.append({
+                    "idea_id": group.get("group_id"),
+                    "claim_id": claim.claim_id,
+                    "canonical_claim_id": claim.canonical_claim_id,
+                    "claim_type": claim.claim_type,
+                    "claim_text": claim.text,
+                    "importance": claim.importance,
+                    "source_clip_id": claim.source_clip_id,
+                    "winning_clip_ids": list(winners),
+                    "coverage_against_winning_realization": round(coverage, 4),
+                    "owning_authority": "BestTakeResolver",
+                    "resolution": "same_idea_semantic_equivalence",
+                    "semantic_equivalent_winner_id": semantic_winner_id,
+                })
                 continue
             # D-079 Phase 1/2: canonical claim identity. `claim.
             # canonical_claim_id` (semantic_claims.extract_claims, minted
