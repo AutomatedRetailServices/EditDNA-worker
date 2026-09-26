@@ -233,6 +233,22 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
     move: set[str] = set()
     add: set[str] = set()
     audit: list[dict] = []
+    # This guard can run more than once around authoritative resolution.
+    # A prior deterministic retry verdict is the last membership decision
+    # over that exact pair, not another co-equal provider vote.  Without
+    # this monotonicity check a near-tied fuller-retry decision could flip
+    # back on the second invocation, leaving reciprocal A->B and B->A
+    # audit rows and making the resolver correctly refuse the contradiction.
+    settled_retry_pairs = {
+        (
+            str(prior.get("clip_id") or prior.get("removed_clip_id") or ""),
+            str(prior.get("winner_clip_id") or ""),
+        )
+        for prior in diagnostics.get("selection_conflicted_bridge_guard") or ()
+        if isinstance(prior, dict)
+        and str(prior.get("reason") or "")
+        == "deterministic_retry_final_membership_resolution"
+    }
     for row in _deterministic_retry_rows(diagnostics):
         fuller_restart_tie = False
         left_id = str(row.get("left_clip_id") or "")
@@ -255,6 +271,10 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             winner_id, loser_id = left_id, right_id
         elif left_selected != right_selected:
             current_id, peer_id = (left_id, right_id) if left_selected else (right_id, left_id)
+            if (peer_id, current_id) in settled_retry_pairs:
+                # The current member is already the settled winner over this
+                # peer. Reapplying the same unchanged evidence is idempotent.
+                continue
             current_positive = _strongest(votes, current_id, {"winner", "keep"})
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
             current, peer = all_by_id[current_id], all_by_id[peer_id]

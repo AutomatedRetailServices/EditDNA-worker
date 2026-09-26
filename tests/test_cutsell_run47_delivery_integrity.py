@@ -170,6 +170,40 @@ def test_final_membership_winner_is_not_resurrected_by_authoritative_resolver():
     assert resolution.winner_realization_id == "real_good"
 
 
+def test_ledger_ignores_stale_reciprocal_final_membership_history():
+    loser = replace(
+        _draft_clip("loser", 10.0, 16.0, "A complete earlier version."),
+        realization_id="real_loser", semantic_idea_id="idea_retry",
+    )
+    winner = replace(
+        _draft_clip("winner", 20.0, 30.0, "A complete fuller retry."),
+        realization_id="real_winner", semantic_idea_id="idea_retry",
+    )
+    draft = DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        (winner,), (), (loser,),
+        {
+            "selection_conflicted_bridge_guard": [
+                {
+                    "clip_id": "loser", "winner_clip_id": "winner",
+                    "reason": "deterministic_retry_final_membership_resolution",
+                },
+                {
+                    "clip_id": "winner", "winner_clip_id": "loser",
+                    "reason": "deterministic_retry_final_membership_resolution",
+                },
+            ],
+            "take_group_members": [["loser", "winner"]],
+        },
+    )
+
+    ledger = build_semantic_ledger_shadow(draft)
+    resolution = resolve_realizations_shadow(ledger).idea_resolutions["idea_retry"]
+
+    assert resolution.winner_realization_id == "real_winner"
+    assert resolution.decision_status == "RESOLVED_WINNER"
+
+
 def test_post_authority_replays_prior_removal_only_proof():
     fragment = _draft_clip("fragment", 10.0, 12.0, "It was like an allergy.")
     winner = _draft_clip("winner", 20.0, 28.0, "The complete later allergy delivery.")

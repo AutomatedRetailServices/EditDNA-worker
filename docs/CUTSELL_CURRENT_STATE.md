@@ -1588,3 +1588,19 @@ the next authorized workflow must pass all Video00 editorial checks, render and
 beat Human Gold without truncations, false starts or duplicates, then rerun
 Yaskira05 and match the approved #31 two-span/33.234 s/QC contract. No release or
 production-readiness claim is made before those artifacts are inspected.
+
+## 2026-09-26 — Run #104: content defects fixed; reciprocal authority blocked render
+
+Run #104 (36279800693) is not approved and produced no render. It selected the
+full gynecologist delivery, removed the acne micro-fragment and stomach false
+start, and reached StoryValidator/FinalEditReviewer PASS. Historical QA still
+showed the old sonography take because repeated final-membership reconciliation
+had recorded both directions of the same retry decision; the authoritative
+resolver returned REVIEW_REQUIRED and correctly blocked Freeze. The final
+selection had 20 clips / 134.265 s.
+
+The guard is now idempotent for an already-settled deterministic retry pair, and
+the Ledger accepts only final-membership audit rows consistent with the draft's
+actual selected/discarded state. Targeted regression is green (81 passed). Live
+qualification remains pending; Human Gold and the approved Yaskira05 #31 contract
+have not yet been reached.

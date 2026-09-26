@@ -984,6 +984,13 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
         loser_record = ledger.realizations().get(loser_realization_id)
         if winner_record is None or loser_record is None:
             continue
+        # Audit history is append-only and may contain an earlier verdict
+        # superseded by a later guard pass.  Only the row consistent with
+        # the draft membership the Ledger is reconstructing is a FINAL
+        # membership verdict; stale reciprocal history remains observable
+        # but cannot become co-equal semantic-winner evidence.
+        if winner_record.state != "selected" or loser_record.state == "selected":
+            continue
         idea_id = winner_record.semantic_idea_id
         if not idea_id or idea_id != loser_record.semantic_idea_id:
             continue

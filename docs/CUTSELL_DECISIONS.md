@@ -80712,3 +80712,30 @@ collection still has the pre-existing optional `modal` dependency error and
 legacy `test_semantic_stitch.py` import-time API mismatch; the broader test run
 was therefore not claimed all-green. A new paid benchmark/render is required
 before any Video00 or Yaskira05 quality claim.
+
+## 2026-09-26 — Repeated final-membership reconciliation is monotonic
+
+Video00 run #104 (36279800693) verified the preceding fixes: the full
+gynecologist delivery was selected, the orphan acne fragment and stomach false
+start were absent, StoryValidator and FinalEditReviewer passed, and final
+membership coverage no longer blocked. It still froze because one sonography
+retry family reached the resolver as REVIEW_REQUIRED. The append-only guard
+audit contained reciprocal verdicts for the same pair: an earlier pass replaced
+the shorter selected delivery with the substantially fuller retry, then a later
+invocation re-applied the unchanged provider confidence and reversed it. The
+Ledger treated both historical rows as current final-winner evidence, correctly
+refusing the contradiction.
+
+A deterministic retry decision is now monotonic across repeated guard calls for
+the same unchanged pair: once the selected member is the recorded settled
+winner, reapplication is idempotent. Independently, Ledger reconstruction only
+promotes a final-membership audit row when its winner is selected and its loser
+is not selected in the draft being reconstructed. Stale reciprocal history stays
+observable but cannot become co-equal winner authority. This does not change the
+first-pass completeness, critical-marker, usability, negative-vote or
+same-opening safety gates, and does not prefer any video-specific wording.
+
+Offline regression: 81 relevant guard/Ledger/resolver tests passed, including
+new repeated-pass and stale-reciprocal controls. Run #104 was not rendered and
+did not reach Human Gold or Yaskira05; another authorized live qualification is
+required.

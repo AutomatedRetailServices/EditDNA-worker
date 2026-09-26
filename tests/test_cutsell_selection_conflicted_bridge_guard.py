@@ -523,6 +523,50 @@ def test_same_opening_near_tie_prefers_substantially_fuller_later_delivery():
     assert add == {"retry"}
 
 
+def test_reapplying_guard_cannot_reverse_settled_fuller_retry():
+    first = _clip(
+        "first", 10.0, 16.5,
+        "We never considered a thyroid scan because every year gave two states.",
+    )
+    retry = _clip(
+        "retry", 20.0, 30.0,
+        "We never considered a thyroid scan because every examination showed it worked perfectly.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "first", "right_clip_id": "retry",
+            "confidence": 1.0, "accepted_by": "same_opening_restart",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "take_judge_groups": [{"candidate_usability_summary": {
+            "first": "USABLE", "retry": "USABLE",
+        }}],
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "first", "label": "winner", "confidence": 0.95},
+            {"clip_id": "retry", "label": "keep", "confidence": 0.85},
+        ]}],
+    }
+    draft = DraftTimeline(
+        "v1", "project", EditStrategy.STORYTELLING,
+        (first,), (), (retry,), diagnostics,
+    )
+    first_pass = apply_selection_conflicted_bridge_guard(draft)
+    second_pass = apply_selection_conflicted_bridge_guard(first_pass)
+
+    assert [clip.clip_id for clip in first_pass.selected] == ["retry"]
+    assert [clip.clip_id for clip in second_pass.selected] == ["retry"]
+    pair_rows = [
+        row for row in second_pass.diagnostics["selection_conflicted_bridge_guard"]
+        if row.get("reason") == "deterministic_retry_final_membership_resolution"
+    ]
+    assert [(row["clip_id"], row["winner_clip_id"]) for row in pair_rows] == [
+        ("first", "retry"),
+    ]
+
+
 def test_short_positive_restart_with_standard_negative_vote_yields_to_safe_full_peer():
     full = _clip(
         "full", 10.0, 17.0,
