@@ -1549,6 +1549,36 @@ def _semantic_best_take(
 from .watch_listen_runtime import runtime_diagnostics
 
 
+def _is_corroborated_failed_singleton(
+    members,
+    semantic_decisions: dict[str, tuple[str, float]],
+    semantic_delete_recommended: dict[str, bool],
+    local_failure_corroborated: dict[str, bool],
+    dense_failure_cluster: dict[str, bool],
+) -> bool:
+    """A lone failed take is unusable only with two independent supports.
+
+    Hybrid supplies the semantic ``failed`` verdict.  Local audiovisual
+    evidence supplies corroboration.  The second semantic support may be an
+    explicit delete recommendation or membership in a dense failure cluster;
+    the latter closes model wording variability without weakening the local
+    evidence requirement.
+    """
+    if len(members) != 1:
+        return False
+    clip_id = members[0].clip_id
+    label, confidence = semantic_decisions.get(clip_id, ("", 0.0))
+    return bool(
+        label == "failed"
+        and confidence >= 0.80
+        and local_failure_corroborated.get(clip_id, False)
+        and (
+            semantic_delete_recommended.get(clip_id, False)
+            or dense_failure_cluster.get(clip_id, False)
+        )
+    )
+
+
 def build_flow_b_draft(
     request: ProcessingRequest,
     takes: Iterable[CandidateTake],
@@ -1872,11 +1902,14 @@ def build_flow_b_draft(
     # every window decision) -- deterministic unusability evidence, never a
     # label.
     hybrid_local_failure_corroborated: dict[str, bool] = {}
+    hybrid_dense_failure_cluster: dict[str, bool] = {}
     for diagnostic in hybrid_cleanup.diagnostics:
         for decision in diagnostic.get("decisions") or ():
             clip_id = decision.get("clip_id")
             if clip_id and decision.get("local_failure_corroborated"):
                 hybrid_local_failure_corroborated[clip_id] = True
+            if clip_id and decision.get("dense_semantic_failure_cluster"):
+                hybrid_dense_failure_cluster[clip_id] = True
 
     # Preserve contextual BTS evidence separately from deterministic local
     # unusability: it is authorized only for consistent BTS singletons.
@@ -2369,12 +2402,12 @@ def build_flow_b_draft(
         complete_window_winner_conflict["routed"] = semantic_best_take_reason == "unresolved_semantic_winner_conflict"
         _terminal_besttake_confidence_result = _terminal_confidence_out.get("terminal_besttake_confidence")
         no_usable_realization = selected_clip_id is None
-        corroborated_failed_singleton = bool(
-            len(members) == 1
-            and family_semantic_decisions.get(members[0].clip_id, ("", 0.0))[0] == "failed"
-            and family_semantic_decisions.get(members[0].clip_id, ("", 0.0))[1] >= 0.85
-            and hybrid_semantic_delete_recommended.get(members[0].clip_id, False)
-            and hybrid_local_failure_corroborated.get(members[0].clip_id, False)
+        corroborated_failed_singleton = _is_corroborated_failed_singleton(
+            members,
+            family_semantic_decisions,
+            hybrid_semantic_delete_recommended,
+            hybrid_local_failure_corroborated,
+            hybrid_dense_failure_cluster,
         )
         covered_failed_singleton = bool(
             len(members) == 1

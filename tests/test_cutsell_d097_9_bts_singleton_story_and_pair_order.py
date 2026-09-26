@@ -35,6 +35,7 @@ from cutsell_worker.final_story_coherence_validation import (
     _no_usable_realization_groups,
     apply_final_story_coherence_validation,
 )
+from cutsell_worker.pipeline import _is_corroborated_failed_singleton
 from cutsell_worker.semantic_idea_equivalence import (
     IdeaEquivalenceDecision,
     IdeaEquivalenceResult,
@@ -172,6 +173,22 @@ def test_the_story_validator_names_the_basis_and_never_blocks():
 def _take(clip_id, start, end, text, *, complete=True):
     return CandidateTake(clip_id=clip_id, source_asset_id="src", source_order=0, start=start, end=end,
                          text=text, complete_idea=complete)
+
+
+def test_dense_failed_singleton_with_local_corroboration_is_unusable_despite_wording_variance():
+    member = _take("failed", 1.0, 5.0, "I start the line and stumble before restarting")
+    assert _is_corroborated_failed_singleton(
+        (member,), {"failed": ("failed", 0.80)}, {"failed": False},
+        {"failed": True}, {"failed": True},
+    )
+
+
+def test_failed_singleton_still_fails_open_without_independent_local_support():
+    member = _take("failed", 1.0, 5.0, "A unique complete statement")
+    assert not _is_corroborated_failed_singleton(
+        (member,), {"failed": ("failed", 0.95)}, {"failed": True},
+        {"failed": False}, {"failed": True},
+    )
 
 
 HAIR = _take("hair", 226.7, 233.2, "My hair was falling out whenever I washed it and I blamed the stress.")
