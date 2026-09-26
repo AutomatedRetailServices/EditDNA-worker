@@ -152,6 +152,99 @@ def test_pair_requires_consistent_failure_and_same_session():
     )
 
 
+def test_stronger_failed_vote_dominates_weaker_overlapping_keep_or_alternate():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    clean_row = row(
+        "clean", label="winner", proposed_label="winner",
+        semantic_delete_recommended=False, confidence=0.95,
+    )
+    for protective_label in ("keep", "alternate", "uncertain"):
+        windows = (
+            {"decisions": [
+                row("failed", confidence=0.85), clean_row,
+            ]},
+            {"decisions": [
+                row(
+                    "failed", label=protective_label,
+                    proposed_label=protective_label, confidence=0.70,
+                    semantic_delete_recommended=False,
+                ),
+                clean_row,
+            ]},
+        )
+        assert failed_retry_coverage_pairs(
+            (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+        ) == frozenset({("failed", "clean")})
+
+
+def test_equal_or_stronger_protective_vote_still_blocks_destructive_comparison():
+    failed = take("failed", FAILED_TEXT, 0, 10)
+    clean = take("clean", CLEAN_TEXT, 50, 65)
+    clean_row = row(
+        "clean", label="winner", proposed_label="winner",
+        semantic_delete_recommended=False, confidence=0.95,
+    )
+    for protective_label in ("keep", "alternate", "uncertain"):
+        for confidence in (0.85, 0.90):
+            windows = (
+                {"decisions": [row("failed", confidence=0.85), clean_row]},
+                {"decisions": [
+                    row(
+                        "failed", label=protective_label,
+                        proposed_label=protective_label,
+                        confidence=confidence,
+                        semantic_delete_recommended=False,
+                    ),
+                    clean_row,
+                ]},
+            )
+            assert not failed_retry_coverage_pairs(
+                (failed, clean), windows,
+                partition_by_id={"failed": 0, "clean": 0},
+            )
+
+
+def test_lower_confidence_alternate_nominates_fragment_for_later_covered_retry():
+    failed = take(
+        "failed",
+        "different salons damaged the shoes so I recommend this repair kit "
+        "with this you can",
+        58.62,
+        64.02,
+    )
+    clean = take(
+        "clean",
+        "has it happened to you that different salons damaged your shoes "
+        "because they did not clean their tools I recommend this repair kit "
+        "and you apply it to the damaged area",
+        101.491,
+        132.0,
+    )
+    windows = (
+        {"partition_index": 0, "member_ids": ["failed", "clean"], "decisions": [
+            row(
+                "failed", label="alternate", proposed_label="alternate",
+                confidence=0.70, semantic_delete_recommended=False,
+            ),
+            row(
+                "clean", label="winner", proposed_label="winner",
+                confidence=0.95, semantic_delete_recommended=False,
+            ),
+        ]},
+        {"partition_index": 0, "member_ids": ["failed", "clean"], "decisions": [
+            row("failed", confidence=0.85),
+            row(
+                "clean", label="winner", proposed_label="winner",
+                confidence=0.95, semantic_delete_recommended=False,
+            ),
+        ]},
+    )
+    assert failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    ) == frozenset({("failed", "clean")})
+
+
 def test_original_recorded_partition_cannot_be_erased_by_reduced_pool_repartitioning():
     failed = take("failed", FAILED_TEXT, 0, 10)
     clean = take("clean", CLEAN_TEXT, 50, 65)
