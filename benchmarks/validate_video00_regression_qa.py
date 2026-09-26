@@ -391,6 +391,17 @@ def _asr_anchor_matches(token: str, anchor: str) -> bool:
     token, anchor = _asr_anchor_token(token), _asr_anchor_token(anchor)
     if token == anchor:
         return True
+    # Common Spanish ASR morphology, still QA-only: imperative ``haz`` is
+    # frequently decoded as the homophonic present form ``hace``; and an
+    # unstressed /i/ may surface as ``y`` in borrowed/uncertain spelling
+    # (``hidrata``/``hydrata``).  These substitutions never apply to
+    # polarity words or numbers and do not change production selection.
+    if (token, anchor) in {("hace", "haz"), ("has", "haz")}:
+        return True
+    token = token.replace("y", "i")
+    anchor = anchor.replace("y", "i")
+    if token == anchor:
+        return True
     # Allow up to two ASR insertions/deletions/substitutions in a long
     # content word (for example Spanish imperative morphology transcribed as
     # ``hidrátate``/``hídrate``).  Short polarity words and numbers never get
@@ -506,7 +517,11 @@ def _locate_target_row(rows: list[tuple[str, str]], target: str) -> int | None:
     target_tokens = {_asr_anchor_token(token) for token in _content_tokens(target)}
     for index, (_, text) in enumerate(rows):
         row_tokens = {_asr_anchor_token(token) for token in _content_tokens(text)}
-        if target_tokens and len(target_tokens & row_tokens) / len(target_tokens) >= _PRECISE_SEARCH_MIN_COVERAGE:
+        matched = sum(
+            any(_asr_anchor_matches(row_token, target_token) for row_token in row_tokens)
+            for target_token in target_tokens
+        )
+        if target_tokens and matched / len(target_tokens) >= _PRECISE_SEARCH_MIN_COVERAGE:
             return index
     return None
 
