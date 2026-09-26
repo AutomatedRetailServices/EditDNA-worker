@@ -45,9 +45,11 @@ from cutsell_worker.contracts import (
     Word,
 )
 from cutsell_worker.final_boundary_authority import (
+    _exact_seam_duplicate_match,
     _reopened_closing_match,
     _reopened_closing_refusal,
     _trim_reopened_closings,
+    _trim_exact_seam_duplicates,
     enforce_complete_idea_boundaries,
 )
 from cutsell_worker.selection_boundary_contract import (
@@ -111,6 +113,38 @@ def _source_map(clips) -> dict[str, tuple[Word, ...]]:
 
 def _run(clips):
     return _trim_reopened_closings(list(clips), _source_map(clips))
+
+
+def _run_seam(clips):
+    return _trim_exact_seam_duplicates(list(clips), _source_map(clips))
+
+
+def test_exact_numeric_phrase_duplicated_across_adjacent_cut_is_trimmed():
+    left = _clip("L", "llega a tu casa de dos a cinco días", 0.0, 4.0, 0)
+    right = _clip("R", "de dos a cinco días laborables muchas gracias", 5.0, 9.0, 1)
+    out, rows = _run_seam((left, right))
+    assert len(rows) == 1
+    assert rows[0]["repeated_tokens"] == ["de", "dos", "a", "cinco", "días"]
+    assert out[0] == left
+    assert out[1].text == "laborables muchas gracias"
+    assert out[1].start == right.words[5].start
+
+
+@pytest.mark.parametrize(
+    "left_text,right_text",
+    [
+        ("esta mochila puede guardar", "esta mochila puede guardar"),
+        ("me gusta mucho este producto", "me gusta mucho esta oferta nueva"),
+        ("por eso y así que", "por eso y así que continuamos ahora"),
+        ("no incluye dos unidades", "incluye dos unidades y envío gratis"),
+    ],
+)
+def test_exact_seam_duplicate_fails_open_without_safe_exact_useful_remainder(left_text, right_text):
+    left = _clip("L", left_text, 0.0, 4.0, 0)
+    right = _clip("R", right_text, 5.0, 9.0, 1)
+    out, rows = _run_seam((left, right))
+    assert rows == []
+    assert out == [left, right]
 
 
 def _trims(rows):

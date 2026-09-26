@@ -67,6 +67,9 @@ _REOPEN_MAX_INTERVENING_SEC = 10.0
 _REOPEN_PHRASE_BREAK_PUNCT = (",", ";", ":", ".", "!", "?", "…")
 _REOPEN_PHRASE_BREAK_PAUSE_SEC = 0.25
 _REOPEN_MIN_REMAINING_SEC = 0.5
+_SEAM_DUPLICATE_MIN_TOKENS = 4
+_SEAM_DUPLICATE_MAX_TOKENS = 10
+_SEAM_DUPLICATE_MIN_CONTENT_TOKENS = 2
 
 
 def _terminal(word: Word) -> bool:
@@ -365,6 +368,79 @@ def _reopened_closing_match(
     return None
 
 
+def _exact_seam_duplicate_match(
+    left_words: tuple[Word, ...],
+    right_words: tuple[Word, ...],
+) -> int | None:
+    """Return the exact suffix/prefix width duplicated across a cut.
+
+    This is deliberately narrower than semantic retry matching: at least four
+    consecutive tokens must be byte-for-byte equal after token normalization,
+    the repeated span must carry at least two content tokens, and useful speech
+    must remain on the right.  Exact equality makes numbers and negations safe:
+    unlike a semantic replacement, the earlier selected clip already contains
+    the very same fact.
+    """
+    left = _tokenized_words(left_words)
+    right = _tokenized_words(right_words)
+    left_tokens = [token for token, _ in left]
+    right_tokens = [token for token, _ in right]
+    max_width = min(_SEAM_DUPLICATE_MAX_TOKENS, len(left_tokens), len(right_tokens) - 1)
+    for width in range(max_width, _SEAM_DUPLICATE_MIN_TOKENS - 1, -1):
+        repeated = right_tokens[:width]
+        if left_tokens[-width:] != repeated:
+            continue
+        content_count = sum(token not in _REOPEN_CONNECTIVE_TOKENS for token in repeated)
+        if content_count < _SEAM_DUPLICATE_MIN_CONTENT_TOKENS:
+            continue
+        remaining = right[width:]
+        if not remaining or remaining[0][0] in _DANGLING_FUNCTION_WORDS:
+            continue
+        if float(remaining[-1][1].end) - float(remaining[0][1].start) < _REOPEN_MIN_REMAINING_SEC:
+            continue
+        return width
+    return None
+
+
+def _trim_exact_seam_duplicates(
+    selected: list[DraftClip],
+    source_map: dict[str, tuple[Word, ...]],
+) -> tuple[list[DraftClip], list[dict]]:
+    """Trim only an exact lexical duplicate spanning adjacent selected clips."""
+    output = list(selected)
+    rows: list[dict] = []
+    for index in range(1, len(output)):
+        left = output[index - 1]
+        right = output[index]
+        if left.source_asset_id != right.source_asset_id or not left.words or not right.words:
+            continue
+        if float(left.end) > float(right.start) + 1e-6:
+            continue
+        width = _exact_seam_duplicate_match(tuple(left.words), tuple(right.words))
+        if width is None:
+            continue
+        tokenized = _tokenized_words(tuple(right.words))
+        first_remaining = tokenized[width][1]
+        new_start = float(first_remaining.start)
+        source_words = source_map.get(right.source_asset_id) or tuple(right.words)
+        rebuilt = _rebuild_clip(right, source_words, new_start, float(right.end))
+        expected = [token for token, _ in tokenized[width:]]
+        if [token for token, _ in _tokenized_words(tuple(rebuilt.words))] != expected:
+            continue
+        output[index] = rebuilt
+        rows.append({
+            "action": "trim_exact_seam_duplicate",
+            "left_clip_id": left.clip_id,
+            "right_clip_id": right.clip_id,
+            "repeated_tokens": [token for token, _ in tokenized[:width]],
+            "original_start": round(float(right.start), 3),
+            "result_start": round(float(rebuilt.start), 3),
+            "removed_sec": round(float(rebuilt.start) - float(right.start), 3),
+            "first_remaining_word": str(first_remaining.text),
+        })
+    return output, rows
+
+
 def _reopened_closing_refusal(right_words: tuple[Word, ...], skip: int, width: int) -> str | None:
     """Why a matched re-opened closing must NOT be trimmed (fail open)."""
     right = _tokenized_words(right_words)
@@ -534,6 +610,11 @@ def enforce_complete_idea_boundaries(
     selected, overlap_rows = _reconcile_same_source_overlaps(originals, selected, source_map)
     diagnostics.extend(overlap_rows)
 
+    # Exact duplicates at an adjacent seam are stronger evidence than the
+    # punctuation-dependent re-opened-closing rule.  Apply them first.
+    selected, seam_rows = _trim_exact_seam_duplicates(selected, source_map)
+    diagnostics.extend(seam_rows)
+
     # D-289.11: after the envelopes are complete and overlap-free, trim a
     # later delivery's re-opened closing phrase (pre-Freeze token change).
     selected, reopen_rows = _trim_reopened_closings(selected, source_map)
@@ -552,5 +633,6 @@ def enforce_complete_idea_boundaries(
     diag["final_boundary_preserved_polish_gap_count"] = len(preserved_gap_rows)
     diag["final_boundary_reopened_closing_trim_count"] = len(reopen_trims)
     diag["final_boundary_reopened_closing_refusal_count"] = len(reopen_rows) - len(reopen_trims)
+    diag["final_boundary_exact_seam_duplicate_trim_count"] = len(seam_rows)
     draft = replace(result.draft, selected=tuple(selected), diagnostics=diag)
     return replace(result, draft=draft)
