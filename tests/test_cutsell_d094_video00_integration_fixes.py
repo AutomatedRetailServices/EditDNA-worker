@@ -289,6 +289,29 @@ def test_d301_unasked_cross_member_contradiction_blocks_shortcut():
     assert bridge["reason_rejected"] == "cross_component_contradiction"
 
 
+def test_d301_exact_pair_lexical_negation_false_positive_does_not_override_semantic_coverage():
+    takes = (
+        _take("A", 10.0, 14.0, "If this happened to you from visiting different salons", complete=False),
+        _take("B", 20.0, 25.0, "If this happened because salons do not disinfect tools use your own kit."),
+        _take("C", 26.0, 30.0, "Salons can spread fungus so use your own pedicure kit."),
+    )
+    take_map = {take.clip_id: take for take in takes}
+    trace = []
+    groups = _bridge_aware_components(
+        ("A", "B", "C"),
+        [
+            _RetryEdge("B", "C", "deterministic", 1.0, "provider_members_compatible"),
+            _RetryEdge("A", "B", "directional_coverage", 0.90,
+                       "structured arbiter: no conflict and left covered by right"),
+        ],
+        protected_ids=frozenset(), take_map=take_map, arbiter=TableArbiter({}),
+        policy=SemanticEquivalenceGatePolicy(), edge_trace=trace,
+    )
+    assert len(groups) == 1 and set(groups[0]) == {"A", "B", "C"}
+    bridge = next(row for row in trace if row.get("accepted_by") == "failed_attempt_directional_coverage")
+    assert bridge["accepted"] is True
+
+
 # ---------------------------------------------------------------------------
 # F4: bridge contradiction is cross-component only
 # ---------------------------------------------------------------------------

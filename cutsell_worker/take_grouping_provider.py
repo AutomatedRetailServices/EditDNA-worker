@@ -2620,6 +2620,16 @@ def _bridge_aware_components(
                 detect_text_contradiction(take_map[left_id].text, take_map[right_id].text).has_conflict
                 for left_id in left_members for right_id in right_members
                 if left_id in take_map and right_id in take_map
+                # The exact edge pair already passed the structured
+                # directional-coverage gate upstream: >= .90, no semantic
+                # meaning conflict, and left covered by right. Re-running
+                # the lexical contradiction detector on that same pair can
+                # only reintroduce the false negation conflict the semantic
+                # verdict explicitly cleared (e.g. an abandoned prefix vs
+                # a fuller delivery containing "no desinfectan"). Every
+                # *unasked* cross-member pair remains protected below.
+                and (left_id, right_id) != (edge.left_id, edge.right_id)
+                and (right_id, left_id) != (edge.left_id, edge.right_id)
             )
         if (
             edge.evidence == "directional_coverage"
