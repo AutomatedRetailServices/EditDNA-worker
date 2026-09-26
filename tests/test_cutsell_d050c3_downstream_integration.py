@@ -267,7 +267,7 @@ def test_authoritative_application_cannot_resurrect_a_globally_settled_restart(m
     assert result.draft.diagnostics["selection_boundary_contract"]["status"] == "verified"
 
 
-def test_global_reconciliation_is_inside_the_authority_signature(monkeypatch):
+def test_authoritative_resolution_owns_post_authority_membership_additions(monkeypatch):
     from cutsell_worker.realization_resolver import (
         AuthoritativeApplicationResult, AuthoritativeIdeaOutcome,
     )
@@ -322,7 +322,7 @@ def test_global_reconciliation_is_inside_the_authority_signature(monkeypatch):
     monkeypatch.setattr(universal, "apply_authoritative_realization_resolution", fake_authority)
     result = _run(monkeypatch, draft, env=RESOLVER_MODE_AUTHORITATIVE)
 
-    assert [clip.clip_id for clip in result.draft.selected] == ["later_take"]
+    assert [clip.clip_id for clip in result.draft.selected] == ["early_take"]
     assert result.stage_status["freeze_blocked_pending_coherence_review"] is False
     assert result.draft.diagnostics["selection_boundary_contract"]["status"] == "verified"
 

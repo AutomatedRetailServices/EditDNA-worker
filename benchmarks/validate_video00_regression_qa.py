@@ -756,15 +756,13 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
                 })
             continue
 
-        if kind in {"required_source_overlap", "forbidden_source_overlap"}:
+        if kind in {"required_source_overlap", "required_any_source_overlap", "forbidden_source_overlap"}:
             # Only a benchmark-specific manifest supplies these source
             # coordinates. They never feed the production editor. They
             # distinguish two takes with similar wording and catch a
             # truncated failed attempt that no text-only search can name.
-            start = float(check["source_start_sec"])
-            end = float(check["source_end_sec"])
-            minimum = float(check["min_overlap_sec"])
-            if not (0 <= start < end and 0 < minimum <= end - start):
+            windows = check.get("source_windows") if kind == "required_any_source_overlap" else [check]
+            if not isinstance(windows, list) or not windows:
                 raise ValueError(f"invalid source-overlap check: {check_id}")
             selected = result.get("selected") or []
             if any("start" not in row or "end" not in row for row in selected):
@@ -773,32 +771,44 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
                     "reason": "source_interval_unavailable",
                 })
                 continue
-            overlapping = sorted(
-                (
-                    max(start, float(row["start"])),
-                    min(end, float(row["end"])),
-                    str(row.get("clip_id") or ""),
-                ) for row in selected
-                if min(end, float(row["end"])) > max(start, float(row["start"]))
-            )
-            # Legitimate re-chunking can split one preferred take into
-            # several clips. Sum the UNION of covered source time, never
-            # require that a single row carry the entire delivery or double
-            # count overlapping clips of the same source.
-            coverage_end = start
-            covered = 0.0
-            for row_start, row_end, _ in overlapping:
-                covered += max(0.0, row_end - max(row_start, coverage_end))
-                coverage_end = max(coverage_end, row_end)
-            matching_ids = [row_id for _, _, row_id in overlapping] if covered >= minimum else []
-            if (kind == "required_source_overlap") == bool(matching_ids):
+            best_covered = 0.0
+            matching_ids = []
+            for window in windows:
+                start = float(window["source_start_sec"])
+                end = float(window["source_end_sec"])
+                minimum = float(window["min_overlap_sec"])
+                if not (0 <= start < end and 0 < minimum <= end - start):
+                    raise ValueError(f"invalid source-overlap check: {check_id}")
+                overlapping = sorted(
+                    (
+                        max(start, float(row["start"])),
+                        min(end, float(row["end"])),
+                        str(row.get("clip_id") or ""),
+                    ) for row in selected
+                    if min(end, float(row["end"])) > max(start, float(row["start"]))
+                )
+                # Legitimate re-chunking can split one preferred take into
+                # several clips. Sum the UNION of covered source time, never
+                # require that a single row carry the entire delivery or
+                # double count overlapping clips of the same source.
+                coverage_end = start
+                covered = 0.0
+                for row_start, row_end, _ in overlapping:
+                    covered += max(0.0, row_end - max(row_start, coverage_end))
+                    coverage_end = max(coverage_end, row_end)
+                best_covered = max(best_covered, covered)
+                if covered >= minimum:
+                    matching_ids = [row_id for _, _, row_id in overlapping]
+                    break
+            required = kind in {"required_source_overlap", "required_any_source_overlap"}
+            if required == bool(matching_ids):
                 passes.append(check_id)
             else:
                 failures.append({
                     "id": check_id, "kind": kind,
-                    "reason": "source_overlap_missing" if kind == "required_source_overlap" else "forbidden_source_overlap_selected",
+                    "reason": "source_overlap_missing" if required else "forbidden_source_overlap_selected",
                     "clip_ids": matching_ids,
-                    "covered_source_sec": round(covered, 3),
+                    "covered_source_sec": round(best_covered, 3),
                 })
             continue
 
