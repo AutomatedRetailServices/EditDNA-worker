@@ -330,6 +330,34 @@ def _outcome_signature(outcome: Mapping) -> tuple:
     return ("no_winner", winners, outcome["normalized_alternate_ids"])
 
 
+def _supported_candidate_ids(outcome: Mapping) -> frozenset[str]:
+    """Candidates a complete window still supports as usable.
+
+    A broad winner set and a narrower later judgement are compatible when
+    they retain at least one common candidate.  Prefer explicit winners;
+    when a window names no winner, fall back to structured ``keep`` labels
+    but never to a mere alternate.  An all-failed or alternate-only window
+    intentionally supports nothing, so it cannot manufacture agreement.
+    """
+    winners = frozenset(str(value) for value in outcome["normalized_winner_ids"])
+    if winners:
+        return winners
+    per_member = outcome.get("provider_outcome_by_member") or {}
+    kept = frozenset(
+        str(clip_id)
+        for clip_id, value in per_member.items()
+        if isinstance(value, Mapping) and str(value.get("label") or "") == "keep"
+    )
+    if kept:
+        return kept
+    return frozenset()
+
+
+def _outcomes_share_supported_candidate(outcomes: Sequence[Mapping]) -> bool:
+    supported = [_supported_candidate_ids(outcome) for outcome in outcomes]
+    return bool(supported) and all(supported) and bool(set.intersection(*(set(ids) for ids in supported)))
+
+
 def complete_window_agreement(
     family_member_ids: Sequence[str],
     window_rows: Iterable[Mapping] | None,
@@ -363,7 +391,8 @@ def complete_window_agreement(
         status = AGREEMENT_ONE_COMPLETE_WINDOW
     else:
         signatures = {_outcome_signature(outcome) for outcome in outcomes}
-        status = AGREEMENT_MULTIPLE_AGREE if len(signatures) == 1 else AGREEMENT_MULTIPLE_DISAGREE
+        compatible = len(signatures) == 1 or _outcomes_share_supported_candidate(outcomes)
+        status = AGREEMENT_MULTIPLE_AGREE if compatible else AGREEMENT_MULTIPLE_DISAGREE
 
     conflict = status == AGREEMENT_MULTIPLE_DISAGREE
     if conflict:
