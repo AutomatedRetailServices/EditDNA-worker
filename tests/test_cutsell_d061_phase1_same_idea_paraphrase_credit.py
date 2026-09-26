@@ -47,12 +47,14 @@ def ranked_row(clip_id, score):
     return {"clip_id": clip_id, "score": score, "reason": "watch_listen_baseline"}
 
 
-def draft(*, selected, discarded, take_judge_groups=(), merges=(), edge_trace=()):
+def draft(*, selected, discarded, take_judge_groups=(), merges=(), edge_trace=(), guard=()):
     diagnostics = {"take_judge_groups": list(take_judge_groups)}
     if merges:
         diagnostics["semantic_idea_equivalence"] = {"status": "applied", "merges": list(merges)}
     if edge_trace:
         diagnostics["distinct_idea_grouping_safety"] = {"edge_trace": list(edge_trace)}
+    if guard:
+        diagnostics["selection_conflicted_bridge_guard"] = list(guard)
     return DraftTimeline(
         schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
         selected=selected, alternates=(), discarded=discarded, diagnostics=diagnostics,
@@ -341,3 +343,96 @@ def test_final_membership_contained_realization_credit_requires_selected_winner(
     assert credited is True
     assert reason == "final_membership_contained_realization_coverage"
     assert missing_winner is False
+
+
+def test_pre_group_lost_atom_consumes_final_membership_chain_coverage():
+    first = clip(
+        "first", 0.0, 5.0,
+        "Only 5-10% of cancers are hereditary and most depend on lifestyle choices.",
+        selected=True,
+    )
+    bridge = clip("bridge", 5.1, 6.0, "Only 5-10% of", selected=True)
+    tail = clip("tail", 6.1, 9.0, "cancers are hereditary and choices matter.", selected=True)
+    discard = clip(
+        "discard", 20.0, 24.0,
+        "I remain absolutely convinced rigorous scientific research definitively demonstrates beyond doubt that only 5-10% of cancers are hereditary.",
+        selected=False,
+    )
+    d = draft(
+        selected=(first, bridge, tail), discarded=(discard,),
+        guard=[{
+            "reason": "later_continuation_chain_repeats_nearby_critical_claim",
+            "clip_ids": ["discard"],
+            "prior_clip_ids": ["first", "bridge", "tail"],
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+    row = _row_for(out.diagnostics["final_story_coherence_validation"], "discard")
+
+    assert row is not None
+    assert row["blocking"] is False
+    assert row["content_loss_suppressed_by"] == "final_membership_nearby_chain_coverage"
+
+
+def test_missing_family_consumes_explicit_final_membership_winner():
+    winner = clip(
+        "winner", 10.0, 15.0,
+        "The complete later delivery preserves the same symptom and its context.",
+        selected=True,
+    )
+    removed = clip(
+        "removed", 0.0, 5.0,
+        "The earlier delivery describes the same symptom and context.",
+        selected=False,
+    )
+    d = draft(
+        selected=(winner,), discarded=(removed,),
+        take_judge_groups=[{
+            "group_id": "removed_family",
+            "ranked": [ranked_row("removed", 0.7), ranked_row("removed_peer", 0.6)],
+        }],
+        guard=[{
+            "reason": "direct_equivalence_confirmed_final_winner",
+            "clip_id": "removed",
+            "winner_clip_id": "winner",
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+    diag = out.diagnostics["final_story_coherence_validation"]
+
+    assert diag["missing_idea_coverage"] == []
+
+
+def test_high_confidence_same_idea_merge_covers_literal_negation_claim():
+    winner = clip(
+        "winner", 0.0, 4.0,
+        "Looking back, there really were indications among the symptoms I experienced.",
+        selected=True,
+    )
+    alternate = clip(
+        "alternate", 5.0, 9.0,
+        "The symptoms did not seem suspicious then, but now I see they were indications.",
+        selected=False,
+    )
+    d = draft(
+        selected=(winner,), discarded=(alternate,),
+        take_judge_groups=[{
+            "group_id": "symptom_reflection",
+            "ranked": [ranked_row("winner", 0.8), ranked_row("alternate", 0.7)],
+        }],
+        merges=[{
+            "left_clip_id": "winner", "right_clip_id": "alternate",
+            "confidence": 0.90, "reason": "same hindsight realization",
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+    diag = out.diagnostics["final_story_coherence_validation"]
+
+    assert diag["lost_critical_claims"] == []
+    assert any(
+        row.get("resolution") == "same_idea_semantic_equivalence"
+        for row in diag["claim_coverage_confirmations"]
+    )

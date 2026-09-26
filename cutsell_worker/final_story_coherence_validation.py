@@ -495,6 +495,13 @@ def _missing_idea_coverage(draft) -> list[dict]:
             cid in selected_ids or cid in selected_parent_ids
             for cid in member_ids
         )
+        if not covered:
+            covered = any(
+                _final_membership_coverage_credit(
+                    draft.diagnostics, cid, selected_ids,
+                )[0]
+                for cid in member_ids
+            )
         if member_ids and not covered:
             missing.append({"group_id": group.get("group_id"), "member_clip_ids": member_ids})
     return missing
@@ -663,6 +670,19 @@ def _final_membership_coverage_credit(
                 and str(row.get("winner_clip_id") or "") in selected_ids
             ):
                 return True, "final_membership_contained_realization_coverage"
+        if reason in {
+            "direct_equivalence_confirmed_final_winner",
+            "deterministic_retry_final_membership_resolution",
+            "failed_unusable_retry_component_yields_to_complete_winner",
+            "deterministic_retry_component_failed_debris",
+            "provider_rejected_restatement_already_fully_delivered",
+            "dependent_opening_yields_to_complete_family_peer",
+        }:
+            if (
+                discarded_id == str(row.get("clip_id") or "")
+                and str(row.get("winner_clip_id") or "") in selected_ids
+            ):
+                return True, "final_membership_explicit_winner_coverage"
     return False, None
 
 
@@ -1003,8 +1023,14 @@ def _lost_semantic_atoms(
         suppressed_reason = None
         restart_consultations: list[dict] = []
         if content_loss:
+            credited, evidence_kind = _final_membership_coverage_credit(
+                draft.diagnostics, clip.clip_id, selected_ids,
+            )
+            if credited:
+                content_loss = False
+                suppressed_reason = evidence_kind
             group = clip_id_to_group.get(clip.clip_id)
-            if group is not None:
+            if content_loss and group is not None:
                 _group_id, member_ids = group
                 credited, evidence_kind = _same_idea_paraphrase_credit(
                     clip, member_ids, selected_ids, draft.diagnostics,
@@ -1012,7 +1038,7 @@ def _lost_semantic_atoms(
                 if credited:
                     content_loss = False
                     suppressed_reason = evidence_kind
-            else:
+            elif content_loss:
                 # D-097.7: the multimodal layer's own wrong_take rejection
                 # (recording-process evidence) is consulted first.
                 credited, restart_consultations = _pre_group_wrong_take_credit(
@@ -1292,6 +1318,28 @@ def _lost_critical_claims(
                         "owning_authority": "BestTakeResolver",
                         "resolution": "claim_equivalence_arbiter_confirmed",
                     })
+                continue
+            semantic_winner_id = next((
+                winner_id for winner_id in winners
+                if _semantic_equivalence_confidence(
+                    draft.diagnostics, claim.source_clip_id, winner_id,
+                ) >= _SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD
+            ), None)
+            if semantic_winner_id is not None:
+                confirmations.append({
+                    "idea_id": group.get("group_id"),
+                    "claim_id": claim.claim_id,
+                    "canonical_claim_id": claim.canonical_claim_id,
+                    "claim_type": claim.claim_type,
+                    "claim_text": claim.text,
+                    "importance": claim.importance,
+                    "source_clip_id": claim.source_clip_id,
+                    "winning_clip_ids": list(winners),
+                    "coverage_against_winning_realization": round(coverage, 4),
+                    "owning_authority": "BestTakeResolver",
+                    "resolution": "same_idea_semantic_equivalence",
+                    "semantic_equivalent_winner_id": semantic_winner_id,
+                })
                 continue
             # D-079 Phase 1/2: canonical claim identity. `claim.
             # canonical_claim_id` (semantic_claims.extract_claims, minted

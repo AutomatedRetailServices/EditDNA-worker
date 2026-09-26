@@ -124,11 +124,20 @@ def _audience_support(diagnostics: dict, clip_id: str) -> float:
             if str(row.get("clip_id") or "") != clip_id:
                 continue
             if str(row.get("content_role") or "") != "audience":
-                continue
-            try:
-                best = max(best, float(row.get("confidence") or 0.0))
-            except (TypeError, ValueError):
-                continue
+                pass
+            else:
+                try:
+                    best = max(best, float(row.get("confidence") or 0.0))
+                except (TypeError, ValueError):
+                    pass
+            audiovisual = row.get("audiovisual") or {}
+            for observation in audiovisual.get("observations") or ():
+                if not isinstance(observation, dict) or str(observation.get("role") or "") != "audience":
+                    continue
+                try:
+                    best = max(best, float(observation.get("confidence") or 0.0))
+                except (TypeError, ValueError):
+                    continue
     return best
 
 
@@ -231,7 +240,21 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             current_id, peer_id = (left_id, right_id) if left_selected else (right_id, left_id)
             current_positive = _strongest(votes, current_id, {"winner", "keep"})
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
-            if peer_positive >= 0.90 and peer_positive - current_positive >= 0.05 - 1e-9:
+            current, peer = all_by_id[current_id], all_by_id[peer_id]
+            peer_is_short_open_restart = (
+                str(row.get("accepted_by") or "") in {
+                    "same_opening_restart", "same_opening_abandoned_start",
+                }
+                and float(peer.end) - float(peer.start) <= 3.0
+                and float(current.end) - float(current.start)
+                >= 1.5 * max(0.001, float(peer.end) - float(peer.start))
+                and not str(peer.text or "").rstrip().endswith((".", "?", "!", "…"))
+            )
+            if (
+                peer_positive >= 0.90
+                and peer_positive - current_positive >= 0.05 - 1e-9
+                and not peer_is_short_open_restart
+            ):
                 winner_id, loser_id = peer_id, current_id
             else:
                 # A deterministic restart relation already proves these two
@@ -242,7 +265,6 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
                 # strong audience evidence, no strong negative verdict and an
                 # appreciably fuller physical delivery.  Critical facts remain
                 # protected by the subset check below.
-                current, peer = all_by_id[current_id], all_by_id[peer_id]
                 peer_negative = _strongest(votes, peer_id, {"alternate", "failed"})
                 later_fuller_retry = (
                     float(peer.start) > float(current.start)
@@ -1096,13 +1118,17 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
         failed_confidence = _strongest(votes, clip_id, {"failed"})
         positive_confidence = _strongest(votes, clip_id, {"winner", "keep"})
         corroborated_wrong_take = bool(wrong_take_peers.get(clip_id))
+        duration = max(0.0, float(clip.end) - float(clip.start))
+        short_wrong_take_tail = corroborated_wrong_take and duration <= 2.5
         terminal_delete = (
             failed_confidence >= 0.90
             and positive_confidence < 0.80
             and bool(evidence.get("deterministic_unusable"))
             and bool(evidence.get("delete_recommended"))
         )
-        if usability.get(clip_id) != "UNUSABLE" or not (terminal_delete or corroborated_wrong_take):
+        if not (terminal_delete or corroborated_wrong_take):
+            continue
+        if usability.get(clip_id) != "UNUSABLE" and not short_wrong_take_tail:
             continue
 
         component = {clip_id}
@@ -1121,9 +1147,23 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
             peer = selected_by_id[peer_id]
             if peer.source_asset_id != clip.source_asset_id:
                 continue
-            if complete.get(peer_id) is False or usability.get(peer_id) == "UNUSABLE":
+            if complete.get(peer_id) is False:
                 continue
-            if _strongest(votes, peer_id, {"winner", "keep"}) < 0.90:
+            winner_positive = _strongest(votes, peer_id, {"winner", "keep"})
+            audience_support = _audience_support(diagnostics, peer_id)
+            if usability.get(peer_id) == "UNUSABLE" and not (
+                short_wrong_take_tail
+                and winner_positive >= 0.80
+                and audience_support >= 0.85
+            ):
+                continue
+            if winner_positive < (0.80 if short_wrong_take_tail else 0.90):
+                continue
+            if (
+                short_wrong_take_tail
+                and winner_positive < 0.90
+                and audience_support < 0.85
+            ):
                 continue
             winner_id = peer_id
             break
@@ -1138,6 +1178,7 @@ def failed_retry_component_ids(selected, alternates, discarded, diagnostics: dic
             "component_clip_ids": sorted(component),
             "failed_confidence": round(failed_confidence, 4),
             "multimodal_wrong_take_corroborated": corroborated_wrong_take,
+            "short_wrong_take_tail": short_wrong_take_tail,
             "winner_positive_confidence": round(
                 _strongest(votes, winner_id, {"winner", "keep"}), 4
             ),

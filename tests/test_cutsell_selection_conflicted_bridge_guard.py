@@ -6,7 +6,6 @@ from cutsell_worker.selection_conflicted_bridge_guard import (
     deterministic_retry_resolution,
     failed_retry_component_ids,
     missing_continuation_bridge_ids,
-    orphaned_family_continuation_head_ids,
     redundant_continuation_chain_ids,
     terminally_incomplete_selected_ids,
     unmerged_same_opening_retry_resolution,
@@ -334,8 +333,10 @@ def test_short_multimodal_wrong_take_tail_uses_native_av_audience_winner():
             {"clip_id": "complete", "complete_idea": True},
         ]},
         "hybrid_editorial_chunks": [{"decisions": [
-            {"clip_id": "complete", "label": "keep", "confidence": 0.85,
-             "content_role": "audience"},
+            {"clip_id": "complete", "label": "keep", "confidence": 0.80,
+             "content_role": "audience", "audiovisual": {"observations": [
+                 {"role": "audience", "confidence": 0.90},
+             ]}},
         ]}],
         "take_judge_groups": [{
             "candidate_usability_summary": {"complete": "UNUSABLE"},
@@ -349,50 +350,7 @@ def test_short_multimodal_wrong_take_tail_uses_native_av_audience_winner():
 
     assert move == {"false_start"}
     assert audit[0]["short_wrong_take_tail"] is True
-    assert audit[0]["winner_positive_confidence"] == 0.85
-
-
-def test_orphaned_sentence_head_is_restored_before_selected_continuation():
-    head = _clip("head", 192.306, 194.718, "También me salían espinillas.")
-    removed_winner = _clip(
-        "removed_winner", 198.832, 210.315,
-        "También me salían espinillas detrás de la oreja y en el cuello.",
-    )
-    continuation = _clip("continuation", 194.90, 198.50, "Era como una alergia recurrente.")
-    diagnostics = {"take_judge_groups": [{
-        "selected_clip_id": "removed_winner",
-        "member_usability": {
-            "head": {
-                "ranker_reason": "material_prefix_fragment_penalty",
-                "delete_recommended": False,
-                "local_failure_corroborated": False,
-            },
-        },
-    }]}
-
-    add, audit = orphaned_family_continuation_head_ids(
-        (removed_winner, continuation), (), (head,), diagnostics, {"removed_winner"},
-    )
-
-    assert add == {"head"}
-    assert audit[0]["right_clip_id"] == "continuation"
-
-
-def test_orphaned_sentence_head_fails_open_without_adjacent_anaphoric_continuation():
-    head = _clip("head", 10.0, 12.0, "También me salían espinillas.")
-    removed_winner = _clip("removed_winner", 15.0, 20.0, "También me salían espinillas en el cuello.")
-    unrelated = _clip("unrelated", 12.1, 14.0, "Después visité a mi doctora.")
-    diagnostics = {"take_judge_groups": [{
-        "selected_clip_id": "removed_winner",
-        "member_usability": {"head": {"ranker_reason": "material_prefix_fragment_penalty"}},
-    }]}
-
-    add, audit = orphaned_family_continuation_head_ids(
-        (removed_winner, unrelated), (), (head,), diagnostics, {"removed_winner"},
-    )
-
-    assert add == set()
-    assert audit == []
+    assert audit[0]["winner_positive_confidence"] == 0.80
 
 
 def test_failed_retry_component_preserves_negation_without_full_failure_evidence():
@@ -491,6 +449,34 @@ def test_deterministic_restart_accepts_clear_positive_over_conflicting_alternate
 
     assert move == {"first"}
     assert add == {"retry"}
+
+
+def test_stronger_vote_cannot_replace_full_delivery_with_short_open_restart():
+    full = _clip(
+        "full", 95.942, 102.714,
+        "Al terminar mi contrato cambié de ginecóloga y le pedí que me hiciera todos los estudios.",
+    )
+    short = _clip("short", 91.24, 93.515, "Al terminar mi contrato le pedía a mi ginecóloga")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "full", "right_clip_id": "short",
+            "confidence": 1.0, "accepted_by": "same_opening_abandoned_start",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "full", "complete_idea": True},
+            {"clip_id": "short", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "full", "label": "winner", "confidence": 0.90},
+            {"clip_id": "short", "label": "winner", "confidence": 0.95},
+        ]}],
+    }
+
+    move, add, audit = deterministic_retry_resolution((full,), (), (short,), diagnostics)
+
+    assert move == set()
+    assert add == set()
+    assert audit == []
 
 
 def test_same_opening_near_tie_prefers_substantially_fuller_later_delivery():
