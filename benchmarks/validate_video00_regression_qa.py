@@ -477,7 +477,19 @@ def _locate_target_row(rows: list[tuple[str, str]], target: str) -> int | None:
         if realization_present(text, target):
             return index
     span = _find_semantic([text for _, text in rows], target)
-    return None if span is None else span[0]
+    if span is not None:
+        return span[0]
+    # A boundary authority may legitimately remove a repeated leading
+    # exhortation from the target row.  Locate that remaining realization
+    # with the same coverage floor, while treating accent-only ASR drift as
+    # spelling rather than missing content.  This is presence detection for
+    # QA only; the independent repeated-closing scan still decides uniqueness.
+    target_tokens = {_asr_anchor_token(token) for token in _content_tokens(target)}
+    for index, (_, text) in enumerate(rows):
+        row_tokens = {_asr_anchor_token(token) for token in _content_tokens(text)}
+        if target_tokens and len(target_tokens & row_tokens) / len(target_tokens) >= _PRECISE_SEARCH_MIN_COVERAGE:
+            return index
+    return None
 
 
 def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:

@@ -1,7 +1,13 @@
 from cutsell_worker.contracts import DraftClip
 from cutsell_worker.selection_conflicted_bridge_guard import (
+    contained_proxy_duplicate_ids,
+    contained_selected_duplicate_ids,
     confirmed_selected_duplicate_ids,
     conflicted_redundant_bridge_ids,
+    dangling_retry_fragment_ids,
+    deterministic_retry_resolution,
+    missing_continuation_bridge_ids,
+    redundant_continuation_chain_ids,
     terminally_incomplete_selected_ids,
 )
 
@@ -212,3 +218,121 @@ def test_complete_or_long_open_delivery_fails_open():
     move, audit = terminally_incomplete_selected_ids((complete, long_open), diagnostics)
     assert move == set()
     assert audit == []
+
+
+def test_selected_interval_contained_by_selected_delivery_is_removed():
+    outer = _clip("outer", 10.0, 20.0, "A complete delivery with every required word.")
+    inner = _clip("inner", 14.0, 20.0, "with every required word.")
+    move, audit = contained_selected_duplicate_ids((outer, inner))
+    assert move == {"inner"}
+    assert audit[0]["winner_clip_id"] == "outer"
+
+
+def test_deterministic_restart_can_swap_to_stronger_positive_peer():
+    first = _clip("first", 10.0, 16.0, "The machine worked perfectly last year.")
+    retry = _clip("retry", 20.0, 27.0, "The machine worked perfectly throughout last year.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "first", "right_clip_id": "retry",
+            "confidence": 1.0, "accepted_by": "same_opening_restart",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "first", "complete_idea": True},
+            {"clip_id": "retry", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [
+            {"decisions": [{"clip_id": "first", "label": "winner", "confidence": 0.90}]},
+            {"decisions": [{"clip_id": "retry", "label": "keep", "confidence": 0.95}]},
+        ],
+    }
+    move, add, audit = deterministic_retry_resolution((first,), (), (retry,), diagnostics)
+    assert move == {"first"} and add == {"retry"}
+    assert audit[0]["accepted_by"] == "same_opening_restart"
+
+
+def test_failed_complete_peer_is_not_resurrected_over_incomplete_selection():
+    incomplete = _clip("incomplete", 10.0, 16.0, "I had trouble with...")
+    failed = _clip("failed", 20.0, 22.0, "I had trouble, no.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "incomplete", "right_clip_id": "failed",
+            "confidence": 1.0, "accepted_by": "multimodal_corroborated_retry",
+        }]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "incomplete", "complete_idea": False},
+            {"clip_id": "failed", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "incomplete", "label": "winner", "confidence": 0.90},
+            {"clip_id": "failed", "label": "failed", "confidence": 0.90},
+        ]}],
+    }
+    move, add, audit = deterministic_retry_resolution((incomplete,), (), (failed,), diagnostics)
+    assert move == set() and add == set() and audit == []
+
+
+def test_selected_suffix_of_confirmed_duplicate_is_removed():
+    suffix = _clip("suffix", 18.0, 20.5, "for customers with annual plans.")
+    full = _clip("full", 10.0, 20.0, "This offer is for customers with annual plans.")
+    winner = _clip("winner", 30.0, 38.0, "The annual-plan customer offer is available now.")
+    diagnostics = {"semantic_idea_equivalence": {"merges": [{
+        "left_clip_id": "full", "right_clip_id": "winner", "confidence": 0.90,
+    }]}}
+    move, audit = contained_proxy_duplicate_ids((suffix, winner), (), (full,), diagnostics)
+    assert move == {"suffix"}
+    assert audit[0]["proxy_clip_id"] == "full"
+
+
+def test_dangling_take_is_removed_only_with_an_incomplete_retry_peer():
+    fragment = _clip("fragment", 10.0, 15.0, "I handled the issue with")
+    diagnostics = {
+        "take_group_members": [["earlier", "fragment"]],
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "earlier", "complete_idea": False},
+            {"clip_id": "fragment", "complete_idea": True},
+        ]},
+    }
+    move, audit = dangling_retry_fragment_ids((fragment,), diagnostics)
+    assert move == {"fragment"}
+    assert audit[0]["terminal_token"] == "with"
+
+
+def test_positive_incomplete_bridge_between_selected_neighbors_is_restored():
+    left = _clip("left", 10.0, 15.0, "The first explanation is complete.")
+    bridge = _clip("bridge", 15.2, 16.5, "Only 7% are from")
+    right = _clip("right", 17.5, 20.0, "that category; choices matter.")
+    diagnostics = {
+        "attempt_reconstruction": {"attempts": [{"clip_id": "bridge", "complete_idea": False}]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "bridge", "label": "keep", "confidence": 0.80},
+        ]}],
+    }
+    add, audit = missing_continuation_bridge_ids((left, right), (), (bridge,), diagnostics)
+    assert add == {"bridge"}
+    assert audit[0]["terminal_token"] == "from"
+
+
+def test_later_numeric_continuation_chain_is_removed_when_facts_already_covered():
+    earlier = _clip("earlier", 10.0, 17.0, "Research shows only 7% belong to this category.")
+    aside = _clip("aside", 18.0, 21.0, "My own case is unusual.")
+    repeat_a = _clip("repeat_a", 22.0, 25.0, "Science confirms only 7% of")
+    repeat_b = _clip("repeat_b", 26.0, 28.0, "cases belong to this category.")
+    diagnostics = {"semantic_idea_equivalence": {"continuation_merges": [{
+        "left_clip_id": "repeat_a", "right_clip_id": "repeat_b",
+        "accepted_by": "sentence_continuation", "confidence": 1.0,
+    }]}}
+    move, audit = redundant_continuation_chain_ids((earlier, aside, repeat_a, repeat_b), diagnostics)
+    assert move == {"repeat_a", "repeat_b"}
+    assert audit[0]["critical_markers"] == ["7%"]
+
+
+def test_numeric_chain_with_a_new_number_fails_open():
+    earlier = _clip("earlier", 10.0, 17.0, "Research shows only 7% belong to this category.")
+    repeat_a = _clip("repeat_a", 22.0, 25.0, "Science confirms only 12% of")
+    repeat_b = _clip("repeat_b", 26.0, 28.0, "cases belong to this category.")
+    diagnostics = {"semantic_idea_equivalence": {"continuation_merges": [{
+        "left_clip_id": "repeat_a", "right_clip_id": "repeat_b",
+        "accepted_by": "sentence_continuation", "confidence": 1.0,
+    }]}}
+    move, audit = redundant_continuation_chain_ids((earlier, repeat_a, repeat_b), diagnostics)
+    assert move == set() and audit == []

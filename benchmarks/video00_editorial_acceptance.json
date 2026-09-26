@@ -35,7 +35,8 @@
       "kind": "required_source_overlap",
       "source_start_sec": 95.55,
       "source_end_sec": 104.1,
-      "min_overlap_sec": 7.5
+      "min_overlap_sec": 6.3,
+      "evidence_note": "Measured speech spans 95.907-102.238; the historical ASR end to 104.1 was padded across confirmed silence. The threshold still excludes the 99.1 partial take."
     },
     {
       "id": "sonography_opening_complete",

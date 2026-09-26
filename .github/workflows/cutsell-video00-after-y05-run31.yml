@@ -25,6 +25,12 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      GOLD_STEM: 5E01F214-A364-4F4B-8F25-D39B1E2B21D2
+      FORBIDDEN_OLD_GOLD: 10035410-8AAD-46E5-9B34-9CBA8EC0A8AD
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,17 +49,129 @@ jobs:
         if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         continue-on-error: true
         run: python benchmarks/run_uploaded_asr_comparison.py run medium-whisperx
-      - name: Preserve full comparison artifacts
+      - name: Require successful engine result
+        run: python -c 'import glob,json;p=glob.glob("uploaded-comparison-artifacts/*/reports/summary.json");assert p,"benchmark summary missing";s=json.load(open(p[0]));assert s.get("engine_ok"),s'
+      - name: Require historical and editorial Video00 acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=$(find uploaded-comparison-artifacts -type f -path '*/reports/result.json' -print -quit)
+          test -n "$result"
+          reports=$(dirname "$result")
+          python benchmarks/validate_video00_regression_qa.py "$result" benchmarks/video00_regression_qa.json | tee "$reports/video00-regression-qa.json"
+          python benchmarks/validate_video00_regression_qa.py "$result" benchmarks/video00_editorial_acceptance.json | tee "$reports/video00-editorial-acceptance.json"
+          echo "VIDEO00_RESULT=$result" >> "$GITHUB_ENV"
+          echo "VIDEO00_REPORTS=$reports" >> "$GITHUB_ENV"
+      - name: Load S3 credentials for Human Gold audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}"
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          template=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$template" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$template" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value"
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+          rm -f templates.json
+      - name: Resolve current Human Gold
+        run: |
+          python -m pip install -q 'numpy>=1.26,<3'
+          python - <<'PY'
+          import os
+          from pathlib import PurePosixPath
+          import boto3
+          s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION') or None)
+          bucket = os.environ['S3_BUCKET']
+          target = os.environ['GOLD_STEM'].casefold()
+          forbidden = os.environ['FORBIDDEN_OLD_GOLD'].casefold()
+          matches = []
+          for page in s3.get_paginator('list_objects_v2').paginate(Bucket=bucket):
+              for item in page.get('Contents') or ():
+                  key = str(item.get('Key') or '')
+                  if forbidden not in key.casefold() and target in PurePosixPath(key).name.casefold():
+                      matches.append(key)
+          if len(matches) != 1:
+              raise SystemExit(f'Expected exactly one current Human Gold, got: {matches}')
+          s3.download_file(bucket, 'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4', 'video00-original-raw.mp4')
+          s3.download_file(bucket, matches[0], 'video00-human-gold.mp4')
+          print({'human_gold_key': matches[0]})
+          PY
+      - name: Prove Video00 improves against Human Gold
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m cutsell_worker.human_gold_decision_map_v2 \
+            --raw video00-original-raw.mp4 \
+            --gold video00-human-gold.mp4 \
+            --engine-json "$VIDEO00_RESULT" \
+            --out-json "$VIDEO00_REPORTS/human-gold-decision-map-v2.json" \
+            --out-csv "$VIDEO00_REPORTS/human-gold-decision-map-v2.csv"
+          python - <<'PY'
+          import json, os
+          path=os.path.join(os.environ['VIDEO00_REPORTS'],'human-gold-decision-map-v2.json')
+          report=json.load(open(path,encoding='utf-8'))
+          parity=report['selection_parity']
+          baseline={'selection_f1':0.7432,'gold_coverage_by_engine':0.7803,
+                    'engine_precision_against_gold':0.7094,'human_chunks_failed':6}
+          assert parity['selection_f1'] > baseline['selection_f1'], (parity, baseline)
+          assert parity['gold_coverage_by_engine'] > baseline['gold_coverage_by_engine'], (parity, baseline)
+          assert parity['engine_precision_against_gold'] > baseline['engine_precision_against_gold'], (parity, baseline)
+          assert parity['human_chunks_failed'] < baseline['human_chunks_failed'], (parity, baseline)
+          print({'human_gold_comparison':'improved_over_run47','selection_parity':parity})
+          PY
+      - name: Archive Video00 evidence before Yaskira05
+        run: |
+          mkdir -p qualification
+          mv uploaded-comparison-artifacts qualification/video00
+          python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'
+      - name: Prepare approved Yaskira05 rerun
+        env:
+          UPLOAD_EXPECTED_SHA: 00f3349f6150879464341c6ba53ace2e2727ce0c594c67a781354430e3a6127d
+          UPLOAD_EXPECTED_BYTES: "14847667"
+        run: python benchmarks/run_uploaded_asr_comparison.py prepare-existing Yaskira/05.MP4
+      - name: Verify exact Yaskira05 source
+        env:
+          UPLOAD_EXPECTED_SHA: 00f3349f6150879464341c6ba53ace2e2727ce0c594c67a781354430e3a6127d
+          UPLOAD_EXPECTED_BYTES: "14847667"
+        run: python benchmarks/run_uploaded_asr_comparison.py await-upload
+      - name: Rerun Yaskira05 with corrected common engine
+        env:
+          UPLOAD_EXPECTED_SHA: 00f3349f6150879464341c6ba53ace2e2727ce0c594c67a781354430e3a6127d
+          UPLOAD_EXPECTED_BYTES: "14847667"
+        run: python benchmarks/run_uploaded_asr_comparison.py run medium-whisperx
+      - name: Require approved Yaskira05 Run31 result
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=$(find uploaded-comparison-artifacts -type f -path '*/reports/result.json' -print -quit)
+          test -n "$result"
+          reports=$(dirname "$result")
+          python benchmarks/validate_approved_result.py "$result" benchmarks/yaskira05_run31_approved.json | tee "$reports/yaskira05-run31-validation.json"
+          mv uploaded-comparison-artifacts qualification/yaskira05
+      - name: Preserve full qualification artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: video00-after-y05-run31-artifacts
-          path: uploaded-comparison-artifacts/
+          name: video00-and-yaskira05-common-engine-qualification
+          path: |
+            qualification/
+            uploaded-comparison-artifacts/
           retention-days: 14
           if-no-files-found: warn
-      - name: Require successful engine result
-        if: always()
-        run: python -c 'import glob,json;p=glob.glob("uploaded-comparison-artifacts/*/reports/summary.json");assert p,"benchmark summary missing";s=json.load(open(p[0]));assert s.get("engine_ok"),s'
       - name: Remove private runtime files
         if: always()
         run: python -c 'import os,shutil;from pathlib import Path;shutil.rmtree(Path(os.environ["RUNNER_TEMP"])/"cutsell-upload-comparison",ignore_errors=True)'

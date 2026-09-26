@@ -177,6 +177,36 @@ def _clip_from_envelope(
     text = " ".join(str(word.text).strip() for word in envelope_words).strip()
 
     timing_changed = abs(new_start - float(clip.start)) > 1e-4 or abs(new_end - float(clip.end)) > 1e-4
+    # A repeated full-source ASR pass can repartition a terminal word into the
+    # following segment.  When the measured envelope did not move and its
+    # lexical stream is only a strict prefix of the already-selected delivery,
+    # refreshing from that pass would silently truncate protected speech.  The
+    # selected clip is the semantic authority here; Boundary may expand it but
+    # may not shorten its token stream without moving a source edge.
+    clip_tokens = [token for token, _ in _tokenized_words(tuple(clip.words))]
+    if not clip_tokens:
+        clip_tokens = [match.casefold() for match in _TOKEN_RE.findall(str(clip.text or ""))]
+    envelope_tokens = [token for token, _ in _tokenized_words(envelope_words)]
+    if (
+        not timing_changed
+        and envelope_tokens
+        and len(envelope_tokens) < len(clip_tokens)
+        and clip_tokens[:len(envelope_tokens)] == envelope_tokens
+    ):
+        return clip, {
+            "clip_id": clip.clip_id,
+            "action": "keep_source_envelope_would_truncate_selected_text",
+            "original_start": round(float(clip.start), 3),
+            "original_end": round(float(clip.end), 3),
+            "result_start": round(float(clip.start), 3),
+            "result_end": round(float(clip.end), 3),
+            "added_leading_sec": 0.0,
+            "added_trailing_sec": 0.0,
+            "first_word": str(envelope_words[0].text),
+            "last_word": str(clip.words[-1].text) if clip.words else str(clip.text or "").split()[-1],
+            "word_count": len(clip.words) if clip.words else len(clip_tokens),
+            "source_envelope_word_count": len(envelope_words),
+        }
     semantic_changed = tuple(clip.words) != envelope_words or str(clip.text or "").strip() != text
     changed = timing_changed or semantic_changed
     updated = replace(

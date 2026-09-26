@@ -37,6 +37,25 @@ def test_complete_idea_envelope_refreshes_text_even_when_timestamps_match():
     assert diagnostic["last_word"] == "alergia."
 
 
+def test_source_refresh_cannot_truncate_a_protected_terminal_word_without_moving_edge():
+    selected_words = (
+        Word("I", 1.0, 1.2), Word("resolved", 1.2, 1.6),
+        Word("it", 1.6, 1.8), Word("with", 1.8, 2.0), Word("cream.", 2.0, 2.4),
+    )
+    # A later ASR partition ends at the same measured edge but has assigned
+    # the last spoken word to its adjacent segment.
+    source_words = selected_words[:-1]
+    selected = DraftClip(
+        "clip", "src", 0, 1.0, 2.4, "I resolved it with cream.",
+        "I resolved it with cream.", words=selected_words,
+    )
+    repaired, row = _clip_from_envelope(selected, source_words)
+    assert repaired == selected
+    assert repaired.text.endswith("cream.")
+    assert row["action"] == "keep_source_envelope_would_truncate_selected_text"
+    assert row["source_envelope_word_count"] == 4
+
+
 def test_complete_idea_recovery_never_reintroduces_a_discarded_neighbor():
     source_words = (
         Word('Use', 0.0, .2), Word('this', .22, .4), Word('product', .42, .7),

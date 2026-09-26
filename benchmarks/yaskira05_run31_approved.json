@@ -1,0 +1,23 @@
+{
+  "schema_version": "cutsell.approved_result.v1",
+  "approval_id": "yaskira05-run31-36245398737",
+  "source_sha256": "00f3349f6150879464341c6ba53ace2e2727ce0c594c67a781354430e3a6127d",
+  "boundary_tolerance_sec": 0.12,
+  "text_coverage_floor": 0.95,
+  "output_duration_sec": 33.234,
+  "output_duration_tolerance_sec": 0.15,
+  "require_deliverable": true,
+  "live_render_qc_status": "PASS",
+  "selected": [
+    {
+      "start": 101.491,
+      "end": 132.0,
+      "text": "te ha pasado como a mí que te han contagiado de hongos por ir a diferentes salones en donde no lavan o no desinfectan bien sus utensilios de belleza pues te recomiendo que uno dejes de ir a salones diferentes y tengas tu propio kit de pedicure y uses esto que se llama Nonguz, tú te lo pones en la planta del pie y eso te ayuda a erradicar el hongo, también con la vasolinita que le recomendé antes lo pueden poner cada noche y ponerse unas medias y me lo van a agradecer, está aquí mismo en el garrito un solo clic tú le das y vas a tener tu Nonguz en tu casa de dos a cinco días"
+    },
+    {
+      "start": 134.408,
+      "end": 137.08,
+      "text": "laborables, besito, me cuente en los comentarios como lo sepa"
+    }
+  ]
+}

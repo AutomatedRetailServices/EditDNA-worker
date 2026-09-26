@@ -29,6 +29,22 @@ _DISCOURSE = frozenset({
     "made", "make", "had", "have", "has", "problem", "problems", "thing", "things", "other",
 })
 _NEGATION = frozenset({"no", "not", "never", "nunca", "sin", "without", "ni"})
+_DANGLING_TERMINALS = frozenset({
+    "a", "al", "and", "because", "con", "de", "del", "for", "from", "if", "in",
+    "of", "or", "para", "pero", "por", "porque", "que", "si", "so", "the", "to",
+    "with", "y",
+})
+_ASSERTION_FRAMING = frozenset({
+    "afirmo", "afirma", "avala", "avalado", "ciencia", "cientifica", "cientifico",
+    "cientificamente", "comprobado", "convencida", "convencido", "creo", "dice",
+    "evidence", "evidencia", "proven", "science", "scientific", "think", "believe",
+})
+_DETERMINISTIC_RETRY_KINDS = frozenset({
+    "same_opening_restart",
+    "same_opening_abandoned_start",
+    "incomplete_attempt_completed_by_retry",
+    "multimodal_corroborated_retry",
+})
 
 
 def _canon(token: str) -> str:
@@ -54,6 +70,11 @@ def _thematic(text: str) -> set[str]:
     return out
 
 
+def _substantive(text: str) -> set[str]:
+    """Content tokens with assertion boilerplate removed."""
+    return {token for token in _thematic(text) if token not in _ASSERTION_FRAMING}
+
+
 def _critical(text: str) -> set[str]:
     out: set[str] = set()
     for raw in _TOKEN_RE.findall(str(text or "")):
@@ -63,6 +84,17 @@ def _critical(text: str) -> set[str]:
         if any(ch.isdigit() for ch in token):
             out.add(token)
     return out
+
+
+def _tokens(text: str) -> tuple[str, ...]:
+    return tuple(_canon(token) for token in _TOKEN_RE.findall(str(text or "")))
+
+
+def _is_contiguous_subsequence(needle: tuple[str, ...], haystack: tuple[str, ...]) -> bool:
+    if not needle or len(needle) > len(haystack):
+        return False
+    width = len(needle)
+    return any(haystack[index:index + width] == needle for index in range(len(haystack) - width + 1))
 
 
 def _hybrid_votes(diagnostics: dict) -> dict[str, list[tuple[str, float]]]:
@@ -86,6 +118,272 @@ def _strongest(votes, clip_id: str, labels: set[str]) -> float:
         (confidence for label, confidence in votes.get(str(clip_id), ()) if label in labels),
         default=0.0,
     )
+
+
+def _attempt_completeness(diagnostics: dict) -> dict[str, bool]:
+    rows = (diagnostics.get("attempt_reconstruction") or {}).get("attempts") or ()
+    return {
+        str(row.get("clip_id")): bool(row.get("complete_idea"))
+        for row in rows
+        if isinstance(row, dict) and row.get("clip_id") and row.get("complete_idea") is not None
+    }
+
+
+def _deterministic_retry_rows(diagnostics: dict):
+    equivalence = diagnostics.get("semantic_idea_equivalence") or {}
+    for row in equivalence.get("merges") or ():
+        if isinstance(row, dict) and str(row.get("accepted_by") or "") in _DETERMINISTIC_RETRY_KINDS:
+            yield row
+
+
+def contained_selected_duplicate_ids(selected):
+    """Drop a selected clip wholly contained by another selected clip."""
+    ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), -float(c.end), c.clip_id)))
+    move: set[str] = set()
+    audit: list[dict] = []
+    for inner in ordered:
+        containers = [
+            outer for outer in ordered
+            if outer.clip_id != inner.clip_id
+            and outer.source_asset_id == inner.source_asset_id
+            and float(outer.start) <= float(inner.start) + 1e-3
+            and float(outer.end) >= float(inner.end) - 1e-3
+            and (float(outer.start) < float(inner.start) - 1e-3 or float(outer.end) > float(inner.end) + 1e-3)
+        ]
+        if not containers:
+            continue
+        outer = max(containers, key=lambda c: float(c.end) - float(c.start))
+        move.add(inner.clip_id)
+        audit.append({
+            "clip_id": inner.clip_id,
+            "winner_clip_id": outer.clip_id,
+            "reason": "selected_interval_fully_contained_by_selected_winner",
+        })
+    return move, audit
+
+
+def deterministic_retry_resolution(selected, alternates, discarded, diagnostics: dict):
+    """Apply already-proven restart evidence to final membership."""
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    all_by_id = {clip.clip_id: clip for clip in (*selected, *alternates, *discarded)}
+    votes = _hybrid_votes(diagnostics)
+    complete = _attempt_completeness(diagnostics)
+    move: set[str] = set()
+    add: set[str] = set()
+    audit: list[dict] = []
+    for row in _deterministic_retry_rows(diagnostics):
+        left_id = str(row.get("left_clip_id") or "")
+        right_id = str(row.get("right_clip_id") or "")
+        if left_id not in all_by_id or right_id not in all_by_id:
+            continue
+        left_selected = left_id in selected_by_id
+        right_selected = right_id in selected_by_id
+        if not (left_selected or right_selected):
+            continue
+        left, right = all_by_id[left_id], all_by_id[right_id]
+        if left.source_asset_id != right.source_asset_id:
+            continue
+
+        winner_id = loser_id = ""
+        if complete.get(left_id) is False and complete.get(right_id) is True:
+            winner_id, loser_id = right_id, left_id
+        elif complete.get(right_id) is False and complete.get(left_id) is True:
+            winner_id, loser_id = left_id, right_id
+        elif left_selected != right_selected:
+            current_id, peer_id = (left_id, right_id) if left_selected else (right_id, left_id)
+            current_positive = _strongest(votes, current_id, {"winner", "keep"})
+            peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
+            if peer_positive >= 0.90 and peer_positive - current_positive >= 0.05 - 1e-9:
+                winner_id, loser_id = peer_id, current_id
+        if not winner_id or loser_id not in selected_by_id:
+            continue
+        winner, loser = all_by_id[winner_id], all_by_id[loser_id]
+        winner_positive = _strongest(votes, winner_id, {"winner", "keep"})
+        winner_negative = _strongest(votes, winner_id, {"alternate", "failed"})
+        if winner_id not in selected_by_id and (winner_positive < 0.80 or winner_negative >= 0.80):
+            continue
+        if not _critical(loser.text).issubset(_critical(winner.text)):
+            continue
+        move.add(loser_id)
+        if winner_id not in selected_by_id:
+            add.add(winner_id)
+        audit.append({
+            "clip_id": loser_id,
+            "winner_clip_id": winner_id,
+            "reason": "deterministic_retry_final_membership_resolution",
+            "accepted_by": str(row.get("accepted_by") or ""),
+            "loser_complete_idea": complete.get(loser_id),
+            "winner_complete_idea": complete.get(winner_id),
+            "loser_positive_confidence": round(_strongest(votes, loser_id, {"winner", "keep"}), 4),
+            "winner_positive_confidence": round(_strongest(votes, winner_id, {"winner", "keep"}), 4),
+        })
+    return move, add, audit
+
+
+def contained_proxy_duplicate_ids(selected, alternates, discarded, diagnostics: dict):
+    """Propagate a confirmed duplicate through an enclosing source interval."""
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    all_unselected = tuple((*alternates, *discarded))
+    move: set[str] = set()
+    audit: list[dict] = []
+    equivalence = diagnostics.get("semantic_idea_equivalence") or {}
+    for row in equivalence.get("merges") or ():
+        if not isinstance(row, dict):
+            continue
+        try:
+            confidence = float(row.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if confidence < 0.85:
+            continue
+        left_id, right_id = str(row.get("left_clip_id") or ""), str(row.get("right_clip_id") or "")
+        for proxy_id, winner_id in ((left_id, right_id), (right_id, left_id)):
+            winner = selected_by_id.get(winner_id)
+            proxy = next((clip for clip in all_unselected if clip.clip_id == proxy_id), None)
+            if winner is None or proxy is None or winner.source_asset_id != proxy.source_asset_id:
+                continue
+            for inner in selected:
+                if inner.clip_id == winner_id or inner.source_asset_id != proxy.source_asset_id:
+                    continue
+                inner_tokens = _tokens(inner.text)
+                structurally_orphaned = (
+                    bool(inner_tokens)
+                    and inner_tokens[0] in _DANGLING_TERMINALS
+                    and float(inner.end) - float(inner.start) <= 3.0
+                )
+                temporal_containment = (
+                    float(proxy.start) <= float(inner.start) + 1e-3
+                    and float(proxy.end) >= float(inner.end) - 1e-3
+                )
+                lexical_containment = (
+                    structurally_orphaned
+                    and _is_contiguous_subsequence(inner_tokens, _tokens(proxy.text))
+                )
+                if temporal_containment or lexical_containment:
+                    if not _critical(inner.text).issubset(_critical(winner.text)):
+                        continue
+                    move.add(inner.clip_id)
+                    audit.append({
+                        "clip_id": inner.clip_id,
+                        "proxy_clip_id": proxy_id,
+                        "winner_clip_id": winner_id,
+                        "reason": "contained_fragment_of_confirmed_duplicate",
+                        "equivalence_confidence": round(confidence, 4),
+                    })
+    return move, audit
+
+
+def dangling_retry_fragment_ids(selected, diagnostics: dict):
+    """Remove a dangling final retry when its family also contains an incomplete attempt."""
+    complete = _attempt_completeness(diagnostics)
+    family_by_id: dict[str, tuple[str, ...]] = {}
+    for group in diagnostics.get("take_group_members") or ():
+        members = tuple(str(item) for item in group if item)
+        for clip_id in members:
+            family_by_id[clip_id] = members
+    move: set[str] = set()
+    audit: list[dict] = []
+    for clip in selected:
+        tokens = [_canon(token) for token in _TOKEN_RE.findall(str(clip.text or ""))]
+        if not tokens or tokens[-1] not in _DANGLING_TERMINALS:
+            continue
+        members = family_by_id.get(clip.clip_id, ())
+        if len(members) < 2 or not any(complete.get(item) is False for item in members if item != clip.clip_id):
+            continue
+        if _critical(clip.text):
+            continue
+        move.add(clip.clip_id)
+        audit.append({
+            "clip_id": clip.clip_id,
+            "reason": "dangling_terminal_in_incomplete_retry_family",
+            "terminal_token": tokens[-1],
+            "family_member_ids": list(members),
+        })
+    return move, audit
+
+
+def missing_continuation_bridge_ids(selected, alternates, discarded, diagnostics: dict):
+    """Restore an omitted positive bridge that closes a selected continuation."""
+    ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
+    complete = _attempt_completeness(diagnostics)
+    votes = _hybrid_votes(diagnostics)
+    candidates = tuple((*alternates, *discarded))
+    add: set[str] = set()
+    audit: list[dict] = []
+    for left, right in zip(ordered, ordered[1:]):
+        if left.source_asset_id != right.source_asset_id:
+            continue
+        for bridge in candidates:
+            if bridge.source_asset_id != left.source_asset_id or complete.get(bridge.clip_id) is not False:
+                continue
+            if not (float(left.end) <= float(bridge.start) + 1e-3 and float(bridge.end) <= float(right.start) + 1e-3):
+                continue
+            left_gap = float(bridge.start) - float(left.end)
+            right_gap = float(right.start) - float(bridge.end)
+            if left_gap < -1e-3 or left_gap > 0.8 or right_gap < -1e-3 or right_gap > 2.0:
+                continue
+            tokens = [_canon(token) for token in _TOKEN_RE.findall(str(bridge.text or ""))]
+            if not tokens or tokens[-1] not in _DANGLING_TERMINALS:
+                continue
+            if _strongest(votes, bridge.clip_id, {"winner", "keep"}) < 0.80:
+                continue
+            add.add(bridge.clip_id)
+            audit.append({
+                "clip_id": bridge.clip_id,
+                "left_clip_id": left.clip_id,
+                "right_clip_id": right.clip_id,
+                "reason": "missing_positive_continuation_bridge_restored",
+                "left_gap_sec": round(left_gap, 3),
+                "right_gap_sec": round(right_gap, 3),
+                "terminal_token": tokens[-1],
+            })
+    return add, audit
+
+
+def redundant_continuation_chain_ids(selected, diagnostics: dict):
+    """Remove a later reconstructed chain whose critical claim already appeared nearby."""
+    selected_by_id = {clip.clip_id: clip for clip in selected}
+    ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
+    index_by_id = {clip.clip_id: index for index, clip in enumerate(ordered)}
+    move: set[str] = set()
+    audit: list[dict] = []
+    equivalence = diagnostics.get("semantic_idea_equivalence") or {}
+    for chain in equivalence.get("continuation_merges") or ():
+        if not isinstance(chain, dict) or str(chain.get("accepted_by") or "") != "sentence_continuation":
+            continue
+        ids = [str(chain.get("left_clip_id") or ""), str(chain.get("right_clip_id") or "")]
+        if any(clip_id not in selected_by_id for clip_id in ids):
+            continue
+        chain_clips = [selected_by_id[clip_id] for clip_id in ids]
+        first_index = min(index_by_id[clip_id] for clip_id in ids)
+        if first_index <= 0 or len({clip.source_asset_id for clip in chain_clips}) != 1:
+            continue
+        prior = [
+            clip for clip in ordered[max(0, first_index - 4):first_index]
+            if clip.source_asset_id == chain_clips[0].source_asset_id
+        ]
+        if not prior:
+            continue
+        later_text = " ".join(clip.text for clip in chain_clips)
+        prior_text = " ".join(clip.text for clip in prior)
+        later_content = _substantive(later_text)
+        prior_content = _substantive(prior_text)
+        if len(later_content) < 2 or not _critical(later_text):
+            continue
+        if not _critical(later_text).issubset(_critical(prior_text)):
+            continue
+        coverage = len(later_content & prior_content) / max(1, len(later_content))
+        if coverage < 0.80:
+            continue
+        move.update(ids)
+        audit.append({
+            "clip_ids": ids,
+            "reason": "later_continuation_chain_repeats_nearby_critical_claim",
+            "prior_clip_ids": [clip.clip_id for clip in prior],
+            "substantive_coverage": round(coverage, 4),
+            "critical_markers": sorted(_critical(later_text)),
+        })
+    return move, audit
 
 
 def conflicted_redundant_bridge_ids(selected, diagnostics: dict):
@@ -278,14 +576,38 @@ def apply_selection_conflicted_bridge_guard(draft):
     bridge_ids, bridge_audit = conflicted_redundant_bridge_ids(draft.selected, diagnostics)
     duplicate_ids, duplicate_audit = confirmed_selected_duplicate_ids(draft.selected, diagnostics)
     incomplete_ids, incomplete_audit = terminally_incomplete_selected_ids(draft.selected, diagnostics)
-    move_ids = bridge_ids | duplicate_ids | incomplete_ids
-    audit = bridge_audit + duplicate_audit + incomplete_audit
-    if not move_ids:
+    contained_ids, contained_audit = contained_selected_duplicate_ids(draft.selected)
+    retry_ids, retry_add_ids, retry_audit = deterministic_retry_resolution(
+        draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
+    proxy_ids, proxy_audit = contained_proxy_duplicate_ids(
+        draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
+    dangling_ids, dangling_audit = dangling_retry_fragment_ids(draft.selected, diagnostics)
+    bridge_add_ids, bridge_add_audit = missing_continuation_bridge_ids(
+        draft.selected, draft.alternates, draft.discarded, diagnostics
+    )
+    all_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.alternates, *draft.discarded)}
+    provisional = tuple((*draft.selected, *(all_by_id[cid] for cid in bridge_add_ids if cid in all_by_id)))
+    chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
+
+    move_ids = bridge_ids | duplicate_ids | incomplete_ids | contained_ids | retry_ids | proxy_ids | dangling_ids | chain_ids
+    add_ids = (retry_add_ids | bridge_add_ids) - move_ids
+    audit = (
+        bridge_audit + duplicate_audit + incomplete_audit + contained_audit + retry_audit
+        + proxy_audit + dangling_audit + bridge_add_audit + chain_audit
+    )
+    if not move_ids and not add_ids:
         return draft
 
     selected_by_id = {clip.clip_id: clip for clip in draft.selected}
-    selected = tuple(clip for clip in draft.selected if clip.clip_id not in move_ids)
-    alternates = list(draft.alternates)
+    selected = [clip for clip in draft.selected if clip.clip_id not in move_ids]
+    for clip_id in sorted(add_ids):
+        clip = all_by_id.get(clip_id)
+        if clip is not None and clip_id not in {item.clip_id for item in selected}:
+            selected.append(replace(clip, selected=True))
+    selected.sort(key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id))
+    alternates = [clip for clip in draft.alternates if clip.clip_id not in add_ids]
     existing = {clip.clip_id for clip in alternates}
     for clip_id in sorted(move_ids):
         clip = selected_by_id.get(clip_id)
@@ -296,7 +618,8 @@ def apply_selection_conflicted_bridge_guard(draft):
     diagnostics["selection_conflicted_bridge_guard"] = list(audit)
     return replace(
         draft,
-        selected=selected,
+        selected=tuple(selected),
         alternates=tuple(alternates),
+        discarded=tuple(clip for clip in draft.discarded if clip.clip_id not in add_ids),
         diagnostics=diagnostics,
     )

@@ -1534,3 +1534,33 @@ The first Yaskira 05 Medium + WhisperX qualification produced a 52.034 s diagnos
 The correction removes the elapsed-time veto only after creator-session partitioning; retry_setup, exact attempt relation, complete replacement, directional claim coverage, numeric/negation safety and winner consistency remain mandatory. Only `uncertain + mixed` may yield to a later >=.95 `winner + audience`; positive `keep/alternate` mixed or recording-only rows, and failed/BTS rows, remain vetoes. Final boundary recovery now intersects its newly added edge with all discarded spans and restores the original selected edge when they overlap.
 
 Independent QA rejected two broader proposals (audience-prefix inference and Native AV self-corroboration) because they could delete unique information; both were removed. This patch does not yet prove that the Yaskira 05 dog interruption or the long mixed failed take will be deleted, because the saved run lacks the independent evidence required by the retained safety gates. Offline relevant regression: 188 passed; independent QA: 79 passed. No additional provider call, GPU run or render was made.
+
+## 2026-09-26 — Video00 run #47 correction awaiting live qualification
+
+Run #47 (36263843658) passed technical QC but failed two historical sonography
+checks and four user-reviewed editorial checks. Artifact replay also exposed a
+selected interval nested inside another, a truncated acne delivery caused by a
+later ASR refresh dropping its protected final word, an orphan suffix from the
+rejected pimples monolith, an incomplete stomach take beside its complete retry,
+and a repeated percentage/closing sequence. These are final membership and
+pre-Freeze boundary integration defects, not missing production safety gates.
+
+The branch now consumes existing deterministic retry, attempt-completeness,
+Hybrid vote, containment and continuation evidence in the final Selection guard.
+It also prevents unchanged source-envelope refresh from truncating an already
+selected lexical tail. Offline run #47 replay produces 21 selected deliveries,
+passes the historical 18/18 checks and the editorial 11/11 checks, while keeping
+the full resorcina take and restoring the omitted 5–10% bridge. The gynecologist
+QA source threshold now follows the independently measured speech envelope
+(6.3 s) rather than the padded ASR word endpoint; the partial take still fails.
+
+New QA also defines the approved Yaskira05 run #31 contract: exact source SHA,
+two ordered source spans within 120 ms, >=95% bidirectional spoken-token coverage,
+33.234 s output within 150 ms, deliverable true and live render QC PASS. The
+same paid qualification run will gate both Video00 manifests, strict improvement
+over run #47's Human Gold F1/recall/precision/chunk failures, then rerun Yaskira05
+and enforce that approval contract. Offline targeted tests: 71 passed. Broad
+engine suite: 8,210 passed / 10 skipped; all six functional failures reproduce at
+parent 088540d, two missing-SQLAlchemy failures pass once the declared dependency
+is present, and one old D-174 test is a path-diff sentinel incompatible with any
+intentional Final Boundary change. No live success or release-ready claim yet.
