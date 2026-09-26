@@ -1,5 +1,6 @@
 from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.failed_retry_coverage_bridge import failed_retry_coverage_pairs
+from cutsell_worker.hybrid_retry_winner_authority import _same_retry_attempt
 from cutsell_worker.semantic_idea_equivalence import IdeaEquivalenceDecision, IdeaEquivalenceResult
 from cutsell_worker.take_grouping_provider import reconcile_semantic_idea_equivalence
 
@@ -84,6 +85,63 @@ def test_strong_failed_take_and_later_proposed_winner_become_comparison_pair():
         (failed, clean), evidence(), partition_by_id={"failed": 0, "clean": 0},
     )
     assert pairs == frozenset({("failed", "clean")})
+
+
+def test_complete_failed_pitch_with_large_shared_core_can_reach_coverage_arbiter():
+    failed = take(
+        "failed",
+        "if you visited many salons they caused fungus on your feet because tools were not washed "
+        "I have the solution first stop changing salons use your own product second buy ClearFoot "
+        "put it on the sole toes and eradicate it",
+        20, 39, complete=True,
+    )
+    clean = take(
+        "clean",
+        "has this happened to you salons infected you with foot fungus because they fail to disinfect "
+        "beauty tools keep your own pedicure kit and use ClearFoot on the sole of the foot to eradicate "
+        "fungus apply balm nightly then click the cart for delivery",
+        70, 101, complete=True,
+    )
+    windows = ({"partition_index": 0, "member_ids": ["failed", "clean"], "decisions": [
+        row("failed", confidence=0.90),
+        row("clean", label="winner", proposed_label="winner", confidence=0.95,
+            semantic_delete_recommended=False),
+    ]},)
+    same_attempt, evidence_row = _same_retry_attempt(failed, clean)
+    assert same_attempt is False
+    assert evidence_row["shared_count"] >= 8
+    assert 0.30 <= evidence_row["failed_coverage"] < 0.45
+    pairs = failed_retry_coverage_pairs(
+        (failed, clean), windows, partition_by_id={"failed": 0, "clean": 0},
+    )
+    assert pairs == frozenset({("failed", "clean")})
+    merged, diagnostics = reconcile_semantic_idea_equivalence(
+        (("failed",), ("clean",)), (failed, clean), CoverageArbiter(confidence=0.90),
+        failed_retry_coverage_pairs=pairs,
+    )
+    assert merged == (("failed", "clean"),)
+    assert diagnostics["merges"][0]["accepted_by"] == "failed_attempt_directional_coverage"
+
+
+def test_shared_core_fallback_is_not_available_for_small_overlap_or_numeric_conflict():
+    failed = take(
+        "failed", "salons spread 3 foot fungus problems because tools are not cleaned use this product on the feet",
+        20, 39, complete=True,
+    )
+    candidates = (
+        take("small", "salons discuss fungus and this completely different price offer", 70, 105, complete=True),
+        take("number", "salons spread 2 foot fungus problems because tools are not cleaned use this product on the feet every night with a complete kit and delivery", 70, 105, complete=True),
+    )
+    for clean in candidates:
+        windows = ({"partition_index": 0, "member_ids": ["failed", clean.clip_id], "decisions": [
+            row("failed", confidence=0.90),
+            row(clean.clip_id, label="winner", proposed_label="winner", confidence=0.95,
+                semantic_delete_recommended=False),
+        ]},)
+        assert not failed_retry_coverage_pairs(
+            (failed, clean), windows,
+            partition_by_id={"failed": 0, clean.clip_id: 0},
+        )
 
 
 def test_consistent_failed_windows_allow_bounded_confidence_and_one_delete_vote():

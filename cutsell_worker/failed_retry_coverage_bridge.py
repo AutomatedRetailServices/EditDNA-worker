@@ -231,8 +231,25 @@ def failed_retry_coverage_pairs(
                         or delivery_words < max(anchor_words + 5, math.ceil(anchor_words * 1.5))
                     ):
                         continue
-                same_attempt, _ = _same_retry_attempt(anchor, delivery)
-                if same_attempt:
+                same_attempt, relation_evidence = _same_retry_attempt(anchor, delivery)
+                # D-304: a complete failed pitch can be substantially shorter
+                # than its later clean realization. The ordinary literal
+                # relation floor can then prevent even asking the structured
+                # directional-coverage question. Admit only a large shared
+                # proposition core with a materially fuller later delivery.
+                shared_core_candidate = bool(
+                    not same_attempt
+                    and anchor.complete_idea
+                    and delivery.complete_idea
+                    and relation_evidence.get("numbers_ok") is True
+                    and int(relation_evidence.get("shared_count") or 0) >= 8
+                    and float(relation_evidence.get("failed_coverage") or 0.0) >= 0.30
+                    and (
+                        (delivery.end - delivery.start) >= (anchor.end - anchor.start) * 1.35
+                        or len(delivery.text.split()) >= len(anchor.text.split()) + 12
+                    )
+                )
+                if same_attempt or shared_core_candidate:
                     left_id = anchor_id if anchor_id in group_anchor_ids else failed_id
                     pairs.add((left_id, delivery_id))
     return frozenset(pairs)
