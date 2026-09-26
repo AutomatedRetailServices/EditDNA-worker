@@ -97,6 +97,28 @@ def test_pause_corroborated_reset_count_is_visible_in_the_summary():
     assert summary["pause_corroborated_reset_count"] == 1
 
 
+def test_short_take_with_pause_corroborated_reset_supplies_local_failure_evidence():
+    take = _take(start=251.97, end=253.574, text="Tuve problemas de estómago, no.")
+    events = [
+        _event("hand_motion_reset_candidate", 253.354, 253.421, 1.0),
+        _event("audio_silence_interval", 252.960, 258.891, 0.9),
+    ]
+    failed, reasons = _failed_local_evidence(take, _context(*events))
+    assert failed is True
+    assert "short_pause_corroborated_reset:1" in reasons
+
+
+def test_one_pause_corroborated_reset_does_not_condemn_long_delivery():
+    take = _take(start=251.0, end=263.0)
+    events = [
+        _event("hand_motion_reset_candidate", 253.354, 253.421, 1.0),
+        _event("audio_silence_interval", 252.960, 253.891, 0.9),
+    ]
+    failed, reasons = _failed_local_evidence(take, _context(*events))
+    assert failed is False
+    assert not any("short_pause_corroborated_reset" in reason for reason in reasons)
+
+
 def test_negative_control_three_uncorroborated_resets_below_threshold():
     """Below the count floor regardless -- must never fail either way."""
     take = _take()
