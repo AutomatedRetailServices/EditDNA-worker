@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from dataclasses import replace
 import pytest
+import requests
 from cutsell_worker.whole_video_av import GeminiWholeVideoAVProvider, build_av_provider
 from cutsell_worker.hybrid_google_transport import DollarBudgetLedger
 from cutsell_worker.contracts import SourceAsset
@@ -25,6 +26,22 @@ class Session:
         self.calls.append((url,json))
         payload=({'totalTokens':100} if url.endswith('countTokens') else
                  {'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':__import__('json').dumps(self.data)}]}}]})
+        class Response:
+            def raise_for_status(self): pass
+            def json(self): return payload
+        return Response()
+
+
+class TimeoutThenSuccessSession(Session):
+    def post(self,url,headers,json,timeout):
+        self.calls.append((url,json,timeout))
+        if url.endswith('countTokens'):
+            payload={'totalTokens':100}
+        elif sum(call[0].endswith('generateContent') for call in self.calls) == 1:
+            raise requests.exceptions.ReadTimeout('first generation timed out')
+        else:
+            payload={'candidates':[{'finishReason':'STOP','content':{
+                'parts':[{'text':__import__('json').dumps(self.data)}]}}]}
         class Response:
             def raise_for_status(self): pass
             def json(self): return payload
@@ -80,6 +97,55 @@ def test_no_budget_means_no_generation(tmp_path):
     context=safe_whole_video_analyze(av,(source(),),(),(),local_paths={'source':str(raw)})
     assert not context.status.available
     assert len(session.calls)==1 and session.calls[0][0].endswith('countTokens')
+
+
+def test_timeout_retry_requires_explicit_flag_and_reserves_second_attempt(tmp_path):
+    av,raw,_=provider(tmp_path)
+    session=TimeoutThenSuccessSession()
+    av.session=session
+    av.retry_generation_timeout=True
+    context=safe_whole_video_analyze(
+        av,(source(),),(),(),local_paths={'source':str(raw)},
+    )
+    assert context.status.available
+    assert [call[2] for call in session.calls]==[60,60,120]
+    record=context.diagnostics['native_av'][0]
+    assert record['status']=='validated'
+    assert record['generation_attempts']==2
+    assert record['retry_reason']=='read_timeout'
+    assert av.ledger.reserved_usd==record['reserved_usd']
+
+
+def test_timeout_does_not_retry_without_explicit_flag(tmp_path):
+    av,raw,_=provider(tmp_path)
+    session=TimeoutThenSuccessSession()
+    av.session=session
+    context=safe_whole_video_analyze(
+        av,(source(),),(),(),local_paths={'source':str(raw)},
+    )
+    assert not context.status.available
+    assert [call[2] for call in session.calls]==[60,60]
+    assert context.diagnostics['native_av'][0]['generation_attempts']==1
+
+
+def test_second_timeout_fails_closed_with_terminal_audit_status(tmp_path):
+    av,raw,_=provider(tmp_path)
+    session=TimeoutThenSuccessSession()
+    session.post=lambda url,headers,json,timeout: (
+        Session.post(session,url,headers,json,timeout)
+        if url.endswith('countTokens')
+        else (_ for _ in ()).throw(requests.exceptions.ReadTimeout('timeout'))
+    )
+    av.session=session
+    av.retry_generation_timeout=True
+    context=safe_whole_video_analyze(
+        av,(source(),),(),(),local_paths={'source':str(raw)},
+    )
+    assert not context.status.available
+    record=context.diagnostics['native_av'][0]
+    assert record['status']=='generation_retry_failed'
+    assert record['generation_attempts']==2
+    assert record['retry_failure_type']=='ReadTimeout'
 
 
 def test_missing_actual_source_does_not_fall_back_to_text(tmp_path):

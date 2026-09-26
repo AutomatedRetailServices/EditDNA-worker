@@ -51,6 +51,9 @@ def prepare(existing_source_key=None, single_provider=False):
             "CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD": "0.10",
             "CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION": "0.30",
             "CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION": "2.50",
+            "CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED": os.environ.get(
+                "CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED", "0"
+            ),
             "CUTSELL_HYBRID_PRIMARY_MODEL": "gemini-3.5-flash-lite",
         })
     required_key = {"deepgram": "DEEPGRAM_API_KEY", "gpt-whisperx": "OPENAI_API_KEY", "medium": "GEMINI_API_KEY", "medium-whisperx": "GEMINI_API_KEY"}[selected_provider]
@@ -85,6 +88,9 @@ def prepare(existing_source_key=None, single_provider=False):
         manifest = json.loads((OUT / "manifest.json").read_text())
         manifest["native_av"] = {"enabled": True, "max_edit_usd": 0.10,
             "model": "gemini-3.5-flash-lite", "input_per_million": 0.30, "output_per_million": 2.50,
+            "timeout_retry_enabled": os.environ.get(
+                "CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED", "0"
+            ) == "1",
             "pricing_source": "https://ai.google.dev/gemini-api/docs/pricing", "pricing_verified": "2026-09-25"}
         write_json(OUT / "manifest.json", manifest)
     if pair:

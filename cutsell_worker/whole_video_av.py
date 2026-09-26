@@ -1,7 +1,7 @@
 """Bounded whole-source Gemini audio/video input, explicitly configured for qualification.
 
 This is evidence production, not a deletion authority. No network at construction,
-no automatic retries, no silent text-only fallback, no change to model policy.
+no implicit retries, no silent text-only fallback, no change to model policy.
 """
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,6 +61,7 @@ class GeminiWholeVideoAVProvider:
     media_preparer: object = prepare_av
     max_output_tokens: int = 2048
     max_media_bytes: int = 12_000_000
+    retry_generation_timeout: bool = False
     audit_records: list = field(default_factory=list, init=False)
 
     def __post_init__(self):
@@ -73,10 +74,10 @@ class GeminiWholeVideoAVProvider:
     def analyze(self, sources, transcripts, samples):
         raise ValueError('Watch + Listen requires local source media, not sampled images alone')
 
-    def _post(self, method, body):
+    def _post(self, method, body, *, timeout_sec=60):
         response=self.session.post(
             f'https://generativelanguage.googleapis.com/v1beta/models/{self.model}:{method}',
-            headers={'x-goog-api-key':self.api_key},json=body,timeout=60,
+            headers={'x-goog-api-key':self.api_key},json=body,timeout=timeout_sec,
         )
         response.raise_for_status()
         return response.json()
@@ -113,17 +114,40 @@ class GeminiWholeVideoAVProvider:
             audit = dict(contract_version='cutsell.av.v1', source_asset_id=source.source_asset_id,
                          source_sha256=digest.hexdigest(), source_duration_sec=source.duration_sec,
                          prepared_duration_sec=duration, model=self.model, reserved_usd=reserved,
-                         input_tokens_preflight=tokens, status='generation_requested')
+                         input_tokens_preflight=tokens, status='generation_requested',
+                         generation_attempts=1)
             self.audit_records.append(audit)
-            raw=self._post('generateContent',{'contents':contents,'generationConfig':{
+            generation_body={'contents':contents,'generationConfig':{
                 'responseMimeType':'application/json','maxOutputTokens':self.max_output_tokens,
                 'responseJsonSchema': response_schema(source.duration_sec),
-            }})
+            }}
+            try:
+                raw=self._post('generateContent',generation_body)
+            except requests.exceptions.ReadTimeout:
+                if not self.retry_generation_timeout:
+                    raise
+                if not self.ledger.reserve(reserved):
+                    audit.update(status='retry_budget_exhausted', retry_reason='read_timeout')
+                    raise ValueError('AV timeout retry budget exhausted')
+                audit.update(
+                    status='generation_retry_requested',
+                    retry_reason='read_timeout',
+                    generation_attempts=2,
+                    reserved_usd=reserved * 2,
+                )
+                try:
+                    raw=self._post('generateContent',generation_body,timeout_sec=120)
+                except Exception as exc:
+                    audit.update(
+                        status='generation_retry_failed',
+                        retry_failure_type=type(exc).__name__,
+                    )
+                    raise
             usage = raw.get('usageMetadata') or {}
             logging.getLogger(__name__).info(
-                'AV response source=%s input_tokens=%s output_tokens=%s thinking_tokens=%s reserved_usd=%.6f',
+                'AV response source=%s input_tokens=%s output_tokens=%s thinking_tokens=%s total_reserved_usd=%.6f',
                 source.source_asset_id, usage.get('promptTokenCount'), usage.get('candidatesTokenCount'),
-                usage.get('thoughtsTokenCount'), reserved,
+                usage.get('thoughtsTokenCount'), audit['reserved_usd'],
             )
             audit['response'] = captured_response(raw)
             try:
@@ -155,4 +179,7 @@ def build_av_provider(settings, values):
         DollarBudgetLedger(float(values.get('CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD','0'))),
         float(values.get('CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION','0')),
         float(values.get('CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION','0')),
+        retry_generation_timeout=str(
+            values.get('CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED','0')
+        ).lower() in {'1','true','yes','on'},
     )
