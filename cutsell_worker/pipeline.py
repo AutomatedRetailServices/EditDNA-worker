@@ -1998,6 +1998,65 @@ def build_flow_b_draft(
         failed_retry_coverage_pairs=failed_retry_coverage_candidates,
     )
 
+    # A first semantic pass can prove that several locally-correlated early
+    # attempts form one retry family before any one member has enough lexical
+    # overlap with the much later clean delivery. Re-run only the bounded
+    # comparison-candidate discovery against that newly established family;
+    # this grants no deletion authority and asks the same directional-
+    # coverage arbiter about only genuinely new pairs. Without this bridge,
+    # the evidence produced by pass one could never influence BestTake.
+    expanded_coverage_candidates = build_failed_retry_coverage_pairs(
+        kept,
+        hybrid_cleanup.diagnostics,
+        partition_by_id=retry_partition_by_id,
+        retry_groups=semantic_equivalence_groups,
+        relation_takes=take_tuple,
+        relation_partition_by_id=relation_partition_by_id,
+    )
+    novel_coverage_candidates = frozenset(
+        expanded_coverage_candidates - failed_retry_coverage_candidates
+    )
+    if novel_coverage_candidates:
+        recovered_groups, recovery_diagnostics = reconcile_semantic_idea_equivalence(
+            semantic_equivalence_groups,
+            kept,
+            semantic_equivalence_arbiter,
+            protected_ids=composite_split_ids,
+            confirmed_recording_evidence=confirmed_recording_evidence,
+            watch_listen_spans_by_id=watch_listen_spans_by_id,
+            measured_silence_evidence=measured_silence_evidence,
+            failed_retry_coverage_pairs=novel_coverage_candidates,
+            coverage_pairs_only=True,
+        )
+        semantic_equivalence_groups = recovered_groups
+        semantic_equivalence_diagnostics = dict(semantic_equivalence_diagnostics)
+        semantic_equivalence_diagnostics["coverage_recovery_pass"] = recovery_diagnostics
+        for key in ("merges", "arbiter_rejected_pairs", "distinct_addition_blocked"):
+            semantic_equivalence_diagnostics[key] = list(
+                semantic_equivalence_diagnostics.get(key) or ()
+            ) + list(recovery_diagnostics.get(key) or ())
+        semantic_equivalence_diagnostics["merged_pair_count"] = len(
+            semantic_equivalence_diagnostics.get("merges") or ()
+        )
+        for key in ("candidate_pair_count", "checked_pair_count"):
+            semantic_equivalence_diagnostics[key] = (
+                int(semantic_equivalence_diagnostics.get(key) or 0)
+                + int(recovery_diagnostics.get(key) or 0)
+            )
+        semantic_equivalence_diagnostics["arbiter_rejected_pair_count"] = len(
+            semantic_equivalence_diagnostics.get("arbiter_rejected_pairs") or ()
+        )
+        semantic_equivalence_diagnostics["distinct_addition_blocked_count"] = len(
+            semantic_equivalence_diagnostics.get("distinct_addition_blocked") or ()
+        )
+        semantic_equivalence_diagnostics["ranked_pair_budget"] = list(
+            semantic_equivalence_diagnostics.get("ranked_pair_budget") or ()
+        ) + list(recovery_diagnostics.get("ranked_pair_budget") or ())
+        semantic_equivalence_diagnostics["failed_retry_coverage_pair_count"] = (
+            int(semantic_equivalence_diagnostics.get("failed_retry_coverage_pair_count") or 0)
+            + int(recovery_diagnostics.get("failed_retry_coverage_pair_count") or 0)
+        )
+
     # D-058 Phase 1: one final cohesion-validation pass -- see
     # take_grouping_provider.split_incohesive_retry_groups's own module
     # comment for the full defect/fix rationale (docs/CUTSELL_DECISIONS.md

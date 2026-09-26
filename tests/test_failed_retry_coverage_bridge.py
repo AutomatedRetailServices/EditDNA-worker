@@ -162,6 +162,59 @@ def test_internal_restart_suffix_requires_long_ordered_coverage_and_preserves_nu
         assert _internal_restart_suffix_covered(failed, clean) is False
 
 
+def test_confirmed_retry_family_can_supply_anchor_for_second_pass_clean_delivery():
+    intro = take("intro", "many salons can give your feet fungus and I have a solution", 5, 13)
+    failed = take(
+        "failed", "many salons gave me fungus use ClearFoot on your feet and then...", 27, 46,
+    )
+    summary = take(
+        "summary", "salons gave you fungus I recommend ClearFoot with this you can", 58, 64,
+        complete=False,
+    )
+    clean = take(
+        "clean", "salons gave you fungus I recommend ClearFoot with this you can eradicate it and order today",
+        101, 132,
+    )
+    windows = ({"partition_index": 0, "member_ids": ["intro", "failed", "summary", "clean"], "decisions": [
+        row("intro", label="alternate", proposed_label="alternate", confidence=0.80,
+            semantic_delete_recommended=False),
+        row("failed", confidence=0.85),
+        row("summary", label="alternate", proposed_label="alternate", confidence=0.80,
+            semantic_delete_recommended=False),
+        row("clean", label="winner", proposed_label="winner", confidence=0.95,
+            semantic_delete_recommended=False),
+    ]},)
+    # The first pass can establish this early family semantically. On the
+    # bounded recovery pass its literal summary member supplies the relation
+    # anchor, while the arbiter still receives the complete original texts.
+    pairs = failed_retry_coverage_pairs(
+        (intro, failed, summary, clean), windows,
+        partition_by_id={cid: 0 for cid in ("intro", "failed", "summary", "clean")},
+        retry_groups=(("intro", "failed", "summary"), ("clean",)),
+    )
+    assert ("summary", "clean") in pairs
+
+
+def test_coverage_only_reconcile_never_reasks_or_merges_ordinary_pairs():
+    failed = take("failed", "this backpack can hold", 0, 4, complete=False)
+    clean = take("clean", "this backpack can hold two laptops", 20, 28)
+    ordinary = take("ordinary", "this backpack comes in blue", 30, 36)
+    arbiter = CoverageArbiter(confidence=0.95, left_covered=True, same_idea=True)
+    groups, diagnostics = reconcile_semantic_idea_equivalence(
+        (("failed",), ("clean",), ("ordinary",)),
+        (failed, clean, ordinary),
+        arbiter,
+        failed_retry_coverage_pairs=frozenset({("failed", "clean")}),
+        coverage_pairs_only=True,
+    )
+    assert len(arbiter.last_request.pairs) == 1
+    assert arbiter.last_request.pairs[0].left_text == failed.text
+    assert arbiter.last_request.pairs[0].right_text == clean.text
+    assert any(set(group) == {"failed", "clean"} for group in groups)
+    assert ("ordinary",) in groups
+    assert diagnostics["candidate_pair_count"] == 1
+
+
 def test_shared_core_fallback_is_not_available_for_small_overlap_or_numeric_conflict():
     failed = take(
         "failed", "salons spread 3 foot fungus problems because tools are not cleaned use this product on the feet",

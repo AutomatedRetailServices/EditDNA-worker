@@ -915,6 +915,7 @@ def reconcile_semantic_idea_equivalence(
     watch_listen_spans_by_id: Mapping[str, object] | None = None,
     measured_silence_evidence: Mapping[str, Tuple[Tuple[float, float], ...]] | None = None,
     failed_retry_coverage_pairs: frozenset[tuple[str, str]] = frozenset(),
+    coverage_pairs_only: bool = False,
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """Merge groups the lexical layer left separate only when a narrow
     semantic arbiter is confident they are recording attempts of the same
@@ -959,7 +960,10 @@ def reconcile_semantic_idea_equivalence(
         return groups, {"status": "not_requested", "candidate_pair_count": 0, "merged_pair_count": 0}
 
     take_map = {take.clip_id: take for take in takes}
-    candidate_pairs = _cross_group_candidate_pairs(groups, take_map, maximum_gap_sec=maximum_gap_sec)
+    candidate_pairs = (
+        () if coverage_pairs_only
+        else _cross_group_candidate_pairs(groups, take_map, maximum_gap_sec=maximum_gap_sec)
+    )
     group_index_of = {cid: gi for gi, group in enumerate(groups) for cid in group}
     directed_coverage_pairs = frozenset(
         (failed_id, delivery_id)
@@ -1001,7 +1005,7 @@ def reconcile_semantic_idea_equivalence(
     # decided once in `continuation_pairs`). Deterministic recording-process
     # evidence, outside the candidate-pair floor (a <= 3-word tail is
     # exactly what the floor excludes) and never spent on the arbiter.
-    chain_pairs = tuple(sorted(
+    chain_pairs = () if coverage_pairs_only else tuple(sorted(
         (
             pair for pair in continuation_pairs(takes)
             if not (pair & protected_ids)
@@ -1186,7 +1190,11 @@ def reconcile_semantic_idea_equivalence(
     # supplied) keeps the flag-OFF path (the overwhelming default) byte-
     # identical to pre-D-161 behavior.
     watch_listen_discovery_enabled = _watch_listen_relation_discovery().watch_listen_relation_discovery_enabled()
-    discovery_may_contribute = bool(watch_listen_discovery_enabled and watch_listen_spans_by_id)
+    discovery_may_contribute = bool(
+        not coverage_pairs_only
+        and watch_listen_discovery_enabled
+        and watch_listen_spans_by_id
+    )
     if arbiter is None:
         if merged_count == 0 and not discovery_may_contribute:
             # D-158: this pre-existing early exit (no arbiter, no restart-
