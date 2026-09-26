@@ -178,6 +178,23 @@ def test_b_helper_detects_the_literal_contiguous_subset_relationship():
     assert _is_incomplete_content_subset(long_, short) is False
 
 
+def test_b_content_subset_with_inserted_details_keeps_full_retry():
+    short = take("short", "When my contract ended I asked my doctor.")
+    long_ = take(
+        "long",
+        "When my contract ended I changed doctors and asked my doctor for every available test.",
+        start=5.0,
+    )
+    assert _is_incomplete_content_subset(short, long_) is True
+    decisions = {"short": ("keep", 0.5), "long": ("failed", 0.9)}
+    selected, _preferred, reason = _semantic_best_take(
+        (short, long_), decisions, "short", ranked(("short", 10.0), ("long", 5.0)),
+        semantic_delete_recommended={"short": False, "long": False},
+    )
+    assert selected == "long"
+    assert reason == "delivery_tie_break_among_survivors"
+
+
 def test_b_negative_control_1_two_complete_alternatives_longer_does_not_automatically_win():
     """Neither candidate's text is a literal contiguous subset of the
     other -- protection must not apply; the HIGHER-scoring candidate wins
