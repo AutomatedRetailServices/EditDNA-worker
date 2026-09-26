@@ -108,6 +108,7 @@ from .whole_video_analysis import WholeVideoProvider
 
 _BTS_SINGLETON_BASIS = "single_bts_unusable"
 _REDUNDANT_FAILED_ATTEMPT_BASIS = "redundant_failed_attempt_family"
+_COVERED_FAILED_SINGLETON_BASIS = "covered_failed_singleton_unusable"
 
 
 def derive_story_completeness(take_judge_groups, *, selected=(), discarded=()) -> dict:
@@ -174,12 +175,17 @@ def derive_story_completeness(take_judge_groups, *, selected=(), discarded=()) -
                     return True
         return False
 
+    non_story_process_bases = {_BTS_SINGLETON_BASIS, _COVERED_FAILED_SINGLETON_BASIS}
     bts = [row for row in dropped if row.get("no_usable_realization_basis") == _BTS_SINGLETON_BASIS]
+    covered_singletons = [
+        row for row in dropped
+        if row.get("no_usable_realization_basis") == _COVERED_FAILED_SINGLETON_BASIS
+    ]
     redundant = [row for row in dropped if redundant_failed_attempt_family(row)]
     redundant_ids = {id(row) for row in redundant}
     ideas = [
         row for row in dropped
-        if row.get("no_usable_realization_basis") != _BTS_SINGLETON_BASIS
+        if row.get("no_usable_realization_basis") not in non_story_process_bases
         and id(row) not in redundant_ids
     ]
     return {
@@ -188,6 +194,7 @@ def derive_story_completeness(take_judge_groups, *, selected=(), discarded=()) -
         "idea_family_ids": [str(row.get("group_id") or "") for row in ideas],
         "bts_singleton_ids": [str(row.get("group_id") or "") for row in bts],
         "redundant_failed_attempt_family_ids": [str(row.get("group_id") or "") for row in redundant],
+        "covered_failed_singleton_ids": [str(row.get("group_id") or "") for row in covered_singletons],
     }
 
 from .watch_listen_runtime import automatic_watch_listen
@@ -1146,6 +1153,9 @@ def process_universal_clean_cut_sources(
             "no_usable_realization_bts_singleton_ids": story["bts_singleton_ids"],
             "no_usable_realization_redundant_failed_attempt_family_ids": story[
                 "redundant_failed_attempt_family_ids"
+            ],
+            "no_usable_realization_covered_failed_singleton_ids": story[
+                "covered_failed_singleton_ids"
             ],
             "freeze_blocked_pending_coherence_review": freeze_blocked,
             "post_authority_integrity_failure": post_authority_integrity_failed,

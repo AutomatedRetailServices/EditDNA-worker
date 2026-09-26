@@ -657,6 +657,31 @@ def _same_idea_paraphrase_credit(
             return True, "same_idea_semantic_equivalence"
     if _structured_component_coverage_credit(diagnostics, clip.clip_id, selected_ids):
         return True, "grouping_safety_structured_component_coverage"
+    # BestTake already established a mutually-exclusive retry family and a
+    # selected sibling.  A member consistently classified FAILED with local
+    # dense performance corroboration is a rejected realization, not an
+    # additive fact merely because no exact pairwise merge row survived the
+    # bounded component audit.
+    rows = [
+        row for window in ((diagnostics or {}).get("hybrid_editorial_chunks") or ())
+        for row in (window.get("decisions") or ())
+        if str(row.get("clip_id") or "") == clip.clip_id
+    ]
+    failed_rows = [
+        row for row in rows
+        if row.get("label") == "failed"
+        and float(row.get("confidence") or 0.0) >= 0.80
+        and row.get("local_failure_corroborated") is True
+        and row.get("dense_semantic_failure_cluster") is True
+    ]
+    unsafe_rows = [
+        row for row in rows
+        if row.get("label") in {"winner", "bts"}
+        or row.get("local_failure_corroborated") is not True
+        or row.get("dense_semantic_failure_cluster") is not True
+    ]
+    if failed_rows and not unsafe_rows:
+        return True, "same_family_corroborated_failed_realization"
     return False, None
 
 

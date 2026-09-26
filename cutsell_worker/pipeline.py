@@ -2106,6 +2106,31 @@ def build_flow_b_draft(
             "CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON"
         ),
     }
+    # A component join may fail closed because the receiving component is
+    # too large to probe completely.  The exact directional edge can still
+    # prove that its singleton failed attempt is covered by the named later
+    # delivery.  Do not auto-keep that singleton merely because it no longer
+    # participates in a multi-member BestTake contest.
+    covered_failed_singleton_ids: set[str] = set()
+    for row in cohesion_diagnostics.get("edge_trace") or ():
+        left_id = str(row.get("left_clip_id") or "")
+        right_id = str(row.get("right_clip_id") or "")
+        left_members = tuple(str(cid) for cid in (row.get("left_component_members") or ()))
+        left_take, right_take = take_by_id.get(left_id), take_by_id.get(right_id)
+        try:
+            confidence = float(row.get("confidence") or row.get("cohesion_confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if (
+            row.get("evidence") == "directional_coverage"
+            and left_members == (left_id,)
+            and left_take is not None and right_take is not None
+            and right_take.start >= left_take.end and right_take.complete_idea
+            and confidence >= 0.90
+            and row.get("semantic_meaning_conflict") is False
+            and row.get("semantic_left_covered_by_right") is True
+        ):
+            covered_failed_singleton_ids.add(left_id)
     # D-289.1: a sentence-continuation chain is ONE realization -- folded
     # onto its head for the whole family competition (see
     # continuation_chain.py's own module docstring). `chain_tails_by_head`
@@ -2344,6 +2369,18 @@ def build_flow_b_draft(
         complete_window_winner_conflict["routed"] = semantic_best_take_reason == "unresolved_semantic_winner_conflict"
         _terminal_besttake_confidence_result = _terminal_confidence_out.get("terminal_besttake_confidence")
         no_usable_realization = selected_clip_id is None
+        covered_failed_singleton = bool(
+            len(members) == 1
+            and members[0].clip_id in covered_failed_singleton_ids
+            and family_semantic_decisions.get(members[0].clip_id, ("", 0.0))[0] == "failed"
+            and family_semantic_decisions.get(members[0].clip_id, ("", 0.0))[1] >= 0.80
+            and hybrid_local_failure_corroborated.get(members[0].clip_id, False)
+        )
+        if covered_failed_singleton:
+            selected_clip_id = None
+            semantic_preferred_clip_id = None
+            semantic_best_take_reason = "covered_failed_singleton_unusable"
+            no_usable_realization = True
         all_delete_recommended = len(members) >= 2 and all(
             hybrid_semantic_delete_recommended.get(member.clip_id, False) for member in members
         )
