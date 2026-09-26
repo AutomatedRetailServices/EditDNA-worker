@@ -14,6 +14,25 @@ from .gpt_whisperx_asr import ALIGNER_PYTHON, ALIGNER_SCRIPT, AlignmentEvidenceE
 
 PROVIDER = "faster-whisper-medium-whisperx"
 
+def _drop_degenerate_duplicate_tail(segments):
+    """Discard only a physically impossible repeated ASR tail at the source edge."""
+    kept = []
+    dropped = []
+    for segment in segments:
+        previous = kept[-1] if kept else None
+        if (previous is not None
+                and 0 < segment.end - segment.start <= 0.05
+                and 0 <= segment.start - previous.end <= 0.5
+                and " ".join(segment.text.casefold().split())
+                    == " ".join(previous.text.casefold().split())
+                and len(segment.text.split()) >= 3):
+            dropped.append({"start": segment.start, "end": segment.end,
+                            "reason": "degenerate_duplicate_tail"})
+            continue
+        kept.append(segment)
+    return tuple(kept), dropped
+
+
 
 @dataclass(frozen=True)
 class AlignmentFingerprint:
@@ -22,7 +41,7 @@ class AlignmentFingerprint:
 
     def fingerprint(self):
         spec = {"provider": PROVIDER, "decode": self.decode, "language": self.language,
-                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v1",
+                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v2-degenerate-tail",
                 "interpolation": "ignore", "audio": "pcm_s16le-mono-16000"}
         return "asrcfg_" + hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
@@ -63,6 +82,8 @@ class MediumWhisperXASR:
                            "confidence_semantics": "CTC alignment score; not lexical confidence", "chunks": []}
         try:
             original = self.base.transcribe(path, source_asset_id=source_asset_id, language_hint=language_hint)
+            original, dropped = _drop_degenerate_duplicate_tail(original)
+            self.last_audit["discarded_degenerate_asr_tails"] = dropped
             language = language_hint or getattr(self.base, "last_detected_language", None)
             if original and language not in {"en", "es"}:
                 raise AlignmentEvidenceError("No qualified detected alignment language")
