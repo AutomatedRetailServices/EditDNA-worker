@@ -238,6 +238,73 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             "loser_positive_confidence": round(_strongest(votes, loser_id, {"winner", "keep"}), 4),
             "winner_positive_confidence": round(winner_positive, 4),
         })
+
+    # Some retry families are expressed as two deterministic edges through
+    # the same abandoned attempt: A->B (a short failed correction) and A->C
+    # (the complete audience delivery).  B and C therefore compete even when
+    # no direct B/C edge was emitted.  Resolve only the unambiguous case: one
+    # strong audience winner and a short selected peer that Hybrid strongly
+    # classified as failed/non-audience recording debris.
+    graph: dict[str, set[str]] = {}
+    for row in _deterministic_retry_rows(diagnostics):
+        left_id = str(row.get("left_clip_id") or "")
+        right_id = str(row.get("right_clip_id") or "")
+        if left_id in all_by_id and right_id in all_by_id:
+            graph.setdefault(left_id, set()).add(right_id)
+            graph.setdefault(right_id, set()).add(left_id)
+    visited: set[str] = set()
+    for root in graph:
+        if root in visited:
+            continue
+        component: set[str] = set()
+        pending = [root]
+        while pending:
+            clip_id = pending.pop()
+            if clip_id in component:
+                continue
+            component.add(clip_id)
+            pending.extend(graph.get(clip_id, ()))
+        visited.update(component)
+        if component & move:
+            continue
+        winner_ids = [
+            clip_id for clip_id in component
+            if _strongest(votes, clip_id, {"winner", "keep"}) >= 0.90
+            and _strongest(votes, clip_id, {"alternate", "failed"}) < 0.80
+            and _audience_support(diagnostics, clip_id) >= 0.80
+            and complete.get(clip_id) is not False
+        ]
+        if len(winner_ids) != 1:
+            continue
+        winner_id = winner_ids[0]
+        winner = all_by_id[winner_id]
+        for loser_id in sorted(component & set(selected_by_id)):
+            if loser_id == winner_id:
+                continue
+            loser = all_by_id[loser_id]
+            duration = max(0.0, float(loser.end) - float(loser.start))
+            if (
+                duration > 4.0
+                or _strongest(votes, loser_id, {"alternate", "failed"}) < 0.90
+                or _audience_support(diagnostics, loser_id) >= 0.80
+            ):
+                continue
+            move.add(loser_id)
+            if winner_id not in selected_by_id:
+                add.add(winner_id)
+            audit.append({
+                "clip_id": loser_id,
+                "winner_clip_id": winner_id,
+                "reason": "deterministic_retry_component_failed_debris",
+                "component_clip_ids": sorted(component),
+                "loser_duration_sec": round(duration, 3),
+                "loser_negative_confidence": round(
+                    _strongest(votes, loser_id, {"alternate", "failed"}), 4,
+                ),
+                "winner_positive_confidence": round(
+                    _strongest(votes, winner_id, {"winner", "keep"}), 4,
+                ),
+            })
     return move, add, audit
 
 
@@ -548,6 +615,22 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
         if right_positive >= 0.90 and left_negative >= 0.80 and left_positive < 0.90:
             loser_id, winner_id = left_id, right_id
         elif left_positive >= 0.90 and right_negative >= 0.80 and right_positive < 0.90:
+            loser_id, winner_id = right_id, left_id
+        elif (
+            confidence >= 0.90
+            and right_positive >= 0.90
+            and right_positive - left_positive >= 0.05 - 1e-9
+            and left_negative < 0.80
+            and right_negative < 0.80
+        ):
+            loser_id, winner_id = left_id, right_id
+        elif (
+            confidence >= 0.90
+            and left_positive >= 0.90
+            and left_positive - right_positive >= 0.05 - 1e-9
+            and left_negative < 0.80
+            and right_negative < 0.80
+        ):
             loser_id, winner_id = right_id, left_id
         elif (
             confidence >= 0.95

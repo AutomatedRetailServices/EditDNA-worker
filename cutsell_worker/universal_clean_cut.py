@@ -377,6 +377,15 @@ def process_universal_clean_cut_sources(
                     exact_p1_target_evidence_by_clip_id=_p1_target_lookup_evidence_by_clip_id,
                 ),
             )
+            # Story coherence may conservatively restore a realization that
+            # the earlier membership guard removed while preserving an idea.
+            # Reconcile once more at the last pre-plan Selection seam so the
+            # Semantic Ledger and authoritative resolver consume the settled
+            # retry/duplicate membership instead of resurrecting stale peers.
+            result = replace(
+                result,
+                draft=apply_selection_conflicted_bridge_guard(result.draft),
+            )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
             semantic_status = "clean_cut_core_v1_idea_first"
             reasoner_status_label = "disabled_clean_cut_core_v1"

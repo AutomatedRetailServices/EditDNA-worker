@@ -196,6 +196,23 @@ def test_equal_safe_confirmed_duplicates_keep_only_later_delivery():
     assert audit[0]["winner_clip_id"] == "later"
 
 
+def test_confirmed_duplicate_uses_clear_positive_margin_without_negative_label():
+    earlier = _clip("earlier", 10.0, 18.0, "A rash appeared behind my ear and neck.")
+    later = _clip("later", 21.0, 28.0, "The rash appeared behind my ear and on my neck.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "earlier", "right_clip_id": "later", "confidence": 0.90,
+        }]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "earlier", "label": "keep", "confidence": 0.90},
+            {"clip_id": "later", "label": "winner", "confidence": 0.95},
+        ]}],
+    }
+    move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
+    assert move == {"earlier"}
+    assert audit[0]["winner_clip_id"] == "later"
+
+
 def test_confirmed_duplicate_with_unique_negation_fails_open():
     earlier = _clip("earlier", 1.0, 4.0, "No tuve ese síntoma.")
     later = _clip("later", 5.0, 8.0, "Tuve ese síntoma.")
@@ -301,6 +318,39 @@ def test_failed_complete_peer_is_not_resurrected_over_incomplete_selection():
     }
     move, add, audit = deterministic_retry_resolution((incomplete,), (), (failed,), diagnostics)
     assert move == set() and add == set() and audit == []
+
+
+def test_shared_abandoned_attempt_resolves_short_failed_component_debris():
+    abandoned = _clip("abandoned", 10.0, 16.0, "I had stomach trouble and was diagnosed with...")
+    correction = _clip("correction", 18.0, 19.6, "I had stomach trouble, no.")
+    complete = _clip(
+        "complete", 24.0, 33.5,
+        "I had digestive trouble and the endoscopy showed gastritis.",
+    )
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [
+            {"left_clip_id": "abandoned", "right_clip_id": "correction",
+             "confidence": 1.0, "accepted_by": "multimodal_corroborated_retry"},
+            {"left_clip_id": "abandoned", "right_clip_id": "complete",
+             "confidence": 1.0, "accepted_by": "incomplete_attempt_completed_by_retry"},
+        ]},
+        "attempt_reconstruction": {"attempts": [
+            {"clip_id": "abandoned", "complete_idea": False},
+            {"clip_id": "correction", "complete_idea": True},
+            {"clip_id": "complete", "complete_idea": True},
+        ]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "correction", "label": "failed", "confidence": 0.90,
+             "content_role": "mixed"},
+            {"clip_id": "complete", "label": "winner", "confidence": 0.95,
+             "content_role": "audience"},
+        ]}],
+    }
+    move, add, audit = deterministic_retry_resolution(
+        (correction, complete), (), (abandoned,), diagnostics,
+    )
+    assert move == {"correction"} and add == set()
+    assert audit[0]["reason"] == "deterministic_retry_component_failed_debris"
 
 
 def test_selected_suffix_of_confirmed_duplicate_is_removed():
