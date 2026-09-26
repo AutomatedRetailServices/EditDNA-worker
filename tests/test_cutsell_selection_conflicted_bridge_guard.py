@@ -1,5 +1,9 @@
 from cutsell_worker.contracts import DraftClip
-from cutsell_worker.selection_conflicted_bridge_guard import conflicted_redundant_bridge_ids
+from cutsell_worker.selection_conflicted_bridge_guard import (
+    confirmed_selected_duplicate_ids,
+    conflicted_redundant_bridge_ids,
+    terminally_incomplete_selected_ids,
+)
 
 
 def _clip(clip_id, start, end, text):
@@ -149,5 +153,62 @@ def test_very_strong_keep_with_clear_margin_wins_conflict_and_fails_open():
 
     move, audit = conflicted_redundant_bridge_ids((left, bridge, right), diagnostics)
 
+    assert move == set()
+    assert audit == []
+
+
+def test_directly_confirmed_selected_duplicate_keeps_semantic_winner():
+    earlier = _clip("earlier", 198.8, 210.3, "También me salían espinillas detrás de la oreja y el cuello.")
+    later = _clip("later", 213.6, 221.7, "Otro síntoma eran espinillas detrás de la oreja y en el cuello.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "earlier", "right_clip_id": "later",
+            "confidence": 0.90, "reason": "same symptom restated",
+        }]},
+        "hybrid_editorial_chunks": [
+            {"decisions": [{"clip_id": "earlier", "label": "alternate", "confidence": 0.85}]},
+            {"decisions": [{"clip_id": "later", "label": "winner", "confidence": 0.95}]},
+        ],
+    }
+    move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
+    assert move == {"earlier"}
+    assert audit[0]["winner_clip_id"] == "later"
+
+
+def test_confirmed_duplicate_with_unique_negation_fails_open():
+    earlier = _clip("earlier", 1.0, 4.0, "No tuve ese síntoma.")
+    later = _clip("later", 5.0, 8.0, "Tuve ese síntoma.")
+    diagnostics = {
+        "semantic_idea_equivalence": {"merges": [{
+            "left_clip_id": "earlier", "right_clip_id": "later", "confidence": 0.90,
+        }]},
+        "hybrid_editorial_chunks": [{"decisions": [
+            {"clip_id": "earlier", "label": "alternate", "confidence": 0.85},
+            {"clip_id": "later", "label": "winner", "confidence": 0.95},
+        ]}],
+    }
+    move, audit = confirmed_selected_duplicate_ids((earlier, later), diagnostics)
+    assert move == set()
+    assert audit == []
+
+
+def test_short_terminally_incomplete_singleton_is_removed():
+    fragment = _clip("fragment", 241.75, 243.254, "me diagnosticaron con...")
+    diagnostics = {"attempt_reconstruction": {"attempts": [{
+        "clip_id": "fragment", "complete_idea": False, "duration_sec": 1.504,
+    }]}}
+    move, audit = terminally_incomplete_selected_ids((fragment,), diagnostics)
+    assert move == {"fragment"}
+    assert audit[0]["reason"] == "short_terminally_incomplete_attempt"
+
+
+def test_complete_or_long_open_delivery_fails_open():
+    complete = _clip("complete", 1.0, 2.5, "Esta idea está completa.")
+    long_open = _clip("long", 3.0, 8.0, "Esta explicación todavía continúa...")
+    diagnostics = {"attempt_reconstruction": {"attempts": [
+        {"clip_id": "complete", "complete_idea": True, "duration_sec": 1.5},
+        {"clip_id": "long", "complete_idea": False, "duration_sec": 5.0},
+    ]}}
+    move, audit = terminally_incomplete_selected_ids((complete, long_open), diagnostics)
     assert move == set()
     assert audit == []
