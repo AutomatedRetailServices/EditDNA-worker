@@ -102,6 +102,39 @@ def test_double_winner_complete_ambiguity_abstains():
     assert selected == "B"
 
 
+def test_conflicting_all_failed_windows_cannot_delete_entire_idea_family():
+    """A keep/alternate versus all-failed disagreement must fail open.
+
+    The local signals only corroborate a semantic label; they are not an
+    independent authority to remove every realization of a required beat.
+    """
+    a = take("A", "Complete bridge into the next story beat.", complete_idea=True)
+    b = take("B", "Alternate complete bridge.", start=4.0, complete_idea=True)
+    selected, preferred, reason = _semantic_best_take(
+        (a, b), {"A": ("failed", 0.92), "B": ("failed", 0.90)}, "A",
+        ranked(("A", 0.64), ("B", 0.60)),
+        semantic_delete_recommended={"A": True, "B": True},
+        deterministic_unusable={"A": True, "B": True},
+        semantic_comparative_authority=AUTHORITY_ABSTAIN_CONFLICT,
+    )
+    assert (selected, preferred, reason) == (
+        "A", None, "authority_abstain_all_failed_fail_open",
+    )
+
+
+def test_authoritative_all_failed_family_still_has_no_usable_realization():
+    a = take("A", "Failed delivery one.", complete_idea=True)
+    b = take("B", "Failed delivery two.", start=4.0, complete_idea=True)
+    selected, preferred, reason = _semantic_best_take(
+        (a, b), {"A": ("failed", 0.92), "B": ("failed", 0.90)}, "A",
+        ranked(("A", 0.64), ("B", 0.60)),
+        semantic_delete_recommended={"A": True, "B": True},
+        deterministic_unusable={"A": True, "B": True},
+        semantic_comparative_authority=AUTHORITY_ALLOWED,
+    )
+    assert (selected, preferred, reason) == (None, None, "no_usable_realization")
+
+
 def test_no_complete_window_abstains():
     status, reason = resolve_semantic_comparative_authority(2, "false", False)
     assert status == AUTHORITY_ABSTAIN_INCOMPLETE_CONTEXT
