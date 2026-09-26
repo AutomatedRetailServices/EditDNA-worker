@@ -68,6 +68,32 @@ def test_absent_new_role_does_not_retroactively_approve_old_diagnostics():
     assert any(f['blocking'] for f in _lost_semantic_atoms(draft(c,[r])))
 
 
+def test_source_bound_whole_video_recording_observation_removes_failed_false_start():
+    c = clip('Tuve problemas de estómago, no.')
+    av = {'status': 'overlap', 'observations': [{
+        'role': 'recording_only', 'confidence': .85,
+        'source_start': 0, 'source_end': 8,
+        'audio': 'Speech interrupted while fixing hair.',
+    }]}
+    rows = [
+        row(c, label='bts', confidence=.90, local_failure_corroborated=False, audiovisual=av),
+        row(c, label='failed', confidence=.85, local_failure_corroborated=False, audiovisual=av),
+    ]
+    proofs = recording_process_proofs([{'decisions': rows}])
+    assert proof_for_clip(c, proofs)['basis'] == 'whole_video_recording_only'
+
+
+def test_whole_video_recording_observation_must_cover_exact_clip_span():
+    c = clip('A unique audience statement.')
+    av = {'status': 'overlap', 'observations': [{
+        'role': 'recording_only', 'confidence': .90,
+        'source_start': 1, 'source_end': 2,
+    }]}
+    assert not recording_process_proofs([{'decisions': [
+        row(c, confidence=.90, local_failure_corroborated=False, audiovisual=av)
+    ]}])
+
+
 def test_pipeline_classifies_before_cleanup_and_records_source_identity(monkeypatch):
     from cutsell_worker import pipeline, hybrid_session_cleanup
     from cutsell_worker.contracts import ProcessingRequest, SourceAsset, CleanCutDecision
