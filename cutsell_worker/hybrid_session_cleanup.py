@@ -495,6 +495,13 @@ def _failed_local_evidence(
     pause_corroborated_reset_count = int(performance["pause_corroborated_reset_count"])
     if reset_count >= 2 and break_count >= 1:
         reasons.append(f"multimodal_reset_cluster:{reset_count}:{break_count}")
+    # A very short take that reaches a strong physical reset exactly where
+    # measured silence begins is the local signature of an aborted start.
+    # Keep this deliberately narrow: the semantic layer must still label the
+    # take as failed before it can be removed, while longer delivery and
+    # gestures during continuous speech remain fail-open.
+    elif take.duration_sec <= 2.0 and pause_corroborated_reset_count >= 1:
+        reasons.append(f"short_pause_corroborated_reset:{pause_corroborated_reset_count}")
     # D-285 (RAW #120 audit, reusing D-149's already-proven doctrine): the reset-count-alone path is the ONE branch
     # with no independent break/disengagement corroboration, so it is the
     # one branch a natural gesture during continuous speech can trip on its
