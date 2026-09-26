@@ -420,6 +420,55 @@ def test_incomplete_failed_take_can_use_discarded_immediate_continuation_as_rela
     ) == frozenset({("failed", "clean")})
 
 
+def test_original_whole_session_identity_overrides_later_heuristic_resplits():
+    failed = take("failed", "abandoned opening with missing ending", 27, 46)
+    anchor = take("anchor", FAILED_TEXT, 58, 64)
+    clean = take("clean", CLEAN_TEXT, 101, 132)
+    windows = ({
+        "partition_index": 0,
+        "member_ids": ["failed", "anchor", "clean"],
+        "decisions": [
+            row("failed", confidence=0.90),
+            row(
+                "anchor", label="alternate", proposed_label="alternate",
+                confidence=0.82, semantic_delete_recommended=False,
+            ),
+            row(
+                "clean", label="winner", proposed_label="winner",
+                confidence=0.95, semantic_delete_recommended=False,
+            ),
+        ],
+    },)
+    assert failed_retry_coverage_pairs(
+        (failed, anchor, clean),
+        windows,
+        partition_by_id={"failed": 0, "anchor": 1, "clean": 2},
+        retry_groups=(("failed", "anchor"), ("clean",)),
+        relation_takes=(failed, anchor, clean),
+        relation_partition_by_id={"failed": 0, "anchor": 1, "clean": 2},
+    ) == frozenset({("anchor", "clean")})
+
+
+def test_partial_recorded_identity_does_not_override_heuristic_session_split():
+    failed = take("failed", FAILED_TEXT, 27, 46)
+    clean = take("clean", CLEAN_TEXT, 101, 132)
+    windows = ({
+        "partition_index": 0,
+        "member_ids": ["failed"],
+        "decisions": [
+            row("failed", confidence=0.90),
+            row(
+                "clean", label="winner", proposed_label="winner",
+                confidence=0.95, semantic_delete_recommended=False,
+            ),
+        ],
+    },)
+    assert not failed_retry_coverage_pairs(
+        (failed, clean), windows,
+        partition_by_id={"failed": 0, "clean": 1},
+    )
+
+
 def test_discarded_continuation_bridge_rejects_complete_donor_large_gap_or_wrong_session():
     clean = take("clean", CLEAN_TEXT, 101.0, 132.0)
     clean_row = row(

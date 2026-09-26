@@ -58,6 +58,30 @@ def failed_retry_coverage_pairs(
             if clip_id in relation_by_id:
                 rows_by_id[clip_id].append(row)
 
+    def same_creator_session(
+        clip_ids: Iterable[str],
+        heuristic_partitions: Mapping[str, int],
+    ) -> bool:
+        """Resolve session identity without letting a reduced-pool split win.
+
+        Whole-session hybrid diagnostics preserve the creator-session identity
+        observed before discarded takes reshape the retry pool.  When every
+        member has one identical recorded partition, that evidence is more
+        authoritative than a later heuristic repartition.  Ambiguous,
+        incomplete, or contradictory recorded evidence never overrides the
+        heuristic and therefore fails closed when the heuristic also splits.
+        """
+        ids = tuple(clip_ids)
+        recorded = tuple(recorded_partitions.get(clip_id, set()) for clip_id in ids)
+        if any(recorded):
+            if not all(len(partitions) == 1 for partitions in recorded):
+                return False
+            if len({next(iter(partitions)) for partitions in recorded}) != 1:
+                return False
+            return True
+        heuristic = tuple(heuristic_partitions.get(clip_id) for clip_id in ids)
+        return all(partition is not None for partition in heuristic) and len(set(heuristic)) == 1
+
     failed_ids: list[str] = []
     delivery_ids: list[str] = []
     for clip_id, rows in rows_by_id.items():
@@ -122,7 +146,6 @@ def failed_retry_coverage_pairs(
     pairs: set[tuple[str, str]] = set()
     for failed_id in failed_ids:
         failed = by_id[failed_id]
-        failed_recorded = recorded_partitions.get(failed_id, set())
         # Failure evidence and lexical relation need not land on the same
         # member of an already-established retry family. One window may see a
         # long member as FAILED while a shorter sibling preserves the literal
@@ -151,37 +174,24 @@ def failed_retry_coverage_pairs(
         ]
         for delivery_id in delivery_ids:
             delivery = by_id[delivery_id]
-            delivery_recorded = recorded_partitions.get(delivery_id, set())
             if (
                 failed.source_asset_id != delivery.source_asset_id
                 or delivery.start < failed.end
-                or partition_by_id.get(failed_id) is None
-                or partition_by_id.get(failed_id) != partition_by_id.get(delivery_id)
-                or (bool(failed_recorded or delivery_recorded) and (
-                    len(failed_recorded) != 1
-                    or failed_recorded != delivery_recorded
-                ))
+                or not same_creator_session(
+                    (failed_id, delivery_id), partition_by_id,
+                )
             ):
                 continue
             for anchor_id in safe_anchor_ids:
                 anchor = relation_by_id[anchor_id]
-                anchor_recorded = recorded_partitions.get(anchor_id, set())
                 if (
                     anchor.source_asset_id != delivery.source_asset_id
                     or anchor.source_asset_id != failed.source_asset_id
                     or delivery.start < anchor.end
                     or not delivery.complete_idea
-                    or relation_partitions.get(anchor_id) is None
-                    or relation_partitions.get(anchor_id) != relation_partitions.get(delivery_id)
-                    or relation_partitions.get(anchor_id) != relation_partitions.get(failed_id)
-                    or (bool(anchor_recorded or delivery_recorded) and (
-                        len(anchor_recorded) != 1
-                        or anchor_recorded != delivery_recorded
-                    ))
-                    or (bool(anchor_recorded or failed_recorded) and (
-                        len(anchor_recorded) != 1
-                        or anchor_recorded != failed_recorded
-                    ))
+                    or not same_creator_session(
+                        (failed_id, anchor_id, delivery_id), relation_partitions,
+                    )
                 ):
                     continue
                 same_attempt, _ = _same_retry_attempt(anchor, delivery)
