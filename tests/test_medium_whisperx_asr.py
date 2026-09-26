@@ -87,6 +87,17 @@ def test_impossible_duplicate_microtail_after_terminal_silence_is_dropped():
                         'reason': 'degenerate_duplicate_tail'}]
 
 
+def test_impossible_duplicate_microtail_ignores_accent_orthography():
+    complete = TranscriptSegment('source', 356.21, 361.43,
+        'Por eso cuídate, alimentate bien, hidratate y haz ejercicio.', ())
+    phantom = TranscriptSegment('source', 362.03, 362.05,
+        'Por eso cuídate, alimentate bien, hidrátate y haz ejercicio.', ())
+    kept, dropped = mw._drop_degenerate_duplicate_tail((complete, phantom))
+    assert kept == (complete,)
+    assert dropped == [{'start': 362.03, 'end': 362.05,
+                        'reason': 'degenerate_duplicate_tail'}]
+
+
 def test_duplicate_microsegment_is_not_dropped_when_it_is_not_the_source_tail():
     repeated = 'Por eso cuídate, alimentate bien, hídrate y haz ejercicio.'
     complete = TranscriptSegment('source', 10.0, 15.0, repeated, ())

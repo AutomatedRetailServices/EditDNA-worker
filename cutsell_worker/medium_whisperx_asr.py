@@ -8,21 +8,30 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
+import unicodedata
 
 from .contracts import TranscriptSegment
 from .gpt_whisperx_asr import ALIGNER_PYTHON, ALIGNER_SCRIPT, AlignmentEvidenceError, checked_segments
 
 PROVIDER = "faster-whisper-medium-whisperx"
 
+
+def _duplicate_text_key(text):
+    """Normalize orthographic accents without changing lexical content."""
+    folded = unicodedata.normalize("NFKD", text.casefold())
+    return " ".join(
+        "".join(char for char in folded if unicodedata.category(char) != "Mn").split()
+    )
+
 def _drop_degenerate_duplicate_tail(segments):
     """Discard only a physically impossible repeated ASR tail at the source edge."""
     kept = []
     dropped = []
     for index, segment in enumerate(segments):
-        normalized = " ".join(segment.text.casefold().split())
+        normalized = _duplicate_text_key(segment.text)
         matching_previous = next((
             previous for previous in reversed(kept)
-            if " ".join(previous.text.casefold().split()) == normalized
+            if _duplicate_text_key(previous.text) == normalized
         ), None)
         if (matching_previous is not None
                 and index == len(segments) - 1
@@ -44,7 +53,7 @@ class AlignmentFingerprint:
 
     def fingerprint(self):
         spec = {"provider": PROVIDER, "decode": self.decode, "language": self.language,
-                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v3-terminal-duplicate-tail",
+                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v4-terminal-duplicate-tail",
                 "interpolation": "ignore", "audio": "pcm_s16le-mono-16000"}
         return "asrcfg_" + hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
