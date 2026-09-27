@@ -120,7 +120,7 @@ def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
     return rows
 
 
-def _source_context(draft: DraftTimeline) -> dict[str, Any]:
+def _source_context(draft: DraftTimeline, *, include_audiovisual: bool = False) -> dict[str, Any]:
     raw = (draft.diagnostics or {}).get("whole_video_context") or {}
     if not isinstance(raw, Mapping):
         return {}
@@ -129,7 +129,7 @@ def _source_context(draft: DraftTimeline) -> dict[str, Any]:
     for source in sources:
         if not isinstance(source, Mapping):
             continue
-        compact_sources.append({
+        row = {
             "source_asset_id": source.get("source_asset_id"),
             "summary": str(source.get("summary") or "")[:3000],
             "creator_intent": str(source.get("creator_intent") or "")[:600],
@@ -137,7 +137,13 @@ def _source_context(draft: DraftTimeline) -> dict[str, Any]:
             "story_logic": str(source.get("story_logic") or "")[:1000],
             "dominant_style": str(source.get("dominant_style") or "")[:300],
             "edit_mode": str(source.get("edit_mode") or "")[:80],
-        })
+        }
+        if include_audiovisual:
+            evidence = str(source.get("audiovisual_evidence") or "")
+            if not evidence:
+                raise ValueError("Editorial Engine V2 source missing audiovisual evidence")
+            row["audiovisual_evidence"] = evidence[:12000]
+        compact_sources.append(row)
     return {
         "dominant_edit_mode": raw.get("dominant_edit_mode"),
         "sources": compact_sources,
@@ -148,28 +154,40 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
     candidates = _candidate_universe(draft)
     if not candidates:
         raise ValueError("unified selection requires at least one candidate")
-    return {
-        "task": "cutsell_unified_whole_video_selection",
-        "source_context": _source_context(draft),
-        "editorial_contract": [
-            "Understand the full creator message before deciding any individual take.",
-            "First infer idea families and retry relationships across the entire timeline.",
-            "A genuine retry family (competing takes of the same moment, relation retry_winner/retry_alternate) produces exactly ONE SELECT: the single cleanest complete delivery. Every other candidate in that same contest is a SWAP, never an additional SELECT, no matter how usable it is on its own.",
-            "SELECT independent valid story coverage, the one winning retry per family, necessary continuations, and every clean piece needed for a composite best take.",
-            "SWAP a usable alternative or redundant delivery that should not play by default but remains useful for manual replacement -- this is the correct action any time your own reason for keeping a clip is that it is merely a usable/redundant alternative, never SELECT.",
-            "DISCARD only recording-process BTS, failed/abandoned delivery, or an inferior retry with no unique audience-facing information -- if you judge a clip's delivery failed or was abandoned, it must never be SELECT either.",
-            "When visual_evidence is present for a candidate, use it as real evidence, not decoration: low motion_stability/expression_naturalness/gesture_naturalness or high visual_fumble/distraction_risk are signs of a visible reset, stumble, or camera-disengagement moment within that take. An incomplete, stumbled, or visually-reset take must not beat a cleaner, complete competing retry in the same family unless it has clearly stronger evidence (better visual_evidence AND a genuinely more complete delivery) -- being merely present or first is not evidence.",
-            "Do not prefer a monolithic take merely because it is longer; a human-quality composite of cleaner micro-deliveries may be better.",
-            "Do not treat adjacent valid statements as retries just because they share topic words.",
-            "Preserve numbers, negations, names, causal claims, and genuinely new story facts.",
+    v2_request = bool((draft.diagnostics or {}).get("editorial_engine_v2_request"))
+    contract = [
+        "Understand the full creator message before deciding any individual take.",
+        "First infer idea families and retry relationships across the entire timeline.",
+        "A genuine retry family produces exactly ONE SELECT: the cleanest complete delivery.",
+        "SELECT independent valid story coverage, the winning retry, necessary continuations, and every clean composite piece.",
+        "DISCARD only recording-process BTS, failed/abandoned delivery, or an inferior retry with no unique audience-facing information.",
+        "Use candidate visual_evidence as real performance evidence, not decoration.",
+        "Do not prefer a monolithic take merely because it is longer; a clean composite may be better.",
+        "Do not treat adjacent valid statements as retries merely because they share topic words.",
+        "Preserve numbers, negations, names, causal claims, and genuinely new story facts.",
+        "WHEN UNCERTAIN, preserve content rather than destructively deleting it.",
+    ]
+    if v2_request:
+        contract.extend([
+            "Use complete audiovisual observations as primary behavioral/performance evidence with the aligned transcript.",
+            "Assign every candidate one unique sequence_index. Preserve chronology by default, but reorder complete valid story beats when it clearly improves comprehension, hook, demonstration, payoff, or coherence without inventing speech.",
+            "Return one final KEEP/DISCARD-equivalent plan: SELECT the final story and DISCARD every non-winner; never return SWAP.",
+        ])
+    else:
+        contract.extend([
             "Natural source story order is authoritative; do not reorder candidates.",
-            "WHEN UNCERTAIN, preserve content rather than destructively deleting it -- prefer SWAP over SELECT when uncertain which retry is best.",
-        ],
+            "SWAP a usable alternative that should not play by default.",
+        ])
+    return {
+        "task": "cutsell_editorial_engine_v2" if v2_request else "cutsell_unified_whole_video_selection",
+        "engine_version": "v2" if v2_request else "legacy",
+        "source_context": _source_context(draft, include_audiovisual=v2_request),
+        "editorial_contract": contract,
         "candidates": candidates,
     }
 
 
-def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
+def unified_selection_response_schema(candidate_count: int, *, v2: bool = False) -> dict[str, Any]:
     # `candidate_count` is accepted for call-site/API compatibility but deliberately
     # NOT encoded as an exact minItems==maxItems array bound: an isolation probe
     # (scripts/isolate_unified_selection_schema.py, see
@@ -208,9 +226,11 @@ def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
                         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                         "family_index": {"type": "integer", "minimum": 0},
                         "reason_code": {"type": "string", "enum": _REASON_CODES},
+                        **({"sequence_index": {"type": "integer", "minimum": 0}} if v2 else {}),
                     },
                     "required": [
                         "candidate_index", "action", "relation", "confidence", "family_index", "reason_code",
+                        *(["sequence_index"] if v2 else []),
                     ],
                     "additionalProperties": False,
                 },
@@ -251,6 +271,7 @@ def _worst_case_decision_json_chars() -> int:
         "confidence": 0.95,
         "family_index": 999,
         "reason_code": max(_REASON_CODES, key=len),
+        "sequence_index": 999,
     }
     one = json.dumps({"decisions": [sample]}, indent=2)
     two = json.dumps({"decisions": [sample, sample]}, indent=2)
@@ -310,7 +331,9 @@ def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_to
             "maxOutputTokens": int(max_output_tokens),
             "thinkingConfig": {"thinkingLevel": "low"},
             "responseMimeType": "application/json",
-            "responseJsonSchema": unified_selection_response_schema(candidate_count),
+            "responseJsonSchema": unified_selection_response_schema(
+                candidate_count, v2=payload.get("engine_version") == "v2"
+            ),
         },
     }
 
@@ -434,6 +457,10 @@ class GoogleUnifiedSelectionReasoner:
                 confidence=float(item.get("confidence", -1.0)),
                 family_index=int(item.get("family_index", -1)),
                 reason_code=str(item.get("reason_code") or ""),
+                sequence_index=(
+                    int(item.get("sequence_index"))
+                    if item.get("sequence_index") is not None else None
+                ),
             ))
         return decisions, output_tokens
 

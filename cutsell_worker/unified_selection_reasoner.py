@@ -47,6 +47,9 @@ class UnifiedSelectionDecision:
     confidence: float
     family_index: int
     reason_code: str
+    # V2-only global story placement. Legacy callers omit it and retain
+    # natural source order exactly as before.
+    sequence_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,9 @@ def validate_unified_selection_plan(
             confidence=confidence,
             family_index=family_index,
             reason_code=reason_code,
+            sequence_index=(
+                None if raw.sequence_index is None else int(raw.sequence_index)
+            ),
         ))
         seen.add(clip_id)
 
@@ -218,6 +224,13 @@ def apply_unified_selection_reasoner(
     clips = _all_clips(draft)
     current = _bucket_map(draft)
     decisions = {decision.clip_id: decision for decision in plan.decisions}
+    v2_request = bool((draft.diagnostics or {}).get("editorial_engine_v2_request"))
+    if v2_request:
+        sequence = [decision.sequence_index for decision in plan.decisions]
+        if any(index is None or int(index) < 0 for index in sequence):
+            raise ValueError("Editorial Engine V2 requires a non-negative sequence_index for every candidate")
+        if len({int(index) for index in sequence}) != len(sequence):
+            raise ValueError("Editorial Engine V2 requires unique sequence_index values")
 
     actions: list[str] = []
     overrides: list[str | None] = []
@@ -254,7 +267,11 @@ def apply_unified_selection_reasoner(
             "family_index": decision.family_index,
             "reason_code": decision.reason_code,
             "safety_override": overrides[index],
+            "sequence_index": decision.sequence_index,
         })
+
+    if v2_request:
+        selected.sort(key=lambda clip: int(decisions[clip.clip_id].sequence_index))
 
     diagnostics["unified_selection_reasoner"] = {
         "status": "applied",

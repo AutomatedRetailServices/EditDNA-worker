@@ -15,6 +15,10 @@ from cutsell_worker.unified_selection_reasoner import (
     UnifiedSelectionDecision,
     UnifiedSelectionPlan,
 )
+from cutsell_worker.unified_selection_google import (
+    build_unified_selection_payload,
+    unified_selection_response_schema,
+)
 
 
 def clip(clip_id, start, *, selected=False):
@@ -45,7 +49,10 @@ def source_result(*, audiovisual=True):
                 "audiovisual_input_status": (
                     "received_and_parsed" if audiovisual else "not_verified"
                 ),
-                "sources": [{"source_asset_id": "source"}],
+                "sources": [{
+                    "source_asset_id": "source",
+                    "audiovisual_evidence": '{"regions":[{"audio":"clean","visual":"steady"}]}',
+                }],
             }
         },
     )
@@ -62,9 +69,9 @@ class Plan:
     def reason(self, draft):
         return UnifiedSelectionPlan(
             decisions=(
-                UnifiedSelectionDecision("a", "discard", "retry_alternate", .95, 0, "redundant_retry"),
-                UnifiedSelectionDecision("b", "select", "retry_winner", .98, 0, "best_complete_take"),
-                UnifiedSelectionDecision("c", "discard", "failed", .99, 1, "failed_delivery"),
+                UnifiedSelectionDecision("a", "discard", "retry_alternate", .95, 0, "redundant_retry", 1),
+                UnifiedSelectionDecision("b", "select", "retry_winner", .98, 0, "best_complete_take", 0),
+                UnifiedSelectionDecision("c", "discard", "failed", .99, 1, "failed_delivery", 2),
             ),
             provider="test",
             model="test",
@@ -133,3 +140,43 @@ def test_v2_fails_closed_on_reasoner_failure():
             recover_complete_boundaries=identity,
             execute_boundaries=identity,
         )
+
+
+def test_v2_fails_closed_when_boundary_changes_story_order():
+    class TwoSelected:
+        def reason(self, draft):
+            return UnifiedSelectionPlan(
+                decisions=(
+                    UnifiedSelectionDecision("a", "select", "independent", .99, 0, "independent_story_coverage", 1),
+                    UnifiedSelectionDecision("b", "select", "independent", .99, 1, "independent_story_coverage", 0),
+                    UnifiedSelectionDecision("c", "discard", "failed", .99, 2, "failed_delivery", 2),
+                ),
+                provider="test",
+                model="test",
+            )
+
+    def reverse(result):
+        return replace(result, draft=replace(result.draft, selected=tuple(reversed(result.draft.selected))))
+
+    with pytest.raises(RuntimeError, match="changed story order"):
+        run_editorial_engine_v2(
+            source_result(),
+            selection_reasoner=TwoSelected(),
+            recover_complete_boundaries=identity,
+            execute_boundaries=reverse,
+        )
+
+
+def test_v2_provider_payload_includes_av_evidence_and_requires_story_order():
+    draft = source_result().draft
+    draft = replace(draft, diagnostics={
+        **draft.diagnostics,
+        "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+    })
+
+    payload = build_unified_selection_payload(draft)
+    item_schema = unified_selection_response_schema(3, v2=True)["properties"]["decisions"]["items"]
+
+    assert payload["engine_version"] == "v2"
+    assert "audio" in payload["source_context"]["sources"][0]["audiovisual_evidence"]
+    assert "sequence_index" in item_schema["required"]

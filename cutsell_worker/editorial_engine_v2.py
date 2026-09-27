@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 import os
+import re
+import unicodedata
 from typing import Callable
 
 from .contracts import ProcessingResult
@@ -60,6 +62,19 @@ def _discard_signature(draft) -> str:
     return hashlib.sha256("\x1f".join(values).encode("utf-8")).hexdigest()
 
 
+_TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+(?:[-–][0-9]+)?%?", re.IGNORECASE)
+
+
+def _ordered_semantic_signature(draft) -> str:
+    """Seal V2 story order as well as content; legacy Freeze sorts by source."""
+    tokens = []
+    for clip in tuple(draft.selected):
+        for token in _TOKEN_RE.findall(str(clip.text or "")):
+            raw = unicodedata.normalize("NFKD", token.casefold())
+            tokens.append("".join(ch for ch in raw if not unicodedata.combining(ch)))
+    return hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
+
+
 def _require_whole_video_evidence(draft) -> dict:
     diagnostics = dict(getattr(draft, "diagnostics", None) or {})
     whole = diagnostics.get("whole_video_context") or {}
@@ -69,6 +84,9 @@ def _require_whole_video_evidence(draft) -> dict:
         raise RuntimeError("Editorial Engine V2 requires available whole-video context")
     if av_status != "received_and_parsed":
         raise RuntimeError("Editorial Engine V2 requires verified audiovisual Watch + Listen input")
+    sources = tuple(whole.get("sources") or ())
+    if not sources or any(not str(source.get("audiovisual_evidence") or "") for source in sources):
+        raise RuntimeError("Editorial Engine V2 requires audiovisual evidence for every source")
     return whole
 
 
@@ -100,7 +118,14 @@ def run_editorial_engine_v2(
     if not candidate_ids:
         raise RuntimeError("Editorial Engine V2 received no editorial candidates")
 
-    resolved = apply_unified_selection_reasoner(result.draft, selection_reasoner)
+    request_diagnostics = dict(result.draft.diagnostics or {})
+    request_diagnostics["editorial_engine_v2_request"] = {
+        "schema_version": SCHEMA_VERSION,
+        "require_audiovisual_evidence": True,
+        "allow_global_story_reordering": True,
+    }
+    request_draft = replace(result.draft, diagnostics=request_diagnostics)
+    resolved = apply_unified_selection_reasoner(request_draft, selection_reasoner)
     reasoner_diag = dict((resolved.diagnostics or {}).get("unified_selection_reasoner") or {})
     if reasoner_diag.get("status") != "applied":
         detail = reasoner_diag.get("error") or reasoner_diag.get("status") or "unknown"
@@ -131,6 +156,7 @@ def run_editorial_engine_v2(
     result = recover_complete_boundaries(result)
     result = replace(result, draft=_fold_alternates(result.draft))
     discard_signature = _discard_signature(result.draft)
+    ordered_semantic_signature = _ordered_semantic_signature(result.draft)
 
     result = replace(result, draft=freeze_selection_contract(result.draft))
     result = execute_boundaries(result)
@@ -140,12 +166,15 @@ def run_editorial_engine_v2(
         raise RuntimeError("Editorial Engine V2 post-freeze stage recreated alternates")
     if _discard_signature(result.draft) != discard_signature:
         raise RuntimeError("Editorial Engine V2 post-freeze stage changed DISCARD membership")
+    if _ordered_semantic_signature(result.draft) != ordered_semantic_signature:
+        raise RuntimeError("Editorial Engine V2 post-freeze stage changed story order")
 
     diagnostics = dict(result.draft.diagnostics or {})
     diagnostics["editorial_engine_v2"] = {
         **diagnostics["editorial_engine_v2"],
         "status": "frozen_boundary_verified_pending_post_render_review",
         "discard_membership_sha256": discard_signature,
+        "ordered_semantic_sha256": ordered_semantic_signature,
         "selection_contract_status": (
             diagnostics.get("selection_boundary_contract") or {}
         ).get("status"),
