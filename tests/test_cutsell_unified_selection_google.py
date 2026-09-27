@@ -241,7 +241,7 @@ def test_reason_retries_on_decision_count_mismatch_not_only_on_parse_failure():
     assert len(plan.decisions) == 2
 
 
-def test_v2_reason_retries_on_duplicate_sequence_index_and_succeeds():
+def test_v2_reason_stably_normalizes_duplicate_sequence_index():
     d = replace(draft(3), diagnostics={
         "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
         "whole_video_context": {
@@ -251,15 +251,12 @@ def test_v2_reason_retries_on_duplicate_sequence_index_and_succeeds():
             }],
         },
     })
-    fake = FakeSession([
-        gemini_response(v2_decisions_json(3, duplicate_sequence=True)),
-        gemini_response(v2_decisions_json(3)),
-    ])
+    fake = FakeSession([gemini_response(v2_decisions_json(3, duplicate_sequence=True))])
     reasoner = make_reasoner(fake)
 
     plan = reasoner.reason(d)
 
-    assert len(fake.calls) == 2
+    assert len(fake.calls) == 1
     assert [decision.sequence_index for decision in plan.decisions] == [0, 1, 2]
 
 
