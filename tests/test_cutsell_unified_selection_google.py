@@ -71,6 +71,13 @@ def decisions_json(candidate_count: int, *, index_offset: int = 0) -> str:
     })
 
 
+def v2_decisions_json(candidate_count: int, *, duplicate_sequence: bool = False) -> str:
+    data = json.loads(decisions_json(candidate_count))
+    for i, item in enumerate(data["decisions"]):
+        item["sequence_index"] = 0 if duplicate_sequence else i
+    return json.dumps(data)
+
+
 def gemini_response(text: str, *, finish_reason: str = "STOP", output_tokens: int = 100) -> dict:
     return {
         "candidates": [{
@@ -232,6 +239,28 @@ def test_reason_retries_on_decision_count_mismatch_not_only_on_parse_failure():
 
     assert len(fake.calls) == 2
     assert len(plan.decisions) == 2
+
+
+def test_v2_reason_retries_on_duplicate_sequence_index_and_succeeds():
+    d = replace(draft(3), diagnostics={
+        "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+        "whole_video_context": {
+            "sources": [{
+                "source_asset_id": "src",
+                "audiovisual_evidence": '{"regions":[{"role":"audience"}]}',
+            }],
+        },
+    })
+    fake = FakeSession([
+        gemini_response(v2_decisions_json(3, duplicate_sequence=True)),
+        gemini_response(v2_decisions_json(3)),
+    ])
+    reasoner = make_reasoner(fake)
+
+    plan = reasoner.reason(d)
+
+    assert len(fake.calls) == 2
+    assert [decision.sequence_index for decision in plan.decisions] == [0, 1, 2]
 
 
 def test_schema_requires_candidate_index_on_every_decision():
