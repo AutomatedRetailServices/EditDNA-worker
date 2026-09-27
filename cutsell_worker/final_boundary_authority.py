@@ -603,6 +603,31 @@ def _trim_reopened_closings(
     return output, rows
 
 
+def trim_reopened_closings_before_validation(result: ProcessingResult) -> ProcessingResult:
+    """Apply the deterministic re-opened-closing trim at the last Selection seam.
+
+    Story/resolver review can conservatively block the later full-source boundary
+    pass. A duplicate closing is nevertheless already decidable from the selected
+    word stream itself. Remove only that proven prefix before validation so the
+    reviewed/frozen plan and a review-blocked draft expose the same clean semantic
+    stream. All D-289.11 refusal gates remain in force; review status is unchanged.
+    """
+    if not hasattr(result.draft, "selected") or not result.draft.selected:
+        return result
+    selected, rows = _trim_reopened_closings(list(result.draft.selected), {})
+    if not rows:
+        return result
+    trims = [row for row in rows if row.get("action") == "trim_reopened_closing_restatement"]
+    diagnostics = dict(result.draft.diagnostics or {})
+    diagnostics["pre_validation_reopened_closing_authority"] = rows[:100]
+    diagnostics["pre_validation_reopened_closing_trim_count"] = len(trims)
+    diagnostics["pre_validation_reopened_closing_refusal_count"] = len(rows) - len(trims)
+    return replace(
+        result,
+        draft=replace(result.draft, selected=tuple(selected), diagnostics=diagnostics),
+    )
+
+
 def enforce_complete_idea_boundaries(
     result: ProcessingResult,
     local_paths: Mapping[str, str],
