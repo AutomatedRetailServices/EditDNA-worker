@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
+import json
 import os
 import re
 import unicodedata
@@ -102,6 +103,76 @@ def _fold_alternates(draft):
     return replace(draft, alternates=(), discarded=discarded)
 
 
+def _audience_regions(whole: dict) -> dict[str, tuple[tuple[float, float], ...]]:
+    """Return high-confidence AV audience spans, failing closed on bad evidence."""
+    output: dict[str, tuple[tuple[float, float], ...]] = {}
+    for source in tuple(whole.get("sources") or ()):
+        source_id = str(source.get("source_asset_id") or "")
+        try:
+            evidence = json.loads(str(source.get("audiovisual_evidence") or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        regions = []
+        for region in evidence.get("regions") or ():
+            if not isinstance(region, dict) or region.get("role") != "audience":
+                continue
+            try:
+                start, end = float(region["start"]), float(region["end"])
+                confidence = float(region.get("confidence", 0.0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if end > start and confidence >= 0.70:
+                regions.append((start, end))
+        if source_id and regions:
+            output[source_id] = tuple(regions)
+    return output
+
+
+def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> ProcessingResult:
+    """Keep short in-take AV gaps when Selection approved both surrounding pieces.
+
+    Candidate segmentation is allowed to split a polished delivery, but those
+    physical splits must not become destructive edits.  Rejoin only a short,
+    chronological gap wholly verified as audience delivery and containing no
+    explicitly discarded candidate.  This remains Boundary work: membership,
+    text, IDs, and story order do not change.
+    """
+    selected = list(result.draft.selected)
+    audience_by_source = _audience_regions(whole)
+    discarded = tuple(result.draft.discarded)
+    rows = []
+    for index in range(len(selected) - 1):
+        left, right = selected[index], selected[index + 1]
+        if left.source_asset_id != right.source_asset_id or left.source_order != right.source_order:
+            continue
+        gap_start, gap_end = float(left.end), float(right.start)
+        gap = gap_end - gap_start
+        if gap <= 1e-6 or gap > 2.25:
+            continue
+        if not any(start <= gap_start + 1e-6 and end >= gap_end - 1e-6
+                   for start, end in audience_by_source.get(left.source_asset_id, ())):
+            continue
+        if any(item.source_asset_id == left.source_asset_id
+               and float(item.start) < gap_end - 1e-6
+               and float(item.end) > gap_start + 1e-6
+               for item in discarded):
+            continue
+        selected[index] = replace(left, end=gap_end)
+        rows.append({
+            "left_clip_id": left.clip_id,
+            "right_clip_id": right.clip_id,
+            "gap_start": round(gap_start, 3),
+            "gap_end": round(gap_end, 3),
+            "restored_sec": round(gap, 3),
+            "basis": "selected_neighbors_inside_high_confidence_audience_region",
+        })
+    if not rows:
+        return result
+    diagnostics = dict(result.draft.diagnostics or {})
+    diagnostics["editorial_engine_v2_continuity_restoration"] = rows
+    return replace(result, draft=replace(result.draft, selected=tuple(selected), diagnostics=diagnostics))
+
+
 def run_editorial_engine_v2(
     result: ProcessingResult,
     *,
@@ -155,6 +226,7 @@ def run_editorial_engine_v2(
     # Complete source-proven word edges before the semantic phase barrier.
     result = recover_complete_boundaries(result)
     result = replace(result, draft=_fold_alternates(result.draft))
+    result = _restore_safe_audience_continuity(result, whole)
     discard_signature = _discard_signature(result.draft)
     ordered_semantic_signature = _ordered_semantic_signature(result.draft)
 
