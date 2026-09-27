@@ -281,6 +281,8 @@ def test_v2_restores_longer_action_gap_inside_verified_product_demonstration():
     result = source_result()
     a = replace(result.draft.selected[0], start=90.0, end=99.5)
     b = replace(result.draft.alternates[0], start=106.5, end=118.0)
+    a = replace(a, text="Put one scoop into the water bottle")
+    b = replace(b, text="Mix the water bottle and continue")
     result = replace(result, draft=replace(
         result.draft, selected=(a,), alternates=(b,), discarded=(),
         diagnostics={"whole_video_context": {
@@ -343,6 +345,8 @@ def test_v2_reasserts_demo_bridge_after_boundary_rebuild_erases_it():
     result = source_result()
     a = replace(result.draft.selected[0], start=90.0, end=99.5)
     b = replace(result.draft.alternates[0], start=106.5, end=118.0)
+    a = replace(a, text="Put one scoop into the water bottle")
+    b = replace(b, text="Mix the water bottle and continue")
     result = replace(result, draft=replace(
         result.draft, selected=(a,), alternates=(b,), discarded=(),
         diagnostics={"whole_video_context": {
