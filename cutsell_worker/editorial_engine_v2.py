@@ -148,6 +148,11 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
     audience_by_source = _audience_regions(whole)
     discarded = tuple(result.draft.discarded)
     rows = []
+    reasoner_rows = {
+        str(row.get("clip_id")): row
+        for row in ((result.draft.diagnostics or {}).get("unified_selection_reasoner") or {}).get("decisions", ())
+        if isinstance(row, dict)
+    }
     for index in range(len(selected) - 1):
         left, right = selected[index], selected[index + 1]
         if left.source_asset_id != right.source_asset_id or left.source_order != right.source_order:
@@ -166,6 +171,17 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
         # instructions is part of the story, not dead air.
         if gap > 2.25 and not any(region[2] for region in containing):
             continue
+        if gap > 2.25:
+            left_decision = reasoner_rows.get(str(left.clip_id), {})
+            right_decision = reasoner_rows.get(str(right.clip_id), {})
+            if str(left_decision.get("relation") or "").startswith("retry_") or str(
+                right_decision.get("relation") or ""
+            ).startswith("retry_"):
+                continue
+            left_tokens = {token.casefold() for token in _TOKEN_RE.findall(str(left.text or "")) if len(token) >= 4}
+            right_tokens = {token.casefold() for token in _TOKEN_RE.findall(str(right.text or "")) if len(token) >= 4}
+            if not left_tokens.intersection(right_tokens):
+                continue
         if any(item.source_asset_id == left.source_asset_id
                and float(item.start) < gap_end - 1e-6
                and float(item.end) > gap_start + 1e-6
