@@ -1,6 +1,34 @@
 from types import SimpleNamespace
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, JobState, ProcessingResult, SemanticRole, Word
-from cutsell_worker.final_boundary_authority import _clip_from_envelope, enforce_complete_idea_boundaries
+from cutsell_worker.final_boundary_authority import (
+    _clip_from_envelope,
+    _trim_spaced_duplicate_from_left,
+    _trim_trailing_aborted_restarts,
+    enforce_complete_idea_boundaries,
+)
+
+
+def _words(texts, start=0.0, step=.4):
+    return tuple(Word(text, start + i * step, start + i * step + .3) for i, text in enumerate(texts))
+
+
+def test_trailing_aborted_restart_is_trimmed_at_repeated_prefix():
+    words = _words(("your", "muscles", "grow", "and", "your", "mus"))
+    clip = DraftClip("a", "src", 0, 0, 2.3, "your muscles grow and your mus", "", words=words)
+    output, rows = _trim_trailing_aborted_restarts([clip], {"src": words})
+    assert output[0].text == "your muscles grow and"
+    assert rows[0]["action"] == "trim_trailing_aborted_restart"
+
+
+def test_spaced_exact_retry_phrase_is_kept_on_later_continuing_take():
+    left_words = _words(("energy", "daily", "you", "can", "perform", "more"), start=0)
+    right_words = _words(("you", "can", "perform", "more", "at", "gym"), start=5)
+    left = DraftClip("a", "src", 0, 0, 2.3, "energy daily you can perform more", "", words=left_words)
+    right = DraftClip("b", "src", 0, 5, 7.3, "you can perform more at gym", "", words=right_words)
+    output, rows = _trim_spaced_duplicate_from_left([left, right], {"src": left_words + right_words})
+    assert output[0].text == "energy daily"
+    assert output[1] == right
+    assert rows[0]["action"] == "trim_spaced_retry_duplicate_from_left"
 
 
 def test_complete_idea_envelope_refreshes_text_even_when_timestamps_match():
