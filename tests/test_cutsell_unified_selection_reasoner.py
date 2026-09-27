@@ -82,6 +82,13 @@ def decision(clip_id, action, relation, confidence, family, reason):
     )
 
 
+def v2_decision(clip_id, action, relation, confidence, family, reason, sequence):
+    return UnifiedSelectionDecision(
+        clip_id=clip_id, action=action, relation=relation, confidence=confidence,
+        family_index=family, reason_code=reason, sequence_index=sequence,
+    )
+
+
 def test_unified_reasoner_can_overturn_legacy_buckets_and_preserve_natural_order():
     reasoner = FakeReasoner([
         decision("selected_old", "swap", "retry_alternate", 0.91, 0, "usable_alternate"),
@@ -252,6 +259,46 @@ def test_independent_relation_family_allows_multiple_selects_untouched():
 
     assert sorted(item.clip_id for item in out.selected) == ["a", "b", "c"]
     assert out.alternates == ()
+
+
+def test_v2_preserves_usable_retry_alternate_with_materially_unique_information():
+    hook = clip("hook", 0, 5, "If you use GLP this gives repetitions energy and stronger muscles", selected=False)
+    winner = clip("winner", 10, 15, "Creatine watermelon flavor mixes into one bottle daily", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(hook, winner), discarded=(),
+        diagnostics={"editorial_engine_v2_request": {"require_audiovisual_evidence": True}},
+    )
+    reasoner = FakeReasoner([
+        v2_decision("hook", "swap", "retry_alternate", .9, 0, "usable_alternate", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+
+    out = apply_unified_selection_reasoner(d, reasoner)
+
+    assert [item.clip_id for item in out.selected] == ["hook", "winner"]
+    row = next(row for row in out.diagnostics["unified_selection_reasoner"]["decisions"]
+               if row["clip_id"] == "hook")
+    assert row["safety_override"] == "unique_retry_information_preserved"
+
+
+def test_v2_does_not_preserve_usable_retry_alternate_that_winner_covers():
+    alternate = clip("alternate", 0, 5, "Creatine watermelon flavor mixes in one bottle", selected=False)
+    winner = clip("winner", 10, 15, "Creatine watermelon flavor mixes in one bottle every day", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(alternate, winner), discarded=(),
+        diagnostics={"editorial_engine_v2_request": {"require_audiovisual_evidence": True}},
+    )
+    reasoner = FakeReasoner([
+        v2_decision("alternate", "swap", "retry_alternate", .9, 0, "usable_alternate", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+
+    out = apply_unified_selection_reasoner(d, reasoner)
+
+    assert [item.clip_id for item in out.selected] == ["winner"]
+    assert [item.clip_id for item in out.alternates] == ["alternate"]
 
 
 def test_unified_request_requires_one_structured_human_style_decision_per_candidate():
