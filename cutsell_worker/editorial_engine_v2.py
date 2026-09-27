@@ -103,7 +103,7 @@ def _fold_alternates(draft):
     return replace(draft, alternates=(), discarded=discarded)
 
 
-def _audience_regions(whole: dict) -> dict[str, tuple[tuple[float, float], ...]]:
+def _audience_regions(whole: dict) -> dict[str, tuple[tuple[float, float, bool], ...]]:
     """Return high-confidence AV audience spans, failing closed on bad evidence."""
     output: dict[str, tuple[tuple[float, float], ...]] = {}
     for source in tuple(whole.get("sources") or ()):
@@ -122,7 +122,13 @@ def _audience_regions(whole: dict) -> dict[str, tuple[tuple[float, float], ...]]
             except (KeyError, TypeError, ValueError):
                 continue
             if end > start and confidence >= 0.70:
-                regions.append((start, end))
+                description = " ".join(str(region.get(key) or "") for key in (
+                    "audio_observation", "visual_observation", "reason",
+                )).casefold()
+                demonstration = any(token in description for token in (
+                    "demonstrat", "show", "display", "mix", "pour", "scoop", "apply", "use the product",
+                ))
+                regions.append((start, end, demonstration))
         if source_id and regions:
             output[source_id] = tuple(regions)
     return output
@@ -147,10 +153,17 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
             continue
         gap_start, gap_end = float(left.end), float(right.start)
         gap = gap_end - gap_start
-        if gap <= 1e-6 or gap > 2.25:
+        if gap <= 1e-6 or gap > 8.0:
             continue
-        if not any(start <= gap_start + 1e-6 and end >= gap_end - 1e-6
-                   for start, end in audience_by_source.get(left.source_asset_id, ())):
+        containing = [region for region in audience_by_source.get(left.source_asset_id, ())
+                      if region[0] <= gap_start + 1e-6 and region[1] >= gap_end - 1e-6]
+        if not containing:
+            continue
+        # Ordinary speech gaps stay tightly bounded. A longer bridge is safe
+        # only when Watch + Listen explicitly observed an audience-facing
+        # product demonstration: action-only footage between approved spoken
+        # instructions is part of the story, not dead air.
+        if gap > 2.25 and not any(region[2] for region in containing):
             continue
         if any(item.source_asset_id == left.source_asset_id
                and float(item.start) < gap_end - 1e-6
@@ -164,7 +177,11 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
             "gap_start": round(gap_start, 3),
             "gap_end": round(gap_end, 3),
             "restored_sec": round(gap, 3),
-            "basis": "selected_neighbors_inside_high_confidence_audience_region",
+            "basis": (
+                "selected_neighbors_inside_high_confidence_audience_demonstration"
+                if gap > 2.25 else
+                "selected_neighbors_inside_high_confidence_audience_region"
+            ),
         })
     if not rows:
         return result
