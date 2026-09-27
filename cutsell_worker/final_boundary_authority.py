@@ -531,7 +531,12 @@ def _trim_trailing_aborted_restarts(
     output = list(selected)
     rows: list[dict] = []
     for index, clip in enumerate(output):
-        words = _tokenized_words(tuple(clip.words))
+        source_words = source_map.get(clip.source_asset_id) or tuple(clip.words)
+        overlap = _overlapping_indices(source_words, float(clip.start), float(clip.end))
+        aligned_words = (
+            tuple(source_words[overlap[0]:overlap[1] + 1]) if overlap is not None else tuple(clip.words)
+        )
+        words = _tokenized_words(aligned_words)
         if len(words) < 6:
             continue
         tokens = [token for token, _ in words]
@@ -553,7 +558,6 @@ def _trim_trailing_aborted_restarts(
         if float(clip.end) - float(first_tail_word.start) > 3.0:
             continue
         new_end = float(words[tail_start - 1][1].end)
-        source_words = source_map.get(clip.source_asset_id) or tuple(clip.words)
         rebuilt = _rebuild_clip(clip, source_words, float(clip.start), new_end)
         output[index] = rebuilt
         rows.append({
@@ -565,6 +569,54 @@ def _trim_trailing_aborted_restarts(
             "removed_sec": round(float(clip.end) - float(rebuilt.end), 3),
         })
     return output, rows
+
+
+_CTA_TOKENS = frozenset({
+    "buy", "cart", "checkout", "link", "order", "shop",
+    "carrito", "compra", "comprar", "enlace", "ordena", "ordenar", "tienda",
+})
+
+
+def _trim_short_post_cta_aside(
+    selected: list[DraftClip],
+    source_map: dict[str, tuple[Word, ...]],
+) -> tuple[list[DraftClip], list[dict]]:
+    """Trim a brief non-CTA aside after a completed CTA and long pause."""
+    if not selected:
+        return selected, []
+    output = list(selected)
+    clip = output[-1]
+    source_words = source_map.get(clip.source_asset_id) or tuple(clip.words)
+    overlap = _overlapping_indices(source_words, float(clip.start), float(clip.end))
+    if overlap is None:
+        return output, []
+    words = tuple(source_words[overlap[0]:overlap[1] + 1])
+    tokenized = _tokenized_words(words)
+    if len(tokenized) < 7:
+        return output, []
+    for split in range(len(tokenized) - 1, 0, -1):
+        pause = float(tokenized[split][1].start) - float(tokenized[split - 1][1].end)
+        tail = tokenized[split:]
+        head_tokens = {token for token, _ in tokenized[:split]}
+        tail_tokens = {token for token, _ in tail}
+        tail_duration = float(tail[-1][1].end) - float(tail[0][1].start)
+        if pause < 1.2 or len(tail) > 4 or tail_duration > 2.0:
+            continue
+        if not head_tokens.intersection(_CTA_TOKENS) or tail_tokens.intersection(_CTA_TOKENS):
+            continue
+        new_end = float(tokenized[split - 1][1].end)
+        rebuilt = _rebuild_clip(clip, source_words, float(clip.start), new_end)
+        output[-1] = rebuilt
+        return output, [{
+            "action": "trim_short_post_cta_aside",
+            "clip_id": clip.clip_id,
+            "original_end": round(float(clip.end), 3),
+            "result_end": round(float(rebuilt.end), 3),
+            "removed_sec": round(float(clip.end) - float(rebuilt.end), 3),
+            "pause_sec": round(pause, 3),
+            "removed_tokens": [token for token, _ in tail],
+        }]
+    return output, []
 
 
 def _text_prefix_has_phrase_break(text: str, removed_token_count: int) -> bool:
@@ -789,6 +841,9 @@ def enforce_complete_idea_boundaries(
     selected, spaced_duplicate_rows = _trim_spaced_duplicate_from_left(selected, source_map)
     diagnostics.extend(spaced_duplicate_rows)
 
+    selected, post_cta_rows = _trim_short_post_cta_aside(selected, source_map)
+    diagnostics.extend(post_cta_rows)
+
     # Exact duplicates at an adjacent seam are stronger evidence than the
     # punctuation-dependent re-opened-closing rule.  Apply them first.
     selected, seam_rows = _trim_exact_seam_duplicates(selected, source_map)
@@ -815,5 +870,6 @@ def enforce_complete_idea_boundaries(
     diag["final_boundary_exact_seam_duplicate_trim_count"] = len(seam_rows)
     diag["final_boundary_trailing_aborted_restart_trim_count"] = len(aborted_rows)
     diag["final_boundary_spaced_retry_duplicate_trim_count"] = len(spaced_duplicate_rows)
+    diag["final_boundary_post_cta_aside_trim_count"] = len(post_cta_rows)
     draft = replace(result.draft, selected=tuple(selected), diagnostics=diag)
     return replace(result, draft=draft)
