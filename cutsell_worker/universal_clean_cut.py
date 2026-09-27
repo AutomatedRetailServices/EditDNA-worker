@@ -106,6 +106,8 @@ from .take_judge_provider import TakeJudgeProvider
 from .unified_selection_reasoner import UnifiedSelectionReasoner, apply_unified_selection_reasoner
 from .visual_analysis import VisualProvider
 from .whole_video_analysis import WholeVideoProvider
+from .editorial_engine_v2 import enabled as editorial_engine_v2_enabled
+from .editorial_engine_v2 import run_editorial_engine_v2
 
 
 
@@ -235,6 +237,7 @@ def process_universal_clean_cut_sources(
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     clause_role_arbiter: ClauseRoleArbiter | None = None,
     clean_cut_core_v1_enabled: bool = True,
+    editorial_engine_v2: bool | None = None,
     progress: ProgressCallback | None = None,
     transcript_observer: Callable[[tuple[TranscriptSegment, ...]], None] | None = None,
 ) -> ProcessingResult:
@@ -263,6 +266,22 @@ def process_universal_clean_cut_sources(
         # wrappers skip on this path.
         boundary_owner="post_freeze",
     )
+
+    # Experimental V2 is a separate, fail-closed A/B path.  It consumes the
+    # complete candidate universe and verified upstream Watch + Listen
+    # evidence, then exits before the legacy semantic rule chain can restore,
+    # substitute, or reorder the reasoner's final decision.
+    if editorial_engine_v2_enabled(editorial_engine_v2):
+        return run_editorial_engine_v2(
+            result,
+            selection_reasoner=selection_reasoner,
+            recover_complete_boundaries=lambda current: enforce_complete_idea_boundaries(
+                current, local_paths, asr_provider=asr_provider,
+            ),
+            execute_boundaries=lambda current: polish_human_boundaries_v5(
+                apply_post_freeze_boundary_pass(current), local_paths,
+            ),
+        )
 
     # D-235X Part A: the live exact-identity context `pipeline.py::build_
     # flow_b_draft` optionally built (see `ProcessingResult.lost_atom_
