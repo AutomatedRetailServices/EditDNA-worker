@@ -165,11 +165,16 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
         "Do not prefer a monolithic take merely because it is longer; a clean composite may be better.",
         "Do not treat adjacent valid statements as retries merely because they share topic words.",
         "Preserve numbers, negations, names, causal claims, and genuinely new story facts.",
+        "Audience-directed speech is not automatically an independent story beat: compare every later complete delivery against the UNION of earlier fragments, even when local groups or wording differ.",
+        "A compact later take may be the single retry winner over several earlier fragments when it cleanly covers their combined hook, benefits, proof, and CTA; discard those earlier fragments only after verifying that no unique audience-facing fact is lost.",
+        "Never leave a retry family with only retry_alternate decisions and no selected winner. Re-evaluate the full timeline and select its cleanest complete delivery unless audiovisual evidence proves the entire family unusable.",
+        "Do not compress the creator's story by deleting a unique hook, claim, example, transition, or CTA merely because another selected clip shares the topic.",
         "WHEN UNCERTAIN, preserve content rather than destructively deleting it.",
     ]
     if v2_request:
         contract.extend([
             "Use complete audiovisual observations as primary behavioral/performance evidence with the aligned transcript.",
+            "A clean high-confidence audiovisual audience region contradicts failed_delivery unless that candidate itself contains an observed reset/stumble or its transcript is clearly abandoned; explain the conflict through the chosen relation and reason code.",
             "Assign every candidate one unique sequence_index. Preserve chronology by default, but reorder complete valid story beats when it clearly improves comprehension, hook, demonstration, payoff, or coherence without inventing speech.",
             "Return one final KEEP/DISCARD-equivalent plan: SELECT the final story and DISCARD every non-winner; never return SWAP.",
         ])
