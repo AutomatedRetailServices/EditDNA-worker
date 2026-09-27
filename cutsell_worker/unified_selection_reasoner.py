@@ -296,12 +296,16 @@ def _preserve_unique_content_when_av_contradicts_failed(
         decision = decisions[clip.clip_id]
         if actions[index] != "discard" or decision.reason_code != "failed_delivery":
             continue
-        # ASR word edges and coarse AV observation edges are produced by
-        # different clocks. Allow a sub-second alignment tolerance while
-        # still requiring the AV audience span to cover essentially the
-        # entire candidate.
-        if not any(start <= float(clip.start) + .75 and end >= float(clip.end) - .75
-                   for start, end in audience.get(clip.source_asset_id, ())):
+        # ASR candidates can combine a clean audience delivery with a short
+        # fumble/reset tail. Preserve unique content when high-confidence AV
+        # audience evidence covers a clear majority of the candidate; clips
+        # that are primarily failed/BTS still cannot pass this gate.
+        duration = max(.001, float(clip.end) - float(clip.start))
+        audience_overlap = sum(
+            max(0.0, min(float(clip.end), end) - max(float(clip.start), start))
+            for start, end in audience.get(clip.source_asset_id, ())
+        )
+        if audience_overlap / duration < .65:
             continue
         tokens = _content_tokens(clip.text)
         unique = tokens - selected_tokens
