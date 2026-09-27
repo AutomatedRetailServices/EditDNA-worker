@@ -11,6 +11,7 @@ contains no HTTP, vendor SDK, benchmark timestamp, phrase, or Human Gold rule.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import json
 import re
 import unicodedata
 from typing import Protocol
@@ -257,6 +258,56 @@ def _preserve_retry_alternates_with_unique_information(
         selected_tokens.update(tokens)
 
 
+def _high_confidence_audience_spans(draft: DraftTimeline) -> dict[str, tuple[tuple[float, float], ...]]:
+    spans: dict[str, tuple[tuple[float, float], ...]] = {}
+    whole = (draft.diagnostics or {}).get("whole_video_context") or {}
+    for source in whole.get("sources") or ():
+        if not isinstance(source, dict):
+            continue
+        try:
+            evidence = json.loads(str(source.get("audiovisual_evidence") or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        rows = []
+        for region in evidence.get("regions") or ():
+            try:
+                if region.get("role") == "audience" and float(region.get("confidence", 0)) >= .90:
+                    rows.append((float(region["start"]), float(region["end"])))
+            except (AttributeError, KeyError, TypeError, ValueError):
+                continue
+        if rows:
+            spans[str(source.get("source_asset_id") or "")] = tuple(rows)
+    return spans
+
+
+def _preserve_unique_content_when_av_contradicts_failed(
+    draft: DraftTimeline,
+    clips: tuple[DraftClip, ...],
+    decisions: dict[str, UnifiedSelectionDecision],
+    actions: list[str],
+    overrides: list[str | None],
+) -> None:
+    """Do not let a semantic failure label erase AV-verified clean content."""
+    audience = _high_confidence_audience_spans(draft)
+    selected_tokens = set().union(*(
+        _content_tokens(clip.text) for i, clip in enumerate(clips) if actions[i] == "select"
+    )) if any(action == "select" for action in actions) else set()
+    for index, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if actions[index] != "discard" or decision.reason_code != "failed_delivery":
+            continue
+        if not any(start <= float(clip.start) + .25 and end >= float(clip.end) - .25
+                   for start, end in audience.get(clip.source_asset_id, ())):
+            continue
+        tokens = _content_tokens(clip.text)
+        unique = tokens - selected_tokens
+        if len(unique) < 3 or len(unique) / max(1, len(tokens)) < .40:
+            continue
+        actions[index] = "select"
+        overrides[index] = "av_audience_unique_content_overrides_failed_label"
+        selected_tokens.update(tokens)
+
+
 def apply_unified_selection_reasoner(
     draft: DraftTimeline,
     reasoner: UnifiedSelectionReasoner | None,
@@ -297,6 +348,9 @@ def apply_unified_selection_reasoner(
     _enforce_single_retry_family_winner(clips, decisions, actions, overrides)
     if v2_request:
         _preserve_retry_alternates_with_unique_information(clips, decisions, actions, overrides)
+        _preserve_unique_content_when_av_contradicts_failed(
+            draft, clips, decisions, actions, overrides,
+        )
 
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
