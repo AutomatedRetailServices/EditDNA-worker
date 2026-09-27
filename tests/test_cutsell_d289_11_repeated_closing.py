@@ -51,6 +51,7 @@ from cutsell_worker.final_boundary_authority import (
     _trim_reopened_closings,
     _trim_exact_seam_duplicates,
     enforce_complete_idea_boundaries,
+    trim_reopened_closings_before_validation,
 )
 from cutsell_worker.selection_boundary_contract import (
     enforce_selection_contract,
@@ -428,6 +429,19 @@ def test_enforce_complete_idea_boundaries_trims_before_freeze_and_boundary_keeps
     after_boundary = apply_post_freeze_boundary_pass(replace(result, draft=frozen))
     verified = enforce_selection_contract(after_boundary.draft)
     assert verified.diagnostics["selection_boundary_contract"]["status"] == "verified"
+
+
+def test_pre_validation_trim_cleans_reviewable_stream_without_changing_review_state():
+    result = _result(_raw124_sequence(), {"resolver_status": "REVIEW_REQUIRED"})
+    cleaned = trim_reopened_closings_before_validation(result)
+    assert [clip.text for clip in cleaned.draft.selected] == [
+        W_TEXT,
+        A_TEXT,
+        "aliméntate bien, hidrátate y haz ejercicio.",
+    ]
+    assert cleaned.draft.diagnostics["resolver_status"] == "REVIEW_REQUIRED"
+    assert cleaned.draft.diagnostics["pre_validation_reopened_closing_trim_count"] == 1
+    assert cleaned.draft.diagnostics["pre_validation_reopened_closing_refusal_count"] == 0
 
 
 def test_freeze_before_the_trim_would_reject_it_so_the_rule_must_stay_pre_freeze():
