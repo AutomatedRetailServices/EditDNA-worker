@@ -1,5 +1,18 @@
 # Yaskira 09 v13 correction — offline evidence, not approval
 
+## Live v16 result
+
+Run36345575257, commit a662be83: technical success, delivery status
+NOT_DELIVERABLE_NEEDS_HUMAN_REVIEW. Demo96.65–106.6 is no longer in renderer
+trim audit; the visual-floor correction has live mechanical evidence.
+Opening aborted prefix and final recording aside remain. Tail proposal is
+3 words at.85 confidence and was refused. The second selected take extends
+to30.2, including an unfinished next phrase. ASR output and candidate decisions
+vary across runs; no claim of stable calibration or final approval is justified.
+V14 hash failure remains unproven. Next work needs targeted source/candidate
+evidence and a general safe semantic correction, not lower safety thresholds
+or hardcoded human-gold cuts. The rejected accent-folding fix must stay removed.
+
 ## Live v15 and bounded follow-up
 
 Run 36344493562 completed and rendered. It recovered opening and demo selection,

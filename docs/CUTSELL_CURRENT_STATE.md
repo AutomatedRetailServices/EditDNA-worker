@@ -1,5 +1,17 @@
 # CutSell.ai — Current State
 
+## 2026-09-27 — v16 result: demonstration floor works, video still rejected
+
+Commit a662be83, run 36345575257 completed and rendered. Renderer audit no
+longer trims the approved demo96.65–106.6. Still NOT_DELIVERABLE_NEEDS_HUMAN_REVIEW:
+opening ends with aborted 'tus mus'; final 'ya se acabó ese' remains; second
+take now extends to30.2 (approved reference ended28). Tail proposal count3,
+confidence.85 was conservatively refused, so separate confidence did not fix it.
+V14 semantic mutation is still unexplained/nonreproduced. No release claim.
+The branch has 445 locally passing tests, but the editorial task is unfinished.
+Do not repeat paid runs without a new evidenced hypothesis; preserve these
+results for targeted candidate/tail/ASR analysis. No production/main changes.
+
 ## 2026-09-27 — v15 rendered but not editorially approved
 
 Run 36344493562 recovered opening/demo selection; renderer then cut 8.185 s
