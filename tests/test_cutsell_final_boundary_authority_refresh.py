@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from dataclasses import replace
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, JobState, ProcessingResult, SemanticRole, Word
 from cutsell_worker.final_boundary_authority import (
     _clip_from_envelope,
@@ -19,6 +20,18 @@ def test_trailing_aborted_restart_is_trimmed_at_repeated_prefix():
     output, rows = _trim_trailing_aborted_restarts([clip], {"src": words})
     assert output[0].text == "your muscles grow and"
     assert rows[0]["action"] == "trim_trailing_aborted_restart"
+
+
+def test_accent_partial_matching_does_not_delete_complete_words():
+    words = _words(("energía", "y", "tus", "músculos", "tus", "mus"))
+    clip = DraftClip("a", "src", 0, 0, 2.3, " ".join(w.text for w in words), "", words=words)
+    assert _trim_trailing_aborted_restarts([clip], {"src": words})[0] == [clip]
+    complete = _words(("energía", "y", "tus", "músculos", "tus", "musculos"))
+    clip2 = replace(clip, words=complete, text=" ".join(w.text for w in complete))
+    assert _trim_trailing_aborted_restarts([clip2], {"src": complete})[0] == [clip2]
+    complete = _words(("Yo", "tomo", "cafeína", "y", "también", "tomo", "café"))
+    clip3 = replace(clip, end=2.7, words=complete, text=" ".join(w.text for w in complete))
+    assert _trim_trailing_aborted_restarts([clip3], {"src": complete})[0] == [clip3]
 
 
 def test_spaced_exact_retry_phrase_is_kept_on_later_continuing_take():

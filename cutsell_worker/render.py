@@ -344,6 +344,8 @@ def tighten_trailing_silence(
     SAME per-segment output-timeline durations `render_preview` actually produces --
     one implementation, not a second guess that could silently drift from it.
     """
+    if segment.trailing_trim_floor is not None and segment.trailing_trim_floor >= segment.end:
+        return segment
     if segment.duration_sec < minimum_silence_sec + 0.35:
         return segment
     probe = probe_media(segment.source_path)
@@ -395,6 +397,8 @@ def tighten_trailing_silence(
 
     new_end = segment.start + silence_start + speech_tail_pad_sec
     new_end = min(segment.end, new_end)
+    if segment.trailing_trim_floor is not None:
+        new_end = max(new_end, min(segment.end, segment.trailing_trim_floor))
     if new_end - segment.start < 0.35 or segment.end - new_end < minimum_silence_sec - 0.05:
         return segment
     return replace(segment, end=new_end)

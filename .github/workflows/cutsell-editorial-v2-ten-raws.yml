@@ -65,6 +65,7 @@ jobs:
             tests/test_cutsell_unified_selection_reasoner.py \
             tests/test_cutsell_final_boundary_authority_refresh.py \
             tests/test_cutsell_v2_recording_tail.py \
+            tests/test_cutsell_v2_visual_trim_floor.py \
             tests/test_cutsell_v13_evidence_replay.py
 
       - name: Load missing runtime secrets from RunPod template vault
@@ -139,7 +140,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_09_recovery.v15",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_09_recovery.v16",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

@@ -8,8 +8,12 @@ def trim_recording_tail(clip, decision, diagnostics):
     row = {"clip_id": clip.clip_id, "source_asset_id": clip.source_asset_id,
            "action": "preserve", "reason": "insufficient_evidence"}
     count = decision.trailing_recording_word_count
+    confidence = (decision.confidence if decision.trailing_recording_confidence is None
+                  else decision.trailing_recording_confidence)
+    row.update(proposed_word_count=count, selection_confidence=decision.confidence,
+               trailing_recording_confidence=confidence)
     words = tuple(clip.words)
-    if (decision.action != "select" or decision.confidence < .97
+    if (decision.action != "select" or not math.isfinite(confidence) or confidence < .97
             or type(count) is not int or not 1 <= count <= 8 or len(words) - count < 3):
         return clip, row
     tokenize = lambda text: re.findall(r"\w+", text.casefold())

@@ -191,6 +191,7 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
         selected[index] = replace(left, end=gap_end)
         rows.append({
             "left_clip_id": left.clip_id,
+            "source_asset_id": left.source_asset_id,
             "right_clip_id": right.clip_id,
             "gap_start": round(gap_start, 3),
             "gap_end": round(gap_end, 3),

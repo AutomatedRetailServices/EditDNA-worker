@@ -179,7 +179,7 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
             "A clean high-confidence audiovisual audience region contradicts failed_delivery unless that candidate itself contains an observed reset/stumble or its transcript is clearly abandoned; explain the conflict through the chosen relation and reason code.",
             "Assign every candidate one unique sequence_index. Preserve chronology by default, but reorder complete valid story beats when it clearly improves comprehension, hook, demonstration, payoff, or coherence without inventing speech.",
             "Return one final KEEP/DISCARD-equivalent plan: SELECT the final story and DISCARD every non-winner; never return SWAP.",
-            "For a SELECT containing a clean delivery followed by a short explicit recording-process aside, optionally return trailing_recording_word_count (1..8) counted from aligned_word_texts. Return 0 or omit when uncertain, words are unavailable, or the ending is audience content. Never trim a disclaimer, offer, qualification, gratitude, humor, reaction, number, negation or product fact. Confidence must cover both selection and the tail classification. Do not discard the whole useful take because only its ending is recording talk.",
+            "For a SELECT containing a clean delivery followed by a short explicit recording-process aside, optionally return trailing_recording_word_count (1..8) counted from aligned_word_texts and trailing_recording_confidence (0..1) for that suffix classification independently of whole-take selection confidence. Return 0 or omit when uncertain, words are unavailable, or the ending is audience content. Never trim a disclaimer, offer, qualification, gratitude, humor, reaction, number, negation or product fact. Do not discard the whole useful take because only its ending is recording talk.",
         ])
     else:
         contract.extend([
@@ -236,6 +236,7 @@ def unified_selection_response_schema(candidate_count: int, *, v2: bool = False)
                         "reason_code": {"type": "string", "enum": _REASON_CODES},
                         **({"sequence_index": {"type": "integer", "minimum": 0}} if v2 else {}),
                         **({"trailing_recording_word_count": {"type": "integer", "minimum": 0, "maximum": 8}} if v2 else {}),
+                        **({"trailing_recording_confidence": {"type": "number", "minimum": 0, "maximum": 1}} if v2 else {}),
                     },
                     "required": [
                         "candidate_index", "action", "relation", "confidence", "family_index", "reason_code",
@@ -250,7 +251,7 @@ def unified_selection_response_schema(candidate_count: int, *, v2: bool = False)
     }
 
 
-def _worst_case_decision_json_chars() -> int:
+def _worst_case_decision_json_chars(*, v2: bool = False) -> int:
     """Exact worst-case marginal cost, in characters, of one additional
     decision object as it actually appears embedded in Gemini's real
     generated response -- derived by diffing a 1-item and 2-item pretty-
@@ -282,6 +283,7 @@ def _worst_case_decision_json_chars() -> int:
         "reason_code": max(_REASON_CODES, key=len),
         "sequence_index": 999,
         "trailing_recording_word_count": 8,
+        **({"trailing_recording_confidence": 0.999999} if v2 else {}),
     }
     one = json.dumps({"decisions": [sample]}, indent=2)
     two = json.dumps({"decisions": [sample, sample]}, indent=2)
@@ -298,10 +300,13 @@ _JSON_FORMATTING_SAFETY_MARGIN = 1.20
 _TOKENS_PER_DECISION = estimate_tokens_from_chars(
     int(_worst_case_decision_json_chars() * _JSON_FORMATTING_SAFETY_MARGIN)
 )
+_V2_TOKENS_PER_DECISION = estimate_tokens_from_chars(
+    int(_worst_case_decision_json_chars(v2=True) * _JSON_FORMATTING_SAFETY_MARGIN)
+)
 _DECISION_ARRAY_OVERHEAD_TOKENS = estimate_tokens_from_chars(len('{"decisions":[]}') + 8)
 
 
-def output_token_reserve(candidate_count: int, *, ceiling: int) -> int:
+def output_token_reserve(candidate_count: int, *, ceiling: int, v2: bool = False) -> int:
     """Worst-case output token budget for `candidate_count` decisions, capped
     at `ceiling`. Every field in the schema is bounded (enums, a 0-1 float,
     and a small integer), so this is a true upper bound, not a heuristic --
@@ -309,7 +314,7 @@ def output_token_reserve(candidate_count: int, *, ceiling: int) -> int:
     schema-valid decision for every candidate."""
     return min(
         ceiling,
-        max(640, _TOKENS_PER_DECISION * max(0, int(candidate_count)) + _DECISION_ARRAY_OVERHEAD_TOKENS),
+        max(640, (_V2_TOKENS_PER_DECISION if v2 else _TOKENS_PER_DECISION) * max(0, int(candidate_count)) + _DECISION_ARRAY_OVERHEAD_TOKENS),
     )
 
 
@@ -488,6 +493,7 @@ class GoogleUnifiedSelectionReasoner:
                 family_index=int(item.get("family_index", -1)),
                 reason_code=str(item.get("reason_code") or ""),
                 trailing_recording_word_count=item.get("trailing_recording_word_count", 0),
+                trailing_recording_confidence=item.get("trailing_recording_confidence"),
                 sequence_index=(
                     normalized_sequence.get(len(decisions), int(item.get("sequence_index")))
                     if item.get("sequence_index") is not None else None
@@ -525,7 +531,8 @@ class GoogleUnifiedSelectionReasoner:
 
         # Exact worst-case budget for the schema actually sent, not a guessed
         # constant -- see output_token_reserve()/_worst_case_decision_json_chars().
-        output_reserve = output_token_reserve(len(candidate_rows), ceiling=self.max_output_tokens)
+        output_reserve = output_token_reserve(len(candidate_rows), ceiling=self.max_output_tokens,
+                                             v2=payload.get("engine_version") == "v2")
 
         for attempt in range(self.max_retries + 1):
             estimated_cost = self.settings.estimate_cost_usd(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import math
 from typing import TYPE_CHECKING, Mapping, Tuple
 
 from .contracts import DraftTimeline
@@ -66,6 +67,9 @@ class RenderSegment:
     # matching this file's existing `audio_start`/`audio_end` precedent
     # exactly.
     visual_transform: "VisualTransformSpec | None" = None
+    # An upstream-authorized visual interval is not silent recording slack.
+    # Renderer may trim after this source time, never through it.
+    trailing_trim_floor: float | None = None
 
     @property
     def duration_sec(self) -> float:
@@ -139,7 +143,9 @@ def _coalesce_contiguous_segments(segments: Tuple[RenderSegment, ...]) -> Tuple[
     for current in segments:
         if output and _can_coalesce(output[-1], current):
             previous = output[-1]
-            output[-1] = replace(previous, end=max(previous.end, current.end))
+            floors = [f for f in (previous.trailing_trim_floor, current.trailing_trim_floor) if f is not None]
+            output[-1] = replace(previous, end=max(previous.end, current.end),
+                                 trailing_trim_floor=max(floors) if floors else None)
             continue
         output.append(current)
     return tuple(output)
@@ -157,6 +163,15 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
         volume = float(clip.audio_volume)
         if volume < 0.0 or volume > 2.0:
             raise ValueError(f"invalid audio volume for selected clip {clip.clip_id}")
+        visual_floors = []
+        if (draft.diagnostics or {}).get("editorial_engine_v2"):
+            for row in draft.diagnostics.get("editorial_engine_v2_continuity_restoration", ()):
+                if (row.get("left_clip_id") in (clip.clip_id, clip.parent_semantic_clip_id)
+                        and row.get("source_asset_id") == clip.source_asset_id
+                        and row.get("basis") == "selected_neighbors_inside_high_confidence_audience_demonstration"):
+                    floor = float(row["gap_end"])
+                    if math.isfinite(floor) and clip.start < floor <= clip.end + 1e-6:
+                        visual_floors.append(min(floor, float(clip.end)))
         output.append(RenderSegment(
             clip_id=clip.clip_id,
             source_asset_id=clip.source_asset_id,
@@ -172,6 +187,7 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             fragment_index=getattr(clip, "fragment_index", None),
             fragment_count=getattr(clip, "fragment_count", None),
             boundary_reason=getattr(clip, "boundary_reason", None),
+            trailing_trim_floor=max(visual_floors) if visual_floors else None,
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

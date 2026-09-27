@@ -72,6 +72,7 @@ class UnifiedSelectionDecision:
     sequence_index: int | None = None
     # V2-only optional semantic proposal; independently verified pre-Freeze.
     trailing_recording_word_count: int = 0
+    trailing_recording_confidence: float | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,11 @@ def validate_unified_selection_plan(
             raise ValueError("unified selection family index must be non-negative")
         if type(raw.trailing_recording_word_count) is not int or not 0 <= raw.trailing_recording_word_count <= 8:
             raise ValueError("invalid trailing recording word count")
+        if raw.trailing_recording_confidence is not None and (
+            type(raw.trailing_recording_confidence) not in (int, float)
+            or not 0 <= raw.trailing_recording_confidence <= 1
+        ):
+            raise ValueError("invalid trailing recording confidence")
         normalized.append(UnifiedSelectionDecision(
             clip_id=clip_id,
             action=action,
@@ -154,6 +160,7 @@ def validate_unified_selection_plan(
                 None if raw.sequence_index is None else int(raw.sequence_index)
             ),
             trailing_recording_word_count=raw.trailing_recording_word_count,
+            trailing_recording_confidence=raw.trailing_recording_confidence,
         ))
         seen.add(clip_id)
 

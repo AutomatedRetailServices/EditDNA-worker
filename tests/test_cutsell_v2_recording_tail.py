@@ -50,6 +50,23 @@ def test_other_source_pause_does_not_authorize_trim():
     assert trim_recording_tail(clip, decision, diagnostics)[0] == clip
 
 
+def test_suffix_confidence_is_independent_and_survives_plan_normalization():
+    clip, decision, diagnostics = sample()
+    decision = replace(decision, confidence=.95, trailing_recording_confidence=.99)
+    class Reasoner:
+        def reason(self, _):
+            return UnifiedSelectionPlan((decision,), "test", "test")
+    draft = DraftTimeline("cutsell.v1", "p", EditStrategy.STORYTELLING, (clip,), (), (), diagnostics)
+    out = apply_unified_selection_reasoner(draft, Reasoner())
+    assert out.selected[0].text == "Find it in cart"
+    assert out.diagnostics["v2_recording_tail"][0]["trailing_recording_confidence"] == .99
+
+
+def test_uncertain_suffix_not_authorized_by_high_selection_confidence():
+    clip, decision, diagnostics = sample()
+    assert trim_recording_tail(clip, replace(decision, trailing_recording_confidence=.9), diagnostics)[0] == clip
+
+
 @pytest.mark.parametrize("tail", ["not free", "no gratis", "only 18", "never mix"])
 def test_protected_tail_fact_preserved_even_with_proposal(tail):
     clip, decision, diagnostics = sample()

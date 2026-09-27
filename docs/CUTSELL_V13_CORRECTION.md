@@ -1,5 +1,27 @@
 # Yaskira 09 v13 correction — offline evidence, not approval
 
+## Live v15 and bounded follow-up
+
+Run 36344493562 completed and rendered. It recovered opening and demo selection,
+but is NOT approved: opening retains an aborted accented prefix; final recording
+aside remains; renderer trimmed the approved demonstration by 8.185 seconds
+(106.66 -> 98.475). The v14 semantic failure did not reproduce; NOT resolved.
+
+Follow-up v16:
+- Proposed accent-folded aborted-prefix correction was REJECTED by independent
+  QA: it could delete valid 'tomo café' after 'tomo cafeína'. It was removed
+  before publication. Opening debris remains unresolved; negative tests retain
+  complete words and faithfully document that the recorded opening is not fixed.
+- Renderer receives a source/clip-bound trailing trim floor for an approved
+  audience demonstration. Silent action is retained, including fragment lineage
+  and coalescing. Ordinary speech/legacy segments retain existing trimming.
+- Tail classification has its own optional confidence rather than sharing take
+  selection confidence. The .97 floor and independent audio/alignment/protected
+  word checks remain; no live success claimed. Proposal/confidence now audited.
+  V2-only output reserve accounts for the field; dollar and token caps unchanged.
+- 445 boundary/selection/render/engine/replay tests pass locally. Real model
+  adherence, video review and the intermittent v14 contract failure remain open.
+
 ## Live v14 follow-up
 
 Run 36343804777 (commit 7e6fb8b) passed workflow tests and runtime credential

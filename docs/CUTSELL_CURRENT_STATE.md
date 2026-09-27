@@ -1,5 +1,13 @@
 # CutSell.ai — Current State
 
+## 2026-09-27 — v15 rendered but not editorially approved
+
+Run 36344493562 recovered opening/demo selection; renderer then cut 8.185 s
+of approved silent demonstration. Opening aborted phrase and recording tail
+remain. V14 contract failure did not reproduce, NOT declared fixed.
+V16 scoped corrections and 445-test checkpoint are documented in
+CUTSELL_V13_CORRECTION.md. Main/production/legacy behavior remain protected.
+
 ## 2026-09-27 — v14 blocked by frozen semantic contract
 
 Run 36343804777, commit 7e6fb8b: workflow tests and credentials passed;
