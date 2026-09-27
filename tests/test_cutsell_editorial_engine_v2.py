@@ -180,3 +180,98 @@ def test_v2_provider_payload_includes_av_evidence_and_requires_story_order():
     assert payload["engine_version"] == "v2"
     assert "audio" in payload["source_context"]["sources"][0]["audiovisual_evidence"]
     assert "sequence_index" in item_schema["required"]
+
+
+def test_v2_payload_requires_global_retry_comparison_and_unique_story_preservation():
+    draft = source_result().draft
+    draft = replace(draft, diagnostics={
+        **draft.diagnostics,
+        "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+    })
+    contract = " ".join(build_unified_selection_payload(draft)["editorial_contract"])
+
+    assert "UNION of earlier fragments" in contract
+    assert "no selected winner" in contract
+    assert "unique hook" in contract
+    assert "audience region contradicts failed_delivery" in contract
+
+
+def test_v2_restores_short_verified_audience_gap_without_changing_membership():
+    result = source_result()
+    a = replace(result.draft.selected[0], start=0.0, end=1.0)
+    b = replace(result.draft.alternates[0], start=2.0, end=3.0)
+    result = replace(result, draft=replace(
+        result.draft,
+        selected=(a,),
+        alternates=(b,),
+        discarded=(),
+        diagnostics={
+            "whole_video_context": {
+                "status": {"status": "applied", "available": True},
+                "audiovisual_input_status": "received_and_parsed",
+                "sources": [{
+                    "source_asset_id": "source",
+                    "audiovisual_evidence": '{"regions":[{"start":0,"end":4,"role":"audience","confidence":0.95}]}',
+                }],
+            }
+        },
+    ))
+
+    class KeepBoth:
+        def reason(self, draft):
+            return UnifiedSelectionPlan(
+                decisions=(
+                    UnifiedSelectionDecision("a", "select", "composite_piece", .99, 0, "composite_best_take_piece", 0),
+                    UnifiedSelectionDecision("b", "select", "continuation", .99, 0, "necessary_continuation", 1),
+                ),
+                provider="test",
+                model="test",
+            )
+
+    output = run_editorial_engine_v2(
+        result,
+        selection_reasoner=KeepBoth(),
+        recover_complete_boundaries=identity,
+        execute_boundaries=identity,
+    )
+
+    assert [item.clip_id for item in output.draft.selected] == ["a", "b"]
+    assert output.draft.selected[0].end == 2.0
+    assert output.draft.diagnostics["editorial_engine_v2_continuity_restoration"][0]["restored_sec"] == 1.0
+
+
+def test_v2_does_not_restore_gap_with_explicitly_discarded_material():
+    result = source_result()
+    a = replace(result.draft.selected[0], start=0.0, end=1.0)
+    b = replace(result.draft.alternates[0], start=2.0, end=3.0)
+    blocked = replace(result.draft.discarded[0], start=1.25, end=1.75)
+    result = replace(result, draft=replace(
+        result.draft,
+        selected=(a,), alternates=(b,), discarded=(blocked,),
+        diagnostics={
+            "whole_video_context": {
+                "status": {"status": "applied", "available": True},
+                "audiovisual_input_status": "received_and_parsed",
+                "sources": [{
+                    "source_asset_id": "source",
+                    "audiovisual_evidence": '{"regions":[{"start":0,"end":4,"role":"audience","confidence":0.95}]}',
+                }],
+            }
+        },
+    ))
+
+    class KeepEnds:
+        def reason(self, draft):
+            return UnifiedSelectionPlan(
+                decisions=(
+                    UnifiedSelectionDecision("a", "select", "composite_piece", .99, 0, "composite_best_take_piece", 0),
+                    UnifiedSelectionDecision("b", "select", "continuation", .99, 0, "necessary_continuation", 1),
+                    UnifiedSelectionDecision("c", "discard", "failed", .99, 1, "failed_delivery", 2),
+                ), provider="test", model="test",
+            )
+
+    output = run_editorial_engine_v2(
+        result, selection_reasoner=KeepEnds(),
+        recover_complete_boundaries=identity, execute_boundaries=identity,
+    )
+    assert output.draft.selected[0].end == 1.0
