@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 08 + 10 Recovery
+name: CutSell Editorial Engine V2 Yaskira 01-10 Calibration
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-yaskira-08-10-recovery
+  group: cutsell-editorial-v2-yaskira-01-10-calibration
   cancel-in-progress: false
 
 jobs:
@@ -55,6 +55,15 @@ jobs:
             libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
             libavfilter-dev libswscale-dev libswresample-dev
           pip install -r requirements.cutsell.worker.txt
+          pip install pytest
+
+      - name: Verify Editorial Engine V2 corrections
+        run: |
+          pytest -q \
+            tests/test_cutsell_editorial_engine_v2.py \
+            tests/test_cutsell_unified_selection_google.py \
+            tests/test_cutsell_unified_selection_reasoner.py \
+            tests/test_cutsell_final_boundary_authority_refresh.py
 
       - name: Load missing runtime secrets from RunPod template vault
         shell: bash
@@ -79,11 +88,11 @@ jobs:
             fi
           done
 
-      - name: Execute isolated V2 qualification for Yaskira 08 and 10
+      - name: Execute V2 calibration for Yaskira 01 through 10
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p editorial-v2-yaskira-08-10/previews editorial-v2-yaskira-08-10/results
+          mkdir -p editorial-v2-yaskira-01-10/previews editorial-v2-yaskira-01-10/results
           python - <<'PY'
           import json
           import re
@@ -91,10 +100,18 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
+              "Yaskira/01.mp4",
+              "Yaskira/02.mp4",
+              "Yaskira/03.mp4",
+              "Yaskira/04.MP4",
+              "Yaskira/05.MP4",
+              "Yaskira/06.MP4",
+              "Yaskira/07.mp4",
               "Yaskira/08.mp4",
+              "Yaskira/09.mp4",
               "Yaskira/10.MOV",
           ]
-          root = Path("editorial-v2-yaskira-08-10")
+          root = Path("editorial-v2-yaskira-01-10")
           results = []
           failures = []
           for index, key in enumerate(keys, start=1):
@@ -124,7 +141,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_10_recovery.v1",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_01_10_calibration.v2",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
@@ -148,7 +165,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-yaskira-08-10-${{ github.run_id }}
-          path: editorial-v2-yaskira-08-10/
+          name: cutsell-editorial-v2-yaskira-01-10-${{ github.run_id }}
+          path: editorial-v2-yaskira-01-10/
           if-no-files-found: warn
           retention-days: 30
