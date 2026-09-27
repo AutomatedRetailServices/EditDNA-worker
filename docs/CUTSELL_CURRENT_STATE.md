@@ -1628,3 +1628,32 @@ the stomach false start and the incomplete percentage fragment while restoring
 the safe closing suffix. The workflow again serializes branch qualification so
 overlapping GPU jobs cannot cross-wire uploaded result identity. Offline targeted
 regression: 83 passed. Live qualification is still required before approval.
+
+
+## 2026-09-27 — Common-engine qualification passed Video00 and Yaskira05
+
+Workflow run `36281747767` qualified code parent `e721e7d6` through trigger SHA
+`33c80a3e` on branch `benchmark/video00-after-y05-run31-20260926`. The run
+completed successfully and preserved artifact `10919157518`.
+
+Video00 completed the full Medium + WhisperX path with render QC PASS. The
+historical regression manifest passed 14/14 and the current editorial acceptance
+manifest passed 15/15 with zero warnings. The accepted output contains 20
+selected deliveries. The checks explicitly confirm the complete sonography
+opening and completion, removal of the rejected sonography take, absence of the
+pimples monolith/micro-attempt/orphan tail, selection of the later pimples take,
+absence of the abandoned and truncated stomach starts, the full gynecologist
+take exactly once, one percentage delivery, and a non-reopened closing with the
+final instructions preserved exactly once.
+
+Against the current Human Gold, the same run improved every locked run-47 gate:
+selection F1 `0.8456` (baseline `0.7432`), Gold coverage `0.8408` (baseline
+`0.7803`), engine precision `0.8505` (baseline `0.7094`), and failed Human Gold
+chunks `4` (baseline `6`; 17/21 passed). Boundary parity was measured separately
+and was not used to weaken any semantic acceptance check.
+
+The workflow then reran Yaskira05 on the same common engine. Source identity
+matched the approved contract, render QC passed, and approval
+`yaskira05-run31-36245398737` passed with exactly two selected spans, output
+duration `33.234 s`, and zero failures. This confirms that the general Video00
+corrections did not regress the previously approved Yaskira05 run-31 result.
