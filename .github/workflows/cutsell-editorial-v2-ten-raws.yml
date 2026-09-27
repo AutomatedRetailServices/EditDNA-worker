@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 01-10 Calibration
+name: CutSell Editorial Engine V2 Yaskira 09 Recovery
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-yaskira-01-10-calibration
+  group: cutsell-editorial-v2-yaskira-09-recovery
   cancel-in-progress: false
 
 jobs:
@@ -88,11 +88,11 @@ jobs:
             fi
           done
 
-      - name: Execute V2 calibration for Yaskira 01 through 10
+      - name: Execute V2 recovery for Yaskira 09
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p editorial-v2-yaskira-01-10/previews editorial-v2-yaskira-01-10/results
+          mkdir -p editorial-v2-yaskira-09/previews editorial-v2-yaskira-09/results
           python - <<'PY'
           import json
           import re
@@ -100,18 +100,9 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Yaskira/01.mp4",
-              "Yaskira/02.mp4",
-              "Yaskira/03.mp4",
-              "Yaskira/04.MP4",
-              "Yaskira/05.MP4",
-              "Yaskira/06.MP4",
-              "Yaskira/07.mp4",
-              "Yaskira/08.mp4",
               "Yaskira/09.mp4",
-              "Yaskira/10.MOV",
           ]
-          root = Path("editorial-v2-yaskira-01-10")
+          root = Path("editorial-v2-yaskira-09")
           results = []
           failures = []
           for index, key in enumerate(keys, start=1):
@@ -141,7 +132,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_01_10_calibration.v2",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_09_recovery.v2",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
@@ -165,7 +156,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-yaskira-01-10-${{ github.run_id }}
-          path: editorial-v2-yaskira-01-10/
+          name: cutsell-editorial-v2-yaskira-09-${{ github.run_id }}
+          path: editorial-v2-yaskira-09/
           if-no-files-found: warn
           retention-days: 30
