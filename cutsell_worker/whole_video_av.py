@@ -29,6 +29,8 @@ negations and personality. Do not force a sales funnel. Do not invent speech or 
 Return JSON: {"summary":str,"creator_intent":str,"story_logic":str,
 "regions":[{"start":seconds,"end":seconds,"role":"recording_only"|"audience"|"mixed"|"uncertain",
 "confidence":0..1,"audio_observation":str,"visual_observation":str,"reason":str}]}.
+Start and end are absolute timestamps on the supplied video's timeline, not a
+start-plus-duration pair. Every end must be strictly greater than its start.
 Use at most 12 significant regions spread across the recording; they are advisory
 observations, NOT word-accurate cuts. Region times must be temporally faithful:
 split when the creator changes from a fumble, interruption or laughter back into
