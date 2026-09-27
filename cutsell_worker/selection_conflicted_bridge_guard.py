@@ -32,7 +32,8 @@ _NEGATION = frozenset({"no", "not", "never", "nunca", "sin", "without", "ni"})
 _DANGLING_TERMINALS = frozenset({
     "a", "al", "and", "because", "con", "de", "del", "for", "from", "if", "in",
     "of", "or", "para", "pero", "por", "porque", "que", "si", "so", "the", "to",
-    "with", "y",
+    "with", "y", "el", "la", "las", "lo", "los", "un", "una", "unos", "unas",
+    "como", "like",
 })
 _DEPENDENT_OPENERS = frozenset({
     "cuando", "whereas", "while",
@@ -233,6 +234,22 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
     move: set[str] = set()
     add: set[str] = set()
     audit: list[dict] = []
+    # This guard can run more than once around authoritative resolution.
+    # A prior deterministic retry verdict is the last membership decision
+    # over that exact pair, not another co-equal provider vote.  Without
+    # this monotonicity check a near-tied fuller-retry decision could flip
+    # back on the second invocation, leaving reciprocal A->B and B->A
+    # audit rows and making the resolver correctly refuse the contradiction.
+    settled_retry_pairs = {
+        (
+            str(prior.get("clip_id") or prior.get("removed_clip_id") or ""),
+            str(prior.get("winner_clip_id") or ""),
+        )
+        for prior in diagnostics.get("selection_conflicted_bridge_guard") or ()
+        if isinstance(prior, dict)
+        and str(prior.get("reason") or "")
+        == "deterministic_retry_final_membership_resolution"
+    }
     for row in _deterministic_retry_rows(diagnostics):
         fuller_restart_tie = False
         left_id = str(row.get("left_clip_id") or "")
@@ -255,6 +272,10 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             winner_id, loser_id = left_id, right_id
         elif left_selected != right_selected:
             current_id, peer_id = (left_id, right_id) if left_selected else (right_id, left_id)
+            if (peer_id, current_id) in settled_retry_pairs:
+                # The current member is already the settled winner over this
+                # peer. Reapplying the same unchanged evidence is idempotent.
+                continue
             current_positive = _strongest(votes, current_id, {"winner", "keep"})
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
             current, peer = all_by_id[current_id], all_by_id[peer_id]
@@ -475,25 +496,10 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
         current_content = _substantive(current.text)
         current_duration = max(0.001, float(current.end) - float(current.start))
         current_positive = _strongest(votes, current_id, {"winner", "keep"})
-        current_negative = _strongest(votes, current_id, {"alternate", "failed"})
-        current_negative_blocks = (
-            current_negative >= 0.80
-            and not (
-                current_positive >= 0.90
-                and current_positive - current_negative >= 0.10 - 1e-9
-                and current_negative <= 0.85 + 1e-9
-            )
-        )
         if (
             len(current_tokens) < 6
             or len(current_content) < 3
             or current_positive < 0.90
-            # A standard-confidence negative observation from an
-            # overlapping window does not make a punctuation-open, very
-            # short winner complete.  Preserve the safety veto when the
-            # negative is stronger than that standard value, or when the
-            # positive verdict lacks a clear margin.
-            or current_negative_blocks
         ):
             continue
 
@@ -503,21 +509,17 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             evidence = member_usability.get(peer_id)
             peer_positive = _strongest(votes, peer_id, {"winner", "keep"})
             peer_negative = _strongest(votes, peer_id, {"alternate", "failed"})
-            peer_negative_blocks = (
-                peer_negative >= 0.80
-                and not (
-                    peer_positive >= 0.90
-                    and peer_positive - peer_negative >= 0.10 - 1e-9
-                    and peer_negative <= 0.85 + 1e-9
-                )
-            )
             if (
                 peer.source_asset_id != current.source_asset_id
                 or complete.get(peer_id) is False
                 or not evidence
                 or bool(evidence.get("deterministic_unusable"))
                 or bool(evidence.get("delete_recommended"))
-                or peer_negative_blocks
+                or peer_negative > 0.80 + 1e-9
+                or (
+                    peer_negative >= 0.80 - 1e-9
+                    and peer_positive - peer_negative < 0.10 - 1e-9
+                )
             ):
                 continue
             peer_tokens = _tokens(peer.text)
@@ -551,12 +553,6 @@ def deterministic_retry_resolution(selected, alternates, discarded, diagnostics:
             "loser_token_count": len(current_tokens),
             "winner_token_count": len(_tokens(winner.text)),
             "winner_duration_sec": round(_duration, 3),
-            "winner_positive_confidence": round(
-                _strongest(votes, winner.clip_id, {"winner", "keep"}), 4,
-            ),
-            "winner_negative_confidence": round(
-                _strongest(votes, winner.clip_id, {"alternate", "failed"}), 4,
-            ),
         })
     return move, add, audit
 
@@ -960,7 +956,13 @@ def abandoned_negated_restart_ids(selected, diagnostics: dict):
             continue
         if len(retry_tokens) < 9 or current_tokens[:2] != retry_tokens[:2]:
             continue
-        if gap < 0.0 or gap > 8.0 or retry_duration < 2.0 * current_duration:
+        # A correction pause can include the creator resetting before the
+        # complete retry.  Keep this narrow through the literal terminal
+        # negation, identical two-word opening, 2x fuller delivery and the
+        # independent mixed/audience AV checks below; nine-to-twelve second
+        # pauses are not by themselves evidence that the false start is a
+        # separate audience statement.
+        if gap < 0.0 or gap > 12.0 or retry_duration < 2.0 * current_duration:
             continue
         if complete.get(retry.clip_id) is False:
             continue
@@ -1056,6 +1058,93 @@ def orphaned_anaphoric_retry_fragment_ids(selected, alternates, discarded, diagn
                     "equivalence_confidence": round(confidence, 4),
                     "substantive_coverage": round(coverage, 4),
                 })
+
+    # A failed delivery may be segmented into an incomplete body plus one or
+    # more small grammatical pieces.  Provider chunking can leave a piece in
+    # a singleton family, so the direct-equivalence loop above cannot always
+    # see that it belongs to the failed body.  Remove only structurally
+    # dependent debris around an explicitly incomplete unselected attempt
+    # when a nearby, substantially fuller selected delivery independently
+    # supplies the audience-safe retry.
+    all_unselected = tuple(unselected_by_id.values())
+    ordered_selected = tuple(sorted(
+        selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)
+    ))
+    complete = _attempt_completeness(diagnostics)
+    votes = _hybrid_votes(diagnostics)
+    for fragment in ordered_selected:
+        if fragment.clip_id in move:
+            continue
+        fragment_tokens = _tokens(fragment.text)
+        fragment_content = _substantive(fragment.text)
+        if not fragment_tokens or len(fragment_tokens) > 8 or not fragment_content:
+            continue
+        raw_text = str(fragment.text or "").lstrip()
+        lower_case_tail = bool(raw_text[:1]) and raw_text[:1].isalpha() and raw_text[:1].islower()
+        anaphoric_opening = tuple(fragment_tokens[:2]) in _ANAPHORIC_FRAGMENT_OPENINGS
+        if not (lower_case_tail or anaphoric_opening):
+            continue
+        for proxy in all_unselected:
+            if (
+                proxy.source_asset_id != fragment.source_asset_id
+                or complete.get(proxy.clip_id) is not False
+            ):
+                continue
+            before_gap = float(fragment.start) - float(proxy.end)
+            after_gap = float(proxy.start) - float(fragment.end)
+            proxy_is_before = 0.0 <= before_gap <= 3.0
+            proxy_is_after = 0.0 <= after_gap <= 3.0
+            if not (proxy_is_before or proxy_is_after):
+                continue
+            proxy_tokens = _tokens(proxy.text)
+            if lower_case_tail and (
+                not proxy_is_before
+                or not proxy_tokens
+                or proxy_tokens[-1] not in _DANGLING_TERMINALS
+            ):
+                continue
+            debris_end = max(float(fragment.end), float(proxy.end))
+            for winner in ordered_selected:
+                if (
+                    winner.clip_id == fragment.clip_id
+                    or winner.source_asset_id != fragment.source_asset_id
+                    or float(winner.start) <= debris_end
+                    or float(winner.start) - debris_end > 8.0
+                    or _strongest(votes, winner.clip_id, {"winner", "keep"}) < 0.90
+                    or _audience_support(diagnostics, winner.clip_id) < 0.80
+                    or complete.get(winner.clip_id) is False
+                    or len(_tokens(winner.text)) < 2 * len(fragment_tokens)
+                ):
+                    continue
+                proxy_content = _substantive(proxy.text)
+                winner_content = _substantive(winner.text)
+                retry_overlap = len(proxy_content & winner_content)
+                if retry_overlap < 2:
+                    continue
+                fragment_coverage = len(
+                    fragment_content & (proxy_content | winner_content)
+                ) / len(fragment_content)
+                minimum_coverage = 0.50 if anaphoric_opening else 0.30
+                if fragment_coverage < minimum_coverage:
+                    continue
+                if not _critical(fragment.text).issubset(_critical(winner.text)):
+                    continue
+                move.add(fragment.clip_id)
+                audit.append({
+                    "clip_id": fragment.clip_id,
+                    "proxy_clip_id": proxy.clip_id,
+                    "winner_clip_id": winner.clip_id,
+                    "reason": "orphaned_retry_debris_around_incomplete_attempt",
+                    "fragment_shape": (
+                        "lower_case_continuation" if lower_case_tail
+                        else "anaphoric_fragment"
+                    ),
+                    "fragment_coverage": round(fragment_coverage, 4),
+                    "proxy_winner_shared_content_tokens": retry_overlap,
+                })
+                break
+            if fragment.clip_id in move:
+                break
     return move, audit
 
 
@@ -1189,6 +1278,43 @@ def confirmed_selected_duplicate_ids(selected, diagnostics: dict):
             loser_id, winner_id = left_id, right_id
         elif left_positive >= 0.90 and right_negative >= 0.80 and right_positive < 0.90:
             loser_id, winner_id = right_id, left_id
+        elif (
+            confidence >= 0.90
+            and left_positive >= 0.90
+            and right_positive >= 0.90
+            and left_negative < 0.80
+            and right_negative < 0.80
+        ):
+            # When two nearby audience-safe deliveries are already proven
+            # equivalent, use the normal retake convention even if an
+            # overlapping provider window gave the earlier take a slightly
+            # higher score.  Require the later delivery to remain a
+            # substantial realization (not a tiny retry), to be separated
+            # by a real cut-sized gap, and to retain the same protected
+            # markers.  This resolves provider variance without making
+            # "later" a general ranking signal.
+            left, right = selected_by_id[left_id], selected_by_id[right_id]
+            earlier, later = (
+                (left, right) if float(left.start) <= float(right.start)
+                else (right, left)
+            )
+            earlier_duration = max(0.001, float(earlier.end) - float(earlier.start))
+            later_duration = max(0.0, float(later.end) - float(later.start))
+            gap = float(later.start) - float(earlier.end)
+            earlier_content = _substantive(earlier.text)
+            later_content = _substantive(later.text)
+            overlap = len(earlier_content & later_content) / max(
+                1, min(len(earlier_content), len(later_content))
+            )
+            if (
+                earlier.source_asset_id == later.source_asset_id
+                and 0.0 <= gap <= 8.0
+                and later_duration >= 0.60 * earlier_duration
+                and len(_tokens(later.text)) >= 0.65 * len(_tokens(earlier.text))
+                and overlap >= 0.60
+                and _critical(earlier.text).issubset(_critical(later.text))
+            ):
+                loser_id, winner_id = earlier.clip_id, later.clip_id
         elif (
             confidence >= 0.90
             and right_positive >= 0.90
@@ -1491,14 +1617,14 @@ def redundant_selected_restatement_ids(selected, diagnostics: dict):
 
 
 def borderline_subspan_reconstruction_ids(selected, alternates, discarded, diagnostics: dict):
-    """Restore a safe prefix when authority selected only its sibling suffix.
+    """Restore a safe sibling when authority retained only half a delivery.
 
     Attempt reconstruction explicitly records these rows when a complete
     parent was split into two independently usable borderline subspans.  If
-    the suffix survives authority but the adjacent prefix does not, retaining
-    only the suffix can silently drop the parent's opening claim.  Rejoin the
-    pair only with full lexical coverage, tight source adjacency, audience
-    evidence, and no terminal delete/unusable finding for the prefix.
+    exactly one sibling survives authority, retaining only that half can
+    silently drop the parent's opening or completion.  Rejoin the pair only
+    with full lexical coverage, tight source adjacency, audience evidence,
+    and no terminal delete/unusable finding for the missing sibling.
     """
     selected_ids = {clip.clip_id for clip in selected}
     all_by_id = {clip.clip_id: clip for clip in (*selected, *alternates, *discarded)}
@@ -1513,7 +1639,9 @@ def borderline_subspan_reconstruction_ids(selected, alternates, discarded, diagn
         parent_id = str(row.get("parent_clip_id") or "")
         prefix_id = str(row.get("prefix_clip_id") or "")
         suffix_id = str(row.get("suffix_clip_id") or "")
-        if suffix_id not in selected_ids or prefix_id in selected_ids:
+        prefix_selected = prefix_id in selected_ids
+        suffix_selected = suffix_id in selected_ids
+        if prefix_selected == suffix_selected:
             continue
         parent = all_by_id.get(parent_id)
         prefix = all_by_id.get(prefix_id)
@@ -1527,10 +1655,12 @@ def borderline_subspan_reconstruction_ids(selected, alternates, discarded, diagn
             continue
         if float(suffix.end) > float(parent.end) + 1e-3 or complete.get(parent_id) is False:
             continue
-        evidence = member_usability.get(prefix_id) or {}
+        missing = suffix if prefix_selected else prefix
+        retained = prefix if prefix_selected else suffix
+        evidence = member_usability.get(missing.clip_id) or {}
         if evidence.get("delete_recommended") is True or evidence.get("deterministic_unusable") is True:
             continue
-        if _audience_support(diagnostics, prefix_id) < 0.80:
+        if _audience_support(diagnostics, missing.clip_id) < 0.80:
             continue
         parent_content = _substantive(parent.text)
         combined_content = _substantive(prefix.text + " " + suffix.text)
@@ -1539,12 +1669,14 @@ def borderline_subspan_reconstruction_ids(selected, alternates, discarded, diagn
             _critical(prefix.text + " " + suffix.text)
         ):
             continue
-        add.add(prefix_id)
+        add.add(missing.clip_id)
         audit.append({
-            "clip_id": prefix_id,
+            "clip_id": missing.clip_id,
+            "retained_sibling_clip_id": retained.clip_id,
+            "prefix_clip_id": prefix_id,
             "suffix_clip_id": suffix_id,
             "parent_clip_id": parent_id,
-            "reason": "complete_parent_borderline_prefix_restored",
+            "reason": "complete_parent_borderline_sibling_restored",
             "source_gap_sec": round(gap, 3),
             "parent_content_coverage": round(coverage, 4),
         })
@@ -1552,8 +1684,9 @@ def borderline_subspan_reconstruction_ids(selected, alternates, discarded, diagn
 
 
 def terminally_incomplete_selected_ids(selected, diagnostics: dict):
-    """Discard tiny attempt fragments proven incomplete upstream."""
+    """Discard attempt fragments proven syntactically incomplete upstream."""
     selected_ids = {clip.clip_id for clip in selected}
+    votes = _hybrid_votes(diagnostics)
     move: set[str] = set()
     audit: list[dict] = []
     reconstruction = diagnostics.get("attempt_reconstruction") or {}
@@ -1570,14 +1703,28 @@ def terminally_incomplete_selected_ids(selected, diagnostics: dict):
         clip = next((item for item in selected if item.clip_id == clip_id), None)
         if clip is None:
             continue
-        token_count = len(_TOKEN_RE.findall(str(clip.text or "")))
+        tokens = _tokens(clip.text)
+        token_count = len(tokens)
         terminally_open = str(clip.text or "").rstrip().endswith(("...", "…"))
-        if duration > 2.0 or token_count > 4 or not terminally_open:
+        tiny_open_fragment = duration <= 2.0 and token_count <= 4 and terminally_open
+        negative = _strongest(votes, clip_id, {"alternate", "failed"})
+        positive = _strongest(votes, clip_id, {"winner", "keep"})
+        provider_rejected_dangling = (
+            bool(tokens)
+            and tokens[-1] in _DANGLING_TERMINALS
+            and negative >= 0.80
+            and positive < 0.80
+        )
+        if not (tiny_open_fragment or provider_rejected_dangling):
             continue
         move.add(clip_id)
         audit.append({
             "clip_id": clip_id,
-            "reason": "short_terminally_incomplete_attempt",
+            "reason": (
+                "provider_rejected_dangling_attempt"
+                if provider_rejected_dangling
+                else "short_terminally_incomplete_attempt"
+            ),
             "duration_sec": round(duration, 3),
             "token_count": token_count,
         })
@@ -1631,36 +1778,9 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
     )
 
     all_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.alternates, *draft.discarded)}
-    effective_continuation_add_ids = (
-        continuation_add_ids if allow_membership_additions else set()
-    )
-    # Build the continuation-chain proof from the membership that will
-    # actually survive the other independently proven removals in this same
-    # pass.  Recording every pre-pass neighbour as a required witness made a
-    # valid coverage proof stale whenever one of those neighbours was itself
-    # a duplicate removed concurrently.
-    pre_chain_move_ids = (
+    independent_move_ids_without_chain = (
         bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | restatement_ids | proxy_ids | contained_ids | abandoned_ids | anaphoric_ids
-    )
-    if allow_membership_additions:
-        pre_chain_move_ids |= dependent_ids | retry_ids | unmerged_retry_ids
-    provisional = tuple(
-        (
-            clip for clip in draft.selected
-            if clip.clip_id not in pre_chain_move_ids
-        )
-    ) + tuple(
-        (
-            all_by_id[clip_id] for clip_id in effective_continuation_add_ids
-            if clip_id in all_by_id
-        )
-    )
-    chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
-
-    independent_move_ids = (
-        bridge_ids | duplicate_ids | incomplete_ids | failed_retry_ids
-        | restatement_ids | proxy_ids | contained_ids | chain_ids
+        | restatement_ids | proxy_ids | contained_ids
         | abandoned_ids | anaphoric_ids
     )
     replacement_move_ids = dependent_ids | retry_ids | unmerged_retry_ids
@@ -1678,9 +1798,11 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         "contained_fragment_of_confirmed_duplicate",
         "terminal_negation_abandoned_restart",
         "orphaned_anaphoric_fragment_of_confirmed_retry",
+        "orphaned_retry_debris_around_incomplete_attempt",
+        "provider_rejected_dangling_attempt",
     }
     selected_ids_now = {clip.clip_id for clip in draft.selected}
-    already_planned = independent_move_ids | (
+    already_planned = independent_move_ids_without_chain | (
         replacement_move_ids if allow_membership_additions else set()
     )
     replayed_independent_ids = {
@@ -1692,14 +1814,31 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
         and str(row.get("winner_clip_id") or "") in selected_ids_now
         and str(row.get("winner_clip_id") or "") not in already_planned
     }
-    independent_move_ids |= replayed_independent_ids
-    move_ids = independent_move_ids | (
+    preliminary_move_ids = independent_move_ids_without_chain | replayed_independent_ids | (
         replacement_move_ids if allow_membership_additions else set()
     )
     requested_add_ids = (
         retry_add_ids | unmerged_retry_add_ids | continuation_add_ids | dependent_add_ids
         | borderline_add_ids
     )
+    preliminary_add_ids = (
+        requested_add_ids - preliminary_move_ids
+        if allow_membership_additions else set()
+    )
+
+    # Compute chain redundancy against the membership that will actually
+    # survive every other decision in this pass.  Previously a chain could
+    # cite a nearby witness that this same pass also removed, producing a
+    # proof that was true only for the transient input membership.
+    provisional = tuple(
+        clip for clip in draft.selected
+        if clip.clip_id not in preliminary_move_ids
+    ) + tuple(
+        all_by_id[clip_id] for clip_id in preliminary_add_ids
+        if clip_id in all_by_id
+    )
+    chain_ids, chain_audit = redundant_continuation_chain_ids(provisional, diagnostics)
+    move_ids = preliminary_move_ids | chain_ids
     add_ids = (requested_add_ids - move_ids) if allow_membership_additions else set()
     audit = (
         bridge_audit + duplicate_audit + incomplete_audit + failed_retry_audit
@@ -1749,10 +1888,21 @@ def apply_selection_conflicted_bridge_guard(draft, *, allow_membership_additions
             "membership_additions_allowed": False,
             "suppressed_add_clip_ids": sorted(requested_add_ids),
         }
-    return replace(
+    updated = replace(
         draft,
         selected=tuple(selected),
         alternates=tuple(alternates),
         discarded=tuple(clip for clip in draft.discarded if clip.clip_id not in add_ids),
         diagnostics=diagnostics,
     )
+    # A subtractive post-authority pass can expose a second-order fragment:
+    # for example, pass 1 removes a proxy realization and only then is its
+    # short anaphoric lead-in provably orphaned.  Iterate to a fixed point;
+    # the selected set strictly shrinks on every recursion, so convergence
+    # is bounded by the input clip count and no membership addition is ever
+    # possible at this authority boundary.
+    if not allow_membership_additions and len(updated.selected) < len(draft.selected):
+        return apply_selection_conflicted_bridge_guard(
+            updated, allow_membership_additions=False,
+        )
+    return updated

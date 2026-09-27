@@ -80739,3 +80739,34 @@ Offline regression: 81 relevant guard/Ledger/resolver tests passed, including
 new repeated-pass and stale-reciprocal controls. Run #104 was not rendered and
 did not reach Human Gold or Yaskira05; another authorized live qualification is
 required.
+
+## 2026-09-27 — Final membership closes provider-variant attempt fragments
+
+Run #110 exposed four segmentation variants that existing evidence already
+described but final membership did not consume: a short anaphoric piece and a
+lower-case suffix adjacent to an incomplete retry body; a literal
+terminal-negation correction separated from its full retry by a creator reset;
+an explicitly incomplete, provider-rejected delivery ending on a dangling
+function word; and the safe completion sibling of a borderline parent whose
+prefix alone survived authority.
+
+The final-membership guard now applies those proofs symmetrically and
+idempotently. Debris removal requires an explicitly incomplete nearby proxy, a
+substantially fuller later selected delivery, strong audience/positive support,
+lexical retry overlap and protected-marker preservation. The correction-pause
+window expands from 8 s to 12 s only under the existing literal-negation,
+same-opening, 2x-duration and mixed-to-audience AV gates. Long incomplete
+fragments are removable only when reconstruction says incomplete, their final
+token is syntactically dangling, and Hybrid is negative without a positive
+counter-vote. Borderline sibling restoration remains confined to a declared
+parent split, full lexical/critical coverage, sub-second adjacency, audience
+support and no delete/deterministic-unusable evidence. These are language- and
+video-independent rules; no benchmark phrase, timestamp or clip identity enters
+production selection.
+
+Qualification workflow concurrency is branch-scoped with cancellation of stale
+runs. Per-commit concurrent GPU jobs had produced a source/result identity
+mismatch even after benchmark IDs became SHA-scoped, so serialized latest-head
+execution is part of deterministic source identity rather than an editing
+behavior change. Offline targeted regression: 83 passed; live Video00, Human
+Gold and Yaskira05 validation remains pending.

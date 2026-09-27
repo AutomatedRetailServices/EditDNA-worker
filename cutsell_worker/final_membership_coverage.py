@@ -28,6 +28,8 @@ _EXPLICIT_WINNER_REASONS = frozenset({
     "contained_fragment_of_confirmed_duplicate",
     "terminal_negation_abandoned_restart",
     "orphaned_anaphoric_fragment_of_confirmed_retry",
+    "orphaned_retry_debris_around_incomplete_attempt",
+    "provider_rejected_dangling_attempt",
 })
 
 

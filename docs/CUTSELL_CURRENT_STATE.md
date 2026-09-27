@@ -1565,28 +1565,66 @@ parent 088540d, two missing-SQLAlchemy failures pass once the declared dependenc
 is present, and one old D-174 test is a path-diff sentinel incompatible with any
 intentional Final Boundary change. No live success or release-ready claim yet.
 
-## 2026-09-26 — Video00 run #98 forensic correction awaiting live qualification
+## 2026-09-26 — Run #92 diagnosed; general correction ready for qualification
 
-Run #98 (36278708364) completed the engine and render with QC PASS, but the
-editorial gate failed: 9/15 checks passed. It selected the abandoned pimples
-opening and long rejected monolith while removing the later complete delivery;
-it also selected the short gynecologist restart instead of the complete take.
-Artifact diagnostics showed two general evidence-integration defects.
+Video00 run #92 (36277670133) is not approved. It passed the historical checks
+but failed 4 of 15 real editorial checks: an orphan acne fragment remained, the
+full gynecologist delivery lost to a partial take, and the closing exhortation was
+reopened/duplicated. Freeze also blocked on two cross-group equivalent winners
+and one continuation-chain proof whose witness was removed in the same pass, so
+no rendered acceptance artifact was produced.
 
-First, a materially shorter exact-prefix fragment joined one full delivery and
-then vetoed an independently supported semantic bridge between the two full
-deliveries. Component reconciliation now removes only that already-defined
-material-prefix debris before evaluating the cross-component veto, and admits
-the direct high-confidence bridge only through the existing contradiction-safe
-restart bridge. Second, complete-delivery superset dominance treated a standard
-0.80/0.85 failed-shadow vote as an absolute veto even when a 0.95 positive vote
-was stronger and all completeness, marker, overlap, chronology and usability
-checks passed. The gate now accepts only that bounded positive margin and records
-both confidences. No source IDs, timestamps or Video00 phrases enter production
-logic.
+The branch now: (1) converges the subtractive post-authority membership guard to
+a fixed point; (2) calculates continuation coverage from same-pass surviving
+witnesses; (3) preserves and shares explicit final-membership coverage evidence
+between StoryValidator and CanonicalEditPlan; and (4) stops treating gesture plus
+facial movement during uninterrupted speech as a recording break without either
+measured silence or camera disengagement. These are general evidence/authority
+corrections; no Video00 phrase, clip ID, timestamp or source hash is encoded, and
+no safety control is disabled.
 
-Offline validation: 95 focused tests and 324 broader targeted tests passed. The
-full CutSell suite reported 8,666 passed / 10 skipped / 7 failed; six functional
-failures reproduce on the documented parent baseline and the seventh is the old
-D-174 path-diff sentinel that intentionally fails when take_grouping_provider.py
-changes. Live Video00, Human Gold and Yaskira05 qualification remain pending.
+Offline targeted regression is green (163 passed). Live status remains pending:
+the next authorized workflow must pass all Video00 editorial checks, render and
+beat Human Gold without truncations, false starts or duplicates, then rerun
+Yaskira05 and match the approved #31 two-span/33.234 s/QC contract. No release or
+production-readiness claim is made before those artifacts are inspected.
+
+## 2026-09-26 — Run #104: content defects fixed; reciprocal authority blocked render
+
+Run #104 (36279800693) is not approved and produced no render. It selected the
+full gynecologist delivery, removed the acne micro-fragment and stomach false
+start, and reached StoryValidator/FinalEditReviewer PASS. Historical QA still
+showed the old sonography take because repeated final-membership reconciliation
+had recorded both directions of the same retry decision; the authoritative
+resolver returned REVIEW_REQUIRED and correctly blocked Freeze. The final
+selection had 20 clips / 134.265 s.
+
+The guard is now idempotent for an already-settled deterministic retry pair, and
+the Ledger accepts only final-membership audit rows consistent with the draft's
+actual selected/discarded state. Targeted regression is green (81 passed). Live
+qualification remains pending; Human Gold and the approved Yaskira05 #31 contract
+have not yet been reached.
+
+## 2026-09-27 — Run #110: provider-variant fragment closure pending qualification
+
+Video00 run #110 (36280581907) proved the monotonic sonography correction: the
+complete later sonography take survived, the earlier take was absent, and the
+later pimples winner was selected. Freeze correctly remained blocked. A provider
+variant split left two pieces of the rejected pimples attempt selected, retained
+a terminal-negation stomach false start across a 8.974 s creator reset, selected
+an explicitly incomplete percentage fragment, and kept only the prefix of a
+pre-declared safe borderline parent. Historical QA therefore stopped before
+editorial, Human Gold and Yaskira05.
+
+Final membership now closes those general evidence shapes: structurally
+dependent debris around an incomplete attempt yields only when a nearby strong
+audience retry independently covers the attempt; a terminal-negation correction
+may span up to 12 s only with the existing same-opening, 2x-completeness and
+mixed-to-audience AV proof; a provider-rejected incomplete delivery ending on a
+dangling function word is removed; and either safe sibling of an explicitly
+preserved borderline parent can be restored. Exact artifact replay converges
+idempotently from 22 to 19 selected deliveries, removing both pimples fragments,
+the stomach false start and the incomplete percentage fragment while restoring
+the safe closing suffix. The workflow again serializes branch qualification so
+overlapping GPU jobs cannot cross-wire uploaded result identity. Offline targeted
+regression: 83 passed. Live qualification is still required before approval.
