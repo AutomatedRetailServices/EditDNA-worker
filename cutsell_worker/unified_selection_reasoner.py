@@ -296,7 +296,11 @@ def _preserve_unique_content_when_av_contradicts_failed(
         decision = decisions[clip.clip_id]
         if actions[index] != "discard" or decision.reason_code != "failed_delivery":
             continue
-        if not any(start <= float(clip.start) + .25 and end >= float(clip.end) - .25
+        # ASR word edges and coarse AV observation edges are produced by
+        # different clocks. Allow a sub-second alignment tolerance while
+        # still requiring the AV audience span to cover essentially the
+        # entire candidate.
+        if not any(start <= float(clip.start) + .75 and end >= float(clip.end) - .75
                    for start, end in audience.get(clip.source_asset_id, ())):
             continue
         tokens = _content_tokens(clip.text)
