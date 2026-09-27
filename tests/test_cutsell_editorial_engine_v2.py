@@ -275,3 +275,65 @@ def test_v2_does_not_restore_gap_with_explicitly_discarded_material():
         recover_complete_boundaries=identity, execute_boundaries=identity,
     )
     assert output.draft.selected[0].end == 1.0
+
+
+def test_v2_restores_longer_action_gap_inside_verified_product_demonstration():
+    result = source_result()
+    a = replace(result.draft.selected[0], start=90.0, end=99.5)
+    b = replace(result.draft.alternates[0], start=106.5, end=118.0)
+    result = replace(result, draft=replace(
+        result.draft, selected=(a,), alternates=(b,), discarded=(),
+        diagnostics={"whole_video_context": {
+            "status": {"status": "applied", "available": True},
+            "audiovisual_input_status": "received_and_parsed",
+            "sources": [{
+                "source_asset_id": "source",
+                "audiovisual_evidence": '{"regions":[{"start":80,"end":120,"role":"audience","confidence":0.95,"visual_observation":"Demonstrates scooping powder into water"}]}',
+            }],
+        }},
+    ))
+
+    class KeepDemo:
+        def reason(self, draft):
+            return UnifiedSelectionPlan(decisions=(
+                UnifiedSelectionDecision("a", "select", "composite_piece", .99, 0, "composite_best_take_piece", 0),
+                UnifiedSelectionDecision("b", "select", "continuation", .99, 0, "necessary_continuation", 1),
+            ), provider="test", model="test")
+
+    output = run_editorial_engine_v2(
+        result, selection_reasoner=KeepDemo(),
+        recover_complete_boundaries=identity, execute_boundaries=identity,
+    )
+    assert output.draft.selected[0].end == 106.5
+    row = output.draft.diagnostics["editorial_engine_v2_continuity_restoration"][0]
+    assert row["basis"].endswith("audience_demonstration")
+
+
+def test_v2_does_not_restore_long_non_demo_audience_gap():
+    result = source_result()
+    a = replace(result.draft.selected[0], start=0.0, end=1.0)
+    b = replace(result.draft.alternates[0], start=7.0, end=8.0)
+    result = replace(result, draft=replace(
+        result.draft, selected=(a,), alternates=(b,), discarded=(),
+        diagnostics={"whole_video_context": {
+            "status": {"status": "applied", "available": True},
+            "audiovisual_input_status": "received_and_parsed",
+            "sources": [{
+                "source_asset_id": "source",
+                "audiovisual_evidence": '{"regions":[{"start":0,"end":9,"role":"audience","confidence":0.95,"reason":"Direct speech to camera"}]}',
+            }],
+        }},
+    ))
+
+    class KeepSpeech:
+        def reason(self, draft):
+            return UnifiedSelectionPlan(decisions=(
+                UnifiedSelectionDecision("a", "select", "independent", .99, 0, "independent_story_coverage", 0),
+                UnifiedSelectionDecision("b", "select", "continuation", .99, 0, "necessary_continuation", 1),
+            ), provider="test", model="test")
+
+    output = run_editorial_engine_v2(
+        result, selection_reasoner=KeepSpeech(),
+        recover_complete_boundaries=identity, execute_boundaries=identity,
+    )
+    assert output.draft.selected[0].end == 1.0
