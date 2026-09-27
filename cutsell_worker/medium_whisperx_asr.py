@@ -53,7 +53,11 @@ def _drop_degenerate_duplicate_tail(segments):
     # open and is sent to strict alignment.
     for start in range(1, len(segments)):
         suffix = segments[start:]
-        if len(suffix) == 1 and suffix[0].end - suffix[0].start > 0.05:
+        # A lone exact repeat may occupy more than the decoder's smallest
+        # timestamp quantum while still being physically impossible speech.
+        # Keep the terminal-only and prior-full-delivery requirements below,
+        # but admit one segment up to 140 ms to the same duplicate-tail check.
+        if len(suffix) == 1 and suffix[0].end - suffix[0].start > 0.14 + 1e-9:
             continue
         source = next((
             previous for previous in reversed(segments[:start])
@@ -100,7 +104,7 @@ class AlignmentFingerprint:
 
     def fingerprint(self):
         spec = {"provider": PROVIDER, "decode": self.decode, "language": self.language,
-                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v5-terminal-duplicate-tail-chain",
+                "whisperx": "3.8.6", "policy": "strict-segment-word-coverage-v6-terminal-duplicate-tail-chain",
                 "interpolation": "ignore", "audio": "pcm_s16le-mono-16000"}
         return "asrcfg_" + hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
