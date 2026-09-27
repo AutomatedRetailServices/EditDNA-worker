@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 01-10
+name: CutSell Editorial Engine V2 Yaskira 08 + 10 Recovery
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-yaskira-01-10
+  group: cutsell-editorial-v2-yaskira-08-10-recovery
   cancel-in-progress: false
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
       CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD: "0.10"
       CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION: "0.30"
       CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION: "2.50"
-      CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED: "0"
+      CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED: "1"
       CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD: "0.02"
       CUTSELL_HYBRID_MAX_SEMANTIC_EQUIVALENCE_USD: "0.008"
       CUTSELL_HYBRID_MAX_CLAIM_EQUIVALENCE_USD: "0.003"
@@ -79,11 +79,11 @@ jobs:
             fi
           done
 
-      - name: Execute isolated V2 qualification for Yaskira 01-10
+      - name: Execute isolated V2 qualification for Yaskira 08 and 10
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p editorial-v2-yaskira-01-10/previews editorial-v2-yaskira-01-10/results
+          mkdir -p editorial-v2-yaskira-08-10/previews editorial-v2-yaskira-08-10/results
           python - <<'PY'
           import json
           import re
@@ -91,18 +91,10 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Yaskira/01.mp4",
-              "Yaskira/02.mp4",
-              "Yaskira/03.mp4",
-              "Yaskira/04.MP4",
-              "Yaskira/05.MP4",
-              "Yaskira/06.MP4",
-              "Yaskira/07.mp4",
               "Yaskira/08.mp4",
-              "Yaskira/09.mp4",
               "Yaskira/10.MOV",
           ]
-          root = Path("editorial-v2-yaskira-01-10")
+          root = Path("editorial-v2-yaskira-08-10")
           results = []
           failures = []
           for index, key in enumerate(keys, start=1):
@@ -132,7 +124,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_01_10.v1",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_10_recovery.v1",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
@@ -156,7 +148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-yaskira-01-10-${{ github.run_id }}
-          path: editorial-v2-yaskira-01-10/
+          name: cutsell-editorial-v2-yaskira-08-10-${{ github.run_id }}
+          path: editorial-v2-yaskira-08-10/
           if-no-files-found: warn
           retention-days: 30
