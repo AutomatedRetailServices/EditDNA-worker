@@ -1657,3 +1657,28 @@ matched the approved contract, render QC passed, and approval
 `yaskira05-run31-36245398737` passed with exactly two selected spans, output
 duration `33.234 s`, and zero failures. This confirms that the general Video00
 corrections did not regress the previously approved Yaskira05 run-31 result.
+
+## 2026-09-27 — Final duplicate-take lead-in removed and requalified
+
+Run `36282667547` supersedes the earlier acceptance artifact. A manual semantic
+review of the earlier 20-clip render found that the lead sentence of a later
+closing retake survived even though its percentage continuation was correctly
+removed as a duplicate. Final membership now removes such a nearby lead-in only
+when the following continuation chain is already proven redundant, the earlier
+story covers at least 70% of its substantive vocabulary, every numeric/negation
+marker is preserved, and both source gaps bound one compact retake. This is a
+general, evidence-gated closing-take rule; it contains no source-specific text,
+timecode, clip id or source hash.
+
+The requalification selected 19 Video00 deliveries / 133.188 s and rendered
+133.267 s with live QC PASS and no render findings. Historical and editorial
+acceptance both passed 15/15 with no warnings. Manual transcript review confirms
+that the rejected sonography take, truncated gynecologist fragment, pimples
+monolith/orphan, stomach false start and later closing retake are absent; the
+percentage statement remains complete across its two continuation pieces and
+the final CTA occurs once. Human Gold improved to F1 `0.8686`, coverage `0.8426`,
+precision `0.8963` and 4/21 failed chunks. Yaskira05 again passed the approved
+run-31 contract with the exact two spans and `33.234 s` output. Both MP4 hashes
+match their archived part manifests; ffprobe confirms matched audio/video
+durations, and black/freeze/silence scans found no interval of one second or
+longer. Artifact `10919502781` is the final evidence for this cycle.
