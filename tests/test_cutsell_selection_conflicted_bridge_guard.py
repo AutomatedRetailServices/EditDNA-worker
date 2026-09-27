@@ -1078,6 +1078,57 @@ def test_numeric_chain_with_a_new_number_fails_open():
     assert move == set() and audit == []
 
 
+def test_duplicate_closing_chain_removes_its_covered_nearby_lead_in():
+    diagnosis = _clip("diagnosis", 1.0, 5.0, "The diagnosis was papillary thyroid cancer.")
+    first = _clip(
+        "first", 10.0, 17.0,
+        "I am the only person in my family with this type of cancer.",
+    )
+    first_stat = _clip(
+        "first_stat", 17.2, 21.0,
+        "Science confirms only 7% of cases are hereditary.",
+    )
+    repeated_lead = _clip(
+        "repeated_lead", 27.0, 31.0,
+        "I am the first in my family with papillary thyroid cancer.",
+    )
+    repeat_a = _clip("repeat_a", 31.4, 34.0, "Science confirms only 7% of")
+    repeat_b = _clip("repeat_b", 34.2, 36.0, "cases are hereditary.")
+    diagnostics = {"semantic_idea_equivalence": {"continuation_merges": [{
+        "left_clip_id": "repeat_a", "right_clip_id": "repeat_b",
+        "accepted_by": "sentence_continuation", "confidence": 1.0,
+    }]}}
+
+    move, audit = redundant_continuation_chain_ids(
+        (diagnosis, first, first_stat, repeated_lead, repeat_a, repeat_b), diagnostics,
+    )
+
+    assert move == {"repeated_lead", "repeat_a", "repeat_b"}
+    assert audit[0]["redundant_lead_in_clip_id"] == "repeated_lead"
+    assert audit[0]["redundant_lead_in_coverage"] >= 0.70
+
+
+def test_duplicate_closing_chain_preserves_lead_in_with_new_content():
+    earlier = _clip(
+        "earlier", 10.0, 17.0,
+        "Science confirms only 7% of cases are hereditary.",
+    )
+    new_fact = _clip("new_fact", 22.0, 26.0, "A new treatment starts tomorrow morning.")
+    repeat_a = _clip("repeat_a", 26.2, 29.0, "Science confirms only 7% of")
+    repeat_b = _clip("repeat_b", 29.2, 31.0, "cases are hereditary.")
+    diagnostics = {"semantic_idea_equivalence": {"continuation_merges": [{
+        "left_clip_id": "repeat_a", "right_clip_id": "repeat_b",
+        "accepted_by": "sentence_continuation", "confidence": 1.0,
+    }]}}
+
+    move, audit = redundant_continuation_chain_ids(
+        (earlier, new_fact, repeat_a, repeat_b), diagnostics,
+    )
+
+    assert move == {"repeat_a", "repeat_b"}
+    assert audit[0]["redundant_lead_in_clip_id"] is None
+
+
 def test_terminal_negation_attempt_yields_to_full_audience_retry():
     abandoned = _clip("abandoned", 10.0, 11.6, "Tuve problemas de estómago, no.")
     retry = _clip(

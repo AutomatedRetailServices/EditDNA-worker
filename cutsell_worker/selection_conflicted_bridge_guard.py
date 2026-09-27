@@ -840,7 +840,15 @@ def missing_continuation_bridge_ids(selected, alternates, discarded, diagnostics
 
 
 def redundant_continuation_chain_ids(selected, diagnostics: dict):
-    """Remove a later continuation chain whose critical claim is already covered."""
+    """Remove a later continuation chain whose critical claim is already covered.
+
+    When that chain is the closing half of a nearby retake, also remove its
+    short lead-in only if the whole earlier story already covers at least
+    seventy percent of the lead-in's substantive vocabulary and every
+    numeric/negation marker.  This keeps a provider split from leaving the
+    first sentence of a duplicate take behind while preserving a lead-in
+    that contributes genuinely new facts.
+    """
     selected_by_id = {clip.clip_id: clip for clip in selected}
     ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
     index_by_id = {clip.clip_id: index for index, clip in enumerate(ordered)}
@@ -875,12 +883,44 @@ def redundant_continuation_chain_ids(selected, diagnostics: dict):
         if coverage < 0.80:
             continue
         move.update(ids)
+        lead_in_id = None
+        lead_in_coverage = None
+        lead_index = first_index - 1
+        if lead_index >= 1:
+            lead = ordered[lead_index]
+            pre_lead = [
+                clip for clip in ordered[:lead_index]
+                if clip.source_asset_id == lead.source_asset_id
+            ]
+            lead_content = _substantive(lead.text)
+            pre_lead_text = " ".join(clip.text for clip in pre_lead)
+            pre_lead_content = _substantive(pre_lead_text)
+            chain_start = min(float(clip.start) for clip in chain_clips)
+            prior_gap = float(lead.start) - float(pre_lead[-1].end) if pre_lead else float("inf")
+            chain_gap = chain_start - float(lead.end)
+            if lead_content:
+                lead_in_coverage = len(lead_content & pre_lead_content) / len(lead_content)
+            if (
+                pre_lead
+                and 5 <= len(lead_content) <= 24
+                and 0.0 <= prior_gap <= 12.0
+                and 0.0 <= chain_gap <= 1.5
+                and lead_in_coverage is not None
+                and lead_in_coverage >= 0.70
+                and _critical(lead.text).issubset(_critical(pre_lead_text))
+            ):
+                move.add(lead.clip_id)
+                lead_in_id = lead.clip_id
         audit.append({
             "clip_ids": ids,
             "reason": "later_continuation_chain_repeats_nearby_critical_claim",
             "prior_clip_ids": [clip.clip_id for clip in prior],
             "substantive_coverage": round(coverage, 4),
             "critical_markers": sorted(_critical(later_text)),
+            "redundant_lead_in_clip_id": lead_in_id,
+            "redundant_lead_in_coverage": (
+                round(lead_in_coverage, 4) if lead_in_coverage is not None else None
+            ),
         })
     return move, audit
 
