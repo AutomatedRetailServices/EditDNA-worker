@@ -3,6 +3,7 @@ from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, Job
 from cutsell_worker.final_boundary_authority import (
     _clip_from_envelope,
     _trim_spaced_duplicate_from_left,
+    _trim_short_post_cta_aside,
     _trim_trailing_aborted_restarts,
     enforce_complete_idea_boundaries,
 )
@@ -29,6 +30,16 @@ def test_spaced_exact_retry_phrase_is_kept_on_later_continuing_take():
     assert output[0].text == "energy daily"
     assert output[1] == right
     assert rows[0]["action"] == "trim_spaced_retry_duplicate_from_left"
+
+
+def test_short_non_cta_aside_after_long_post_cta_pause_is_trimmed():
+    head = _words(("find", "it", "in", "the", "cart"), start=0, step=.35)
+    tail = _words(("that", "is", "done"), start=4, step=.35)
+    words = head + tail
+    clip = DraftClip("a", "src", 0, 0, 5, "find it in the cart that is done", "", words=words)
+    output, rows = _trim_short_post_cta_aside([clip], {"src": words})
+    assert output[0].text == "find it in the cart"
+    assert rows[0]["action"] == "trim_short_post_cta_aside"
 
 
 def test_complete_idea_envelope_refreshes_text_even_when_timestamps_match():
