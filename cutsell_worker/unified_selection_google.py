@@ -458,16 +458,20 @@ class GoogleUnifiedSelectionReasoner:
         # the plan ambiguous and previously failed only after the transport's
         # retry seam. Reject it here so the ordinary bounded provider retry
         # gets one chance to return a complete, unambiguous ordering.
+        normalized_sequence: dict[int, int] = {}
         if payload.get("engine_version") == "v2":
             sequence = [item.get("sequence_index") for item in raw_decisions]
             if any(index is None or int(index) < 0 for index in sequence):
                 raise UnifiedSelectionUnreliableResponseError(
                     "unified Selection V2 sequence_index missing or negative"
                 )
-            if len({int(index) for index in sequence}) != len(sequence):
-                raise UnifiedSelectionUnreliableResponseError(
-                    "unified Selection V2 sequence_index values must be unique"
-                )
+            # Structured output constrains each value but cannot express
+            # array-wide uniqueness. Gemini can repeatedly return ties even
+            # after a paid retry. Resolve a tie without inventing editorial
+            # order: stable-rank by the model's requested sequence first and
+            # candidate/source order second.
+            ranked = sorted(range(len(sequence)), key=lambda i: (int(sequence[i]), i))
+            normalized_sequence = {candidate_index: rank for rank, candidate_index in enumerate(ranked)}
 
         decisions = []
         for candidate, item in zip(candidate_rows, raw_decisions):
@@ -479,7 +483,7 @@ class GoogleUnifiedSelectionReasoner:
                 family_index=int(item.get("family_index", -1)),
                 reason_code=str(item.get("reason_code") or ""),
                 sequence_index=(
-                    int(item.get("sequence_index"))
+                    normalized_sequence.get(len(decisions), int(item.get("sequence_index")))
                     if item.get("sequence_index") is not None else None
                 ),
             ))
