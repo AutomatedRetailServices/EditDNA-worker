@@ -473,6 +473,100 @@ def _trim_exact_seam_duplicates(
     return output, rows
 
 
+def _trim_spaced_duplicate_from_left(
+    selected: list[DraftClip],
+    source_map: dict[str, tuple[Word, ...]],
+) -> tuple[list[DraftClip], list[dict]]:
+    """Prefer the later, continuing delivery across a clearly spaced retry seam."""
+    output = list(selected)
+    rows: list[dict] = []
+    for index in range(1, len(output)):
+        left, right = output[index - 1], output[index]
+        gap = float(right.start) - float(left.end)
+        if left.source_asset_id != right.source_asset_id or gap < .75:
+            continue
+        left_tokenized = _tokenized_words(tuple(left.words))
+        right_tokenized = _tokenized_words(tuple(right.words))
+        left_tokens = [token for token, _ in left_tokenized]
+        right_tokens = [token for token, _ in right_tokenized]
+        width = None
+        for candidate_width in range(
+            min(_SEAM_DUPLICATE_MAX_TOKENS, len(left_tokens), len(right_tokens) - 2),
+            _SEAM_DUPLICATE_MIN_TOKENS - 1,
+            -1,
+        ):
+            if left_tokens[-candidate_width:] != right_tokens[:candidate_width]:
+                continue
+            if not any(token not in _REOPEN_CONNECTIVE_TOKENS for token in right_tokens[:candidate_width]):
+                continue
+            width = candidate_width
+            break
+        if width is None:
+            continue
+        left_words = left_tokenized
+        keep = left_words[:-width]
+        if len(keep) < 2:
+            continue
+        new_end = float(keep[-1][1].end)
+        source_words = source_map.get(left.source_asset_id) or tuple(left.words)
+        rebuilt = _rebuild_clip(left, source_words, float(left.start), new_end)
+        output[index - 1] = rebuilt
+        rows.append({
+            "action": "trim_spaced_retry_duplicate_from_left",
+            "left_clip_id": left.clip_id,
+            "right_clip_id": right.clip_id,
+            "repeated_tokens": [token for token, _ in left_words[-width:]],
+            "original_end": round(float(left.end), 3),
+            "result_end": round(float(rebuilt.end), 3),
+            "removed_sec": round(float(left.end) - float(rebuilt.end), 3),
+        })
+    return output, rows
+
+
+def _trim_trailing_aborted_restarts(
+    selected: list[DraftClip],
+    source_map: dict[str, tuple[Word, ...]],
+) -> tuple[list[DraftClip], list[dict]]:
+    """Remove a final repeated phrase that stops midway through its last word."""
+    output = list(selected)
+    rows: list[dict] = []
+    for index, clip in enumerate(output):
+        words = _tokenized_words(tuple(clip.words))
+        if len(words) < 6:
+            continue
+        tokens = [token for token, _ in words]
+        matched = None
+        for width in (3, 2):
+            tail = tokens[-width:]
+            if len(tail[-1]) < 3 or any(ch.isdigit() for token in tail for ch in token):
+                continue
+            for earlier in range(0, len(tokens) - width * 2 + 1):
+                prior = tokens[earlier:earlier + width]
+                if prior[:-1] == tail[:-1] and prior[-1] != tail[-1] and prior[-1].startswith(tail[-1]):
+                    matched = (width, len(words) - width)
+            if matched:
+                break
+        if matched is None:
+            continue
+        width, tail_start = matched
+        first_tail_word = words[tail_start][1]
+        if float(clip.end) - float(first_tail_word.start) > 3.0:
+            continue
+        new_end = float(words[tail_start - 1][1].end)
+        source_words = source_map.get(clip.source_asset_id) or tuple(clip.words)
+        rebuilt = _rebuild_clip(clip, source_words, float(clip.start), new_end)
+        output[index] = rebuilt
+        rows.append({
+            "action": "trim_trailing_aborted_restart",
+            "clip_id": clip.clip_id,
+            "repeated_prefix_tokens": [token for token, _ in words[-width:]],
+            "original_end": round(float(clip.end), 3),
+            "result_end": round(float(rebuilt.end), 3),
+            "removed_sec": round(float(clip.end) - float(rebuilt.end), 3),
+        })
+    return output, rows
+
+
 def _text_prefix_has_phrase_break(text: str, removed_token_count: int) -> bool:
     """Return whether transcript punctuation separates a removed prefix.
 
@@ -689,6 +783,12 @@ def enforce_complete_idea_boundaries(
     selected, overlap_rows = _reconcile_same_source_overlaps(originals, selected, source_map)
     diagnostics.extend(overlap_rows)
 
+    selected, aborted_rows = _trim_trailing_aborted_restarts(selected, source_map)
+    diagnostics.extend(aborted_rows)
+
+    selected, spaced_duplicate_rows = _trim_spaced_duplicate_from_left(selected, source_map)
+    diagnostics.extend(spaced_duplicate_rows)
+
     # Exact duplicates at an adjacent seam are stronger evidence than the
     # punctuation-dependent re-opened-closing rule.  Apply them first.
     selected, seam_rows = _trim_exact_seam_duplicates(selected, source_map)
@@ -713,5 +813,7 @@ def enforce_complete_idea_boundaries(
     diag["final_boundary_reopened_closing_trim_count"] = len(reopen_trims)
     diag["final_boundary_reopened_closing_refusal_count"] = len(reopen_rows) - len(reopen_trims)
     diag["final_boundary_exact_seam_duplicate_trim_count"] = len(seam_rows)
+    diag["final_boundary_trailing_aborted_restart_trim_count"] = len(aborted_rows)
+    diag["final_boundary_spaced_retry_duplicate_trim_count"] = len(spaced_duplicate_rows)
     draft = replace(result.draft, selected=tuple(selected), diagnostics=diag)
     return replace(result, draft=draft)
