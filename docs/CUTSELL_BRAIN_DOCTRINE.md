@@ -173,6 +173,28 @@ available.
 A benchmark passes quality only when the output itself is postable; structural execution
 success is necessary but not sufficient.
 
+## Experimental Editorial Engine V2 authority path
+
+`CUTSELL_EDITORIAL_ENGINE_V2=1` activates a separate A/B-only path with this
+fixed order:
+
+1. perceive the complete source;
+2. understand story, behavior and attempts with verified audio+video input;
+3. reconstruct attempts and candidate families;
+4. decide Clean Cut and Best Take from the complete candidate universe;
+5. compose the story;
+6. resolve exactly one final `KEEP`/`DISCARD` plan;
+7. freeze semantic membership;
+8. execute physical Boundary work without changing the spoken stream or
+   discarded membership;
+9. review the rendered video and, when blocked, reopen only the responsible
+   family through a controlled new resolution.
+
+V2 is fail-closed. It must not fall back silently to the stable rule chain when
+verified native Watch + Listen evidence or the complete whole-video plan is
+unavailable. The renderer and post-render validators never gain semantic
+selection authority. The stable V1 path remains unchanged when the flag is off.
+
 
 ## Automatic execution integration — experimental 2026-09-25
 

@@ -1,5 +1,23 @@
 # CutSell.ai — Current State
 
+## 2026-09-27 — Editorial Engine V2 experimental authority rebuilt
+
+Branch `feat/editorial-engine-v2-whole-video-rebuild` adds an OFF-by-default,
+fail-closed V2 path controlled by `CUTSELL_EDITORIAL_ENGINE_V2=1`. V2 requires
+verified native Gemini audio+video Watch + Listen input and a complete
+whole-video selection plan. It resolves the full candidate universe once,
+folds every non-winner into DISCARD, freezes semantic membership, permits only
+Boundary work afterward, and rejects any changed spoken stream, recreated SWAP
+bucket or changed DISCARD membership. The stable V1 path is unchanged when the
+flag is off.
+
+This checkpoint is code/offline evidence only. Post-render localized repair is
+specified but not yet implemented as an automatic loop. The authorized ten-video
+A/B has not run, no paid call has been made, no production flag has changed, and
+no release/quality claim is made before rendered outputs receive technical and
+human Watch + Listen review. Canonical experiment details live in
+`docs/CUTSELL_EDITORIAL_ENGINE_V2_EXPERIMENT.md`.
+
 ## 2026-09-25 AssemblyAI ASR-only probe completed
 
 `benchmarks/run_assemblyai_asr_probe.py` is a manual, opt-in comparison probe

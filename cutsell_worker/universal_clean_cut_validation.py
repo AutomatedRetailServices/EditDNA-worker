@@ -407,6 +407,7 @@ def run_single_universal_clean_cut_validation(
             # available.
             claim_equivalence_arbiter=brain.claim_equivalence_arbiter,
             clean_cut_core_v1_enabled=brain.clean_cut_core_v1_enabled,
+            editorial_engine_v2=brain.editorial_engine_v2_enabled,
             transcript_observer=_capture_timed_asr,
         )
 

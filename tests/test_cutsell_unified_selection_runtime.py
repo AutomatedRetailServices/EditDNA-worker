@@ -108,6 +108,35 @@ def test_clean_cut_core_v1_rollback_env_flag_disables_it():
     assert brain.clean_cut_core_v1_enabled is False
 
 
+def test_editorial_engine_v2_builds_required_reasoner_and_av_provider():
+    env = {
+        **base_env(),
+        "CUTSELL_EDITORIAL_ENGINE_V2": "1",
+        "CUTSELL_WATCH_LISTEN_AV_ENABLED": "1",
+        "CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD": "0.05",
+        "CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION": "1.0",
+        "CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION": "1.0",
+    }
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.editorial_engine_v2_enabled is True
+    assert brain.selection_reasoner is not None
+    assert brain.whole_video_provider.__class__.__name__ == "GeminiWholeVideoAVProvider"
+
+
+@pytest.mark.parametrize("missing", ["CUTSELL_HYBRID_LLM_ENABLED", "CUTSELL_WATCH_LISTEN_AV_ENABLED"])
+def test_editorial_engine_v2_refuses_missing_paid_or_av_dependency(missing):
+    env = {
+        **base_env(),
+        "CUTSELL_EDITORIAL_ENGINE_V2": "1",
+        "CUTSELL_WATCH_LISTEN_AV_ENABLED": "1",
+    }
+    env[missing] = "0"
+
+    with pytest.raises(RuntimeError):
+        build_brain_runtime(load_runtime_config(env), env)
+
+
 def test_semantic_equivalence_arbiter_builds_when_hybrid_enabled_without_unified_selection():
     # Phase 2: take grouping runs upstream of the Unified Selection/legacy
     # branch, so the arbiter must be available even when

@@ -84,6 +84,9 @@ class BrainRuntime:
     # (whole-video Unified Selection reasoner when explicitly requested, else
     # the legacy Hybrid-vote-informed path) for comparison/regression testing.
     clean_cut_core_v1_enabled: bool = True
+    # Experimental whole-video authority.  This is threaded explicitly to
+    # the orchestrator; it never silently replaces the stable V1 path.
+    editorial_engine_v2_enabled: bool = False
 
     @property
     def external_calls_enabled(self) -> bool:
@@ -206,21 +209,26 @@ def build_brain_runtime(
     values: Mapping[str, str] = env if env is not None else os.environ
     requested_hybrid = _env_true(values.get("CUTSELL_HYBRID_LLM_ENABLED"))
     requested_unified = _env_true(values.get("CUTSELL_UNIFIED_SELECTION_REASONER"))
+    requested_editorial_v2 = _env_true(values.get("CUTSELL_EDITORIAL_ENGINE_V2"))
     requested_provider = str(values.get("CUTSELL_HYBRID_PROVIDER") or "google").strip().lower()
     if requested_hybrid and requested_provider != "google":
         raise RuntimeError(
             "CUTSELL_HYBRID_LLM_ENABLED=1 requires CUTSELL_HYBRID_PROVIDER=google; "
             f"got {requested_provider!r}. Refusing silent local fallback"
         )
-    if requested_unified and not requested_hybrid:
+    if (requested_unified or requested_editorial_v2) and not requested_hybrid:
         raise RuntimeError(
-            "CUTSELL_UNIFIED_SELECTION_REASONER=1 requires CUTSELL_HYBRID_LLM_ENABLED=1"
+            "Whole-video selection requires CUTSELL_HYBRID_LLM_ENABLED=1"
+        )
+    if requested_editorial_v2 and not _env_true(values.get("CUTSELL_WATCH_LISTEN_AV_ENABLED")):
+        raise RuntimeError(
+            "CUTSELL_EDITORIAL_ENGINE_V2=1 requires CUTSELL_WATCH_LISTEN_AV_ENABLED=1"
         )
 
     hybrid_settings = load_hybrid_provider_settings(dict(values))
     selection_reasoner = (
         _build_unified_selection_reasoner(hybrid_settings, values)
-        if requested_unified
+        if requested_unified or requested_editorial_v2
         else None
     )
     clean_cut_core_v1_enabled = _env_true_default_true(values.get("CUTSELL_CLEAN_CUT_CORE_V1"))
@@ -291,4 +299,5 @@ def build_brain_runtime(
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
         claim_equivalence_arbiter=claim_equivalence_arbiter,
         clean_cut_core_v1_enabled=clean_cut_core_v1_enabled,
+        editorial_engine_v2_enabled=requested_editorial_v2,
     )
