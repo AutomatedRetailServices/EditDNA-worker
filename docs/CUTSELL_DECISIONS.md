@@ -80770,3 +80770,24 @@ mismatch even after benchmark IDs became SHA-scoped, so serialized latest-head
 execution is part of deterministic source identity rather than an editing
 behavior change. Offline targeted regression: 83 passed; live Video00, Human
 Gold and Yaskira05 validation remains pending.
+
+## 2026-09-27 — Common-engine qualification accepted on run #126
+
+Run #126 (36281747767, head 33c80a3 / engine e721e7d) is the acceptance
+evidence for this cycle. Video00 passed the historical regression 14/14 and the
+independent editorial acceptance 15/15, rendered 140.134 s with live QC PASS,
+kept speech lock and cleared StoryValidator plus FinalEditReviewer. The selected
+semantic stream contains the complete later sonography delivery, complete
+gynecologist delivery, later pimples delivery, complete gastritis delivery and
+one coherent closing; the rejected false starts, truncated fragments, orphan
+tail, percentage restatement and repeated closing are absent.
+
+Human Gold remains QA-only. Its measured comparison was F1 0.8456, Gold coverage
+0.8408, engine precision 0.8505 and 4/21 failed chunks, all strictly better than
+the qualification thresholds. The same immutable workflow reran Yaskira05 and
+passed approval `yaskira05-run31-36245398737` with exactly two selected spans,
+33.234 s output and live QC PASS. The engine fixes remain evidence-driven and
+general; no source-specific production rule or safety-gate bypass was introduced.
+The rendered artifacts were inspected for container duration and representative
+visual continuity. This decision closes the common-engine benchmark cycle only;
+normal deployment/release gates remain unchanged.
