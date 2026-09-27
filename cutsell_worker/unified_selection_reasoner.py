@@ -242,9 +242,11 @@ def _preserve_retry_alternates_with_unique_information(
             selected_tokens.update(_content_tokens(clip.text))
     for index, clip in enumerate(clips):
         decision = decisions[clip.clip_id]
-        if actions[index] != "swap":
+        if actions[index] not in {"swap", "discard"}:
             continue
-        if decision.relation != "retry_alternate" or decision.reason_code != "usable_alternate":
+        if decision.relation != "retry_alternate" or decision.reason_code not in {
+            "usable_alternate", "redundant_retry",
+        }:
             continue
         tokens = _content_tokens(clip.text)
         unique = tokens - selected_tokens
