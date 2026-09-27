@@ -1,5 +1,23 @@
 # Yaskira 09 v13 correction — offline evidence, not approval
 
+## Live v14 follow-up
+
+Run 36343804777 (commit 7e6fb8b) passed workflow tests and runtime credential
+loading, but failed before rendering: Boundary changed frozen Selection
+semantic content, expected=311549ccb522 actual=f7814c5f5d46. No video was
+produced; the three editorial corrections are NOT live-qualified.
+
+The failure artifact only contained error hashes, not replayable clips.
+The v15 diagnostic change preserves frozen and final clip/word snapshots and
+an allowlist of physical-operation diagnostics in a separate failure JSON.
+It does not weaken Freeze, refreeze altered content or change editing behavior.
+The recorded demo with real post-Freeze callbacks and individual recorded
+clips did not reproduce the failure. Actual v14 cause remains unproven.
+Independent inspection identifies word/text mismatch during splitting,
+crossing word intervals and ordering of overlapping parents as hypotheses.
+The diagnostic patch passes 39 targeted engine/replay/tail tests locally;
+independent QA found no blocker and separately passed 12 engine tests.
+
 Branch: feat/editorial-engine-v2-whole-video-rebuild. Reference run:
 36340955692. Production and main are unchanged.
 

@@ -119,13 +119,20 @@ def test_v2_fails_closed_when_post_freeze_stage_resurrects_discard():
             discarded=result.draft.discarded[1:],
         ))
 
-    with pytest.raises(RuntimeError, match="Boundary changed frozen Selection semantic content"):
+    with pytest.raises(RuntimeError, match="Boundary changed frozen Selection semantic content") as caught:
         run_editorial_engine_v2(
             source_result(),
             selection_reasoner=Plan(),
             recover_complete_boundaries=identity,
             execute_boundaries=resurrect,
         )
+    import json
+    evidence = caught.value.boundary_failure_evidence
+    assert [c["clip_id"] for c in evidence["before"]] == ["b"]
+    assert [c["clip_id"] for c in evidence["after"]] == ["b", "a"]
+    assert evidence["diagnostics"]["selection_boundary_contract"]["status"] == "frozen"
+    assert "whole_video_context" not in evidence["diagnostics"]
+    json.dumps(evidence)
 
 
 def test_v2_fails_closed_on_reasoner_failure():

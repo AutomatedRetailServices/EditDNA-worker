@@ -1,5 +1,15 @@
 # CutSell.ai — Current State
 
+## 2026-09-27 — v14 blocked by frozen semantic contract
+
+Run 36343804777, commit 7e6fb8b: workflow tests and credentials passed;
+processing failed before rendering because Boundary changed frozen content
+(311549ccb522 -> f7814c5f5d46). No corrected video or editorial approval.
+Next diagnostic v15 preserves replayable frozen/final clip snapshots and
+allowlisted Boundary audits without changing editing behavior or bypassing
+the contract. See CUTSELL_V13_CORRECTION.md for evidence and limitations.
+Main, production and the legacy engine remain untouched.
+
 ## 2026-09-27 — Yaskira 09 v13 evidence-driven correction (experimental)
 
 Run 36340955692 completed technically but is NOT editorially approved. Its
@@ -18,7 +28,6 @@ preservation only, not that Gemini will classify the live tail correctly.
 The decision log on this branch is unreadable non-UTF-8 both locally and via
 GitHub; it was not overwritten. The companion correction document records this
 cycle pending recovery of that pre-existing documentation defect.
-
 
 ## 2026-09-27 — Editorial Engine V2 experimental authority rebuilt
 

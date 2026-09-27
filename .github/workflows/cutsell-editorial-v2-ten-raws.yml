@@ -126,6 +126,11 @@ jobs:
                       json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
                   )
               except Exception as exc:
+                  evidence = getattr(exc, "boundary_failure_evidence", None)
+                  if evidence is not None:
+                      (root / "results" / f"{index:02d}-boundary-failure.json").write_text(
+                          json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+                      )
                   failures.append({
                       "index": index,
                       "source_key": key,
@@ -134,7 +139,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_09_recovery.v14",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_09_recovery.v15",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

@@ -8,7 +8,7 @@ legacy rule chain would make an A/B run impossible to interpret.
 """
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 import hashlib
 import json
 import os
@@ -266,13 +266,37 @@ def run_editorial_engine_v2(
     ordered_semantic_signature = _ordered_semantic_signature(result.draft)
 
     result = replace(result, draft=freeze_selection_contract(result.draft))
+    frozen_selected = tuple(result.draft.selected)
     result = execute_boundaries(result)
     # Boundary polish may rebuild a clip from its spoken-word envelope and
     # unintentionally erase an already-approved action-only demonstration
     # bridge. Reassert the same evidence-gated physical continuity after the
     # last Boundary mutation; semantic membership and text remain frozen.
     result = _restore_safe_audience_continuity(result, whole)
-    result = replace(result, draft=enforce_selection_contract(result.draft))
+    try:
+        result = replace(result, draft=enforce_selection_contract(result.draft))
+    except RuntimeError as exc:
+        # Preserve replayable source words and physical-operation audits. Do
+        # not weaken Freeze, restore text over changed media, or auto-approve.
+        diagnostic_keys = (
+            "final_boundary_authority",
+            "post_selection_edge_only_boundary", "post_selection_interior_gap_trim",
+            "post_selection_interior_gap_trace", "boundary_engine_pass",
+            "human_boundary_polish", "editorial_engine_v2_continuity_restoration",
+            "selection_boundary_contract", "v2_recording_tail",
+        )
+        exc.boundary_failure_evidence = {
+            "schema_version": "cutsell.v2.boundary_failure.v1",
+            "before": [asdict(clip) for clip in frozen_selected],
+            "after": [asdict(clip) for clip in result.draft.selected],
+            "diagnostics": {key: result.draft.diagnostics[key] for key in diagnostic_keys
+                            if key in result.draft.diagnostics},
+        }
+        exc.boundary_failure_evidence["diagnostics"]["attempt_reconstruction"] = {
+            "positioned_performance_evidence": (result.draft.diagnostics.get("attempt_reconstruction") or {}).get(
+                "positioned_performance_evidence", []),
+        }
+        raise
 
     if tuple(result.draft.alternates):
         raise RuntimeError("Editorial Engine V2 post-freeze stage recreated alternates")
