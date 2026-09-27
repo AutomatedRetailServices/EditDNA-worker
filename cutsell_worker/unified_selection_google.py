@@ -453,6 +453,22 @@ class GoogleUnifiedSelectionReasoner:
                 f"0..{len(candidate_rows) - 1}, mismatches={mismatches[:5]}, finishReason={finish_reason!r})"
             )
 
+        # V2 uses sequence_index as the global story-order authority. A
+        # schema-valid response can still repeat an integer, which would make
+        # the plan ambiguous and previously failed only after the transport's
+        # retry seam. Reject it here so the ordinary bounded provider retry
+        # gets one chance to return a complete, unambiguous ordering.
+        if payload.get("engine_version") == "v2":
+            sequence = [item.get("sequence_index") for item in raw_decisions]
+            if any(index is None or int(index) < 0 for index in sequence):
+                raise UnifiedSelectionUnreliableResponseError(
+                    "unified Selection V2 sequence_index missing or negative"
+                )
+            if len({int(index) for index in sequence}) != len(sequence):
+                raise UnifiedSelectionUnreliableResponseError(
+                    "unified Selection V2 sequence_index values must be unique"
+                )
+
         decisions = []
         for candidate, item in zip(candidate_rows, raw_decisions):
             decisions.append(UnifiedSelectionDecision(
