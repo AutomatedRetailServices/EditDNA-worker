@@ -27,7 +27,10 @@ from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult, TranscriptSegment
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
 from .watch_listen_besttake_guard_authority import apply_watch_listen_besttake_guard_authority
-from .final_boundary_authority import enforce_complete_idea_boundaries
+from .final_boundary_authority import (
+    enforce_complete_idea_boundaries,
+    trim_reopened_closings_before_validation,
+)
 from .final_story_coherence_validation import (
     apply_final_story_coherence_validation,
     apply_post_authority_story_validation,
@@ -432,6 +435,13 @@ def process_universal_clean_cut_sources(
             selection_stage = "legacy_explicit_final_selection_authority_executed"
             semantic_status = "not_requested_clean_cut_only"
             reasoner_status_label = "disabled"
+
+        # A re-opened closing is a deterministic duplicate-prefix boundary
+        # decision, not a semantic winner decision. Resolve it at the last
+        # Selection seam so conservative resolver review can still block
+        # Freeze without leaking the duplicate into the reviewable output.
+        # This preserves every review/safety verdict and all D-289.11 gates.
+        result = trim_reopened_closings_before_validation(result)
 
         # CanonicalEditPlan (D-024) + bounded targeted repair loop (D-026) +
         # general causal/story order validation (D-027): build v1, review it
