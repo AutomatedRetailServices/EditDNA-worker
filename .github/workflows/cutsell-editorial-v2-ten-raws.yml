@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Ten RAWs
+name: CutSell Editorial Engine V2 RAWs 01-03
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-ten-raws
+  group: cutsell-editorial-v2-raws-01-03
   cancel-in-progress: false
 
 jobs:
@@ -79,11 +79,11 @@ jobs:
             fi
           done
 
-      - name: Execute isolated ten-RAW V2 qualification
+      - name: Execute isolated V2 qualification for RAWs 01-03
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p editorial-v2-ten-raws/previews editorial-v2-ten-raws/results
+          mkdir -p editorial-v2-raws-01-03/previews editorial-v2-raws-01-03/results
           python - <<'PY'
           import json
           import re
@@ -91,21 +91,14 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Editdna longform validation/copy_0A524783-376E-4FD4-AE19-F2C722177CDC.MOV",
-              "Editdna longform validation/copy_0C08368A-1FA1-4217-B9AB-A05BE613B6A4.MOV",
-              "Editdna longform validation/copy_2E76C007-26DD-48F9-9AF7-41C8849A602D.MP4",
-              "Editdna longform validation/copy_3EC2186B-4AA9-4449-BACD-52CF82719B74.MP4",
-              "Editdna longform validation/copy_69D72849-50AA-45F7-9B13-BA21505530E5.MOV",
-              "Editdna longform validation/copy_7053BB2F-D130-4DC9-81CA-F431B7FF4038.MOV",
-              "Editdna longform validation/copy_767E1C78-4791-4AFD-B6C1-49CEEC5F73EE.MOV",
-              "Editdna longform validation/copy_7A0721D7-BDA7-4EE6-8A72-F7B46F19E716.MOV",
-              "Editdna longform validation/copy_82A297CA-95F0-4546-A161-EA0FCD8804E1.MOV",
-              "Editdna longform validation/copy_9E4975E5-79EF-43EF-9440-5F06AC0A5581.MP4",
+              "Editdna longform validation/VIDEO-2026-07-30-09-21-35.mp4",
+              "Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4",
+              "Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4",
           ]
-          root = Path("editorial-v2-ten-raws")
+          root = Path("editorial-v2-raws-01-03")
           results = []
           failures = []
-          for index, key in enumerate(keys, start=4):
+          for index, key in enumerate(keys, start=1):
               safe = re.sub(r"[^A-Za-z0-9._-]+", "-", PurePosixPath(key).stem)[:80]
               preview = root / "previews" / f"{index:02d}-{safe}.mp4"
               try:
@@ -132,7 +125,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.ten_raws.v1",
+              "schema_version": "cutsell.editorial_engine_v2.raws_01_03.v1",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
@@ -156,7 +149,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-ten-raws-${{ github.run_id }}
-          path: editorial-v2-ten-raws/
+          name: cutsell-editorial-v2-raws-01-03-${{ github.run_id }}
+          path: editorial-v2-raws-01-03/
           if-no-files-found: warn
           retention-days: 30
