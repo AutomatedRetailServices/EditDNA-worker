@@ -804,6 +804,12 @@ def enforce_complete_idea_boundaries(
             })
             continue
         updated, row = _clip_from_envelope(clip, words)
+        for exclusion in (result.draft.diagnostics or {}).get("v2_recording_tail", ()):
+            if (exclusion.get("action") == "trim" and exclusion.get("clip_id") == clip.clip_id
+                    and exclusion.get("source_asset_id") == clip.source_asset_id
+                    and float(updated.end) > float(exclusion["allowed_end"])):
+                updated = _rebuild_clip(updated, words, float(updated.start), float(exclusion["allowed_end"]))
+                row.update(action="preserve_recording_tail_exclusion", result_end=updated.end)
         # Complete-idea recovery cannot resurrect source speech that selection
         # already rejected.  Bound only the newly-added edge; the selected
         # clip's original words and timing remain untouched.
@@ -841,7 +847,11 @@ def enforce_complete_idea_boundaries(
     selected, spaced_duplicate_rows = _trim_spaced_duplicate_from_left(selected, source_map)
     diagnostics.extend(spaced_duplicate_rows)
 
-    selected, post_cta_rows = _trim_short_post_cta_aside(selected, source_map)
+    # V2 requires an explicit recording-tail proposal, not CTA + pause alone.
+    if (result.draft.diagnostics or {}).get("editorial_engine_v2_request"):
+        post_cta_rows = []
+    else:
+        selected, post_cta_rows = _trim_short_post_cta_aside(selected, source_map)
     diagnostics.extend(post_cta_rows)
 
     # Exact duplicates at an adjacent seam are stronger evidence than the

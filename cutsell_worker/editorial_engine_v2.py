@@ -174,9 +174,10 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
         if gap > 2.25:
             left_decision = reasoner_rows.get(str(left.clip_id), {})
             right_decision = reasoner_rows.get(str(right.clip_id), {})
-            if str(left_decision.get("relation") or "").startswith("retry_") or str(
+            continuous_demo = left_decision.get("safety_override") == "av_continuous_demonstration_preserved"
+            if not continuous_demo and (str(left_decision.get("relation") or "").startswith("retry_") or str(
                 right_decision.get("relation") or ""
-            ).startswith("retry_"):
+            ).startswith("retry_")):
                 continue
             left_tokens = {token.casefold() for token in _TOKEN_RE.findall(str(left.text or "")) if len(token) >= 4}
             right_tokens = {token.casefold() for token in _TOKEN_RE.findall(str(right.text or "")) if len(token) >= 4}

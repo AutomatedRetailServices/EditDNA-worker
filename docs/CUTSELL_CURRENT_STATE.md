@@ -1,5 +1,25 @@
 # CutSell.ai — Current State
 
+## 2026-09-27 — Yaskira 09 v13 evidence-driven correction (experimental)
+
+Run 36340955692 completed technically but is NOT editorially approved. Its
+recorded plan discarded the useful opening as failed, discarded the start of
+the demonstration as redundant, and retained a post-CTA recording aside.
+The current offline correction is documented in
+`CUTSELL_V13_CORRECTION.md`. It preserves AV-supported content without requiring
+40% novel vocabulary; cautiously preserves uncertain demonstration continuity;
+and adds an optional explicit, independently corroborated recording-tail proposal
+at the existing pre-Freeze selection seam. V2 no longer treats CTA + pause alone
+as authority to delete a short ending. No production promotion is authorized.
+
+Historical v13 has no tail proposal: its tail remains unresolved under faithful
+replay. A separately labelled synthetic proposal proves execution and exclusion
+preservation only, not that Gemini will classify the live tail correctly.
+The decision log on this branch is unreadable non-UTF-8 both locally and via
+GitHub; it was not overwritten. The companion correction document records this
+cycle pending recovery of that pre-existing documentation defect.
+
+
 ## 2026-09-27 — Editorial Engine V2 experimental authority rebuilt
 
 Branch `feat/editorial-engine-v2-whole-video-rebuild` adds an OFF-by-default,

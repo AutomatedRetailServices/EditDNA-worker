@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import json
+import math
 import re
 import unicodedata
 from typing import Protocol
@@ -69,6 +70,8 @@ class UnifiedSelectionDecision:
     # V2-only global story placement. Legacy callers omit it and retain
     # natural source order exactly as before.
     sequence_index: int | None = None
+    # V2-only optional semantic proposal; independently verified pre-Freeze.
+    trailing_recording_word_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,8 @@ def validate_unified_selection_plan(
             raise ValueError("unified selection confidence outside 0..1")
         if family_index < 0:
             raise ValueError("unified selection family index must be non-negative")
+        if type(raw.trailing_recording_word_count) is not int or not 0 <= raw.trailing_recording_word_count <= 8:
+            raise ValueError("invalid trailing recording word count")
         normalized.append(UnifiedSelectionDecision(
             clip_id=clip_id,
             action=action,
@@ -148,6 +153,7 @@ def validate_unified_selection_plan(
             sequence_index=(
                 None if raw.sequence_index is None else int(raw.sequence_index)
             ),
+            trailing_recording_word_count=raw.trailing_recording_word_count,
         ))
         seen.add(clip_id)
 
@@ -271,12 +277,21 @@ def _high_confidence_audience_spans(draft: DraftTimeline) -> dict[str, tuple[tup
         rows = []
         for region in evidence.get("regions") or ():
             try:
-                if region.get("role") == "audience" and float(region.get("confidence", 0)) >= .90:
-                    rows.append((float(region["start"]), float(region["end"])))
+                start, end = float(region["start"]), float(region["end"])
+                confidence = float(region.get("confidence", 0))
+                if (region.get("role") == "audience" and .90 <= confidence <= 1
+                        and math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+                    rows.append((start, end))
             except (AttributeError, KeyError, TypeError, ValueError):
                 continue
         if rows:
-            spans[str(source.get("source_asset_id") or "")] = tuple(rows)
+            merged = []
+            for start, end in sorted(rows):
+                if merged and start <= merged[-1][1]:
+                    merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+                else:
+                    merged.append((start, end))
+            spans[str(source.get("source_asset_id") or "")] = tuple(merged)
     return spans
 
 
@@ -309,11 +324,61 @@ def _preserve_unique_content_when_av_contradicts_failed(
             continue
         tokens = _content_tokens(clip.text)
         unique = tokens - selected_tokens
-        if len(unique) < 3 or len(unique) / max(1, len(tokens)) < .40:
+        # A long delivery may share most of its vocabulary with the story
+        # while retaining an uncovered opening/fact. Positive AV conflicts
+        # with the failure label: preserve the existing three-token evidence
+        # floor without making preservation depend on total clip length.
+        if len(unique) < 3:
             continue
         actions[index] = "select"
         overrides[index] = "av_audience_unique_content_overrides_failed_label"
         selected_tokens.update(tokens)
+
+
+def _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides):
+    """Do not equate a repeated instruction with a repeated visual action.
+
+    A low-confidence redundancy proposal cannot delete an instruction inside
+    one AV-observed demonstration leading directly to its selected explanation.
+    This is inclusion-only, before Freeze; it never deletes a competing take.
+    """
+    whole = (draft.diagnostics or {}).get("whole_video_context") or {}
+    demos = {}
+    for source in whole.get("sources") or ():
+        try:
+            evidence = json.loads(source.get("audiovisual_evidence") or "{}")
+        except (TypeError, ValueError):
+            continue
+        for region in evidence.get("regions") or ():
+            try:
+                start, end = float(region["start"]), float(region["end"])
+                confidence = float(region.get("confidence", 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            description = " ".join(str(region.get(k) or "") for k in (
+                "visual_observation", "reason",
+            )).casefold()
+            if (region.get("role") == "audience" and .90 <= confidence <= 1
+                    and math.isfinite(start) and math.isfinite(end) and 0 <= start < end
+                    and any(term in description for term in ("demonstrat", "mixing", "pouring", "applying"))
+                    and not any(term in description for term in ("retry", "restart", "fumble", "abandon"))):
+                demos.setdefault(source.get("source_asset_id"), []).append((start, end))
+    for i, left in enumerate(clips[:-1]):
+        d = decisions[left.clip_id]
+        right = clips[i + 1]
+        if (actions[i] not in {"swap", "discard"} or d.reason_code != "redundant_retry"
+                or d.relation != "retry_alternate" or d.confidence >= .90
+                or actions[i + 1] != "select" or left.source_asset_id != right.source_asset_id
+                or left.source_order != right.source_order or not 0 <= right.start - left.end <= 10
+                or not _content_tokens(left.text).intersection(_content_tokens(right.text))):
+            continue
+        if not any(start <= left.start and end > right.start
+                   for start, end in demos.get(left.source_asset_id, ())):
+            continue
+        if _content_tokens(left.text) <= _content_tokens(right.text):
+            continue
+        actions[i] = "select"
+        overrides[i] = "av_continuous_demonstration_preserved"
 
 
 def apply_unified_selection_reasoner(
@@ -359,16 +424,22 @@ def apply_unified_selection_reasoner(
         _preserve_unique_content_when_av_contradicts_failed(
             draft, clips, decisions, actions, overrides,
         )
+        _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides)
 
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
     discarded: list[DraftClip] = []
     audit: list[dict] = []
+    tail_audit: list[dict] = []
 
     for index, clip in enumerate(clips):
         decision = decisions[clip.clip_id]
         action = actions[index]
         normalized_clip = replace(clip, selected=(action == "select"))
+        if v2_request and action == "select" and decision.trailing_recording_word_count:
+            from .v2_recording_tail import trim_recording_tail
+            normalized_clip, tail_row = trim_recording_tail(normalized_clip, decision, diagnostics)
+            tail_audit.append(tail_row)
         if action == "select":
             selected.append(normalized_clip)
         elif action == "swap":
@@ -403,6 +474,8 @@ def apply_unified_selection_reasoner(
         "estimated_output_tokens": plan.estimated_output_tokens,
         "decisions": audit,
     }
+    if tail_audit:
+        diagnostics["v2_recording_tail"] = tail_audit
     return replace(
         draft,
         selected=tuple(selected),

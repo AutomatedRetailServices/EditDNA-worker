@@ -100,6 +100,8 @@ def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
             "text": " ".join(str(clip.text or "").split())[:1800],
             "hybrid_votes": hybrid_votes.get(clip.clip_id, [])[:6],
         }
+        if (draft.diagnostics or {}).get("editorial_engine_v2_request"):
+            row["aligned_word_texts"] = [word.text for word in clip.words]
         # Local face/pose/motion evidence (local_performance.py), when the
         # upstream take was analyzed. Higher visual_fumble/distraction_risk
         # and lower expression/gesture naturalness indicate a visible reset,
@@ -177,6 +179,7 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
             "A clean high-confidence audiovisual audience region contradicts failed_delivery unless that candidate itself contains an observed reset/stumble or its transcript is clearly abandoned; explain the conflict through the chosen relation and reason code.",
             "Assign every candidate one unique sequence_index. Preserve chronology by default, but reorder complete valid story beats when it clearly improves comprehension, hook, demonstration, payoff, or coherence without inventing speech.",
             "Return one final KEEP/DISCARD-equivalent plan: SELECT the final story and DISCARD every non-winner; never return SWAP.",
+            "For a SELECT containing a clean delivery followed by a short explicit recording-process aside, optionally return trailing_recording_word_count (1..8) counted from aligned_word_texts. Return 0 or omit when uncertain, words are unavailable, or the ending is audience content. Never trim a disclaimer, offer, qualification, gratitude, humor, reaction, number, negation or product fact. Confidence must cover both selection and the tail classification. Do not discard the whole useful take because only its ending is recording talk.",
         ])
     else:
         contract.extend([
@@ -232,6 +235,7 @@ def unified_selection_response_schema(candidate_count: int, *, v2: bool = False)
                         "family_index": {"type": "integer", "minimum": 0},
                         "reason_code": {"type": "string", "enum": _REASON_CODES},
                         **({"sequence_index": {"type": "integer", "minimum": 0}} if v2 else {}),
+                        **({"trailing_recording_word_count": {"type": "integer", "minimum": 0, "maximum": 8}} if v2 else {}),
                     },
                     "required": [
                         "candidate_index", "action", "relation", "confidence", "family_index", "reason_code",
@@ -277,6 +281,7 @@ def _worst_case_decision_json_chars() -> int:
         "family_index": 999,
         "reason_code": max(_REASON_CODES, key=len),
         "sequence_index": 999,
+        "trailing_recording_word_count": 8,
     }
     one = json.dumps({"decisions": [sample]}, indent=2)
     two = json.dumps({"decisions": [sample, sample]}, indent=2)
@@ -482,6 +487,7 @@ class GoogleUnifiedSelectionReasoner:
                 confidence=float(item.get("confidence", -1.0)),
                 family_index=int(item.get("family_index", -1)),
                 reason_code=str(item.get("reason_code") or ""),
+                trailing_recording_word_count=item.get("trailing_recording_word_count", 0),
                 sequence_index=(
                     normalized_sequence.get(len(decisions), int(item.get("sequence_index")))
                     if item.get("sequence_index") is not None else None
