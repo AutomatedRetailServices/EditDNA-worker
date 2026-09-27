@@ -301,6 +301,24 @@ def test_v2_does_not_preserve_usable_retry_alternate_that_winner_covers():
     assert [item.clip_id for item in out.alternates] == ["alternate"]
 
 
+def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():
+    detail = clip("detail", 0, 5, "Stronger at the gym with a noticeable first week difference", selected=False)
+    winner = clip("winner", 10, 15, "Watermelon creatine mixes into one daily bottle", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(detail, winner), discarded=(),
+        diagnostics={"editorial_engine_v2_request": {"require_audiovisual_evidence": True}},
+    )
+    reasoner = FakeReasoner([
+        v2_decision("detail", "discard", "retry_alternate", .95, 0, "redundant_retry", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+
+    out = apply_unified_selection_reasoner(d, reasoner)
+
+    assert [item.clip_id for item in out.selected] == ["detail", "winner"]
+
+
 def test_unified_request_requires_one_structured_human_style_decision_per_candidate():
     payload = build_unified_selection_payload(draft())
     request = build_unified_selection_request(payload, max_output_tokens=1000)
