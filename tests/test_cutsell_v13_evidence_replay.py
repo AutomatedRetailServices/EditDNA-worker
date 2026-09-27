@@ -141,3 +141,30 @@ def test_recorded_opening_accent_only_evidence_does_not_authorize_deletion():
     assert out.draft.selected[0].text.endswith("tus mus")
     assert out.draft.selected[0].end == 16.98
     assert out.draft.selected[1].text.startswith("y aparte tus músculos")
+
+
+def test_simulated_native_suffix_plan_on_recorded_opening_survives_recovery():
+    # Simulates an explicit native model proposal, not a successful live call.
+    from cutsell_worker.v2_recording_tail import trim_recording_tail
+    data = evidence()
+    source = data["av"][0]["source_asset_id"]
+    words = tuple(Word(*w) for w in data["words"])
+    aligned = tuple(w for w in words if 4.98 <= w.start and w.end <= 16.98)
+    text = " ".join(w.text for w in aligned)
+    opening = DraftClip("open", source, 0, 4.98, 16.98, text, text, words=aligned)
+    target = DraftClip("next", source, 0, 19, 28.14,
+                       "y aparte tus músculos van a estar más fuerte en 30 días", "")
+    diag = {"editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+            "v2_native_selection_modalities": ["video", "audio", "source_words"]}
+    decision = UnifiedSelectionDecision("open", "select", "independent", .99, 0,
+        "independent_story_coverage", 0, 6, .99, "abandoned_restart", "next")
+    trimmed, row = trim_recording_tail(opening, decision, diag, selected_clips=(target,))
+    assert trimmed.end == 14.4
+    diag["v2_recording_tail"] = [row]
+    result = ProcessingResult("cutsell.v1", "p", JobState.DRAFT_READY,
+        DraftTimeline("cutsell.v1", "p", EditStrategy.STORYTELLING, (trimmed,), (), (), diag), {})
+    class ASR:
+        def transcribe(self, *args, **kwargs): return (SimpleNamespace(words=words),)
+    out = enforce_complete_idea_boundaries(result, {source: "unused"}, asr_provider=ASR())
+    assert out.draft.selected[0].text.endswith("en el día")
+    assert out.draft.selected[0].end == 14.4

@@ -18,6 +18,7 @@ must never repair a semantic membership mistake.
 from __future__ import annotations
 
 import dataclasses
+import os
 from dataclasses import replace
 from typing import Callable, Mapping
 
@@ -272,12 +273,22 @@ def process_universal_clean_cut_sources(
     # evidence, then exits before the legacy semantic rule chain can restore,
     # substitute, or reorder the reasoner's final decision.
     if editorial_engine_v2_enabled(editorial_engine_v2):
+        frozen_source_asr = asr_provider
+        canonical_reconcile = lambda current: current
+        if os.environ.get("CUTSELL_V2_NATIVE_SELECTION_ENABLED") == "1":
+            from .v2_source_selection import canonicalize_candidates, attach_audiovisual_sources, reconcile_canonical_word_seams
+            result, frozen_source_asr = canonicalize_candidates(result, local_paths, asr_provider)
+            canonical_reconcile = lambda current: reconcile_canonical_word_seams(current, frozen_source_asr.words_by_source)
+            selection_reasoner = attach_audiovisual_sources(selection_reasoner, local_paths)
+            result = replace(result, draft=replace(result.draft, diagnostics={
+                **result.draft.diagnostics, "v2_native_selection_modalities": ["video", "audio", "source_words"],
+            }))
         return run_editorial_engine_v2(
             result,
             selection_reasoner=selection_reasoner,
-            recover_complete_boundaries=lambda current: enforce_complete_idea_boundaries(
-                current, local_paths, asr_provider=asr_provider,
-            ),
+            recover_complete_boundaries=lambda current: canonical_reconcile(enforce_complete_idea_boundaries(
+                current, local_paths, asr_provider=frozen_source_asr,
+            )),
             execute_boundaries=lambda current: polish_human_boundaries_v5(
                 apply_post_freeze_boundary_pass(current), local_paths,
             ),

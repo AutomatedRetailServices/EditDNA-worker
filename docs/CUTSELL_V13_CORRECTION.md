@@ -1,5 +1,31 @@
 # Yaskira 09 v13 correction — offline evidence, not approval
 
+## V17 native Selection qualification
+
+Root cause in v16: final Selection saw text plus broad AV summaries, not actual
+source media, and suffix counts referred to candidate ASR while later recovery
+used a different source transcription. A count of3 corresponded to a final tail
+of4 words. Mixed useful/failed deliveries were forced into whole-take choices.
+
+V17 (explicit CUTSELL_V2_NATIVE_SELECTION_ENABLED, workflow only):
+- Bind candidates to one source transcript, retaining original timing geometry;
+  reuse that exact transcript for pre-Freeze recovery, with source-word digests.
+- Give the SAME final Selection authority actual complete audio/video, bounded
+  to12MB. Count actual multimodal tokens before budget admission; fail visibly
+  if token counting or size/cost limits fail, never fall back to text silently.
+  This qualification raises only selection's explicit cap from$.02 to$.05,
+  within existing user authorization for paid correction runs; production is off.
+- Extend existing suffix proposals with abandoned_restart and an explicit
+  selected replacement candidate. Require native AV, .97 classification,
+  same-source later selected coverage, protected word/alignment checks; exclude
+  replacement proposals from coverage. Recording asides retain pause corroboration.
+  No standalone accent/prefix deletion heuristic is reintroduced.
+- Before Freeze, repair only continuous shared-word seams from canonical words.
+  Preserve outer-edge words: refuse seam reconstruction when either outside
+  boundary crosses another word. Independent QA reproduced this risk; guarded.
+- 473 relevant tests pass locally. Simulated source-word proposal tests demonstrate
+  execution only, not model adherence. Real editorial qualification still pending.
+
 ## Live v16 result
 
 Run36345575257, commit a662be83: technical success, delivery status

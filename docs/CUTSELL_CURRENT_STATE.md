@@ -1,5 +1,15 @@
 # CutSell.ai — Current State
 
+## 2026-09-27 — V17 native Selection prepared for isolated qualification
+
+Continue Yaskira09 from v16. Canonical source words now feed both Selection and
+pre-Freeze recovery; same final authority receives actual full AV, not only a
+coarse summary. Explicit bounded suffix proposals distinguish abandoned retries
+with selected replacement coverage from recording asides. V2-only native flag,
+explicit selection cap$.05 (user authorized correction runs), production off.
+473 local tests pass; independent QA findings addressed before live launch.
+See CUTSELL_V13_CORRECTION.md. No claim the video is fixed before qualification.
+
 ## 2026-09-27 — v16 result: demonstration floor works, video still rejected
 
 Commit a662be83, run 36345575257 completed and rendered. Renderer audit no

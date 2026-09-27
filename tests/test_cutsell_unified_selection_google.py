@@ -474,3 +474,24 @@ def test_editorial_contract_instructs_use_of_visual_evidence():
     payload = build_unified_selection_payload(draft(2))
     contract_text = " ".join(payload["editorial_contract"])
     assert "visual_evidence" in contract_text
+
+
+def test_native_selection_counts_same_media_sent_to_generation():
+    fake = FakeSession([{"totalTokens": 1200}, gemini_response(decisions_json(2))])
+    reasoner = make_reasoner(fake)
+    reasoner.audiovisual_parts = ({"inlineData": {"mimeType": "video/mp4", "data": "TEST"}},)
+    plan = reasoner.reason(draft(2))
+    assert fake.calls[0][0].endswith(":countTokens")
+    assert fake.calls[1][0].endswith(":generateContent")
+    assert fake.calls[0][2]["contents"] == fake.calls[1][2]["contents"]
+    assert plan.estimated_input_tokens == 1200
+
+
+@pytest.mark.parametrize("count", [None, True, -1, 100000])
+def test_native_preflight_failure_never_generates_or_falls_back_to_text(count):
+    fake = FakeSession([{"totalTokens": count}])
+    reasoner = make_reasoner(fake)
+    reasoner.audiovisual_parts = ({"inlineData": {"mimeType": "video/mp4", "data": "TEST"}},)
+    with pytest.raises(ValueError):
+        reasoner.reason(draft(2))
+    assert len(fake.calls) == 1

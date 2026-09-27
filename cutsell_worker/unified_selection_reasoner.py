@@ -73,6 +73,8 @@ class UnifiedSelectionDecision:
     # V2-only optional semantic proposal; independently verified pre-Freeze.
     trailing_recording_word_count: int = 0
     trailing_recording_confidence: float | None = None
+    trailing_recording_kind: str = "recording_aside"
+    trailing_replacement_clip_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,10 @@ def validate_unified_selection_plan(
             or not 0 <= raw.trailing_recording_confidence <= 1
         ):
             raise ValueError("invalid trailing recording confidence")
+        if raw.trailing_recording_kind not in {"recording_aside", "abandoned_restart"}:
+            raise ValueError("invalid trailing recording kind")
+        if raw.trailing_replacement_clip_id is not None and raw.trailing_replacement_clip_id not in expected:
+            raise ValueError("unknown trailing replacement clip")
         normalized.append(UnifiedSelectionDecision(
             clip_id=clip_id,
             action=action,
@@ -161,6 +167,8 @@ def validate_unified_selection_plan(
             ),
             trailing_recording_word_count=raw.trailing_recording_word_count,
             trailing_recording_confidence=raw.trailing_recording_confidence,
+            trailing_recording_kind=raw.trailing_recording_kind,
+            trailing_replacement_clip_id=raw.trailing_replacement_clip_id,
         ))
         seen.add(clip_id)
 
@@ -445,7 +453,16 @@ def apply_unified_selection_reasoner(
         normalized_clip = replace(clip, selected=(action == "select"))
         if v2_request and action == "select" and decision.trailing_recording_word_count:
             from .v2_recording_tail import trim_recording_tail
-            normalized_clip, tail_row = trim_recording_tail(normalized_clip, decision, diagnostics)
+            coverage_clips = []
+            for other_index, other in enumerate(clips):
+                other_decision = decisions[other.clip_id]
+                if actions[other_index] != "select" or other_decision.action != "select":
+                    continue
+                count = other_decision.trailing_recording_word_count
+                coverage_clips.append(replace(other, text=" ".join(w.text for w in other.words[:-count]))
+                                      if count else other)
+            normalized_clip, tail_row = trim_recording_tail(
+                normalized_clip, decision, diagnostics, selected_clips=coverage_clips)
             tail_audit.append(tail_row)
         if action == "select":
             selected.append(normalized_clip)
