@@ -329,7 +329,7 @@ def test_v2_av_audience_unique_content_overrides_false_failed_label():
             "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
             "whole_video_context": {"sources": [{
                 "source_asset_id": "src",
-                "audiovisual_evidence": '{"regions":[{"start":3,"end":18,"role":"audience","confidence":0.96}]}',
+                "audiovisual_evidence": '{"regions":[{"start":5.5,"end":15.5,"role":"audience","confidence":0.96}]}',
             }]},
         },
     )
