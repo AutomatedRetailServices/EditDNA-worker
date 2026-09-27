@@ -337,3 +337,37 @@ def test_v2_does_not_restore_long_non_demo_audience_gap():
         recover_complete_boundaries=identity, execute_boundaries=identity,
     )
     assert output.draft.selected[0].end == 1.0
+
+
+def test_v2_reasserts_demo_bridge_after_boundary_rebuild_erases_it():
+    result = source_result()
+    a = replace(result.draft.selected[0], start=90.0, end=99.5)
+    b = replace(result.draft.alternates[0], start=106.5, end=118.0)
+    result = replace(result, draft=replace(
+        result.draft, selected=(a,), alternates=(b,), discarded=(),
+        diagnostics={"whole_video_context": {
+            "status": {"status": "applied", "available": True},
+            "audiovisual_input_status": "received_and_parsed",
+            "sources": [{
+                "source_asset_id": "source",
+                "audiovisual_evidence": '{"regions":[{"start":80,"end":120,"role":"audience","confidence":0.95,"reason":"Preparation instructions with product bottle"}]}',
+            }],
+        }},
+    ))
+
+    class KeepDemo:
+        def reason(self, draft):
+            return UnifiedSelectionPlan(decisions=(
+                UnifiedSelectionDecision("a", "select", "composite_piece", .99, 0, "composite_best_take_piece", 0),
+                UnifiedSelectionDecision("b", "select", "continuation", .99, 0, "necessary_continuation", 1),
+            ), provider="test", model="test")
+
+    def erase_bridge(output):
+        first, second = output.draft.selected
+        return replace(output, draft=replace(output.draft, selected=(replace(first, end=99.5), second)))
+
+    output = run_editorial_engine_v2(
+        result, selection_reasoner=KeepDemo(),
+        recover_complete_boundaries=identity, execute_boundaries=erase_bridge,
+    )
+    assert output.draft.selected[0].end == 106.5
