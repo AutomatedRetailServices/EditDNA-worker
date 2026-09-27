@@ -346,6 +346,28 @@ def test_v2_av_audience_unique_content_overrides_false_failed_label():
     assert row["safety_override"] == "av_audience_unique_content_overrides_failed_label"
 
 
+def test_v2_av_majority_audience_preserves_unique_delivery_with_short_failed_tail():
+    mixed = clip("mixed", 19, 29, "Thirty day results make muscles stronger with creatine", selected=False)
+    winner = clip("winner", 50, 70, "Watermelon flavor mixes into one bottle daily", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(mixed, winner), discarded=(),
+        diagnostics={
+            "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+            "whole_video_context": {"sources": [{
+                "source_asset_id": "src",
+                "audiovisual_evidence": '{"regions":[{"start":19.3,"end":26.5,"role":"audience","confidence":0.95}]}',
+            }]},
+        },
+    )
+    reasoner = FakeReasoner([
+        v2_decision("mixed", "discard", "failed", .9, 0, "failed_delivery", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+    out = apply_unified_selection_reasoner(d, reasoner)
+    assert [item.clip_id for item in out.selected] == ["mixed", "winner"]
+
+
 def test_unified_request_requires_one_structured_human_style_decision_per_candidate():
     payload = build_unified_selection_payload(draft())
     request = build_unified_selection_request(payload, max_output_tokens=1000)
