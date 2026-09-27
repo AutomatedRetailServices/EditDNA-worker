@@ -127,6 +127,7 @@ def _audience_regions(whole: dict) -> dict[str, tuple[tuple[float, float, bool],
                 )).casefold()
                 demonstration = any(token in description for token in (
                     "demonstrat", "show", "display", "mix", "pour", "scoop", "apply", "use the product",
+                    "prepar", "instruction", "bottle", "container", "product",
                 ))
                 regions.append((start, end, demonstration))
         if source_id and regions:
@@ -249,6 +250,11 @@ def run_editorial_engine_v2(
 
     result = replace(result, draft=freeze_selection_contract(result.draft))
     result = execute_boundaries(result)
+    # Boundary polish may rebuild a clip from its spoken-word envelope and
+    # unintentionally erase an already-approved action-only demonstration
+    # bridge. Reassert the same evidence-gated physical continuity after the
+    # last Boundary mutation; semantic membership and text remain frozen.
+    result = _restore_safe_audience_continuity(result, whole)
     result = replace(result, draft=enforce_selection_contract(result.draft))
 
     if tuple(result.draft.alternates):
