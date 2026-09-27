@@ -319,6 +319,33 @@ def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():
     assert [item.clip_id for item in out.selected] == ["detail", "winner"]
 
 
+def test_v2_av_audience_unique_content_overrides_false_failed_label():
+    hook = clip("hook", 5, 16, "GLP users get more repetitions energy and stronger muscles", selected=False)
+    winner = clip("winner", 50, 70, "Watermelon creatine mixes into one bottle daily", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(hook, winner), discarded=(),
+        diagnostics={
+            "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+            "whole_video_context": {"sources": [{
+                "source_asset_id": "src",
+                "audiovisual_evidence": '{"regions":[{"start":3,"end":18,"role":"audience","confidence":0.96}]}',
+            }]},
+        },
+    )
+    reasoner = FakeReasoner([
+        v2_decision("hook", "discard", "failed", .9, 0, "failed_delivery", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+
+    out = apply_unified_selection_reasoner(d, reasoner)
+
+    assert [item.clip_id for item in out.selected] == ["hook", "winner"]
+    row = next(row for row in out.diagnostics["unified_selection_reasoner"]["decisions"]
+               if row["clip_id"] == "hook")
+    assert row["safety_override"] == "av_audience_unique_content_overrides_failed_label"
+
+
 def test_unified_request_requires_one_structured_human_style_decision_per_candidate():
     payload = build_unified_selection_payload(draft())
     request = build_unified_selection_request(payload, max_output_tokens=1000)
