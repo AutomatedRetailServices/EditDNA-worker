@@ -11,6 +11,8 @@ contains no HTTP, vendor SDK, benchmark timestamp, phrase, or Human Gold rule.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import re
+import unicodedata
 from typing import Protocol
 
 from .contracts import DraftClip, DraftTimeline
@@ -37,6 +39,22 @@ _ALLOWED_REASONS = frozenset({
     "recording_process_bts",
     "uncertain_preserve",
 })
+
+_CONTENT_TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
+_CONTENT_STOPWORDS = frozenset("""
+a al an and are as at con de del el ella en es esta este esto for from he her here i in is it
+la las lo los me mi mira more más ni no of on or para pero por que se she si sin su sus te than
+that the their this to tu tú un una was we with y ya yo you your
+""".split())
+
+
+def _content_tokens(text: str) -> set[str]:
+    raw = unicodedata.normalize("NFKD", str(text or "").casefold())
+    plain = "".join(ch for ch in raw if not unicodedata.combining(ch))
+    return {
+        token for token in _CONTENT_TOKEN_RE.findall(plain)
+        if len(token) >= 3 and token not in _CONTENT_STOPWORDS
+    }
 
 
 @dataclass(frozen=True)
@@ -203,6 +221,40 @@ def _enforce_single_retry_family_winner(
                 overrides[i] = "retry_family_single_winner_enforced"
 
 
+def _preserve_retry_alternates_with_unique_information(
+    clips: tuple[DraftClip, ...],
+    decisions: dict[str, UnifiedSelectionDecision],
+    actions: list[str],
+    overrides: list[str | None],
+) -> None:
+    """Prevent a false retry family from deleting materially distinct beats.
+
+    Gemini may call an earlier hook or continuation a usable retry alternate
+    even when the chosen later take does not contain much of its information.
+    V2 has no manual SWAP bucket after resolution, so preserve a clean usable
+    alternate when at least three meaningful tokens and 40% of its content
+    vocabulary are absent from the complete selected story. Failed delivery
+    and BTS never qualify.
+    """
+    selected_tokens: set[str] = set()
+    for index, clip in enumerate(clips):
+        if actions[index] == "select":
+            selected_tokens.update(_content_tokens(clip.text))
+    for index, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if actions[index] != "swap":
+            continue
+        if decision.relation != "retry_alternate" or decision.reason_code != "usable_alternate":
+            continue
+        tokens = _content_tokens(clip.text)
+        unique = tokens - selected_tokens
+        if len(unique) < 3 or len(unique) / max(1, len(tokens)) < 0.40:
+            continue
+        actions[index] = "select"
+        overrides[index] = "unique_retry_information_preserved"
+        selected_tokens.update(tokens)
+
+
 def apply_unified_selection_reasoner(
     draft: DraftTimeline,
     reasoner: UnifiedSelectionReasoner | None,
@@ -241,6 +293,8 @@ def apply_unified_selection_reasoner(
         overrides.append(safety_override)
 
     _enforce_single_retry_family_winner(clips, decisions, actions, overrides)
+    if v2_request:
+        _preserve_retry_alternates_with_unique_information(clips, decisions, actions, overrides)
 
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
