@@ -18,6 +18,13 @@ no release/quality claim is made before rendered outputs receive technical and
 human Watch + Listen review. Canonical experiment details live in
 `docs/CUTSELL_EDITORIAL_ENGINE_V2_EXPERIMENT.md`.
 
+Offline verification on the rebuilt branch: 69 focused V2/runtime/provider tests
+passed. The full `tests/test_cutsell_*.py` regression completed with 8,684 passed,
+10 skipped and 7 failed. Every one of the 7 failures was reproduced unchanged on
+base commit `a26c1f77`; therefore the V2 diff introduced zero observed regression
+failures. The pre-existing failures remain visible and are not waived or relabeled
+as passes.
+
 ## 2026-09-25 AssemblyAI ASR-only probe completed
 
 `benchmarks/run_assemblyai_asr_probe.py` is a manual, opt-in comparison probe
