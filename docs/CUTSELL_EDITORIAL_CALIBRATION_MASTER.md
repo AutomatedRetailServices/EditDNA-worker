@@ -18,9 +18,21 @@ el transporte real y no sirve como evidencia del contenido de la solicitud;
 el segundo guardó hash, conteos y estado sin publicar el prompt RAW. Antes de
 otra calificación pagada de 08, reproducir offline sus decisiones frente al
 V26 (un ganador final y alternativos descartados) y al V20 (rescate lexical y
-selección directa de intentos anteriores). El reporte focal todavía no
-conserva el detalle de decisiones del selector; registrar ese detalle en
-futuros runs sin inferirlo del render.
+selección directa de intentos anteriores). V20 seleccionó seis candidatos en
+la primera pasada y no produjo competencia global; V26 eligió dos y sí
+produjo la competencia que cubrió los intentos anteriores. El run actual
+seleccionó diez intervalos, aunque su reporte inicial no conservó las
+decisiones individuales.
+
+**Corrección V2 candidata, aún sin calificación RAW:** commit `099f8be` añade
+una segunda revisión global solo si la primera omite toda competencia y
+selecciona al menos cinco candidatos. La segunda salida no cambia acciones;
+solo aporta comparaciones explícitas que el resolver conservador ya valida.
+La llamada está limitada a $0.012 y dentro del presupuesto del selector. La
+prueba offline reproduce la cobertura V20 y conserva cantidad/CTA únicos; 98
+pruebas focales pasan. La siguiente calificación del 08 registrará también
+las decisiones, comparaciones y revisión activada. No declarar mejora hasta
+comparar su Gold y revisar el MP4.
 
 En Video09, un probe AV de 17.5–29 s, run `36480589139` SHA `aab26bca`,
 observó que el tropiezo termina aproximadamente en 18.6 s y que la afirmación

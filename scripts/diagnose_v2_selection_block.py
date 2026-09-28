@@ -74,9 +74,29 @@ try:
         preview_output=str(OUTPUT / "08.mp4"))
     selected = [(float(row["start"]), float(row["end"]))
                 for row in result.get("selected", ())]
+    diagnostics = result.get("diagnostics") or {}
+    reasoner = diagnostics.get("unified_selection_reasoner") or {}
+    buckets = {row.get("clip_id"): row
+               for key in ("selected", "discarded", "alternates")
+               for row in result.get(key, ())}
+    decisions = []
+    for decision in reasoner.get("decisions") or ():
+        row = buckets.get(decision.get("clip_id"), {})
+        decisions.append({
+            "start": row.get("start"), "end": row.get("end"),
+            "model_action": decision.get("model_action"),
+            "effective_action": decision.get("effective_action"),
+            "relation": decision.get("relation"),
+            "reason_code": decision.get("reason_code"),
+            "safety_override": decision.get("safety_override"),
+        })
     gold_start, gold_end = 120.0, 147.0
     report["pipeline"] = {"status": "complete", "selection_reasoner_status":
                           result.get("selection_reasoner_status"),
+                          "candidate_count": reasoner.get("candidate_count"),
+                          "competition_review": diagnostics.get("competition_review"),
+                          "take_competitions": diagnostics.get("v2_take_competitions"),
+                          "decisions": decisions,
                           "selected_intervals": selected,
                           "gold_keep_retained_sec": round(sum(
                               max(0., min(end, gold_end) - max(start, gold_start))
