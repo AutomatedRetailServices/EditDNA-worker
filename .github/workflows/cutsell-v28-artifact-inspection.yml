@@ -47,7 +47,7 @@ jobs:
                   if 70 < c.get('start',0) < 107:
                       print('CANDIDATE',round(c['start'],2),round(c['end'],2),c.get('text','')[:90],c.get('audio_muted'))
               for a in dx.get('unified_selection_reasoner',{}).get('decisions',[]):
-                  if any(c.get('clip_id')==a['clip_id'] and 70<c.get('start',0)<107 for c in d.get('selected',[])+d.get('alternates',[])+d.get('discarded',[]):
+                  if any(c.get('clip_id')==a['clip_id'] and 70<c.get('start',0)<107 for c in d.get('selected',[])+d.get('alternates',[])+d.get('discarded',[])):
                       print('DECISION',json.dumps(a,ensure_ascii=False))
               for source in dx.get('whole_video_context',{}).get('input_audit',{}).get('native_av',[]):
                   if source.get('window_index')==1000:
