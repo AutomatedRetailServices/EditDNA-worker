@@ -48,3 +48,12 @@ jobs:
                        'decision':x.get('decision'),'relation':x.get('relation')}
                       for x in diag.get('v2_take_competitions',[])],ensure_ascii=False))
           PY
+      - name: Save small structured replay evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-v32-batch-decision-replay-${{ github.run_id }}
+          path: |
+            evidence/results/02.json
+            evidence/results/06.json
+            evidence/results/09.json
+          retention-days: 14
