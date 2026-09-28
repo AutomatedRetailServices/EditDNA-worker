@@ -304,3 +304,15 @@ de cabeza. 130 pruebas locales pasaron; run focal V33 `36461394295` se
 califica en 08/09. El lote de referencia V32 es run `36460332422` con SHA
 `920ec9ec59740eea508a68a14af6f6246d820800`: sus resultados no deben
 atribuirse a V33. Los dos runs son diagnóstico, no certificación comercial.
+
+La primera calificación V33 `36461394295` **no llamó al proveedor**: 253
+pruebas pasaron y el replay histórico de la demo falló porque la nueva
+cantidad «una cucharadita» preservó la frase antes de la verificación AV de
+continuidad; la acción KEEP era correcta, pero faltó la autoridad de puente
+para Boundary. V33b SHA `c96590701758523fe6a8b24529e222e142b2a6d9`
+permite que la verificación AV vuelva a evaluar una pieza ya preservada por
+cantidad; conserva todas las guardas de fuente, orden, confianza, contenido
+y región audiovisual. Si no hay demo AV confirmada, el override de cantidad
+no habilita ningún puente. QA independiente pasó; 108 pruebas del motor y
+36 focales de razón/replay pasaron localmente. Run V33b `36462878091`
+está en CI y solo ejecutará RAW si la suite pasa.
