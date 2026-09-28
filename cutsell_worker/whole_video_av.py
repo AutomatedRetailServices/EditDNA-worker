@@ -24,6 +24,12 @@ from .audio_silence import detect_audio_silence_intervals
 
 _VISUAL_ACTION_TERMS = ("mix", "pour", "scoop", "stir", "blend", "apply",
                         "mezcla", "vertiendo", "cuchar", "prepar", "vierte")
+_PRODUCT_OBJECT_TERMS = ("product", "powder", "supplement", "tub", "bottle", "container",
+                         "jar", "cup", "scoop", "producto", "polvo", "suplemento",
+                         "bote", "botella", "envase", "frasco", "recipiente", "cuchara")
+_PHYSICAL_VISUAL_TERMS = ("bend", "show", "hold", "hand", "open", "pick", "reach",
+                          "shake", "mix", "pour", "agarr", "muestra", "sost",
+                          "toma", "abre", "mezcla", "vierte")
 
 
 def _describes_product_operation(description):
@@ -271,14 +277,33 @@ class GeminiWholeVideoAVProvider:
                 continue
             for region in regions:
                 description = str(region.get('visual_observation') or '').casefold()
-                if (region.get('role') == 'audience' and float(region.get('confidence', 0)) >= .75
-                        and _describes_product_operation(description)
-                        and min(silence_end, region['end']) - max(silence_start, region['start']) >= 2.0):
-                    candidates.append((silence_start, silence_end))
-                    break
+                overlap = min(silence_end, region['end']) - max(silence_start, region['start'])
+                if overlap < 2.0 or float(region.get('confidence', 0)) < .70:
+                    continue
+                observed_action = (region.get('role') == 'audience'
+                                   and _describes_product_operation(description))
+                mixed_product_interaction = (
+                    region.get('role') in {'mixed', 'uncertain'}
+                    and any(term in description for term in _PRODUCT_OBJECT_TERMS)
+                    and any(term in description for term in _PHYSICAL_VISUAL_TERMS))
+                if observed_action or mixed_product_interaction:
+                    # The whole-source mixed region nominates a location only.
+                    # A focused observation must still prove the useful action.
+                    candidates.append((2 if observed_action else 1,
+                                       silence_start, silence_end, region.get('role')))
         if not candidates:
             return []
-        silence_start, silence_end = max(candidates, key=lambda pair: pair[1] - pair[0])
+        tier, silence_start, silence_end, nominated_role = max(
+            candidates, key=lambda row: (row[0], row[2] - row[1]))
+        self.audit_records.append({
+            'contract_version': 'cutsell.av.visual_action.v1',
+            'source_asset_id': source.source_asset_id,
+            'status': 'probe_nominated',
+            'basis': 'observed_audience_action' if tier == 2 else 'mixed_product_silence',
+            'candidate_count': len(candidates),
+            'window_start_sec': silence_start, 'window_end_sec': silence_end,
+            'nominating_region_role': nominated_role,
+        })
         length = min(30.0, float(source.duration_sec))
         start = max(0.0, min(silence_start - 8.0, float(source.duration_sec) - length))
         piece = Path(directory) / 'focused-visual-action.mp4'

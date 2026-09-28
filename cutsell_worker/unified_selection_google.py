@@ -7,7 +7,7 @@ before Selection freeze.  Boundary ownership remains elsewhere.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import base64
 import json
 from pathlib import Path
@@ -566,6 +566,22 @@ def _parse_take_competitions(raw: Mapping[str, Any], rows: list[dict[str, Any]])
         raise UnifiedSelectionUnreliableResponseError(f"invalid V2 take competitions: {exc}") from exc
 
 
+def _reconcile_verified_continuation_order(decisions, links):
+    """Correct only model story-order inversions proven by source AV."""
+    if not links:
+        return decisions
+    ranked = sorted(decisions, key=lambda decision: decision.sequence_index)
+    for left_id, right_id in links:
+        left_index = next(i for i, item in enumerate(ranked) if item.clip_id == left_id)
+        right_index = next(i for i, item in enumerate(ranked) if item.clip_id == right_id)
+        if left_index > right_index:
+            moved = ranked.pop(left_index)
+            right_index = next(i for i, item in enumerate(ranked) if item.clip_id == right_id)
+            ranked.insert(right_index, moved)
+    ranks = {item.clip_id: index for index, item in enumerate(ranked)}
+    return [replace(item, sequence_index=ranks[item.clip_id]) for item in decisions]
+
+
 @dataclass
 class GoogleUnifiedSelectionReasoner:
     api_key: str
@@ -617,7 +633,6 @@ class GoogleUnifiedSelectionReasoner:
                     decision_by_id[right.clip_id].action != "select" or
                     decision_by_id[left.clip_id].sequence_index is None or
                     decision_by_id[right.clip_id].sequence_index is None or
-                    decision_by_id[left.clip_id].sequence_index >= decision_by_id[right.clip_id].sequence_index or
                     decision_by_id[left.clip_id].relation not in {"retry_alternate", "failed", "uncertain"}):
                 continue
             inspected_sources.add(left.source_asset_id)
@@ -897,6 +912,7 @@ class GoogleUnifiedSelectionReasoner:
                 if actual_cost < estimated_cost:
                     self.ledger.release(estimated_cost - actual_cost)
                 links, evidence = self._verify_adjacent_continuations(draft, decisions)
+                decisions = _reconcile_verified_continuation_order(decisions, links)
                 return UnifiedSelectionPlan(
                     decisions=tuple(decisions),
                     provider="google",

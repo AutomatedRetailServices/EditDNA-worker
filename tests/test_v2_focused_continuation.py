@@ -82,3 +82,20 @@ def test_focused_continuation_provider_and_ffmpeg_fail_closed(monkeypatch):
         raise subprocess.CalledProcessError(1, 'ffmpeg')
     monkeypatch.setattr(av, 'slice_prepared_av', failed)
     assert reasoner._verify_adjacent_continuations(d, choices)[0] == ()
+
+
+def test_verified_source_continuation_repairs_model_story_order_only_when_confirmed(monkeypatch):
+    from cutsell_worker.unified_selection_google import _reconcile_verified_continuation_order
+    choices = [UnifiedSelectionDecision('a','discard','retry_alternate',.9,1,
+                                         'redundant_retry',sequence_index=9),
+               UnifiedSelectionDecision('b','select','independent',.95,2,
+                                         'independent_story_coverage',sequence_index=5)]
+    observed = dict(linked=True, restart_observed=False, uncertainty='low',
+                    audio_evidence='Continuous speech and one utterance with no reset.',
+                    visual_evidence='Same pose and gestures without any visible restart.')
+    reasoner, draft_with_pair, _, _ = fixtures(monkeypatch, observed)
+    links, audit = reasoner._verify_adjacent_continuations(draft_with_pair, choices)
+    assert links == (('a','b'),), audit
+    fixed = _reconcile_verified_continuation_order(choices, links)
+    assert fixed[0].sequence_index < fixed[1].sequence_index
+    assert _reconcile_verified_continuation_order(choices, ()) == choices

@@ -513,3 +513,31 @@ def test_visible_product_operation_accepts_add_powder_without_accepting_static_d
     assert not _describes_product_operation('She does not add powder into the bottle.')
     assert not _describes_product_operation('She talks about adding powder into the bottle.')
     assert not _describes_product_operation('She puts the supplement aside.')
+
+
+def test_mixed_source_region_nominates_silence_but_cannot_authorize_action(monkeypatch, tmp_path):
+    from cutsell_worker import whole_video_av
+    av, raw, _ = provider(tmp_path)
+    prepared = tmp_path / 'prepared.mp4'
+    prepared.write_bytes(b'prepared')
+    monkeypatch.setenv('CUTSELL_EDITORIAL_ENGINE_V2', '1')
+    monkeypatch.setattr(whole_video_av, 'detect_audio_silence_intervals',
+                        lambda path, **kwargs: ((69.0, 75.0), (98.4, 106.8)))
+    av.media_slicer = lambda path, dest, start, length: (dest.write_bytes(b'video') or length)
+    observed = {'regions': [{'start': 7.0, 'end': 14.0, 'role': 'audience',
+                             'confidence': .94,
+                             'visual_observation': 'Adds powder into the bottle'}]}
+    monkeypatch.setattr(av, '_observe_window', lambda *args: observed)
+    actions = av._focus_silent_action(
+        replace(source(), duration_sec=120), raw, prepared, 'digest',
+        [{'start': 68, 'end': 113.5, 'role': 'mixed', 'confidence': .9,
+          'visual_observation': 'Bending down to retrieve a lid, then showing a blue-labeled tub'}],
+        tmp_path)
+    assert actions and actions[0]['start'] == 98.4
+    assert av.audit_records[0]['basis'] == 'mixed_product_silence'
+    observed['regions'][0]['role'] = 'recording_only'
+    assert av._focus_silent_action(
+        replace(source(), duration_sec=120), raw, prepared, 'digest',
+        [{'start': 68, 'end': 113.5, 'role': 'mixed', 'confidence': .9,
+          'visual_observation': 'Bending down to retrieve a lid, then showing a blue-labeled tub'}],
+        tmp_path) == []
