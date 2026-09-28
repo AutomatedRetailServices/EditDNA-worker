@@ -1,0 +1,63 @@
+name: CutSell Yaskira09 Raw Action Frames
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/editorial-engine-v2-whole-video-rebuild
+    paths:
+      - .github/workflows/cutsell-yaskira09-action-frames.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load source credentials if required
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] && [ -n "${S3_BUCKET:-}" ]; then exit 0; fi
+          test -n "${RUNPOD_API_KEY:-}"
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != null
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value"
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+      - name: Capture source action interval
+        run: |
+          set -euo pipefail
+          python -m pip install boto3
+          mkdir -p action-frames
+          python - <<'PY'
+          import os
+          import boto3
+          boto3.client('s3').download_file(os.environ['S3_BUCKET'], 'Yaskira/09.mp4', '/tmp/yaskira09.mp4')
+          PY
+          for second in 90 92 94 96 98 100 102 104 106 108; do
+            ffmpeg -v error -ss "$second" -i /tmp/yaskira09.mp4 -frames:v 1 -vf scale=480:-1 \
+              -y "action-frames/raw-${second}.jpg"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cutsell-yaskira09-source-action-frames
+          path: action-frames/
+          if-no-files-found: error
