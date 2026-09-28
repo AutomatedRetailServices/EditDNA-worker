@@ -1,0 +1,44 @@
+name: CutSell V28 Artifact Inspection
+on:
+  push:
+    branches:
+      - feat/editorial-engine-v2-whole-video-rebuild
+    paths:
+      - .github/workflows/cutsell-v28-artifact-inspection.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download prior evidence without provider calls
+        run: |
+          mkdir -p evidence
+          gh run download 36443271393 --repo AutomatedRetailServices/EditDNA-worker --name cutsell-editorial-v2-yaskira-08-36443271393 --dir evidence
+      - name: Print narrow Gold and visual action audit
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          gold={'01':[(120,147)],'02':[(5,14),(19,28),(52,66),(73,91),(97,120)]}
+          for p in sorted(Path('evidence/results').glob('*.json')):
+              if p.stem not in gold: continue
+              d=json.loads(p.read_text()); spans=sorted((c['start'],c['end']) for c in d.get('selected',[]))
+              wanted=gold[p.stem]; overlap=sum(max(0,min(b,y)-max(a,x)) for a,b in wanted for x,y in spans)
+              extra=sum(max(0,b-a)-sum(max(0,min(b,y)-max(a,x)) for x,y in wanted) for a,b in spans)
+              audit=d.get('diagnostics',{}); av=audit.get('whole_video_context',{}).get('sources',[])
+              visual=[]
+              for source in av:
+                  try: visual.extend(json.loads(source.get('audiovisual_evidence','{}')).get('focused_silent_visual_actions',[]))
+                  except (ValueError,TypeError): pass
+              print(json.dumps({'source':d.get('source_key'),'selected':[[round(a,3),round(b,3)] for a,b in spans],
+                  'gold_overlap':round(overlap,3),'gold_total':sum(b-a for a,b in wanted),
+                  'extra':round(extra,3),'visual_actions':visual,
+                  'focused_candidates':audit.get('v2_focused_visual_action_candidates',[]),
+                  'continuation_links':audit.get('v2_verified_continuation_links',[]),
+                  'qc':d.get('live_render_qc',{}).get('status')},ensure_ascii=False))
+          for p in Path('evidence/results').glob('*failure.json'): print(p.name,p.read_text()[:1800])
+          PY
