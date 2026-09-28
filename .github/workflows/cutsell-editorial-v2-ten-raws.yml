@@ -142,7 +142,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v22_source_word_union",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v23_silence_bridge",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

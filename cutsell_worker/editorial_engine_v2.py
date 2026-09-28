@@ -181,7 +181,11 @@ def _audience_regions(whole: dict) -> dict[str, tuple[tuple[float, float, bool],
                     "demonstrat", "show", "display", "mix", "pour", "scoop", "apply", "use the product",
                     "prepar", "instruction", "bottle", "container", "product",
                 ))
-                regions.append((start, end, demonstration))
+                operation = any(token in description for token in (
+                    "mix", "pour", "scoop", "stir", "blend", "apply", "unbox", "assemble",
+                    "mezcla", "mezclando", "vertiendo", "aplicando",
+                ))
+                regions.append((start, end, demonstration, operation))
         if source_id and regions:
             output[source_id] = tuple(regions)
     return output
@@ -205,6 +209,8 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
         for row in ((result.draft.diagnostics or {}).get("unified_selection_reasoner") or {}).get("decisions", ())
         if isinstance(row, dict)
     }
+    source_events = {str(source.get("source_asset_id") or ""): tuple(source.get("events") or ())
+                     for source in whole.get("sources") or () if isinstance(source, dict)}
     for index in range(len(selected) - 1):
         left, right = selected[index], selected[index + 1]
         if left.source_asset_id != right.source_asset_id or left.source_order != right.source_order:
@@ -213,9 +219,20 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
         gap = gap_end - gap_start
         if gap <= 1e-6 or gap > 8.0:
             continue
+        # A broad AV audience label cannot overrule measured dead air. Do
+        # not stretch selected speech across a source silence that QC would
+        # reject after render, even if both neighboring takes are selected.
         containing = [region for region in audience_by_source.get(left.source_asset_id, ())
                       if region[0] <= gap_start + 1e-6 and region[1] >= gap_end - 1e-6]
         if not containing:
+            continue
+        measured_dead_air = any(
+            isinstance(event, dict) and event.get("kind") == "audio_silence_interval"
+            and min(gap_end, float(event.get("end") or 0)) -
+            max(gap_start, float(event.get("start") or 0)) >= 1.20
+            for event in source_events.get(left.source_asset_id, ()))
+        visually_observed_operation = any(region[3] for region in containing)
+        if measured_dead_air and not visually_observed_operation:
             continue
         # Ordinary speech gaps stay tightly bounded. A longer bridge is safe
         # only when Watch + Listen explicitly observed an audience-facing

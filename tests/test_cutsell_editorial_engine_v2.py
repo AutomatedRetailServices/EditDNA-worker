@@ -11,7 +11,39 @@ from cutsell_worker.contracts import (
     SCHEMA_VERSION,
     Word,
 )
-from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2, _coalesce_overlapping_selected_speech
+from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2, _coalesce_overlapping_selected_speech, _restore_safe_audience_continuity
+
+
+def test_v2_measured_silence_blocks_broad_av_continuity_bridge():
+    base = source_result()
+    a = replace(clip("left", 100, selected=True), end=116.57, text="demonstration workout")
+    b = replace(clip("right", 120.33, selected=True), end=140, text="workout demonstration")
+    whole = {"sources": [{
+        "source_asset_id": "source",
+        "audiovisual_evidence": '{"regions":[{"start":90,"end":145,"role":"audience","confidence":0.95,"visual_observation":"Demonstrates the product"}]}',
+        "events": [{"kind": "audio_silence_interval", "start": 117.128, "end": 119.584}],
+    }]}
+    result = replace(base, draft=replace(base.draft, selected=(a, b), alternates=(), discarded=()))
+    output = _restore_safe_audience_continuity(result, whole)
+    assert output.draft.selected[0].end == 116.57
+    assert not output.draft.diagnostics.get("editorial_engine_v2_continuity_restoration")
+    # Explicit product manipulation can justify a long silent action bridge.
+    a = replace(a, start=95, end=100)
+    b = replace(b, start=106, end=110)
+    whole["sources"][0]["audiovisual_evidence"] = (
+        '{"regions":[{"start":94,"end":111,"role":"audience","confidence":0.95,'
+        '"visual_observation":"Demonstrates the product"}]}'
+    )
+    whole["sources"][0]["events"] = [{"kind": "audio_silence_interval", "start": 101, "end": 103}]
+    # A generic presentation description is insufficient.
+    output = _restore_safe_audience_continuity(
+        replace(base, draft=replace(base.draft, selected=(a, b), alternates=(), discarded=())), whole)
+    assert output.draft.selected[0].end == 100
+    whole["sources"][0]["audiovisual_evidence"] = whole["sources"][0]["audiovisual_evidence"].replace(
+        'Demonstrates the product', 'Mixes powder into a bottle')
+    output = _restore_safe_audience_continuity(
+        replace(base, draft=replace(base.draft, selected=(a, b), alternates=(), discarded=())), whole)
+    assert output.draft.selected[0].end == 106
 
 
 def test_v2_coalesces_identical_source_word_overlap_preserving_unique_edges():
