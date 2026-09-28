@@ -8,6 +8,36 @@ seguridad, despliegue y autoridad de producción siguen en `AGENTS.md` y
 
 ## Punto de control actual (2026-09-28)
 
+**Estado actual de la calibración:** la reauditoría global de competencias
+pasó tests y el gate de ejecución, pero no pudo calificarse en RAW08. Run
+`36488048062` recibió `PROHIBITED_CONTENT` tanto en Selection audiovisual
+como en el diagnóstico de texto; no hubo candidatos ni render. No reenviar la
+misma solicitud ni modificar el prompt para eludir el bloqueo. La corrida
+focal previa `36485855717` retuvo 22.719/27 s KEEP, conservó 47.327 s fuera
+de Gold y perdió el CTA final. No se ha demostrado una mejora en 08.
+
+El replay offline V32 encontró dos errores transversales del resolver:
+02: `whole_take_equivalent_covered` pudo borrar candidatos etiquetados por el
+propio selector como `failed_delivery`; 06: la protección de CTA pudo
+reinsertar un CTA descartado pese a existir ya uno seleccionado con el mismo
+destino. El parche local bloquea ambos caminos. La suite V2 ampliada pasó 268
+tests (77 focales de Selection), además de `py_compile` y `git diff --check`.
+Esto aún requiere una calificación focal con un RAW no bloqueado; no equivale
+a corregir 02/06 en resultados renderizados. La pérdida parcial de entrega de
+09 sigue siendo otro defecto abierto y necesita su propia solución.
+
+**Iteraciones sin límite fijo:** continuar probando y corrigiendo el conjunto
+hasta resolver los defectos; no imponer un máximo de dos corridas ni descartar
+08 por haber fallado una prueba. Cada corrida debe tener una hipótesis nueva,
+usar primero replays y adversarios locales, e incluir su costo/resultado en el
+registro. Para 08, investigar el bloqueo con evidencia local y una ruta de
+diagnóstico distinta; no reenviar la misma solicitud bloqueada ni reformularla
+para eludir el filtro. Continuar además con 02/06/09 y los demás videos, con
+regresión completa cuando un cambio editorial esté focalmente cualificado.
+Revisar resultados editoriales y MP4, sin límite fijo de iteraciones. Los
+videos 01, 04, 05, 07, 09 y 10 también tienen problemas o bloqueos conocidos;
+no asumir que los únicos defectuosos son 02, 06, 08 y 09.
+
 **Última calificación focal:** Video08 run `36485855717`, SHA
 `a23add22`, pasó 265 tests CI y render QC, pero **EDITORIAL_FAIL**:
 22.719/27 s KEEP Gold retenidos, 47.327 s fuera del Gold y CTA final

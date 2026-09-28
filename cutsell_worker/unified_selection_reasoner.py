@@ -341,13 +341,30 @@ def _apply_v2_take_competitions(
                         _has_purchase_action(clips[j].text) and
                         _purchase_destination(clips[j].text) == _purchase_destination(clips[i].text)
                         for j in range(len(clips)))
+                    cta_destination_already_selected = actions[i] != "select" and any(
+                        j != i and actions[j] == "select" and
+                        decisions[clips[j].clip_id].action == "select" and
+                        not decisions[clips[j].clip_id].trailing_recording_word_count and
+                        clips[j].source_asset_id == clips[i].source_asset_id and
+                        _has_purchase_action(clips[j].text) and
+                        _purchase_destination(clips[j].text) == _purchase_destination(clips[i].text)
+                        for j in range(len(clips))
+                    )
                     if (_has_purchase_action(clips[i].text) and not winner_has_cta and
+                            not cta_destination_already_selected and
                             not selected_cta_elsewhere):
                         if (decisions[clip_id].reason_code not in {"failed_delivery", "recording_process_bts"}
                                 and decisions[clip_id].relation not in {"failed", "bts"}):
                             actions[i] = "select"
                             overrides[i] = "purchase_action_not_covered_by_winner"
                         reason = "purchase_action_coverage_conflict"
+                        continue
+                    # A provider's own failed-delivery judgment is stronger
+                    # than an equivalent-take proposal. Do not let a broad
+                    # whole-plan comparison erase that explicit distinction.
+                    if (decisions[clip_id].reason_code == "failed_delivery" or
+                            decisions[clip_id].relation == "failed"):
+                        reason = "failed_delivery_preserved_against_equivalence"
                         continue
                     if (tuple(sorted(contest.winner_clip_ids)), clip_id) in protected:
                         reason = "conflicting_material_unique_preserved"
@@ -356,7 +373,8 @@ def _apply_v2_take_competitions(
                         actions[i] = "discard"
                         overrides[i] = "whole_take_equivalent_covered"
                 if reason not in {"conflicting_material_unique_preserved", "purchase_action_coverage_conflict",
-                                  "distinct_focused_visual_action_preserved", "material_claim_not_covered_by_winner"}:
+                                  "distinct_focused_visual_action_preserved", "material_claim_not_covered_by_winner",
+                                  "failed_delivery_preserved_against_equivalence"}:
                     reason = "covered_alternates_removed"
         audit.append({
             "winners": list(contest.winner_clip_ids),

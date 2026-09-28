@@ -420,6 +420,47 @@ def test_v2_whole_take_cannot_claim_to_cover_absent_purchase_action():
     assert actions == ["select", "select", "select"]
 
 
+def test_v2_unique_selected_cta_prevents_rescuing_duplicate_discarded_cta():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    chosen = clip("chosen", 80, 96,
+                  "Lo puedes encontrar en el carrito y dura muchísimo", selected=True)
+    duplicate = clip("duplicate", 63, 79,
+                     "Lo puedes encontrar en el carrito y déjame comentarios", selected=False)
+    decisions = {
+        "chosen": v2_decision("chosen", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+        "duplicate": v2_decision("duplicate", "discard", "retry_alternate", .95, 0,
+                                  "redundant_retry", 0),
+    }
+    actions, overrides = ["select", "discard"], [None, None]
+    audit = _apply_v2_take_competitions(
+        (duplicate, chosen), decisions, actions, overrides,
+        (UnifiedTakeCompetition(("chosen",), ("duplicate",), (),
+                                "equivalent_take", .95, "Same delivery and destination"),),
+    )
+    assert actions == ["select", "discard"]
+    assert overrides == [None, None]
+    assert audit[0]["decision"] == "winner_not_confirmed_selected"
+
+
+def test_v2_equivalence_cannot_erase_failed_delivery_decision():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    failed = clip("failed", 51, 69, "We were laughing and could barely stay in character", selected=True)
+    winner = clip("winner", 28, 50, "We ordered a pizza and had fun making the video", selected=True)
+    decisions = {
+        "failed": v2_decision("failed", "discard", "failed", .90, 0, "failed_delivery", 1),
+        "winner": v2_decision("winner", "select", "retry_winner", .98, 1, "best_complete_take", 0),
+    }
+    actions, overrides = ["select", "select"], [None, None]
+    audit = _apply_v2_take_competitions(
+        (failed, winner), decisions, actions, overrides,
+        (UnifiedTakeCompetition(("winner",), ("failed",), (),
+                                "equivalent_take", .95, "Same overall narrative"),),
+    )
+    assert actions == ["select", "select"]
+    assert overrides == [None, None]
+    assert audit[0]["decision"] == "failed_delivery_preserved_against_equivalence"
+
+
 def test_v2_cta_support_cannot_depend_on_another_proposed_deletion():
     from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
     body_a = clip("body_a", 0, 5, "Product review", selected=True)
