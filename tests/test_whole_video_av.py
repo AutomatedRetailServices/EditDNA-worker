@@ -376,12 +376,12 @@ def test_bad_second_window_fails_closed_without_partial_context(tmp_path):
 
 def test_approved_short_source_keeps_single_whole_video_request(tmp_path):
     raw=tmp_path/'raw.mp4';raw.write_bytes(b'original')
-    def prepare(path,target):target.write_bytes(b'prepared');return 140
+    def prepare(path,target):target.write_bytes(b'prepared');return 90
     def should_not_slice(*args):raise AssertionError('short source must remain whole')
     session=Session()
     av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
         session=session,media_preparer=prepare,media_slicer=should_not_slice)
-    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=140),),(),(),
+    context=safe_whole_video_analyze(av,(replace(source(),duration_sec=90),),(),(),
         local_paths={'source':str(raw)})
     assert context.status.available
     assert len(session.calls)==2
@@ -566,3 +566,36 @@ def test_ninety_second_window_threshold_and_source_time_offsets(tmp_path):
         assert audit['window_count']==(1 if duration<=90 else 2)
         assert [(r['start'],r['end']) for r in audit['regions']]==(
             [(1,2)] if duration<=90 else [(1,2),(46,47)])
+
+
+def test_149_second_source_merges_short_tail_and_rejects_intermediate_window_failure(tmp_path):
+    raw=tmp_path/'raw-149.mp4'
+    raw.write_bytes(b'input')
+    def prepare(path,target):
+        target.write_bytes(b'prepared')
+        return 149
+    slices=[]
+    def slice_media(path,target,start,length):
+        slices.append((start,length))
+        target.write_bytes(b'window')
+        return length
+    av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
+        session=Session(),media_preparer=prepare,media_slicer=slice_media)
+    result=safe_whole_video_analyze(av,(replace(source(),duration_sec=149),),(),(),
+                                    local_paths={'source':str(raw)})
+    assert result.status.available
+    assert slices == [(0,45),(45,45),(90,59)]
+    assert json.loads(result.sources[0].audiovisual_evidence)['window_count']==3
+
+    class FailedMiddle(Session):
+        def post(self,url,headers,json,timeout):
+            if len(self.calls)==3 and url.endswith('generateContent'):
+                self.calls.append((url,json))
+                raise requests.exceptions.HTTPError('window 2 rejected')
+            return super().post(url,headers,json,timeout)
+    av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
+        session=FailedMiddle(),media_preparer=prepare,media_slicer=slice_media)
+    result=safe_whole_video_analyze(av,(replace(source(),duration_sec=149),),(),(),
+                                    local_paths={'source':str(raw)})
+    assert not result.status.available
+    assert result.sources==()
