@@ -29,6 +29,8 @@ jobs:
               d=json.loads(p.read_text()); spans=sorted((c['start'],c['end']) for c in d.get('selected',[]))
               if p.stem=='01':
                   audit=d.get('diagnostics',{})
+                  print('RAW08_CONFLICTS',json.dumps([x for x in audit.get('v2_retry_claim_conflicts',[])
+                        if x.get('clip_id')=='clip_869e4054ae44dc9114dc'],ensure_ascii=False))
                   for c in d.get('selected',[]):
                       if 55 < c.get('start',0) < 90:
                           decision=next((a for a in audit.get('unified_selection_reasoner',{}).get('decisions',[])
