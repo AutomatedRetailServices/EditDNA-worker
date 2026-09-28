@@ -1,4 +1,20 @@
+Warning: truncated output (original token count: 30256)
+Total output lines: 1781
+
 # CutSell.ai — Current State
+
+## 2026-09-28 — Canonical rule audit and whole-take evidence (offline)
+
+The V2 branch is auditing inherited editorial rules against Video00 and the
+Yaskira 01–10 Human Gold instead of carrying the old engine's protections
+forward automatically.  The first code change exposes source-scoped,
+interval-preserving take-group summaries to the whole-video reasoner as
+evidence only; it explicitly separates delivery attempts from retry families
+and semantic ideas.  Missing IDs remain singletons and equal IDs across
+sources never merge.  Selection Freeze, provenance, content-integrity,
+security and operational guards remain unchanged.  No paid run or production
+change has been made at this checkpoint.  Audit and exit criteria:
+`docs/CUTSELL_V2_CANONICAL_RULE_AUDIT_20260928.md`.
 
 ## 2026-09-27 — V17 native Selection prepared for isolated qualification
 
@@ -1013,23 +1029,7 @@ Video00 is generally a useful Clean Cut, despite inconsistent AI decisions.
 Preserve that product assessment separately from unchanged technical QC and
 source-range criteria; it does not override the automated delivery gate.
 The sales-funnel layer is an opportunity inside the same editor to improve
-the source-supported hook, benefit progression and CTA. No commercial layer
-was changed in this batch, no rigid funnel is required, and no conversion
-improvement is established by visual cleanliness or these repeated trials.
-
-
-## Uploaded MOV medium versus Deepgram authorized
-
-Two fresh full-engine outputs requested for uploaded MOV SHA 5ae3cffb9034cc9aebbe4f645c4f1f34538f9113f05990291215c86b7163b681.
-Same source, frozen configuration and engine code; medium then Deepgram, no WhisperX.
-No retries, no production promotion. Reuse verified existing source bytes.
-
-Completed run 36076863910 / job 107889907974, tested e76bf1210c561040a445436b4a1c12192c607963.
-Medium: 33.767 s, 277 ASR words, technical PASS but delivery blocked by perceptual FAIL.
-Deepgram: 33.061 s, 268 words, technical PASS, pending human Watch & Listen.
-Both MP4 hashes and full decode verified; same source and build; both Modal apps stopped.
-Both selected plans retain preparation/retry speech; this is not an approved clean-edit
-quality win for either provider. No human listening claimed. Preserve contradictory
+the source-support…256 tokens truncated… human listening claimed. Preserve contradictory
 Medium compact deliverable=true versus NOT_DELIVERABLE status; status used for labeling.
 Two authorized calls completed, no extra retry or production change.
 

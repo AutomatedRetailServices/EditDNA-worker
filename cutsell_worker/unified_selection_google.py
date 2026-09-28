@@ -101,6 +101,7 @@ def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
             "hybrid_votes": hybrid_votes.get(clip.clip_id, [])[:6],
         }
         if (draft.diagnostics or {}).get("editorial_engine_v2_request"):
+            row["source_asset_id"] = clip.source_asset_id
             row["aligned_word_texts"] = [word.text for word in clip.words]
             row["aligned_words"] = [[i, word.text, round(word.start, 3), round(word.end, 3)]
                                     for i, word in enumerate(clip.words)]
@@ -122,6 +123,68 @@ def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
             }
         rows.append(row)
     return rows
+
+
+def _take_group_summaries(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose upstream take grouping as inspectable evidence, never authority.
+
+    V2 previously sent ``take_group_id`` only on isolated candidate rows.  That
+    made a delivery split by pauses look like unrelated clips and encouraged
+    the whole-video reasoner to compare fragments instead of reconstructed
+    attempts.  The summary keeps every original interval and gap visible.  It
+    deliberately does not call a group a retry family or an idea: those are
+    separate editorial judgments the reasoner must still make.
+    """
+    grouped: dict[tuple[str, tuple[str, str]], list[tuple[int, dict[str, Any]]]] = {}
+    for candidate_index, row in enumerate(candidates):
+        source_asset_id = str(row.get("source_asset_id") or "")
+        raw_group_id = row.get("take_group_id")
+        # Missing grouping evidence is always a singleton.  In particular,
+        # unrelated null-ID candidates must never collapse into one mega-take.
+        # The tagged tuple cannot collide with any real upstream string ID.
+        group_key = (("present", str(raw_group_id)) if raw_group_id
+                     else ("missing", str(candidate_index)))
+        grouped.setdefault((source_asset_id, group_key), []).append((candidate_index, row))
+
+    summaries = []
+    for (source_asset_id, group_key), members in grouped.items():
+        members.sort(key=lambda item: (float(item[1]["start"]), float(item[1]["end"]), item[0]))
+        intervals = []
+        combined_text = []
+        previous_end = None
+        for candidate_index, row in members:
+            start = float(row["start"])
+            end = float(row["end"])
+            gap_before = None if previous_end is None else round(max(0.0, start - previous_end), 3)
+            intervals.append({
+                "candidate_index": candidate_index,
+                "clip_id": row["clip_id"],
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "gap_before": gap_before,
+                "current_bucket": row["current_bucket"],
+                # Full text remains authoritative in candidates[].  A short
+                # excerpt makes the grouped view readable without duplicating
+                # the whole transcript and exhausting V2's input budget.
+                "text_excerpt": str(row.get("text") or "")[:160],
+            })
+            separator = "[START]" if gap_before is None else f"[GAP {gap_before:.3f}s]"
+            combined_text.append(
+                f"{separator} candidate {candidate_index}: {str(row.get('text') or '')[:160]}"
+            )
+            previous_end = max(previous_end or end, end)
+        summaries.append({
+            # Source qualification keeps equal upstream IDs from looking like
+            # one cross-source attempt to the model.
+            "take_evidence_id": f"{source_asset_id}:{group_key[0]}:{group_key[1]}",
+            "upstream_take_group_id": members[0][1].get("take_group_id"),
+            "source_asset_id": source_asset_id,
+            "candidate_indices": [index for index, _ in members],
+            "intervals": intervals,
+            "combined_text_with_gaps": " ".join(combined_text),
+            "evidence_only": True,
+        })
+    return summaries
 
 
 def _source_context(draft: DraftTimeline, *, include_audiovisual: bool = False) -> dict[str, Any]:
@@ -191,13 +254,23 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
             "Natural source story order is authoritative; do not reorder candidates.",
             "SWAP a usable alternative that should not play by default.",
         ])
-    return {
+    payload = {
         "task": "cutsell_editorial_engine_v2" if v2_request else "cutsell_unified_whole_video_selection",
         "engine_version": "v2" if v2_request else "legacy",
         "source_context": _source_context(draft, include_audiovisual=v2_request),
         "editorial_contract": contract,
         "candidates": candidates,
     }
+    if v2_request:
+        payload["take_group_contract"] = [
+            "take_groups are provisional delivery-attempt evidence, not retry families, semantic ideas, or selection authority.",
+            "Inspect every listed interval and gap. Shared IDs do not prove continuity when audiovisual evidence shows a restart or a separate retry.",
+            "Candidates from different sources never form one take, and missing take_group_id candidates remain independent singletons.",
+            "A take may contain several candidate pieces; compare its union against other complete delivery attempts before deciding individual actions.",
+            "A group summary never changes candidate membership, order, timestamps, or boundaries; return one decision for every original candidate.",
+        ]
+        payload["take_groups"] = _take_group_summaries(candidates)
+    return payload
 
 
 def unified_selection_response_schema(candidate_count: int, *, v2: bool = False) -> dict[str, Any]:

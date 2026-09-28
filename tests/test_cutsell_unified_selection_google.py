@@ -41,6 +41,19 @@ def clip(i: int) -> DraftClip:
     )
 
 
+def grouped_clip(i: int, *, source: str = "src", group: str | None = "take-1",
+                 start: float | None = None, end: float | None = None,
+                 bucket_text: str | None = None) -> DraftClip:
+    start = float(i * 5) if start is None else start
+    end = start + 4.0 if end is None else end
+    text = bucket_text or f"Delivery piece {i}"
+    return DraftClip(
+        clip_id=f"g{i}-{source}", source_asset_id=source, source_order=i,
+        start=start, end=end, text=text, caption_text=text,
+        take_group_id=group,
+    )
+
+
 def draft(candidate_count: int) -> DraftTimeline:
     clips = tuple(clip(i) for i in range(candidate_count))
     return DraftTimeline(
@@ -51,6 +64,77 @@ def draft(candidate_count: int) -> DraftTimeline:
         alternates=(),
         discarded=(),
     )
+
+
+def timeline_with(*, selected=(), alternates=(), discarded=()) -> DraftTimeline:
+    return DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p",
+        strategy=EditStrategy.STORYTELLING, selected=tuple(selected),
+        alternates=tuple(alternates), discarded=tuple(discarded),
+        diagnostics={"editorial_engine_v2_request": True},
+    )
+
+
+def test_take_group_summary_reconstructs_split_delivery_without_mutating_candidates():
+    payload = build_unified_selection_payload(timeline_with(
+        selected=(grouped_clip(0, start=10.0, end=12.0, bucket_text="first half"),),
+        alternates=(grouped_clip(1, start=12.4, end=15.0, bucket_text="second half"),),
+    ))
+    group = payload["take_groups"][0]
+    assert group["candidate_indices"] == [0, 1]
+    assert [row["gap_before"] for row in group["intervals"]] == [None, 0.4]
+    assert "first half" in group["combined_text_with_gaps"]
+    assert "second half" in group["combined_text_with_gaps"]
+    assert [row["clip_id"] for row in payload["candidates"]] == ["g0-src", "g1-src"]
+
+
+def test_same_take_group_id_in_different_sources_never_merges():
+    payload = build_unified_selection_payload(timeline_with(selected=(
+        grouped_clip(0, source="a", group="shared"),
+        grouped_clip(1, source="b", group="shared"),
+    )))
+    assert len(payload["take_groups"]) == 2
+    assert {group["source_asset_id"] for group in payload["take_groups"]} == {"a", "b"}
+
+
+def test_missing_take_group_ids_are_independent_singletons():
+    payload = build_unified_selection_payload(timeline_with(selected=(
+        grouped_clip(0, group=None), grouped_clip(1, group=None),
+    )))
+    assert len(payload["take_groups"]) == 2
+    assert all(len(group["candidate_indices"]) == 1 for group in payload["take_groups"])
+
+
+def test_noncontiguous_same_group_preserves_gap_instead_of_claiming_continuity():
+    payload = build_unified_selection_payload(timeline_with(selected=(
+        grouped_clip(0, group="provisional", start=0.0, end=2.0),
+        grouped_clip(1, group="provisional", start=20.0, end=22.0),
+    )))
+    group = payload["take_groups"][0]
+    assert group["intervals"][1]["gap_before"] == 18.0
+    assert "[GAP 18.000s]" in group["combined_text_with_gaps"]
+    assert group["evidence_only"] is True
+
+
+def test_take_group_contract_separates_delivery_evidence_from_retry_authority():
+    payload = build_unified_selection_payload(timeline_with(selected=(grouped_clip(0),)))
+    contract = " ".join(payload["take_group_contract"])
+    assert "not retry families" in contract
+    assert "return one decision for every original candidate" in contract
+
+
+def test_take_group_context_is_v2_only_and_does_not_change_legacy_payload():
+    payload = build_unified_selection_payload(draft(2))
+    assert "take_groups" not in payload
+    assert "take_group_contract" not in payload
+
+
+def test_real_group_id_cannot_collide_with_missing_id_singleton():
+    payload = build_unified_selection_payload(timeline_with(selected=(
+        grouped_clip(0, group=None), grouped_clip(1, group="__missing_0"),
+    )))
+    assert len(payload["take_groups"]) == 2
+    assert len({group["take_evidence_id"] for group in payload["take_groups"]}) == 2
 
 
 def decisions_json(candidate_count: int, *, index_offset: int = 0) -> str:
