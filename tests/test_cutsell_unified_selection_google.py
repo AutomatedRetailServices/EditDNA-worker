@@ -498,7 +498,10 @@ def test_native_preflight_failure_never_generates_or_falls_back_to_text(count):
 
 
 def test_v2_contract_prefers_complete_take_over_fragment_patchwork():
-    payload = build_unified_selection_payload(draft(2), v2_request=True)
+    d = replace(draft(2), diagnostics={
+        "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+    })
+    payload = build_unified_selection_payload(d)
     contract = " ".join(payload["editorial_contract"])
     assert "continuous complete take" in contract
     assert "immediately adjacent continuation candidates" in contract
