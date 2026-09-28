@@ -35,10 +35,20 @@ def _describes_product_operation(description):
     value = str(description or "").casefold()
     if any(term in value for term in _VISUAL_ACTION_TERMS):
         return True
+    if re.search(r'\b(?:does not|did not|doesn.t|didn.t|no|nunca|sin)\s+'
+                 r'(?:\w+\s+){0,3}(?:add|adds|adding|put|puts|agrega|añade|echa)\b', value):
+        return False
+    if re.search(r'\b(?:talks? about|speaks? about|says? to|plans? to|'
+                 r'prepares? to|about to|habla de|dice que|va a)\s+'
+                 r'(?:\w+\s+){0,3}(?:add|adds|adding|put|puts|agrega|añade|echa)\b', value):
+        return False
     return bool(re.search(
         r'\b(?:add(?:s|ed|ing)?|put(?:s|ting)?|dispens(?:e|es|ed|ing)|'
         r'agreg(?:a|an|ando)|añad(?:e|en|iendo)|ech(?:a|an|ando))\b'
-        r'.{0,65}\b(?:powder|supplement|creatine|polvo|suplemento|creatina)\b', value))
+        r'.{0,65}\b(?:powder|supplement|creatine|polvo|suplemento|creatina)\b'
+        r'.{0,100}\b(?:into|in|to|en|al|sobre)\b'
+        r'.{0,40}\b(?:bottle|cup|container|glass|water|drink|surface|'
+        r'botella|vaso|recipiente|agua|bebida|superficie)\b', value))
 
 FOCUSED_ACTION_PROMPT = '''Watch and listen to this short creator-source window.
 Find only visible, audience-facing product operations such as pouring, mixing,

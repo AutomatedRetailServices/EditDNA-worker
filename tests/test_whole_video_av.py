@@ -510,3 +510,6 @@ def test_visible_product_operation_accepts_add_powder_without_accepting_static_d
     assert _describes_product_operation('La creadora agrega creatina al recipiente.')
     assert not _describes_product_operation('She holds the powder tub while speaking to camera.')
     assert not _describes_product_operation('She adds a joke and shows the container.')
+    assert not _describes_product_operation('She does not add powder into the bottle.')
+    assert not _describes_product_operation('She talks about adding powder into the bottle.')
+    assert not _describes_product_operation('She puts the supplement aside.')
