@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 01–10 Batch V32
+name: CutSell Editorial Engine V2 Focused Regression 02-03-04-06-09
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-yaskira-01-10-batch
+  group: cutsell-editorial-v2-focused-regression-02-03-04-06-09
   cancel-in-progress: false
 
 jobs:
@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p editorial-v2-yaskira-01-10/previews editorial-v2-yaskira-01-10/results
+          mkdir -p editorial-v2-focused-regression/previews editorial-v2-focused-regression/results
           python - <<'PY'
           import json
           import re
@@ -112,18 +112,13 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Yaskira/01.mp4",
               "Yaskira/02.mp4",
               "Yaskira/03.mp4",
               "Yaskira/04.MP4",
-              "Yaskira/05.MP4",
               "Yaskira/06.MP4",
-              "Yaskira/07.mp4",
-              "Yaskira/08.mp4",
               "Yaskira/09.mp4",
-              "Yaskira/10.MOV",
           ]
-          root = Path("editorial-v2-yaskira-01-10")
+          root = Path("editorial-v2-focused-regression")
           results = []
           failures = []
           for index, key in enumerate(keys, start=1):
@@ -132,7 +127,7 @@ jobs:
               try:
                   result = run_single_universal_clean_cut_validation(
                       key,
-                      project_id=f"cutsell-editorial-v2-ten-raws-{index:02d}",
+                      project_id=f"cutsell-editorial-v2-focused-regression-{index:02d}",
                       preview_output=str(preview),
                   )
                   v2_status = result.get("diagnostics", {}).get("editorial_engine_v2", {}).get("status")
@@ -216,7 +211,7 @@ jobs:
           print(json.dumps(comparisons, ensure_ascii=False, indent=2))
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_01_10.v32_qc_split",
+          "schema_version": "cutsell.editorial_engine_v2.yaskira_focused_regression.v1",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
@@ -240,7 +235,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-yaskira-01-10-${{ github.run_id }}
-          path: editorial-v2-yaskira-01-10/
+          name: cutsell-editorial-v2-focused-regression-02-03-04-06-09-${{ github.run_id }}
+          path: editorial-v2-focused-regression/
           if-no-files-found: warn
           retention-days: 30
