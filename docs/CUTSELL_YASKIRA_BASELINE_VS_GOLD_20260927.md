@@ -25,4 +25,4 @@ Offline interval comparison of saved baseline outputs from runs 36321269066 and 
 
 ## Next bounded correction
 
-Use Video08 to diagnose one general winning-take failure. One correction hypothesis and one evaluation cycle count toward the agreed two-cycle limit for this defect class. Regression checks must include 05,06 and09 to prevent a fix that simply favors the latest take in every video.
+Historical proposal: use Video08 to diagnose one general winning-take failure. The former two-cycle limit is superseded by `CUTSELL_EDITORIAL_CALIBRATION_MASTER.md`: investigation has no fixed cycle count, and each paid run needs a recorded hypothesis or diagnostic/reproducibility objective within authorization. Regression checks include 05, 06 and 09, followed by a complete 01–10 pass on the same version.

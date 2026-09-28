@@ -207,3 +207,10 @@ or improved a video. Runtime reports must distinguish activation,
 dependency blocking, missing evidence and actual decisions. Explicit rollback
 controls remain available. This integration is not a production deployment
 or live editorial acceptance. See the corresponding CURRENT_STATE entry.
+# Active calibration process
+
+Editorial changes to the experimental V2 motor follow
+`CUTSELL_EDITORIAL_CALIBRATION_MASTER.md`. Historical rules in this doctrine
+are hypotheses to test against Human Gold and independent regression, not
+automatic V2 decision authority. Technical/security invariants remain subject
+to their own contracts.

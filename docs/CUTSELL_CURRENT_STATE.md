@@ -1,7 +1,21 @@
-Warning: truncated output (original token count: 30256)
-Total output lines: 1781
+Warning: truncated output (original token count: 30230)
+Total output lines: 1779
 
 # CutSell.ai — Current State
+
+## 2026-09-28 — V19 Video08 failed; calibration master adopted
+
+Run `36410612325` at `12730096` finished technically and uploaded artifact
+`10964875544`. Selected 122.72 seconds across 19.25–144.11 even though
+Yaskira08 Human Gold retains only 120–147. The final CTA at 145.1–146.709
+was discarded; earlier takes were labeled independent and the final take
+failed, with only part recovered by a conservative AV/unique-token override.
+Post-render QC marked `NOT_DELIVERABLE_NEEDS_HUMAN_REVIEW` for 1.397 seconds
+of lingering silence. This is EDITORIAL_FAIL and BLOCKED, not an accepted
+video. `CUTSELL_EDITORIAL_CALIBRATION_MASTER.md` now governs this and future
+cycles: diagnose one failure, test offline, qualify that case, then run all
+ten on the same commit/configuration and inspect each rendered MP4. No
+commercial-quality claim is made from the present ten development videos.
 
 ## 2026-09-28 — Canonical rule audit and whole-take evidence (offline)
 
@@ -1016,20 +1030,7 @@ the five existing GPT + WhisperX trials. Exactly five new sequential calls,
 one frozen environment snapshot, same source and checkout, fresh provider per
 trial, no cross-trial transcript reuse or automatic retries. No editorial
 changes; reuse identical Video00 criteria. Completed: run 36070640917, test
-a5fa3918d69d89d110dac02e740a005706ca27ca. Five videos recovered and decoded;
-editorial scores 7, 10, 7, 7, 7 out of 11 (mean 7.6 versus GPT 6.4).
-Selection coverage IoU 91.393–100% versus GPT 72.821–90.996%. All five remain
-NEEDS_HUMAN_REVIEW; aggregate workflow failed its editorial gate as designed,
-not its five engine calls. Five distinct Deepgram requests; source, config,
-package and build checks passed; all Modal apps completed. No sixth run or
-production change. See CUTSELL_DEEPGRAM_FIVE_TRIALS.md.
-
-Product Owner assessment during this batch: the prior individual Deepgram
-Video00 is generally a useful Clean Cut, despite inconsistent AI decisions.
-Preserve that product assessment separately from unchanged technical QC and
-source-range criteria; it does not override the automated delivery gate.
-The sales-funnel layer is an opportunity inside the same editor to improve
-the source-support…256 tokens truncated… human listening claimed. Preserve contradictory
+a5fa3918d69d89…230 tokens truncated… human listening claimed. Preserve contradictory
 Medium compact deliverable=true versus NOT_DELIVERABLE status; status used for labeling.
 Two authorized calls completed, no extra retry or production change.
 

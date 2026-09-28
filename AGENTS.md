@@ -14,6 +14,7 @@ Before changing CutSell code, read in this order:
 6. `docs/CUTSELL_STAGING_READINESS.md`
 7. `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` -- canonical roles, gates, and QA modes (D-062); governs who may implement vs. who may certify release-ready.
 8. `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md` -- Automatic Editor Doctrine, CRITICAL_COVERAGE_DOMINANCE, Automatic Resolution Hierarchy, and the HUMAN_CHOICE_ELIGIBLE escalation contract (D-062.2); governs when the resolver decides for itself vs. when (rarely) it would ever ask a human.
+9. `docs/CUTSELL_EDITORIAL_CALIBRATION_MASTER.md` -- current V2 calibration loop, versioned Human Gold, per-case diagnosis, same-version batch regression, and acceptance rules. Apply when changing editorial behavior; audit inherited rules against current evidence rather than copying them into V2 automatically.
 
 Treat these as the product constitution for the clean CutSell release path.
 
