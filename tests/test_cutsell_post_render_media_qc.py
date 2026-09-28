@@ -178,6 +178,21 @@ def test_intentional_protected_pause_is_preserved(silence_audio):
     assert result.findings == ()
 
 
+def test_silence_crossing_verified_visual_only_checks_unprotected_part(monkeypatch):
+    monkeypatch.setattr('cutsell_worker.post_render_media_qc._detect_silence_intervals',
+                        lambda *args, **kwargs: [(43.636, 49.804)])
+    visual = [(44.55, 50.60)]
+    assert check_accidental_silence('unused.mp4', protected_pause_windows=visual).status == 'PASS'
+    report = check_accidental_silence('unused.mp4', protected_pause_windows=[(45.2, 50.60)])
+    assert report.status == 'FAIL'
+    assert len(report.findings) == 1
+    assert (report.findings[0].start, report.findings[0].end) == (43.636, 45.2)
+    assert check_accidental_silence('unused.mp4').status == 'FAIL'
+    report = check_accidental_silence('unused.mp4', protected_pause_windows=[
+        (48.0, 50.0), (42.0, 44.0), (44.0, 46.0), (48.0, 49.0)])
+    assert [(row.start, row.end) for row in report.findings] == [(46.0, 48.0)]
+
+
 def test_continuous_audio_with_no_gap_passes_silence_check(continuous_audio):
     result = check_accidental_silence(continuous_audio, max_allowed_silence_sec=1.0)
     assert result.status == "PASS"

@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 08–09 Visual Join V31
+name: CutSell Editorial Engine V2 Yaskira 08–09 QC Split V32
 
 on:
   workflow_dispatch:
@@ -74,6 +74,7 @@ jobs:
             tests/test_whole_video_av.py \
             tests/test_cutsell_selection_boundary_contract.py \
             tests/test_cutsell_live_render_qc.py \
+            tests/test_cutsell_post_render_media_qc.py \
             tests/test_cutsell_d097_perceptual_watch_listen_and_clean_raw_gate.py
 
       - name: Load missing runtime secrets from RunPod template vault
@@ -149,7 +150,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09.v31_visual_join",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09.v32_qc_split",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

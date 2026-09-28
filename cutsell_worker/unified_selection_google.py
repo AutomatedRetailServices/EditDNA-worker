@@ -494,7 +494,14 @@ def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mappi
     """
     candidates = raw.get("candidates")
     if not isinstance(candidates, list) or not candidates:
-        raise UnifiedSelectionUnreliableResponseError("Gemini unified response missing candidates")
+        feedback = raw.get("promptFeedback") or {}
+        reason = str(feedback.get("blockReason") or "none") if isinstance(feedback, Mapping) else "malformed"
+        usage = raw.get("usageMetadata") or {}
+        tokens = usage.get("promptTokenCount") if isinstance(usage, Mapping) else None
+        raise UnifiedSelectionUnreliableResponseError(
+            f"Gemini unified response missing candidates (blockReason={reason[:40]!r}, "
+            f"promptTokenCount={tokens if isinstance(tokens, int) else 'unknown'})"
+        )
     first = candidates[0]
     if not isinstance(first, Mapping):
         raise UnifiedSelectionUnreliableResponseError("Gemini unified candidate malformed")

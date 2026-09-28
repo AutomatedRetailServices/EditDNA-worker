@@ -277,6 +277,10 @@ def test_parse_raises_unreliable_error_on_truncated_json_and_names_finish_reason
 def test_parse_raises_unreliable_error_when_candidates_missing():
     with pytest.raises(UnifiedSelectionUnreliableResponseError, match="candidates"):
         parse_unified_selection_response({"candidates": []})
+    with pytest.raises(UnifiedSelectionUnreliableResponseError, match="blockReason='SAFETY'.*promptTokenCount=321"):
+        parse_unified_selection_response({"candidates": [],
+            "promptFeedback": {"blockReason": "SAFETY", "blockReasonMessage": "private input"},
+            "usageMetadata": {"promptTokenCount": 321}})
 
 
 def test_parse_raises_unreliable_error_when_content_missing():

@@ -144,30 +144,34 @@ def check_accidental_silence(
     max_allowed_silence_sec: float = 1.2,
     noise_floor_db: float = -35.0,
 ) -> PostRenderQCResult:
-    """Flag a real, decoded silence interval longer than
-    `max_allowed_silence_sec` that does not fall inside any caller-supplied
-    protected/expected pause window. `protected_pause_windows` is an
+    """Flag real, decoded unprotected silence longer than
+    `max_allowed_silence_sec`, excluding only caller-supplied
+    protected/expected pause windows. `protected_pause_windows` is an
     ordinary parameter (e.g. an editorially intentional dramatic pause the
     upstream draft already knows about) -- never a hardcoded constant."""
     findings: list[PostRenderFinding] = []
     for start, end in _detect_silence_intervals(
         media_path, noise_floor_db=noise_floor_db, min_silence_sec=max_allowed_silence_sec,
     ):
-        duration = end - start
-        if duration < max_allowed_silence_sec:
-            continue
-        protected = any(
-            window_start <= start and end <= window_end
-            for window_start, window_end in protected_pause_windows
-        )
-        if protected:
-            continue
-        findings.append(PostRenderFinding(
-            kind=LINGERING_ACCIDENTAL_SILENCE,
-            start=start, end=end,
-            detail={"duration_sec": duration, "noise_floor_db": noise_floor_db},
-            routes_to="BoundaryEngine",
-        ))
+        # A measured silence can span a spoken tail and a frozen visual
+        # scene. Protect only the explicitly expected frames, then assess
+        # every remaining interval on its own; a long speech-side gap still
+        # fails even if it touches a protected action.
+        remainder = [(start, end)]
+        for protected_start, protected_end in sorted(protected_pause_windows):
+            remainder = [(a, b) for left, right in remainder for a, b in
+                         ((left, min(right, protected_start)),
+                          (max(left, protected_end), right)) if b > a]
+        for unprotected_start, unprotected_end in remainder:
+            duration = unprotected_end - unprotected_start
+            if duration < max_allowed_silence_sec:
+                continue
+            findings.append(PostRenderFinding(
+                kind=LINGERING_ACCIDENTAL_SILENCE,
+                start=unprotected_start, end=unprotected_end,
+                detail={"duration_sec": duration, "noise_floor_db": noise_floor_db},
+                routes_to="BoundaryEngine",
+            ))
     status = "FAIL" if findings else "PASS"
     return PostRenderQCResult(status=status, findings=tuple(findings))
 
