@@ -1,0 +1,117 @@
+name: Extract V2 Regression 364945 Decisions
+on:
+  push:
+    branches: [feat/editorial-engine-v2-whole-video-rebuild]
+    paths:
+      - .github/workflows/cutsell-v2-extract-regression-364945.yml
+permissions:
+  actions: read
+  contents: read
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and compact existing regression evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p raw compact
+          gh run download 36494537658 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-focused-regression-02-03-04-06-09-36494537658 \
+            --dir raw
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("raw")
+          def read(path):
+              return json.loads(path.read_text(encoding="utf-8"))
+
+          report_path = root / "report.json"
+          report = read(report_path) if report_path.exists() else {}
+          comparison_path = root / "gold_comparison.json"
+          gold = read(comparison_path) if comparison_path.exists() else []
+          compact = {
+              "source_count": report.get("source_count"),
+              "completed_count": report.get("completed_count"),
+              "execution_failure_count": report.get("execution_failure_count"),
+              "gold_comparison": gold,
+              "sources": [],
+              "failures": report.get("failures", []),
+          }
+          for path in sorted((root / "results").glob("*.json")):
+              result = read(path)
+              if "source_key" not in result:
+                  continue
+              diag = result.get("diagnostics") or {}
+              reasoner = diag.get("unified_selection_reasoner") or {}
+              intervals = {
+                  str(row.get("clip_id")): {
+                      "source_order": row.get("source_order"),
+                      "start": row.get("start"), "end": row.get("end"),
+                  }
+                  for row in (diag.get("candidate_intervals") or reasoner.get("candidate_intervals") or ())
+                  if row.get("clip_id")
+              }
+              decisions = []
+              for row in reasoner.get("decisions") or ():
+                  decisions.append({
+                      **intervals.get(str(row.get("clip_id")), {}),
+                      "clip_id": row.get("clip_id"),
+                      "model_action": row.get("model_action"),
+                      "effective_action": row.get("effective_action"),
+                      "relation": row.get("relation"),
+                      "reason_code": row.get("reason_code"),
+                      "safety_override": row.get("safety_override"),
+                  })
+              competitions = []
+              for row in (diag.get("v2_take_competitions") or ()):
+                  competitions.append({
+                      "winners": [dict(clip_id=cid, **intervals.get(str(cid), {}))
+                                  for cid in row.get("winners", ())],
+                      "covered": [dict(clip_id=cid, **intervals.get(str(cid), {}))
+                                  for cid in row.get("covered", ())],
+                      "material_unique": [dict(clip_id=cid, **intervals.get(str(cid), {}))
+                                          for cid in row.get("material_unique", ())],
+                      "relation": row.get("relation"),
+                      "confidence": row.get("confidence"),
+                      "decision": row.get("decision"),
+                      "reason_code": row.get("reason_code"),
+                      "reason": row.get("reason"),
+                  })
+              compact["sources"].append({
+                  "source_key": result["source_key"],
+                  "source_duration_sec": result.get("source_duration_sec"),
+                  "selection_status": reasoner.get("status"),
+                  "competition_review": diag.get("competition_review"),
+                  "selected_intervals": [
+                      {"clip_id": row.get("clip_id"), "start": row.get("start"), "end": row.get("end")}
+                      for row in result.get("selected", ())
+                  ],
+                  "candidate_intervals": intervals,
+                  "decisions": decisions,
+                  "take_competitions": competitions,
+                  "render_qc": (result.get("live_render_qc") or {}).get("status"),
+              })
+          out = Path("compact/regression-364945-interval-decisions.json")
+          out.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps({
+              "source_count": compact["source_count"],
+              "completed_count": compact["completed_count"],
+              "sources": [{
+                  "source_key": row["source_key"],
+                  "selected_count": len(row["selected_intervals"]),
+                  "candidate_count": len(row["candidate_intervals"]),
+                  "decision_count": len(row["decisions"]),
+              } for row in compact["sources"]],
+              "failures": compact["failures"],
+          }, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v2-regression-364945-interval-decisions
+          path: compact/regression-364945-interval-decisions.json
