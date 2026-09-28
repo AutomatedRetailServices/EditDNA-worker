@@ -1,0 +1,86 @@
+name: CutSell V31 Artifact Inspection
+on:
+  push:
+    branches:
+      - feat/editorial-engine-v2-whole-video-rebuild
+    paths:
+      - .github/workflows/cutsell-v31-artifact-inspection.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download prior evidence without provider calls
+        run: |
+          mkdir -p evidence
+          gh run download 36456010160 --repo AutomatedRetailServices/EditDNA-worker --name cutsell-editorial-v2-yaskira-08-36456010160 --dir evidence
+      - name: Print narrow Gold and visual action audit
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          gold={'01':[(120,147)],'02':[(5,14),(19,28),(52,66),(73,91),(97,120)]}
+          for p in sorted(Path('evidence/results').glob('*.json')):
+              if p.stem not in gold: continue
+              d=json.loads(p.read_text()); spans=sorted((c['start'],c['end']) for c in d.get('selected',[]))
+              wanted=gold[p.stem]; overlap=sum(max(0,min(b,y)-max(a,x)) for a,b in wanted for x,y in spans)
+              extra=sum(max(0,b-a)-sum(max(0,min(b,y)-max(a,x)) for x,y in wanted) for a,b in spans)
+              audit=d.get('diagnostics',{}); av=audit.get('whole_video_context',{}).get('sources',[])
+              visual=[]
+              for source in av:
+                  try: visual.extend(json.loads(source.get('audiovisual_evidence','{}')).get('focused_silent_visual_actions',[]))
+                  except (ValueError,TypeError): pass
+              print(json.dumps({'source':d.get('source_key'),'selected':[[round(a,3),round(b,3)] for a,b in spans],
+                  'gold_overlap':round(overlap,3),'gold_total':sum(b-a for a,b in wanted),
+                  'extra':round(extra,3),'visual_actions':visual,
+                  'focused_candidates':audit.get('v2_focused_visual_action_candidates',[]),
+                  'continuation_links':audit.get('v2_verified_continuation_links',[]),
+                  'qc':d.get('live_render_qc',{}).get('status')},ensure_ascii=False))
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text()); dx=d.get('diagnostics',{})
+              print('CONTINUATION_OBSERVATIONS',json.dumps(dx.get('v2_continuation_observations',[]),ensure_ascii=False)[:3000])
+              for c in d.get('selected',[])+d.get('alternates',[])+d.get('discarded',[]):
+                  if 70 < c.get('start',0) < 107:
+                      print('CANDIDATE',round(c['start'],2),round(c['end'],2),c.get('text','')[:90],c.get('audio_muted'))
+              for a in dx.get('unified_selection_reasoner',{}).get('decisions',[]):
+                  if any(c.get('clip_id')==a['clip_id'] and 70<c.get('start',0)<107 for c in d.get('selected',[])+d.get('alternates',[])+d.get('discarded',[])):
+                      print('DECISION',json.dumps(a,ensure_ascii=False))
+              for source in dx.get('whole_video_context',{}).get('input_audit',{}).get('native_av',[]):
+                  if source.get('window_index')==1000:
+                      print('FOCUS_AUDIT',source.get('status'),source.get('rejection'),source.get('reserved_usd'))
+                      try:
+                          raw=source['response']; data=json.loads(''.join(part.get('text','') for part in raw['candidates'][0]['content']['parts']))
+                          print('FOCUS_REGIONS',json.dumps(data.get('regions',[]),ensure_ascii=False)[:3500])
+                      except (KeyError,IndexError,ValueError,TypeError) as exc: print('FOCUS_PARSE_ERROR',type(exc).__name__)
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text()); whole=d.get('diagnostics',{}).get('whole_video_context',{})
+              print('AV_AUDIT',[(x.get('window_index'),x.get('status'),x.get('error_type')) for x in whole.get('input_audit',{}).get('native_av',[])])
+              for source in whole.get('sources',[]):
+                  try:
+                      av=json.loads(source.get('audiovisual_evidence','{}'))
+                      print('RAW_AV_REGIONS',json.dumps([row for row in av.get('regions',[]) if row.get('end',0)>90 and row.get('start',0)<110],ensure_ascii=False)[:3200])
+                  except (ValueError,TypeError): pass
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text()); qc=d.get('live_render_qc',{})
+              print('LIVE_QC',json.dumps({k:qc.get(k) for k in ('status','finding_types','findings')},ensure_ascii=False)[:4200])
+              print('PERCEPTUAL',json.dumps(d.get('perceptual_watch_listen',{}),ensure_ascii=False)[:2600])
+              print('V2_STORY_ORDER',json.dumps(d.get('diagnostics',{}).get('v2_story_order',[]),ensure_ascii=False)[:1800])
+          for p in Path('evidence/results').glob('*failure.json'): print(p.name,p.read_text()[:1800])
+          for p in Path('evidence').glob('report.json'):
+              report=json.loads(p.read_text()); print('REPORT_FAILURES',json.dumps(report.get('failures',[]),ensure_ascii=False))
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text())
+              for c in d.get('selected',[]):
+                  if 94 < c.get('start',0) < 107:
+                      print('SPEECH_VISUAL_DETAIL',json.dumps({k:c.get(k) for k in ('clip_id','start','end','source_asset_id','audio_muted','text','words','visual_observation')},ensure_ascii=False)[:3800])
+              print('QC_DETAIL',json.dumps(d.get('live_render_qc',{}),ensure_ascii=False)[:9000])
+              print('PERCEPTUAL_DETAIL',json.dumps(d.get('perceptual_watch_listen',{}),ensure_ascii=False)[:6500])
+              whole=d.get('diagnostics',{}).get('whole_video_context',{})
+              for source in whole.get('sources',[]):
+                  print('SOURCE_WORD_EVENTS',json.dumps([e for e in source.get('events',[]) if isinstance(e,dict) and e.get('end',0)>96 and e.get('start',999)<100],ensure_ascii=False)[:4800])
+              print('ARTIFACT_FILES',[str(x) for x in Path('evidence').rglob('*') if x.is_file()][:70])
+          PY
