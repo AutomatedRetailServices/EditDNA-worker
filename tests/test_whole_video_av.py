@@ -502,3 +502,11 @@ def test_replay_preserves_original_padding_response(tmp_path):
     record=context.diagnostics['native_av'][0]
     assert replay(record)['regions'][0]['end']==9.9
     assert json.loads(record['response']['candidates'][0]['content']['parts'][0]['text'])['regions'][0]['end']==10
+
+
+def test_visible_product_operation_accepts_add_powder_without_accepting_static_display():
+    from cutsell_worker.whole_video_av import _describes_product_operation
+    assert _describes_product_operation('She bends down and again adds powder from a spoon into the water bottle.')
+    assert _describes_product_operation('La creadora agrega creatina al recipiente.')
+    assert not _describes_product_operation('She holds the powder tub while speaking to camera.')
+    assert not _describes_product_operation('She adds a joke and shows the container.')

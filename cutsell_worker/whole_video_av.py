@@ -11,6 +11,7 @@ import json
 import math
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import requests
@@ -23,6 +24,21 @@ from .audio_silence import detect_audio_silence_intervals
 
 _VISUAL_ACTION_TERMS = ("mix", "pour", "scoop", "stir", "blend", "apply",
                         "mezcla", "vertiendo", "cuchar", "prepar", "vierte")
+
+
+def _describes_product_operation(description):
+    """Recognize physical product use even when the model calls a scoop a spoon.
+
+    The focused AV observation remains mandatory. A product mention or object
+    held for display is not an action; require a manipulation verb and object.
+    """
+    value = str(description or "").casefold()
+    if any(term in value for term in _VISUAL_ACTION_TERMS):
+        return True
+    return bool(re.search(
+        r'\b(?:add(?:s|ed|ing)?|put(?:s|ting)?|dispens(?:e|es|ed|ing)|'
+        r'agreg(?:a|an|ando)|añad(?:e|en|iendo)|ech(?:a|an|ando))\b'
+        r'.{0,65}\b(?:powder|supplement|creatine|polvo|suplemento|creatina)\b', value))
 
 FOCUSED_ACTION_PROMPT = '''Watch and listen to this short creator-source window.
 Find only visible, audience-facing product operations such as pouring, mixing,
@@ -246,7 +262,7 @@ class GeminiWholeVideoAVProvider:
             for region in regions:
                 description = str(region.get('visual_observation') or '').casefold()
                 if (region.get('role') == 'audience' and float(region.get('confidence', 0)) >= .75
-                        and any(term in description for term in _VISUAL_ACTION_TERMS)
+                        and _describes_product_operation(description)
                         and min(silence_end, region['end']) - max(silence_start, region['start']) >= 2.0):
                     candidates.append((silence_start, silence_end))
                     break
@@ -282,7 +298,7 @@ class GeminiWholeVideoAVProvider:
             action_start, action_end = start + region['start'], start + region['end']
             begin, end = max(action_start, silence_start), min(action_end, silence_end)
             if (region.get('role') != 'audience' or region['confidence'] < .85
-                    or not any(term in description for term in _VISUAL_ACTION_TERMS)
+                    or not _describes_product_operation(description)
                     or not 1.5 <= end - begin <= 18.0):
                 continue
             actions.append({'start': round(begin, 3), 'end': round(end, 3),

@@ -197,3 +197,11 @@ la decisión previa y queda sujeto a la evaluación humana. Regresiones
 negativas: cambio de fuente, hueco entre fragmentos y ausencia de palabras.
 Pendiente: ejecución real en los RAW 08/09, inspección de render y repetición
 01–10 en configuración idéntica antes de considerar la versión lista.
+
+La corrida V27 `36440885494` (SHA `35163926`, artifact `10978832574`)
+confirmó QC PASS de ambos RAW: 08 retuvo 25.199/27 s Gold; 09 retuvo
+58.516/73 s Gold, con 14.484 s todavía ausentes. En 09 el probe sí
+observó «adds powder from a spoon» durante 97.935–104.935, pero la
+enumeración de verbos de la acción silenciosa no reconoció «adds powder».
+Se agregó reconocimiento general de verbo de manipulación más producto,
+con negativo para mera exhibición del envase. Se revalida en V28.

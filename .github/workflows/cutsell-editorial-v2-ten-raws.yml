@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 08–09 Coverage Guards V27
+name: CutSell Editorial Engine V2 Yaskira 08–09 Source AV V28
 
 on:
   workflow_dispatch:
@@ -64,6 +64,7 @@ jobs:
             tests/test_cutsell_editorial_engine_v2.py \
             tests/test_cutsell_unified_selection_google.py \
             tests/test_cutsell_unified_selection_reasoner.py \
+            tests/test_v2_focused_continuation.py \
             tests/test_cutsell_final_boundary_authority_refresh.py \
             tests/test_cutsell_v2_recording_tail.py \
             tests/test_cutsell_v2_visual_trim_floor.py \
