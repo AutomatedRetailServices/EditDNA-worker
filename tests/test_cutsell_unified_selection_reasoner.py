@@ -606,3 +606,10 @@ def test_v2_verified_continuation_restores_adjacent_member_after_competition():
                     replace(left, end=76.5), replace(left, words=())):
         broken = replace(d, discarded=(invalid,))
         assert apply_unified_selection_reasoner(broken, Verified()).diagnostics['unified_selection_reasoner']['status'] == 'provider_error_fail_open'
+
+    class Reversed(Verified):
+        def reason(self, candidate_draft):
+            original = super().reason(candidate_draft)
+            return replace(original, decisions=tuple(replace(decision,
+                sequence_index=1-decision.sequence_index) for decision in original.decisions))
+    assert apply_unified_selection_reasoner(d, Reversed()).diagnostics['unified_selection_reasoner']['status'] == 'provider_error_fail_open'
