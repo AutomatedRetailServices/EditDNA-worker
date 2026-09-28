@@ -298,7 +298,7 @@ def overall_status(capabilities: Iterable[CapabilityReport]) -> str:
 
 # --- capabilities ----------------------------------------------------------------
 
-def _dead_air_on_mp4(media_path: str) -> CapabilityReport:
+def _dead_air_on_mp4(media_path: str, protected_visual_windows: Sequence[tuple[float, float]] = ()) -> CapabilityReport:
     name = "interior_dead_air_mp4"
     try:
         from .post_render_media_qc import _detect_silence_intervals
@@ -307,11 +307,19 @@ def _dead_air_on_mp4(media_path: str) -> CapabilityReport:
         return CapabilityReport(name, ERROR, "mp4_measured", note=f"silencedetect failed: {str(exc)[:120]}")
     findings = []
     for start, end in intervals:
-        duration = end - start
-        if duration >= DEAD_AIR_FAIL_SEC:
-            findings.append(PerceptualFinding(name, INTERIOR_DEAD_AIR, start, end, "FAIL", ROUTE_BOUNDARY, {"duration_sec": round(duration, 3)}))
-        elif duration >= LONG_PAUSE_SEC:
-            findings.append(PerceptualFinding(name, LONG_PAUSE, start, end, "UNCERTAIN", ROUTE_BOUNDARY, {"duration_sec": round(duration, 3)}))
+        # The decoded MP4 still contains intentional silent footage. Remove
+        # only frozen, explicitly selected visual windows from this measured
+        # interval; any speech-side silence remains subject to normal QC.
+        remainder = [(start, end)]
+        for visual_start, visual_end in sorted(protected_visual_windows):
+            remainder = [(a, b) for left, right in remainder for a, b in
+                         ((left, min(right, visual_start)), (max(left, visual_end), right)) if b > a]
+        for a, b in remainder:
+            duration = b - a
+            if duration >= DEAD_AIR_FAIL_SEC:
+                findings.append(PerceptualFinding(name, INTERIOR_DEAD_AIR, a, b, "FAIL", ROUTE_BOUNDARY, {"duration_sec": round(duration, 3)}))
+            elif duration >= LONG_PAUSE_SEC:
+                findings.append(PerceptualFinding(name, LONG_PAUSE, a, b, "UNCERTAIN", ROUTE_BOUNDARY, {"duration_sec": round(duration, 3)}))
     if any(f.severity == "FAIL" for f in findings):
         status = EVALUATED_FAIL
     elif findings:
@@ -509,8 +517,10 @@ def review_rendered_candidate(
     """Run every v1 capability against the rendered candidate and return the
     routed review. Never raises: a capability that cannot run reports ERROR."""
     joins = [w[1] for w in output_windows[:-1]]
+    from .live_render_qc import frozen_visual_pause_windows
+    protected_visual = frozen_visual_pause_windows(draft, segments, output_windows)
     capabilities = [
-        _dead_air_on_mp4(media_path),
+        _dead_air_on_mp4(media_path, protected_visual),
         _speech_energy_at_cuts(media_path, joins),
         _reset_debris_at_edges(draft, segments, output_windows),
         _repeated_audience_content(draft, segments, output_windows),

@@ -188,6 +188,27 @@ def _resolve_edit_plan(draft) -> CanonicalEditPlan:
     return replace(edit_plan, plan_id=plan_id, plan_version=plan_version)
 
 
+def frozen_visual_pause_windows(draft, segments, output_windows):
+    """Only a frozen wordless selection can authorize silent output frames."""
+    frozen_visual = {tuple(span) for span in
+                     ((draft.diagnostics or {}).get("selection_boundary_contract") or {})
+                     .get("visual_only_source_spans", ())}
+    windows = [(max(0.0, window[0] - .04), window[1] + .04)
+               for seg, window in zip(segments, output_windows)
+               if seg.audio_muted and (
+                   str(seg.clip_id), str(seg.source_asset_id),
+                   next((int(clip.source_order) for clip in draft.selected
+                         if clip.clip_id == seg.clip_id), -1),
+                   float(seg.start), float(seg.end)) in frozen_visual]
+    merged = []
+    for start, end in sorted(windows):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    return tuple(merged)
+
+
 def render_with_post_render_qc(
     draft,
     segments: Sequence[RenderSegment],
@@ -256,26 +277,8 @@ def render_with_post_render_qc(
         # Only a frozen, explicitly selected wordless visual scene can
         # authorize expected silence. Verify its source interval against the
         # Freeze record before exempting any output time from silence QC.
-        frozen_visual = {
-            tuple(span) for span in ((draft.diagnostics or {}).get("selection_boundary_contract") or {})
-            .get("visual_only_source_spans", ())
-        }
-        # Encoded AAC can report a few milliseconds of priming/padding beyond
-        # an exact video frame boundary. Bound that tolerance to one frame.
-        visual_pause_windows = [(max(0.0, window[0] - 0.04), window[1] + 0.04)
-                                for seg, window in zip(current_segments, output_windows)
-                                if seg.audio_muted and (
-                                    str(seg.clip_id), str(seg.source_asset_id),
-                                    next((int(clip.source_order) for clip in draft.selected
-                                          if clip.clip_id == seg.clip_id), -1),
-                                    float(seg.start), float(seg.end)) in frozen_visual]
-        merged_visual_windows = []
-        for start, end in visual_pause_windows:
-            if merged_visual_windows and start <= merged_visual_windows[-1][1]:
-                merged_visual_windows[-1] = (merged_visual_windows[-1][0],
-                                             max(end, merged_visual_windows[-1][1]))
-            else:
-                merged_visual_windows.append((start, end))
+        # AAC frame rounding is bounded to one frame inside the shared helper.
+        merged_visual_windows = frozen_visual_pause_windows(draft, current_segments, output_windows)
         media = run_post_render_media_qc(
             output_path,
             boundary_timestamps=boundary_timestamps,

@@ -159,6 +159,30 @@ def test_frozen_visual_action_keeps_its_frames_and_authorizes_only_its_own_silen
     assert observed[0][0] >= 1.9 and observed[0][1] >= 3.9
 
 
+def test_perceptual_silence_exempts_only_frozen_visual_output(monkeypatch, tmp_path, source_video):
+    from cutsell_worker import perceptual_watch_listen as reviewer
+    spoken = _clip('spoken', 0, 2, 'product')
+    action = replace(_clip('action', 2, 4, ''), audio_muted=True)
+    draft = freeze_selection_contract(_draft((spoken, action)))
+    segments = build_render_plan(draft, {'src': source_video})
+    windows = [(0, 2), (2, 4)]
+    monkeypatch.setattr('cutsell_worker.post_render_media_qc._detect_silence_intervals',
+                        lambda *args, **kwargs: [(1.5, 4)])
+    protected = live_render_qc.frozen_visual_pause_windows(draft, segments, windows)
+    assert live_render_qc.frozen_visual_pause_windows(_draft((spoken, action)), segments, windows) == ()
+    assert live_render_qc.frozen_visual_pause_windows(
+        freeze_selection_contract(_draft((spoken, replace(action, start=2.2)))), segments, windows
+    ) == ()
+    report = reviewer._dead_air_on_mp4('unused.mp4', protected)
+    assert report.status == reviewer.EVALUATED_PASS
+    assert reviewer._dead_air_on_mp4('unused.mp4').status == reviewer.EVALUATED_FAIL
+    monkeypatch.setattr('cutsell_worker.post_render_media_qc._detect_silence_intervals',
+                        lambda *args, **kwargs: [(0.2, 4)])
+    report = reviewer._dead_air_on_mp4('unused.mp4', protected)
+    assert report.status == reviewer.EVALUATED_FAIL
+    assert report.findings[0].end <= 2.0
+
+
 def test_adjacent_frozen_visual_actions_retain_individual_qc_windows(
     monkeypatch, tmp_path, source_video,
 ):

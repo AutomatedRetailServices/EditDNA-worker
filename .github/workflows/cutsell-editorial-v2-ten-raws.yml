@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 08–09 AV Windows V30
+name: CutSell Editorial Engine V2 Yaskira 08–09 Visual Join V31
 
 on:
   workflow_dispatch:
@@ -38,6 +38,7 @@ jobs:
       CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION: "0.30"
       CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION: "2.50"
       CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED: "1"
+      CUTSELL_HYBRID_MAX_SESSION_USD: "0.05"
       CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD: "0.05"
       CUTSELL_HYBRID_MAX_SEMANTIC_EQUIVALENCE_USD: "0.008"
       CUTSELL_HYBRID_MAX_CLAIM_EQUIVALENCE_USD: "0.003"
@@ -72,7 +73,8 @@ jobs:
             tests/test_cutsell_v13_evidence_replay.py \
             tests/test_whole_video_av.py \
             tests/test_cutsell_selection_boundary_contract.py \
-            tests/test_cutsell_live_render_qc.py
+            tests/test_cutsell_live_render_qc.py \
+            tests/test_cutsell_d097_perceptual_watch_listen_and_clean_raw_gate.py
 
       - name: Load missing runtime secrets from RunPod template vault
         shell: bash
@@ -147,7 +149,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09.v30_av_windows",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09.v31_visual_join",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

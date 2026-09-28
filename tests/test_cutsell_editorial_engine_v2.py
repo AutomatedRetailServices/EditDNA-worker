@@ -11,7 +11,35 @@ from cutsell_worker.contracts import (
     SCHEMA_VERSION,
     Word,
 )
-from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2, _coalesce_overlapping_selected_speech, _restore_safe_audience_continuity, _add_focused_visual_action_candidates, _run_speech_boundary_preserving_visual_actions
+from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2, _coalesce_overlapping_selected_speech, _restore_safe_audience_continuity, _add_focused_visual_action_candidates, _run_speech_boundary_preserving_visual_actions, _reconcile_spoken_visual_source_overlap
+
+
+def test_spoken_visual_overlap_ends_at_measured_silence_only_after_last_word():
+    base = source_result()
+    spoken = replace(clip('spoken', 96, selected=True), end=99.59,
+                     text='en el agua', words=(Word('en', 97, 97.2), Word('el', 97.3, 97.5), Word('agua', 97.8, 98.3)))
+    visual = replace(clip('visual', 98.435, selected=True), end=104.435,
+                     text='', caption_text='', words=(), audio_muted=True)
+    draft = replace(base.draft, selected=(spoken, visual),
+                    diagnostics={'v2_focused_visual_action_candidates': [{'clip_id': 'visual'}]})
+    whole = {'sources': [{'source_asset_id': spoken.source_asset_id, 'events': [
+        {'kind': 'audio_silence_interval', 'start': 98.421, 'end': 106.764}]}]}
+    repaired = _reconcile_spoken_visual_source_overlap(replace(base, draft=draft), whole)
+    assert [(c.start, c.end) for c in repaired.draft.selected] == [(96, 98.435), (98.435, 104.435)]
+    assert repaired.draft.selected[0].words == spoken.words
+    assert repaired.draft.diagnostics['v2_spoken_visual_overlap_reconciliation'][0]['last_word_end'] == 98.3
+    for unsafe in (replace(spoken, words=(Word('agua', 97.8, 98.5),)),
+                   replace(spoken, source_asset_id='other'),
+                   replace(spoken, end=107.0)):
+        assert _reconcile_spoken_visual_source_overlap(
+            replace(base, draft=replace(draft, selected=(unsafe, visual))), whole
+        ).draft.selected[0].end == unsafe.end
+    assert _reconcile_spoken_visual_source_overlap(
+        replace(base, draft=draft), {'sources': [{'source_asset_id': spoken.source_asset_id, 'events': []}]}
+    ).draft.selected[0].end == 99.59
+    assert _reconcile_spoken_visual_source_overlap(
+        replace(base, draft=replace(draft, diagnostics={})), whole
+    ).draft.selected[0].end == 99.59
 
 
 def test_focused_visual_action_becomes_wordless_candidate_before_selection():

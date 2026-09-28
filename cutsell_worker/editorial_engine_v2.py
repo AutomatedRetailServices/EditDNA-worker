@@ -191,6 +191,48 @@ def _run_speech_boundary_preserving_visual_actions(result, boundary):
     return replace(processed, draft=replace(processed.draft, selected=merged))
 
 
+def _reconcile_spoken_visual_source_overlap(result: ProcessingResult, whole: dict) -> ProcessingResult:
+    """Cut a verified silent action at its speech boundary before Freeze.
+
+    An AV action candidate may begin inside a speech candidate's generous
+    trailing handle. Only measured source silence and complete word timing
+    authorize shortening that handle. Never remove a word to make QC pass.
+    """
+    selected = list(result.draft.selected)
+    verified = {str(row.get('clip_id')): row for row in
+                (result.draft.diagnostics or {}).get('v2_focused_visual_action_candidates', ())}
+    events = {str(source.get('source_asset_id')): tuple(source.get('events') or ())
+              for source in whole.get('sources') or ()}
+    audit = []
+    for index in range(1, len(selected)):
+        spoken, visual = selected[index - 1:index + 1]
+        if (visual.clip_id not in verified or not visual.audio_muted or visual.words or visual.text.strip()
+                or spoken.audio_muted or not spoken.words or not spoken.text.strip()
+                or spoken.source_asset_id != visual.source_asset_id
+                or spoken.source_order != visual.source_order
+                or not spoken.start < visual.start < spoken.end <= visual.end):
+            continue
+        measured = any(isinstance(event, dict)
+                       and event.get('kind') == 'audio_silence_interval'
+                       and float(event.get('start') or -1) <= visual.start + .06
+                       and float(event.get('end') or -1) >= spoken.end - .06
+                       for event in events.get(spoken.source_asset_id, ()))
+        last_word_end = max(word.end for word in spoken.words)
+        if not measured or last_word_end > visual.start + 1e-6:
+            continue
+        selected[index - 1] = replace(spoken, end=visual.start)
+        audit.append({'spoken_clip_id': spoken.clip_id, 'visual_clip_id': visual.clip_id,
+                      'old_spoken_end': round(spoken.end, 3),
+                      'new_spoken_end': round(visual.start, 3),
+                      'last_word_end': round(last_word_end, 3),
+                      'basis': 'verified_visual_source_silence_after_complete_speech'})
+    if not audit:
+        return result
+    diagnostics = dict(result.draft.diagnostics or {})
+    diagnostics['v2_spoken_visual_overlap_reconciliation'] = audit
+    return replace(result, draft=replace(result.draft, selected=tuple(selected), diagnostics=diagnostics))
+
+
 def _coalesce_overlapping_selected_speech(draft):
     """Represent overlapping selections as one continuous source-word delivery.
 
@@ -424,6 +466,7 @@ def run_editorial_engine_v2(
     result = _run_speech_boundary_preserving_visual_actions(result, recover_complete_boundaries)
     result = replace(result, draft=_fold_alternates(result.draft))
     result = replace(result, draft=_coalesce_overlapping_selected_speech(result.draft))
+    result = _reconcile_spoken_visual_source_overlap(result, whole)
     result = _restore_safe_audience_continuity(result, whole)
     discard_signature = _discard_signature(result.draft)
     ordered_semantic_signature = _ordered_semantic_signature(result.draft)
