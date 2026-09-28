@@ -101,6 +101,9 @@ class UnifiedSelectionPlan:
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
     take_competitions: tuple[UnifiedTakeCompetition, ...] = ()
+    # Source-verified dependencies between adjacent pieces of one utterance.
+    continuation_links: tuple[tuple[str, str], ...] = ()
+    continuation_evidence: tuple[dict, ...] = ()
 
 
 class UnifiedSelectionReasoner(Protocol):
@@ -207,6 +210,21 @@ def validate_unified_selection_plan(
             raise ValueError("invalid whole-take competition confidence")
         checked_competitions.append(competition)
 
+    by_id = {clip.clip_id: clip for clip in _all_clips(draft)}
+    checked_links = []
+    for left_id, right_id in plan.continuation_links:
+        if left_id not in by_id or right_id not in by_id or left_id == right_id:
+            raise ValueError("invalid continuation dependency membership")
+        left, right = by_id[left_id], by_id[right_id]
+        if (left.source_asset_id != right.source_asset_id or
+                not left.start < right.start or abs(left.end - right.start) > .2 or
+                not left.words or not right.words):
+            raise ValueError("continuation dependency contradicts source alignment")
+        ordering = {decision.clip_id: decision.sequence_index for decision in normalized}
+        if ordering[left_id] is None or ordering[right_id] is None or ordering[left_id] >= ordering[right_id]:
+            raise ValueError("continuation dependency contradicts story order")
+        checked_links.append((left_id, right_id))
+
     return UnifiedSelectionPlan(
         decisions=tuple(normalized),
         provider=str(plan.provider or "unknown")[:80],
@@ -216,6 +234,8 @@ def validate_unified_selection_plan(
         estimated_input_tokens=int(plan.estimated_input_tokens),
         estimated_output_tokens=int(plan.estimated_output_tokens),
         take_competitions=tuple(checked_competitions),
+        continuation_links=tuple(checked_links),
+        continuation_evidence=tuple(plan.continuation_evidence),
     )
 
 
@@ -634,6 +654,12 @@ def apply_unified_selection_reasoner(
         competition_audit = _apply_v2_take_competitions(
             clips, decisions, actions, overrides, plan.take_competitions,
         )
+        index_by_id = {clip.clip_id: i for i, clip in enumerate(clips)}
+        for left_id, right_id in plan.continuation_links:
+            left_i, right_i = index_by_id[left_id], index_by_id[right_id]
+            if actions[right_i] == "select" and actions[left_i] != "select":
+                actions[left_i] = "select"
+                overrides[left_i] = "source_verified_necessary_continuation"
 
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
@@ -696,6 +722,8 @@ def apply_unified_selection_reasoner(
         diagnostics["v2_recording_tail"] = tail_audit
     if v2_request:
         diagnostics["v2_take_competitions"] = competition_audit
+        diagnostics["v2_verified_continuation_links"] = [list(pair) for pair in plan.continuation_links]
+        diagnostics["v2_continuation_observations"] = list(plan.continuation_evidence)
     return replace(
         draft,
         selected=tuple(selected),

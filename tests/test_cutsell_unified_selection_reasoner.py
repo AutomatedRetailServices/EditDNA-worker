@@ -581,3 +581,28 @@ def test_unified_request_requires_one_structured_human_style_decision_per_candid
     # index named, not just a bare count mismatch.
     assert "candidate_index" in properties
     assert "candidate_index" in decisions["items"]["required"]
+
+
+def test_v2_verified_continuation_restores_adjacent_member_after_competition():
+    from cutsell_worker.contracts import Word
+    left = replace(clip('left', 73.8, 77.07, 'You will feel it in your', selected=False),
+                   words=(Word('your', 76.8, 77.07),))
+    right = replace(clip('right', 77.07, 86.5, 'first week using it', selected=True),
+                    words=(Word('first', 77.07, 77.4),))
+    d = DraftTimeline(schema_version=SCHEMA_VERSION, project_id='p',
+                      strategy=EditStrategy.STORYTELLING, selected=(right,),
+                      alternates=(), discarded=(left,),
+                      diagnostics={'editorial_engine_v2_request': {'require_audiovisual_evidence': True}})
+    class Verified:
+        def reason(self, _draft):
+            return UnifiedSelectionPlan(decisions=(
+                v2_decision('left', 'discard', 'retry_alternate', .9, 1, 'redundant_retry', 0),
+                v2_decision('right', 'select', 'independent', .95, 2, 'independent_story_coverage', 1),
+            ), provider='test', model='test', continuation_links=(('left', 'right'),))
+    output = apply_unified_selection_reasoner(d, Verified())
+    assert [c.clip_id for c in output.selected] == ['left', 'right']
+    assert output.diagnostics['unified_selection_reasoner']['decisions'][0]['safety_override'] == 'source_verified_necessary_continuation'
+    for invalid in (replace(left, source_asset_id='other'),
+                    replace(left, end=76.5), replace(left, words=())):
+        broken = replace(d, discarded=(invalid,))
+        assert apply_unified_selection_reasoner(broken, Verified()).diagnostics['unified_selection_reasoner']['status'] == 'provider_error_fail_open'

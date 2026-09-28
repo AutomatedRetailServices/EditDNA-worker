@@ -176,3 +176,24 @@ trazabilidad y objetivo para cada corrida pagada.
 - Instrumentar el paso de grupos provisionales a intentos completos, y
   comparar con verdaderas familias de reintentos y escenas independientes.
 - Corregir y validar contra 05, 06, 09 y 10 antes de lanzar el lote 01–10.
+
+## 2026-09-28: dependencia audiovisual entre fragmentos adyacentes
+
+La calificación V26 de RAW09 descartó 73.782–77.070 («... en tu»)
+como `retry_alternate`, mientras seleccionó 77.070–86.526 («primera
+semana ...») como pieza independiente. El probe focal de fuente 71–92
+(run 36441381173, artifact 10979480433) confirmó `linked=true`,
+`restart_observed=false`, incertidumbre baja y continuidad de prosodia,
+postura y gestos. El artefacto es evidencia de diagnóstico, nunca una
+excepción incorporada al código.
+
+En V28 se inspeccionan pares adyacentes contradictorios con una ventana
+limitada del audio/video original. La dependencia se acepta únicamente si
+la fuente, palabras alineadas, orden, ausencia de reinicio y observación
+multimodal coinciden; el testigo de continuidad se evalúa antes de Freeze.
+La comprobación consume a lo sumo una llamada adicional por fuente,
+reservada en el mismo presupuesto. Un fallo o falta de presupuesto conserva
+la decisión previa y queda sujeto a la evaluación humana. Regresiones
+negativas: cambio de fuente, hueco entre fragmentos y ausencia de palabras.
+Pendiente: ejecución real en los RAW 08/09, inspección de render y repetición
+01–10 en configuración idéntica antes de considerar la versión lista.
