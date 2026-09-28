@@ -70,11 +70,9 @@ def freeze_selection_contract(draft, *, plan=None):
         "semantic_token_count": len(tokens),
         "semantic_sha256": digest,
         "selected_parent_count_at_freeze": len(tuple(draft.selected)),
+        "visual_only_source_spans": _visual_only_spans(draft.selected),
         "status": "frozen",
     }
-    visual_spans = _visual_only_spans(draft.selected)
-    if visual_spans:
-        contract["visual_only_source_spans"] = visual_spans
     if plan is not None:
         contract["plan_id"] = plan.plan_id
         contract["plan_version"] = plan.plan_version

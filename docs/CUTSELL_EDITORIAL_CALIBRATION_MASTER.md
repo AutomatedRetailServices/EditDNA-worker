@@ -10,8 +10,10 @@ seguridad, despliegue y autoridad de producción siguen en `AGENTS.md` y
 
 V25 logró en una corrida de 08 una selección de 25.199/27 s Gold sin material
 externo, pendiente de revisión humana del render. La repetición de 08 y 09
-con esa misma versión se lanzó en el run `36435114060`; hasta contar con sus
-resultados no hay afirmación de estabilidad. El RAW 09 tiene acción útil
+con esa misma versión, run `36435114060`, **falló**: 08 recuperó además un
+fragmento 97.21–101.09 s ajeno al Gold y descartó una continuación hablada
+142.93–144.77 s; 09 recibió HTTP 503 en Watch + Listen antes de Selection.
+No hay afirmación de estabilidad. El RAW 09 tiene acción útil
 durante un silencio medido 98.4–106.8 s que el motor todavía no ofrece como
 candidato visual independiente. Los fotogramas 90–108 s están registrados en
 `evidence/YASKIRA_08_V25_AND_09_VISUAL_GAP_20260928.md`.
@@ -25,9 +27,17 @@ sí solos para conservarla. El contrato de Freeze ya protege intervalos mudos
 que se seleccionen explícitamente; falta crear y calificar ese candidato en
 producción. El primer probe focal `36435404880` falló por respuesta del
 proveedor en forma de lista en vez de objeto; el contrato JSON se corrigió
-antes de repetirlo. El renderer ya respeta el final de escenas visuales
+y `36435957367` observó acción visual 96–106 s. Su afirmación de voz en
+96–106 contradice el silencio del audio fuente 98.4–106.8; solo se permite
+usar la intersección visual/audio medida, no la afirmación de voz del modelo.
+El renderer ya respeta el final de escenas visuales
 explícitas y QC reserva solo su ventana tras verificar el Freeze (35 pruebas
-focales aprobadas). Ningún estado de este bloque
+focales aprobadas). Una prueba de QA detectó y permitió corregir Freeze vacío
+y fusión de acciones contiguas. La regla tentativa basada en una palabra
+«para/to» y la normalización léxica global fueron descartadas tras QA:
+ambas habrían permitido errores fuera del caso. La continuación hablada
+142.93–144.77 requiere una prueba semántica o audiovisual adicional antes de
+reclasificarla. Ningún estado de este bloque
 equivale a aceptación editorial o autorización de despliegue.
 
 ## Objetivo y autoridad

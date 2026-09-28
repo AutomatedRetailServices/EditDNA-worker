@@ -159,6 +159,29 @@ def test_frozen_visual_action_keeps_its_frames_and_authorizes_only_its_own_silen
     assert observed[0][0] >= 1.9 and observed[0][1] >= 3.9
 
 
+def test_adjacent_frozen_visual_actions_retain_individual_qc_windows(
+    monkeypatch, tmp_path, source_video,
+):
+    spoken = _clip("spoken", 0, 2, "product")
+    action_a = replace(_clip("action_a", 2, 3.5, ""), audio_muted=True)
+    action_b = replace(_clip("action_b", 3.5, 5, ""), audio_muted=True)
+    draft = freeze_selection_contract(_draft((spoken, action_a, action_b)))
+    segments = build_render_plan(draft, {"src": source_video})
+    assert [seg.clip_id for seg in segments] == ["spoken", "action_a", "action_b"]
+    observed = []
+    real_qc = live_render_qc.run_post_render_media_qc
+
+    def observe(path, **kwargs):
+        observed.extend(kwargs["protected_pause_windows"])
+        return real_qc(path, **kwargs)
+
+    monkeypatch.setattr(live_render_qc, "run_post_render_media_qc", observe)
+    result = live_render_qc.render_with_post_render_qc(draft, segments, str(tmp_path / "two-actions.mp4"))
+    assert len(observed) == 1
+    assert observed[0][0] >= 1.9 and observed[0][1] >= 5
+    assert result.status == "PASS", result.attempts
+
+
 # ---------------------------------------------------------------------------
 # 3/4. Physical failure triggers Boundary repair; repaired render is QC'd again
 # ---------------------------------------------------------------------------

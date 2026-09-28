@@ -89,3 +89,12 @@ def test_speech_timing_polish_does_not_change_visual_action_freeze():
     frozen = freeze_selection_contract(_draft((spoken, action)))
     verified = enforce_selection_contract(replace(frozen, selected=(replace(spoken, start=10.1), action)))
     assert verified.diagnostics["selection_boundary_contract"]["status"] == "verified"
+
+
+def test_boundary_cannot_add_action_after_speech_only_freeze():
+    spoken = _clip("spoken", 10, 12, "mezclar")
+    action = replace(_clip("action", 12, 17, ""), words=(), audio_muted=True)
+    frozen = freeze_selection_contract(_draft((spoken,)))
+    assert frozen.diagnostics["selection_boundary_contract"]["visual_only_source_spans"] == ()
+    with pytest.raises(RuntimeError, match="visual-only"):
+        enforce_selection_contract(replace(frozen, selected=(spoken, action)))

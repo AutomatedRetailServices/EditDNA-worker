@@ -11,7 +11,56 @@ from cutsell_worker.contracts import (
     SCHEMA_VERSION,
     Word,
 )
-from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2, _coalesce_overlapping_selected_speech, _restore_safe_audience_continuity
+from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2, _coalesce_overlapping_selected_speech, _restore_safe_audience_continuity, _add_focused_visual_action_candidates, _run_speech_boundary_preserving_visual_actions
+
+
+def test_focused_visual_action_becomes_wordless_candidate_before_selection():
+    import json
+    base = source_result()
+    whole = base.draft.diagnostics['whole_video_context']
+    digest = 'a' * 64
+    evidence = {
+        'source_sha256': digest,
+        'focused_silent_visual_actions': [{
+            'start': 98.4, 'end': 106.0,
+            'observed_start': 96.0, 'observed_end': 106.0,
+            'measured_silence_start': 98.4, 'measured_silence_end': 106.8,
+            'confidence': .92, 'visual_observation': 'Mixing the product',
+            'source_sha256': digest,
+            'basis': 'focused_av_action_intersect_source_measured_silence',
+        }],
+    }
+    source = {**whole['sources'][0], 'audiovisual_evidence': json.dumps(evidence)}
+    updated = _add_focused_visual_action_candidates(base.draft, {**whole, 'sources': [source]})
+    action = updated.discarded[-1]
+    assert (action.start, action.end, action.text, action.words, action.audio_muted) == (
+        98.4, 106.0, '', (), True)
+    assert not action.selected
+    # A forged digest or an unverified wide AV summary cannot add a candidate.
+    evidence['focused_silent_visual_actions'][0]['source_sha256'] = 'other'
+    source['audiovisual_evidence'] = json.dumps(evidence)
+    rejected = _add_focused_visual_action_candidates(base.draft, {**whole, 'sources': [source]})
+    assert len(rejected.discarded) == len(base.draft.discarded)
+
+
+def test_boundary_stage_never_passes_silent_visual_action_to_asr_rebuilder():
+    original = source_result()
+    before, after = clip('before', 0, selected=True), clip('after', 10, selected=True)
+    visual = replace(clip('visual', 3, selected=True), end=8, text='',
+                     caption_text='', words=(), audio_muted=True)
+    result = replace(original, draft=replace(original.draft,
+                                            selected=(before, visual, after)))
+
+    def simulated_asr_boundary(current):
+        assert [clip.clip_id for clip in current.draft.selected] == ['before', 'after']
+        processed = tuple(replace(clip, start=clip.start + .03)
+                          for clip in current.draft.selected)
+        return replace(current, draft=replace(current.draft, selected=processed))
+
+    output = _run_speech_boundary_preserving_visual_actions(result, simulated_asr_boundary)
+    assert [clip.clip_id for clip in output.draft.selected] == ['before', 'visual', 'after']
+    assert output.draft.selected[1] == visual
+    assert output.draft.selected[0].start == .03
 
 
 def test_v2_measured_silence_blocks_broad_av_continuity_bridge():

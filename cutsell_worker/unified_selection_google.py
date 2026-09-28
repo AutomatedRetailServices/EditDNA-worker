@@ -103,6 +103,12 @@ def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
         }
         if (draft.diagnostics or {}).get("editorial_engine_v2_request"):
             row["source_asset_id"] = clip.source_asset_id
+            if clip.audio_muted and not clip.words and not clip.text.strip():
+                observed = next((item for item in
+                    (draft.diagnostics or {}).get("v2_focused_visual_action_candidates", ())
+                    if item.get("clip_id") == clip.clip_id), None)
+                if observed:
+                    row["visual_action_only"] = observed
             row["aligned_word_texts"] = [word.text for word in clip.words]
             row["aligned_words"] = [[i, word.text, round(word.start, 3), round(word.end, 3)]
                                     for i, word in enumerate(clip.words)]
@@ -257,6 +263,7 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
             "A clean high-confidence audiovisual audience region contradicts failed_delivery unless that candidate itself contains an observed reset/stumble or its transcript is clearly abandoned; explain the conflict through the chosen relation and reason code.",
             "Assign every candidate one unique sequence_index. Preserve chronology by default, but reorder complete valid story beats when it clearly improves comprehension, hook, demonstration, payoff, or coherence without inventing speech.",
             "Return one final KEEP/DISCARD-equivalent plan: SELECT the final story and DISCARD every non-winner; never return SWAP.",
+            "A candidate with visual_action_only is source-observed product action during objectively measured silence, with no invented speech or captions. Compare its visual story contribution to the spoken takes and SELECT useful unique product demonstration even without words; DISCARD redundant, failed, or production-only action. Place selected action in source order near its spoken context and do not substitute it for speech.",
             "For a SELECT containing a clean delivery followed by a short explicit recording-process aside, optionally return trailing_recording_word_count (1..8) counted from aligned_word_texts and trailing_recording_confidence (0..1) for that suffix classification independently of whole-take selection confidence. Return 0 or omit when uncertain, words are unavailable, or the ending is audience content. Never trim a disclaimer, offer, qualification, gratitude, humor, reaction, number, negation or product fact. Do not discard the whole useful take because only its ending is recording talk.",
             "If actual source video/audio is attached, WATCH AND LISTEN to the exact indexed words before classifying a suffix. Broad earlier AV regions are advisory and can miss short defects. A useful take ending in an abandoned restart must be SELECT, with only its failed suffix proposed for removal: trailing_recording_kind='abandoned_restart', trailing_recording_word_count and trailing_replacement_candidate_index pointing to a SELECT that completes the same attempt. Do not discard its unique useful head. Use kind='recording_aside' for explicit off-audience recording talk; preserve intentional audience reactions. Count aligned word ENTRIES, including every connector belonging to the rejected suffix; never invent timestamps or alter transcript words. Inspect the end of EVERY selected take for these two defects. Omit proposals unless the actual performance makes the defect clear.",
         ])

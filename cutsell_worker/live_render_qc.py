@@ -269,10 +269,17 @@ def render_with_post_render_qc(
                                     next((int(clip.source_order) for clip in draft.selected
                                           if clip.clip_id == seg.clip_id), -1),
                                     float(seg.start), float(seg.end)) in frozen_visual]
+        merged_visual_windows = []
+        for start, end in visual_pause_windows:
+            if merged_visual_windows and start <= merged_visual_windows[-1][1]:
+                merged_visual_windows[-1] = (merged_visual_windows[-1][0],
+                                             max(end, merged_visual_windows[-1][1]))
+            else:
+                merged_visual_windows.append((start, end))
         media = run_post_render_media_qc(
             output_path,
             boundary_timestamps=boundary_timestamps,
-            protected_pause_windows=(*protected_pause_windows, *visual_pause_windows),
+            protected_pause_windows=(*protected_pause_windows, *merged_visual_windows),
         )
         reconciliation = reconcile_silence_findings(draft, current_segments, media.findings, output_windows)
 

@@ -48,6 +48,29 @@ class TimeoutThenSuccessSession(Session):
         return Response()
 
 
+class Transient503ThenSuccessSession(Session):
+    def post(self, url, headers, json, timeout):
+        if url.endswith('generateContent') and not any(
+                call[0].endswith('generateContent') for call in self.calls):
+            self.calls.append((url, json))
+            response = requests.Response()
+            response.status_code = 503
+            raise requests.exceptions.HTTPError('503 Service Unavailable', response=response)
+        return super().post(url, headers, json, timeout)
+
+
+def test_explicitly_budgeted_av_retries_one_transient_provider_503(tmp_path):
+    av, raw, _ = provider(tmp_path)
+    av.session = Transient503ThenSuccessSession()
+    av.retry_generation_timeout = True
+    context = safe_whole_video_analyze(av, (source(),), (), (),
+                                       local_paths={'source': str(raw)})
+    assert context.status.available
+    assert len([row for row in av.session.calls if row[0].endswith('generateContent')]) == 2
+    assert av.audit_records[0]['retry_reason'] == 'transient_http'
+    assert av.audit_records[0]['generation_attempts'] == 2
+
+
 class InvalidThenSuccessSession(Session):
     def post(self,url,headers,json,timeout):
         self.calls.append((url,json,timeout))
@@ -74,6 +97,58 @@ def provider(tmp_path,data=None,budget=.1):
     av=GeminiWholeVideoAVProvider('test-key','configured-model',DollarBudgetLedger(budget),1,2,
                                  session=session,media_preparer=prepare)
     return av,raw,session
+
+
+def test_focused_visual_action_intersects_observed_frames_with_measured_audio(
+    monkeypatch, tmp_path,
+):
+    from cutsell_worker import whole_video_av
+    av, raw, _ = provider(tmp_path)
+    prepared = tmp_path / 'prepared.mp4'
+    prepared.write_bytes(b'prepared')
+    monkeypatch.setenv('CUTSELL_EDITORIAL_ENGINE_V2', '1')
+    monkeypatch.setattr(whole_video_av, 'detect_audio_silence_intervals',
+                        lambda path, **kwargs: ((98.4, 106.8),))
+
+    def slice_media(path, dest, start, length):
+        dest.write_bytes(b'video-and-audio')
+        return length
+
+    def observed(*args):
+        return {'regions': [{'start': 6.0, 'end': 16.0, 'role': 'audience',
+                             'confidence': .93, 'visual_observation': 'Mixing a product'}]}
+
+    av.media_slicer = slice_media
+    monkeypatch.setattr(av, '_observe_window', observed)
+    actions = av._focus_silent_action(
+        replace(source(), duration_sec=120), raw, prepared, 'digest',
+        [{'start': 50, 'end': 109, 'role': 'audience', 'confidence': .9,
+          'visual_observation': 'Pouring and mixing the product'}], tmp_path)
+    assert len(actions) == 1
+    assert actions[0]['start'] == 98.4
+    assert actions[0]['end'] == 106.0  # focused image edge, intersected with source audio
+    assert actions[0]['basis'] == 'focused_av_action_intersect_source_measured_silence'
+
+
+def test_no_action_candidate_from_broad_region_without_focused_visual_proof(
+    monkeypatch, tmp_path,
+):
+    from cutsell_worker import whole_video_av
+    av, raw, _ = provider(tmp_path)
+    prepared = tmp_path / 'prepared.mp4'
+    prepared.write_bytes(b'prepared')
+    monkeypatch.setenv('CUTSELL_EDITORIAL_ENGINE_V2', '1')
+    monkeypatch.setattr(whole_video_av, 'detect_audio_silence_intervals',
+                        lambda path, **kwargs: ((98.4, 106.8),))
+    av.media_slicer = lambda path, dest, start, length: (dest.write_bytes(b'video') or length)
+    monkeypatch.setattr(av, '_observe_window', lambda *args: {
+        'regions': [{'start': 6, 'end': 16, 'role': 'recording_only',
+                     'confidence': .99, 'visual_observation': 'Looking for the product'}]})
+    actions = av._focus_silent_action(
+        replace(source(), duration_sec=120), raw, prepared, 'digest',
+        [{'start': 50, 'end': 109, 'role': 'audience', 'confidence': .9,
+          'visual_observation': 'Pouring product'}], tmp_path)
+    assert actions == []
 
 
 def test_actual_media_handoff_and_evidence_reaches_classifier(tmp_path):

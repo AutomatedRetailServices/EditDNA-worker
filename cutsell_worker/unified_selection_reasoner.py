@@ -53,10 +53,8 @@ that the their this to tu tú un una was we with y ya yo you your
 def _content_tokens(text: str) -> set[str]:
     raw = unicodedata.normalize("NFKD", str(text or "").casefold())
     plain = "".join(ch for ch in raw if not unicodedata.combining(ch))
-    return {
-        token for token in _CONTENT_TOKEN_RE.findall(plain)
-        if len(token) >= 3 and token not in _CONTENT_STOPWORDS
-    }
+    return {token for token in _CONTENT_TOKEN_RE.findall(plain)
+            if len(token) >= 3 and token not in _CONTENT_STOPWORDS}
 
 
 @dataclass(frozen=True)
@@ -427,7 +425,12 @@ def _preserve_retry_alternates_with_unique_information(
             continue
         tokens = _content_tokens(clip.text)
         unique = tokens - selected_tokens
-        if len(unique) < 3 or len(unique) / max(1, len(tokens)) < 0.40:
+        # Three surface words alone can describe an alternate aesthetic of
+        # the same product without a distinct claim. A model-confirmed
+        # redundant retry needs stronger independent information before a
+        # lexical safety rescue can override it.
+        minimum_unique = 4 if decision.reason_code == 'redundant_retry' else 3
+        if len(unique) < minimum_unique or len(unique) / max(1, len(tokens)) < 0.40:
             continue
         actions[index] = "select"
         overrides[index] = "unique_retry_information_preserved"

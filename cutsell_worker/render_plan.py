@@ -118,6 +118,12 @@ def _can_coalesce(left: RenderSegment, right: RenderSegment, *, tolerance_sec: f
     safe direction. No existing production segment ever sets this field, so
     this guard changes nothing about today's live coalescing behavior.
     """
+    # Freeze and silence QC need each explicit action's original clip identity
+    # and source interval. Joining adjacent muted actions would erase that
+    # mapping even though the decoded pixels look continuous.
+    if any(seg.audio_muted and seg.trailing_trim_floor is not None
+           and seg.trailing_trim_floor >= seg.end for seg in (left, right)):
+        return False
     if left.has_independent_audio_window or right.has_independent_audio_window:
         return False
     if left.source_asset_id != right.source_asset_id or left.source_path != right.source_path:

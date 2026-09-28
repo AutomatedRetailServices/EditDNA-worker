@@ -455,6 +455,22 @@ def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():
     assert [item.clip_id for item in out.selected] == ["detail", "winner"]
 
 
+def test_v2_three_surface_words_do_not_overrule_confirmed_redundant_retry():
+    detail = clip("detail", 0, 5, "Este color con rosadito pastel", selected=False)
+    winner = clip("winner", 10, 15, "Disponible en todos los colores y tallas", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(detail, winner), discarded=(),
+        diagnostics={"editorial_engine_v2_request": {"require_audiovisual_evidence": True}},
+    )
+    reasoner = FakeReasoner([
+        v2_decision("detail", "discard", "retry_alternate", .85, 0, "redundant_retry", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+    out = apply_unified_selection_reasoner(d, reasoner)
+    assert [item.clip_id for item in out.selected] == ["winner"]
+
+
 def test_v2_av_audience_unique_content_overrides_false_failed_label():
     hook = clip("hook", 5, 16, "GLP users get more repetitions energy and stronger muscles", selected=False)
     winner = clip("winner", 50, 70, "Watermelon creatine mixes into one bottle daily", selected=False)

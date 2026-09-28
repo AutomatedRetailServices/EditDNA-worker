@@ -16,7 +16,7 @@ import re
 import unicodedata
 from typing import Callable
 
-from .contracts import ProcessingResult
+from .contracts import DraftClip, ProcessingResult
 from .selection_boundary_contract import (
     enforce_selection_contract,
     freeze_selection_contract,
@@ -101,6 +101,94 @@ def _fold_alternates(draft):
         key=lambda clip: (clip.source_order, float(clip.start), float(clip.end), clip.clip_id),
     ))
     return replace(draft, alternates=(), discarded=discarded)
+
+
+def _add_focused_visual_action_candidates(draft, whole: dict):
+    """Expose independently observed wordless operations to the one selector.
+
+    The AV provider must have intersected a local visual observation with
+    objective source silence. This method does not select footage; the same
+    whole-video reasoner sees the action candidate alongside speech, and can
+    discard it if the operation is redundant or interrupts the story.
+    """
+    existing = {clip.clip_id for clip in (*draft.selected, *draft.alternates, *draft.discarded)}
+    order = {clip.source_asset_id: clip.source_order for clip in
+             (*draft.selected, *draft.alternates, *draft.discarded)}
+    candidates, audit = [], []
+    for source in whole.get('sources') or ():
+        source_id = str(source.get('source_asset_id') or '')
+        try:
+            evidence = json.loads(str(source.get('audiovisual_evidence') or '{}'))
+        except (ValueError, TypeError):
+            continue
+        for action in evidence.get('focused_silent_visual_actions') or ():
+            try:
+                start, end = float(action['start']), float(action['end'])
+                silent_start, silent_end = (float(action['measured_silence_start']),
+                                            float(action['measured_silence_end']))
+                seen_start, seen_end = float(action['observed_start']), float(action['observed_end'])
+                confidence = float(action['confidence'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (source_id not in order or action.get('basis') !=
+                    'focused_av_action_intersect_source_measured_silence'
+                    or not re.fullmatch(r'[0-9a-f]{64}', str(action.get('source_sha256') or ''))
+                    or evidence.get('source_sha256') != action.get('source_sha256')
+                    or not .85 <= confidence <= 1.0
+                    or not all(map(lambda x: x >= 0 and x < float('inf'),
+                                   (start, end, silent_start, silent_end, seen_start, seen_end)))
+                    or not 1.5 <= end - start <= 18.0
+                    or not (silent_start <= start < end <= silent_end
+                            and seen_start <= start < end <= seen_end)):
+                continue
+            clip_id = 'v2_visual_' + hashlib.sha256(
+                f'{source_id}\x1f{start:.3f}\x1f{end:.3f}\x1f{action["source_sha256"]}'.encode()
+            ).hexdigest()[:20]
+            if clip_id in existing:
+                continue
+            existing.add(clip_id)
+            candidates.append(DraftClip(
+                clip_id=clip_id, source_asset_id=source_id, source_order=order[source_id],
+                start=start, end=end, text='', caption_text='', words=(),
+                selected=False, audio_muted=True,
+            ))
+            audit.append({'clip_id': clip_id, 'source_asset_id': source_id,
+                          'start': start, 'end': end, 'confidence': confidence,
+                          'visual_observation': str(action.get('visual_observation') or '')[:240]})
+    diagnostics = dict(draft.diagnostics or {})
+    diagnostics['v2_focused_visual_action_candidates'] = audit
+    return replace(draft, discarded=(*draft.discarded, *candidates), diagnostics=diagnostics)
+
+
+def _run_speech_boundary_preserving_visual_actions(result, boundary):
+    """Do not feed silent action footage to ASR word-envelope/silence trimmers.
+
+    The same Boundary stage still operates on every spoken selection. Insert
+    the explicit visual scenes at their pre-stage story positions, unchanged;
+    fail closed if a speech fragment cannot be attributed to its parent.
+    """
+    original = tuple(result.draft.selected)
+    visuals = {clip.clip_id for clip in original
+               if clip.audio_muted and not clip.words and not clip.text.strip()}
+    if not visuals:
+        return boundary(result)
+    spoken = tuple(clip for clip in original if clip.clip_id not in visuals)
+    if not spoken:
+        return result
+    processed = boundary(replace(result, draft=replace(result.draft, selected=spoken)))
+    by_parent: dict[str, list] = {clip.clip_id: [] for clip in spoken}
+    for clip in processed.draft.selected:
+        parent = (clip.parent_semantic_clip_id
+                  if clip.parent_semantic_clip_id in by_parent else clip.clip_id)
+        if parent not in by_parent:
+            raise RuntimeError('Boundary produced a speech fragment with unknown V2 parent')
+        by_parent[parent].append(clip)
+    if any(not fragments for fragments in by_parent.values()):
+        raise RuntimeError('Boundary removed a frozen spoken selection')
+    merged = tuple(part for original_clip in original
+                   for part in ([original_clip] if original_clip.clip_id in visuals
+                                else by_parent[original_clip.clip_id]))
+    return replace(processed, draft=replace(processed.draft, selected=merged))
 
 
 def _coalesce_overlapping_selected_speech(draft):
@@ -213,6 +301,9 @@ def _restore_safe_audience_continuity(result: ProcessingResult, whole: dict) -> 
                      for source in whole.get("sources") or () if isinstance(source, dict)}
     for index in range(len(selected) - 1):
         left, right = selected[index], selected[index + 1]
+        if (left.audio_muted and not left.words and not left.text.strip()
+                or right.audio_muted and not right.words and not right.text.strip()):
+            continue
         if left.source_asset_id != right.source_asset_id or left.source_order != right.source_order:
             continue
         gap_start, gap_end = float(left.end), float(right.start)
@@ -290,6 +381,7 @@ def run_editorial_engine_v2(
         raise RuntimeError("Editorial Engine V2 requires a whole-video selection reasoner")
 
     whole = _require_whole_video_evidence(result.draft)
+    result = replace(result, draft=_add_focused_visual_action_candidates(result.draft, whole))
     candidate_ids = _candidate_ids(result.draft)
     if not candidate_ids:
         raise RuntimeError("Editorial Engine V2 received no editorial candidates")
@@ -329,7 +421,7 @@ def run_editorial_engine_v2(
     result = replace(result, draft=replace(resolved, diagnostics=diagnostics))
 
     # Complete source-proven word edges before the semantic phase barrier.
-    result = recover_complete_boundaries(result)
+    result = _run_speech_boundary_preserving_visual_actions(result, recover_complete_boundaries)
     result = replace(result, draft=_fold_alternates(result.draft))
     result = replace(result, draft=_coalesce_overlapping_selected_speech(result.draft))
     result = _restore_safe_audience_continuity(result, whole)
@@ -338,7 +430,7 @@ def run_editorial_engine_v2(
 
     result = replace(result, draft=freeze_selection_contract(result.draft))
     frozen_selected = tuple(result.draft.selected)
-    result = execute_boundaries(result)
+    result = _run_speech_boundary_preserving_visual_actions(result, execute_boundaries)
     # Boundary polish may rebuild a clip from its spoken-word envelope and
     # unintentionally erase an already-approved action-only demonstration
     # bridge. Reassert the same evidence-gated physical continuity after the

@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 08–09 Repeatability
+name: CutSell Editorial Engine V2 Yaskira 08–09 Focused Visual V26
 
 on:
   workflow_dispatch:
@@ -68,7 +68,10 @@ jobs:
             tests/test_cutsell_v2_recording_tail.py \
             tests/test_cutsell_v2_visual_trim_floor.py \
             tests/test_cutsell_v2_source_selection.py \
-            tests/test_cutsell_v13_evidence_replay.py
+            tests/test_cutsell_v13_evidence_replay.py \
+            tests/test_whole_video_av.py \
+            tests/test_cutsell_selection_boundary_contract.py \
+            tests/test_cutsell_live_render_qc.py
 
       - name: Load missing runtime secrets from RunPod template vault
         shell: bash
@@ -143,7 +146,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v19_take_groups",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09.v26_focused_visual",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
