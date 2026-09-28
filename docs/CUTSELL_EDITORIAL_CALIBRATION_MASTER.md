@@ -206,3 +206,25 @@ observó «adds powder from a spoon» durante 97.935–104.935, pero la
 enumeración de verbos de la acción silenciosa no reconoció «adds powder».
 Se agregó reconocimiento general de verbo de manipulación más producto,
 con negativo para mera exhibición del envase. Se revalida en V28.
+
+## V28/V29: resultados y reliability gate (2026-09-28)
+
+V28 run 36443271393 (SHA 5e0ebbb6) falló en 08: el selector
+recibió dos respuestas sin candidatos y rechazó el plan. En 09 completó
+el render y QC PASS, pero intersectó solo 58.860/73 s Gold y conservó
+11.480 s fuera de los tramos KEEP. Su Watch+Listen global etiquetó
+68–113.5 como mixed por un fumble de tapa, ocultando la acción 97–104;
+no nominó probe focal. También propuso «en tu» después de «primera
+semana», por lo que el verificador estricto omitió el enlace.
+
+V29 run 36444903026 (SHA c4181717) corrigió la regresión de 08:
+seleccionó 120.39–141.388, 142.709–145.1 y 145.1–146.91, con
+25.199/27 s Gold y cero segundos DELETE conservados, QC PASS. El 09
+falló antes de Selection por respuesta AV temporal inválida 113–20 s
+sobre una fuente de 123.81 s; el pipeline la rechazó sin inventar cortes.
+
+V30 prepara una nominación focal desde regiones mixtas con objeto/producto
+más silencio medido, y corrige inversión de dos fragmentos únicamente si
+la fuente audiovisual confirma una frase continua. Fuentes >90 s usarán
+ventanas locales de 45 s para evitar depender de una única descripción
+larga. QA y corrida 08/09 pendientes; son hipótesis, no resultados.
