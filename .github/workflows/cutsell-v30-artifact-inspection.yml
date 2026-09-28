@@ -64,6 +64,11 @@ jobs:
                       av=json.loads(source.get('audiovisual_evidence','{}'))
                       print('RAW_AV_REGIONS',json.dumps([row for row in av.get('regions',[]) if row.get('end',0)>90 and row.get('start',0)<110],ensure_ascii=False)[:3200])
                   except (ValueError,TypeError): pass
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text()); qc=d.get('live_render_qc',{})
+              print('LIVE_QC',json.dumps({k:qc.get(k) for k in ('status','finding_types','findings')},ensure_ascii=False)[:4200])
+              print('PERCEPTUAL',json.dumps(d.get('perceptual_watch_listen',{}),ensure_ascii=False)[:2600])
+              print('V2_STORY_ORDER',json.dumps(d.get('diagnostics',{}).get('v2_story_order',[]),ensure_ascii=False)[:1800])
           for p in Path('evidence/results').glob('*failure.json'): print(p.name,p.read_text()[:1800])
           for p in Path('evidence').glob('report.json'):
               report=json.loads(p.read_text()); print('REPORT_FAILURES',json.dumps(report.get('failures',[]),ensure_ascii=False))
