@@ -103,6 +103,58 @@ def _fold_alternates(draft):
     return replace(draft, alternates=(), discarded=discarded)
 
 
+def _coalesce_overlapping_selected_speech(draft):
+    """Represent overlapping selections as one continuous source-word delivery.
+
+    Both candidates may contain unique leading/trailing words; do not choose
+    one based on length. Only coalesce if their shared source words agree and
+    their union covers the complete spoken interval without a disputed word.
+    Otherwise leave the hard Boundary/Freeze failure in place for review.
+    """
+    selected = list(draft.selected)
+    audit = []
+    index = 0
+    while index < len(selected) - 1:
+        first, second = selected[index:index + 2]
+        left, right = sorted((first, second), key=lambda clip: (clip.start, clip.end))
+        if (left.source_asset_id != right.source_asset_id or
+                left.source_order != right.source_order or
+                not left.start < right.start < left.end or right.end <= left.end or
+                not left.words or not right.words):
+            index += 1
+            continue
+        def keys(words):
+            return [(round(w.start, 3), round(w.end, 3), w.text.casefold()) for w in words]
+        if (" ".join(w.text.strip() for w in left.words).casefold().split() != left.text.casefold().split() or
+                " ".join(w.text.strip() for w in right.words).casefold().split() != right.text.casefold().split()):
+            index += 1
+            continue
+        left_overlap = {key for word, key in zip(left.words, keys(left.words))
+                        if word.end > right.start and word.start < left.end}
+        right_overlap = {key for word, key in zip(right.words, keys(right.words))
+                         if word.end > right.start and word.start < left.end}
+        if not left_overlap or left_overlap != right_overlap:
+            index += 1
+            continue
+        by_key = {key: word for word, key in zip(left.words, keys(left.words))}
+        by_key.update(zip(keys(right.words), right.words))
+        joined = tuple(by_key[key] for key in sorted(by_key))
+        if (not joined or joined[0].start > left.start + .1 or joined[-1].end < right.end - .1):
+            index += 1
+            continue
+        text = " ".join(word.text.strip() for word in joined).strip()
+        selected[index:index + 2] = [replace(
+            left, end=right.end, words=joined, text=text, caption_text=text,
+            word_indices=tuple(sorted(set((*left.word_indices, *right.word_indices)))),
+        )]
+        audit.append({"left_clip_id": left.clip_id, "right_clip_id": right.clip_id,
+                      "start": round(left.start, 3), "end": round(right.end, 3),
+                      "action": "source_word_union"})
+    diagnostics = dict(draft.diagnostics or {})
+    diagnostics["v2_overlapping_selection_word_union"] = audit
+    return replace(draft, selected=tuple(selected), diagnostics=diagnostics)
+
+
 def _audience_regions(whole: dict) -> dict[str, tuple[tuple[float, float, bool], ...]]:
     """Return high-confidence AV audience spans, failing closed on bad evidence."""
     output: dict[str, tuple[tuple[float, float], ...]] = {}
@@ -262,6 +314,7 @@ def run_editorial_engine_v2(
     # Complete source-proven word edges before the semantic phase barrier.
     result = recover_complete_boundaries(result)
     result = replace(result, draft=_fold_alternates(result.draft))
+    result = replace(result, draft=_coalesce_overlapping_selected_speech(result.draft))
     result = _restore_safe_audience_continuity(result, whole)
     discard_signature = _discard_signature(result.draft)
     ordered_semantic_signature = _ordered_semantic_signature(result.draft)
@@ -285,6 +338,7 @@ def run_editorial_engine_v2(
             "post_selection_interior_gap_trace", "boundary_engine_pass",
             "human_boundary_polish", "editorial_engine_v2_continuity_restoration",
             "selection_boundary_contract", "v2_recording_tail",
+            "unified_selection_reasoner", "v2_take_competitions", "v2_overlapping_selection_word_union",
         )
         exc.boundary_failure_evidence = {
             "schema_version": "cutsell.v2.boundary_failure.v1",

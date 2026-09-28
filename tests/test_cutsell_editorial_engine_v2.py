@@ -9,8 +9,30 @@ from cutsell_worker.contracts import (
     JobState,
     ProcessingResult,
     SCHEMA_VERSION,
+    Word,
 )
-from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2
+from cutsell_worker.editorial_engine_v2 import run_editorial_engine_v2, _coalesce_overlapping_selected_speech
+
+
+def test_v2_coalesces_identical_source_word_overlap_preserving_unique_edges():
+    words = tuple(Word(word, i, i + 1) for i, word in enumerate(("unique", "prefix", "shared", "shared2", "tail")))
+    a = replace(clip("a", 0, selected=True), end=4, words=words[:4], text="unique prefix shared shared2")
+    b = replace(clip("b", 2, selected=True), end=5, words=words[2:], text="shared shared2 tail")
+    source = source_result().draft
+    output = _coalesce_overlapping_selected_speech(replace(source, selected=(a, b)))
+    assert len(output.selected) == 1
+    assert output.selected[0].text == "unique prefix shared shared2 tail"
+    assert (output.selected[0].start, output.selected[0].end) == (0, 5)
+    assert output.diagnostics["v2_overlapping_selection_word_union"][0]["action"] == "source_word_union"
+    output = _coalesce_overlapping_selected_speech(replace(source, selected=(b, a)))
+    assert output.selected[0].text == "unique prefix shared shared2 tail"
+    bad = replace(b, words=(Word("different", 2, 3), *words[3:]))
+    output = _coalesce_overlapping_selected_speech(replace(source, selected=(a, bad)))
+    assert len(output.selected) == 2
+    crossing = replace(b, words=(words[2], Word("crossing", 3.8, 4.2), words[4]),
+                       text="shared crossing tail")
+    output = _coalesce_overlapping_selected_speech(replace(source, selected=(a, crossing)))
+    assert len(output.selected) == 2
 from cutsell_worker.unified_selection_reasoner import (
     UnifiedSelectionDecision,
     UnifiedSelectionPlan,
