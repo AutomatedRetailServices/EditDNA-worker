@@ -1,0 +1,112 @@
+name: CutSell V2 Video08 Selection Block Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/editorial-engine-v2-whole-video-rebuild
+    paths:
+      - .github/workflows/cutsell-v2-video08-block-diagnostic.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutsell-v2-video08-block-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CUTSELL_ASR_MODEL: medium
+      CUTSELL_EDITORIAL_ENGINE_V2: "1"
+      CUTSELL_V2_NATIVE_SELECTION_ENABLED: "1"
+      CUTSELL_HYBRID_LLM_ENABLED: "1"
+      CUTSELL_HYBRID_PROVIDER: google
+      CUTSELL_HYBRID_PRIMARY_MODEL: gemini-3.5-flash-lite
+      CUTSELL_WATCH_LISTEN_AV_ENABLED: "1"
+      CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD: "0.10"
+      CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION: "0.30"
+      CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION: "2.50"
+      CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED: "1"
+      CUTSELL_HYBRID_MAX_SESSION_USD: "0.05"
+      CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD: "0.05"
+      CUTSELL_HYBRID_MAX_SEMANTIC_EQUIVALENCE_USD: "0.008"
+      CUTSELL_HYBRID_MAX_CLAIM_EQUIVALENCE_USD: "0.003"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3-dev ffmpeg jq pkg-config \
+            libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libswresample-dev
+          pip install -r requirements.cutsell.worker.txt
+          pip install pytest
+
+      - name: Verify Editorial Engine V2 corrections
+        run: |
+          pytest -q \
+            tests/test_cutsell_editorial_engine_v2.py \
+            tests/test_cutsell_unified_selection_google.py \
+            tests/test_cutsell_unified_selection_reasoner.py \
+            tests/test_v2_focused_continuation.py \
+            tests/test_cutsell_final_boundary_authority_refresh.py \
+            tests/test_cutsell_v2_recording_tail.py \
+            tests/test_cutsell_v2_visual_trim_floor.py \
+            tests/test_cutsell_v2_source_selection.py \
+            tests/test_cutsell_v13_evidence_replay.py \
+            tests/test_whole_video_av.py \
+            tests/test_cutsell_selection_boundary_contract.py \
+            tests/test_cutsell_live_render_qc.py \
+            tests/test_cutsell_post_render_media_qc.py \
+            tests/test_cutsell_d097_perceptual_watch_listen_and_clean_raw_gate.py
+
+      - name: Load missing runtime secrets from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'runtime secrets unavailable'; exit 3; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value" || { echo "$key missing"; exit 5; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Diagnose one Video08 selection block
+        run: python scripts/diagnose_v2_selection_block.py
+
+      - name: Upload sanitized diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-v2-video08-block-${{ github.run_id }}
+          path: selection-block-diagnostic/report.json
+          if-no-files-found: warn
