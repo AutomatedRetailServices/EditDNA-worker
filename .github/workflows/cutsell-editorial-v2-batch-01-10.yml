@@ -1,0 +1,246 @@
+name: CutSell Editorial Engine V2 Yaskira 01–10 Batch V32
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/editorial-engine-v2-whole-video-rebuild
+    paths:
+      - .github/workflows/cutsell-editorial-v2-batch-01-10.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutsell-editorial-v2-yaskira-01-10-batch
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CUTSELL_ASR_MODEL: medium
+      CUTSELL_EDITORIAL_ENGINE_V2: "1"
+      CUTSELL_V2_NATIVE_SELECTION_ENABLED: "1"
+      CUTSELL_HYBRID_LLM_ENABLED: "1"
+      CUTSELL_HYBRID_PROVIDER: google
+      CUTSELL_HYBRID_PRIMARY_MODEL: gemini-3.5-flash-lite
+      CUTSELL_WATCH_LISTEN_AV_ENABLED: "1"
+      CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD: "0.10"
+      CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION: "0.30"
+      CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION: "2.50"
+      CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED: "1"
+      CUTSELL_HYBRID_MAX_SESSION_USD: "0.05"
+      CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD: "0.05"
+      CUTSELL_HYBRID_MAX_SEMANTIC_EQUIVALENCE_USD: "0.008"
+      CUTSELL_HYBRID_MAX_CLAIM_EQUIVALENCE_USD: "0.003"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3-dev ffmpeg jq pkg-config \
+            libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libswresample-dev
+          pip install -r requirements.cutsell.worker.txt
+          pip install pytest
+
+      - name: Verify Editorial Engine V2 corrections
+        run: |
+          pytest -q \
+            tests/test_cutsell_editorial_engine_v2.py \
+            tests/test_cutsell_unified_selection_google.py \
+            tests/test_cutsell_unified_selection_reasoner.py \
+            tests/test_v2_focused_continuation.py \
+            tests/test_cutsell_final_boundary_authority_refresh.py \
+            tests/test_cutsell_v2_recording_tail.py \
+            tests/test_cutsell_v2_visual_trim_floor.py \
+            tests/test_cutsell_v2_source_selection.py \
+            tests/test_cutsell_v13_evidence_replay.py \
+            tests/test_whole_video_av.py \
+            tests/test_cutsell_selection_boundary_contract.py \
+            tests/test_cutsell_live_render_qc.py \
+            tests/test_cutsell_post_render_media_qc.py \
+            tests/test_cutsell_d097_perceptual_watch_listen_and_clean_raw_gate.py
+
+      - name: Load missing runtime secrets from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'runtime secrets unavailable'; exit 3; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value" || { echo "$key missing"; exit 5; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Qualify the ten Yaskira RAW sources with one frozen revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p editorial-v2-yaskira-01-10/previews editorial-v2-yaskira-01-10/results
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path, PurePosixPath
+          from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
+
+          keys = [
+              "Yaskira/01.mp4",
+              "Yaskira/02.mp4",
+              "Yaskira/03.mp4",
+              "Yaskira/04.MP4",
+              "Yaskira/05.MP4",
+              "Yaskira/06.MP4",
+              "Yaskira/07.mp4",
+              "Yaskira/08.mp4",
+              "Yaskira/09.mp4",
+              "Yaskira/10.MOV",
+          ]
+          root = Path("editorial-v2-yaskira-01-10")
+          results = []
+          failures = []
+          for index, key in enumerate(keys, start=1):
+              safe = re.sub(r"[^A-Za-z0-9._-]+", "-", PurePosixPath(key).stem)[:80]
+              preview = root / "previews" / f"{index:02d}-{safe}.mp4"
+              try:
+                  result = run_single_universal_clean_cut_validation(
+                      key,
+                      project_id=f"cutsell-editorial-v2-ten-raws-{index:02d}",
+                      preview_output=str(preview),
+                  )
+                  v2_status = result.get("diagnostics", {}).get("editorial_engine_v2", {}).get("status")
+                  if v2_status != "frozen_boundary_verified_pending_post_render_review":
+                      raise RuntimeError(f"Editorial Engine V2 returned unexpected status: {v2_status!r}")
+                  if not result.get("selection_reasoner_enabled"):
+                      raise RuntimeError("Global selection reasoner was not enabled")
+                  results.append(result)
+                  (root / "results" / f"{index:02d}.json").write_text(
+                      json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+                  )
+              except Exception as exc:
+                  evidence = getattr(exc, "boundary_failure_evidence", None)
+                  if evidence is not None:
+                      (root / "results" / f"{index:02d}-boundary-failure.json").write_text(
+                          json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+                      )
+                  failures.append({
+                      "index": index,
+                      "source_key": key,
+                      "error_type": exc.__class__.__name__,
+                      "error": str(exc)[:2000],
+                  })
+
+          # Owner-declared rounded source-time Gold; 07 requires render alignment.
+          gold_keep = {
+              "Yaskira/03.mp4": [(0, 19.623)],
+              "Yaskira/04.MP4": [(5, 27), (28, 44)],
+              "Yaskira/05.MP4": [(98, 137)],
+              "Yaskira/06.MP4": [(85, 107)],
+              "Yaskira/08.mp4": [(120, 147)],
+              "Yaskira/09.mp4": [(5, 14), (19, 28), (52, 66), (73, 91), (97, 120)],
+              "Yaskira/10.MOV": [(16, 25), (55, 64), (75, 79), (83, 97)],
+          }
+          gold_delete = {
+              "Yaskira/01.mp4": [(58, 59)],
+              "Yaskira/02.mp4": [(49, 50), (68, 70)],
+          }
+          comparisons = []
+          for result in results:
+              key = result["source_key"]
+              if key == "Yaskira/07.mp4":
+                  comparisons.append({"source_key": key, "status": "gold_render_alignment_required"})
+                  continue
+              duration = float(result["source_duration_sec"])
+              keep = gold_keep.get(key)
+              if key in gold_delete:
+                  keep = []
+                  cursor = 0.0
+                  for low, high in gold_delete[key]:
+                      if cursor < low:
+                          keep.append((cursor, low))
+                      cursor = high
+                  if cursor < duration:
+                      keep.append((cursor, duration))
+              if keep is None:
+                  comparisons.append({"source_key": key, "status": "gold_unavailable"})
+                  continue
+              intervals = sorted((float(row["start"]), float(row["end"]))
+                                 for row in result.get("selected", []))
+              merged = []
+              for start, end in intervals:
+                  if merged and start <= merged[-1][1]:
+                      merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+                  else:
+                      merged.append((start, end))
+              overlap = sum(max(0.0, min(end, upper) - max(start, lower))
+                            for start, end in merged for lower, upper in keep)
+              retained = sum(end - start for start, end in merged)
+              total_keep = sum(upper - lower for lower, upper in keep)
+              comparisons.append({
+                  "source_key": key, "status": "rounded_source_gold_comparison",
+                  "gold_keep_sec": round(total_keep, 3),
+                  "keep_retained_sec": round(overlap, 3),
+                  "keep_lost_sec": round(max(0, total_keep - overlap), 3),
+                  "delete_retained_sec": round(max(0, retained - overlap), 3),
+                  "live_render_qc": result.get("live_render_qc", {}).get("status"),
+              })
+          (root / "gold_comparison.json").write_text(
+              json.dumps(comparisons, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(comparisons, ensure_ascii=False, indent=2))
+
+          report = {
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_01_10.v32_qc_split",
+              "engine": "editorial_engine_v2",
+              "source_keys": keys,
+              "source_count": len(keys),
+              "completed_count": len(results),
+              "execution_failure_count": len(failures),
+              "results": results,
+              "failures": failures,
+          }
+          (root / "report.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+          )
+          print(json.dumps({k: report[k] for k in (
+              "engine", "source_count", "completed_count", "execution_failure_count"
+          )}, indent=2))
+          if failures:
+              print(json.dumps(failures, ensure_ascii=False, indent=2))
+              raise SystemExit("One or more isolated V2 qualifications failed")
+          PY
+
+      - name: Upload complete V2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-editorial-v2-yaskira-01-10-${{ github.run_id }}
+          path: editorial-v2-yaskira-01-10/
+          if-no-files-found: warn
+          retention-days: 30

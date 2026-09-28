@@ -259,3 +259,32 @@ No imponer unión ni descarte por una respuesta contradictoria; inspeccionar
 la misma unión física y la evidencia de palabras antes de decidir. El lote
 01–10 sigue condicionado a 08/09 sin regresiones materiales, y los renders
 siguen requiriendo evaluación mirando y escuchando antes de promocionar.
+
+La calificación V31 run `36456010160` terminó **sin aprobar**: 224 tests
+pasaron, pero 08 recibió dos respuestas de selección Gemini sin candidatos
+y falló cerrado. En 09 el selector eligió 58.431/73 s KEEP, 5.962 s fuera de
+Gold; descartó 19.218–28.14 como `failed_delivery` aunque el Gold conserva
+la afirmación «más fuerte en 30 días». A diferencia de V30, sí conservó
+73.35–77.07 y 77.07–87.37; por tanto la pérdida editorial de 09 varía entre
+corridas y no se certifica como estable. El revisor perceptual dejó de
+marcar la demo muda como defecto; QC físico aún bloqueó un silencio
+43.636–49.804 que cruza un resto mudo hablado inferior a 1.2 s y la acción
+visual congelada. V32 divide ese intervalo en la parte protegida y la parte
+no protegida, conservando FAIL si esta última alcanza 1.2 s. QA independiente
+pasó la regla y 116 pruebas locales la cubren; V32 registra además el motivo
+`blockReason` de respuestas vacías sin imprimir texto del RAW. Sigue pendiente
+calificar 08/09 y observar el conjunto completo sin usar Gold en el motor.
+
+V32 run `36458204884` pasó pruebas y ambos renders dieron QC PASS, pero
+la edición **sigue en EDITORIAL_FAIL**. 08 intersectó 25.199/27 s Gold y
+añadió 19.914 s DELETE 62.503–82.417. 09 intersectó 57.367/73 s Gold,
+añadió 6.102 s fuera de Gold y no generó ningún candidato para la operación
+98.435–104.435, que V31 sí había observado. En 09 V32 conservó
+19–28.14 gracias a `material_retry_claim_preserved`; V31 lo clasificó
+`failed_delivery` y perdió la afirmación. Esto prueba variación entre
+percepción, grupos de reintentos y selección global en el mismo RAW;
+corregir solo QC no basta. El batch 01–10 de V32 se lanza para medir clases
+de error por fuente con la misma configuración, sin promocionar ningún
+render a calidad comercial. Investigar primero la pérdida intermitente de
+demostración silenciosa y el rescate erróneo de 08 62–82 con auditoría AV,
+decisiones y metraje. La prueba Gold nunca entra al prompt de producción.
