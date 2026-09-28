@@ -16,24 +16,24 @@ import requests
 OUTPUT = Path("selection-block-diagnostic")
 OUTPUT.mkdir(exist_ok=True)
 report = {"source_key": "Yaskira/08.mp4", "control": "not_reached", "comparison": "not_run"}
-original_post = requests.Session.post
+original_post = requests.post
 observed = False
 
 
-def post_with_diagnostic(self, url, *args, **kwargs):
+def post_with_diagnostic(url, *args, **kwargs):
     global observed
     body = kwargs.get("json")
     if (observed or not url.endswith(":generateContent") or
             not isinstance(body, dict) or not body.get("contents") or
             "cutsell_editorial_engine_v2" not in str(body["contents"][0]["parts"][0].get("text", ""))):
-        return original_post(self, url, *args, **kwargs)
+        return original_post(url, *args, **kwargs)
     observed = True
     parts = body["contents"][0]["parts"]
     prompt = parts[0]["text"]
     report.update({"prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                    "prompt_chars": len(prompt), "part_count": len(parts),
                    "has_av": len(parts) > 1})
-    response = original_post(self, url, *args, **kwargs)
+    response = original_post(url, *args, **kwargs)
     raw = response.json() if response.ok else {}
     feedback = raw.get("promptFeedback") or {}
     report["control"] = {"http_status": response.status_code,
@@ -46,7 +46,7 @@ def post_with_diagnostic(self, url, *args, **kwargs):
                    "generationConfig": body["generationConfig"]}
         headers = kwargs.get("headers")
         endpoint = url.rsplit(":", 1)[0]
-        count = original_post(self, endpoint + ":countTokens", headers=headers,
+        count = original_post(endpoint + ":countTokens", headers=headers,
                               json={"contents": compact["contents"]}, timeout=60)
         count.raise_for_status()
         tokens = count.json().get("totalTokens")
@@ -55,7 +55,7 @@ def post_with_diagnostic(self, url, *args, **kwargs):
         if type(tokens) is not int or tokens <= 0 or (tokens * .30 + output * 2.50) / 1_000_000 > .02:
             report["comparison"] = "budget_rejected"
         else:
-            comparison = original_post(self, url, headers=headers, json=compact,
+            comparison = original_post(url, headers=headers, json=compact,
                                        timeout=kwargs.get("timeout", 120))
             other = comparison.json() if comparison.ok else {}
             report["comparison"] = {"input": "text_only_diagnostic",
@@ -66,7 +66,7 @@ def post_with_diagnostic(self, url, *args, **kwargs):
     return response
 
 
-requests.Session.post = post_with_diagnostic
+requests.post = post_with_diagnostic
 try:
     from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
     result = run_single_universal_clean_cut_validation(
