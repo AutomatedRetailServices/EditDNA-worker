@@ -40,5 +40,21 @@ jobs:
                   'focused_candidates':audit.get('v2_focused_visual_action_candidates',[]),
                   'continuation_links':audit.get('v2_verified_continuation_links',[]),
                   'qc':d.get('live_render_qc',{}).get('status')},ensure_ascii=False))
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text()); dx=d.get('diagnostics',{})
+              print('CONTINUATION_OBSERVATIONS',json.dumps(dx.get('v2_continuation_observations',[]),ensure_ascii=False)[:3000])
+              for c in d.get('selected',[])+d.get('alternates',[])+d.get('discarded',[]):
+                  if 70 < c.get('start',0) < 107:
+                      print('CANDIDATE',round(c['start'],2),round(c['end'],2),c.get('text','')[:90],c.get('audio_muted'))
+              for a in dx.get('unified_selection_reasoner',{}).get('decisions',[]):
+                  if any(c.get('clip_id')==a['clip_id'] and 70<c.get('start',0)<107 for c in d.get('selected',[])+d.get('alternates',[])+d.get('discarded',[]):
+                      print('DECISION',json.dumps(a,ensure_ascii=False))
+              for source in dx.get('whole_video_context',{}).get('input_audit',{}).get('native_av',[]):
+                  if source.get('window_index')==1000:
+                      print('FOCUS_AUDIT',source.get('status'),source.get('rejection'),source.get('reserved_usd'))
+                      try:
+                          raw=source['response']; data=json.loads(''.join(part.get('text','') for part in raw['candidates'][0]['content']['parts']))
+                          print('FOCUS_REGIONS',json.dumps(data.get('regions',[]),ensure_ascii=False)[:3500])
+                      except (KeyError,IndexError,ValueError,TypeError) as exc: print('FOCUS_PARSE_ERROR',type(exc).__name__)
           for p in Path('evidence/results').glob('*failure.json'): print(p.name,p.read_text()[:1800])
           PY
