@@ -1,0 +1,26 @@
+name: CutSell V2 Video08 Report Extract
+on:
+  push:
+    branches: [feat/editorial-engine-v2-whole-video-rebuild]
+    paths: [.github/workflows/cutsell-v2-video08-report-extract.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Extract existing diagnostic JSON without provider requests
+        run: |
+          mkdir -p extracted
+          gh run download 36480800424 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-v2-video08-block-36480800424 --dir /tmp/v08-diagnostic
+          cp /tmp/v08-diagnostic/report.json extracted/report.json
+          python -m json.tool extracted/report.json >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-v2-video08-report-only
+          path: extracted/report.json
