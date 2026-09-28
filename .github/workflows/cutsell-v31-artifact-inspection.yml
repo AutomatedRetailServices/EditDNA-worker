@@ -75,6 +75,7 @@ jobs:
           for p in Path('evidence/results').glob('02.json'):
               d=json.loads(p.read_text())
               dx=d.get('diagnostics',{})
+              print('SELECTED_TEXT',[(c.get('start'),c.get('end'),c.get('text')) for c in d.get('selected',[])])
               for c in d.get('selected',[])+d.get('discarded',[]):
                   if 16 < c.get('start',0) < 33:
                       decision=next((a for a in dx.get('unified_selection_reasoner',{}).get('decisions',[])
