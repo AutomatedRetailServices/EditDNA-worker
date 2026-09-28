@@ -282,7 +282,7 @@ def test_v2_preserves_usable_retry_alternate_with_materially_unique_information(
     assert [item.clip_id for item in out.selected] == ["hook", "winner"]
     row = next(row for row in out.diagnostics["unified_selection_reasoner"]["decisions"]
                if row["clip_id"] == "hook")
-    assert row["safety_override"] == "unique_retry_information_preserved"
+    assert row["safety_override"] == "material_retry_claim_preserved"
 
 
 def test_v2_does_not_preserve_usable_retry_alternate_that_winner_covers():
@@ -438,7 +438,7 @@ def test_v2_cta_support_cannot_depend_on_another_proposed_deletion():
 
 
 def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():
-    detail = clip("detail", 0, 5, "Stronger at the gym with a noticeable first week difference", selected=False)
+    detail = clip("detail", 0, 5, "Stronger at the gym with a noticeable difference in 30 days", selected=False)
     winner = clip("winner", 10, 15, "Watermelon creatine mixes into one daily bottle", selected=False)
     d = DraftTimeline(
         schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
@@ -613,3 +613,106 @@ def test_v2_verified_continuation_restores_adjacent_member_after_competition():
             return replace(original, decisions=tuple(replace(decision,
                 sequence_index=1-decision.sequence_index) for decision in original.decisions))
     assert apply_unified_selection_reasoner(d, Reversed()).diagnostics['unified_selection_reasoner']['status'] == 'provider_error_fail_open'
+
+
+def test_v2_lexical_novelty_in_retry_does_not_override_selected_complete_take():
+    earlier = clip('earlier', 20, 28,
+                   'Available in every size and a lavender jacket pairs beautifully with it', selected=False)
+    later = clip('later', 50, 69,
+                 'This suit comes in every color and size and fits comfortably', selected=True)
+    d = DraftTimeline(schema_version=SCHEMA_VERSION, project_id='p',
+                      strategy=EditStrategy.STORYTELLING, selected=(later,),
+                      alternates=(), discarded=(earlier,),
+                      diagnostics={'editorial_engine_v2_request': True})
+    class SemanticChoice:
+        def reason(self, _draft):
+            return UnifiedSelectionPlan(decisions=(
+                v2_decision('earlier', 'discard', 'retry_alternate', .8, 1,
+                            'redundant_retry', 0),
+                v2_decision('later', 'select', 'retry_winner', .98, 0,
+                            'best_complete_take', 1),
+            ), provider='test', model='test')
+    output = apply_unified_selection_reasoner(d, SemanticChoice())
+    assert [c.clip_id for c in output.selected] == ['later']
+    assert [c.clip_id for c in output.discarded] == ['earlier']
+
+
+def test_v2_objective_quantity_survives_an_erroneous_retry_label():
+    earlier = clip('earlier', 20, 28, 'Results in 30 days', selected=False)
+    later = clip('later', 50, 69, 'Results with daily use', selected=True)
+    d = DraftTimeline(schema_version=SCHEMA_VERSION, project_id='p',
+                      strategy=EditStrategy.STORYTELLING, selected=(later,),
+                      alternates=(), discarded=(earlier,),
+                      diagnostics={'editorial_engine_v2_request': True})
+    class SemanticChoice:
+        def reason(self, _draft):
+            return UnifiedSelectionPlan(decisions=(
+                v2_decision('earlier', 'discard', 'retry_alternate', .8, 1,
+                            'redundant_retry', 0),
+                v2_decision('later', 'select', 'retry_winner', .98, 0,
+                            'best_complete_take', 1),
+            ), provider='test', model='test')
+    output = apply_unified_selection_reasoner(d, SemanticChoice())
+    assert [c.clip_id for c in output.selected] == ['earlier', 'later']
+
+
+def test_v2_retry_claim_guard_handles_written_numbers_negation_and_health_facts():
+    from cutsell_worker.unified_selection_reasoner import _preserve_retry_alternates_with_unique_information
+    examples = ('resultados en treinta días', 'sin azúcar para el desayuno',
+                'contiene alérgenos importantes', 'apto para diabéticos diagnosticados')
+    for sentence in examples:
+        earlier = clip('earlier', 10, 18, sentence, selected=False)
+        later = clip('later', 30, 45, 'Mezcla diaria con agua', selected=True)
+        choices = {'earlier': v2_decision('earlier', 'discard', 'retry_alternate', .8, 1,
+                                          'redundant_retry', 0),
+                   'later': v2_decision('later', 'select', 'retry_winner', .98, 0,
+                                        'best_complete_take', 1)}
+        actions, overrides = ['discard', 'select'], [None, None]
+        audit = _preserve_retry_alternates_with_unique_information(
+            (earlier, later), choices, actions, overrides)
+        assert actions == ['select', 'select'], (sentence, audit)
+        assert audit[0]['status'] == 'material_claim_preserved'
+
+
+def test_v2_other_source_cannot_cover_material_quantity_and_lexical_conflict_is_audited():
+    from cutsell_worker.unified_selection_reasoner import _preserve_retry_alternates_with_unique_information
+    earlier = clip('earlier', 10, 18, 'Resultados en 30 días', selected=False)
+    other_source = replace(clip('other', 1, 12, 'Resultados en 30 días', selected=True),
+                           source_asset_id='other-source')
+    later = clip('later', 30, 45, 'Mezcla diaria con agua', selected=True)
+    choices = {'earlier': v2_decision('earlier', 'discard', 'retry_alternate', .8, 1,
+                                      'redundant_retry', 0),
+               'other': v2_decision('other', 'select', 'independent', .9, 2,
+                                    'independent_story_coverage', 1),
+               'later': v2_decision('later', 'select', 'retry_winner', .98, 0,
+                                    'best_complete_take', 2)}
+    actions, overrides = ['discard', 'select', 'select'], [None] * 3
+    audit = _preserve_retry_alternates_with_unique_information(
+        (earlier, other_source, later), choices, actions, overrides)
+    assert actions[0] == 'select'
+    assert audit[0]['missing_quantity'] == [('30', 'dias')]
+    earlier = replace(earlier, text='Una chaqueta brillante combina muy bien')
+    actions, overrides = ['discard', 'select', 'select'], [None] * 3
+    audit = _preserve_retry_alternates_with_unique_information(
+        (earlier, other_source, later), choices, actions, overrides)
+    assert actions[0] == 'discard'
+    assert audit[0]['status'] == 'model_discard_pending_review'
+
+
+def test_v2_different_protected_health_fact_is_not_covered_by_same_category_word():
+    from cutsell_worker.unified_selection_reasoner import _preserve_retry_alternates_with_unique_information
+    for earlier_text, winner_text in (
+        ('Allergic to peanuts', 'Allergic to milk'),
+        ('Diagnosed with diabetes', 'Diagnosed with asthma'),
+        ('Ingredient includes nuts', 'Ingredient includes oats'),
+    ):
+        earlier = clip('early', 1, 5, earlier_text, selected=False)
+        winner = clip('winner', 8, 14, winner_text, selected=True)
+        choices = {'early': v2_decision('early', 'discard', 'retry_alternate', .9, 1,
+                                        'redundant_retry', 0),
+                   'winner': v2_decision('winner', 'select', 'retry_winner', .9, 0,
+                                         'best_complete_take', 1)}
+        actions, overrides = ['discard', 'select'], [None, None]
+        audit = _preserve_retry_alternates_with_unique_information(
+            (earlier, winner), choices, actions, overrides)
+        assert actions[0] == 'select', audit

@@ -459,20 +459,29 @@ def _preserve_retry_alternates_with_unique_information(
     decisions: dict[str, UnifiedSelectionDecision],
     actions: list[str],
     overrides: list[str | None],
-) -> None:
-    """Prevent a false retry family from deleting materially distinct beats.
+) -> list[dict]:
+    """Guard a concrete omitted claim, never promote a retry by vocabulary alone.
 
-    Gemini may call an earlier hook or continuation a usable retry alternate
-    even when the chosen later take does not contain much of its information.
-    V2 has no manual SWAP bucket after resolution, so preserve a clean usable
-    alternate when at least three meaningful tokens and 40% of its content
-    vocabulary are absent from the complete selected story. Failed delivery
-    and BTS never qualify.
+    Best-take editing can intentionally omit adjective and style variations.
+    Keep a disputed alternate in the audit, but promote it to the played
+    timeline only for an unrepresented quantity, audience condition, or CTA.
+    A source-verified spoken continuation is protected by a separate authority.
     """
-    selected_tokens: set[str] = set()
-    for index, clip in enumerate(clips):
-        if actions[index] == "select":
-            selected_tokens.update(_content_tokens(clip.text))
+    def plain(text):
+        value = unicodedata.normalize('NFKD', str(text or '').casefold())
+        return ''.join(ch for ch in value if not unicodedata.combining(ch))
+
+    spoken_numbers = {'uno': '1', 'one': '1', 'dos': '2', 'two': '2',
+                      'tres': '3', 'three': '3', 'cinco': '5', 'five': '5',
+                      'diez': '10', 'ten': '10', 'quince': '15', 'fifteen': '15',
+                      'veinte': '20', 'twenty': '20', 'treinta': '30', 'thirty': '30',
+                      'sesenta': '60', 'sixty': '60', 'noventa': '90', 'ninety': '90'}
+    def quantities(value):
+        return set(re.findall(r'\b(\d+(?:[.,]\d+)?)\s*([a-z]+)?',
+                              re.sub(r'\b(?:' + '|'.join(spoken_numbers) + r')\b',
+                                     lambda m: spoken_numbers[m.group()], plain(value))))
+
+    conflicts = []
     for index, clip in enumerate(clips):
         decision = decisions[clip.clip_id]
         if actions[index] not in {"swap", "discard"}:
@@ -481,13 +490,51 @@ def _preserve_retry_alternates_with_unique_information(
             "usable_alternate", "redundant_retry",
         }:
             continue
-        tokens = _content_tokens(clip.text)
-        unique = tokens - selected_tokens
-        if len(unique) < 3 or len(unique) / max(1, len(tokens)) < 0.40:
-            continue
-        actions[index] = "select"
-        overrides[index] = "unique_retry_information_preserved"
-        selected_tokens.update(tokens)
+        # A claim repeated by another source cannot cover this creator's take.
+        selected_same_source = [other for j, other in enumerate(clips)
+                                if j != index and actions[j] == 'select' and
+                                other.source_asset_id == clip.source_asset_id]
+        selected_text = ' '.join(other.text for other in selected_same_source)
+        normalized = plain(clip.text)
+        selected_norm = plain(selected_text)
+        amounts = quantities(clip.text)
+        selected_amounts = quantities(selected_text)
+        conditional = re.search(r'\b(?:si|if)\s+(?:(?:tu\s+)?(?:estas\s+)?|you\s+(?:are\s+)?)'
+                                r'(?:usando|utilizando|using|taking|use|usas?)\s+([\w-]+)', normalized)
+        missing_condition = bool(conditional and
+                                 conditional.group(1) not in _content_tokens(selected_text))
+        unique_cta = (_has_purchase_action(clip.text) and
+                      not any(actions[j] == 'select' and
+                                  other.source_asset_id == clip.source_asset_id and
+                                  _has_purchase_action(other.text) and
+                                  _purchase_destination(other.text) == _purchase_destination(clip.text)
+                                  for j, other in enumerate(clips)))
+        negative_claims = re.findall(
+            r'\b(?:sin|without|free of)\s+(?!ningun\b|any\b)(?:\w+\s+){0,2}'
+            r'(?:azucar|sugar|gluten|lactosa|lactose|alergen\w*|allergen\w*|'
+            r'calorias|calories|alcohol|cafeina|caffeine)\b|'
+            r'\b(?:no\s+contiene|does\s+not\s+contain|doesn.t\s+contain)\s+'
+            r'(?:\w+\s+){0,3}\w+', normalized)
+        negative_claim = bool(negative_claims and
+                              any(claim not in selected_norm for claim in negative_claims))
+        protected_topic = bool(re.search(
+            r'\b(?:allerg\w*|alerg\w*|diabet\w*|diagnos\w*|diagnost\w*|'
+            r'ingredient\w*|ingrediente\w*)\b', normalized)
+            and normalized not in selected_norm)
+        protected = bool(amounts - selected_amounts or missing_condition or unique_cta or
+                         negative_claim or protected_topic)
+        unique = sorted(_content_tokens(clip.text) - _content_tokens(selected_text))
+        if protected:
+            actions[index] = "select"
+            overrides[index] = "material_retry_claim_preserved"
+        if protected or unique:
+            conflicts.append({"clip_id": clip.clip_id, "source_asset_id": clip.source_asset_id,
+                              "status": "material_claim_preserved" if protected else "model_discard_pending_review",
+                              "missing_quantity": sorted(amounts - selected_amounts),
+                              "missing_condition": missing_condition, "unique_cta": unique_cta,
+                              "missing_negation": negative_claim, "protected_topic": protected_topic,
+                              "lexical_difference": unique[:16]})
+    return conflicts
 
 
 def _high_confidence_audience_spans(draft: DraftTimeline) -> dict[str, tuple[tuple[float, float], ...]]:
@@ -646,7 +693,8 @@ def apply_unified_selection_reasoner(
 
     _enforce_single_retry_family_winner(clips, decisions, actions, overrides)
     if v2_request:
-        _preserve_retry_alternates_with_unique_information(clips, decisions, actions, overrides)
+        retry_conflicts = _preserve_retry_alternates_with_unique_information(
+            clips, decisions, actions, overrides)
         _preserve_unique_content_when_av_contradicts_failed(
             draft, clips, decisions, actions, overrides,
         )
@@ -722,6 +770,7 @@ def apply_unified_selection_reasoner(
         diagnostics["v2_recording_tail"] = tail_audit
     if v2_request:
         diagnostics["v2_take_competitions"] = competition_audit
+        diagnostics["v2_retry_claim_conflicts"] = retry_conflicts
         diagnostics["v2_verified_continuation_links"] = [list(pair) for pair in plan.continuation_links]
         diagnostics["v2_continuation_observations"] = list(plan.continuation_evidence)
     return replace(
