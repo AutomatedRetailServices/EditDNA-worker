@@ -37,3 +37,23 @@ modificar autoridad. Separadamente, reproducir el rechazo físico en 117–119.
 No lanzar la regresión pagada 01–10 hasta que una corrección general supere
 el caso diagnosticado y pruebas contrarias offline; luego correr los diez
 con un mismo commit/configuración.
+
+### Experimento V20 preparado
+
+El modelo recibió `current_bucket` y votos Hybrid locales en cada candidato
+y volvió a escoger casi exactamente los candidatos ya marcados SELECT; la
+toma final estaba marcada DISCARD. Esto muestra correlación, no demuestra
+por sí solo causalidad de anclaje. V20 elimina esas decisiones previas del
+payload de V2, incluidos sus resúmenes de grupos, mientras conserva tiempos,
+texto, ASR y evidencia audiovisual. El runtime legado y el diagnóstico
+conservan los buckets. Hipótesis falsable: sin esa señal circular, el modelo
+elegirá la toma posterior y examinará el CTA como contenido de audiencia.
+La instrucción sobre CTA es la misma de V19 para aislar el cambio de entrada.
+Si mantiene la misma selección, el bloqueo está en comprensión de intentos
+o cobertura, y no se repetirá este experimento sin una nueva causa.
+
+El silencio 117.128–118.525 está en la toma anterior 103.07–120.45;
+`ffmpeg silencedetect` confirmó en el MP4 el mismo intervalo de salida
+93.391–94.788. Se tratará la selección primero: al descartar esa toma,
+el silencio también abandona la línea de tiempo. No se relaja QC para
+permitir un render bloqueado.

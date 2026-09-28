@@ -162,7 +162,6 @@ def _take_group_summaries(candidates: list[dict[str, Any]]) -> list[dict[str, An
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "gap_before": gap_before,
-                "current_bucket": row["current_bucket"],
                 # Full text remains authoritative in candidates[].  A short
                 # excerpt makes the grouped view readable without duplicating
                 # the whole transcript and exhausting V2's input budget.
@@ -222,6 +221,17 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
     if not candidates:
         raise ValueError("unified selection requires at least one candidate")
     v2_request = bool((draft.diagnostics or {}).get("editorial_engine_v2_request"))
+    if v2_request:
+        # Provisional local buckets and Hybrid votes are past decisions, not
+        # source evidence. V19 mostly repeated their labels, keeping the
+        # selected early patchwork while calling the discarded final take
+        # failed. Preserve those labels in draft diagnostics for audit; do
+        # not anchor the V2 whole-video authority with them.
+        candidates = [
+            {key: value for key, value in row.items()
+             if key not in {"current_bucket", "hybrid_votes"}}
+            for row in candidates
+        ]
     contract = [
         "Understand the full creator message before deciding any individual take.",
         "First infer idea families and retry relationships across the entire timeline.",
@@ -401,12 +411,17 @@ def output_token_reserve(candidate_count: int, *, ceiling: int, v2: bool = False
 
 def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_tokens: int) -> dict[str, Any]:
     candidate_count = len(payload.get("candidates") or ())
+    prior_decision_clause = (
+        "Provisional local bucket and Hybrid decisions are absent; form the final edit from source evidence. "
+        if payload.get("engine_version") == "v2" else
+        "Current buckets, local groups, and Hybrid votes are evidence only and may be overturned. "
+    )
     prompt = (
         "You are CutSell's final human-style Selection editor for ONE complete raw creator video. "
         "Do not make isolated clip decisions. Read every candidate first, reconstruct the intended story, "
         "form same-idea retry families, distinguish continuations from retries, and identify when the best "
-        "human edit is a composite assembled from multiple clean sub-deliveries. Current buckets, local groups, "
-        "and Hybrid votes are evidence only and may be overturned. Return one decision for every candidate in "
+        "human edit is a composite assembled from multiple clean sub-deliveries. "
+        + prior_decision_clause + "Return one decision for every candidate in "
         "the exact supplied order. family_index must be the same integer for genuine competing retries or "
         "composite pieces of one idea; use a different family for independent story beats. SELECT means it plays "
         "in the default edit. SWAP means it remains available but does not play. DISCARD is destructive and is "

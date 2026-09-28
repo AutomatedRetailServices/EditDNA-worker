@@ -1,7 +1,23 @@
+Warning: truncated output (original token count: 30218)
+Total output lines: 1782
+
 Warning: truncated output (original token count: 30230)
 Total output lines: 1779
 
 # CutSell.ai — Current State
+
+## 2026-09-28 — V20 removal of prior bucket anchoring (offline)
+
+V19's global Selection selected almost every upstream `SELECT`, including
+earlier fragments, and discarded the already-discarded final CTA. This
+correlation motivates an isolated V2 experiment: the Gemini input no longer
+contains `current_bucket` or Hybrid votes on candidates or take summaries.
+Prior buckets remain available for audit and runtime fallbacks, and legacy
+payloads are unchanged. 83 focused V2 tests pass locally. The hypothesis
+must be tested on rendered Video08 before any claim of editorial improvement;
+the V19 blocked silence belongs to an earlier selected take and may resolve
+only if Selection rejects that take. See
+`docs/evidence/YASKIRA_08_V19_CALIBRATION_20260928.md`.
 
 ## 2026-09-28 — V19 Video08 failed; calibration master adopted
 
@@ -1015,22 +1031,7 @@ Original Video00 source hash verified. Deepgram: 651 words, zero zero-duration
 words, seven native overlapping pairs; one request and one intra-job cache hit.
 20 selected/20 discarded, output 143.334 s, engine elapsed 431.011 s.
 Editorial criteria 10/11: full gynecologist and percentage-restatement checks
-pass, abandoned stomach attempt remains. Historical gold 17/18 (exact pimples
-micro-2 mismatch). Technical QC NEEDS_HUMAN_REVIEW for 1.5034 s accidental
-silence at output 42.9635–44.4669; diagnostic MP4 only. No human listening or
-universal ASR superiority claim. Modal stopped. Artifact reports 10837364760;
-parts 10837424599/10837324883; SHA digests verified. Manual-only restored at
-1bfe30f8. No Watch & Listen fix or production change; no further paid call.
-
-
-## Five Deepgram Video00 trials newly authorized
-
-Product Owner requested five full-engine Video00 outputs for comparison with
-the five existing GPT + WhisperX trials. Exactly five new sequential calls,
-one frozen environment snapshot, same source and checkout, fresh provider per
-trial, no cross-trial transcript reuse or automatic retries. No editorial
-changes; reuse identical Video00 criteria. Completed: run 36070640917, test
-a5fa3918d69d89…230 tokens truncated… human listening claimed. Preserve contradictory
+pass, abandoned stomach attempt remains. Historical gold 17/18 (ex…218 tokens truncated… human listening claimed. Preserve contradictory
 Medium compact deliverable=true versus NOT_DELIVERABLE status; status used for labeling.
 Two authorized calls completed, no extra retry or production change.
 

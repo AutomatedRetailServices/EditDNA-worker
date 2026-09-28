@@ -137,6 +137,22 @@ def test_real_group_id_cannot_collide_with_missing_id_singleton():
     assert len({group["take_evidence_id"] for group in payload["take_groups"]}) == 2
 
 
+def test_v2_does_not_expose_provisional_buckets_or_hybrid_votes_to_selector():
+    source = timeline_with(
+        selected=(grouped_clip(0, group="take"),),
+        discarded=(grouped_clip(1, group="take"),),
+    )
+    payload = build_unified_selection_payload(source)
+    assert [row["clip_id"] for row in payload["candidates"]] == ["g0-src", "g1-src"]
+    assert all("current_bucket" not in row and "hybrid_votes" not in row
+               for row in payload["candidates"])
+    assert all("current_bucket" not in interval
+               for group in payload["take_groups"] for interval in group["intervals"])
+    assert {row.clip_id for row in (*source.selected, *source.discarded)} == {
+        "g0-src", "g1-src",
+    }
+
+
 def decisions_json(candidate_count: int, *, index_offset: int = 0) -> str:
     """index_offset lets a test deliberately misalign candidate_index from
     position, e.g. index_offset=1 makes every candidate_index wrong by one."""
