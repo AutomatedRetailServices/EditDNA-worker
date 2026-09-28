@@ -1,0 +1,112 @@
+name: CutSell V2 Video09 Local Delivery Probe
+
+on:
+  push:
+    branches: [feat/editorial-engine-v2-whole-video-rebuild]
+    paths: [.github/workflows/cutsell-v2-video09-local-delivery-probe.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load missing runtime credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = 1 ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}"
+          curl --fail --silent --show-error --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != null
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value"
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+      - name: Inspect one local audio and video delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          python -m pip install boto3 requests
+          mkdir -p observation
+          python - <<'PY'
+          import boto3, os
+          boto3.client('s3').download_file(os.environ['S3_BUCKET'], 'Yaskira/09.mp4', '/tmp/raw.mp4')
+          PY
+          ffmpeg -v error -ss 17.5 -t 11.5 -i /tmp/raw.mp4 -map 0:v:0 -map 0:a:0 \
+            -vf scale=480:-2 -r 12 -c:v libx264 -crf 30 -preset fast \
+            -c:a aac -ac 1 -ar 16000 -b:a 48k -y /tmp/window.mp4
+          python - <<'PY'
+          import base64, json, os, pathlib, requests
+          model='gemini-3.5-flash-lite'
+          endpoint=f'https://generativelanguage.googleapis.com/v1beta/models/{model}:'
+          prompt=('Inspect the actual audio and video of this one 11.5-second unedited creator source. '
+                  'The clip begins at source second 17.5. A laugh or stumble may occur near the start. '
+                  'Using local seconds, locate any reset and the first complete audience-directed spoken claim after it. '
+                  'Is the spoken claim about stronger muscles and results in 30 days delivered intelligibly? '
+                  'Identify the exact local start and end of valid speech and any later fumble. '
+                  'Do not infer delivery quality from the supplied transcript or from a broad region label. '
+                  'Transcript for word alignment only: "y aparte tus músculos van a estar más fuerte '
+                  'en 30 días tú vas a ver resultados esto no te puede faltar yo estoy hablando de la creatina mira". '
+                  'Return JSON: reset_end_sec, valid_start_sec, valid_end_sec (use -1 if unknown), '
+                  'claim_intelligible boolean, speech_evidence, visual_evidence, uncertainty strings. '
+                  'State uncertainty when a boundary cannot be seen or heard.')
+          contents=[{'role':'user','parts':[{'inline_data':{'mime_type':'video/mp4','data':base64.b64encode(
+              pathlib.Path('/tmp/window.mp4').read_bytes()).decode()}},{'text':prompt}]}]
+          headers={'x-goog-api-key':os.environ['GEMINI_API_KEY']}
+          session=requests.Session()
+          counted=session.post(endpoint+'countTokens',headers=headers,json={'contents':contents},timeout=60)
+          counted.raise_for_status()
+          tokens=counted.json()['totalTokens']
+          if not 0 < tokens <= 12000 or (tokens*.30+750*2.50)/1_000_000 > .012:
+              raise RuntimeError('Local audiovisual probe budget exceeded')
+          schema={'type':'object','properties':{
+              'reset_end_sec':{'type':'number'},
+              'valid_start_sec':{'type':'number'},
+              'valid_end_sec':{'type':'number'},
+              'claim_intelligible':{'type':'boolean'},
+              'speech_evidence':{'type':'string'},'visual_evidence':{'type':'string'},
+              'uncertainty':{'type':'string'}},
+              'required':['reset_end_sec','valid_start_sec','valid_end_sec','claim_intelligible',
+                          'speech_evidence','visual_evidence','uncertainty']}
+          response=session.post(endpoint+'generateContent',headers=headers,json={
+              'contents':contents,'generationConfig':{'temperature':0,'responseMimeType':'application/json',
+              'responseJsonSchema':schema,'maxOutputTokens':750}},timeout=120)
+          response.raise_for_status()
+          raw=response.json()
+          if not raw.get('candidates') or raw['candidates'][0].get('finishReason')!='STOP':
+              raise RuntimeError('Local audiovisual observation unavailable')
+          data=json.loads(''.join(p.get('text','') for p in raw['candidates'][0]['content']['parts']))
+          pathlib.Path('observation/video09-local.json').write_text(json.dumps({
+              'source_window':[17.5,29.0],'model':model,'input_tokens':tokens,
+              'usage':raw.get('usageMetadata',{}),'observation':data},indent=2))
+          print('Local audiovisual observation saved')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cutsell-v2-video09-local-delivery
+          path: observation/
+          if-no-files-found: warn
