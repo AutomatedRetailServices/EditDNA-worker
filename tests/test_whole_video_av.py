@@ -59,6 +59,59 @@ class Transient503ThenSuccessSession(Session):
         return super().post(url, headers, json, timeout)
 
 
+class Preflight503ThenSuccessSession(Session):
+    def post(self, url, headers, json, timeout):
+        if url.endswith('countTokens') and not self.calls:
+            self.calls.append((url, json))
+            response = requests.Response()
+            response.status_code = 503
+            raise requests.exceptions.HTTPError('503 Service Unavailable', response=response)
+        return super().post(url, headers, json, timeout)
+
+
+def test_opted_in_av_preflight_503_retries_once_without_extra_generation(tmp_path):
+    av, raw, _ = provider(tmp_path)
+    av.session = Preflight503ThenSuccessSession()
+    av.retry_generation_timeout = True
+    context = safe_whole_video_analyze(av, (source(),), (), (),
+                                       local_paths={'source': str(raw)})
+    assert context.status.available
+    assert [call[0].rsplit(':', 1)[-1] for call in av.session.calls] == [
+        'countTokens', 'countTokens', 'generateContent']
+    assert av.audit_records[0]['preflight_attempts'] == 2
+    assert av.audit_records[0]['generation_attempts'] == 1
+    assert av.ledger.reserved_usd == av.audit_records[0]['reserved_usd']
+
+
+def test_av_preflight_503_fails_closed_without_opt_in(tmp_path):
+    av, raw, _ = provider(tmp_path)
+    av.session = Preflight503ThenSuccessSession()
+    context = safe_whole_video_analyze(av, (source(),), (), (),
+                                       local_paths={'source': str(raw)})
+    assert not context.status.available
+    assert len(av.session.calls) == 1
+    assert av.ledger.reserved_usd == 0
+
+
+@pytest.mark.parametrize('status,expected_calls', [(503, 2), (403, 1), (400, 1)])
+def test_av_preflight_terminal_errors_send_no_generation(tmp_path, status, expected_calls):
+    av, raw, _ = provider(tmp_path)
+    class RejectedPreflight(Session):
+        def post(self, url, headers, json, timeout):
+            self.calls.append((url, json))
+            response = requests.Response()
+            response.status_code = status
+            raise requests.exceptions.HTTPError(f'{status} rejected', response=response)
+    av.session = RejectedPreflight()
+    av.retry_generation_timeout = True
+    context = safe_whole_video_analyze(av, (source(),), (), (),
+                                       local_paths={'source': str(raw)})
+    assert not context.status.available
+    assert len(av.session.calls) == expected_calls
+    assert all(call[0].endswith('countTokens') for call in av.session.calls)
+    assert av.ledger.reserved_usd == 0
+
+
 def test_explicitly_budgeted_av_retries_one_transient_provider_503(tmp_path):
     av, raw, _ = provider(tmp_path)
     av.session = Transient503ThenSuccessSession()

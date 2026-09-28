@@ -21,7 +21,12 @@ def canonicalize_candidates(result, local_paths, asr_provider):
         words = tuple(w for w in sources.get(clip.source_asset_id, ())
                       if w.end > clip.start and w.start < clip.end)
         if not words:
-            raise ValueError("V2 candidate has no canonical source alignment")
+            raise ValueError(
+                'V2 candidate has no canonical source alignment '
+                f'(clip_id={clip.clip_id}, source_asset_id={clip.source_asset_id}, '
+                f'interval={clip.start:.3f}..{clip.end:.3f}, '
+                f'source_word_count={len(sources.get(clip.source_asset_id, ()))})'
+            )
         text = " ".join(w.text for w in words)
         # Keep original candidate geometry until selected-neighbor recovery;
         # eagerly expanding both neighbors creates artificial source overlap.

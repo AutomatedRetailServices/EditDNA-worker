@@ -171,7 +171,17 @@ class GeminiWholeVideoAVProvider:
 
     def _observe_window(self, contents, source, source_sha256, duration,
                         prepared_duration, window_start, window_index):
-        counted=self._post('countTokens',{'contents':contents})
+        preflight_attempts = 1
+        try:
+            counted = self._post('countTokens', {'contents': contents})
+        except requests.exceptions.HTTPError as exc:
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            if not self.retry_generation_timeout or status not in {429, 502, 503, 504}:
+                raise
+            # A countTokens outage precedes generation and any budget
+            # reservation. Retry once under the existing opt-in retry gate.
+            preflight_attempts = 2
+            counted = self._post('countTokens', {'contents': contents})
         tokens=counted.get('totalTokens')
         if type(tokens) is not int or tokens <= 0:
             raise ValueError('AV token preflight unavailable')
@@ -185,7 +195,7 @@ class GeminiWholeVideoAVProvider:
                      window_duration_sec=duration,
                      prepared_duration_sec=prepared_duration, model=self.model, reserved_usd=reserved,
                      input_tokens_preflight=tokens, status='generation_requested',
-                     generation_attempts=1)
+                     generation_attempts=1, preflight_attempts=preflight_attempts)
         self.audit_records.append(audit)
         generation_body={'contents':contents,'generationConfig':{
             # Remove avoidable sampling variance from identical

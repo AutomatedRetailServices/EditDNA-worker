@@ -26,6 +26,18 @@ def test_candidates_and_boundary_reuse_one_source_word_stream():
     assert out.draft.selected[0].start == .2 and out.draft.selected[0].end == 1.8
 
 
+def test_missing_canonical_alignment_identifies_geometry_without_raw_speech():
+    clip = DraftClip('candidate-1', 'src', 0, 5.0, 6.0, 'private dialogue', '')
+    draft = DraftTimeline('cutsell.v1', 'p', EditStrategy.STORYTELLING, (clip,), (), ())
+    result = ProcessingResult('cutsell.v1', 'p', JobState.DRAFT_READY, draft, {})
+    class ASR:
+        def transcribe(self, *a, **k):
+            return (SimpleNamespace(words=(Word('elsewhere', 0.0, 1.0),)),)
+    with pytest.raises(ValueError, match='clip_id=candidate-1.*interval=5.000..6.000.*source_word_count=1') as exc:
+        canonicalize_candidates(result, {'src': 'unused'}, ASR())
+    assert 'private dialogue' not in str(exc.value)
+
+
 def test_shared_source_word_survives_once_across_adjacent_selected_candidates():
     from cutsell_worker.v2_source_selection import reconcile_canonical_word_seams
     from cutsell_worker.final_boundary_authority import enforce_complete_idea_boundaries

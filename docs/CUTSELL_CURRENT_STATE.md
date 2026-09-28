@@ -6,6 +6,20 @@ Total output lines: 1779
 
 # CutSell.ai — Current State
 
+## 2026-09-28 — V32 01–10 complete; calibration remains blocked
+
+Run `36460332422` at `920ec9ec59740eea508a68a14af6f6246d820800`
+completed with failure and uploaded artifact `10989869047`. Five of ten RAWs
+rendered with technical QC PASS; 02, 04, 06 and 09 differ materially from
+their Human Gold, while 03 is close by rounded timestamps pending rendered
+human review. The other five blocked before a comparable render: 01 transient
+HTTP 503 at AV token preflight, 05/10 missing canonical word alignment, 07
+Selection input over token cap, 08 provider `PROHIBITED_CONTENT`. The batch
+is not a commercial qualification. Per-case classification and quantities
+are recorded in `CUTSELL_EDITORIAL_CALIBRATION_MASTER.md`. A narrow opt-in
+retry of transient AV token preflight was tested offline, pending independent
+QA and focused qualification; other cases require distinct root-cause work.
+
 ## 2026-09-28 — V20 render passed QC, editorial calibration failed
 
 Run `36420143783` at `6fa803e7` uploaded artifact `10969262149`.

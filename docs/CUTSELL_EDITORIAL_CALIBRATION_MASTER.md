@@ -8,6 +8,36 @@ seguridad, despliegue y autoridad de producción siguen en `AGENTS.md` y
 
 ## Punto de control actual (2026-09-28)
 
+**Lote completo V32 terminado y rechazado:** run `36460332422`, SHA
+`920ec9ec59740eea508a68a14af6f6246d820800`, artifact `10989869047`.
+La suite CI pasó (252 pruebas); cinco RAW renderizaron con QC físico PASS,
+pero sus resultados son diagnósticos, no aprobación editorial. Otros cinco
+fallaron cerrados antes de calificación. Gold usa intervalos RAW redondeados;
+Video00/07 requiere alinear su render Gold antes de una puntuación válida.
+
+| RAW | Resultado | KEEP perdido | DELETE retenido | Causa inmediata |
+|---|---|---:|---:|---|
+| 01 | BLOCKED | — | — | HTTP 503 en `countTokens` de Watch + Listen |
+| 02 | EDITORIAL_FAIL, QC PASS | 47.312 s | 0.870 s | Selección pierde contenido Gold |
+| 03 | Diagnóstico cercano, QC PASS | 0.003 s | 0 s | Falta revisión humana del MP4 |
+| 04 | EDITORIAL_FAIL, QC PASS | 3.840 s | 0.440 s | Selección y bordes por revisar |
+| 05 | BLOCKED | — | — | Candidato sin alineación ASR canónica |
+| 06 | EDITORIAL_FAIL, QC PASS | 0 s | 15.860 s | Conserva tomas ajenas al Gold |
+| 07 | BLOCKED | — | — | Preflight de Selection supera 64 000 tokens |
+| 08 | BLOCKED | — | — | Gemini `PROHIBITED_CONTENT`, sin candidatos |
+| 09 | EDITORIAL_FAIL, QC PASS | 41.660 s | 4.920 s | Pérdida editorial variable; V33b focal difiere |
+| 10 | BLOCKED | — | — | Candidato sin alineación ASR canónica |
+
+La clasificación inicial distingue fallos de proveedor/preflight (01, 07,
+08), identidad/transcripción (05, 10) y elección editorial (02, 04, 06,
+09). El 03 no se declara aceptado por métricas de tiempo. La corrección
+focal del 01 se prueba offline: una segunda solicitud `countTokens` solo
+ante HTTP transitorio bajo el flag de retry ya habilitado, sin cambiar
+ningún límite de generación. 05/10 exigen identificar qué candidato carece
+de palabras canónicas antes de ajustar el alineador; 07 necesita reducir o
+particionar la entrada sin alterar el alcance global de decisión. Ninguno
+justifica ejecutar de nuevo los diez todavía.
+
 V25 logró en una corrida de 08 una selección de 25.199/27 s Gold sin material
 externo, pendiente de revisión humana del render. La repetición de 08 y 09
 con esa misma versión, run `36435114060`, **falló**: 08 recuperó además un
@@ -336,3 +366,16 @@ se corre de nuevo solamente cuando el conjunto de errores observado aporte
 una hipótesis verificable. Si el proveedor bloquea un RAW, registrar `BLOCKED`
 como resultado separado de `EDITORIAL_FAIL`, sin inferir que el motor editó
 bien ni cargarlo a reintentos hasta consumir el presupuesto.
+
+Inspección directa del artifact V33b de 09: la evidencia AV de esa corrida
+marcó 17.5–26.5 s como `mixed` (tropiezo/risa) y 26.5–33.5 s como `audience`;
+la evidencia histórica de replay clasificó 19–26.5 s como `audience`.
+El candidato 19.218–28.14 s contiene «más fuerte en 30 días», pero la
+observación V33b no satisface el umbral de cobertura de audiencia que permite
+contradecir `failed_delivery`. Ésta es la causa concreta de la pérdida
+intermitente: una clasificación AV amplia y contradictoria sobre un tramo
+mixto. Próximo experimento: inspección AV focal de 19–28 s, con palabras
+alineadas y escucha de inicio/fin; preservar únicamente la porción de entrega
+válida si queda corroborada, y comprobar en replay que ningún blooper de
+otras fuentes se reincorpora por contener una cifra. No promover por el Gold
+ni por texto aislado cuando la actuación no está corroborada.
