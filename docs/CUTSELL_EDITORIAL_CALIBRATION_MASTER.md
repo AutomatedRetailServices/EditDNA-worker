@@ -8,6 +8,30 @@ seguridad, despliegue y autoridad de producción siguen en `AGENTS.md` y
 
 ## Punto de control actual (2026-09-28)
 
+**Diagnóstico focal posterior, sin aceptación editorial.** En run
+`36480800424` (SHA `9e144eda`), Video08 recibió respuesta de Selection
+(`HTTP 200`, candidatos presentes, tres partes con AV) y renderizó con QC
+PASS, pero conservó 25.199/27 s del Gold y **95.727 s fuera del Gold**.
+El bloqueo `PROHIBITED_CONTENT` no se reprodujo en esta corrida; su causa
+permanece sin aislar. El primer instrumento, run `36478832805`, no interceptó
+el transporte real y no sirve como evidencia del contenido de la solicitud;
+el segundo guardó hash, conteos y estado sin publicar el prompt RAW. Antes de
+otra calificación pagada de 08, reproducir offline sus decisiones frente al
+V26 (un ganador final y alternativos descartados) y al V20 (rescate lexical y
+selección directa de intentos anteriores). El reporte focal todavía no
+conserva el detalle de decisiones del selector; registrar ese detalle en
+futuros runs sin inferirlo del render.
+
+En Video09, un probe AV de 17.5–29 s, run `36480589139` SHA `aab26bca`,
+observó que el tropiezo termina aproximadamente en 18.6 s y que la afirmación
+«más fuerte en 30 días» se entrega inteligiblemente hasta ~24.3 s. Esto
+contradice descartar el candidato completo 19.218–28.14 como
+`failed_delivery`. La observación no calificó independientemente todo el
+resto hasta 28.14 s: falta resolver esa cola con audio y video antes de
+recortar o promover el candidato completo. No convertir la etiqueta mixta
+amplia ni el número 30 en una regla de rescate universal sin ejemplos
+adversos 01/06. No se ha ejecutado una regresión 01–10 con corrección nueva.
+
 **Lote completo V32 terminado y rechazado:** run `36460332422`, SHA
 `920ec9ec59740eea508a68a14af6f6246d820800`, artifact `10989869047`.
 La suite CI pasó (252 pruebas); cinco RAW renderizaron con QC físico PASS,
