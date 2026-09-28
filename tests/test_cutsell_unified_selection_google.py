@@ -495,3 +495,13 @@ def test_native_preflight_failure_never_generates_or_falls_back_to_text(count):
     with pytest.raises(ValueError):
         reasoner.reason(draft(2))
     assert len(fake.calls) == 1
+
+
+def test_v2_contract_prefers_complete_take_over_fragment_patchwork():
+    payload = build_unified_selection_payload(draft(2), v2_request=True)
+    contract = " ".join(payload["editorial_contract"])
+    assert "continuous complete take" in contract
+    assert "immediately adjacent continuation candidates" in contract
+    assert "unique audience information" in contract
+    assert "useful visual actions" in contract
+    assert "audiovisual evidence shows it failed" in contract

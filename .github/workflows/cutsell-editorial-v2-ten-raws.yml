@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 09 Recovery
+name: CutSell Editorial Engine V2 Yaskira 08 Recovery
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-yaskira-09-recovery
+  group: cutsell-editorial-v2-yaskira-08-recovery
   cancel-in-progress: false
 
 jobs:
@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p editorial-v2-yaskira-09/previews editorial-v2-yaskira-09/results
+          mkdir -p editorial-v2-yaskira-08/previews editorial-v2-yaskira-08/results
           python - <<'PY'
           import json
           import re
@@ -105,9 +105,9 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Yaskira/09.mp4",
+              "Yaskira/08.mp4",
           ]
-          root = Path("editorial-v2-yaskira-09")
+          root = Path("editorial-v2-yaskira-08")
           results = []
           failures = []
           for index, key in enumerate(keys, start=1):
@@ -142,7 +142,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_09_recovery.v17",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v18",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
@@ -166,7 +166,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-yaskira-09-${{ github.run_id }}
-          path: editorial-v2-yaskira-09/
+          name: cutsell-editorial-v2-yaskira-08-${{ github.run_id }}
+          path: editorial-v2-yaskira-08/
           if-no-files-found: warn
           retention-days: 30

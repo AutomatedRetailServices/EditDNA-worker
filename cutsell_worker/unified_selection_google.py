@@ -167,6 +167,7 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
         "DISCARD only recording-process BTS, failed/abandoned delivery, or an inferior retry with no unique audience-facing information.",
         "Use candidate visual_evidence as real performance evidence, not decoration.",
         "Do not prefer a monolithic take merely because it is longer; a clean composite may be better.",
+        "When one continuous complete take covers ideas otherwise spread across several earlier fragments, prefer the continuous take when the take, together with its immediately adjacent continuation candidates, covers the same ideas with better continuity and performance. Preserve earlier fragments that add unique audience information, conditions, or useful visual actions, and reject the continuous take when audiovisual evidence shows it failed. Do not call the complete take redundant merely because its ideas recur across a patchwork of selected attempts.",
         "Do not treat adjacent valid statements as retries merely because they share topic words.",
         "Preserve numbers, negations, names, causal claims, and genuinely new story facts.",
         "Audience-directed speech is not automatically an independent story beat: compare every later complete delivery against the UNION of earlier fragments, even when local groups or wording differ.",
