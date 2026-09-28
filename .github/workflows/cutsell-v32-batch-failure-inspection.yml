@@ -1,0 +1,40 @@
+name: CutSell V32 Batch Failure Inspection
+on:
+  push:
+    branches:
+      - feat/editorial-engine-v2-whole-video-rebuild
+    paths:
+      - .github/workflows/cutsell-v32-batch-failure-inspection.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Inspect frozen batch artifact without model calls
+        run: |
+          mkdir evidence
+          gh run download 36460332422 --repo AutomatedRetailServices/EditDNA-worker --name cutsell-editorial-v2-yaskira-01-10-36460332422 --dir evidence
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for index in (2,4,6,9):
+              path=Path('evidence/results')/f'{index:02d}.json'
+              d=json.loads(path.read_text()); diag=d.get('diagnostics',{})
+              decisions={x.get('clip_id'):x for x in diag.get('unified_selection_reasoner',{}).get('decisions',[])}
+              print('SOURCE',index,'QC',d.get('live_render_qc',{}).get('status'))
+              for bucket in ('selected','discarded'):
+                  rows=[]
+                  for c in d.get(bucket,[]):
+                      x=decisions.get(c.get('clip_id'),{})
+                      if index==2 and bucket=='discarded' and c.get('end',0)<45: continue
+                      if index==9 and bucket=='discarded' and c.get('start',999)>35: continue
+                      rows.append([round(c['start'],3),round(c['end'],3),x.get('relation'),
+                                   x.get('reason_code'),x.get('safety_override')])
+                  print(bucket.upper(),json.dumps(rows[:80],ensure_ascii=False))
+              print('DECISION_COUNT',len(decisions),'BUCKET_COUNTS',
+                    {b:len(d.get(b,[])) for b in ('selected','alternates','discarded')})
+          PY
