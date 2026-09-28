@@ -142,7 +142,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v19_take_groups",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v20_no_prior_buckets",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
