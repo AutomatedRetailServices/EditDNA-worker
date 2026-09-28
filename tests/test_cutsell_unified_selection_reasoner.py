@@ -730,6 +730,29 @@ def test_v2_spanish_impersonal_uno_ve_does_not_resurrect_discarded_take():
             assert actions[0] == 'discard', phrase
 
 
+def test_quantity_preservation_does_not_authorize_demo_bridge_without_av():
+    import json
+    from cutsell_worker.unified_selection_reasoner import _preserve_continuous_demonstration
+    left = clip('instruction', 96, 99, 'pones una cucharadita en el agua', selected=False)
+    right = clip('explanation', 106, 120, 'pones un scoop en el agua', selected=True)
+    decisions = {'instruction': v2_decision('instruction', 'discard', 'retry_alternate', .8, 0,
+                                             'redundant_retry', 0),
+                 'explanation': v2_decision('explanation', 'select', 'retry_winner', .98, 0,
+                                             'best_complete_take', 1)}
+    region = {'role': 'audience', 'start': 90, 'end': 121, 'confidence': .95,
+              'visual_observation': 'Creator talks about a bottle'}
+    d = replace(draft(), diagnostics={'whole_video_context': {'sources': [
+        {'source_asset_id': 'src', 'audiovisual_evidence': json.dumps({'regions': [region]})}]}})
+    actions, overrides = ['select', 'select'], ['material_retry_claim_preserved', None]
+    _preserve_continuous_demonstration(d, (left, right), decisions, actions, overrides)
+    assert overrides[0] == 'material_retry_claim_preserved'
+    region['visual_observation'] = 'Creator mixing the product in a bottle'
+    d = replace(d, diagnostics={'whole_video_context': {'sources': [
+        {'source_asset_id': 'src', 'audiovisual_evidence': json.dumps({'regions': [region]})}]}})
+    _preserve_continuous_demonstration(d, (left, right), decisions, actions, overrides)
+    assert overrides[0] == 'av_continuous_demonstration_preserved'
+
+
 def test_v2_different_protected_health_fact_is_not_covered_by_same_category_word():
     from cutsell_worker.unified_selection_reasoner import _preserve_retry_alternates_with_unique_information
     for earlier_text, winner_text in (

@@ -657,7 +657,12 @@ def _preserve_continuous_demonstration(draft, clips, decisions, actions, overrid
     for i, left in enumerate(clips[:-1]):
         d = decisions[left.clip_id]
         right = clips[i + 1]
-        if (actions[i] not in {"swap", "discard"} or d.reason_code != "redundant_retry"
+        # A unique amount may already have promoted the left instruction.
+        # Keep checking its independently verified AV demonstration so
+        # Boundary can join the two selected pieces without a dead gap.
+        if ((actions[i] not in {"swap", "discard"} and not (
+                    actions[i] == "select" and overrides[i] == "material_retry_claim_preserved"))
+                or d.reason_code != "redundant_retry"
                 or d.relation != "retry_alternate" or d.confidence >= .90
                 or actions[i + 1] != "select" or left.source_asset_id != right.source_asset_id
                 or left.source_order != right.source_order or not 0 <= right.start - left.end <= 10
