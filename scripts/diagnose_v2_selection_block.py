@@ -76,13 +76,16 @@ try:
                 for row in result.get("selected", ())]
     diagnostics = result.get("diagnostics") or {}
     reasoner = diagnostics.get("unified_selection_reasoner") or {}
-    buckets = {row.get("clip_id"): row
-               for key in ("selected", "discarded", "alternates")
-               for row in result.get(key, ())}
+    candidate_intervals = {
+        row.get("clip_id"): row
+        for row in reasoner.get("candidate_intervals") or ()
+    }
     decisions = []
     for decision in reasoner.get("decisions") or ():
-        row = buckets.get(decision.get("clip_id"), {})
+        row = candidate_intervals.get(decision.get("clip_id"), {})
         decisions.append({
+            "clip_id": decision.get("clip_id"),
+            "source_order": row.get("source_order"),
             "start": row.get("start"), "end": row.get("end"),
             "model_action": decision.get("model_action"),
             "effective_action": decision.get("effective_action"),
@@ -90,12 +93,23 @@ try:
             "reason_code": decision.get("reason_code"),
             "safety_override": decision.get("safety_override"),
         })
+    competitions = []
+    for contest in diagnostics.get("v2_take_competitions") or ():
+        competitions.append({
+            **contest,
+            "winner_intervals": [candidate_intervals.get(key)
+                                 for key in contest.get("winners") or ()],
+            "covered_intervals": [candidate_intervals.get(key)
+                                  for key in contest.get("covered") or ()],
+            "material_unique_intervals": [candidate_intervals.get(key)
+                                          for key in contest.get("material_unique") or ()],
+        })
     gold_start, gold_end = 120.0, 147.0
     report["pipeline"] = {"status": "complete", "selection_reasoner_status":
                           result.get("selection_reasoner_status"),
                           "candidate_count": reasoner.get("candidate_count"),
                           "competition_review": diagnostics.get("competition_review"),
-                          "take_competitions": diagnostics.get("v2_take_competitions"),
+                          "take_competitions": competitions,
                           "decisions": decisions,
                           "selected_intervals": selected,
                           "gold_keep_retained_sec": round(sum(

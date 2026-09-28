@@ -427,7 +427,8 @@ def test_broad_v2_selection_gets_bounded_second_pass_when_first_pass_omits_compe
     assert "first_pass_decisions" in review_text
     assert len(plan.take_competitions) == 1
     assert plan.competition_review == {
-        "status": "completed", "input_tokens": 1200, "output_tokens": 120,
+        "status": "completed", "review_mode": "missing_competitions",
+        "first_pass_competition_count": 0, "input_tokens": 1200, "output_tokens": 120,
         "competition_count": 1, "estimated_cost_usd": .00066,
     }
     from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
@@ -438,6 +439,52 @@ def test_broad_v2_selection_gets_bounded_second_pass_when_first_pass_omits_compe
     )
     assert actions == ["discard", "discard", "discard", "select", "select", "select"]
     assert audit[0]["decision"] == "covered_alternates_removed"
+
+
+def test_v2_reaudits_a_saturated_competition_list_without_changing_first_pass_actions():
+    first = json.loads(v2_decisions_json(6))
+    first["competitions"] = [
+        {"winner_candidate_indices": [2*i], "covered_candidate_indices": [2*i+1],
+         "material_unique_candidate_indices": [], "relation": "equivalent_take",
+         "confidence": .95, "reason": f"First pass comparison {i}"}
+        for i in range(3)
+    ]
+    audited = {"competitions": [{
+        "winner_candidate_indices": [5], "covered_candidate_indices": [0, 1, 2],
+        "material_unique_candidate_indices": [3, 4], "relation": "equivalent_take",
+        "confidence": .97, "reason": "Re-audit preserves unique claims and CTA",
+    }]}
+    fake = FakeSession([
+        gemini_response(json.dumps(first)),
+        {"totalTokens": 1200},
+        gemini_response(json.dumps(audited), output_tokens=125),
+    ])
+    reasoner = make_reasoner(fake)
+    texts = ["Repeated product pitch remains covered"] * 3 + [
+        "This bottle contains 30 capsules", "Tap the orange cart to buy it",
+        "Full final product delivery",
+    ]
+    clips = tuple(replace(clip(i), text=text, caption_text=text) for i, text in enumerate(texts))
+    v2_draft = replace(draft(6), selected=clips, diagnostics={
+        "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+    })
+
+    plan = reasoner.reason(v2_draft)
+
+    assert len(fake.calls) == 3
+    review_text = fake.calls[2][2]["contents"][0]["parts"][0]["text"]
+    assert "first_pass_competitions" in review_text
+    assert "corrected COMPLETE list" in review_text
+    assert plan.competition_review["review_mode"] == "full_reaudit"
+    assert plan.competition_review["first_pass_competition_count"] == 3
+    # A successful audit replaces the saturated, potentially partial first
+    # set; the actions themselves remain the first pass's complete six SELECTs.
+    assert len(plan.take_competitions) == 1
+    assert all(row.action == "select" for row in plan.decisions)
+    assert len(plan.candidate_intervals) == 6
+    assert plan.candidate_intervals[0] == {
+        "clip_id": "c0", "source_order": 0, "start": 0.0, "end": 4.0,
+    }
 
 
 def test_v2_narrow_selection_does_not_pay_for_second_pass():

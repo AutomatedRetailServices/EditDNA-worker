@@ -8,6 +8,29 @@ seguridad, despliegue y autoridad de producción siguen en `AGENTS.md` y
 
 ## Punto de control actual (2026-09-28)
 
+**Última calificación focal:** Video08 run `36485855717`, SHA
+`a23add22`, pasó 265 tests CI y render QC, pero **EDITORIAL_FAIL**:
+22.719/27 s KEEP Gold retenidos, 47.327 s fuera del Gold y CTA final
+145.1–146.709 s descartado. Selection devolvió tres competencias; por eso la
+segunda revisión candidata no se activó. La evidencia concreta invalida su
+gate anterior (solo “cero competencias”) como cobertura suficiente.
+
+**Siguiente cambio candidato, todavía no calificado:** además de la revisión
+cuando faltan todas las competencias, reauditar el plan completo si Selection
+usó los tres espacios de comparación y seleccionó al menos cuatro piezas. La
+revisión conserva las acciones de la primera pasada y reemplaza su lista de
+comparaciones solo al completarse con respuesta válida; la reserva extra sigue
+limitada a $0.012. Se agregan únicamente intervalos/orden de candidatos al
+reporte, sin transcripciones, para saber qué tramos cubre cada competencia.
+Antes de otra corrida RAW: pasar los tests focales, gate 265 y QA de CTA,
+hechos/cantidades, continuaciones, equivalencias y fallos audiovisuales. La
+corrida 08 no está aprobada; 01–10 sigue sin una regresión sobre esta versión.
+
+El intento de calificación previo a esta evidencia (`36484800772`) fue
+detenido por el gate antes de llamar al proveedor: el código subido contenía
+truncamiento de dos módulos grandes. Se restauraron completos y se verificaron
+sus SHA en `a23add22`; no se atribuye ningún resultado RAW a aquella corrida.
+
 **Diagnóstico focal posterior, sin aceptación editorial.** En run
 `36480800424` (SHA `9e144eda`), Video08 recibió respuesta de Selection
 (`HTTP 200`, candidatos presentes, tres partes con AV) y renderizó con QC

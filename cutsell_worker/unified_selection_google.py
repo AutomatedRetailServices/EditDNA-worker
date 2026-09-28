@@ -492,8 +492,9 @@ def build_v2_competition_review_request(
     decisions: list[UnifiedSelectionDecision],
     *,
     max_output_tokens: int,
+    existing_competitions: tuple[UnifiedTakeCompetition, ...] = (),
 ) -> dict[str, Any]:
-    """Request a second-pass coverage audit only after a broad first-pass edit.
+    """Request an independent whole-plan competition audit after a broad edit.
 
     This pass cannot change any action. It can only supply explicit, typed
     whole-take coverage evidence for the existing conservative resolver.
@@ -508,9 +509,17 @@ def build_v2_competition_review_request(
         "candidates": candidates,
         "take_groups": payload.get("take_groups", []),
         "first_pass_decisions": first_pass,
+        "first_pass_competitions": [{
+            "winners": list(row.winner_clip_ids),
+            "covered": list(row.covered_clip_ids),
+            "material_unique": list(row.material_unique_clip_ids),
+            "relation": row.relation,
+            "confidence": row.confidence,
+        } for row in existing_competitions],
         "review_contract": [
-            "Independently audit whether the first pass selected multiple attempts of the same product/story delivery.",
-            "Compare every earlier selected attempt against the union of the later selected complete attempt(s).",
+            "Independently re-audit the complete plan, including every first-pass competition, when the edit contains many selected pieces or the first pass used all three competition slots.",
+            "Return the corrected COMPLETE list of up to three whole-take competitions. Omit any first-pass comparison you cannot independently confirm.",
+            "Compare each selected attempt against the union of later selected complete attempts, including fragments the first pass called independent_story_coverage.",
             "Emit an equivalent_take competition only when winners preserve every covered fact, number, condition, negation, useful product action and CTA.",
             "List every non-covered material contribution under material_unique_candidate_indices; list the remaining covered alternatives under covered_candidate_indices.",
             "Use complementary or independent when material differs. If evidence is ambiguous, emit no competition.",
@@ -662,12 +671,18 @@ class GoogleUnifiedSelectionReasoner:
     audiovisual_parts: tuple = ()
     source_paths: tuple[tuple[str, str], ...] = ()
 
-    def _review_missing_competitions(self, payload, candidate_rows, decisions):
-        """Bounded semantic audit when a broad V2 selection omitted competitions."""
+    def _review_missing_competitions(self, payload, candidate_rows, decisions,
+                                    existing_competitions=()):
+        """Bounded independent audit for a broad plan or a saturated first pass."""
         selected_count = sum(row.action == "select" for row in decisions)
-        if payload.get("engine_version") != "v2" or selected_count < 5:
+        full_reaudit = len(existing_competitions) >= 3 and selected_count >= 4
+        missing_competitions = not existing_competitions and selected_count >= 5
+        if payload.get("engine_version") != "v2" or not (full_reaudit or missing_competitions):
             return (), {"status": "not_eligible", "first_pass_selected_count": selected_count}
-        body = build_v2_competition_review_request(payload, decisions, max_output_tokens=1000)
+        body = build_v2_competition_review_request(
+            payload, decisions, max_output_tokens=1000,
+            existing_competitions=tuple(existing_competitions),
+        )
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:"
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         try:
@@ -708,7 +723,10 @@ class GoogleUnifiedSelectionReasoner:
                     output_tokens=actual_output, escalation=False)
                 if actual < estimated:
                     self.ledger.release(estimated - actual)
-                return competitions, {"status": "completed", "input_tokens": actual_tokens,
+                return competitions, {"status": "completed",
+                    "review_mode": "full_reaudit" if full_reaudit else "missing_competitions",
+                    "first_pass_competition_count": len(existing_competitions),
+                    "input_tokens": actual_tokens,
                     "output_tokens": actual_output, "competition_count": len(competitions),
                     "estimated_cost_usd": round(actual, 7)}
             except UnifiedSelectionProviderBlockedError:
@@ -1035,7 +1053,17 @@ class GoogleUnifiedSelectionReasoner:
                     self.ledger.release(estimated_cost - actual_cost)
                 competition_review = None
                 if payload.get("engine_version") == "v2":
-                    if competitions:
+                    selected_count = sum(row.action == "select" for row in decisions)
+                    if len(competitions) >= 3 and selected_count >= 4:
+                        audited, competition_review = self._review_missing_competitions(
+                            payload, candidate_rows, decisions, competitions,
+                        )
+                        if competition_review.get("status") == "completed":
+                            # A successful full audit replaces, rather than
+                            # stacks over, the initial comparison set. A failed
+                            # audit leaves the first-pass evidence untouched.
+                            competitions = tuple(audited)
+                    elif competitions:
                         competition_review = {"status": "first_pass_present",
                                               "competition_count": len(competitions)}
                     else:
@@ -1057,4 +1085,10 @@ class GoogleUnifiedSelectionReasoner:
                     continuation_links=links,
                     continuation_evidence=evidence,
                     competition_review=competition_review,
+                    candidate_intervals=tuple({
+                        "clip_id": str(row["clip_id"]),
+                        "source_order": int(row.get("source_order", 0)),
+                        "start": round(float(row["start"]), 3),
+                        "end": round(float(row["end"]), 3),
+                    } for row in candidate_rows),
                 )

@@ -105,6 +105,7 @@ class UnifiedSelectionPlan:
     continuation_links: tuple[tuple[str, str], ...] = ()
     continuation_evidence: tuple[dict, ...] = ()
     competition_review: dict | None = None
+    candidate_intervals: tuple[dict, ...] = ()
 
 
 class UnifiedSelectionReasoner(Protocol):
@@ -239,6 +240,7 @@ def validate_unified_selection_plan(
         continuation_evidence=tuple(plan.continuation_evidence),
         competition_review=(dict(plan.competition_review)
                             if isinstance(plan.competition_review, dict) else None),
+        candidate_intervals=tuple(dict(row) for row in plan.candidate_intervals),
     )
 
 
@@ -794,6 +796,8 @@ def apply_unified_selection_reasoner(
     }
     if plan.competition_review is not None:
         diagnostics["competition_review"] = dict(plan.competition_review)
+    if plan.candidate_intervals:
+        diagnostics["candidate_intervals"] = [dict(row) for row in plan.candidate_intervals]
     if tail_audit:
         diagnostics["v2_recording_tail"] = tail_audit
     if v2_request:

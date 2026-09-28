@@ -6,6 +6,32 @@ Total output lines: 1779
 
 # CutSell.ai — Current State
 
+## 2026-09-28 — V2 Video08 second-pass coverage audit still needs correction
+
+The qualification workflow initially stopped before any RAW call because two
+large Python modules had been uploaded from truncated tool output. The failure
+was isolated in GitHub Actions, both complete module blobs were restored and
+verified by SHA, and the focal workflow now watches those source files so
+future edits cannot silently skip its test gate.
+
+On corrected branch SHA `a23add22`, focal run `36485855717` passed its 265-test
+workflow gate and completed Video08 with render QC PASS. Editorial QA still
+FAILED: 22.719/27.000 s Human Gold KEEP retained, 47.327 s outside Gold kept,
+and the final CTA at 145.1–146.709 s was discarded. The first pass returned
+three competitions, so the candidate second review (which only ran when no
+competitions existed) did not run. This is new evidence that the review gate
+must also audit a saturated three-comparison result when the plan still selects
+at least four pieces. Do not declare Video08 fixed.
+
+Candidate follow-up is offline only until tests/QA finish: perform a bounded
+whole-plan re-audit after a saturated first-pass comparison set, preserve
+first-pass actions, and apply only the independently returned competition set
+when that audit completes. Add interval-only candidate diagnostics so every
+decision/competition can be mapped to source time without recording transcript
+text. Local targeted tests are in progress; then qualify the changed 08 once,
+review the MP4, and only after focal cases pass run a same-version 01–10
+regression. No 01–10 correction is established yet.
+
 ## 2026-09-28 — V32 01–10 complete; calibration remains blocked
 
 Run `36460332422` at `920ec9ec59740eea508a68a14af6f6246d820800`
