@@ -41,28 +41,14 @@ def post_with_diagnostic(url, *args, **kwargs):
                          "prompt_tokens": (raw.get("usageMetadata") or {}).get("promptTokenCount"),
                          "has_candidates": bool(raw.get("candidates"))}
     if feedback.get("blockReason") == "PROHIBITED_CONTENT" and len(parts) > 1:
-        # Diagnostic only: never apply this partial-input output to the edit.
-        compact = {"contents": [{"role": "user", "parts": [parts[0]]}],
-                   "generationConfig": body["generationConfig"]}
-        headers = kwargs.get("headers")
-        endpoint = url.rsplit(":", 1)[0]
-        count = original_post(endpoint + ":countTokens", headers=headers,
-                              json={"contents": compact["contents"]}, timeout=60)
-        count.raise_for_status()
-        tokens = count.json().get("totalTokens")
-        output = int(compact["generationConfig"].get("maxOutputTokens", 0))
-        # Existing Selection pricing; stop before a comparison above $0.02.
-        if type(tokens) is not int or tokens <= 0 or (tokens * .30 + output * 2.50) / 1_000_000 > .02:
-            report["comparison"] = "budget_rejected"
-        else:
-            comparison = original_post(url, headers=headers, json=compact,
-                                       timeout=kwargs.get("timeout", 120))
-            other = comparison.json() if comparison.ok else {}
-            report["comparison"] = {"input": "text_only_diagnostic",
-                                    "http_status": comparison.status_code,
-                                    "block_reason": (other.get("promptFeedback") or {}).get("blockReason"),
-                                    "has_candidates": bool(other.get("candidates")),
-                                    "prompt_tokens": (other.get("usageMetadata") or {}).get("promptTokenCount")}
+        # The exact same text-only diagnostic already returned PROHIBITED_CONTENT
+        # in run 36488048062. Repeating it adds no new evidence and cannot be
+        # used to evade the provider's decision.
+        report["comparison"] = {
+            "status": "not_repeated",
+            "reason": "identical_text_only_probe_already_blocked",
+            "prior_run_id": 36488048062,
+        }
     return response
 
 
