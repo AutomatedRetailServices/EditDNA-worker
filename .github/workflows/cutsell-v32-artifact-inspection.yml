@@ -27,6 +27,13 @@ jobs:
           for p in sorted(Path('evidence/results').glob('*.json')):
               if p.stem not in gold: continue
               d=json.loads(p.read_text()); spans=sorted((c['start'],c['end']) for c in d.get('selected',[]))
+              if p.stem=='01':
+                  audit=d.get('diagnostics',{})
+                  for c in d.get('selected',[]):
+                      if 55 < c.get('start',0) < 90:
+                          decision=next((a for a in audit.get('unified_selection_reasoner',{}).get('decisions',[])
+                                         if a.get('clip_id')==c.get('clip_id')),None)
+                          print('RAW08_EXTRA',json.dumps({'clip':c,'decision':decision},ensure_ascii=False)[:2000])
               wanted=gold[p.stem]; overlap=sum(max(0,min(b,y)-max(a,x)) for a,b in wanted for x,y in spans)
               extra=sum(max(0,b-a)-sum(max(0,min(b,y)-max(a,x)) for x,y in wanted) for a,b in spans)
               audit=d.get('diagnostics',{}); av=audit.get('whole_video_context',{}).get('sources',[])
