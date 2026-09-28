@@ -471,15 +471,33 @@ def _preserve_retry_alternates_with_unique_information(
         value = unicodedata.normalize('NFKD', str(text or '').casefold())
         return ''.join(ch for ch in value if not unicodedata.combining(ch))
 
-    spoken_numbers = {'uno': '1', 'one': '1', 'dos': '2', 'two': '2',
+    spoken_numbers = {'uno': '1', 'una': '1', 'one': '1', 'dos': '2', 'two': '2',
                       'tres': '3', 'three': '3', 'cinco': '5', 'five': '5',
                       'diez': '10', 'ten': '10', 'quince': '15', 'fifteen': '15',
                       'veinte': '20', 'twenty': '20', 'treinta': '30', 'thirty': '30',
                       'sesenta': '60', 'sixty': '60', 'noventa': '90', 'ninety': '90'}
     def quantities(value):
-        return set(re.findall(r'\b(\d+(?:[.,]\d+)?)\s*([a-z]+)?',
-                              re.sub(r'\b(?:' + '|'.join(spoken_numbers) + r')\b',
-                                     lambda m: spoken_numbers[m.group()], plain(value))))
+        normalized = plain(value)
+        # 'uno ve esos cuerpos' is an impersonal Spanish pronoun, not a
+        # quantitative promise. Resolve one/uno/una as a number only when the
+        # following token is an explicit measure/count unit. Other written
+        # quantities (for example 'treinta dias') remain protected.
+        one_units = (r'dias?|days?|semanas?|weeks?|meses?|months?|horas?|hours?|'
+                     r'gramos?|grams?|miligramos?|milligrams?|mg|kg|kilos?|'
+                     r'scoops?|cucharaditas?|cucharadas?|bottles?|botellas?|'
+                     r'litros?|liters?|mililitros?|milliliters?|ml|'
+                     r'capsulas?|capsules?|tabletas?|tablets?|pastillas?|pills?|'
+                     r'dosis|dose|doses|porciones?|servings?|gotas?|drops?|'
+                     r'veces?|times?|repeticiones?|reps?|'
+                     r'por\s+ciento|percent|porcentaje|personas?|people')
+        def replace_number(match):
+            if match.group() in {'uno', 'una', 'one'} and not re.match(
+                    r'\s+(?:' + one_units + r')\b', normalized[match.end():]):
+                return match.group()
+            return spoken_numbers[match.group()]
+        numeric = re.sub(r'\b(?:' + '|'.join(spoken_numbers) + r')\b',
+                         replace_number, normalized)
+        return set(re.findall(r'\b(\d+(?:[.,]\d+)?)\s*([a-z]+)?', numeric))
 
     conflicts = []
     for index, clip in enumerate(clips):

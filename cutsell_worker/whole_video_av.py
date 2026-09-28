@@ -56,6 +56,14 @@ def _describes_product_operation(description):
         r'.{0,40}\b(?:bottle|cup|container|glass|water|drink|surface|'
         r'botella|vaso|recipiente|agua|bebida|superficie)\b', value))
 
+
+def _nominates_product_operation(description):
+    """A broad hint may earn a focused probe, never authorize footage."""
+    value = str(description or '').casefold()
+    return _describes_product_operation(value) or bool(re.search(
+        r'\b(?:shak(?:e|es|ing)|agit(?:a|an|ando))\b.{0,65}'
+        r'\b(?:bottle|container|cup|jar|botella|envase|vaso|frasco)\b', value))
+
 FOCUSED_ACTION_PROMPT = '''Watch and listen to this short creator-source window.
 Find only visible, audience-facing product operations such as pouring, mixing,
 applying, or demonstrating. Report precise LOCAL start/end times of the visible
@@ -281,7 +289,7 @@ class GeminiWholeVideoAVProvider:
                 if overlap < 2.0 or float(region.get('confidence', 0)) < .70:
                     continue
                 observed_action = (region.get('role') == 'audience'
-                                   and _describes_product_operation(description))
+                                   and _nominates_product_operation(description))
                 mixed_product_interaction = (
                     region.get('role') in {'mixed', 'uncertain'}
                     and any(term in description for term in _PRODUCT_OBJECT_TERMS)

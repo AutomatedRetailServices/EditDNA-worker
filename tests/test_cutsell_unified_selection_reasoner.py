@@ -699,6 +699,37 @@ def test_v2_other_source_cannot_cover_material_quantity_and_lexical_conflict_is_
     assert audit[0]['status'] == 'model_discard_pending_review'
 
 
+def test_v2_spanish_impersonal_uno_ve_does_not_resurrect_discarded_take():
+    from cutsell_worker.unified_selection_reasoner import _preserve_retry_alternates_with_unique_information
+    alternate = clip('alternate', 62, 82, 'a veces uno ve esos cuerpos transformados', selected=False)
+    winner = clip('winner', 120, 147, 'un jumpsuit que te queda bien', selected=True)
+    decisions = {'alternate': v2_decision('alternate', 'discard', 'retry_alternate', .9, 0,
+                                           'redundant_retry', 0),
+                 'winner': v2_decision('winner', 'select', 'retry_winner', .98, 0,
+                                       'best_complete_take', 1)}
+    actions, overrides = ['discard', 'select'], [None, None]
+    audit = _preserve_retry_alternates_with_unique_information(
+        (alternate, winner), decisions, actions, overrides)
+    assert actions == ['discard', 'select']
+    assert overrides == [None, None]
+    assert audit[0]['missing_quantity'] == []
+
+    for phrase, unit in (('one scoop', 'scoop'), ('one capsule', 'capsule'),
+                         ('one tablet', 'tablet'), ('one dose', 'dose'),
+                         ('one serving', 'serving'), ('one milliliter', 'milliliter'),
+                         ('una dosis', 'dosis'), ('uno mililitro', 'mililitro'),
+                         ('uno ve', None)):
+        spoken = replace(alternate, text=f'agrega {phrase} de creatina')
+        actions, overrides = ['discard', 'select'], [None, None]
+        audit = _preserve_retry_alternates_with_unique_information(
+            (spoken, winner), decisions, actions, overrides)
+        if unit:
+            assert actions[0] == 'select', phrase
+            assert audit[0]['missing_quantity'] == [('1', unit)]
+        else:
+            assert actions[0] == 'discard', phrase
+
+
 def test_v2_different_protected_health_fact_is_not_covered_by_same_category_word():
     from cutsell_worker.unified_selection_reasoner import _preserve_retry_alternates_with_unique_information
     for earlier_text, winner_text in (

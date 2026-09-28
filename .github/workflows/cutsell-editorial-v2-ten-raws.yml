@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 08–09 QC Split V32
+name: CutSell Editorial Engine V2 Yaskira 08–09 Selection Stability V33
 
 on:
   workflow_dispatch:
@@ -150,7 +150,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09.v32_qc_split",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09.v33_selection_stability",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

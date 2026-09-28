@@ -151,6 +151,48 @@ def test_no_action_candidate_from_broad_region_without_focused_visual_proof(
     assert actions == []
 
 
+def test_shaking_container_during_measured_silence_nominates_but_does_not_approve_action(
+    monkeypatch, tmp_path,
+):
+    from cutsell_worker import whole_video_av
+    av, raw, _ = provider(tmp_path)
+    prepared = tmp_path / 'prepared.mp4'
+    prepared.write_bytes(b'prepared')
+    monkeypatch.setenv('CUTSELL_EDITORIAL_ENGINE_V2', '1')
+    monkeypatch.setattr(whole_video_av, 'detect_audio_silence_intervals',
+                        lambda path, **kwargs: ((98.435, 106.764),))
+    av.media_slicer = lambda path, dest, start, length: (dest.write_bytes(b'video') or length)
+    region = {'start': 96.8, 'end': 119.5, 'role': 'audience', 'confidence': .95,
+              'visual_observation': 'Creator shakes the pink water bottle'}
+    monkeypatch.setattr(av, '_observe_window', lambda *args: {
+        'regions': [{'start': 8.0, 'end': 14.0, 'role': 'audience', 'confidence': .96,
+                     'visual_observation': 'Pours powder from spoon into bottle'}]})
+    actions = av._focus_silent_action(
+        replace(source(), duration_sec=123.8), raw, prepared, 'digest', [region], tmp_path)
+    assert len(actions) == 1
+    assert actions[0]['start'] >= 98.435
+    assert av.audit_records[0]['status'] == 'probe_nominated'
+    region['visual_observation'] = 'Creator shakes her head while looking at camera'
+    assert av._focus_silent_action(
+        replace(source(), duration_sec=123.8), raw, prepared, 'digest', [region], tmp_path) == []
+    region['visual_observation'] = 'Creator shakes the pink water bottle'
+    for non_action in ('Does not shake the bottle', 'Plans to shake the bottle',
+                       'Shakes her head while holding a bottle'):
+        monkeypatch.setattr(av, '_observe_window', lambda *args, description=non_action: {
+            'regions': [{'start': 8.0, 'end': 14.0, 'role': 'audience', 'confidence': .96,
+                         'visual_observation': description}]})
+        audit_count = len(av.audit_records)
+        assert av._focus_silent_action(
+            replace(source(), duration_sec=123.8), raw, prepared, 'digest', [region], tmp_path) == [], non_action
+        assert av.audit_records[audit_count]['status'] == 'probe_nominated'
+    region['visual_observation'] = 'Creator shakes the pink water bottle'
+    monkeypatch.setattr(av, '_observe_window', lambda *args: {
+        'regions': [{'start': 8.0, 'end': 14.0, 'role': 'recording_only', 'confidence': .96,
+                     'visual_observation': 'Fumbles with bottle'}]})
+    assert av._focus_silent_action(
+        replace(source(), duration_sec=123.8), raw, prepared, 'digest', [region], tmp_path) == []
+
+
 def test_actual_media_handoff_and_evidence_reaches_classifier(tmp_path):
     from cutsell_worker.hybrid_session_cleanup import _editorial_session
     from cutsell_worker.hybrid_payload import build_compact_editorial_payload
