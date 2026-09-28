@@ -443,6 +443,9 @@ def test_broad_v2_selection_gets_bounded_second_pass_when_first_pass_omits_compe
 
 def test_v2_reaudits_a_saturated_competition_list_without_changing_first_pass_actions():
     first = json.loads(v2_decisions_json(6))
+    first["decisions"][5].update({
+        "action": "discard", "relation": "failed", "reason_code": "failed_delivery",
+    })
     first["competitions"] = [
         {"winner_candidate_indices": [2*i], "covered_candidate_indices": [2*i+1],
          "material_unique_candidate_indices": [], "relation": "equivalent_take",
@@ -450,7 +453,7 @@ def test_v2_reaudits_a_saturated_competition_list_without_changing_first_pass_ac
         for i in range(3)
     ]
     audited = {"competitions": [{
-        "winner_candidate_indices": [5], "covered_candidate_indices": [0, 1, 2],
+        "winner_candidate_indices": [0], "covered_candidate_indices": [2],
         "material_unique_candidate_indices": [3, 4], "relation": "equivalent_take",
         "confidence": .97, "reason": "Re-audit preserves unique claims and CTA",
     }]}
@@ -480,11 +483,19 @@ def test_v2_reaudits_a_saturated_competition_list_without_changing_first_pass_ac
     # A successful audit replaces the saturated, potentially partial first
     # set; the actions themselves remain the first pass's complete six SELECTs.
     assert len(plan.take_competitions) == 1
-    assert all(row.action == "select" for row in plan.decisions)
+    assert [row.action for row in plan.decisions] == ["select"] * 5 + ["discard"]
     assert len(plan.candidate_intervals) == 6
     assert plan.candidate_intervals[0] == {
         "clip_id": "c0", "source_order": 0, "start": 0.0, "end": 4.0,
     }
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    actions, overrides = ["select"] * 5 + ["discard"], [None] * 6
+    _apply_v2_take_competitions(
+        clips, {row.clip_id: row for row in plan.decisions}, actions, overrides,
+        plan.take_competitions,
+    )
+    assert actions == ["select", "select", "discard", "select", "select", "discard"]
+    assert overrides[3] is None  # unique audience context from an earlier take survives
 
 
 def test_v2_narrow_selection_does_not_pay_for_second_pass():
