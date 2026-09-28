@@ -396,6 +396,63 @@ def test_v2_parses_explicit_take_competition_indices():
         _parse_take_competitions(gemini_response(json.dumps(data)), rows)
 
 
+def test_broad_v2_selection_gets_bounded_second_pass_when_first_pass_omits_competitions():
+    data = {"competitions": [{
+        "winner_candidate_indices": [5], "covered_candidate_indices": [0, 1, 2],
+        "material_unique_candidate_indices": [3, 4], "relation": "equivalent_take",
+        "confidence": .96, "reason": "Final delivery covers repeated product pitch",
+    }]}
+    fake = FakeSession([
+        gemini_response(v2_decisions_json(6)),
+        {"totalTokens": 1200},
+        gemini_response(json.dumps(data), output_tokens=120),
+    ])
+    reasoner = make_reasoner(fake)
+    texts = ["Repeated product pitch remains covered"] * 3 + [
+        "This bottle contains 30 capsules", "Tap the orange cart to buy it",
+        "Full final product delivery",
+    ]
+    clips = tuple(replace(clip(i), text=text, caption_text=text) for i, text in enumerate(texts))
+    v2_draft = replace(draft(6), selected=clips, diagnostics={
+        "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+    })
+
+    plan = reasoner.reason(v2_draft)
+
+    assert len(fake.calls) == 3
+    assert fake.calls[1][0].endswith(":countTokens")
+    assert fake.calls[2][0].endswith(":generateContent")
+    review_text = fake.calls[2][2]["contents"][0]["parts"][0]["text"]
+    assert "cutsell_v2_independent_take_coverage_review" in review_text
+    assert "first_pass_decisions" in review_text
+    assert len(plan.take_competitions) == 1
+    assert plan.competition_review == {
+        "status": "completed", "input_tokens": 1200, "output_tokens": 120,
+        "competition_count": 1, "estimated_cost_usd": .00066,
+    }
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    actions, overrides = ["select"] * 6, [None] * 6
+    audit = _apply_v2_take_competitions(
+        clips, {row.clip_id: row for row in plan.decisions}, actions, overrides,
+        plan.take_competitions,
+    )
+    assert actions == ["discard", "discard", "discard", "select", "select", "select"]
+    assert audit[0]["decision"] == "covered_alternates_removed"
+
+
+def test_v2_narrow_selection_does_not_pay_for_second_pass():
+    fake = FakeSession([gemini_response(v2_decisions_json(3))])
+    reasoner = make_reasoner(fake)
+    v2_draft = replace(draft(3), diagnostics={
+        "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+    })
+
+    plan = reasoner.reason(v2_draft)
+
+    assert len(fake.calls) == 1
+    assert plan.competition_review["status"] == "not_eligible"
+
+
 def test_schema_requires_candidate_index_on_every_decision():
     # RAW #120: a normal-STOP response returned 31 decisions for 32
     # candidates. An isolation probe (scripts/isolate_unified_selection_
