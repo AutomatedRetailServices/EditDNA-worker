@@ -93,7 +93,7 @@ jobs:
             fi
           done
 
-      - name: Execute V2 recovery for Yaskira 09
+      - name: Execute V2 recovery for Yaskira 08
         shell: bash
         run: |
           set -euo pipefail
@@ -142,7 +142,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v18_2",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v19_take_groups",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
