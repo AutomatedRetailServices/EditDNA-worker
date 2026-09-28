@@ -50,6 +50,13 @@ intervalos: el selector descartó 0–29.18 y 31.918–44.869 como
 preserva explícitamente 29–32. La siguiente causa a investigar es el
 agrupamiento de intentos: comparar el significado y el AV de esas tomas antes
 de tratar bloques narrativos distintos como reintentos de una sola idea.
+En el artifact 01, la observación AV marca 0–45 s como `audience` con
+confianza 0.95: el descarte de 0–29.18 no se explica por falta de video
+hablando a cámara. Ese tramo introduce a la persona y el contexto de la
+historia que los fragmentos ganadores solo mencionan de nuevo en parte.
+Una protección basada únicamente en palabras nuevas podría resucitar los
+reintentos que el Gold sí descarta en 06; contrastar ambos casos al diseñar
+la regla de cobertura semántica antes de escribirla.
 
 Inspección offline del artifact V32 (sin llamadas al proveedor): 02 seleccionó
 0.05–49.87 s y descartó 51.224–68.903 y 69.15–97.683 como
