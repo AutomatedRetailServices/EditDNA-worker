@@ -7,6 +7,7 @@ on:
       - feat/editorial-engine-v2-whole-video-rebuild
     paths:
       - .github/workflows/cutsell-v2-video08-block-diagnostic.yml
+      - scripts/diagnose_v2_selection_block.py
 
 permissions:
   contents: read
@@ -108,5 +109,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cutsell-v2-video08-block-${{ github.run_id }}
-          path: selection-block-diagnostic/report.json
+          path: selection-block-diagnostic/
           if-no-files-found: warn

@@ -72,8 +72,20 @@ try:
     result = run_single_universal_clean_cut_validation(
         "Yaskira/08.mp4", project_id="cutsell-v2-selection-block-diagnostic",
         preview_output=str(OUTPUT / "08.mp4"))
+    selected = [(float(row["start"]), float(row["end"]))
+                for row in result.get("selected", ())]
+    gold_start, gold_end = 120.0, 147.0
     report["pipeline"] = {"status": "complete", "selection_reasoner_status":
-                          result.get("selection_reasoner_status")}
+                          result.get("selection_reasoner_status"),
+                          "selected_intervals": selected,
+                          "gold_keep_retained_sec": round(sum(
+                              max(0., min(end, gold_end) - max(start, gold_start))
+                              for start, end in selected), 3),
+                          "outside_gold_retained_sec": round(sum(
+                              max(0., min(end, gold_start) - start) +
+                              max(0., end - max(start, gold_end))
+                              for start, end in selected), 3),
+                          "render_qc": (result.get("live_render_qc") or {}).get("status")}
 except Exception as exc:
     report["pipeline"] = {"status": "failed", "error_type": type(exc).__name__,
                           "error": str(exc)[:300]}
