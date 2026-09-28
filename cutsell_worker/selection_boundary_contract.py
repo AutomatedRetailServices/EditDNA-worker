@@ -31,6 +31,19 @@ def _digest(tokens: tuple[str, ...]) -> str:
     return hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
 
 
+def _visual_only_spans(selected) -> tuple[tuple[str, str, int, float, float], ...]:
+    """Freeze explicit wordless footage independently of the spoken-token hash.
+
+    A silent action has no words for the ordinary Selection/Boundary contract
+    to detect if Boundary removes or shortens it. Preserve exact source spans
+    once Selection has explicitly selected them; never infer an action from a
+    silent pause or an empty caption on a spoken candidate.
+    """
+    return tuple((str(clip.clip_id), str(clip.source_asset_id), int(clip.source_order),
+                  float(clip.start), float(clip.end))
+                 for clip in selected if clip.audio_muted and not clip.words and not clip.text.strip())
+
+
 def freeze_selection_contract(draft, *, plan=None):
     """Freeze the current ``draft.selected`` as the semantic contract
     Boundary must not disturb.
@@ -59,6 +72,9 @@ def freeze_selection_contract(draft, *, plan=None):
         "selected_parent_count_at_freeze": len(tuple(draft.selected)),
         "status": "frozen",
     }
+    visual_spans = _visual_only_spans(draft.selected)
+    if visual_spans:
+        contract["visual_only_source_spans"] = visual_spans
     if plan is not None:
         contract["plan_id"] = plan.plan_id
         contract["plan_version"] = plan.plan_version
@@ -81,6 +97,11 @@ def enforce_selection_contract(draft):
             "Boundary changed frozen Selection semantic content; refusing unsafe final timeline "
             f"expected={expected[:12]} actual={actual[:12]}"
         )
+    if "visual_only_source_spans" in frozen:
+        actual_visual = _visual_only_spans(draft.selected)
+        expected_visual = tuple(tuple(span) for span in frozen["visual_only_source_spans"])
+        if actual_visual != expected_visual:
+            raise RuntimeError("Boundary changed frozen visual-only Selection source spans")
     diagnostics["selection_boundary_contract"] = {
         **dict(frozen),
         "final_semantic_token_count": len(tokens),

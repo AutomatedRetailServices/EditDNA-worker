@@ -21,19 +21,20 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Load source credentials if required
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] && [ -n "${S3_BUCKET:-}" ]; then exit 0; fi
+          if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] && [ -n "${S3_BUCKET:-}" ] && [ -n "${GEMINI_API_KEY:-}" ]; then exit 0; fi
           test -n "${RUNPOD_API_KEY:-}"
           curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" \
             --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
           TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
           test "$TEMPLATE" != null
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
             if [ -z "${!key:-}" ]; then
               value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
               test -n "$value"
@@ -57,6 +58,59 @@ jobs:
             ffmpeg -v error -ss "$second" -i /tmp/yaskira09.mp4 -frames:v 1 -vf scale=480:-1 \
               -y "action-frames/raw-${second}.jpg"
           done
+      - name: Probe precise action boundaries with source audio and video
+        run: |
+          set -euo pipefail
+          ffmpeg -v error -ss 90 -t 22 -i /tmp/yaskira09.mp4 -map 0:v:0 -map 0:a:0 \
+            -vf scale=480:-2 -r 12 -c:v libx264 -crf 30 -preset fast \
+            -c:a aac -ac 1 -ar 16000 -b:a 48k -y /tmp/action-window.mp4
+          python - <<'PY'
+          import base64, json, os, pathlib, requests
+          model = 'gemini-3.5-flash-lite'
+          endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:'
+          headers = {'x-goog-api-key': os.environ['GEMINI_API_KEY']}
+          clip = pathlib.Path('/tmp/action-window.mp4')
+          if clip.stat().st_size > 8_000_000:
+              raise RuntimeError('AV probe exceeds budgeted input size')
+          contents = [{'role': 'user', 'parts': [
+              {'inline_data': {'mime_type': 'video/mp4', 'data': base64.b64encode(clip.read_bytes()).decode()}},
+              {'text': ('Watch and listen to this complete 22-second source window. '
+                        'Identify only visually OBSERVED audience-facing product actions; exclude '
+                        'searching, standing still, repositioning, production fumbles or abandoned takes. '
+                        'Return JSON with actions array. For each action give start, end in seconds '
+                        'relative to this 22-second window, what visibly happens, and whether voice '
+                        'is present. Split preparation, handling, mixing and presentation at actual '
+                        'visual boundaries; do not use transcription timestamps as visual evidence. '
+                        'Return an empty array if there is no confirmed meaningful action.')},
+          ]}]
+          session = requests.Session()
+          counted = session.post(endpoint + 'countTokens', headers=headers,
+                                 json={'contents': contents}, timeout=60)
+          counted.raise_for_status()
+          tokens = counted.json()['totalTokens']
+          if tokens <= 0 or tokens > 30_000:
+              raise RuntimeError('AV probe token budget exceeded')
+          response = session.post(endpoint + 'generateContent', headers=headers,
+                                  json={'contents': contents, 'generationConfig': {
+                                      'temperature': 0, 'responseMimeType': 'application/json',
+                                      'maxOutputTokens': 800}}, timeout=120)
+          response.raise_for_status()
+          raw = response.json()
+          candidate = raw['candidates'][0]
+          if candidate.get('finishReason') != 'STOP':
+              raise RuntimeError('AV probe did not finish')
+          data = json.loads(''.join(part.get('text', '') for part in candidate['content']['parts']))
+          for action in data['actions']:
+              if not 0 <= float(action['start']) < float(action['end']) <= 22.3:
+                  raise RuntimeError('AV probe returned invalid local times')
+              action['source_start'] = round(90 + float(action['start']), 3)
+              action['source_end'] = round(90 + float(action['end']), 3)
+          pathlib.Path('action-frames/action-probe.json').write_text(json.dumps({
+              'model': model, 'source_window': [90, 112], 'input_tokens': tokens,
+              'usage': raw.get('usageMetadata', {}), 'observations': data,
+          }, indent=2))
+          print('AV probe saved with', len(data['actions']), 'observed actions')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

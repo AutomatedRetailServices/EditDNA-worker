@@ -70,3 +70,22 @@ def test_boundary_reorder_hard_fails():
             _clip("b", 10.0, 12.0, "tres cuatro"),
             _clip("a", 13.0, 15.0, "uno dos"),
         )))
+
+
+def test_wordless_action_cannot_be_lost_or_shortened_after_freeze():
+    spoken = _clip("spoken", 10, 12, "mezclar")
+    action = replace(_clip("action", 12, 17, ""), words=(), audio_muted=True)
+    frozen = freeze_selection_contract(_draft((spoken, action)))
+    assert enforce_selection_contract(frozen).diagnostics["selection_boundary_contract"]["status"] == "verified"
+    for changed in ((spoken,), (spoken, replace(action, end=16)),
+                    (spoken, replace(action, source_asset_id="other"))):
+        with pytest.raises(RuntimeError, match="visual-only"):
+            enforce_selection_contract(replace(frozen, selected=changed))
+
+
+def test_speech_timing_polish_does_not_change_visual_action_freeze():
+    spoken = _clip("spoken", 10, 12, "mezclar")
+    action = replace(_clip("action", 12, 17, ""), words=(), audio_muted=True)
+    frozen = freeze_selection_contract(_draft((spoken, action)))
+    verified = enforce_selection_contract(replace(frozen, selected=(replace(spoken, start=10.1), action)))
+    assert verified.diagnostics["selection_boundary_contract"]["status"] == "verified"
