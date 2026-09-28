@@ -1,0 +1,111 @@
+name: CutSell Yaskira09 Focused Spoken Continuation Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/editorial-engine-v2-whole-video-rebuild
+    paths:
+      - .github/workflows/cutsell-yaskira09-continuation-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load source credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = 1 ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}"
+          curl --fail --silent --show-error --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != null
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value"
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+      - name: Observe whether adjacent speech is one delivery
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          python -m pip install boto3 requests
+          mkdir -p observation
+          python - <<'PY'
+          import os, boto3
+          boto3.client('s3').download_file(os.environ['S3_BUCKET'], 'Yaskira/09.mp4', '/tmp/raw.mp4')
+          PY
+          ffmpeg -v error -ss 71 -t 21 -i /tmp/raw.mp4 -map 0:v:0 -map 0:a:0 \
+            -vf scale=480:-2 -r 12 -c:v libx264 -crf 30 -preset fast \
+            -c:a aac -ac 1 -ar 16000 -b:a 48k -y /tmp/window.mp4
+          python - <<'PY'
+          import base64, json, os, pathlib, requests
+          model='gemini-3.5-flash-lite'
+          endpoint=f'https://generativelanguage.googleapis.com/v1beta/models/{model}:'
+          contents=[{'role':'user','parts':[
+              {'inline_data':{'mime_type':'video/mp4','data':base64.b64encode(
+                  pathlib.Path('/tmp/window.mp4').read_bytes()).decode()}},
+              {'text':('Watch and listen to this unedited 21-second creator source. '
+                       'Local time 2.8–6.1 seconds ends with "en tu"; local 6.1–15.5 starts '
+                       '"primera semana". Determine from actual audio, prosody, and visuals '
+                       'whether these adjacent fragments are one continuing audience sentence, '
+                       'or a restart/failed take followed by a different delivery. '
+                       'Do not infer continuity from timestamps or transcript alone. '
+                       'Return JSON with linked boolean, restart_observed boolean, '
+                       'audio_evidence, visual_evidence, uncertainty as strings.')},
+          ]}]
+          session=requests.Session()
+          headers={'x-goog-api-key':os.environ['GEMINI_API_KEY']}
+          counted=session.post(endpoint+'countTokens',headers=headers,json={'contents':contents},timeout=60)
+          counted.raise_for_status()
+          tokens=counted.json()['totalTokens']
+          if not 0 < tokens <= 30000: raise RuntimeError('AV probe budget exceeded')
+          schema={'type':'object','properties':{
+              'linked':{'type':'boolean'},'restart_observed':{'type':'boolean'},
+              'audio_evidence':{'type':'string'},'visual_evidence':{'type':'string'},
+              'uncertainty':{'type':'string'}},
+              'required':['linked','restart_observed','audio_evidence','visual_evidence','uncertainty']}
+          response=session.post(endpoint+'generateContent',headers=headers,json={
+              'contents':contents,'generationConfig':{'temperature':0,'responseMimeType':
+                  'application/json','responseJsonSchema':schema,'maxOutputTokens':650}},timeout=120)
+          response.raise_for_status()
+          raw=response.json()
+          if raw['candidates'][0].get('finishReason')!='STOP':
+              raise RuntimeError('AV probe response incomplete')
+          data=json.loads(''.join(p.get('text','') for p in raw['candidates'][0]['content']['parts']))
+          if not isinstance(data,dict) or type(data.get('linked')) is not bool:
+              raise RuntimeError('AV probe response invalid')
+          pathlib.Path('observation/continuation.json').write_text(json.dumps({
+              'source_window':[71,92], 'model':model, 'input_tokens':tokens,
+              'usage':raw.get('usageMetadata',{}), 'observation':data,
+          },indent=2))
+          print('Focused continuation observation saved')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cutsell-yaskira09-continuation-probe
+          path: observation/
+          if-no-files-found: warn
