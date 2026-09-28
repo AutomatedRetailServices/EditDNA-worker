@@ -79,4 +79,8 @@ jobs:
                       print('SPEECH_VISUAL_DETAIL',json.dumps({k:c.get(k) for k in ('clip_id','start','end','source_asset_id','audio_muted','text','words','visual_observation')},ensure_ascii=False)[:3800])
               print('QC_DETAIL',json.dumps(d.get('live_render_qc',{}),ensure_ascii=False)[:9000])
               print('PERCEPTUAL_DETAIL',json.dumps(d.get('perceptual_watch_listen',{}),ensure_ascii=False)[:6500])
+              whole=d.get('diagnostics',{}).get('whole_video_context',{})
+              for source in whole.get('sources',[]):
+                  print('SOURCE_WORD_EVENTS',json.dumps([e for e in source.get('events',[]) if isinstance(e,dict) and e.get('end',0)>96 and e.get('start',999)<100],ensure_ascii=False)[:4800])
+              print('ARTIFACT_FILES',[str(x) for x in Path('evidence').rglob('*') if x.is_file()][:70])
           PY
