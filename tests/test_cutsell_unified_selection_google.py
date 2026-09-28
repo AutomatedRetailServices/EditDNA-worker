@@ -508,3 +508,6 @@ def test_v2_contract_prefers_complete_take_over_fragment_patchwork():
     assert "unique audience information" in contract
     assert "useful visual actions" in contract
     assert "audiovisual evidence shows it failed" in contract
+    assert "reconstruct whole delivery attempts" in contract
+    assert "Compare complete takes as units" in contract
+    assert "material fact, number, condition, personality moment" in contract
