@@ -228,3 +228,34 @@ más silencio medido, y corrige inversión de dos fragmentos únicamente si
 la fuente audiovisual confirma una frase continua. Fuentes >90 s usarán
 ventanas locales de 45 s para evitar depender de una única descripción
 larga. QA y corrida 08/09 pendientes; son hipótesis, no resultados.
+
+## V30/V31: unión de voz y demostración muda (2026-09-28)
+
+V30 run `36452891320` recuperó en 09 la operación visual observada de
+98.435–104.435 s y seleccionó 67.51/73 s Gold, pero el render quedó
+`NEEDS_HUMAN_REVIEW`: silencio de salida 54.785–60.997 s abarcó el
+remanente mudo de una frase 96.65–99.59 s y la escena visual seleccionada.
+La auditoría fuente muestra silencio medido 98.421–106.983 s. V30 no permite
+concluir que el producto está listo: 09 pierde aún el antecedente 73–77 s y
+conserva material fuera de Gold; 08 no llegó a selección porque el límite de
+sesión híbrida siguió en 0.02 USD pese a fijarse en 0.05 USD la suboperación.
+
+V31 SHA `e0b07f234fc9ffc3dcd01768d838a7622197d1d8` ajusta el límite de
+sesión a 0.05 USD sin quitar topes y reconcilia el solapamiento voz/acción
+antes de Freeze únicamente si una fuente idéntica, silencio físico medido,
+última palabra completa y cobertura total por el visual seleccionado lo
+permiten. El QC perceptual excluye solo los fotogramas mudos autorizados por
+el Freeze, conservando los defectos de silencio del resto. QA independiente
+detectó y permitió cerrar el contraejemplo donde un visual más corto hubiera
+eliminado contenido posterior; 48 pruebas locales pasaron. Run V31
+`36456010160` está en calificación 08/09; registrar a continuación selección,
+QC técnico, Watch+Listen y errores Gold por separado. El rechazo de una
+acción visual sin evidencia y la falta de garantía de cobertura nunca deben
+convertirse en exenciones de QC.
+
+El enlace entre 73.782–77.070 y 77.070–87.37 permanece **disputado**: una
+observación focal 71–92 marcó continuidad y otra 67.09–89.09 marcó reinicio.
+No imponer unión ni descarte por una respuesta contradictoria; inspeccionar
+la misma unión física y la evidencia de palabras antes de decidir. El lote
+01–10 sigue condicionado a 08/09 sin regresiones materiales, y los renders
+siguen requiriendo evaluación mirando y escuchando antes de promocionar.
