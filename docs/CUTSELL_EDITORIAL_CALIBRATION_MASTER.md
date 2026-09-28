@@ -38,6 +38,20 @@ de palabras canónicas antes de ajustar el alineador; 07 necesita reducir o
 particionar la entrada sin alterar el alcance global de decisión. Ninguno
 justifica ejecutar de nuevo los diez todavía.
 
+Inspección offline del artifact V32 (sin llamadas al proveedor): 02 seleccionó
+0.05–49.87 s y descartó 51.224–68.903 y 69.15–97.683 como
+`whole_take_equivalent_covered` pese al Gold KEEP-all salvo dos pausas.
+La próxima hipótesis debe comprobar cobertura real de cada afirmación y
+demostración antes de que una toma compuesta cubra otra. 06 seleccionó
+63.68–79.2 s fuera de Gold mediante `purchase_action_not_covered_by_winner`,
+además de 84.77–107.11 s; comprobar si el CTA protegido es un duplicado de
+destino ya cubierto, sin eliminar CTA verdaderamente únicos. 09 V32
+seleccionó 4.98–16.98, 19–28.14 y 106.66–121.78 s; perdió la explicación
+52–91 y la demo 97–106. V33b focal recuperó parte de estos intervalos, pero
+no estabilizó 19–28. 04 retuvo 5.55–23.71 y 27.85–44.29; revisar bordes
+frente a KEEP 5–27 y 28–44, sin inventar otro ganador editorial. Conservar
+estos resultados como cuatro clases de replay separadas antes de otro batch.
+
 V25 logró en una corrida de 08 una selección de 25.199/27 s Gold sin material
 externo, pendiente de revisión humana del render. La repetición de 08 y 09
 con esa misma versión, run `36435114060`, **falló**: 08 recuperó además un

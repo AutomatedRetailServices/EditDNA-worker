@@ -17,8 +17,15 @@ HTTP 503 at AV token preflight, 05/10 missing canonical word alignment, 07
 Selection input over token cap, 08 provider `PROHIBITED_CONTENT`. The batch
 is not a commercial qualification. Per-case classification and quantities
 are recorded in `CUTSELL_EDITORIAL_CALIBRATION_MASTER.md`. A narrow opt-in
-retry of transient AV token preflight was tested offline, pending independent
-QA and focused qualification; other cases require distinct root-cause work.
+retry of transient AV token preflight passed 42 AV tests and independent QA;
+the isolated 01 qualification is run `36470320482` at SHA `7ce39e1`.
+The 05/10 canonical alignment errors now report candidate identity and
+source time without disclosing speech; 53 targeted AV/alignment tests passed.
+An artifact-only inspection of the frozen V32 batch found that 02 lost two
+otherwise kept later regions under `whole_take_equivalent_covered`, and 06
+resurrected an earlier outside-Gold CTA under
+`purchase_action_not_covered_by_winner`. No corrective editorial rule is
+claimed or ten-video rerun started on these findings.
 
 ## 2026-09-28 — V20 render passed QC, editorial calibration failed
 
