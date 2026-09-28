@@ -172,6 +172,10 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
                     floor = float(row["gap_end"])
                     if math.isfinite(floor) and clip.start < floor <= clip.end + 1e-6:
                         visual_floors.append(min(floor, float(clip.end)))
+        # A wordless, explicitly selected visual scene owns its full source
+        # window. Silence trimming must not silently erase its last frames.
+        if clip.audio_muted and not clip.words and not clip.text.strip():
+            visual_floors.append(float(clip.end))
         output.append(RenderSegment(
             clip_id=clip.clip_id,
             source_asset_id=clip.source_asset_id,

@@ -23,6 +23,7 @@ Skipped, not failed, if ffmpeg is absent from the runner.
 """
 import shutil
 import subprocess
+from dataclasses import replace
 
 import pytest
 
@@ -38,6 +39,7 @@ from cutsell_worker.post_render_watch_listen_qc import (
     STRUCTURAL_SEQUENCE_MISMATCH,
 )
 from cutsell_worker.render_plan import RenderSegment, build_render_plan
+from cutsell_worker.selection_boundary_contract import freeze_selection_contract
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not available on this runner")
 
@@ -132,6 +134,29 @@ def test_clean_render_passes_directly(tmp_path, two_clip_draft_and_segments):
     assert len(result.attempts) == 1
     assert result.attempts[0].status == "PASS"
     assert result.attempts[0].findings == ()
+
+
+def test_frozen_visual_action_keeps_its_frames_and_authorizes_only_its_own_silence(
+    monkeypatch, tmp_path, source_video,
+):
+    spoken = _clip("spoken", 0, 2, "product")
+    action = _clip("action", 2, 4, "")
+    action = replace(action, audio_muted=True)
+    draft = freeze_selection_contract(_draft((spoken, action)))
+    segments = build_render_plan(draft, {"src": source_video})
+    assert segments[1].trailing_trim_floor == 4
+    observed = []
+    real_qc = live_render_qc.run_post_render_media_qc
+
+    def observe(path, **kwargs):
+        observed.extend(kwargs["protected_pause_windows"])
+        return real_qc(path, **kwargs)
+
+    monkeypatch.setattr(live_render_qc, "run_post_render_media_qc", observe)
+    result = live_render_qc.render_with_post_render_qc(draft, segments, str(tmp_path / "action.mp4"))
+    assert result.status == "PASS", result.attempts
+    assert len(observed) == 1
+    assert observed[0][0] >= 1.9 and observed[0][1] >= 3.9
 
 
 # ---------------------------------------------------------------------------

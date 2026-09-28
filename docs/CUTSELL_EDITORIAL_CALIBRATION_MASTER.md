@@ -6,6 +6,30 @@ video, una corrección del Human Gold o un error del motor. Referencias de
 seguridad, despliegue y autoridad de producción siguen en `AGENTS.md` y
 `CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md`.
 
+## Punto de control actual (2026-09-28)
+
+V25 logró en una corrida de 08 una selección de 25.199/27 s Gold sin material
+externo, pendiente de revisión humana del render. La repetición de 08 y 09
+con esa misma versión se lanzó en el run `36435114060`; hasta contar con sus
+resultados no hay afirmación de estabilidad. El RAW 09 tiene acción útil
+durante un silencio medido 98.4–106.8 s que el motor todavía no ofrece como
+candidato visual independiente. Los fotogramas 90–108 s están registrados en
+`evidence/YASKIRA_08_V25_AND_09_VISUAL_GAP_20260928.md`.
+
+La corrección en investigación exige observar límites de acción con audio y
+video locales, presentar un intervalo mudo explícito al mismo selector antes
+de Freeze, proteger su identidad y sus bordes durante Boundary, y reservar
+solo esa porción visual seleccionada como silencio intencional en QC. Una
+región AV amplia, un silencio ASR o una pausa entre dos frases no bastan por
+sí solos para conservarla. El contrato de Freeze ya protege intervalos mudos
+que se seleccionen explícitamente; falta crear y calificar ese candidato en
+producción. El primer probe focal `36435404880` falló por respuesta del
+proveedor en forma de lista en vez de objeto; el contrato JSON se corrigió
+antes de repetirlo. El renderer ya respeta el final de escenas visuales
+explícitas y QC reserva solo su ventana tras verificar el Freeze (35 pruebas
+focales aprobadas). Ningún estado de este bloque
+equivale a aceptación editorial o autorización de despliegue.
+
 ## Objetivo y autoridad
 
 El producto debe editar un RAW nuevo sin recibir timestamps de la usuaria en

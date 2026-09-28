@@ -253,10 +253,26 @@ def render_with_post_render_qc(
 
         output_windows = segment_output_windows(current_segments)
         boundary_timestamps = [w[1] for w in output_windows[:-1]]
+        # Only a frozen, explicitly selected wordless visual scene can
+        # authorize expected silence. Verify its source interval against the
+        # Freeze record before exempting any output time from silence QC.
+        frozen_visual = {
+            tuple(span) for span in ((draft.diagnostics or {}).get("selection_boundary_contract") or {})
+            .get("visual_only_source_spans", ())
+        }
+        # Encoded AAC can report a few milliseconds of priming/padding beyond
+        # an exact video frame boundary. Bound that tolerance to one frame.
+        visual_pause_windows = [(max(0.0, window[0] - 0.04), window[1] + 0.04)
+                                for seg, window in zip(current_segments, output_windows)
+                                if seg.audio_muted and (
+                                    str(seg.clip_id), str(seg.source_asset_id),
+                                    next((int(clip.source_order) for clip in draft.selected
+                                          if clip.clip_id == seg.clip_id), -1),
+                                    float(seg.start), float(seg.end)) in frozen_visual]
         media = run_post_render_media_qc(
             output_path,
             boundary_timestamps=boundary_timestamps,
-            protected_pause_windows=protected_pause_windows,
+            protected_pause_windows=(*protected_pause_windows, *visual_pause_windows),
         )
         reconciliation = reconcile_silence_findings(draft, current_segments, media.findings, output_windows)
 

@@ -93,13 +93,23 @@ jobs:
           response = session.post(endpoint + 'generateContent', headers=headers,
                                   json={'contents': contents, 'generationConfig': {
                                       'temperature': 0, 'responseMimeType': 'application/json',
-                                      'maxOutputTokens': 800}}, timeout=120)
+                                      'maxOutputTokens': 800,
+                                      'responseJsonSchema': {'type': 'object', 'properties': {
+                                          'actions': {'type': 'array', 'items': {'type': 'object',
+                                              'properties': {'start': {'type': 'number'},
+                                                             'end': {'type': 'number'},
+                                                             'observation': {'type': 'string'},
+                                                             'voice_present': {'type': 'boolean'}},
+                                              'required': ['start', 'end', 'observation', 'voice_present']}}},
+                                          'required': ['actions']}}}, timeout=120)
           response.raise_for_status()
           raw = response.json()
           candidate = raw['candidates'][0]
           if candidate.get('finishReason') != 'STOP':
               raise RuntimeError('AV probe did not finish')
           data = json.loads(''.join(part.get('text', '') for part in candidate['content']['parts']))
+          if not isinstance(data, dict) or not isinstance(data.get('actions'), list):
+              raise RuntimeError('AV probe response lacked an actions array')
           for action in data['actions']:
               if not 0 <= float(action['start']) < float(action['end']) <= 22.3:
                   raise RuntimeError('AV probe returned invalid local times')
