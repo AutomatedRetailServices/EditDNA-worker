@@ -13,13 +13,31 @@ from .unified_selection_google import GoogleUnifiedSelectionReasoner
 
 def canonicalize_candidates(result, local_paths, asr_provider):
     sources = {}
+    candidate_word_fallbacks = []
     for source_id, path in local_paths.items():
         segments = asr_provider.transcribe(path, source_asset_id=source_id, language_hint=None)
         sources[source_id] = tuple(sorted(
             (word for segment in segments for word in segment.words), key=lambda w: (w.start, w.end)))
     def bind(clip):
-        words = tuple(w for w in sources.get(clip.source_asset_id, ())
-                      if w.end > clip.start and w.start < clip.end)
+        source_words = sources.get(clip.source_asset_id, ())
+        words = tuple(w for w in source_words if w.end > clip.start and w.start < clip.end)
+        if not words:
+            # The canonical whole-source ASR above is a second decode. If it
+            # omits a short span because of decode/VAD variance, reuse only
+            # words already attached to this exact candidate by the original
+            # pipeline pass, and only when their timestamps overlap its
+            # geometry. Never snap to a neighboring word or invent alignment.
+            words = tuple(w for w in clip.words
+                          if w.end > clip.start and w.start < clip.end)
+            if words:
+                candidate_word_fallbacks.append({
+                    "clip_id": clip.clip_id,
+                    "source_asset_id": clip.source_asset_id,
+                    "start": round(float(clip.start), 3),
+                    "end": round(float(clip.end), 3),
+                    "word_count": len(words),
+                    "basis": "original_candidate_word_timestamps",
+                })
         if not words:
             raise ValueError(
                 'V2 candidate has no canonical source alignment '
@@ -38,6 +56,7 @@ def canonicalize_candidates(result, local_paths, asr_provider):
                                          ensure_ascii=False).encode()).hexdigest()
         for source, words in sources.items()
     }
+    diagnostics["v2_candidate_word_alignment_fallbacks"] = candidate_word_fallbacks
     class FrozenASR:
         words_by_source = sources
         def transcribe(self, path, *, source_asset_id, **kwargs):

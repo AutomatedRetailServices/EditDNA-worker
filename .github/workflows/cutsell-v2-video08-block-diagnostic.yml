@@ -10,7 +10,9 @@ on:
       - scripts/diagnose_v2_selection_block.py
       - cutsell_worker/unified_selection_google.py
       - cutsell_worker/unified_selection_reasoner.py
+      - cutsell_worker/v2_source_selection.py
       - tests/test_cutsell_unified_selection_google.py
+      - tests/test_cutsell_v2_source_selection.py
 
 permissions:
   contents: read

@@ -38,6 +38,43 @@ def test_missing_canonical_alignment_identifies_geometry_without_raw_speech():
     assert 'private dialogue' not in str(exc.value)
 
 
+def test_second_decode_omission_reuses_only_overlapping_original_candidate_words():
+    original_word = Word("source-word", 119.4, 120.0)
+    # The fresh whole-source decode omits this short span, while the original
+    # ASR words that created the candidate still carry exact overlapping times.
+    words = (Word("elsewhere", 0.0, 1.0),)
+    clip = DraftClip("decode-variance", "src", 0, 119.479, 119.959,
+                     "model text", "", words=(original_word,))
+    draft = DraftTimeline("cutsell.v1", "p", EditStrategy.STORYTELLING, (clip,), (), ())
+    result = ProcessingResult("cutsell.v1", "p", JobState.DRAFT_READY, draft, {})
+
+    class ASR:
+        def transcribe(self, *a, **k): return (SimpleNamespace(words=words),)
+
+    out, _ = canonicalize_candidates(result, {"src": "unused"}, ASR())
+    assert out.draft.selected[0].words == (original_word,)
+    assert out.draft.selected[0].text == "source-word"
+    assert (out.draft.selected[0].start, out.draft.selected[0].end) == (119.479, 119.959)
+    assert out.draft.diagnostics["v2_candidate_word_alignment_fallbacks"] == [{
+        "clip_id": "decode-variance", "source_asset_id": "src",
+        "start": 119.479, "end": 119.959, "word_count": 1,
+        "basis": "original_candidate_word_timestamps",
+    }]
+
+
+def test_candidate_far_from_source_words_still_fails_closed():
+    words = (Word("elsewhere", 0.0, 1.0),)
+    clip = DraftClip("distant-candidate", "src", 0, 5.0, 6.0, "model text", "")
+    draft = DraftTimeline("cutsell.v1", "p", EditStrategy.STORYTELLING, (clip,), (), ())
+    result = ProcessingResult("cutsell.v1", "p", JobState.DRAFT_READY, draft, {})
+
+    class ASR:
+        def transcribe(self, *a, **k): return (SimpleNamespace(words=words),)
+
+    with pytest.raises(ValueError, match="no canonical source alignment"):
+        canonicalize_candidates(result, {"src": "unused"}, ASR())
+
+
 def test_shared_source_word_survives_once_across_adjacent_selected_candidates():
     from cutsell_worker.v2_source_selection import reconcile_canonical_word_seams
     from cutsell_worker.final_boundary_authority import enforce_complete_idea_boundaries
