@@ -14,7 +14,7 @@ con esa misma versión, run `36435114060`, **falló**: 08 recuperó además un
 fragmento 97.21–101.09 s ajeno al Gold y descartó una continuación hablada
 142.93–144.77 s; 09 recibió HTTP 503 en Watch + Listen antes de Selection.
 No hay afirmación de estabilidad. El RAW 09 tiene acción útil
-durante un silencio medido 98.4–106.8 s que el motor todavía no ofrece como
+durante un silencio medido 98.4–106.8 s que V25 no ofrecía como
 candidato visual independiente. Los fotogramas 90–108 s están registrados en
 `evidence/YASKIRA_08_V25_AND_09_VISUAL_GAP_20260928.md`.
 
@@ -24,8 +24,8 @@ de Freeze, proteger su identidad y sus bordes durante Boundary, y reservar
 solo esa porción visual seleccionada como silencio intencional en QC. Una
 región AV amplia, un silencio ASR o una pausa entre dos frases no bastan por
 sí solos para conservarla. El contrato de Freeze ya protege intervalos mudos
-que se seleccionen explícitamente; falta crear y calificar ese candidato en
-producción. El primer probe focal `36435404880` falló por respuesta del
+que se seleccionen explícitamente; V26 ya creó y calificó ese candidato en
+una corrida real. El primer probe focal `36435404880` falló por respuesta del
 proveedor en forma de lista en vez de objeto; el contrato JSON se corrigió
 y `36435957367` observó acción visual 96–106 s. Su afirmación de voz en
 96–106 contradice el silencio del audio fuente 98.4–106.8; solo se permite
@@ -39,6 +39,16 @@ ambas habrían permitido errores fuera del caso. La continuación hablada
 142.93–144.77 requiere una prueba semántica o audiovisual adicional antes de
 reclasificarla. Ningún estado de este bloque
 equivale a aceptación editorial o autorización de despliegue.
+
+**V26 ya medido**: run `36438018959` en los RAW 08 y 09. El 08 volvió a
+25.199/27 s Gold, 0 s DELETE, QC PASS. El 09 retuvo solo 35.647/73 s Gold,
+añadió 7.722 s DELETE, QC PASS: `EDITORIAL_FAIL`. El análisis focal halló
+la acción 98.435–104.435 s, el selector la eligió y una comparación
+posterior la eliminó porque consideró equivalente una explicación de voz
+posterior. Ver `evidence/YASKIRA_08_09_V26_REGRESSION_20260928.md`.
+V27 protege esa acción y cantidades/condiciones ausentes en equivalencias;
+no implica que las demás pérdidas de 09 estén corregidas. Es obligatorio
+repetir 08 y 09 y revisar el MP4 antes de lanzar 01–10.
 
 ## Objetivo y autoridad
 

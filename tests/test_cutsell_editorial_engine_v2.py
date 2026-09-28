@@ -63,6 +63,44 @@ def test_boundary_stage_never_passes_silent_visual_action_to_asr_rebuilder():
     assert output.draft.selected[0].start == .03
 
 
+def test_focused_visual_action_survives_full_v2_selection_freeze_and_boundary():
+    import json
+    base = source_result()
+    whole = base.draft.diagnostics['whole_video_context']
+    digest = 'f' * 64
+    evidence = json.dumps({'source_sha256': digest,
+                           'regions': [{'start': 90, 'end': 110, 'role': 'audience',
+                                        'confidence': .95, 'visual_observation': 'mixing'}],
+                           'focused_silent_visual_actions': [{
+                               'start': 98.4, 'end': 106, 'observed_start': 96,
+                               'observed_end': 106, 'measured_silence_start': 98.4,
+                               'measured_silence_end': 106.8, 'confidence': .95,
+                               'visual_observation': 'mixing the product',
+                               'source_sha256': digest,
+                               'basis': 'focused_av_action_intersect_source_measured_silence'}]})
+    whole['sources'][0]['audiovisual_evidence'] = evidence
+
+    class ActionPlan:
+        def reason(self, draft):
+            actions = []
+            for i, item in enumerate((*draft.selected, *draft.alternates, *draft.discarded)):
+                visual = item.audio_muted and not item.text
+                actions.append(UnifiedSelectionDecision(item.clip_id,
+                    'select' if visual or item.clip_id == 'a' else 'discard',
+                    'independent' if visual else 'failed', .98, i,
+                    ('independent_story_coverage' if visual else
+                     'best_complete_take' if item.clip_id == 'a' else 'recording_process_bts'), i))
+            return UnifiedSelectionPlan(decisions=tuple(actions), provider='test', model='test')
+
+    result = run_editorial_engine_v2(base, selection_reasoner=ActionPlan(),
+                                      recover_complete_boundaries=identity,
+                                      execute_boundaries=identity)
+    visual = [c for c in result.draft.selected if c.audio_muted]
+    assert len(visual) == 1
+    assert (visual[0].start, visual[0].end, visual[0].text) == (98.4, 106, '')
+    assert result.draft.diagnostics['selection_boundary_contract']['status'] == 'verified'
+
+
 def test_v2_measured_silence_blocks_broad_av_continuity_bridge():
     base = source_result()
     a = replace(clip("left", 100, selected=True), end=116.57, text="demonstration workout")

@@ -269,6 +269,43 @@ def _apply_v2_take_competitions(
             else:
                 for clip_id in contest.covered_clip_ids:
                     i = index_by_id[clip_id]
+                    covered_clip = clips[i]
+                    winning_text = ' '.join(clips[index_by_id[w]].text for w in contest.winner_clip_ids)
+                    covered_norm = unicodedata.normalize('NFKD', covered_clip.text.casefold())
+                    covered_norm = ''.join(ch for ch in covered_norm if not unicodedata.combining(ch))
+                    winning_norm = unicodedata.normalize('NFKD', winning_text.casefold())
+                    winning_norm = ''.join(ch for ch in winning_norm if not unicodedata.combining(ch))
+                    # Preserve an amount together with its adjacent unit or
+                    # subject. Repeating the same numeral with another unit
+                    # is not coverage of the original claim.
+                    amounts = lambda value: set(re.findall(
+                        r'\b(\d+(?:[.,]\d+)?)\s*([a-z]+)?', value))
+                    critical_amounts = amounts(covered_norm)
+                    winning_amounts = amounts(winning_norm)
+                    condition = re.search(r'\b(?:si|if)\s+(?:(?:tu\s+)?(?:estas\s+)?|you\s+are\s+)'
+                                          r'(?:usando|utilizando|using|taking)\s+([\w-]+)', covered_norm)
+                    condition_topic_missing = bool(condition and
+                        condition.group(1) not in _content_tokens(winning_text))
+                    if (critical_amounts - winning_amounts or condition_topic_missing):
+                        # A global equivalence label is insufficient proof of
+                        # coverage if the winning take omits a stated amount
+                        # or audience condition. Preserve the actual source
+                        # claim for independent editorial resolution.
+                        reason = 'material_claim_not_covered_by_winner'
+                        continue
+                    if (covered_clip.audio_muted and not covered_clip.words
+                            and not covered_clip.text.strip()
+                            and not any(
+                                clips[index_by_id[w]].source_asset_id == covered_clip.source_asset_id
+                                and clips[index_by_id[w]].start <= covered_clip.start
+                                and clips[index_by_id[w]].end >= covered_clip.end
+                                for w in contest.winner_clip_ids)):
+                        # Spoken instructions recorded later cannot contain
+                        # pixels from a distinct earlier visual operation.
+                        # The single whole-video selector already chose this
+                        # action; a verbal equivalence claim cannot erase it.
+                        reason = 'distinct_focused_visual_action_preserved'
+                        continue
                     winner_has_cta = any(_has_purchase_action(clips[index_by_id[w]].text)
                                          for w in contest.winner_clip_ids)
                     selected_cta_elsewhere = any(
@@ -293,7 +330,8 @@ def _apply_v2_take_competitions(
                     if actions[i] == "select":
                         actions[i] = "discard"
                         overrides[i] = "whole_take_equivalent_covered"
-                if reason not in {"conflicting_material_unique_preserved", "purchase_action_coverage_conflict"}:
+                if reason not in {"conflicting_material_unique_preserved", "purchase_action_coverage_conflict",
+                                  "distinct_focused_visual_action_preserved", "material_claim_not_covered_by_winner"}:
                     reason = "covered_alternates_removed"
         audit.append({
             "winners": list(contest.winner_clip_ids),
@@ -425,12 +463,7 @@ def _preserve_retry_alternates_with_unique_information(
             continue
         tokens = _content_tokens(clip.text)
         unique = tokens - selected_tokens
-        # Three surface words alone can describe an alternate aesthetic of
-        # the same product without a distinct claim. A model-confirmed
-        # redundant retry needs stronger independent information before a
-        # lexical safety rescue can override it.
-        minimum_unique = 4 if decision.reason_code == 'redundant_retry' else 3
-        if len(unique) < minimum_unique or len(unique) / max(1, len(tokens)) < 0.40:
+        if len(unique) < 3 or len(unique) / max(1, len(tokens)) < 0.40:
             continue
         actions[index] = "select"
         overrides[index] = "unique_retry_information_preserved"

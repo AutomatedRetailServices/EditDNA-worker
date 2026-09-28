@@ -455,20 +455,54 @@ def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():
     assert [item.clip_id for item in out.selected] == ["detail", "winner"]
 
 
-def test_v2_three_surface_words_do_not_overrule_confirmed_redundant_retry():
-    detail = clip("detail", 0, 5, "Este color con rosadito pastel", selected=False)
-    winner = clip("winner", 10, 15, "Disponible en todos los colores y tallas", selected=False)
-    d = DraftTimeline(
-        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
-        selected=(), alternates=(detail, winner), discarded=(),
-        diagnostics={"editorial_engine_v2_request": {"require_audiovisual_evidence": True}},
-    )
-    reasoner = FakeReasoner([
-        v2_decision("detail", "discard", "retry_alternate", .85, 0, "redundant_retry", 0),
-        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
-    ])
-    out = apply_unified_selection_reasoner(d, reasoner)
-    assert [item.clip_id for item in out.selected] == ["winner"]
+def test_v2_verbal_summary_cannot_cover_distinct_selected_silent_action():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    action = replace(clip('action', 10, 15, '', selected=False), audio_muted=True)
+    later = clip('later', 17, 26, 'Mix the product in water daily', selected=False)
+    clips = (action, later)
+    decisions = {item.clip_id: v2_decision(item.clip_id, 'select', 'independent',
+                                         .95, i, 'independent_story_coverage', i)
+                 for i, item in enumerate(clips)}
+    contest = UnifiedTakeCompetition(('later',), ('action',), (), 'equivalent_take', .97,
+                                     'Narration summarizes mixing')
+    actions, overrides = ['select', 'select'], [None, None]
+    audit = _apply_v2_take_competitions(clips, decisions, actions, overrides, (contest,))
+    assert actions == ['select', 'select']
+    assert audit[0]['decision'] == 'distinct_focused_visual_action_preserved'
+    # The same original frames already included in the winner can be folded.
+    later = replace(later, start=9, end=26)
+    clips = (action, later)
+    actions, overrides = ['select', 'select'], [None, None]
+    _apply_v2_take_competitions(clips, decisions, actions, overrides, (contest,))
+    assert actions == ['discard', 'select']
+
+
+def test_v2_equivalent_take_cannot_erase_missing_amount_or_audience_condition():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    condition = clip('condition', 0, 6, 'Si tu estas usando creatina tienes mas energia', selected=False)
+    amount = clip('amount', 6, 10, 'En 30 dias vas a ver resultados', selected=False)
+    winner = clip('winner', 30, 40, 'El suplemento te da energia y resultados', selected=False)
+    clips = (condition, amount, winner)
+    decisions = {item.clip_id: v2_decision(item.clip_id, 'select', 'independent',
+                                         .98, i, 'independent_story_coverage', i)
+                 for i, item in enumerate(clips)}
+    contest = UnifiedTakeCompetition(('winner',), ('condition', 'amount'), (),
+                                     'equivalent_take', .99, 'Everything is covered')
+    actions, overrides = ['select'] * 3, [None] * 3
+    audit = _apply_v2_take_competitions(clips, decisions, actions, overrides, (contest,))
+    assert actions == ['select'] * 3
+    assert audit[0]['decision'] == 'material_claim_not_covered_by_winner'
+    # A winner that actually states the same audience and quantity may win.
+    winner = replace(winner, text='Si tu estas usando creatina, en 30 dias tienes energia')
+    actions, overrides = ['select'] * 3, [None] * 3
+    _apply_v2_take_competitions((condition, amount, winner), decisions,
+                                actions, overrides, (contest,))
+    assert actions == ['discard'] * 2 + ['select']
+    winner = replace(winner, text='Si tu estas usando creatina, con 30 gramos tienes energia')
+    actions, overrides = ['select'] * 3, [None] * 3
+    _apply_v2_take_competitions((condition, amount, winner), decisions,
+                                actions, overrides, (contest,))
+    assert actions == ['discard', 'select', 'select']
 
 
 def test_v2_av_audience_unique_content_overrides_false_failed_label():
