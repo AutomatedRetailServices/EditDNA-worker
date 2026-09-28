@@ -72,4 +72,11 @@ jobs:
           for p in Path('evidence/results').glob('*failure.json'): print(p.name,p.read_text()[:1800])
           for p in Path('evidence').glob('report.json'):
               report=json.loads(p.read_text()); print('REPORT_FAILURES',json.dumps(report.get('failures',[]),ensure_ascii=False))
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text())
+              for c in d.get('selected',[]):
+                  if 94 < c.get('start',0) < 107:
+                      print('SPEECH_VISUAL_DETAIL',json.dumps({k:c.get(k) for k in ('clip_id','start','end','source_asset_id','audio_muted','text','words','visual_observation')},ensure_ascii=False)[:3800])
+              print('QC_DETAIL',json.dumps(d.get('live_render_qc',{}),ensure_ascii=False)[:9000])
+              print('PERCEPTUAL_DETAIL',json.dumps(d.get('perceptual_watch_listen',{}),ensure_ascii=False)[:6500])
           PY
