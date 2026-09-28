@@ -56,5 +56,13 @@ jobs:
                           raw=source['response']; data=json.loads(''.join(part.get('text','') for part in raw['candidates'][0]['content']['parts']))
                           print('FOCUS_REGIONS',json.dumps(data.get('regions',[]),ensure_ascii=False)[:3500])
                       except (KeyError,IndexError,ValueError,TypeError) as exc: print('FOCUS_PARSE_ERROR',type(exc).__name__)
+          for p in Path('evidence/results').glob('02.json'):
+              d=json.loads(p.read_text()); whole=d.get('diagnostics',{}).get('whole_video_context',{})
+              print('AV_AUDIT',[(x.get('window_index'),x.get('status'),x.get('error_type')) for x in whole.get('input_audit',{}).get('native_av',[])])
+              for source in whole.get('sources',[]):
+                  try:
+                      av=json.loads(source.get('audiovisual_evidence','{}'))
+                      print('RAW_AV_REGIONS',json.dumps([row for row in av.get('regions',[]) if row.get('end',0)>90 and row.get('start',0)<110],ensure_ascii=False)[:3200])
+                  except (ValueError,TypeError): pass
           for p in Path('evidence/results').glob('*failure.json'): print(p.name,p.read_text()[:1800])
           PY
