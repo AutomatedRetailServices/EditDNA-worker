@@ -288,3 +288,19 @@ de error por fuente con la misma configuración, sin promocionar ningún
 render a calidad comercial. Investigar primero la pérdida intermitente de
 demostración silenciosa y el rescate erróneo de 08 62–82 con auditoría AV,
 decisiones y metraje. La prueba Gold nunca entra al prompt de producción.
+
+El diagnóstico V32 precisó ambas causas. 08 había sido descartado por el
+selector, pero `material_retry_claim_preserved` lo reinsertó al interpretar
+«uno ve» como cantidad `1 ve`, un falso positivo lexical. La acción muda de
+09 no llegó a la prueba focal: la región AV describió que la creadora
+«shakes the water bottle» con silencio medido, y el nominador solo aceptaba
+otras operaciones. V33 SHA `4ab4b51d5eccd7689fcfd81d120af58b390c1531`
+reconoce `uno`/`una`/`one` como números solo junto a unidades explícitas,
+incluidas dosis, cápsulas, medidas y duraciones; una descripción amplia de
+agitar recipiente puede **nominar** una inspección focal, pero no admitir
+fotogramas sin confirmación más estricta. QA independiente detectó y cerró
+riesgos de omitir dosis y de aceptar menciones negadas, planeadas o gestos
+de cabeza. 130 pruebas locales pasaron; run focal V33 `36461394295` se
+califica en 08/09. El lote de referencia V32 es run `36460332422` con SHA
+`920ec9ec59740eea508a68a14af6f6246d820800`: sus resultados no deben
+atribuirse a V33. Los dos runs son diagnóstico, no certificación comercial.
