@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION
 from cutsell_worker.unified_selection_google import (
     build_unified_selection_payload,
@@ -375,6 +377,34 @@ def test_v2_three_way_and_chain_claims_do_not_depend_on_comparison_order():
             actions, overrides = ["select"] * 3, [None] * 3
             _apply_v2_take_competitions(clips, decisions, actions, overrides, order)
             assert actions == ["select"] * 3
+
+
+def test_v2_whole_take_cannot_claim_to_cover_absent_purchase_action():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions, _has_purchase_action
+    body = clip("body", 120, 144, "Este jumpsuit es el mejor que encontre en TikTok Shop", selected=True)
+    cta = clip("cta", 145, 147, "Lo puedes encontrar aqui en el carrito naranja", selected=False)
+    assert not _has_purchase_action(body.text)
+    assert _has_purchase_action(cta.text)
+    assert _has_purchase_action("Puedes encontrarlo en el carrito")
+    assert _has_purchase_action("Puedes comprarlo en la tienda")
+    assert _has_purchase_action("Puedes conseguirlo en el enlace")
+    assert not _has_purchase_action("I did not buy it at that store")
+    assert not _has_purchase_action("No puedes encontrarlo en el carrito")
+    assert not _has_purchase_action("Don't click the link")
+    assert _has_purchase_action("No tiene azúcar. Puedes comprarlo en el carrito")
+    decisions = {"body": v2_decision("body", "select", "retry_winner", .99, 0, "best_complete_take", 0),
+                 "cta": v2_decision("cta", "discard", "retry_alternate", .95, 0, "redundant_retry", 1)}
+    actions, overrides = ["select", "discard"], [None, None]
+    audit = _apply_v2_take_competitions((body, cta), decisions, actions, overrides,
+                                        (UnifiedTakeCompetition(("body",), ("cta",), (), "equivalent_take", .98),))
+    assert actions == ["select", "select"]
+    assert overrides[1] == "purchase_action_not_covered_by_winner"
+    assert audit[0]["decision"] == "purchase_action_coverage_conflict"
+    complete = replace(body, text="Compra este jumpsuit ahora en la tienda")
+    actions, overrides = ["select", "discard"], [None, None]
+    _apply_v2_take_competitions((complete, cta), decisions, actions, overrides,
+                                 (UnifiedTakeCompetition(("body",), ("cta",), (), "equivalent_take", .98),))
+    assert actions == ["select", "discard"]
 
 
 def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():

@@ -106,7 +106,6 @@ jobs:
 
           keys = [
               "Yaskira/08.mp4",
-              "Yaskira/09.mp4",
           ]
           root = Path("editorial-v2-yaskira-08")
           results = []
@@ -143,7 +142,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_09_v23_regression",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_v24_cta_coverage",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

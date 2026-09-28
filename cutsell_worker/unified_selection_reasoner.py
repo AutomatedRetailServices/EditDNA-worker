@@ -269,13 +269,22 @@ def _apply_v2_take_competitions(
             else:
                 for clip_id in contest.covered_clip_ids:
                     i = index_by_id[clip_id]
+                    winner_has_cta = any(_has_purchase_action(clips[index_by_id[w]].text)
+                                         for w in contest.winner_clip_ids)
+                    if _has_purchase_action(clips[i].text) and not winner_has_cta:
+                        if (decisions[clip_id].reason_code not in {"failed_delivery", "recording_process_bts"}
+                                and decisions[clip_id].relation not in {"failed", "bts"}):
+                            actions[i] = "select"
+                            overrides[i] = "purchase_action_not_covered_by_winner"
+                        reason = "purchase_action_coverage_conflict"
+                        continue
                     if (tuple(sorted(contest.winner_clip_ids)), clip_id) in protected:
                         reason = "conflicting_material_unique_preserved"
                         continue
                     if actions[i] == "select":
                         actions[i] = "discard"
                         overrides[i] = "whole_take_equivalent_covered"
-                if reason != "conflicting_material_unique_preserved":
+                if reason not in {"conflicting_material_unique_preserved", "purchase_action_coverage_conflict"}:
                     reason = "covered_alternates_removed"
         audit.append({
             "winners": list(contest.winner_clip_ids),
@@ -287,6 +296,26 @@ def _apply_v2_take_competitions(
             "reason": contest.reason[:240],
         })
     return audit
+
+
+def _has_purchase_action(value: str) -> bool:
+    """Recognize an explicit buying direction, not a product/store mention."""
+    normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.replace("’", "'").replace("don't", "dont").replace("didn't", "didnt")
+    for clause in re.split(r"[.!?;]+", normalized):
+        action = re.search(
+            r"\b(?:puedes?|pueden|podras?)\s+(?:encontrar|comprar|conseguir)(?:lo|la)?\b"
+            r"|\b(?:compra|compralo|pidelo|encuentralo|adquierelo)\b"
+            r"|\b(?:buy now|order now|shop now|tap|click|find it|get yours)\b", clause)
+        destination = re.search(r"\b(?:carrito|enlace|link|bio|tienda|cart|store|shop|checkout)\b", clause)
+        if not action or not destination:
+            continue
+        prefix = clause[:action.start()]
+        if re.search(r"\b(?:no|nunca|jamas|not|never|dont|didnt)\b(?:\W+\w+){0,3}\W*$", prefix):
+            continue
+        return True
+    return False
 
 
 def _effective_action(decision: UnifiedSelectionDecision, current_bucket: str) -> tuple[str, str | None]:
