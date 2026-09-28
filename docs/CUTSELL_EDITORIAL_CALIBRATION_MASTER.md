@@ -38,6 +38,19 @@ de palabras canónicas antes de ajustar el alineador; 07 necesita reducir o
 particionar la entrada sin alterar el alcance global de decisión. Ninguno
 justifica ejecutar de nuevo los diez todavía.
 
+Calificación focal de 01, run `36470320482` SHA `7ce39e1`, artifact
+`10991214498`: 262 pruebas CI aprobadas, una fuente procesada y render QC
+PASS; la comparación Gold **falló** con 62.301/114.561 s KEEP retenidos,
+52.260 s KEEP perdidos y 1 s DELETE retenido. El 503 de `countTokens` del
+lote anterior ya no bloqueó esta ejecución, pero eso no demuestra que el
+reintento haya sido efectivamente utilizado: esta corrida pudo recibir una
+primera respuesta correcta. No declarar el video aceptado. Inspección de
+intervalos: el selector descartó 0–29.18 y 31.918–44.869 como
+`retry_alternate`, y 29.18–31.08 como `failed_delivery`, pese a que el Gold
+preserva explícitamente 29–32. La siguiente causa a investigar es el
+agrupamiento de intentos: comparar el significado y el AV de esas tomas antes
+de tratar bloques narrativos distintos como reintentos de una sola idea.
+
 Inspección offline del artifact V32 (sin llamadas al proveedor): 02 seleccionó
 0.05–49.87 s y descartó 51.224–68.903 y 69.15–97.683 como
 `whole_take_equivalent_covered` pese al Gold KEEP-all salvo dos pausas.

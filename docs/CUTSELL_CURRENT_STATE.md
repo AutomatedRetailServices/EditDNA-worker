@@ -27,6 +27,15 @@ resurrected an earlier outside-Gold CTA under
 `purchase_action_not_covered_by_winner`. No corrective editorial rule is
 claimed or ten-video rerun started on these findings.
 
+Focused 01 run `36470320482` completed at `7ce39e1` with artifact
+`10991214498`: 262 tests passed, render QC PASS, but editorial Gold failed:
+52.260 s KEEP lost and 1 s DELETE retained. The 503 did not recur in this
+run; success does not prove the transient retry path was exercised live.
+The model labeled 0–29.18 and 31.918–44.869 s as redundant alternate takes
+and 29.18–31.08 s as failed delivery, although the owner explicitly keeps
+29–32. Diagnose attempt grouping and performance evidence before applying a
+general selection fix; no automatic acceptance from QC PASS.
+
 ## 2026-09-28 — V20 render passed QC, editorial calibration failed
 
 Run `36420143783` at `6fa803e7` uploaded artifact `10969262149`.

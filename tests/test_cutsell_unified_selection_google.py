@@ -633,6 +633,16 @@ def test_native_preflight_failure_never_generates_or_falls_back_to_text(count):
     assert len(fake.calls) == 1
 
 
+def test_native_over_budget_preflight_reports_size_without_generation():
+    fake = FakeSession([{'totalTokens': 100000}])
+    reasoner = make_reasoner(fake)
+    reasoner.audiovisual_parts = ({'inlineData': {'mimeType': 'video/mp4', 'data': 'TEST'}},)
+    reasoner.max_input_tokens = 64000
+    with pytest.raises(ValueError, match=r'input_tokens=100000, max_input_tokens=64000, candidate_count=2'):
+        reasoner.reason(draft(2))
+    assert len(fake.calls) == 1
+
+
 def test_v2_contract_prefers_complete_take_over_fragment_patchwork():
     d = replace(draft(2), diagnostics={
         "editorial_engine_v2_request": {"require_audiovisual_evidence": True},

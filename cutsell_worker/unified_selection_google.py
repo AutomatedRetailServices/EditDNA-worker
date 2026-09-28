@@ -869,7 +869,11 @@ class GoogleUnifiedSelectionReasoner:
             if type(input_tokens) is not int or input_tokens <= 0:
                 raise ValueError("V2 audiovisual selection token preflight unavailable")
         if input_tokens > self.max_input_tokens:
-            raise ValueError("unified Selection input token budget exceeded")
+            raise ValueError(
+                'unified Selection input token budget exceeded '
+                f'(input_tokens={input_tokens}, max_input_tokens={self.max_input_tokens}, '
+                f'candidate_count={len(candidate_rows)})'
+            )
 
         # Exact worst-case budget for the schema actually sent, not a guessed
         # constant -- see output_token_reserve()/_worst_case_decision_json_chars().
