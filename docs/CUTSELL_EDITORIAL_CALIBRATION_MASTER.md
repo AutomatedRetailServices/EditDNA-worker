@@ -315,4 +315,24 @@ cantidad; conserva todas las guardas de fuente, orden, confianza, contenido
 y región audiovisual. Si no hay demo AV confirmada, el override de cantidad
 no habilita ningún puente. QA independiente pasó; 108 pruebas del motor y
 36 focales de razón/replay pasaron localmente. Run V33b `36462878091`
-está en CI y solo ejecutará RAW si la suite pasa.
+pasó la suite y ejecutó 08/09. En 09 recuperó la demostración muda
+98.435–104.435 s y el QC técnico pasó, pero la comparación editorial siguió
+fallando: 58.431/73 s KEEP, 5.962 s fuera de Gold y pérdida intermitente de
+la afirmación «más fuerte en 30 días» cuando el selector llama `failed_delivery`
+al intento 19–28 s. Ni QC PASS ni la nominación visual certifican este video.
+En 08 el proveedor devolvió `promptFeedback.blockReason=PROHIBITED_CONTENT`
+sin candidatos en dos intentos, con `promptTokenCount=17437`; no hubo selección
+aplicable. No seguir gastando en la misma solicitud bloqueada ni intentar
+sortear el bloqueo. El motor debe detener esos reintentos, reportar el motivo
+sin reproducir contenido sensible y conservar la reserva de presupuesto porque
+el proveedor pudo procesar y cobrar tokens de entrada. Los otros errores de
+respuesta incompleta siguen siendo reintentables dentro del tope existente.
+
+El lote 01–10 V32 `36460332422` sigue siendo diagnóstico independiente con
+revisión por video de cobertura Gold, DELETE retenido, QC físico, errores de
+proveedor y revisión audiovisual. Una corrección posterior nunca cambia el
+SHA congelado de ese lote: se prueba primero en replay y casos focales, luego
+se corre de nuevo solamente cuando el conjunto de errores observado aporte
+una hipótesis verificable. Si el proveedor bloquea un RAW, registrar `BLOCKED`
+como resultado separado de `EDITORIAL_FAIL`, sin inferir que el motor editó
+bien ni cargarlo a reintentos hasta consumir el presupuesto.

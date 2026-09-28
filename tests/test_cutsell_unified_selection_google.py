@@ -21,6 +21,7 @@ from cutsell_worker.hybrid_payload import estimate_tokens_from_chars
 from cutsell_worker.hybrid_provider_settings import HybridProviderSettings
 from cutsell_worker.unified_selection_google import (
     GoogleUnifiedSelectionReasoner,
+    UnifiedSelectionProviderBlockedError,
     UnifiedSelectionUnreliableResponseError,
     build_unified_selection_payload,
     output_token_reserve,
@@ -281,6 +282,18 @@ def test_parse_raises_unreliable_error_when_candidates_missing():
         parse_unified_selection_response({"candidates": [],
             "promptFeedback": {"blockReason": "SAFETY", "blockReasonMessage": "private input"},
             "usageMetadata": {"promptTokenCount": 321}})
+
+
+def test_explicit_provider_content_block_never_retries_or_applies_selection():
+    blocked = {"candidates": [], "promptFeedback": {"blockReason": "PROHIBITED_CONTENT"},
+               "usageMetadata": {"promptTokenCount": 17437}}
+    session = FakeSession([blocked, gemini_response(decisions_json(2))])
+    ledger = DollarBudgetLedger(max_usd=0.05)
+    reasoner = make_reasoner(session, ledger=ledger)
+    with pytest.raises(UnifiedSelectionProviderBlockedError, match="PROHIBITED_CONTENT"):
+        reasoner.reason(draft(2))
+    assert len(session.calls) == 1
+    assert ledger.reserved_usd > 0  # Provider may bill the processed input tokens.
 
 
 def test_parse_raises_unreliable_error_when_content_missing():

@@ -61,6 +61,10 @@ class UnifiedSelectionUnreliableResponseError(ValueError):
     """
 
 
+class UnifiedSelectionProviderBlockedError(RuntimeError):
+    """A provider explicitly declined the input; repeating it wastes budget."""
+
+
 def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
     buckets: dict[str, str] = {}
     clips = {}
@@ -486,7 +490,8 @@ def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_to
 def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mapping[str, Any]], int, str]:
     """Return (decisions, output_tokens, finish_reason).
 
-    Raises UnifiedSelectionUnreliableResponseError for any shape the response
+    Raises UnifiedSelectionProviderBlockedError when the provider explicitly
+    prohibits the input; other unusable responses raise UnifiedSelectionUnreliableResponseError.
     could take that must never be treated as a complete editorial result:
     a missing candidate/content/parts/decisions field, or JSON that failed to
     parse -- the latter always names finishReason so a MAX_TOKENS truncation
@@ -498,7 +503,9 @@ def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mappi
         reason = str(feedback.get("blockReason") or "none") if isinstance(feedback, Mapping) else "malformed"
         usage = raw.get("usageMetadata") or {}
         tokens = usage.get("promptTokenCount") if isinstance(usage, Mapping) else None
-        raise UnifiedSelectionUnreliableResponseError(
+        error_class = (UnifiedSelectionProviderBlockedError if reason == "PROHIBITED_CONTENT"
+                       else UnifiedSelectionUnreliableResponseError)
+        raise error_class(
             f"Gemini unified response missing candidates (blockReason={reason[:40]!r}, "
             f"promptTokenCount={tokens if isinstance(tokens, int) else 'unknown'})"
         )
@@ -884,6 +891,10 @@ class GoogleUnifiedSelectionReasoner:
                 decisions, competitions, output_tokens = self._call_once(
                     payload, candidate_rows, output_tokens_requested=output_reserve,
                 )
+            except UnifiedSelectionProviderBlockedError:
+                # The provider processed input tokens before refusing output;
+                # retain the reservation because the charged amount is unknown.
+                raise
             except (requests.RequestException, UnifiedSelectionUnreliableResponseError):
                 # A failed attempt bills no real generation tokens, so give the
                 # preflight reservation back rather than leaking it -- otherwise
