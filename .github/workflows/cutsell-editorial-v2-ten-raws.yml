@@ -142,7 +142,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_v24_cta_coverage",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_v25_cta_story_support",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),

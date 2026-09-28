@@ -239,6 +239,8 @@ def _apply_v2_take_competitions(
     # regardless of the order in which comparisons arrived.
     protected = {(tuple(sorted(c.winner_clip_ids)), clip_id)
                  for c in competitions for clip_id in c.material_unique_clip_ids}
+    proposed_covered = {clip_id for contest in competitions if contest.relation == "equivalent_take"
+                        for clip_id in contest.covered_clip_ids}
     disputed = set()
     for left in competitions:
         for right in competitions:
@@ -271,7 +273,16 @@ def _apply_v2_take_competitions(
                     i = index_by_id[clip_id]
                     winner_has_cta = any(_has_purchase_action(clips[index_by_id[w]].text)
                                          for w in contest.winner_clip_ids)
-                    if _has_purchase_action(clips[i].text) and not winner_has_cta:
+                    selected_cta_elsewhere = any(
+                        j != i and clips[j].clip_id not in proposed_covered and
+                        actions[j] == "select" and decisions[clips[j].clip_id].action == "select" and
+                        not decisions[clips[j].clip_id].trailing_recording_word_count and
+                        clips[j].source_asset_id == clips[i].source_asset_id and
+                        _has_purchase_action(clips[j].text) and
+                        _purchase_destination(clips[j].text) == _purchase_destination(clips[i].text)
+                        for j in range(len(clips)))
+                    if (_has_purchase_action(clips[i].text) and not winner_has_cta and
+                            not selected_cta_elsewhere):
                         if (decisions[clip_id].reason_code not in {"failed_delivery", "recording_process_bts"}
                                 and decisions[clip_id].relation not in {"failed", "bts"}):
                             actions[i] = "select"
@@ -316,6 +327,18 @@ def _has_purchase_action(value: str) -> bool:
             continue
         return True
     return False
+
+
+def _purchase_destination(value: str) -> str | None:
+    normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    destinations = {"carrito": "cart", "cart": "cart", "enlace": "link", "link": "link",
+                    "bio": "bio", "tienda": "store", "store": "store", "shop": "store",
+                    "checkout": "checkout"}
+    for token in re.findall(r"\b\w+\b", normalized):
+        if token in destinations:
+            return destinations[token]
+    return None
 
 
 def _effective_action(decision: UnifiedSelectionDecision, current_bucket: str) -> tuple[str, str | None]:

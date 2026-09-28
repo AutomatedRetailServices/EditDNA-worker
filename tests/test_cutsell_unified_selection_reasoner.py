@@ -405,6 +405,36 @@ def test_v2_whole_take_cannot_claim_to_cover_absent_purchase_action():
     _apply_v2_take_competitions((complete, cta), decisions, actions, overrides,
                                  (UnifiedTakeCompetition(("body",), ("cta",), (), "equivalent_take", .98),))
     assert actions == ["select", "discard"]
+    final_cta = replace(cta, clip_id="final_cta", start=150, end=153,
+                        text="Puedes comprarlo ahora en el carrito")
+    decisions["final_cta"] = v2_decision("final_cta", "select", "independent", .96, 2,
+                                         "necessary_continuation", 2)
+    actions, overrides = ["select", "discard", "select"], [None] * 3
+    _apply_v2_take_competitions((body, cta, final_cta), decisions, actions, overrides,
+                                 (UnifiedTakeCompetition(("body",), ("cta",), (), "equivalent_take", .98),))
+    assert actions == ["select", "discard", "select"]
+    different_destination = replace(final_cta, text="Puedes comprarlo por el enlace de la bio")
+    actions, overrides = ["select", "discard", "select"], [None] * 3
+    _apply_v2_take_competitions((body, cta, different_destination), decisions, actions, overrides,
+                                 (UnifiedTakeCompetition(("body",), ("cta",), (), "equivalent_take", .98),))
+    assert actions == ["select", "select", "select"]
+
+
+def test_v2_cta_support_cannot_depend_on_another_proposed_deletion():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    body_a = clip("body_a", 0, 5, "Product review", selected=True)
+    body_b = clip("body_b", 10, 15, "Product details", selected=True)
+    a = clip("cta_a", 6, 8, "Puedes encontrarlo en el carrito", selected=True)
+    b = clip("cta_b", 16, 18, "Puedes comprarlo en el carrito", selected=True)
+    clips = (body_a, a, body_b, b)
+    decisions = {item.clip_id: v2_decision(item.clip_id, "select", "independent", .98, i,
+                                           "best_complete_take", i) for i, item in enumerate(clips)}
+    contests = (UnifiedTakeCompetition(("body_a",), ("cta_a",), (), "equivalent_take", .98),
+                UnifiedTakeCompetition(("body_b",), ("cta_b",), (), "equivalent_take", .98))
+    for order in (contests, contests[::-1]):
+        actions, overrides = ["select"] * 4, [None] * 4
+        _apply_v2_take_competitions(clips, decisions, actions, overrides, order)
+        assert actions == ["select"] * 4
 
 
 def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():

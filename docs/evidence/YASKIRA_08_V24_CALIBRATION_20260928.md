@@ -1,0 +1,7 @@
+# Yaskira08 V24 — CTA protected, earlier attempts remain
+
+Commit `99c7d13e`, run `36431065013`, artifact `10973144084`, 135 workflow tests pass. Selected source union 78.599s; approved Gold 25.199/27, lost 1.801s, outside Gold 53.4s (recall 93.33%, precision 32.06%). Technical QC reports `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN` with no blocking silence.
+
+V24 selected the final product pitch 120.39–146.91, including the short completion and CTA. It also selected earlier 36.79–62.39, 88.75–116.55. One whole-take competition declared candidate 9 the complete review covering earlier candidates. The CTA-coverage guard correctly detected an earlier CTA in 36.79–62.39 missing from that *winner* and restored it. However, another selected final CTA at 145.1–146.91 already supplies the same shopping direction. V25 must check the entire explicitly selected story for an equivalent destination before restoring an earlier CTA. Independent QA identified and rejected an initial order-dependent version; the revised check excludes every proposed covered candidate, requires an explicit untrimmed selected CTA, and matches normalized shopping destination.
+
+The other early selected intervals arise from independent model SELECT decisions and the lexical unique-information safeguard. They require a semantic whole-attempt adjudication, not a CTA exception. This run does not pass editorial Gold. Human watch/listen and same-version repeatability remain outstanding.
