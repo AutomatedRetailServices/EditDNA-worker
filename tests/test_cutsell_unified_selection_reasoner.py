@@ -6,6 +6,7 @@ from cutsell_worker.unified_selection_google import (
 from cutsell_worker.unified_selection_reasoner import (
     UnifiedSelectionDecision,
     UnifiedSelectionPlan,
+    UnifiedTakeCompetition,
     apply_unified_selection_reasoner,
 )
 
@@ -299,6 +300,81 @@ def test_v2_does_not_preserve_usable_retry_alternate_that_winner_covers():
 
     assert [item.clip_id for item in out.selected] == ["winner"]
     assert [item.clip_id for item in out.alternates] == ["alternate"]
+
+
+def test_v2_explicit_whole_take_coverage_removes_prior_selected_fragments():
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(
+            clip("fragment1", 0, 5, "Specific opening claim", selected=False),
+            clip("fragment2", 5, 10, "Distinct middle demonstration", selected=False),
+            clip("complete", 20, 35, "Specific opening claim distinct middle demonstration and close", selected=False),
+        ), discarded=(), diagnostics={"editorial_engine_v2_request": {"require_audiovisual_evidence": True}},
+    )
+    class ContestReasoner(FakeReasoner):
+        def __init__(self, relation="equivalent_take", confidence=.96, covered=("fragment1", "fragment2")):
+            self.relation, self.confidence, self.covered = relation, confidence, covered
+
+        def reason(self, _draft):
+            return UnifiedSelectionPlan(
+                decisions=(
+                    v2_decision("fragment1", "select", "independent", .98, 0, "independent_story_coverage", 0),
+                    v2_decision("fragment2", "select", "independent", .98, 1, "independent_story_coverage", 1),
+                    v2_decision("complete", "select", "independent", .98, 2, "best_complete_take", 2),
+                ), provider="fake", model="test",
+                take_competitions=(UnifiedTakeCompetition(("complete",), self.covered, (),
+                                                        self.relation, self.confidence, "covered"),),
+            )
+
+    result = apply_unified_selection_reasoner(d, ContestReasoner())
+    assert [item.clip_id for item in result.selected] == ["complete"]
+    assert result.diagnostics["v2_take_competitions"][0]["decision"] == "covered_alternates_removed"
+    for relation, confidence in (("complementary", .99), ("equivalent_take", .89)):
+        result = apply_unified_selection_reasoner(d, ContestReasoner(relation, confidence))
+        assert [item.clip_id for item in result.selected] == ["fragment1", "fragment2", "complete"]
+    result = apply_unified_selection_reasoner(d, ContestReasoner(covered=("fragment1",)))
+    assert [item.clip_id for item in result.selected] == ["fragment2", "complete"]
+
+
+def test_v2_cyclic_whole_take_claims_preserve_both_regardless_of_order():
+    d = DraftTimeline(schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+                      selected=(clip("a", 0, 5, "opening", selected=True),
+                                clip("b", 10, 15, "closing", selected=True)),
+                      alternates=(), discarded=(),
+                      diagnostics={"editorial_engine_v2_request": {"require_audiovisual_evidence": True}})
+    class Cyclic(FakeReasoner):
+        def __init__(self, contests):
+            self.contests = contests
+
+        def reason(self, _draft):
+            return UnifiedSelectionPlan(decisions=(
+                v2_decision("a", "select", "independent", .99, 0, "best_complete_take", 0),
+                v2_decision("b", "select", "independent", .99, 1, "best_complete_take", 1),
+            ), provider="fake", model="test", take_competitions=self.contests)
+
+    contests = (UnifiedTakeCompetition(("a",), ("b",), (), "equivalent_take", .99),
+                UnifiedTakeCompetition(("b",), ("a",), (), "equivalent_take", .99))
+    for order in (contests, contests[::-1]):
+        result = apply_unified_selection_reasoner(d, Cyclic(order))
+        assert [item.clip_id for item in result.selected] == ["a", "b"]
+        assert all(c["decision"] == "contradictory_competitions_preserved"
+                   for c in result.diagnostics["v2_take_competitions"])
+
+
+def test_v2_three_way_and_chain_claims_do_not_depend_on_comparison_order():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    clips = tuple(clip(name, i * 10, i * 10 + 5, name, selected=True)
+                  for i, name in enumerate(("a", "b", "c")))
+    decisions = {item.clip_id: v2_decision(item.clip_id, "select", "independent", .99, i,
+                                           "best_complete_take", i) for i, item in enumerate(clips)}
+    a_b = UnifiedTakeCompetition(("a",), ("b",), (), "equivalent_take", .99)
+    b_c = UnifiedTakeCompetition(("b",), ("c",), (), "equivalent_take", .99)
+    c_a = UnifiedTakeCompetition(("c",), ("a",), (), "equivalent_take", .99)
+    for contests in ((a_b, b_c), (a_b, b_c, c_a)):
+        for order in (contests, contests[::-1]):
+            actions, overrides = ["select"] * 3, [None] * 3
+            _apply_v2_take_competitions(clips, decisions, actions, overrides, order)
+            assert actions == ["select"] * 3
 
 
 def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():

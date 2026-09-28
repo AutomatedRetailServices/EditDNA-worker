@@ -20,6 +20,7 @@ from .hybrid_provider_settings import HybridProviderSettings
 from .unified_selection_reasoner import (
     UnifiedSelectionDecision,
     UnifiedSelectionPlan,
+    UnifiedTakeCompetition,
 )
 
 _ACTIONS = ["select", "swap", "discard"]
@@ -334,9 +335,21 @@ def unified_selection_response_schema(candidate_count: int, *, v2: bool = False)
                     ],
                     "additionalProperties": False,
                 },
-            }
+            },
+            **({"competitions": {
+                "type": "array", "items": {"type": "object", "properties": {
+                    "winner_candidate_indices": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+                    "covered_candidate_indices": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+                    "material_unique_candidate_indices": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+                    "relation": {"type": "string", "enum": ["equivalent_take", "complementary", "independent"]},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reason": {"type": "string"},
+                }, "required": ["winner_candidate_indices", "covered_candidate_indices",
+                               "material_unique_candidate_indices", "relation", "confidence", "reason"],
+                    "additionalProperties": False},
+            }} if v2 else {}),
         },
-        "required": ["decisions"],
+        "required": ["decisions", *(["competitions"] if v2 else [])],
         "additionalProperties": False,
     }
 
@@ -398,14 +411,14 @@ _DECISION_ARRAY_OVERHEAD_TOKENS = estimate_tokens_from_chars(len('{"decisions":[
 
 
 def output_token_reserve(candidate_count: int, *, ceiling: int, v2: bool = False) -> int:
-    """Worst-case output token budget for `candidate_count` decisions, capped
-    at `ceiling`. Every field in the schema is bounded (enums, a 0-1 float,
-    and a small integer), so this is a true upper bound, not a heuristic --
-    the model cannot need more tokens than this to state one complete,
-    schema-valid decision for every candidate."""
+    """Reserve for decisions and (in V2) three short take comparisons.
+
+    The provider ceiling can be smaller than a large response needs. Truncation
+    is rejected in the parser and retried; partial responses never apply.
+    """
     return min(
         ceiling,
-        max(640, (_V2_TOKENS_PER_DECISION if v2 else _TOKENS_PER_DECISION) * max(0, int(candidate_count)) + _DECISION_ARRAY_OVERHEAD_TOKENS),
+        max(640, (_V2_TOKENS_PER_DECISION if v2 else _TOKENS_PER_DECISION) * max(0, int(candidate_count)) + _DECISION_ARRAY_OVERHEAD_TOKENS + (2000 if v2 else 0)),
     )
 
 
@@ -433,6 +446,16 @@ def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_to
         "(0, 1, 2, ...). Never merge two candidates into one decision and never omit any candidate, even if two "
         "candidates look nearly identical -- they still each need their own decision with their own "
         "candidate_index.\n\n"
+        + ("V2: After assigning decisions, compare COMPLETE attempted deliveries across all provisional "
+           "take groups, including a union of several earlier fragments against a later fluent take. "
+           "Return competitions only for the three most consequential competing attempts, at most 3; empty array if none. "
+           "For each, list winning candidate indices, indices whose audience-facing content and visual actions "
+           "are FULLY covered by winners, and any material-unique indices separately. Mark equivalent_take "
+           "only when the winners preserve all specific facts, numbers, negations, distinct demonstrations, "
+           "personality and CTA of the covered side. Topic overlap, recency, and duration alone never prove "
+           "equivalence. Keep each reason under 120 characters. Use complementary or independent when contributions differ; do not claim coverage "
+           "for any material-unique candidate. Confidence must reflect semantic certainty.\n\n"
+           if payload.get("engine_version") == "v2" else "")
         + json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
     )
     return {
@@ -495,6 +518,43 @@ def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mappi
     return decisions, output_tokens, finish_reason
 
 
+def _parse_take_competitions(raw: Mapping[str, Any], rows: list[dict[str, Any]]) -> tuple[UnifiedTakeCompetition, ...]:
+    """Reject incomplete or invalid comparison evidence before applying any V2 decisions."""
+    try:
+        parsed = json.loads("".join(str(part.get("text") or "")
+                                    for part in raw["candidates"][0]["content"]["parts"]
+                                    if isinstance(part, Mapping)))
+        contests = parsed["competitions"]
+        if not isinstance(contests, list) or len(contests) > 3:
+            raise ValueError("competition count")
+        result = []
+        for item in contests:
+            if not isinstance(item, Mapping):
+                raise ValueError("competition object")
+            groups = []
+            for key in ("winner_candidate_indices", "covered_candidate_indices", "material_unique_candidate_indices"):
+                values = item[key]
+                if not isinstance(values, list) or any(type(i) is not int or not 0 <= i < len(rows) for i in values):
+                    raise ValueError(f"invalid {key}")
+                if len(values) != len(set(values)):
+                    raise ValueError(f"duplicate {key}")
+                groups.append(tuple(str(rows[i]["clip_id"]) for i in values))
+            winners, covered, unique = groups
+            if not winners or not covered or (set(winners) & set(covered)) or (set(unique) & set(covered)):
+                raise ValueError("overlapping or empty competition")
+            relation = item["relation"]
+            confidence = float(item["confidence"])
+            if relation not in {"equivalent_take", "complementary", "independent"} or not 0 <= confidence <= 1:
+                raise ValueError("invalid relation or confidence")
+            if len(str(item["reason"])) > 120:
+                raise ValueError("competition reason too long")
+            result.append(UnifiedTakeCompetition(winners, covered, unique, relation, confidence,
+                                                 str(item["reason"])))
+        return tuple(result)
+    except (KeyError, TypeError, ValueError, IndexError) as exc:
+        raise UnifiedSelectionUnreliableResponseError(f"invalid V2 take competitions: {exc}") from exc
+
+
 @dataclass
 class GoogleUnifiedSelectionReasoner:
     api_key: str
@@ -524,7 +584,7 @@ class GoogleUnifiedSelectionReasoner:
         candidate_rows: list[dict[str, Any]],
         *,
         output_tokens_requested: int,
-    ) -> tuple[list[UnifiedSelectionDecision], int]:
+    ) -> tuple[list[UnifiedSelectionDecision], tuple[UnifiedTakeCompetition, ...], int]:
         body = build_unified_selection_request(payload, max_output_tokens=output_tokens_requested)
         body["contents"][0]["parts"].extend(self.audiovisual_parts)
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
@@ -603,7 +663,8 @@ class GoogleUnifiedSelectionReasoner:
                     if item.get("sequence_index") is not None else None
                 ),
             ))
-        return decisions, output_tokens
+        competitions = _parse_take_competitions(raw, candidate_rows) if payload.get("engine_version") == "v2" else ()
+        return decisions, competitions, output_tokens
 
     def _max_affordable_output_tokens(self, input_tokens: int) -> int:
         """The largest output budget a fresh call at this input size could
@@ -662,7 +723,7 @@ class GoogleUnifiedSelectionReasoner:
                 raise RuntimeError("unified Selection edit dollar budget exhausted")
 
             try:
-                decisions, output_tokens = self._call_once(
+                decisions, competitions, output_tokens = self._call_once(
                     payload, candidate_rows, output_tokens_requested=output_reserve,
                 )
             except (requests.RequestException, UnifiedSelectionUnreliableResponseError):
@@ -707,4 +768,5 @@ class GoogleUnifiedSelectionReasoner:
                     available=True,
                     estimated_input_tokens=input_tokens,
                     estimated_output_tokens=output_tokens,
+                    take_competitions=competitions,
                 )

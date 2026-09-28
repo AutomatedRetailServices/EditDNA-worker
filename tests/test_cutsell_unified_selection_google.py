@@ -173,6 +173,7 @@ def decisions_json(candidate_count: int, *, index_offset: int = 0) -> str:
 
 def v2_decisions_json(candidate_count: int, *, duplicate_sequence: bool = False) -> str:
     data = json.loads(decisions_json(candidate_count))
+    data["competitions"] = []
     for i, item in enumerate(data["decisions"]):
         item["sequence_index"] = 0 if duplicate_sequence else i
     return json.dumps(data)
@@ -358,6 +359,24 @@ def test_v2_reason_stably_normalizes_duplicate_sequence_index():
 
     assert len(fake.calls) == 1
     assert [decision.sequence_index for decision in plan.decisions] == [0, 1, 2]
+
+
+def test_v2_parses_explicit_take_competition_indices():
+    from cutsell_worker.unified_selection_google import _parse_take_competitions, UnifiedSelectionUnreliableResponseError
+    import pytest
+    rows = [{"clip_id": name} for name in ("prior", "unique", "final")]
+    data = {"competitions": [{
+        "winner_candidate_indices": [2], "covered_candidate_indices": [0],
+        "material_unique_candidate_indices": [1], "relation": "equivalent_take",
+        "confidence": .97, "reason": "Complete delivery preserves prior claim",
+    }]}
+    raw = gemini_response(json.dumps(data))
+    contests = _parse_take_competitions(raw, rows)
+    assert contests[0].winner_clip_ids == ("final",)
+    assert contests[0].material_unique_clip_ids == ("unique",)
+    data["competitions"][0]["covered_candidate_indices"] = [1]
+    with pytest.raises(UnifiedSelectionUnreliableResponseError):
+        _parse_take_competitions(gemini_response(json.dumps(data)), rows)
 
 
 def test_schema_requires_candidate_index_on_every_decision():

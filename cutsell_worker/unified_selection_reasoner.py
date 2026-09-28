@@ -78,6 +78,22 @@ class UnifiedSelectionDecision:
 
 
 @dataclass(frozen=True)
+class UnifiedTakeCompetition:
+    """Model-proposed comparison of complete deliveries, before Freeze.
+
+    The winning side may be a composite. Covered candidates are removable
+    only after all winners are selected and the model confirms high-confidence
+    equivalent delivery with no material information or action lost.
+    """
+    winner_clip_ids: tuple[str, ...]
+    covered_clip_ids: tuple[str, ...]
+    material_unique_clip_ids: tuple[str, ...] = ()
+    relation: str = "independent"
+    confidence: float = 0.0
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class UnifiedSelectionPlan:
     decisions: tuple[UnifiedSelectionDecision, ...]
     provider: str
@@ -86,6 +102,7 @@ class UnifiedSelectionPlan:
     available: bool = True
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
+    take_competitions: tuple[UnifiedTakeCompetition, ...] = ()
 
 
 class UnifiedSelectionReasoner(Protocol):
@@ -175,6 +192,23 @@ def validate_unified_selection_plan(
     if seen != expected:
         raise ValueError("unified selection reasoner omitted candidates")
 
+    checked_competitions = []
+    for competition in plan.take_competitions:
+        winners = tuple(competition.winner_clip_ids)
+        covered = tuple(competition.covered_clip_ids)
+        unique = tuple(competition.material_unique_clip_ids)
+        if (not winners or not covered or
+                any(not group or len(group) != len(set(group)) or not set(group) <= expected
+                    for group in (winners, covered)) or
+                len(unique) != len(set(unique)) or not set(unique) <= expected or
+                set(winners) & set(covered) or set(unique) & set(covered)):
+            raise ValueError("invalid whole-take competition membership")
+        if competition.relation not in {"equivalent_take", "complementary", "independent"}:
+            raise ValueError("invalid whole-take competition relation")
+        if not math.isfinite(float(competition.confidence)) or not 0 <= competition.confidence <= 1:
+            raise ValueError("invalid whole-take competition confidence")
+        checked_competitions.append(competition)
+
     return UnifiedSelectionPlan(
         decisions=tuple(normalized),
         provider=str(plan.provider or "unknown")[:80],
@@ -183,7 +217,76 @@ def validate_unified_selection_plan(
         available=True,
         estimated_input_tokens=int(plan.estimated_input_tokens),
         estimated_output_tokens=int(plan.estimated_output_tokens),
+        take_competitions=tuple(checked_competitions),
     )
+
+
+def _apply_v2_take_competitions(
+    clips: tuple[DraftClip, ...],
+    decisions: dict[str, UnifiedSelectionDecision],
+    actions: list[str],
+    overrides: list[str | None],
+    competitions: tuple[UnifiedTakeCompetition, ...],
+) -> list[dict]:
+    """Resolve explicit cross-family equivalence, including lexical rescues.
+
+    Do not deduce equivalence from topical words or chronology. A disputed
+    candidate survives if the comparison is missing, low confidence, names a
+    material exception, or does not have its complete winner selected.
+    """
+    index_by_id = {clip.clip_id: i for i, clip in enumerate(clips)}
+    # Preserve any material exception named against the same winning delivery,
+    # regardless of the order in which comparisons arrived.
+    protected = {(tuple(sorted(c.winner_clip_ids)), clip_id)
+                 for c in competitions for clip_id in c.material_unique_clip_ids}
+    disputed = set()
+    for left in competitions:
+        for right in competitions:
+            if left is right:
+                continue
+            if (set(left.winner_clip_ids) & set(right.covered_clip_ids) or
+                    set(right.winner_clip_ids) & set(left.covered_clip_ids)):
+                disputed.update((id(left), id(right)))
+    audit = []
+    for contest in competitions:
+        reason = "advisory_only"
+        if id(contest) in disputed:
+            reason = "contradictory_competitions_preserved"
+        elif contest.relation != "equivalent_take":
+            reason = "different_or_complementary"
+        elif contest.confidence < .90:
+            reason = "low_confidence"
+        elif not all(actions[index_by_id[clip_id]] == "select" and
+                     decisions[clip_id].action == "select" and
+                     not decisions[clip_id].trailing_recording_word_count
+                     for clip_id in contest.winner_clip_ids):
+            reason = "winner_not_confirmed_selected"
+        else:
+            source_ids = {clips[index_by_id[clip_id]].source_asset_id for clip_id in
+                          (*contest.winner_clip_ids, *contest.covered_clip_ids)}
+            if len(source_ids) != 1:
+                reason = "cross_source_conflict"
+            else:
+                for clip_id in contest.covered_clip_ids:
+                    i = index_by_id[clip_id]
+                    if (tuple(sorted(contest.winner_clip_ids)), clip_id) in protected:
+                        reason = "conflicting_material_unique_preserved"
+                        continue
+                    if actions[i] == "select":
+                        actions[i] = "discard"
+                        overrides[i] = "whole_take_equivalent_covered"
+                if reason != "conflicting_material_unique_preserved":
+                    reason = "covered_alternates_removed"
+        audit.append({
+            "winners": list(contest.winner_clip_ids),
+            "covered": list(contest.covered_clip_ids),
+            "material_unique": list(contest.material_unique_clip_ids),
+            "relation": contest.relation,
+            "confidence": contest.confidence,
+            "decision": reason,
+            "reason": contest.reason[:240],
+        })
+    return audit
 
 
 def _effective_action(decision: UnifiedSelectionDecision, current_bucket: str) -> tuple[str, str | None]:
@@ -440,6 +543,9 @@ def apply_unified_selection_reasoner(
             draft, clips, decisions, actions, overrides,
         )
         _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides)
+        competition_audit = _apply_v2_take_competitions(
+            clips, decisions, actions, overrides, plan.take_competitions,
+        )
 
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
@@ -500,6 +606,8 @@ def apply_unified_selection_reasoner(
     }
     if tail_audit:
         diagnostics["v2_recording_tail"] = tail_audit
+    if v2_request:
+        diagnostics["v2_take_competitions"] = competition_audit
     return replace(
         draft,
         selected=tuple(selected),
