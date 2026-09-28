@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Yaskira 08 Recovery
+name: CutSell Editorial Engine V2 Yaskira 08–09 Repeatability
 
 on:
   workflow_dispatch:
@@ -93,7 +93,7 @@ jobs:
             fi
           done
 
-      - name: Execute V2 recovery for Yaskira 08
+      - name: Repeat V2 qualification for Yaskira 08 and 09
         shell: bash
         run: |
           set -euo pipefail
@@ -106,6 +106,7 @@ jobs:
 
           keys = [
               "Yaskira/08.mp4",
+              "Yaskira/09.mp4",
           ]
           root = Path("editorial-v2-yaskira-08")
           results = []
@@ -142,7 +143,7 @@ jobs:
                   })
 
           report = {
-              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_v25_cta_story_support",
+              "schema_version": "cutsell.editorial_engine_v2.yaskira_08_recovery.v19_take_groups",
               "engine": "editorial_engine_v2",
               "source_keys": keys,
               "source_count": len(keys),
