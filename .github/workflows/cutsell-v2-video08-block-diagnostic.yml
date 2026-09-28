@@ -8,6 +8,9 @@ on:
     paths:
       - .github/workflows/cutsell-v2-video08-block-diagnostic.yml
       - scripts/diagnose_v2_selection_block.py
+      - cutsell_worker/unified_selection_google.py
+      - cutsell_worker/unified_selection_reasoner.py
+      - tests/test_cutsell_unified_selection_google.py
 
 permissions:
   contents: read

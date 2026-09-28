@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 10296)
-Total output lines: 810
-
 """Unified whole-video Selection authority for CutSell Universal Clean Cut.
 
 The legacy pipeline may produce useful local evidence, retry groups, Hybrid votes,
@@ -334,7 +331,168 @@ def _apply_v2_take_competitions(
                         continue
                     winner_has_cta = any(_has_purchase_action(clips[index_by_id[w]].text)
                                          for w in contest.winner_clip_ids)
-                    selected_cta_…2296 tokens truncated…ntaje|personas?|people')
+                    selected_cta_elsewhere = any(
+                        j != i and clips[j].clip_id not in proposed_covered and
+                        actions[j] == "select" and decisions[clips[j].clip_id].action == "select" and
+                        not decisions[clips[j].clip_id].trailing_recording_word_count and
+                        clips[j].source_asset_id == clips[i].source_asset_id and
+                        _has_purchase_action(clips[j].text) and
+                        _purchase_destination(clips[j].text) == _purchase_destination(clips[i].text)
+                        for j in range(len(clips)))
+                    if (_has_purchase_action(clips[i].text) and not winner_has_cta and
+                            not selected_cta_elsewhere):
+                        if (decisions[clip_id].reason_code not in {"failed_delivery", "recording_process_bts"}
+                                and decisions[clip_id].relation not in {"failed", "bts"}):
+                            actions[i] = "select"
+                            overrides[i] = "purchase_action_not_covered_by_winner"
+                        reason = "purchase_action_coverage_conflict"
+                        continue
+                    if (tuple(sorted(contest.winner_clip_ids)), clip_id) in protected:
+                        reason = "conflicting_material_unique_preserved"
+                        continue
+                    if actions[i] == "select":
+                        actions[i] = "discard"
+                        overrides[i] = "whole_take_equivalent_covered"
+                if reason not in {"conflicting_material_unique_preserved", "purchase_action_coverage_conflict",
+                                  "distinct_focused_visual_action_preserved", "material_claim_not_covered_by_winner"}:
+                    reason = "covered_alternates_removed"
+        audit.append({
+            "winners": list(contest.winner_clip_ids),
+            "covered": list(contest.covered_clip_ids),
+            "material_unique": list(contest.material_unique_clip_ids),
+            "relation": contest.relation,
+            "confidence": contest.confidence,
+            "decision": reason,
+            "reason": contest.reason[:240],
+        })
+    return audit
+
+
+def _has_purchase_action(value: str) -> bool:
+    """Recognize an explicit buying direction, not a product/store mention."""
+    normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.replace("’", "'").replace("don't", "dont").replace("didn't", "didnt")
+    for clause in re.split(r"[.!?;]+", normalized):
+        action = re.search(
+            r"\b(?:puedes?|pueden|podras?)\s+(?:encontrar|comprar|conseguir)(?:lo|la)?\b"
+            r"|\b(?:compra|compralo|pidelo|encuentralo|adquierelo)\b"
+            r"|\b(?:buy now|order now|shop now|tap|click|find it|get yours)\b", clause)
+        destination = re.search(r"\b(?:carrito|enlace|link|bio|tienda|cart|store|shop|checkout)\b", clause)
+        if not action or not destination:
+            continue
+        prefix = clause[:action.start()]
+        if re.search(r"\b(?:no|nunca|jamas|not|never|dont|didnt)\b(?:\W+\w+){0,3}\W*$", prefix):
+            continue
+        return True
+    return False
+
+
+def _purchase_destination(value: str) -> str | None:
+    normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    destinations = {"carrito": "cart", "cart": "cart", "enlace": "link", "link": "link",
+                    "bio": "bio", "tienda": "store", "store": "store", "shop": "store",
+                    "checkout": "checkout"}
+    for token in re.findall(r"\b\w+\b", normalized):
+        if token in destinations:
+            return destinations[token]
+    return None
+
+
+def _effective_action(decision: UnifiedSelectionDecision, current_bucket: str) -> tuple[str, str | None]:
+    """Fail open on uncertainty without turning uncertainty into destructive deletion."""
+    # A reason_code is the model's own explanation for a decision, and some
+    # reason codes are self-describing about which tier they belong to per
+    # the editorial contract itself: "usable_alternate" is SWAP-tier by
+    # definition ("a usable alternative...that should not play by default"),
+    # and "failed_delivery" is DISCARD-tier by definition ("failed/abandoned
+    # delivery"). A `select` action paired with either directly contradicts
+    # the model's own stated reason -- checked first, ahead of confidence, so
+    # a high-confidence self-contradiction is still caught. General, not
+    # Video00-specific: it depends only on the fixed reason_code vocabulary.
+    if decision.action == "select" and decision.reason_code == "failed_delivery":
+        return "discard", "failed_delivery_reason_overrides_select_action"
+    if decision.action == "select" and decision.reason_code == "usable_alternate":
+        return "swap", "usable_alternate_reason_overrides_select_action"
+    if decision.relation == "uncertain" or decision.confidence < 0.70:
+        if current_bucket == "select":
+            return "select", "uncertain_preserved_current_selected"
+        return "swap", "uncertain_preserved_as_swap"
+    if decision.action == "discard" and decision.confidence < 0.80:
+        return "swap", "low_confidence_discard_demoted_to_swap"
+    return decision.action, None
+
+
+def _enforce_single_retry_family_winner(
+    clips: tuple[DraftClip, ...],
+    decisions: dict[str, UnifiedSelectionDecision],
+    actions: list[str],
+    overrides: list[str | None],
+) -> None:
+    """Within one retry family, a genuine retry contest -- relation
+    retry_winner or retry_alternate, i.e. candidates the model itself framed
+    as competing takes of the same moment -- must produce at most one SELECT.
+    More than one surviving SELECT there is always a policy error, never a
+    legitimate composite: composites are relation composite_piece/
+    continuation and are untouched by this pass, as is every independent
+    story beat. Mutates `actions`/`overrides` in place; keeps the
+    highest-confidence contender, demotes the rest to SWAP (never DISCARD --
+    an alternate that was good enough to reach SELECT stays available for
+    manual replacement, it is not thrown away)."""
+    by_family: dict[int, list[int]] = {}
+    for index, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if decision.relation in ("retry_winner", "retry_alternate"):
+            by_family.setdefault(decision.family_index, []).append(index)
+
+    for indices in by_family.values():
+        select_indices = [i for i in indices if actions[i] == "select"]
+        if len(select_indices) <= 1:
+            continue
+        winner = max(select_indices, key=lambda i: decisions[clips[i].clip_id].confidence)
+        for i in select_indices:
+            if i != winner:
+                actions[i] = "swap"
+                overrides[i] = "retry_family_single_winner_enforced"
+
+
+def _preserve_retry_alternates_with_unique_information(
+    clips: tuple[DraftClip, ...],
+    decisions: dict[str, UnifiedSelectionDecision],
+    actions: list[str],
+    overrides: list[str | None],
+) -> list[dict]:
+    """Guard a concrete omitted claim, never promote a retry by vocabulary alone.
+
+    Best-take editing can intentionally omit adjective and style variations.
+    Keep a disputed alternate in the audit, but promote it to the played
+    timeline only for an unrepresented quantity, audience condition, or CTA.
+    A source-verified spoken continuation is protected by a separate authority.
+    """
+    def plain(text):
+        value = unicodedata.normalize('NFKD', str(text or '').casefold())
+        return ''.join(ch for ch in value if not unicodedata.combining(ch))
+
+    spoken_numbers = {'uno': '1', 'una': '1', 'one': '1', 'dos': '2', 'two': '2',
+                      'tres': '3', 'three': '3', 'cinco': '5', 'five': '5',
+                      'diez': '10', 'ten': '10', 'quince': '15', 'fifteen': '15',
+                      'veinte': '20', 'twenty': '20', 'treinta': '30', 'thirty': '30',
+                      'sesenta': '60', 'sixty': '60', 'noventa': '90', 'ninety': '90'}
+    def quantities(value):
+        normalized = plain(value)
+        # 'uno ve esos cuerpos' is an impersonal Spanish pronoun, not a
+        # quantitative promise. Resolve one/uno/una as a number only when the
+        # following token is an explicit measure/count unit. Other written
+        # quantities (for example 'treinta dias') remain protected.
+        one_units = (r'dias?|days?|semanas?|weeks?|meses?|months?|horas?|hours?|'
+                     r'gramos?|grams?|miligramos?|milligrams?|mg|kg|kilos?|'
+                     r'scoops?|cucharaditas?|cucharadas?|bottles?|botellas?|'
+                     r'litros?|liters?|mililitros?|milliliters?|ml|'
+                     r'capsulas?|capsules?|tabletas?|tablets?|pastillas?|pills?|'
+                     r'dosis|dose|doses|porciones?|servings?|gotas?|drops?|'
+                     r'veces?|times?|repeticiones?|reps?|'
+                     r'por\s+ciento|percent|porcentaje|personas?|people')
         def replace_number(match):
             if match.group() in {'uno', 'una', 'one'} and not re.match(
                     r'\s+(?:' + one_units + r')\b', normalized[match.end():]):
