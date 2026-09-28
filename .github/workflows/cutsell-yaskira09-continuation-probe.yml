@@ -61,7 +61,7 @@ jobs:
             -vf scale=480:-2 -r 12 -c:v libx264 -crf 30 -preset fast \
             -c:a aac -ac 1 -ar 16000 -b:a 48k -y /tmp/window.mp4
           python - <<'PY'
-          import base64, json, os, pathlib, requests
+          import base64, json, os, pathlib, time, requests
           model='gemini-3.5-flash-lite'
           endpoint=f'https://generativelanguage.googleapis.com/v1beta/models/{model}:'
           contents=[{'role':'user','parts':[
@@ -82,15 +82,23 @@ jobs:
           counted.raise_for_status()
           tokens=counted.json()['totalTokens']
           if not 0 < tokens <= 30000: raise RuntimeError('AV probe budget exceeded')
+          if 2*(tokens*.30 + 650*2.50)/1_000_000 > .02:
+              raise RuntimeError('AV probe retry budget exceeded')
           schema={'type':'object','properties':{
               'linked':{'type':'boolean'},'restart_observed':{'type':'boolean'},
               'audio_evidence':{'type':'string'},'visual_evidence':{'type':'string'},
               'uncertainty':{'type':'string'}},
               'required':['linked','restart_observed','audio_evidence','visual_evidence','uncertainty']}
-          response=session.post(endpoint+'generateContent',headers=headers,json={
-              'contents':contents,'generationConfig':{'temperature':0,'responseMimeType':
-                  'application/json','responseJsonSchema':schema,'maxOutputTokens':650}},timeout=120)
-          response.raise_for_status()
+          payload={'contents':contents,'generationConfig':{'temperature':0,
+              'responseMimeType':'application/json','responseJsonSchema':schema,
+              'maxOutputTokens':650}}
+          for attempt in range(2):
+              response=session.post(endpoint+'generateContent',headers=headers,
+                                    json=payload,timeout=120)
+              if response.status_code not in (429,502,503,504) or attempt == 1:
+                  response.raise_for_status()
+                  break
+              time.sleep(2)
           raw=response.json()
           if raw['candidates'][0].get('finishReason')!='STOP':
               raise RuntimeError('AV probe response incomplete')
