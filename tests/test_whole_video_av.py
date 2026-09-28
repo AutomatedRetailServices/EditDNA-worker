@@ -541,3 +541,28 @@ def test_mixed_source_region_nominates_silence_but_cannot_authorize_action(monke
         [{'start': 68, 'end': 113.5, 'role': 'mixed', 'confidence': .9,
           'visual_observation': 'Bending down to retrieve a lid, then showing a blue-labeled tub'}],
         tmp_path) == []
+
+
+def test_ninety_second_window_threshold_and_source_time_offsets(tmp_path):
+    for duration, expected_starts in ((89, []), (90, []), (91, [0, 45])):
+        raw=tmp_path / f'raw-{duration}.mp4'
+        raw.write_bytes(b'source')
+        def prepare(path, target):
+            target.write_bytes(b'compressed')
+            return duration
+        sliced=[]
+        def slice_media(path, target, start, length):
+            sliced.append((start,length))
+            target.write_bytes(b'window')
+            return length
+        av=GeminiWholeVideoAVProvider('key','model',DollarBudgetLedger(.1),1,2,
+                                      session=Session(),media_preparer=prepare,
+                                      media_slicer=slice_media)
+        result=safe_whole_video_analyze(av,(replace(source(),duration_sec=duration),),(),(),
+                                        local_paths={'source':str(raw)})
+        assert result.status.available
+        assert [start for start,_ in sliced] == expected_starts
+        audit=json.loads(result.sources[0].audiovisual_evidence)
+        assert audit['window_count']==(1 if duration<=90 else 2)
+        assert [(r['start'],r['end']) for r in audit['regions']]==(
+            [(1,2)] if duration<=90 else [(1,2),(46,47)])
