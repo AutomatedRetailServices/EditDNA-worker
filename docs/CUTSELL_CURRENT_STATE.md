@@ -1,10 +1,21 @@
-Warning: truncated output (original token count: 30218)
-Total output lines: 1782
+Warning: truncated output (original token count: 30375)
+Total output lines: 1793
 
 Warning: truncated output (original token count: 30230)
 Total output lines: 1779
 
 # CutSell.ai — Current State
+
+## 2026-09-28 — V20 render passed QC, editorial calibration failed
+
+Run `36420143783` at `6fa803e7` uploaded artifact `10969262149`.
+V2 Selection without prior buckets kept 26.52/27 Gold seconds for Yaskira08
+and the final CTA, but retained 95.30 seconds of unwanted earlier takes.
+QC returned `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN`; there is no editorial
+approval. Two redundant retries were restored by lexical uniqueness, while
+other earlier candidates were model-selected. The next diagnosis addresses
+semantic materiality and whole-attempt comparison. Evidence:
+`docs/evidence/YASKIRA_08_V20_CALIBRATION_20260928.md`.
 
 ## 2026-09-28 — V20 removal of prior bucket anchoring (offline)
 
@@ -1020,18 +1031,7 @@ and discard at 0.90 with corroboration. Active whole-video context is an ASR
 summary plus separately computed local signals; hybrid Gemini cleanup is text
 only. clean_cut_provider=None; v2/guard diagnostics disabled. P2 whole-video
 reasoning flag is diagnostics-only and cannot repair selection by enabling it.
-No engine fix, threshold change, production change or paid run. See
-CUTSELL_WATCH_LISTEN_DEEPGRAM_FORENSIC.md for evidence and correction boundary.
-
-
-## 2026-09-24 authorized Video00 Deepgram full run completed
-
-Run 36069441576 / job 107866693967, test 9aa5e5180a534e27833eb8d5ee717368b2203d3c.
-Original Video00 source hash verified. Deepgram: 651 words, zero zero-duration
-words, seven native overlapping pairs; one request and one intra-job cache hit.
-20 selected/20 discarded, output 143.334 s, engine elapsed 431.011 s.
-Editorial criteria 10/11: full gynecologist and percentage-restatement checks
-pass, abandoned stomach attempt remains. Historical gold 17/18 (ex…218 tokens truncated… human listening claimed. Preserve contradictory
+No engine fix, threshold change, product…375 tokens truncated… human listening claimed. Preserve contradictory
 Medium compact deliverable=true versus NOT_DELIVERABLE status; status used for labeling.
 Two authorized calls completed, no extra retry or production change.
 
