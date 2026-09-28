@@ -37,4 +37,14 @@ jobs:
                   print(bucket.upper(),json.dumps(rows[:80],ensure_ascii=False))
               print('DECISION_COUNT',len(decisions),'BUCKET_COUNTS',
                     {b:len(d.get(b,[])) for b in ('selected','alternates','discarded')})
+              if index in (2,6):
+                  print('RETRY_CONFLICTS',index,json.dumps([
+                      {'clip_id':x.get('clip_id'),'status':x.get('status'),
+                       'unique_count':len(x.get('lexical_difference',[])),
+                       'unique_cta':x.get('unique_cta')}
+                      for x in diag.get('v2_retry_claim_conflicts',[])],ensure_ascii=False))
+                  print('TAKE_COMPETITIONS',index,json.dumps([
+                      {'covered_count':len(x.get('covered',[])),
+                       'decision':x.get('decision'),'relation':x.get('relation')}
+                      for x in diag.get('v2_take_competitions',[])],ensure_ascii=False))
           PY
