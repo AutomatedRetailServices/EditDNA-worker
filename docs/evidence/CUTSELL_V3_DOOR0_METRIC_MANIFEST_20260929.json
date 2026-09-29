@@ -1,15 +1,15 @@
 {
   "schema": "cutsell.v3.door0.gold-overlap-manifest.v1",
   "created_date": "2026-09-29",
-  "purpose": "Deterministic offline re-calculation of saved selected intervals against owner Gold labels; this does not replay ASR, AV, selector, Boundary, or render.",
+  "purpose": "Deterministic offline re-calculation of saved selected intervals against historical, provisionally attributed labels; per-video owner approval and RAW identity require verification. This does not replay ASR, AV, selector, Boundary, or render.",
   "gold_source": "docs/CUTSELL_YASKIRA_01_10_HUMAN_GOLD.md",
   "evidence_classification": "Historical V2 artifacts from different runs/revisions. No common-revision ten-video comparison.",
   "metric_definition": {
-    "selected_and_gold_intervals_are_unioned_before_overlap": true,
-    "gold_seconds": "duration of union of approved KEEP windows",
-    "approved_seconds_retained": "intersection duration of selected union and Gold KEEP union",
-    "approved_seconds_lost": "Gold KEEP duration minus retained",
-    "unwanted_seconds_retained": "selected union duration minus retained",
+    "selected_and_reference_intervals_are_unioned_before_overlap": true,
+    "reference_seconds": "duration of historical KEEP windows (provisional until verified)",
+    "reference_seconds_retained": "intersection duration of selected union and historical KEEP union",
+    "reference_seconds_lost": "reference KEEP duration minus retained",
+    "other_seconds_retained": "selected union duration minus retained",
     "rounding_seconds": 3
   },
   "sources": [
@@ -188,7 +188,8 @@
           "av_region_count": 6,
           "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/02.mp4",
@@ -328,7 +329,8 @@
           "av_region_count": 2,
           "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/03.mp4",
@@ -399,7 +401,8 @@
           "av_region_count": 1,
           "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/04.MP4",
@@ -488,7 +491,8 @@
           "av_region_count": 6,
           "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/05.MP4",
@@ -622,7 +626,8 @@
           "av_region_count": 21,
           "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/06.MP4",
@@ -782,7 +787,8 @@
           ],
           "code_revision": "e78fbcbdc1a35d396393bd0d47f775a3b0400eff"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/07.mp4",
@@ -797,14 +803,15 @@
           "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
         }
       ],
-      "gold_status": "incomplete_raw_time_alignment",
+      "gold_status": "rejected_by_owner_no_approved_gold",
       "source_identity_check": {
         "candidate_library_filename": "00-VIDEO-2026-07-30-09-18-03.mp4",
         "candidate_duration_sec": 228.80267,
-        "gold_keep_reaches_sec": 361.55,
-        "disposition": "excluded_from_alignment_due_to_duration_mismatch",
-        "reason": "The candidate ends before the authoritative Gold keep window; it cannot be used as the RAW-time source for this map."
-      }
+        "historical_batch_source_duration_sec": 366.997,
+        "disposition": "identity_unverified_and_gold_render_rejected",
+        "reason": "The owner rejected Video00_Human_Gold.mp4 as incorrectly edited. The 228.803-second candidate does not match the 366.997-second batch RAW. Neither can establish approved Gold labels."
+      },
+      "label_provenance_status": "rejected_by_owner"
     },
     {
       "source_key": "Yaskira/08.mp4",
@@ -839,7 +846,8 @@
           ],
           "code_revision": "37cb7b8d293eeef90a49278431f13eba3d88b213"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/09.mp4",
@@ -931,7 +939,8 @@
           ],
           "code_revision": "ae2a43660cfe308ea2249544608de19e7ac34b1a"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     },
     {
       "source_key": "Yaskira/10.MOV",
@@ -1127,7 +1136,8 @@
           },
           "code_revision": "37cb7b8d293eeef90a49278431f13eba3d88b213"
         }
-      ]
+      ],
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit"
     }
   ]
 }
