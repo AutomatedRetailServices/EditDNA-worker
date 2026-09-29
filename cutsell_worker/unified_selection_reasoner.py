@@ -688,6 +688,44 @@ def _preserve_unique_content_when_av_contradicts_failed(
         selected_tokens.update(tokens)
 
 
+def _preserve_short_audience_continuations(draft, clips, decisions, actions, overrides):
+    """Keep a short, useful bridge inside the same verified clean delivery.
+
+    A candidate-level redundancy label can sever a spoken transition between
+    two selected beats. Require independent high-confidence AV coverage,
+    close source adjacency on both sides, and information absent from the
+    already selected speech. Never promote recording talk or failed delivery.
+    """
+    audience = _high_confidence_audience_spans(draft)
+    for i, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if (actions[i] != "discard" or decision.reason_code != "redundant_retry"
+                or decision.relation != "retry_alternate"
+                or not 0 < clip.end - clip.start <= 4):
+            continue
+        earlier = next((clips[j] for j in range(i - 1, -1, -1)
+                        if actions[j] == "select" and clips[j].source_asset_id == clip.source_asset_id), None)
+        later = next((clips[j] for j in range(i + 1, len(clips))
+                      if actions[j] == "select" and clips[j].source_asset_id == clip.source_asset_id), None)
+        if (earlier is None or later is None or not 0 <= clip.start - earlier.end <= 2
+                or not 0 <= later.start - clip.end <= 12):
+            continue
+        if not any(start <= earlier.end and clip.start >= start and end >= clip.end
+                   for start, end in audience.get(clip.source_asset_id, ())):
+            continue
+        if any(other.source_asset_id == clip.source_asset_id and
+               decisions[other.clip_id].reason_code == "recording_process_bts" and
+               earlier.end <= other.start < clip.end for other in clips):
+            continue
+        selected_text = ' '.join(other.text for j, other in enumerate(clips)
+                                 if actions[j] == "select" and
+                                 other.source_asset_id == clip.source_asset_id)
+        if len(_content_tokens(clip.text) - _content_tokens(selected_text)) < 2:
+            continue
+        actions[i] = "select"
+        overrides[i] = "av_continuous_audience_bridge_preserved"
+
+
 def _refine_failed_delivery_from_focused_av(draft, clips, decisions, actions, overrides):
     """Keep only word-aligned clean speech confirmed by a focused AV probe.
 
@@ -842,6 +880,9 @@ def apply_unified_selection_reasoner(
         retry_conflicts = _preserve_retry_alternates_with_unique_information(
             clips, decisions, actions, overrides)
         _preserve_unique_content_when_av_contradicts_failed(
+            draft, clips, decisions, actions, overrides,
+        )
+        _preserve_short_audience_continuations(
             draft, clips, decisions, actions, overrides,
         )
         refined_clips = _refine_failed_delivery_from_focused_av(

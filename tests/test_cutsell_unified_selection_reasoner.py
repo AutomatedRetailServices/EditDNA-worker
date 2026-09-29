@@ -676,6 +676,53 @@ def test_v2_av_majority_audience_preserves_unique_delivery_with_short_failed_tai
     assert [item.clip_id for item in out.selected] == ["mixed", "winner"]
 
 
+def test_v2_av_preserves_short_unique_bridge_between_selected_beats():
+    from cutsell_worker.unified_selection_reasoner import _preserve_short_audience_continuations
+    clips = (
+        clip("first", 77, 87, "I feel stronger with this product", selected=True),
+        clip("bridge", 87.6, 89.6, "So preparing it is remarkably easy", selected=False),
+        clip("demo", 94, 98, "Put one scoop into the bottle", selected=True),
+    )
+    decisions = {
+        "first": v2_decision("first", "select", "independent", .95, 0, "independent_story_coverage", 0),
+        "bridge": v2_decision("bridge", "discard", "retry_alternate", .95, 0, "redundant_retry", 1),
+        "demo": v2_decision("demo", "select", "continuation", .95, 0, "necessary_continuation", 2),
+    }
+    draft = DraftTimeline(SCHEMA_VERSION, "p", EditStrategy.STORYTELLING, (), (), (), {
+        "whole_video_context": {"sources": [{"source_asset_id": "src",
+            "audiovisual_evidence": json.dumps({"regions": [{"start": 70, "end": 90,
+                "role": "audience", "confidence": .98}]})}]},
+    })
+    actions, overrides = ["select", "discard", "select"], [None] * 3
+    _preserve_short_audience_continuations(draft, clips, decisions, actions, overrides)
+    assert actions == ["select", "select", "select"]
+    assert overrides[1] == "av_continuous_audience_bridge_preserved"
+
+
+def test_v2_bridge_cannot_jump_a_reset_or_a_separate_av_region():
+    from cutsell_worker.unified_selection_reasoner import _preserve_short_audience_continuations
+    clips = (
+        clip("first", 77, 87, "I feel stronger with this product", selected=True),
+        clip("reset", 87.1, 87.5, "Wait let me start over", selected=False),
+        clip("bridge", 87.6, 89.6, "So preparing it is remarkably easy", selected=False),
+        clip("demo", 94, 98, "Put one scoop into the bottle", selected=True),
+    )
+    decisions = {
+        "first": v2_decision("first", "select", "independent", .95, 0, "independent_story_coverage", 0),
+        "reset": v2_decision("reset", "discard", "bts", .95, 0, "recording_process_bts", 1),
+        "bridge": v2_decision("bridge", "discard", "retry_alternate", .95, 0, "redundant_retry", 2),
+        "demo": v2_decision("demo", "select", "continuation", .95, 0, "necessary_continuation", 3),
+    }
+    draft = DraftTimeline(SCHEMA_VERSION, "p", EditStrategy.STORYTELLING, (), (), (), {
+        "whole_video_context": {"sources": [{"source_asset_id": "src",
+            "audiovisual_evidence": json.dumps({"regions": [{"start": 70, "end": 90,
+                "role": "audience", "confidence": .98}]})}]},
+    })
+    actions, overrides = ["select", "discard", "discard", "select"], [None] * 4
+    _preserve_short_audience_continuations(draft, clips, decisions, actions, overrides)
+    assert actions == ["select", "discard", "discard", "select"]
+
+
 def test_v2_focused_av_rescues_only_word_aligned_clean_delivery_from_mixed_candidate():
     from cutsell_worker.contracts import Word
 
