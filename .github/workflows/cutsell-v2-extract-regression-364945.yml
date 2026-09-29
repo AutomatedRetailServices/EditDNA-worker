@@ -1,4 +1,4 @@
-name: Extract V2 Regression 365027 Decisions
+name: Extract V2 Regression 365187 Decisions
 on:
   push:
     branches: [feat/editorial-engine-v2-whole-video-rebuild]
@@ -20,8 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p raw compact
-          gh run download 36502756185 --repo "$GITHUB_REPOSITORY" \
-            --name cutsell-editorial-v2-remaining-regression-01-05-07-10-36502756185 \
+          gh run download 36518797026 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-07-09-verification-36518797026 \
             --dir raw
           python - <<'PY'
           import json
@@ -63,11 +63,15 @@ jobs:
                   for row in (diag.get("candidate_intervals") or reasoner.get("candidate_intervals") or ())
                   if row.get("clip_id")
               }
+              texts = {str(item.get("clip_id")): item.get("text")
+                       for bucket in ("selected", "alternates", "discarded")
+                       for item in result.get(bucket, ())}
               decisions = []
               for row in reasoner.get("decisions") or ():
                   decisions.append({
                       **intervals.get(str(row.get("clip_id")), {}),
                       "clip_id": row.get("clip_id"),
+                      "text": texts.get(str(row.get("clip_id"))),
                       "model_action": row.get("model_action"),
                       "effective_action": row.get("effective_action"),
                       "relation": row.get("relation"),
@@ -123,7 +127,7 @@ jobs:
                   "audiovisual_regions": av_regions,
                   "render_qc": (result.get("live_render_qc") or {}).get("status"),
               })
-          out = Path("compact/regression-365027-interval-decisions.json")
+          out = Path("compact/regression-365187-interval-decisions.json")
           out.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps({
               "source_count": compact["source_count"],
@@ -139,5 +143,5 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: v2-regression-365027-interval-decisions
-          path: compact/regression-365027-interval-decisions.json
+          name: v2-regression-365187-interval-decisions
+          path: compact/regression-365187-interval-decisions.json
