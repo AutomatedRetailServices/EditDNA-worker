@@ -91,7 +91,7 @@ La implementación puede ubicar módulos nuevos junto a `cutsell_worker/editoria
 | 2 Comparador | `NOT_STARTED` | Decisiones trazables por idea |
 | 3 Plan | `NOT_STARTED` | Adaptador a Freeze/Boundary/render |
 | 4 Offline | `NOT_STARTED` | Matriz 01–10 misma revisión |
-| 5 RAW y prueba ciega | `NOT_STARTED` | MP4 inspeccionados y videos no vistos |
+| 5 RAW y prueba ciega | `NOT_STARTED` | MP4 inspeccionados y videos no vistos. Intento Modal Yaskira/01 Medium+WhisperX 36587713782 (2026-09-29) falló antes del motor sin MP4; ver [evidencia](evidence/CUTSELL_YASKIRA01_MODAL_MEDIUM_WHISPERX_RUN_20260929.md) |
 | 6 Retiro V2 | `NOT_STARTED` | Evidencia de sustitución y reversión |
 
 **Puerta 0 ya iniciada:** se inventariaron artefactos existentes y se repitió offline el cálculo de solapamiento entre intervalos seleccionados y Gold. Ese replay no vuelve a ejecutar ASR, AV, selección, Boundary ni render. No reejecutar RAW para llenar gaps antes de verificar fuentes/artefactos; continuar con la lista de salida de la matriz enlazada. Este documento define dirección y criterio de avance; no afirma que V3 exista ni fija una fecha sin inventario verificable.
