@@ -141,3 +141,26 @@ def test_complete_accented_word_not_removed_as_an_aborted_prefix():
     target = replace(target, text="y también tomo cafeína")
     decision = replace(decision, trailing_recording_word_count=4)
     assert trim_recording_tail(clip, decision, diag, selected_clips=(target,))[0] == clip
+def test_v2_av_binding_admits_long_source_with_existing_cost_ledger(tmp_path, monkeypatch):
+    from cutsell_worker.v2_source_selection import attach_audiovisual_sources
+    from cutsell_worker.hybrid_google_transport import DollarBudgetLedger
+    from cutsell_worker.hybrid_provider_settings import HybridProviderSettings
+    from cutsell_worker.unified_selection_google import GoogleUnifiedSelectionReasoner
+    from cutsell_worker import v2_source_selection
+
+    def fake_prepare(_source, output):
+        output.write_bytes(b"compressed audiovisual source")
+        return 240.0
+
+    monkeypatch.setattr(v2_source_selection, "prepare_av", fake_prepare)
+    settings = HybridProviderSettings(enabled=True)
+    ledger = DollarBudgetLedger(max_usd=.05)
+    reasoner = GoogleUnifiedSelectionReasoner(
+        api_key="test", model=settings.primary_model, settings=settings, ledger=ledger,
+    )
+
+    bound = attach_audiovisual_sources(reasoner, {"src": tmp_path / "long.mp4"})
+
+    assert bound.max_input_tokens == 96_000
+    assert bound.ledger is ledger
+    assert bound.audiovisual_parts[0]["text"].startswith("Actual audio and video")

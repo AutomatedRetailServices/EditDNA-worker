@@ -396,6 +396,27 @@ def test_v2_parses_explicit_take_competition_indices():
         _parse_take_competitions(gemini_response(json.dumps(data)), rows)
 
 
+def test_v2_invalid_optional_comparison_cannot_discard_complete_decisions():
+    payload = json.loads(v2_decisions_json(2))
+    payload["competitions"] = [{
+        "winner_candidate_indices": [0], "covered_candidate_indices": [0],
+        "material_unique_candidate_indices": [], "relation": "equivalent_take",
+        "confidence": .99, "reason": "The same candidate appears on both sides",
+    }]
+    fake = FakeSession([gemini_response(json.dumps(payload))])
+    reasoner = make_reasoner(fake)
+    source = replace(draft(2), diagnostics={"editorial_engine_v2_request": True})
+
+    plan = reasoner.reason(source)
+
+    assert len(fake.calls) == 1
+    assert len(plan.decisions) == 2
+    assert plan.take_competitions == ()
+    assert plan.competition_review["ignored_invalid_competitions"] == [
+        {"competition_index": 0, "reason": "overlapping_or_empty_membership"}
+    ]
+
+
 def test_broad_v2_selection_gets_bounded_second_pass_when_first_pass_omits_competitions():
     data = {"competitions": [{
         "winner_candidate_indices": [5], "covered_candidate_indices": [0, 1, 2],
@@ -756,6 +777,24 @@ def test_native_over_budget_preflight_reports_size_without_generation():
     with pytest.raises(ValueError, match=r'input_tokens=100000, max_input_tokens=64000, candidate_count=2'):
         reasoner.reason(draft(2))
     assert len(fake.calls) == 1
+
+
+def test_v2_72502_token_media_runs_within_96k_admission_and_dollar_cap():
+    fake = FakeSession([{"totalTokens": 72502}, gemini_response(v2_decisions_json(2))])
+    ledger = DollarBudgetLedger(max_usd=.05)
+    reasoner = make_reasoner(fake, ledger)
+    reasoner.settings = replace(reasoner.settings, max_cost_per_session_usd=.05,
+                                max_cost_per_unified_selection_call_usd=.05)
+    reasoner.max_input_tokens = 96_000
+    reasoner.audiovisual_parts = ({"inlineData": {"mimeType": "video/mp4", "data": "TEST"}},)
+    source = replace(draft(2), diagnostics={"editorial_engine_v2_request": True})
+
+    plan = reasoner.reason(source)
+
+    assert plan.estimated_input_tokens == 72502
+    assert len(plan.decisions) == 2
+    assert len(fake.calls) == 2
+    assert 0 < ledger.reserved_usd <= ledger.max_usd
 
 
 def test_v2_contract_prefers_complete_take_over_fragment_patchwork():

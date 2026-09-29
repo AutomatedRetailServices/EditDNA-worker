@@ -594,7 +594,10 @@ def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mappi
     return decisions, output_tokens, finish_reason
 
 
-def _parse_take_competitions(raw: Mapping[str, Any], rows: list[dict[str, Any]]) -> tuple[UnifiedTakeCompetition, ...]:
+def _parse_take_competitions(
+    raw: Mapping[str, Any], rows: list[dict[str, Any]],
+    *, ignored_invalid: list[dict[str, Any]] | None = None,
+) -> tuple[UnifiedTakeCompetition, ...]:
     """Reject incomplete or invalid comparison evidence before applying any V2 decisions."""
     try:
         parsed = json.loads("".join(str(part.get("text") or "")
@@ -604,7 +607,7 @@ def _parse_take_competitions(raw: Mapping[str, Any], rows: list[dict[str, Any]])
         if not isinstance(contests, list) or len(contests) > 3:
             raise ValueError("competition count")
         result = []
-        for item in contests:
+        for competition_index, item in enumerate(contests):
             if not isinstance(item, Mapping):
                 raise ValueError("competition object")
             groups = []
@@ -617,6 +620,13 @@ def _parse_take_competitions(raw: Mapping[str, Any], rows: list[dict[str, Any]])
                 groups.append(tuple(str(rows[i]["clip_id"]) for i in values))
             winners, covered, unique = groups
             if not winners or not covered or (set(winners) & set(covered)) or (set(unique) & set(covered)):
+                if ignored_invalid is not None:
+                    # A comparison is advisory; an impossible comparison has
+                    # no authority to reject otherwise complete decisions.
+                    # Keep the omission visible to downstream QA.
+                    ignored_invalid.append({"competition_index": competition_index,
+                                            "reason": "overlapping_or_empty_membership"})
+                    continue
                 raise ValueError("overlapping or empty competition")
             relation = item["relation"]
             confidence = float(item["confidence"])
@@ -867,7 +877,7 @@ class GoogleUnifiedSelectionReasoner:
         candidate_rows: list[dict[str, Any]],
         *,
         output_tokens_requested: int,
-    ) -> tuple[list[UnifiedSelectionDecision], tuple[UnifiedTakeCompetition, ...], int]:
+    ) -> tuple[list[UnifiedSelectionDecision], tuple[UnifiedTakeCompetition, ...], int, tuple[dict, ...]]:
         body = build_unified_selection_request(payload, max_output_tokens=output_tokens_requested)
         body["contents"][0]["parts"].extend(self.audiovisual_parts)
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
@@ -946,8 +956,10 @@ class GoogleUnifiedSelectionReasoner:
                     if item.get("sequence_index") is not None else None
                 ),
             ))
-        competitions = _parse_take_competitions(raw, candidate_rows) if payload.get("engine_version") == "v2" else ()
-        return decisions, competitions, output_tokens
+        ignored_invalid: list[dict[str, Any]] = []
+        competitions = (_parse_take_competitions(raw, candidate_rows, ignored_invalid=ignored_invalid)
+                        if payload.get("engine_version") == "v2" else ())
+        return decisions, competitions, output_tokens, tuple(ignored_invalid)
 
     def _max_affordable_output_tokens(self, input_tokens: int) -> int:
         """The largest output budget a fresh call at this input size could
@@ -1010,7 +1022,7 @@ class GoogleUnifiedSelectionReasoner:
                 raise RuntimeError("unified Selection edit dollar budget exhausted")
 
             try:
-                decisions, competitions, output_tokens = self._call_once(
+                decisions, competitions, output_tokens, ignored_invalid = self._call_once(
                     payload, candidate_rows, output_tokens_requested=output_reserve,
                 )
             except UnifiedSelectionProviderBlockedError:
@@ -1071,6 +1083,9 @@ class GoogleUnifiedSelectionReasoner:
                             payload, candidate_rows, decisions,
                         )
                         competitions = tuple((*competitions, *additional))
+                    if ignored_invalid:
+                        competition_review = {**(competition_review or {}),
+                            "ignored_invalid_competitions": list(ignored_invalid)}
                 links, evidence = self._verify_adjacent_continuations(draft, decisions)
                 decisions = _reconcile_verified_continuation_order(decisions, links)
                 return UnifiedSelectionPlan(

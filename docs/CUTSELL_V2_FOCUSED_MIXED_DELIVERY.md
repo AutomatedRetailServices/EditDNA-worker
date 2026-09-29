@@ -43,3 +43,37 @@ the existing decision remains in force.
 
 This is a calibration change, not a release-quality certification. Gold remains
 an evaluation artifact and is not passed to production selection.
+
+## Same-revision qualification: runs 36502632708 and 36502756185
+
+Both workflows completed. The first produced four renders and failed on 09;
+the second produced three renders and failed on 07. Source-time comparisons
+below use the owner-declared rounded Gold and are not a judgment of the audio
+or the finished story.
+
+| Video | Gold lost (s) | Outside Gold retained (s) | Result |
+| --- | ---: | ---: | --- |
+| 01 | 4.104 | 1.000 | Render QC PASS |
+| 02 | 1.629 | 3.000 | Render QC PASS |
+| 03 | 0.003 | 0 | Render QC PASS |
+| 04 | 3.840 | 0.440 | Render QC PASS |
+| 05 | 1.971 | 0.540 | Render QC PASS |
+| 06 | 0 | 26.740 | Render QC PASS; editorial failure |
+| 07 | unknown | unknown | Selection preflight 72,502 tokens exceeded 64,000 ceiling |
+| 08 | 1.451 | 0.050 | Separate run 36502227811; QC PASS |
+| 09 | unknown | unknown | Model supplied an overlapping/empty optional take comparison |
+| 10 | 10.620 | 11.420 | Render QC PASS; editorial failure |
+
+In 06, 4.21–15.09 s was rescued despite a `failed_delivery` model label by a
+broad `audience` observation (2–39 s); 63.68–79.20 s was selected directly by
+the model. In 10, a candidate spanning 8.95–24.77 s was discarded as a
+redundant retry, despite overlapping owner Gold. These are distinct selection
+issues and need audiovisual review before changing editorial authority.
+
+The next transport correction treats a logically impossible optional
+competition as advisory data to omit and audit, preserving a complete set of
+candidate decisions. The admission ceiling for a preflighted V2 AV input is
+raised from 64k to 96k; the existing per-call and per-session dollar checks
+still decide affordability before generation. Both changes require a targeted
+live qualification of 07 and 09; passing unit tests alone does not establish
+their editorial quality.
