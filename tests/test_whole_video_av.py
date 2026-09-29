@@ -276,6 +276,27 @@ def test_focused_delivery_checks_repeated_starts_inside_broad_audience_region(mo
     assert calls == []
 
 
+def test_focused_delivery_checks_final_cta_to_recording_transition(monkeypatch, tmp_path):
+    av, _, _ = provider(tmp_path)
+    prepared = tmp_path / 'prepared.mp4'
+    prepared.write_bytes(b'prepared')
+    monkeypatch.setenv('CUTSELL_EDITORIAL_ENGINE_V2', '1')
+    av.media_slicer = lambda path, dest, start, length: (dest.write_bytes(b'video') or length)
+    calls = []
+    def observed(contents, source_asset, digest, length, prepared_duration, start, index):
+        calls.append((start, length))
+        return {'regions': [{'start': 10, 'end': 13, 'role': 'recording_only',
+                             'confidence': .96, 'audio_observation': 'Recording aside',
+                             'visual_observation': 'Walks away', 'reason': 'No audience speech'}]}
+    av._observe_window = observed
+    refined = av._focus_mixed_delivery(replace(source(), duration_sec=124), prepared,
+        'a' * 64, [{'start': 106, 'end': 124, 'role': 'audience', 'confidence': .9,
+                    'audio_observation': 'Points to the cart',
+                    'visual_observation': 'Shakes bottle then walks away'}], tmp_path)
+    assert calls == [(110, 14)]
+    assert [(r['start'], r['end'], r['role']) for r in refined] == [(120, 123, 'recording_only')]
+
+
 def test_shaking_container_during_measured_silence_nominates_but_does_not_approve_action(
     monkeypatch, tmp_path,
 ):

@@ -4,7 +4,8 @@ import math
 import re
 
 
-def trim_recording_tail(clip, decision, diagnostics, *, selected_clips=()):
+def trim_recording_tail(clip, decision, diagnostics, *, selected_clips=(),
+                        av_recording_only=False):
     row = {"clip_id": clip.clip_id, "source_asset_id": clip.source_asset_id,
            "action": "preserve", "reason": "insufficient_evidence"}
     count = decision.trailing_recording_word_count
@@ -13,7 +14,8 @@ def trim_recording_tail(clip, decision, diagnostics, *, selected_clips=()):
     row.update(proposed_word_count=count, selection_confidence=decision.confidence,
                trailing_recording_confidence=confidence, kind=decision.trailing_recording_kind)
     words = tuple(clip.words)
-    if (decision.action != "select" or not math.isfinite(confidence) or confidence < .97
+    required_confidence = .95 if av_recording_only else .97
+    if (decision.action != "select" or not math.isfinite(confidence) or confidence < required_confidence
             or type(count) is not int or not 1 <= count <= 8 or len(words) - count < 3):
         return clip, row
     tokenize = lambda text: re.findall(r"\w+", text.casefold())
@@ -65,11 +67,13 @@ def trim_recording_tail(clip, decision, diagnostics, *, selected_clips=()):
                    and any(t.startswith(final) and len(t) >= len(final) + 2 for t in covered))
         if len(rejected & covered) < 2 or (missing and not partial):
             return clip, {**row, "reason": "uncovered_suffix_content"}
-    if not abandoned and not pauses:
+    if not abandoned and not pauses and not av_recording_only:
         return clip, {**row, "reason": "missing_independent_pause"}
     text = " ".join(w.text for w in head)
     return replace(clip, end=head[-1].end, text=text, caption_text=text, words=head), {
         **row, "action": "trim", "reason": ("native_av_abandoned_restart_with_selected_coverage" if abandoned
+                                               else "av_recording_only_and_measured_pause" if av_recording_only and pauses
+                                               else "av_recording_only_tail_confirmed" if av_recording_only
                                                else "explicit_recording_proposal_and_measured_pause"),
         "allowed_end": head[-1].end, "original_end": clip.end,
         "removed_words": [w.text for w in tail], "measured_pauses": pauses,

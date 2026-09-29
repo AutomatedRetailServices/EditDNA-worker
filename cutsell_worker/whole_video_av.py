@@ -77,8 +77,8 @@ from visual mouth movement alone. Regions must fit inside this window.
 '''
 
 FOCUSED_DELIVERY_PROMPT = '''Watch and listen closely to this short creator-source window.
-The broad whole-source pass saw either mixed/uncertain delivery or a long audience
-region with hesitations and repeated starts. Identify precise
+The broad whole-source pass saw mixed/uncertain delivery, repeated starts, or a
+closing transition from a CTA into recording-only wrap-up. Identify precise
 LOCAL spans where the creator is delivering complete, audience-facing speech, and
 separate laughter, stumble, reset, word search, or recording-only moments. A short
 reaction must not label adjacent clean speech as failed. Use role audience only when
@@ -393,7 +393,11 @@ class GeminiWholeVideoAVProvider:
             hesitant_audience = (role == 'audience' and
                 any(term in description for term in ('hesitat', 'stambl', 'stumbl', 'false start')) and
                 any(term in description for term in ('repeat', 'repetit', 'restart', 'start over')))
-            if role not in {'mixed', 'uncertain'} and not hesitant_audience:
+            closing_transition = (role == 'audience' and
+                any(term in str(region.get('visual_observation') or '').casefold()
+                    for term in ('walks away', 'leaves frame', 'stops recording')) and
+                any(term in description for term in ('cart', 'carrito', 'checkout')))
+            if role not in {'mixed', 'uncertain'} and not hesitant_audience and not closing_transition:
                 continue
             try:
                 start, end = float(region['start']), float(region['end'])
@@ -407,7 +411,8 @@ class GeminiWholeVideoAVProvider:
             # the return to delivery are visible together. A long audience
             # region that explicitly contains repeated starts needs adjacent
             # windows rather than silently labeling its whole span clean.
-            window_start = max(0.0, start - 1.0)
+            window_start = (max(0.0, end - 14.0) if closing_transition and
+                            end >= float(source.duration_sec) - .2 else max(0.0, start - 1.0))
             window_end = min(float(source.duration_sec), end + 1.0)
             if window_end - window_start > 14.0:
                 window_end = window_start + 14.0

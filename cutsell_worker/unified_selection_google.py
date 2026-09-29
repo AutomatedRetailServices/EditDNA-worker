@@ -767,7 +767,8 @@ class GoogleUnifiedSelectionReasoner:
                     self.ledger.release(estimated)
                 raise
         except Exception as exc:
-            return (), {"status": "failed", "error_type": type(exc).__name__}
+            return (), {"status": "failed", "error_type": type(exc).__name__,
+                        "error_detail": str(exc)[:180]}
 
     def _verify_adjacent_continuations(self, draft, decisions):
         """A bounded second look at contradictory adjacent spoken candidates.

@@ -7,6 +7,9 @@ on:
       - feat/editorial-engine-v2-whole-video-rebuild
     paths:
       - .github/workflows/cutsell-editorial-v2-batch-01-10.yml
+      - cutsell_worker/whole_video_av.py
+      - cutsell_worker/v2_recording_tail.py
+      - cutsell_worker/unified_selection_reasoner.py
 
 permissions:
   contents: read

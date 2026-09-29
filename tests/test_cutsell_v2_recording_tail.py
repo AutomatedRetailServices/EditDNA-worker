@@ -101,6 +101,52 @@ def test_provider_plan_tail_proposal_survives_validation_and_is_applied():
     assert legacy.selected[0].text == clip.text
 
 
+def test_v2_av_recording_only_aside_after_cta_and_measured_pause_is_removed():
+    words = (Word("Lo", 0, .2), Word("puedes", .2, .4), Word("encontrar", .4, .7),
+             Word("en", .7, .9), Word("el", .9, 1.1), Word("carrito", 1.1, 1.8),
+             Word("ya", 3.6, 3.8), Word("se", 3.8, 4), Word("acabó", 4, 4.3),
+             Word("ese", 4.3, 4.6))
+    text = " ".join(w.text for w in words)
+    clip = DraftClip("c", "src", 0, 0, 4.6, text, text, words=words)
+    diagnostics = {
+        "editorial_engine_v2_request": True,
+        "whole_video_context": {"sources": [{"source_asset_id": "src",
+            "audiovisual_evidence": json.dumps({"regions": [{"start": 3.3, "end": 4.7,
+                "role": "recording_only", "confidence": .95}]})}]},
+        "attempt_reconstruction": {"positioned_performance_evidence": [{
+            "source_asset_id": "src", "positioned_events": [{
+                "kind": "audio_silence_interval", "evidence_source": "audio_silence",
+                "confidence": 1.0, "start": 1.8, "end": 3.65,
+            }]}]},
+    }
+    draft = DraftTimeline("cutsell.v1", "p", EditStrategy.STORYTELLING, (clip,), (), (), diagnostics)
+    decision = UnifiedSelectionDecision("c", "select", "independent", .95, 0,
+                                        "best_complete_take", 0)
+    class Reasoner:
+        def reason(self, _):
+            return UnifiedSelectionPlan((decision,), "fake", "synthetic")
+    out = apply_unified_selection_reasoner(draft, Reasoner())
+    assert out.selected[0].text == "Lo puedes encontrar en el carrito"
+    assert out.diagnostics["v2_recording_tail"][0]["reason"] == "av_recording_only_and_measured_pause"
+    assert out.diagnostics["unified_selection_reasoner"]["decisions"][0]["safety_override"] == "av_recording_only_tail_removed"
+    audience = replace(draft, diagnostics={**diagnostics,
+        "whole_video_context": {"sources": [{"source_asset_id": "src",
+            "audiovisual_evidence": json.dumps({"regions": [{"start": 3.3, "end": 4.7,
+                "role": "audience", "confidence": .98}]})}]}})
+    assert apply_unified_selection_reasoner(audience, Reasoner()).selected[0].text == text
+    focused = replace(draft, diagnostics={**diagnostics,
+        "whole_video_context": {"sources": [{"source_asset_id": "src",
+            "audiovisual_evidence": json.dumps({"regions": [{"start": 0, "end": 4.7,
+                "role": "audience", "confidence": .9}],
+                "focused_delivery_regions": [{"start": 3.3, "end": 4.7,
+                    "role": "recording_only", "confidence": .96}]})}]},
+        "attempt_reconstruction": {"positioned_performance_evidence": []},
+    })
+    focused_out = apply_unified_selection_reasoner(focused, Reasoner())
+    assert focused_out.selected[0].text == "Lo puedes encontrar en el carrito"
+    assert focused_out.diagnostics["v2_recording_tail"][0]["reason"] == "av_recording_only_tail_confirmed"
+
+
 def test_real_repeated_instruction_is_not_restored_as_demo():
     left = DraftClip("a", "src", 0, 0, 2, "Mix the powder in water", "")
     right = DraftClip("b", "src", 0, 5, 8, "Mix the powder in water until dissolved", "")

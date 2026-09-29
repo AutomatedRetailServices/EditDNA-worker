@@ -859,6 +859,45 @@ def _preserve_continuous_demonstration(draft, clips, decisions, actions, overrid
         overrides[i] = "av_continuous_demonstration_preserved"
 
 
+def _av_recording_only_tail(draft, clip):
+    """Propose a CTA-adjacent aside only when AV observes its exact words as recording-only.
+
+    The recording-tail executor still demands a matching transcript and an
+    independent measured pause. This proposal happens before Selection Freeze.
+    """
+    if not clip.words or len(clip.words) < 4:
+        return 0, 0.0
+    whole = (draft.diagnostics or {}).get("whole_video_context") or {}
+    for source in whole.get("sources") or ():
+        if str(source.get("source_asset_id")) != clip.source_asset_id:
+            continue
+        try:
+            evidence = json.loads(str(source.get("audiovisual_evidence") or ""))
+        except (TypeError, ValueError):
+            continue
+        for region in (*tuple(evidence.get("regions") or ()),
+                       *tuple(evidence.get("focused_delivery_regions") or ())):
+            try:
+                start, end = float(region["start"]), float(region["end"])
+                confidence = float(region.get("confidence", 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (region.get("role") != "recording_only" or not .95 <= confidence <= 1
+                    or not math.isfinite(start) or not math.isfinite(end)
+                    or not clip.start < start < clip.end <= end + .001):
+                continue
+            count = 0
+            for word in reversed(clip.words):
+                if float(word.start) < start or float(word.end) > end + .001:
+                    break
+                count += 1
+            if not 1 <= count <= 8 or len(clip.words) - count < 3:
+                continue
+            if _has_purchase_action(" ".join(w.text for w in clip.words[:-count])):
+                return count, confidence
+    return 0, 0.0
+
+
 def apply_unified_selection_reasoner(
     draft: DraftTimeline,
     reasoner: UnifiedSelectionReasoner | None,
@@ -932,7 +971,17 @@ def apply_unified_selection_reasoner(
         action = actions[index]
         normalized_clip = replace(refined_clips.get(clip.clip_id, clip),
                                   selected=(action == "select"))
-        if v2_request and action == "select" and decision.trailing_recording_word_count:
+        av_recording_only = False
+        tail_decision = decision
+        if v2_request and action == "select" and not decision.trailing_recording_word_count:
+            count, confidence = _av_recording_only_tail(draft, normalized_clip)
+            if count and not any(actions[j] == "select" and
+                                 other.source_asset_id == clip.source_asset_id and
+                                 other.start >= clip.end for j, other in enumerate(clips)):
+                tail_decision = replace(decision, trailing_recording_word_count=count,
+                                        trailing_recording_confidence=confidence)
+                av_recording_only = True
+        if v2_request and action == "select" and tail_decision.trailing_recording_word_count:
             from .v2_recording_tail import trim_recording_tail
             coverage_clips = []
             for other_index, other in enumerate(clips):
@@ -943,8 +992,11 @@ def apply_unified_selection_reasoner(
                 coverage_clips.append(replace(other, text=" ".join(w.text for w in other.words[:-count]))
                                       if count else other)
             normalized_clip, tail_row = trim_recording_tail(
-                normalized_clip, decision, diagnostics, selected_clips=coverage_clips)
+                normalized_clip, tail_decision, diagnostics,
+                selected_clips=coverage_clips, av_recording_only=av_recording_only)
             tail_audit.append(tail_row)
+            if tail_row["action"] == "trim" and av_recording_only:
+                overrides[index] = "av_recording_only_tail_removed"
         if action == "select":
             selected.append(normalized_clip)
         elif action == "swap":
