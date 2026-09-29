@@ -26,12 +26,13 @@ on:
   workflow_dispatch:
     inputs:
       asr_provider:
-        description: "RAW ASR evidence provider (GPT uses isolated WhisperX alignment)."
+        description: "RAW ASR provider (Medium/GPT WhisperX uses isolated GPU word alignment)."
         required: false
         type: choice
         default: faster-whisper
         options:
           - faster-whisper
+          - faster-whisper-medium-whisperx
           - gpt-transcribe-whisperx
       source_key:
         # D-228: optional override of the exact S3 object this RAW processes.
@@ -829,7 +830,7 @@ jobs:
           p = Path('/tmp/cutsell-env.json')
           env = json.loads(p.read_text())
           provider = os.environ['CUTSELL_VALIDATION_ASR_PROVIDER']
-          if provider not in {'faster-whisper', 'gpt-transcribe-whisperx'}:
+          if provider not in {'faster-whisper', 'faster-whisper-medium-whisperx', 'gpt-transcribe-whisperx'}:
               raise SystemExit('Unknown RAW ASR provider')
           if provider == 'gpt-transcribe-whisperx':
               key = str(env.get('OPENAI_API_KEY') or '').strip()
@@ -840,6 +841,36 @@ jobs:
           print('RAW ASR provider:', provider)
           print('ASR credential preflight passed; key values not displayed')
           PYASR
+
+      - name: Pin Yaskira01 Medium WhisperX and Gemini 3.5 audiovisual review
+        shell: bash
+        run: |
+          python3 - <<'PYREVIEW'
+          import json
+          import os
+          from pathlib import Path
+
+          if os.environ['SOURCE_KEY'] != 'Yaskira/01.mp4':
+              raise SystemExit(0)
+          path = Path('/tmp/cutsell-env.json')
+          env = json.loads(path.read_text())
+          if env.get('CUTSELL_VALIDATION_ASR_PROVIDER') != 'faster-whisper-medium-whisperx':
+              raise SystemExit('Yaskira01 editorial review requires Medium + WhisperX')
+          if not str(env.get('GEMINI_API_KEY') or '').strip():
+              raise SystemExit('GEMINI_API_KEY missing; no paid GPU invocation')
+          env.update({
+              'CUTSELL_ASR_MODEL': 'medium',
+              'CUTSELL_EDITORIAL_ENGINE_V2': '1',
+              'CUTSELL_V2_NATIVE_SELECTION_ENABLED': '1',
+              'CUTSELL_HYBRID_LLM_ENABLED': '1',
+              'CUTSELL_HYBRID_PROVIDER': 'google',
+              'CUTSELL_HYBRID_PRIMARY_MODEL': 'gemini-3.5-flash-lite',
+              'CUTSELL_WATCH_LISTEN_AV_ENABLED': '1',
+              'CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD': '0.10',
+          })
+          path.write_text(json.dumps(env))
+          print('Yaskira01 review: Medium + WhisperX; Gemini 3.5 audiovisual enabled')
+          PYREVIEW
 
       - name: D-235U lost-atom materiality Freeze authority overlay
         # Kept as its OWN step (rather than appended inline into the
