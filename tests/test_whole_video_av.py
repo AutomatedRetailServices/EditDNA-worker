@@ -250,6 +250,32 @@ def test_focused_delivery_probe_is_disabled_without_v2(monkeypatch, tmp_path):
         [{'start': 1, 'end': 8, 'role': 'mixed', 'confidence': .99}], tmp_path) == []
 
 
+def test_focused_delivery_checks_repeated_starts_inside_broad_audience_region(monkeypatch, tmp_path):
+    av, _, _ = provider(tmp_path)
+    prepared = tmp_path / 'prepared.mp4'
+    prepared.write_bytes(b'prepared')
+    monkeypatch.setenv('CUTSELL_EDITORIAL_ENGINE_V2', '1')
+    av.media_slicer = lambda path, dest, start, length: (dest.write_bytes(b'video') or length)
+    calls = []
+    def observed(contents, source_asset, digest, length, prepared_duration, start, index):
+        calls.append((start, length))
+        return {'regions': [{'start': 1, 'end': length - 1, 'role': 'audience',
+                             'confidence': .96, 'audio_observation': 'Clean delivery',
+                             'visual_observation': 'Talking to camera', 'reason': 'Clear speech'}]}
+    av._observe_window = observed
+    regions = [{'start': 8, 'end': 42, 'role': 'audience', 'confidence': .95,
+                'audio_observation': 'Audience speech with hesitations and repetitions'}]
+    refined = av._focus_mixed_delivery(
+        replace(source(), duration_sec=98), prepared, 'a' * 64, regions, tmp_path)
+    assert calls == [(7, 14), (20, 14)]
+    assert [(r['start'], r['end']) for r in refined] == [(8, 20), (21, 33)]
+    calls.clear()
+    regions[0]['audio_observation'] = 'Clear speech to the audience'
+    assert av._focus_mixed_delivery(
+        replace(source(), duration_sec=98), prepared, 'a' * 64, regions, tmp_path) == []
+    assert calls == []
+
+
 def test_shaking_container_during_measured_silence_nominates_but_does_not_approve_action(
     monkeypatch, tmp_path,
 ):

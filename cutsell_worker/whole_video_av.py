@@ -77,7 +77,8 @@ from visual mouth movement alone. Regions must fit inside this window.
 '''
 
 FOCUSED_DELIVERY_PROMPT = '''Watch and listen closely to this short creator-source window.
-The broad whole-source pass marked this window mixed or uncertain. Identify precise
+The broad whole-source pass saw either mixed/uncertain delivery or a long audience
+region with hesitations and repeated starts. Identify precise
 LOCAL spans where the creator is delivering complete, audience-facing speech, and
 separate laughter, stumble, reset, word search, or recording-only moments. A short
 reaction must not label adjacent clean speech as failed. Use role audience only when
@@ -386,7 +387,13 @@ class GeminiWholeVideoAVProvider:
             return []
         nominations = []
         for region in regions:
-            if region.get('role') not in {'mixed', 'uncertain'}:
+            role = region.get('role')
+            description = ' '.join(str(region.get(k) or '') for k in (
+                'audio_observation', 'reason')).casefold()
+            hesitant_audience = (role == 'audience' and
+                any(term in description for term in ('hesitat', 'stambl', 'stumbl', 'false start')) and
+                any(term in description for term in ('repeat', 'repetit', 'restart', 'start over')))
+            if role not in {'mixed', 'uncertain'} and not hesitant_audience:
                 continue
             try:
                 start, end = float(region['start']), float(region['end'])
@@ -397,17 +404,25 @@ class GeminiWholeVideoAVProvider:
                     or confidence < .65 or end - start < 4.0):
                 continue
             # Include a small amount of context on both sides so a reset and
-            # the return to delivery are visible together. Keep each call short.
+            # the return to delivery are visible together. A long audience
+            # region that explicitly contains repeated starts needs adjacent
+            # windows rather than silently labeling its whole span clean.
             window_start = max(0.0, start - 1.0)
             window_end = min(float(source.duration_sec), end + 1.0)
             if window_end - window_start > 14.0:
                 window_end = window_start + 14.0
             if window_end - window_start >= 4.0:
                 nominations.append((confidence, window_start, window_end))
+                if hesitant_audience and end - start > 18:
+                    second_start = max(window_start, window_end - 1.0)
+                    second_end = min(float(source.duration_sec), second_start + 14.0)
+                    if second_end - second_start >= 4.0:
+                        nominations.append((confidence, second_start, second_end))
         # Bound extra spend even when the whole-source model emits many mixed
         # regions. The highest-confidence, longest spans are most informative.
-        nominations = sorted(set(nominations), key=lambda row: (row[0], row[2] - row[1]),
-                             reverse=True)[:2]
+        nominations = sorted(sorted(set(nominations),
+            key=lambda row: (row[0], row[2] - row[1]), reverse=True)[:2],
+            key=lambda row: row[1])
         observations = []
         for probe_index, (_, start, end) in enumerate(nominations):
             length = end - start
