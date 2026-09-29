@@ -1,4 +1,4 @@
-name: Extract V2 Regression 365307 Decisions
+name: Extract V2 Regression 365307 Word Evidence
 on:
   push:
     branches: [feat/editorial-engine-v2-whole-video-rebuild]
@@ -110,6 +110,9 @@ jobs:
                           "source_asset_id": source.get("source_asset_id"),
                           "start": region.get("start"), "end": region.get("end"),
                           "role": region.get("role"), "confidence": region.get("confidence"),
+                          "visual_observation": region.get("visual_observation"),
+                          "audio_observation": region.get("audio_observation"),
+                          "reason": region.get("reason"),
                       })
               compact["sources"].append({
                   "source_key": result["source_key"],
@@ -125,6 +128,19 @@ jobs:
                   "take_competitions": competitions,
                   "retry_claim_conflicts": retry_claim_conflicts,
                   "audiovisual_regions": av_regions,
+                  "focused_word_evidence": [
+                      {"start": segment.get("start"), "end": segment.get("end"),
+                       "text": segment.get("text"), "words": segment.get("words")}
+                      for segment in (result.get("timed_asr_replay_evidence") or {}).get("raw_segments") or ()
+                      if (result["source_key"] == "Yaskira/09.mp4" and
+                          any(float(segment.get("start", -1)) < high and
+                              float(segment.get("end", -1)) > low
+                              for low, high in ((8, 30), (86, 122)))) or
+                         (result["source_key"] == "Yaskira/10.MOV" and
+                          any(float(segment.get("start", -1)) < high and
+                              float(segment.get("end", -1)) > low
+                              for low, high in ((8, 26), (46, 67))))
+                  ],
                   "render_qc": (result.get("live_render_qc") or {}).get("status"),
               })
           out = Path("compact/regression-365307-interval-decisions.json")
