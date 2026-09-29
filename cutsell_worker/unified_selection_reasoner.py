@@ -561,7 +561,11 @@ def _preserve_retry_alternates_with_unique_information(
         decision = decisions[clip.clip_id]
         if actions[index] not in {"swap", "discard"}:
             continue
-        if decision.relation != "retry_alternate" or decision.reason_code not in {
+        # Some provider responses call a discarded fragment retry_winner while
+        # simultaneously labeling it redundant_retry. The explicit discarded
+        # action still needs the same material-claim protection; the relation
+        # label cannot silently exempt an uncovered amount or condition.
+        if decision.relation not in {"retry_alternate", "retry_winner"} or decision.reason_code not in {
             "usable_alternate", "redundant_retry",
         }:
             continue
@@ -655,7 +659,12 @@ def _preserve_unique_content_when_av_contradicts_failed(
     actions: list[str],
     overrides: list[str | None],
 ) -> None:
-    """Do not let a semantic failure label erase AV-verified clean content."""
+    """Protect an uncovered concrete claim when broad AV disputes failure.
+
+    A broad audience label establishes address to camera, not successful
+    delivery. Ordinary lexical novelty cannot override an explicit failed
+    label; focused AV can still rescue word-aligned clean content separately.
+    """
     audience = _high_confidence_audience_spans(draft)
     selected_tokens = set().union(*(
         _content_tokens(clip.text) for i, clip in enumerate(clips) if actions[i] == "select"
@@ -677,11 +686,24 @@ def _preserve_unique_content_when_av_contradicts_failed(
             continue
         tokens = _content_tokens(clip.text)
         unique = tokens - selected_tokens
-        # A long delivery may share most of its vocabulary with the story
-        # while retaining an uncovered opening/fact. Positive AV conflicts
-        # with the failure label: preserve the existing three-token evidence
-        # floor without making preservation depend on total clip length.
-        if len(unique) < 3:
+        def amounts(value):
+            normalized = unicodedata.normalize('NFKD', str(value or '').casefold())
+            normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+            for word, number in (('thirty', '30'), ('treinta', '30'),
+                                 ('fifteen', '15'), ('quince', '15')):
+                normalized = re.sub(r'\b' + word + r'\b', number, normalized)
+            return set(re.findall(r'\b(\d+(?:[.,]\d+)?)\s*([a-z]+)?', normalized))
+        selected_text = ' '.join(other.text for j, other in enumerate(clips)
+                                 if actions[j] == 'select' and
+                                 other.source_asset_id == clip.source_asset_id)
+        normalized = unicodedata.normalize('NFKD', clip.text.casefold())
+        normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+        condition = re.search(r'\b(?:si|if)\s+(?:(?:tu\s+)?(?:estas\s+)?|you\s+(?:are\s+)?)'
+                              r'(?:usando|utilizando|using|taking|use|usas?)\s+([\w-]+)', normalized)
+        missing_condition = bool(condition and condition.group(1) not in
+                                 _content_tokens(selected_text))
+        if len(unique) < 3 or not (amounts(clip.text) - amounts(selected_text)
+                                   or missing_condition):
             continue
         actions[index] = "select"
         overrides[index] = "av_audience_unique_content_overrides_failed_label"
@@ -700,7 +722,7 @@ def _preserve_short_audience_continuations(draft, clips, decisions, actions, ove
     for i, clip in enumerate(clips):
         decision = decisions[clip.clip_id]
         if (actions[i] != "discard" or decision.reason_code != "redundant_retry"
-                or decision.relation != "retry_alternate"
+                or decision.relation not in {"retry_alternate", "retry_winner"}
                 or not 0 < clip.end - clip.start <= 4):
             continue
         earlier = next((clips[j] for j in range(i - 1, -1, -1)

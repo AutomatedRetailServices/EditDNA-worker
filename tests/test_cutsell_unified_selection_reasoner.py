@@ -577,6 +577,27 @@ def test_v2_preserves_redundant_retry_label_when_information_is_not_redundant():
     assert [item.clip_id for item in out.selected] == ["detail", "winner"]
 
 
+def test_v2_discarded_retry_winner_with_uncovered_quantity_is_protected():
+    claim = clip("claim", 19, 28, "Stronger muscles in 30 days", selected=False)
+    chosen = clip("chosen", 50, 70, "Daily watermelon supplement gives more energy", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(claim, chosen), discarded=(),
+        diagnostics={"editorial_engine_v2_request": True},
+    )
+    reasoner = FakeReasoner([
+        v2_decision("claim", "discard", "retry_winner", .95, 0, "redundant_retry", 0),
+        v2_decision("chosen", "select", "independent", .98, 0, "best_complete_take", 1),
+    ])
+
+    out = apply_unified_selection_reasoner(d, reasoner)
+
+    assert [item.clip_id for item in out.selected] == ["claim", "chosen"]
+    row = next(row for row in out.diagnostics["unified_selection_reasoner"]["decisions"]
+               if row["clip_id"] == "claim")
+    assert row["safety_override"] == "material_retry_claim_preserved"
+
+
 def test_v2_verbal_summary_cannot_cover_distinct_selected_silent_action():
     from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
     action = replace(clip('action', 10, 15, '', selected=False), audio_muted=True)
@@ -628,7 +649,7 @@ def test_v2_equivalent_take_cannot_erase_missing_amount_or_audience_condition():
 
 
 def test_v2_av_audience_unique_content_overrides_false_failed_label():
-    hook = clip("hook", 5, 16, "GLP users get more repetitions energy and stronger muscles", selected=False)
+    hook = clip("hook", 5, 16, "If you are using GLP you get more repetitions and energy", selected=False)
     winner = clip("winner", 50, 70, "Watermelon creatine mixes into one bottle daily", selected=False)
     d = DraftTimeline(
         schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
@@ -652,6 +673,23 @@ def test_v2_av_audience_unique_content_overrides_false_failed_label():
     row = next(row for row in out.diagnostics["unified_selection_reasoner"]["decisions"]
                if row["clip_id"] == "hook")
     assert row["safety_override"] == "av_audience_unique_content_overrides_failed_label"
+
+
+def test_v2_broad_av_does_not_revive_failed_take_for_stylistic_vocabulary():
+    failed = clip("failed", 19, 35, "The garment looks delightful and elegant on camera", selected=False)
+    winner = clip("winner", 120, 145, "This garment fits well and looks beautiful", selected=False)
+    d = DraftTimeline(SCHEMA_VERSION, "p", EditStrategy.STORYTELLING, (), (failed, winner), (), {
+        "editorial_engine_v2_request": True,
+        "whole_video_context": {"sources": [{"source_asset_id": "src",
+            "audiovisual_evidence": json.dumps({"regions": [{"start": 18, "end": 36,
+                "role": "audience", "confidence": .96}]})}]},
+    })
+    reasoner = FakeReasoner([
+        v2_decision("failed", "discard", "failed", .9, 0, "failed_delivery", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+    out = apply_unified_selection_reasoner(d, reasoner)
+    assert [item.clip_id for item in out.selected] == ["winner"]
 
 
 def test_v2_av_majority_audience_preserves_unique_delivery_with_short_failed_tail():
@@ -685,7 +723,7 @@ def test_v2_av_preserves_short_unique_bridge_between_selected_beats():
     )
     decisions = {
         "first": v2_decision("first", "select", "independent", .95, 0, "independent_story_coverage", 0),
-        "bridge": v2_decision("bridge", "discard", "retry_alternate", .95, 0, "redundant_retry", 1),
+        "bridge": v2_decision("bridge", "discard", "retry_winner", .95, 0, "redundant_retry", 1),
         "demo": v2_decision("demo", "select", "continuation", .95, 0, "necessary_continuation", 2),
     }
     draft = DraftTimeline(SCHEMA_VERSION, "p", EditStrategy.STORYTELLING, (), (), (), {
