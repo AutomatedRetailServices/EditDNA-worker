@@ -1,0 +1,236 @@
+{
+  "manifest_schema": "cutsell.v3.door0.gold-overlap-manifest.v1",
+  "replay_scope": "selected interval vs Gold metric only",
+  "observations": [
+    {
+      "source_key": "Yaskira/01.mp4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502756185,
+      "artifact_id": 11026136307,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 114.561,
+        "selected_union_seconds": 108.198,
+        "keep_retained_seconds": 107.198,
+        "keep_lost_seconds": 7.363,
+        "delete_retained_seconds": 1.0,
+        "recall": 0.9357,
+        "precision": 0.9908
+      }
+    },
+    {
+      "source_key": "Yaskira/02.mp4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502632708,
+      "artifact_id": 11026136307,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 96.262,
+        "selected_union_seconds": 92.883,
+        "keep_retained_seconds": 90.38,
+        "keep_lost_seconds": 5.882,
+        "delete_retained_seconds": 2.503,
+        "recall": 0.9389,
+        "precision": 0.9731
+      }
+    },
+    {
+      "source_key": "Yaskira/03.mp4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502632708,
+      "artifact_id": 11026136307,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 19.623,
+        "selected_union_seconds": 17.756,
+        "keep_retained_seconds": 17.756,
+        "keep_lost_seconds": 1.867,
+        "delete_retained_seconds": 0.0,
+        "recall": 0.9049,
+        "precision": 1.0
+      }
+    },
+    {
+      "source_key": "Yaskira/04.MP4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502632708,
+      "artifact_id": 11026136307,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 38.0,
+        "selected_union_seconds": 34.6,
+        "keep_retained_seconds": 34.16,
+        "keep_lost_seconds": 3.84,
+        "delete_retained_seconds": 0.44,
+        "recall": 0.8989,
+        "precision": 0.9873
+      }
+    },
+    {
+      "source_key": "Yaskira/05.MP4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502756185,
+      "artifact_id": 11026136307,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 39.0,
+        "selected_union_seconds": 37.569,
+        "keep_retained_seconds": 37.029,
+        "keep_lost_seconds": 1.971,
+        "delete_retained_seconds": 0.54,
+        "recall": 0.9494,
+        "precision": 0.9856
+      }
+    },
+    {
+      "source_key": "Yaskira/06.MP4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502632708,
+      "artifact_id": 11026136307,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 22.0,
+        "selected_union_seconds": 48.534,
+        "keep_retained_seconds": 21.904,
+        "keep_lost_seconds": 0.096,
+        "delete_retained_seconds": 26.63,
+        "recall": 0.9956,
+        "precision": 0.4513
+      }
+    },
+    {
+      "source_key": "Yaskira/06.MP4",
+      "kind": "saved_followup_v2",
+      "run_id": 36534356753,
+      "artifact_id": 11018520264,
+      "selection_status": "applied",
+      "source_sha256": "7ef73ebafc53ca405243c9613bd50d640cb7aa5ccd97ffa395994931b0a4028b",
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 22.0,
+        "selected_union_seconds": 22.34,
+        "keep_retained_seconds": 22.0,
+        "keep_lost_seconds": 0.0,
+        "delete_retained_seconds": 0.34,
+        "recall": 1.0,
+        "precision": 0.9848
+      }
+    },
+    {
+      "source_key": "Yaskira/07.mp4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502756185,
+      "artifact_id": null,
+      "selection_status": null,
+      "source_sha256": null,
+      "metric_status": "incomplete_raw_time_alignment"
+    },
+    {
+      "source_key": "Yaskira/08.mp4",
+      "kind": "saved_followup_v2",
+      "run_id": 36546701227,
+      "artifact_id": 11023061700,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 27.0,
+        "selected_union_seconds": 25.199,
+        "keep_retained_seconds": 25.199,
+        "keep_lost_seconds": 1.801,
+        "delete_retained_seconds": 0.0,
+        "recall": 0.9333,
+        "precision": 1.0
+      }
+    },
+    {
+      "source_key": "Yaskira/09.mp4",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502632708,
+      "artifact_id": null,
+      "selection_status": null,
+      "source_sha256": null,
+      "metric_status": "failed_before_selection"
+    },
+    {
+      "source_key": "Yaskira/09.mp4",
+      "kind": "saved_followup_v2",
+      "run_id": 36538958510,
+      "artifact_id": 11019339666,
+      "selection_status": "applied",
+      "source_sha256": "463e774293a518eecc4d568099183359f81b2b96381b8444ed63d617ee643381",
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 73.0,
+        "selected_union_seconds": 76.398,
+        "keep_retained_seconds": 65.146,
+        "keep_lost_seconds": 7.854,
+        "delete_retained_seconds": 11.252,
+        "recall": 0.8924,
+        "precision": 0.8527
+      }
+    },
+    {
+      "source_key": "Yaskira/10.MOV",
+      "kind": "historical_multi_video_v2",
+      "run_id": 36502756185,
+      "artifact_id": 11026136307,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 36.0,
+        "selected_union_seconds": 38.793,
+        "keep_retained_seconds": 25.38,
+        "keep_lost_seconds": 10.62,
+        "delete_retained_seconds": 13.413,
+        "recall": 0.705,
+        "precision": 0.6542
+      }
+    },
+    {
+      "source_key": "Yaskira/10.MOV",
+      "kind": "saved_followup_v2",
+      "run_id": 36546701251,
+      "artifact_id": 11024579682,
+      "selection_status": "applied",
+      "source_sha256": null,
+      "metric_status": "replayed",
+      "metrics": {
+        "gold_keep_seconds": 36.0,
+        "selected_union_seconds": 45.4,
+        "keep_retained_seconds": 26.8,
+        "keep_lost_seconds": 9.2,
+        "delete_retained_seconds": 18.6,
+        "recall": 0.7444,
+        "precision": 0.5903
+      },
+      "reported_metric_comparison": {
+        "keep_retained": {
+          "reported": 26.8,
+          "replayed": 26.8
+        },
+        "keep_lost": {
+          "reported": 9.2,
+          "replayed": 9.2
+        },
+        "delete_retained": {
+          "reported": 18.6,
+          "replayed": 18.6
+        }
+      }
+    }
+  ]
+}

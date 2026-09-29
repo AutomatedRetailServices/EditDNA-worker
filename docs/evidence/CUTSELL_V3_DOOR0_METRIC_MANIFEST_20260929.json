@@ -1,0 +1,1126 @@
+{
+  "schema": "cutsell.v3.door0.gold-overlap-manifest.v1",
+  "created_date": "2026-09-29",
+  "purpose": "Deterministic offline re-calculation of saved selected intervals against owner Gold labels; this does not replay ASR, AV, selector, Boundary, or render.",
+  "gold_source": "docs/CUTSELL_YASKIRA_01_10_HUMAN_GOLD.md",
+  "evidence_classification": "Historical V2 artifacts from different runs/revisions. No common-revision ten-video comparison.",
+  "metric_definition": {
+    "selected_and_gold_intervals_are_unioned_before_overlap": true,
+    "gold_seconds": "duration of union of approved KEEP windows",
+    "approved_seconds_retained": "intersection duration of selected union and Gold KEEP union",
+    "approved_seconds_lost": "Gold KEEP duration minus retained",
+    "unwanted_seconds_retained": "selected union duration minus retained",
+    "rounding_seconds": 3
+  },
+  "sources": [
+    {
+      "source_key": "Yaskira/01.mp4",
+      "gold_keep_intervals": [
+        [
+          0,
+          58
+        ],
+        [
+          59,
+          115.561
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502756185,
+          "artifact_id": 11026136307,
+          "source_duration_sec": 115.561,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 0.0,
+              "end": 29.18,
+              "clip_id": "clip_c093472a2dd867616c3b"
+            },
+            {
+              "start": 31.918,
+              "end": 36.76,
+              "clip_id": "clip_e28088ccadd2808e7f12"
+            },
+            {
+              "start": 38.312,
+              "end": 44.869,
+              "clip_id": "clip_03d6c040ab17b897bd1a"
+            },
+            {
+              "start": 45.697,
+              "end": 62.86,
+              "clip_id": "clip_87e7d426e83fda78aaae"
+            },
+            {
+              "start": 62.86,
+              "end": 81.889,
+              "clip_id": "clip_1f1836ac3b608251871e"
+            },
+            {
+              "start": 82.52,
+              "end": 96.0711,
+              "clip_id": "clip_6ef602ff141d0856368d__psiglf63e87008d81"
+            },
+            {
+              "start": 97.27629999999999,
+              "end": 105.08,
+              "clip_id": "clip_6ef602ff141d0856368d__psigr421aefc018f2"
+            },
+            {
+              "start": 105.328,
+              "end": 114.5,
+              "clip_id": "clip_deef22512ce0380dba91"
+            },
+            {
+              "start": 114.5,
+              "end": 115.4,
+              "clip_id": "clip_01a1a68c4bf5cfa24e42"
+            }
+          ],
+          "decisions": [
+            {
+              "start": 0.0,
+              "end": 29.18,
+              "clip_id": "clip_c093472a2dd867616c3b",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 29.18,
+              "end": 31.06,
+              "clip_id": "clip_1bbba51e9578125a803e",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "failed_delivery"
+            },
+            {
+              "start": 31.918,
+              "end": 36.76,
+              "clip_id": "clip_e28088ccadd2808e7f12",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 38.312,
+              "end": 44.869,
+              "clip_id": "clip_03d6c040ab17b897bd1a",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 45.697,
+              "end": 62.86,
+              "clip_id": "clip_87e7d426e83fda78aaae",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 62.86,
+              "end": 81.889,
+              "clip_id": "clip_1f1836ac3b608251871e",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 82.856,
+              "end": 103.92,
+              "clip_id": "clip_6ef602ff141d0856368d",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 105.328,
+              "end": 110.0,
+              "clip_id": "clip_9fe378c022027b046117",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 105.328,
+              "end": 114.5,
+              "clip_id": "clip_deef22512ce0380dba91",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 110.635,
+              "end": 114.297,
+              "clip_id": "clip_8935ff9785592bc9e218",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 114.5,
+              "end": 115.4,
+              "clip_id": "clip_01a1a68c4bf5cfa24e42",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "necessary_continuation"
+            }
+          ],
+          "candidate_count": 12,
+          "attempt_count": 9,
+          "asr_segment_count": 24,
+          "av_region_count": 6,
+          "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/02.mp4",
+      "gold_keep_intervals": [
+        [
+          0,
+          49
+        ],
+        [
+          50,
+          68
+        ],
+        [
+          70,
+          99.262
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502632708,
+          "artifact_id": 11026136307,
+          "source_duration_sec": 99.262,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 0.05,
+              "end": 4.07,
+              "clip_id": "clip_a058089c02cbcb02e2ae"
+            },
+            {
+              "start": 4.889,
+              "end": 12.53,
+              "clip_id": "clip_03592a080bafc16ac6f8"
+            },
+            {
+              "start": 12.53,
+              "end": 20.37,
+              "clip_id": "clip_222205c34b38101967ea"
+            },
+            {
+              "start": 21.614,
+              "end": 28.11,
+              "clip_id": "clip_32d615e777f83ba710af"
+            },
+            {
+              "start": 29.076,
+              "end": 49.75,
+              "clip_id": "clip_2b3ecc8e8bdf836b2c07"
+            },
+            {
+              "start": 51.224,
+              "end": 68.903,
+              "clip_id": "clip_8b4d6b1bcb4e766abbb2"
+            },
+            {
+              "start": 69.15,
+              "end": 71.20527848925093,
+              "clip_id": "clip_88ed8bb666e26d2358bb__psigldad49456a9dd"
+            },
+            {
+              "start": 71.20527848925093,
+              "end": 97.683,
+              "clip_id": "clip_88ed8bb666e26d2358bb__psigrfb925bd378b7"
+            }
+          ],
+          "decisions": [
+            {
+              "start": 0.05,
+              "end": 4.07,
+              "clip_id": "clip_a058089c02cbcb02e2ae",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 4.889,
+              "end": 12.53,
+              "clip_id": "clip_03592a080bafc16ac6f8",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            },
+            {
+              "start": 12.53,
+              "end": 20.37,
+              "clip_id": "clip_222205c34b38101967ea",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            },
+            {
+              "start": 21.614,
+              "end": 28.11,
+              "clip_id": "clip_32d615e777f83ba710af",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            },
+            {
+              "start": 29.076,
+              "end": 49.75,
+              "clip_id": "clip_2b3ecc8e8bdf836b2c07",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            },
+            {
+              "start": 51.224,
+              "end": 68.903,
+              "clip_id": "clip_8b4d6b1bcb4e766abbb2",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            },
+            {
+              "start": 69.15,
+              "end": 97.683,
+              "clip_id": "clip_88ed8bb666e26d2358bb",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            }
+          ],
+          "candidate_count": 8,
+          "attempt_count": 7,
+          "asr_segment_count": 20,
+          "av_region_count": 2,
+          "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/03.mp4",
+      "gold_keep_intervals": [
+        [
+          0,
+          19.623
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502632708,
+          "artifact_id": 11026136307,
+          "source_duration_sec": 19.623,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 0.0,
+              "end": 5.36,
+              "clip_id": "clip_9b39d64e6799fb71e8d3"
+            },
+            {
+              "start": 6.255,
+              "end": 10.811,
+              "clip_id": "clip_f6dd55e1fcc5e49b638d"
+            },
+            {
+              "start": 11.78,
+              "end": 19.62,
+              "clip_id": "clip_07a454c1dce178af2dd3"
+            }
+          ],
+          "decisions": [
+            {
+              "start": 0.0,
+              "end": 5.36,
+              "clip_id": "clip_9b39d64e6799fb71e8d3",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 6.255,
+              "end": 10.811,
+              "clip_id": "clip_f6dd55e1fcc5e49b638d",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 11.78,
+              "end": 19.62,
+              "clip_id": "clip_07a454c1dce178af2dd3",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            }
+          ],
+          "candidate_count": 3,
+          "attempt_count": 3,
+          "asr_segment_count": 5,
+          "av_region_count": 1,
+          "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/04.MP4",
+      "gold_keep_intervals": [
+        [
+          5,
+          27
+        ],
+        [
+          28,
+          44
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502632708,
+          "artifact_id": 11026136307,
+          "source_duration_sec": 54.025,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 5.55,
+              "end": 14.89,
+              "clip_id": "clip_4f9f7027c36e208b5ed8"
+            },
+            {
+              "start": 14.89,
+              "end": 23.71,
+              "clip_id": "clip_99d6c9869f3a33434dfc"
+            },
+            {
+              "start": 27.85,
+              "end": 30.496399999999998,
+              "clip_id": "clip_a739a9b9a069eb7c876c__psiglaa31526b1d52"
+            },
+            {
+              "start": 30.496399999999998,
+              "end": 44.29,
+              "clip_id": "clip_a739a9b9a069eb7c876c__psigr0aff4b7f440a"
+            }
+          ],
+          "decisions": [
+            {
+              "start": 5.55,
+              "end": 14.89,
+              "clip_id": "clip_4f9f7027c36e208b5ed8",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 14.89,
+              "end": 23.71,
+              "clip_id": "clip_99d6c9869f3a33434dfc",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            },
+            {
+              "start": 26.493,
+              "end": 26.953,
+              "clip_id": "clip_2ccb4862301596ab10dc",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "failed_delivery"
+            },
+            {
+              "start": 27.85,
+              "end": 44.29,
+              "clip_id": "clip_a739a9b9a069eb7c876c",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            }
+          ],
+          "candidate_count": 5,
+          "attempt_count": 4,
+          "asr_segment_count": 7,
+          "av_region_count": 6,
+          "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/05.MP4",
+      "gold_keep_intervals": [
+        [
+          98,
+          137
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502756185,
+          "artifact_id": 11026136307,
+          "source_duration_sec": 139.965,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 97.76,
+              "end": 99.2185,
+              "clip_id": "clip_b424d27cd53ba681ec61__psigl166ea0acc9d6"
+            },
+            {
+              "start": 101.19,
+              "end": 133.4,
+              "clip_id": "clip_b424d27cd53ba681ec61__psigr22b73d209fd8"
+            },
+            {
+              "start": 133.4,
+              "end": 137.3,
+              "clip_id": "clip_1dae315c1d35d30ca5e9"
+            }
+          ],
+          "decisions": [
+            {
+              "start": 5.17,
+              "end": 13.41,
+              "clip_id": "clip_f6bebe4023348220a3c8",
+              "action": "swap",
+              "model_action": "swap",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 14.79,
+              "end": 19.91,
+              "clip_id": "clip_b3dcb6e5b1996e05f59a",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "recording_process_bts"
+            },
+            {
+              "start": 21.539,
+              "end": 22.41,
+              "clip_id": "clip_aa902cdbe960dc00063f",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "recording_process_bts"
+            },
+            {
+              "start": 26.88,
+              "end": 48.48,
+              "clip_id": "clip_e13d1e2ce15fc20002ca",
+              "action": "swap",
+              "model_action": "swap",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 49.42,
+              "end": 70.26,
+              "clip_id": "clip_955da8d5a23d97cf5a5d",
+              "action": "swap",
+              "model_action": "swap",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 71.694,
+              "end": 72.909,
+              "clip_id": "clip_70f625f77c912eec407e",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "recording_process_bts"
+            },
+            {
+              "start": 85.47,
+              "end": 89.062,
+              "clip_id": "clip_ebde1dceb3c33e19a053",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "recording_process_bts"
+            },
+            {
+              "start": 92.191,
+              "end": 93.65,
+              "clip_id": "clip_7181501f14ff9d4d7cdb",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "recording_process_bts"
+            },
+            {
+              "start": 98.01,
+              "end": 131.987,
+              "clip_id": "clip_b424d27cd53ba681ec61",
+              "action": "select",
+              "model_action": "select",
+              "relation": "retry_winner",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 133.4,
+              "end": 137.3,
+              "clip_id": "clip_1dae315c1d35d30ca5e9",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            }
+          ],
+          "candidate_count": 11,
+          "attempt_count": 10,
+          "asr_segment_count": 23,
+          "av_region_count": 21,
+          "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/06.MP4",
+      "gold_keep_intervals": [
+        [
+          85,
+          107
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502632708,
+          "artifact_id": 11026136307,
+          "source_duration_sec": 112.002,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 4.21,
+              "end": 15.09,
+              "clip_id": "clip_786de26bafb89c4dcc12"
+            },
+            {
+              "start": 63.68,
+              "end": 79.2,
+              "clip_id": "clip_e8c3aaa8e561bb67f416"
+            },
+            {
+              "start": 84.77,
+              "end": 105.53,
+              "clip_id": "clip_b955b0978ce0836a2335"
+            },
+            {
+              "start": 105.53,
+              "end": 106.904,
+              "clip_id": "clip_4a461f6d8c3584c05f5a"
+            }
+          ],
+          "decisions": [
+            {
+              "start": 4.21,
+              "end": 15.09,
+              "clip_id": "clip_786de26bafb89c4dcc12",
+              "action": "select",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "failed_delivery"
+            },
+            {
+              "start": 15.09,
+              "end": 17.15,
+              "clip_id": "clip_b799fc98b0ff384d923a",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "failed_delivery"
+            },
+            {
+              "start": 17.85,
+              "end": 25.19,
+              "clip_id": "clip_9802151675e6a96bca74",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 25.19,
+              "end": 39.99,
+              "clip_id": "clip_4dcc0e6704555dc8b020",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 44.08,
+              "end": 56.32,
+              "clip_id": "clip_c1c75a33b98a4e00f69f",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 58.9,
+              "end": 62.12,
+              "clip_id": "clip_ec48fba10e6c42f5638a",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 63.68,
+              "end": 79.2,
+              "clip_id": "clip_e8c3aaa8e561bb67f416",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "independent_story_coverage"
+            },
+            {
+              "start": 80.538,
+              "end": 81.88,
+              "clip_id": "clip_b1133bb4be693acf2406",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "bts",
+              "reason_code": "recording_process_bts"
+            },
+            {
+              "start": 84.77,
+              "end": 105.53,
+              "clip_id": "clip_b955b0978ce0836a2335",
+              "action": "select",
+              "model_action": "select",
+              "relation": "retry_winner",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 105.53,
+              "end": 106.904,
+              "clip_id": "clip_4a461f6d8c3584c05f5a",
+              "action": "select",
+              "model_action": "select",
+              "relation": "continuation",
+              "reason_code": "necessary_continuation"
+            }
+          ],
+          "candidate_count": 10,
+          "attempt_count": 10,
+          "asr_segment_count": 25,
+          "av_region_count": 8,
+          "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
+        },
+        {
+          "kind": "saved_followup_v2",
+          "run_id": 36534356753,
+          "artifact_id": 11018520264,
+          "source_sha256": "7ef73ebafc53ca405243c9613bd50d640cb7aa5ccd97ffa395994931b0a4028b",
+          "selection_status": "applied",
+          "technical_delivery_status": "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:watch_listen=HUMAN_REVIEW_REQUIRED",
+          "selected_intervals": [
+            {
+              "start": 84.77,
+              "end": 105.53,
+              "clip_id": "clip_35896113bc8b37bc1a2e"
+            },
+            {
+              "start": 105.53,
+              "end": 107.11,
+              "clip_id": "clip_d8475a96afb92586ec93"
+            }
+          ],
+          "code_revision": "e78fbcbdc1a35d396393bd0d47f775a3b0400eff"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/07.mp4",
+      "gold_keep_intervals": null,
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502756185,
+          "status": "failed_before_selection",
+          "error": "Editorial Engine V2 whole-video plan failed: ValueError: unified Selection input token budget exceeded (input_tokens=72502, max_input_tokens=64000, candidate_count=37)",
+          "candidate_count": 37,
+          "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
+        }
+      ],
+      "gold_status": "incomplete_raw_time_alignment"
+    },
+    {
+      "source_key": "Yaskira/08.mp4",
+      "gold_keep_intervals": [
+        [
+          120,
+          147
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "saved_followup_v2",
+          "run_id": 36546701227,
+          "artifact_id": 11023061700,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "prompt_sha256": "ca3c16aae9fa4ae9fe767081b24b783bb47581c97b32bd9dac117f6463a5023a",
+          "selected_intervals": [
+            {
+              "start": 120.39,
+              "end": 141.388
+            },
+            {
+              "start": 142.709,
+              "end": 145.1
+            },
+            {
+              "start": 145.1,
+              "end": 146.91
+            }
+          ],
+          "code_revision": "37cb7b8d293eeef90a49278431f13eba3d88b213"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/09.mp4",
+      "gold_keep_intervals": [
+        [
+          5,
+          14
+        ],
+        [
+          19,
+          28
+        ],
+        [
+          52,
+          66
+        ],
+        [
+          73,
+          91
+        ],
+        [
+          97,
+          120
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502632708,
+          "status": "failed_before_selection",
+          "error": "Editorial Engine V2 whole-video plan failed: UnifiedSelectionUnreliableResponseError: invalid V2 take competitions: overlapping or empty competition",
+          "candidate_count": null,
+          "code_revision": "a4c222b15598b39b5ff292078adcf03e83758646"
+        },
+        {
+          "kind": "saved_followup_v2",
+          "run_id": 36538958510,
+          "artifact_id": 11019339666,
+          "source_sha256": "463e774293a518eecc4d568099183359f81b2b96381b8444ed63d617ee643381",
+          "selection_status": "applied",
+          "technical_delivery_status": "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:watch_listen=HUMAN_REVIEW_REQUIRED",
+          "watch_listen_status": "HUMAN_REVIEW_REQUIRED",
+          "selected_intervals": [
+            {
+              "start": 4.98,
+              "end": 16.98,
+              "clip_id": "clip_d3e9fa1721825e2ce2da"
+            },
+            {
+              "start": 19.0,
+              "end": 28.14,
+              "clip_id": "clip_a588837497e4e7d16fcd"
+            },
+            {
+              "start": 50.33,
+              "end": 70.89,
+              "clip_id": "clip_899f5f233ee9fe4c3d3d"
+            },
+            {
+              "start": 77.07,
+              "end": 87.37,
+              "clip_id": "clip_48b5ea5158e3aa3d00bb"
+            },
+            {
+              "start": 87.37,
+              "end": 90.59,
+              "clip_id": "clip_3a001be4ebe2ace40a44"
+            },
+            {
+              "start": 96.61,
+              "end": 99.65,
+              "clip_id": "clip_9e9827fd42afbb6a85b5"
+            },
+            {
+              "start": 98.435,
+              "end": 104.435,
+              "clip_id": "v2_visual_6bc0bfeb215dd7089458"
+            },
+            {
+              "start": 106.66,
+              "end": 118.851,
+              "clip_id": "clip_b26f32de2f7202517b6b__psiglac7641872076"
+            },
+            {
+              "start": 120.618,
+              "end": 121.78,
+              "clip_id": "clip_b26f32de2f7202517b6b__psigrae07206565dd"
+            }
+          ],
+          "code_revision": "ae2a43660cfe308ea2249544608de19e7ac34b1a"
+        }
+      ]
+    },
+    {
+      "source_key": "Yaskira/10.MOV",
+      "gold_keep_intervals": [
+        [
+          16,
+          25
+        ],
+        [
+          55,
+          64
+        ],
+        [
+          75,
+          79
+        ],
+        [
+          83,
+          97
+        ]
+      ],
+      "observations": [
+        {
+          "kind": "historical_multi_video_v2",
+          "run_id": 36502756185,
+          "artifact_id": 11026136307,
+          "source_duration_sec": 97.972,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 46.75,
+              "end": 66.643,
+              "clip_id": "clip_aa9706f64a316fd9e412"
+            },
+            {
+              "start": 74.27,
+              "end": 79.85,
+              "clip_id": "clip_67f0b1535f4b3a204845"
+            },
+            {
+              "start": 82.06,
+              "end": 93.7,
+              "clip_id": "clip_8a56b8bdf2dfba012eae"
+            },
+            {
+              "start": 94.68,
+              "end": 96.36,
+              "clip_id": "clip_340f5826b5df1e41b454"
+            }
+          ],
+          "decisions": [
+            {
+              "start": 1.01,
+              "end": 5.14,
+              "clip_id": "clip_93f4524d16ba85492e51",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "failed_delivery"
+            },
+            {
+              "start": 8.95,
+              "end": 24.77,
+              "clip_id": "clip_f2a401494b67d2b765e7",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 26.66,
+              "end": 32.606,
+              "clip_id": "clip_8b08517d3cc516212a01",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "failed_delivery"
+            },
+            {
+              "start": 33.98,
+              "end": 41.16,
+              "clip_id": "clip_9748cff737a8c8b0fded",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            },
+            {
+              "start": 46.75,
+              "end": 66.643,
+              "clip_id": "clip_aa9706f64a316fd9e412",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 69.61,
+              "end": 72.51,
+              "clip_id": "clip_1abd140ccbc71f3864e0",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "failed",
+              "reason_code": "failed_delivery"
+            },
+            {
+              "start": 74.27,
+              "end": 79.85,
+              "clip_id": "clip_67f0b1535f4b3a204845",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 82.06,
+              "end": 93.7,
+              "clip_id": "clip_8a56b8bdf2dfba012eae",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 94.68,
+              "end": 96.36,
+              "clip_id": "clip_340f5826b5df1e41b454",
+              "action": "select",
+              "model_action": "select",
+              "relation": "independent",
+              "reason_code": "best_complete_take"
+            },
+            {
+              "start": 96.36,
+              "end": 97.96,
+              "clip_id": "clip_5608b55ede64000482c0",
+              "action": "discard",
+              "model_action": "discard",
+              "relation": "retry_alternate",
+              "reason_code": "redundant_retry"
+            }
+          ],
+          "candidate_count": 10,
+          "attempt_count": 10,
+          "asr_segment_count": 17,
+          "av_region_count": 7,
+          "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
+        },
+        {
+          "kind": "saved_followup_v2",
+          "run_id": 36546701251,
+          "artifact_id": 11024579682,
+          "source_sha256": null,
+          "selection_status": "applied",
+          "render_qc": "PASS",
+          "selected_intervals": [
+            {
+              "start": 33.98,
+              "end": 41.16,
+              "clip_id": "clip_19048f553a12454956f9"
+            },
+            {
+              "start": 46.75,
+              "end": 64.65,
+              "clip_id": "clip_ea4a89920f51c7234c66"
+            },
+            {
+              "start": 74.27,
+              "end": 79.85,
+              "clip_id": "clip_f9a11099dde9f8bd17a8"
+            },
+            {
+              "start": 82.06,
+              "end": 94.54,
+              "clip_id": "clip_71cdab9a0728f7b7da8e"
+            },
+            {
+              "start": 94.54,
+              "end": 96.8,
+              "clip_id": "clip_9a2351092534aa91bacf"
+            }
+          ],
+          "reported_metric": {
+            "source_key": "Yaskira/10.MOV",
+            "status": "rounded_source_gold_comparison",
+            "gold_keep_sec": 36,
+            "keep_retained_sec": 26.8,
+            "keep_lost_sec": 9.2,
+            "delete_retained_sec": 18.6,
+            "live_render_qc": "PASS"
+          },
+          "code_revision": "37cb7b8d293eeef90a49278431f13eba3d88b213"
+        }
+      ]
+    }
+  ]
+}
