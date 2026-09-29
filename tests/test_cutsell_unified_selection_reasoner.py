@@ -389,6 +389,9 @@ def test_v2_whole_take_cannot_claim_to_cover_absent_purchase_action():
     assert _has_purchase_action("Puedes encontrarlo en el carrito")
     assert _has_purchase_action("Puedes comprarlo en la tienda")
     assert _has_purchase_action("Puedes conseguirlo en el enlace")
+    assert _has_purchase_action("Lo puedes adquirir en el carrito")
+    assert _has_purchase_action("Puedes ordenarlo en el carrito")
+    assert not _has_purchase_action("No puedes ordenarlo en el carrito")
     assert not _has_purchase_action("I did not buy it at that store")
     assert not _has_purchase_action("No puedes encontrarlo en el carrito")
     assert not _has_purchase_action("Don't click the link")
@@ -480,6 +483,44 @@ def test_v2_confirmed_winner_removes_failed_take_rescued_by_broad_av():
     assert actions == ["discard", "select"]
     assert overrides[0] == "whole_take_equivalent_covered"
     assert audit[0]["decision"] == "covered_alternates_removed"
+
+
+def test_v2_post_reset_complete_take_survives_inverted_comparison():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    early = clip("early", 63, 79, "Buy now in the cart for this fragrance", selected=True)
+    reset = clip("reset", 80, 82, "I did not say that right", selected=False)
+    late = clip("late", 84, 106,
+                "This fragrance makes the room smell fresh. Buy now in the cart",
+                selected=False)
+    decisions = {
+        "early": v2_decision("early", "select", "retry_winner", .97, 0, "best_complete_take", 0),
+        "reset": v2_decision("reset", "discard", "bts", .98, 0, "recording_process_bts", 1),
+        "late": v2_decision("late", "discard", "retry_alternate", .95, 0, "redundant_retry", 2),
+    }
+    actions, overrides = ["select", "discard", "discard"], [None] * 3
+    audit = _apply_v2_take_competitions(
+        (early, reset, late), decisions, actions, overrides,
+        (UnifiedTakeCompetition(("early",), ("late",), (), "equivalent_take", .96),),
+    )
+    assert actions == ["select", "discard", "select"]
+    assert overrides[2] == "post_reset_complete_take_preserved"
+    assert audit[0]["decision"] == "post_reset_complete_take_preserved"
+
+
+def test_v2_post_reset_guard_requires_matching_complete_purchase_take():
+    from cutsell_worker.unified_selection_reasoner import _apply_v2_take_competitions
+    early = clip("early", 63, 79, "Buy now in the cart for this fragrance", selected=True)
+    reset = clip("reset", 80, 82, "I did not say that right", selected=False)
+    late = clip("late", 84, 86, "Buy the other item at the store", selected=False)
+    decisions = {
+        "early": v2_decision("early", "select", "retry_winner", .97, 0, "best_complete_take", 0),
+        "reset": v2_decision("reset", "discard", "bts", .98, 0, "recording_process_bts", 1),
+        "late": v2_decision("late", "discard", "retry_alternate", .95, 0, "redundant_retry", 2),
+    }
+    actions, overrides = ["select", "discard", "discard"], [None] * 3
+    _apply_v2_take_competitions((early, reset, late), decisions, actions, overrides,
+        (UnifiedTakeCompetition(("early",), ("late",), (), "equivalent_take", .96),))
+    assert actions == ["select", "discard", "discard"]
 
 
 def test_v2_broad_av_rescue_retains_uncovered_quantity_despite_competition():

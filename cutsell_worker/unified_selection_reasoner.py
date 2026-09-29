@@ -295,6 +295,32 @@ def _apply_v2_take_competitions(
                 for clip_id in contest.covered_clip_ids:
                     i = index_by_id[clip_id]
                     covered_clip = clips[i]
+                    # A recording-process reset separates attempts. A short
+                    # pre-reset winner cannot prove the later, longer complete
+                    # retake redundant merely by repeating its product/CTA.
+                    # Retain the later take for editorial resolution when its
+                    # purchase destination matches and its delivery is not
+                    # itself marked failed. This does not assume every later
+                    # take wins, nor erase the earlier one here.
+                    earlier_winners = [clips[index_by_id[w]] for w in contest.winner_clip_ids
+                                       if clips[index_by_id[w]].end <= covered_clip.start]
+                    post_reset = bool(earlier_winners and
+                        decisions[clip_id].reason_code == "redundant_retry" and
+                        any(decisions[reset.clip_id].reason_code == "recording_process_bts" and
+                            reset.source_asset_id == covered_clip.source_asset_id and
+                            any(w.end <= reset.start < covered_clip.start for w in earlier_winners)
+                            for reset in clips) and
+                        covered_clip.end - covered_clip.start >=
+                            max(w.end - w.start for w in earlier_winners) and
+                        _has_purchase_action(covered_clip.text) and
+                        any(_has_purchase_action(w.text) and
+                            _purchase_destination(w.text) == _purchase_destination(covered_clip.text)
+                            for w in earlier_winners))
+                    if post_reset:
+                        actions[i] = "select"
+                        overrides[i] = "post_reset_complete_take_preserved"
+                        reason = "post_reset_complete_take_preserved"
+                        continue
                     winning_text = ' '.join(clips[index_by_id[w]].text for w in contest.winner_clip_ids)
                     covered_norm = unicodedata.normalize('NFKD', covered_clip.text.casefold())
                     covered_norm = ''.join(ch for ch in covered_norm if not unicodedata.combining(ch))
@@ -381,7 +407,8 @@ def _apply_v2_take_competitions(
                         overrides[i] = "whole_take_equivalent_covered"
                 if reason not in {"conflicting_material_unique_preserved", "purchase_action_coverage_conflict",
                                   "distinct_focused_visual_action_preserved", "material_claim_not_covered_by_winner",
-                                  "failed_delivery_preserved_against_equivalence"}:
+                                  "failed_delivery_preserved_against_equivalence",
+                                  "post_reset_complete_take_preserved"}:
                     reason = "covered_alternates_removed"
         audit.append({
             "winners": list(contest.winner_clip_ids),
@@ -402,8 +429,8 @@ def _has_purchase_action(value: str) -> bool:
     normalized = normalized.replace("’", "'").replace("don't", "dont").replace("didn't", "didnt")
     for clause in re.split(r"[.!?;]+", normalized):
         action = re.search(
-            r"\b(?:puedes?|pueden|podras?)\s+(?:encontrar|comprar|conseguir)(?:lo|la)?\b"
-            r"|\b(?:compra|compralo|pidelo|encuentralo|adquierelo)\b"
+            r"\b(?:puedes?|pueden|podras?)\s+(?:encontrar|comprar|conseguir|adquirir|ordenar|pedir)(?:lo|la)?\b"
+            r"|\b(?:compra|compralo|pidelo|ordenalo|encuentralo|adquierelo)\b"
             r"|\b(?:buy now|order now|shop now|tap|click|find it|get yours)\b", clause)
         destination = re.search(r"\b(?:carrito|enlace|link|bio|tienda|cart|store|shop|checkout)\b", clause)
         if not action or not destination:
