@@ -797,7 +797,14 @@
           "code_revision": "a96af1c0af745f06600c7fadebaedea1f4e52d68"
         }
       ],
-      "gold_status": "incomplete_raw_time_alignment"
+      "gold_status": "incomplete_raw_time_alignment",
+      "source_identity_check": {
+        "candidate_library_filename": "00-VIDEO-2026-07-30-09-18-03.mp4",
+        "candidate_duration_sec": 228.80267,
+        "gold_keep_reaches_sec": 361.55,
+        "disposition": "excluded_from_alignment_due_to_duration_mismatch",
+        "reason": "The candidate ends before the authoritative Gold keep window; it cannot be used as the RAW-time source for this map."
+      }
     },
     {
       "source_key": "Yaskira/08.mp4",
