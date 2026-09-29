@@ -1,4 +1,4 @@
-"""Recalculate interval overlap for saved selector outputs against owner Gold.
+"""Recalculate interval overlap for saved selector outputs against historical labels.
 
 This is an offline metric replay only. It does not invoke ASR, AV, selection,
 Boundary, or rendering. The manifest deliberately keeps separate historical runs.
@@ -45,7 +45,8 @@ def replay(manifest):
             row = {"source_key": source["source_key"], "kind": observation["kind"],
                    "run_id": observation.get("run_id"), "artifact_id": observation.get("artifact_id"),
                    "selection_status": observation.get("selection_status"),
-                   "source_sha256": observation.get("source_sha256")}
+                   "source_sha256": observation.get("source_sha256"),
+                   "label_provenance_status": source.get("label_provenance_status", "unverified")}
             if not gold:
                 row["metric_status"] = source.get("gold_status", "unscored_gold_missing")
             elif selected_raw is None:
@@ -75,7 +76,8 @@ def replay(manifest):
                         ) if reported.get(src) is not None
                     }
             output.append(row)
-    return {"manifest_schema": manifest["schema"], "replay_scope": "selected interval vs Gold metric only",
+    return {"manifest_schema": manifest["schema"],
+            "replay_scope": "saved selected interval vs provisional historical label; not an editorial acceptance score",
             "observations": output}
 
 
