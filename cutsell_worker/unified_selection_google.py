@@ -632,10 +632,12 @@ def _parse_take_competitions(
             confidence = float(item["confidence"])
             if relation not in {"equivalent_take", "complementary", "independent"} or not 0 <= confidence <= 1:
                 raise ValueError("invalid relation or confidence")
-            if len(str(item["reason"])) > 120:
-                raise ValueError("competition reason too long")
+            # The explanation is audit text, not decision authority. Keep a
+            # bounded prefix instead of discarding valid comparison indices
+            # when a provider exceeds the requested prose length.
+            reason = str(item["reason"])[:120]
             result.append(UnifiedTakeCompetition(winners, covered, unique, relation, confidence,
-                                                 str(item["reason"])))
+                                                 reason))
         return tuple(result)
     except (KeyError, TypeError, ValueError, IndexError) as exc:
         raise UnifiedSelectionUnreliableResponseError(f"invalid V2 take competitions: {exc}") from exc

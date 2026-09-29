@@ -845,6 +845,41 @@ def test_v2_focused_av_preserves_clean_second_start_of_usable_alternate():
     assert [item.clip_id for item in without_av.selected] == ["winner"]
 
 
+def test_v2_split_conditional_keeps_only_source_spoken_clean_instruction():
+    from cutsell_worker.contracts import Word
+    before = replace(clip("before", 9, 16.8,
+                          "false start every every if you're", selected=False),
+                     words=(Word("false", 9, 9.5), Word("if", 16.1, 16.4),
+                            Word("you're", 16.4, 16.8)))
+    suffix = "gonna do this in skincare put vinegar every morning wash your face".split()
+    current = replace(clip("current", 16.8, 24.8, " ".join(suffix), selected=False),
+                      words=tuple(Word(w, 16.8 + i * .6, 16.8 + (i + 1) * .6)
+                                  for i, w in enumerate(suffix)))
+    winner = clip("winner", 47, 65, "Put vinegar in your skincare every morning",
+                  selected=False)
+    def make_draft(role):
+        return DraftTimeline(SCHEMA_VERSION, "p", EditStrategy.STORYTELLING,
+            (), (before, current, winner), (), {
+                "editorial_engine_v2_request": True,
+                "whole_video_context": {"sources": [{"source_asset_id": "src",
+                    "audiovisual_evidence": json.dumps({"regions": [
+                        {"start": 8, "end": 26, "role": role, "confidence": .95}]})}]},
+            })
+    reasoner = FakeReasoner([
+        v2_decision("before", "discard", "failed", .96, 0, "failed_delivery", 0),
+        v2_decision("current", "discard", "retry_alternate", .95, 0, "redundant_retry", 1),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 2),
+    ], take_competitions=(UnifiedTakeCompetition(("winner",), ("current",), (),
+                                                   "equivalent_take", .95),))
+    out = apply_unified_selection_reasoner(make_draft("audience"), reasoner)
+    assert [item.clip_id for item in out.selected] == ["current", "winner"]
+    assert out.selected[0].start == 16.1
+    assert out.selected[0].text.startswith("if you're gonna")
+    assert "false start" not in out.selected[0].text
+    assert [item.clip_id for item in apply_unified_selection_reasoner(
+        make_draft("mixed"), reasoner).selected] == ["winner"]
+
+
 def test_unified_request_requires_one_structured_human_style_decision_per_candidate():
     payload = build_unified_selection_payload(draft())
     request = build_unified_selection_request(payload, max_output_tokens=1000)

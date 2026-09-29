@@ -344,7 +344,8 @@ def _apply_v2_take_competitions(
                         # claim for independent editorial resolution.
                         reason = 'material_claim_not_covered_by_winner'
                         continue
-                    if overrides[i] == "focused_av_clean_second_start_preserved":
+                    if overrides[i] in {"focused_av_clean_second_start_preserved",
+                                        "source_spoken_split_instruction_preserved"}:
                         reason = "focused_av_clean_action_preserved"
                         continue
                     if (covered_clip.audio_muted and not covered_clip.words
@@ -887,6 +888,61 @@ def _refine_repeated_opening_alternate(draft, clips, decisions, actions, overrid
     return refined
 
 
+def _preserve_split_conditional_instruction(draft, clips, decisions, actions, overrides):
+    """Rejoin a spoken condition split at a candidate boundary.
+
+    A short failed earlier take can end with the start of a clean conditional
+    instruction. Only the source words that complete that condition cross the
+    boundary; an unrelated failed take never enters the selected timeline.
+    """
+    audience = _high_confidence_audience_spans(draft)
+    refined = {}
+    for index, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if (actions[index] != "discard" or decision.reason_code != "redundant_retry"
+                or decision.relation != "retry_alternate" or len(clip.words) < 10):
+            continue
+        previous = next((other for other in clips
+                         if other.source_asset_id == clip.source_asset_id
+                         and 0 <= clip.start - other.end <= .25
+                         and other.clip_id != clip.clip_id
+                         and decisions[other.clip_id].reason_code == "failed_delivery"
+                         and len(other.words) >= 2), None)
+        if previous is None:
+            continue
+        prefix = tuple(previous.words[-2:])
+        if (not re.fullmatch(r"if\s+you(?:'re|re)|si\s+(?:tu|tú|te)",
+                             " ".join(word.text for word in prefix).casefold())
+                or not re.match(r"^(?:gonna|going\s+to|vas\s+a)\b", clip.text.casefold())):
+            continue
+        duration = clip.end - prefix[0].start
+        if not 6 <= duration <= 14:
+            continue
+        coverage = sum(max(0., min(clip.end, end) - max(prefix[0].start, start))
+                       for start, end in audience.get(clip.source_asset_id, ()))
+        if coverage < .85 * duration:
+            continue
+        selected_text = " ".join(other.text for j, other in enumerate(clips)
+                                 if actions[j] == "select" and
+                                 other.source_asset_id == clip.source_asset_id)
+        # A specific physical instruction must be absent from selected speech.
+        # Generic product nouns and stylistic wording cannot rescue a retry.
+        instruction = re.search(
+            r"\b(?:wash|clean|apply|rinse|lava|lavar|limpia|aplica)\s+"
+            r"(?:your|the|tu|la|el)\s+(?:face|cara|rostro|skin|piel)\b",
+            clip.text.casefold(),
+        )
+        if not instruction or instruction.group() in selected_text.casefold():
+            continue
+        words = (*prefix, *clip.words)
+        text = " ".join(word.text for word in words)
+        refined[clip.clip_id] = replace(clip, start=float(prefix[0].start),
+                                        text=text, caption_text=text, words=words)
+        actions[index] = "select"
+        overrides[index] = "source_spoken_split_instruction_preserved"
+    return refined
+
+
 def _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides):
     """Do not equate a repeated instruction with a repeated visual action.
 
@@ -1029,6 +1085,9 @@ def apply_unified_selection_reasoner(
             draft, clips, decisions, actions, overrides,
         )
         refined_clips.update(_refine_repeated_opening_alternate(
+            draft, clips, decisions, actions, overrides,
+        ))
+        refined_clips.update(_preserve_split_conditional_instruction(
             draft, clips, decisions, actions, overrides,
         ))
         _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides)

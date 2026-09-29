@@ -417,6 +417,23 @@ def test_v2_invalid_optional_comparison_cannot_discard_complete_decisions():
     ]
 
 
+def test_v2_comparison_keeps_valid_membership_when_explanation_is_verbose():
+    from cutsell_worker.unified_selection_google import _parse_take_competitions
+    payload = json.loads(v2_decisions_json(2))
+    payload["competitions"] = [{
+        "winner_candidate_indices": [0], "covered_candidate_indices": [1],
+        "material_unique_candidate_indices": [], "relation": "equivalent_take",
+        "confidence": .95, "reason": "Repeated explanation. " * 20,
+    }]
+    competitions = _parse_take_competitions(
+        gemini_response(json.dumps(payload)),
+        [{"clip_id": "first"}, {"clip_id": "second"}],
+    )
+    assert competitions[0].winner_clip_ids == ("first",)
+    assert competitions[0].covered_clip_ids == ("second",)
+    assert len(competitions[0].reason) == 120
+
+
 def test_broad_v2_selection_gets_bounded_second_pass_when_first_pass_omits_competitions():
     data = {"competitions": [{
         "winner_candidate_indices": [5], "covered_candidate_indices": [0, 1, 2],
