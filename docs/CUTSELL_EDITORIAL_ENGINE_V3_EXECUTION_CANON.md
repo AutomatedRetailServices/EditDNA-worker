@@ -86,7 +86,7 @@ La implementación puede ubicar módulos nuevos junto a `cutsell_worker/editoria
 
 | Puerta | Estado al crear este canon | Evidencia pendiente |
 | --- | --- | --- |
-| 0 Inventario | `NOT_STARTED` | Inventario completo 01–10 y alineación total de 07 |
+| 0 Inventario | `IN_PROGRESS` | [Inventario de evidencia 2026-09-29](evidence/CUTSELL_V3_DOOR0_INVENTORY_20260929.md); faltan paquetes V2 actuales de 01–05, alineación completa de 07 y manifiesto normalizado replayable 01–10 |
 | 1 Intentos | `NOT_STARTED` | Contrato V3 y pruebas de representabilidad |
 | 2 Comparador | `NOT_STARTED` | Decisiones trazables por idea |
 | 3 Plan | `NOT_STARTED` | Adaptador a Freeze/Boundary/render |
@@ -94,4 +94,4 @@ La implementación puede ubicar módulos nuevos junto a `cutsell_worker/editoria
 | 5 RAW y prueba ciega | `NOT_STARTED` | MP4 inspeccionados y videos no vistos |
 | 6 Retiro V2 | `NOT_STARTED` | Evidencia de sustitución y reversión |
 
-**Próxima acción al iniciar implementación:** puerta 0. Este documento define dirección y criterio de avance; no afirma que V3 exista ni fija una fecha sin inventario verificable.
+**Puerta 0 ya iniciada:** inventario de evidencia existente. No reejecutar RAW para llenar gaps antes de verificar fuentes/artefactos; continuar con la lista de salida de la matriz enlazada. Este documento define dirección y criterio de avance; no afirma que V3 exista ni fija una fecha sin inventario verificable.

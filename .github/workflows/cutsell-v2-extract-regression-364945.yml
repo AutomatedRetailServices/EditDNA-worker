@@ -1,4 +1,4 @@
-name: Extract V2 Regression 365467 Focused Delivery
+name: Extract V2 Door 0 Saved Decision Evidence
 on:
   push:
     branches: [feat/editorial-engine-v2-whole-video-rebuild]
@@ -10,7 +10,7 @@ permissions:
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -19,158 +19,108 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p raw compact
-          gh run download 36546701251 --repo "$GITHUB_REPOSITORY" \
-            --name cutsell-editorial-v2-09-verification-36546701251 \
-            --dir raw
+          mkdir -p raw-02-06 raw-01-10 compact
+          gh run download 36502632708 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-focused-regression-02-03-04-06-09-36502632708 \
+            --dir raw-02-06
+          gh run download 36502756185 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-remaining-regression-01-05-07-10-36502756185 \
+            --dir raw-01-10
           python - <<'PY'
           import json
           from pathlib import Path
-
-          root = Path("raw")
-          def read(path):
-              return json.loads(path.read_text(encoding="utf-8"))
-
-          report_path = root / "report.json"
-          report = read(report_path) if report_path.exists() else {}
-          comparison_path = root / "gold_comparison.json"
-          gold = read(comparison_path) if comparison_path.exists() else []
-          compact = {
-              "source_count": report.get("source_count"),
-              "completed_count": report.get("completed_count"),
-              "execution_failure_count": report.get("execution_failure_count"),
-              "gold_comparison": gold,
-              "sources": [],
-              "failures": report.get("failures", []),
-              "boundary_failure_evidence": [],
+          gold = {
+              "Yaskira/01.mp4": [(0, 58), (59, 115.561)],
+              "Yaskira/02.mp4": [(0, 49), (50, 68), (70, 99.262)],
+              "Yaskira/03.mp4": [(0, 19.623)],
+              "Yaskira/04.MP4": [(5, 27), (28, 44)],
+              "Yaskira/05.MP4": [(98, 137)],
+              "Yaskira/06.MP4": [(85, 107)],
+              "Yaskira/08.mp4": [(120, 147)],
+              "Yaskira/09.mp4": [(5, 14), (19, 28), (52, 66), (73, 91), (97, 120)],
+              "Yaskira/10.MOV": [(16, 25), (55, 64), (75, 79), (83, 97)],
           }
-          for path in sorted((root / "results").glob("*boundary-failure.json")):
-              compact["boundary_failure_evidence"].append({
-                  "file": path.name,
-                  "evidence": read(path),
-              })
-          for path in sorted((root / "results").glob("*.json")):
-              result = read(path)
-              if "source_key" not in result:
-                  continue
-              diag = result.get("diagnostics") or {}
-              reasoner = diag.get("unified_selection_reasoner") or {}
-              intervals = {
-                  str(row.get("clip_id")): {
-                      "source_order": row.get("source_order"),
-                      "start": row.get("start"), "end": row.get("end"),
-                  }
-                  for row in (diag.get("candidate_intervals") or reasoner.get("candidate_intervals") or ())
-                  if row.get("clip_id")
-              }
-              texts = {str(item.get("clip_id")): item.get("text")
-                       for bucket in ("selected", "alternates", "discarded")
-                       for item in result.get(bucket, ())}
-              decisions = []
-              for row in reasoner.get("decisions") or ():
-                  decisions.append({
-                      **intervals.get(str(row.get("clip_id")), {}),
-                      "clip_id": row.get("clip_id"),
-                      "text": texts.get(str(row.get("clip_id"))),
-                      "model_action": row.get("model_action"),
-                      "effective_action": row.get("effective_action"),
-                      "relation": row.get("relation"),
-                      "reason_code": row.get("reason_code"),
-                      "safety_override": row.get("safety_override"),
-                  })
-              retry_claim_conflicts = [
-                  {field: row.get(field) for field in (
-                      "clip_id", "source_asset_id", "status", "missing_quantity",
-                      "missing_condition", "unique_cta", "missing_negation", "protected_topic")}
-                  for row in (diag.get("v2_retry_claim_conflicts") or ())
-              ]
-              competitions = []
-              for row in (diag.get("v2_take_competitions") or ()):
-                  competitions.append({
-                      "winners": [dict(clip_id=cid, **intervals.get(str(cid), {}))
-                                  for cid in row.get("winners", ())],
-                      "covered": [dict(clip_id=cid, **intervals.get(str(cid), {}))
-                                  for cid in row.get("covered", ())],
-                      "material_unique": [dict(clip_id=cid, **intervals.get(str(cid), {}))
-                                          for cid in row.get("material_unique", ())],
-                      "relation": row.get("relation"),
-                      "confidence": row.get("confidence"),
-                      "decision": row.get("decision"),
-                      "reason_code": row.get("reason_code"),
-                      "reason": row.get("reason"),
-                  })
-              av_regions = []
-              for source in (diag.get("whole_video_context") or {}).get("sources") or ():
-                  try:
-                      evidence = json.loads(str(source.get("audiovisual_evidence") or "{}"))
-                  except (TypeError, ValueError, json.JSONDecodeError):
+          reports = []
+          for folder, run_id in (("raw-02-06", 36502632708), ("raw-01-10", 36502756185)):
+              path = Path(folder) / "report.json"
+              if path.exists():
+                  reports.append((run_id, json.loads(path.read_text(encoding="utf-8"))))
+          sources = {}
+          failures = []
+          for run_id, report in reports:
+              failures.extend({"run_id": run_id, **row} for row in report.get("failures", []))
+              for result in report.get("results", []):
+                  key = result.get("source_key")
+                  if not key:
                       continue
-                  for region in evidence.get("regions") or ():
-                      av_regions.append({
-                          "source_asset_id": source.get("source_asset_id"),
-                          "start": region.get("start"), "end": region.get("end"),
-                          "role": region.get("role"), "confidence": region.get("confidence"),
-                          "visual_observation": region.get("visual_observation"),
-                          "audio_observation": region.get("audio_observation"),
-                          "reason": region.get("reason"),
-                      })
-                  for region in evidence.get("focused_delivery_regions") or ():
-                      av_regions.append({
-                          "source_asset_id": source.get("source_asset_id"),
-                          "start": region.get("start"), "end": region.get("end"),
-                          "role": region.get("role"), "confidence": region.get("confidence"),
-                          "visual_observation": region.get("visual_observation"),
-                          "audio_observation": region.get("audio_observation"),
-                          "reason": region.get("reason"), "focused": True,
-                      })
-              compact["sources"].append({
-                  "source_key": result["source_key"],
-                  "source_duration_sec": result.get("source_duration_sec"),
-                  "selection_status": reasoner.get("status"),
-                  "competition_review": diag.get("competition_review"),
-                  "selected_intervals": [
-                      {"clip_id": row.get("clip_id"), "start": row.get("start"), "end": row.get("end")}
-                      for row in result.get("selected", ())
-                  ],
-                  "candidate_intervals": intervals,
-                  "decisions": decisions,
-                  "take_competitions": competitions,
-                  "retry_claim_conflicts": retry_claim_conflicts,
-                  "audiovisual_regions": av_regions,
-                  "av_probe_audit": [
-                      item for item in ((diag.get("whole_video_context") or {}).get("input_audit") or {}).get("native_av", ())
-                      if isinstance(item, dict) and 'focused_delivery' in str(item.get("contract_version"))
-                  ],
-                  "focused_word_evidence": [
-                      {"start": segment.get("start"), "end": segment.get("end"),
-                       "text": segment.get("text"), "words": segment.get("words")}
-                      for segment in (result.get("timed_asr_replay_evidence") or {}).get("raw_segments") or ()
-                      if (result["source_key"] == "Yaskira/09.mp4" and
-                          any(float(segment.get("start", -1)) < high and
-                              float(segment.get("end", -1)) > low
-                              for low, high in ((8, 30), (86, 122)))) or
-                         (result["source_key"] == "Yaskira/10.MOV" and
-                          any(float(segment.get("start", -1)) < high and
-                              float(segment.get("end", -1)) > low
-                              for low, high in ((8, 26), (46, 67))))
-                  ],
-                  "render_qc": (result.get("live_render_qc") or {}).get("status"),
-              })
-          out = Path("compact/regression-365467-interval-decisions.json")
-          out.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
+                  diag = result.get("diagnostics") or {}
+                  reasoner = diag.get("unified_selection_reasoner") or {}
+                  intervals = {str(row.get("clip_id")): row for row in
+                      (diag.get("candidate_intervals") or reasoner.get("candidate_intervals") or [])
+                      if row.get("clip_id")}
+                  candidates = [
+                      {"bucket": bucket, "clip_id": clip.get("clip_id"),
+                       "start": intervals.get(str(clip.get("clip_id")), {}).get("start", clip.get("start")),
+                       "end": intervals.get(str(clip.get("clip_id")), {}).get("end", clip.get("end")),
+                       "text": clip.get("text"), "audio_muted": clip.get("audio_muted")}
+                      for bucket in ("selected", "alternates", "discarded")
+                      for clip in result.get(bucket, [])
+                  ]
+                  decision_rows = []
+                  for row in reasoner.get("decisions") or []:
+                      cid = str(row.get("clip_id"))
+                      clip = next((item for item in candidates if str(item.get("clip_id")) == cid), {})
+                      decision_rows.append({**{k: intervals.get(cid, {}).get(k) for k in ("start", "end", "source_order")},
+                          "clip_id": cid, "text": clip.get("text"),
+                          "action": row.get("effective_action"), "model_action": row.get("model_action"),
+                          "relation": row.get("relation"), "reason_code": row.get("reason_code"),
+                          "safety_override": row.get("safety_override")})
+                  selected = [item for item in candidates if item["bucket"] == "selected"]
+                  duration = float(result.get("source_duration_sec") or 0)
+                  intervals_gold = gold.get(key)
+                  comparison = None
+                  if intervals_gold:
+                      overlap = sum(max(0, min(float(c.get("end") or 0), hi) - max(float(c.get("start") or 0), lo))
+                          for c in selected for lo, hi in intervals_gold)
+                      keep = sum(hi - lo for lo, hi in intervals_gold)
+                      total = sum(float(c.get("end") or 0) - float(c.get("start") or 0) for c in selected)
+                      comparison = {"keep_gold_sec": round(keep, 3), "keep_retained_sec": round(overlap, 3),
+                          "keep_lost_sec": round(max(0, keep - overlap), 3),
+                          "delete_retained_sec": round(max(0, total - overlap), 3)}
+                  av = []
+                  for source in (diag.get("whole_video_context") or {}).get("sources") or []:
+                      try:
+                          evidence = json.loads(str(source.get("audiovisual_evidence") or "{}"))
+                      except (TypeError, ValueError):
+                          continue
+                      av.extend({"source_asset_id": source.get("source_asset_id"), **region}
+                          for region in (*evidence.get("regions", []), *evidence.get("focused_delivery_regions", [])))
+                  sources[key] = {"run_id": run_id, "source_duration_sec": duration,
+                      "source_sha256": result.get("source_sha256"),
+                      "engine_v2_status": (diag.get("editorial_engine_v2") or {}).get("status"),
+                      "selection_status": reasoner.get("status"), "competition_review": diag.get("competition_review"),
+                      "selection_gold_comparison": comparison, "selected": selected,
+                      "candidate_intervals": intervals, "candidates": candidates,
+                      "decisions": decision_rows, "take_competitions": diag.get("v2_take_competitions"),
+                      "attempt_reconstruction": diag.get("attempt_reconstruction"),
+                      "av_regions": av,
+                      "asr_segments": (result.get("timed_asr_replay_evidence") or {}).get("raw_segments", []),
+                      "render_qc": (result.get("live_render_qc") or {}).get("status")}
+          output = {"classification": "historical V2 multi-video runs; not current V3 qualification",
+              "run_ids": [run for run, _ in reports], "sources": sources, "failures": failures,
+              "unscored_source_keys": ["Yaskira/07.mp4"]}
+          out = Path("compact/door0-v2-saved-decision-evidence.json")
+          out.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps({
-              "source_count": compact["source_count"],
-              "completed_count": compact["completed_count"],
-              "sources": [{
-                  "source_key": row["source_key"],
-                  "selected_count": len(row["selected_intervals"]),
-                  "candidate_count": len(row["candidate_intervals"]),
-                  "decision_count": len(row["decisions"]),
-              } for row in compact["sources"]],
-              "failures": compact["failures"],
+              "run_ids": output["run_ids"],
+              "sources": [{"source_key": key, "run_id": row["run_id"],
+                  "selected_count": len(row["selected"]), "candidate_count": len(row["candidates"]),
+                  "decision_count": len(row["decisions"]), "gold": row["selection_gold_comparison"]}
+                  for key, row in sorted(sources.items())],
+              "failures": failures,
           }, indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: v2-regression-365467-interval-decisions
-          path: compact/regression-365467-interval-decisions.json
+          name: v2-door0-saved-decision-evidence
+          path: compact/door0-v2-saved-decision-evidence.json
