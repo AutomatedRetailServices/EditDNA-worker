@@ -1,4 +1,4 @@
-name: Extract V2 Regression 365187 Decisions
+name: Extract V2 Regression 365307 Decisions
 on:
   push:
     branches: [feat/editorial-engine-v2-whole-video-rebuild]
@@ -20,8 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p raw compact
-          gh run download 36518797026 --repo "$GITHUB_REPOSITORY" \
-            --name cutsell-editorial-v2-07-09-verification-36518797026 \
+          gh run download 36530757268 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-06-09-10-verification-36530757268 \
             --dir raw
           python - <<'PY'
           import json
@@ -127,7 +127,7 @@ jobs:
                   "audiovisual_regions": av_regions,
                   "render_qc": (result.get("live_render_qc") or {}).get("status"),
               })
-          out = Path("compact/regression-365187-interval-decisions.json")
+          out = Path("compact/regression-365307-interval-decisions.json")
           out.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps({
               "source_count": compact["source_count"],
@@ -143,5 +143,5 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: v2-regression-365187-interval-decisions
-          path: compact/regression-365187-interval-decisions.json
+          name: v2-regression-365307-interval-decisions
+          path: compact/regression-365307-interval-decisions.json
