@@ -68,6 +68,12 @@ jobs:
                       "reason_code": row.get("reason_code"),
                       "safety_override": row.get("safety_override"),
                   })
+              retry_claim_conflicts = [
+                  {field: row.get(field) for field in (
+                      "clip_id", "source_asset_id", "status", "missing_quantity",
+                      "missing_condition", "unique_cta", "missing_negation", "protected_topic")}
+                  for row in (diag.get("v2_retry_claim_conflicts") or ())
+              ]
               competitions = []
               for row in (diag.get("v2_take_competitions") or ()):
                   competitions.append({
@@ -83,6 +89,18 @@ jobs:
                       "reason_code": row.get("reason_code"),
                       "reason": row.get("reason"),
                   })
+              av_regions = []
+              for source in (diag.get("whole_video_context") or {}).get("sources") or ():
+                  try:
+                      evidence = json.loads(str(source.get("audiovisual_evidence") or "{}"))
+                  except (TypeError, ValueError, json.JSONDecodeError):
+                      continue
+                  for region in evidence.get("regions") or ():
+                      av_regions.append({
+                          "source_asset_id": source.get("source_asset_id"),
+                          "start": region.get("start"), "end": region.get("end"),
+                          "role": region.get("role"), "confidence": region.get("confidence"),
+                      })
               compact["sources"].append({
                   "source_key": result["source_key"],
                   "source_duration_sec": result.get("source_duration_sec"),
@@ -95,6 +113,8 @@ jobs:
                   "candidate_intervals": intervals,
                   "decisions": decisions,
                   "take_competitions": competitions,
+                  "retry_claim_conflicts": retry_claim_conflicts,
+                  "audiovisual_regions": av_regions,
                   "render_qc": (result.get("live_render_qc") or {}).get("status"),
               })
           out = Path("compact/regression-364945-interval-decisions.json")
