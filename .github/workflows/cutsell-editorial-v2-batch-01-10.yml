@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Focused Regression 02-03-04-06-09 with focused mixed-delivery evidence
+name: CutSell Editorial Engine V2 Remaining Regression 01-05-07-10 with focused mixed-delivery evidence
 
 on:
   workflow_dispatch:
@@ -112,11 +112,10 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Yaskira/02.mp4",
-              "Yaskira/03.mp4",
-              "Yaskira/04.MP4",
-              "Yaskira/06.MP4",
-              "Yaskira/09.mp4",
+              "Yaskira/01.mp4",
+              "Yaskira/05.MP4",
+              "Yaskira/07.mp4",
+              "Yaskira/10.MOV",
           ]
           root = Path("editorial-v2-focused-regression")
           results = []
@@ -127,7 +126,7 @@ jobs:
               try:
                   result = run_single_universal_clean_cut_validation(
                       key,
-                      project_id=f"cutsell-editorial-v2-focused-regression-{index:02d}",
+                      project_id=f"cutsell-editorial-v2-remaining-regression-{index:02d}",
                       preview_output=str(preview),
                   )
                   v2_status = result.get("diagnostics", {}).get("editorial_engine_v2", {}).get("status")
@@ -235,7 +234,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-focused-regression-02-03-04-06-09-${{ github.run_id }}
+          name: cutsell-editorial-v2-remaining-regression-01-05-07-10-${{ github.run_id }}
           path: editorial-v2-focused-regression/
           if-no-files-found: warn
           retention-days: 30
