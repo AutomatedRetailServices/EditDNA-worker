@@ -867,9 +867,29 @@ jobs:
               'CUTSELL_HYBRID_PRIMARY_MODEL': 'gemini-3.5-flash-lite',
               'CUTSELL_WATCH_LISTEN_AV_ENABLED': '1',
               'CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD': '0.10',
+              # whole_video_av.GeminiWholeVideoAVProvider refuses to start
+              # unless the per-edit budget AND both conservative per-million
+              # token prices are finite and positive (run 36587713782 failed
+              # inside the container with exactly that ValueError because the
+              # two prices were missing here). Same values every other V2
+              # Yaskira workflow uses for gemini-3.5-flash-lite.
+              'CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION': '0.30',
+              'CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION': '2.50',
+              'CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED': '1',
           })
+          # Fail here, on the free CPU runner, before any paid GPU dispatch,
+          # if the AV configuration would be rejected by the worker.
+          for key in ('CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD',
+                      'CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION',
+                      'CUTSELL_WATCH_LISTEN_AV_OUTPUT_USD_PER_MILLION'):
+              try:
+                  value = float(env.get(key, ''))
+              except ValueError:
+                  value = float('nan')
+              if not (value == value and value not in (float('inf'), float('-inf')) and value > 0):
+                  raise SystemExit(f'{key} must be a finite positive number; no paid GPU invocation')
           path.write_text(json.dumps(env))
-          print('Yaskira01 review: Medium + WhisperX; Gemini 3.5 audiovisual enabled')
+          print('Yaskira01 review: Medium + WhisperX; Gemini 3.5 audiovisual enabled with explicit AV budget and prices')
           PYREVIEW
 
       - name: D-235U lost-atom materiality Freeze authority overlay
