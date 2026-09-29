@@ -204,6 +204,52 @@ def test_no_action_candidate_from_broad_region_without_focused_visual_proof(
     assert actions == []
 
 
+def test_focused_delivery_refines_mixed_region_and_maps_local_times(monkeypatch, tmp_path):
+    av, _, _ = provider(tmp_path)
+    prepared = tmp_path / 'prepared.mp4'
+    prepared.write_bytes(b'prepared')
+    monkeypatch.setenv('CUTSELL_EDITORIAL_ENGINE_V2', '1')
+
+    def slice_media(path, dest, start, length):
+        dest.write_bytes(b'video-and-audio')
+        return length
+
+    av.media_slicer = slice_media
+    calls = []
+
+    def observed(contents, source_asset, digest, length, prepared_duration, start, index):
+        calls.append((length, start, index))
+        return {'regions': [
+            {'start': 1.1, 'end': 6.8, 'role': 'audience', 'confidence': .96,
+             'audio_observation': 'Delivers a complete claim to camera',
+             'visual_observation': 'Creator talking to camera', 'reason': 'clear delivery'}
+        ]}
+
+    av._observe_window = observed
+    refined = av._focus_mixed_delivery(
+        replace(source(), duration_sec=45), prepared, 'a' * 64,
+        [{'start': 17.5, 'end': 26.0, 'role': 'mixed', 'confidence': .82},
+         {'start': 4, 'end': 8, 'role': 'audience', 'confidence': .99},
+         {'start': 30, 'end': 39, 'role': 'uncertain', 'confidence': .61}],
+        tmp_path)
+
+    assert len(calls) == 1
+    assert calls[0][1] == 16.5
+    assert calls[0][0] == 10.5
+    assert refined[0]['start'] == 17.6
+    assert refined[0]['end'] == 23.3
+    assert refined[0]['evidence_scope'] == 'focused_mixed_delivery_probe'
+    assert av.audit_records[0]['status'] == 'probe_nominated'
+
+
+def test_focused_delivery_probe_is_disabled_without_v2(monkeypatch, tmp_path):
+    av, _, _ = provider(tmp_path)
+    monkeypatch.delenv('CUTSELL_EDITORIAL_ENGINE_V2', raising=False)
+    assert av._focus_mixed_delivery(
+        replace(source(), duration_sec=45), tmp_path / 'missing.mp4', 'digest',
+        [{'start': 1, 'end': 8, 'role': 'mixed', 'confidence': .99}], tmp_path) == []
+
+
 def test_shaking_container_during_measured_silence_nominates_but_does_not_approve_action(
     monkeypatch, tmp_path,
 ):

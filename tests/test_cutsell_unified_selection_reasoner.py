@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION
 from cutsell_worker.unified_selection_google import (
@@ -593,6 +594,54 @@ def test_v2_av_majority_audience_preserves_unique_delivery_with_short_failed_tai
     ])
     out = apply_unified_selection_reasoner(d, reasoner)
     assert [item.clip_id for item in out.selected] == ["mixed", "winner"]
+
+
+def test_v2_focused_av_rescues_only_word_aligned_clean_delivery_from_mixed_candidate():
+    from cutsell_worker.contracts import Word
+
+    mixed = replace(
+        clip("mixed", 19.218, 28.14,
+             "Y aparte tus músculos van a estar más fuerte en 30 días tú vas a ver resultados", selected=False),
+        words=(Word("Y", 19.22, 19.35), Word("aparte", 19.36, 19.72),
+               Word("tus", 19.73, 19.91), Word("músculos", 19.92, 20.42),
+               Word("van", 20.43, 20.64), Word("a", 20.65, 20.72),
+               Word("estar", 20.73, 21.10), Word("más", 21.11, 21.34),
+               Word("fuerte", 21.35, 21.78), Word("en", 21.79, 21.91),
+               Word("30", 21.92, 22.20), Word("días", 22.21, 22.56),
+               Word("resultados", 23.5, 24.1), Word("reset", 26.4, 27.0)),
+    )
+    winner = clip("winner", 50, 70,
+                  "Watermelon flavor mixes into one bottle daily", selected=False)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(), alternates=(mixed, winner), discarded=(),
+        diagnostics={
+            "editorial_engine_v2_request": {"require_audiovisual_evidence": True},
+            "whole_video_context": {"sources": [{
+                "source_asset_id": "src",
+                "audiovisual_evidence": json.dumps({
+                    "regions": [{"start": 17.5, "end": 26, "role": "mixed", "confidence": .9}],
+                    "focused_delivery_regions": [{
+                        "start": 18.6, "end": 24.3, "role": "audience", "confidence": .96,
+                    }],
+                }),
+            }]},
+        },
+    )
+    reasoner = FakeReasoner([
+        v2_decision("mixed", "discard", "failed", .9, 0, "failed_delivery", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ])
+
+    out = apply_unified_selection_reasoner(d, reasoner)
+
+    refined = next(item for item in out.selected if item.clip_id == "mixed")
+    assert refined.start == 19.22
+    assert refined.end == 24.1
+    assert "reset" not in refined.text
+    row = next(row for row in out.diagnostics["unified_selection_reasoner"]["decisions"]
+               if row["clip_id"] == "mixed")
+    assert row["safety_override"] == "focused_av_clean_delivery_preserved"
 
 
 def test_unified_request_requires_one_structured_human_style_decision_per_candidate():

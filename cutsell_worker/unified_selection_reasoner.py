@@ -589,7 +589,12 @@ def _high_confidence_audience_spans(draft: DraftTimeline) -> dict[str, tuple[tup
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         rows = []
-        for region in evidence.get("regions") or ():
+        # Focused local delivery probes refine broad mixed/uncertain whole-source
+        # observations. They remain advisory; only high-confidence audience spans
+        # participate in the same coverage and unique-content gates below.
+        regions = tuple(evidence.get("regions") or ()) + tuple(
+            evidence.get("focused_delivery_regions") or ())
+        for region in regions:
             try:
                 start, end = float(region["start"]), float(region["end"])
                 confidence = float(region.get("confidence", 0))
@@ -647,6 +652,66 @@ def _preserve_unique_content_when_av_contradicts_failed(
         actions[index] = "select"
         overrides[index] = "av_audience_unique_content_overrides_failed_label"
         selected_tokens.update(tokens)
+
+
+def _refine_failed_delivery_from_focused_av(draft, clips, decisions, actions, overrides):
+    """Keep only word-aligned clean speech confirmed by a focused AV probe.
+
+    A localized probe may identify a valid delivery inside a broad candidate
+    that also contains laughter or a reset. When ASR word timings exist, trim
+    to words fully inside the focused audience span; never promote the entire
+    mixed candidate or invent new timestamps.
+    """
+    whole = (draft.diagnostics or {}).get("whole_video_context") or {}
+    focused = {}
+    for source in whole.get("sources") or ():
+        try:
+            evidence = json.loads(str(source.get("audiovisual_evidence") or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        rows = []
+        for region in evidence.get("focused_delivery_regions") or ():
+            try:
+                start, end = float(region["start"]), float(region["end"])
+                confidence = float(region.get("confidence", 0))
+                if (region.get("role") == "audience" and .90 <= confidence <= 1
+                        and math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+                    rows.append((start, end))
+            except (AttributeError, KeyError, TypeError, ValueError):
+                continue
+        if rows:
+            focused[str(source.get("source_asset_id") or "")] = tuple(rows)
+
+    refined = {}
+    covered_tokens = set().union(*(
+        _content_tokens(clip.text) for index, clip in enumerate(clips)
+        if actions[index] == "select"
+    )) if any(action == "select" for action in actions) else set()
+    for index, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if decision.reason_code != "failed_delivery" or not clip.words:
+            continue
+        if actions[index] not in {"discard", "select"}:
+            continue
+        for start, end in focused.get(clip.source_asset_id, ()):
+            words = tuple(word for word in clip.words
+                          if float(word.start) >= start and float(word.end) <= end
+                          and float(word.start) < float(word.end))
+            if len(words) < 3:
+                continue
+            text = " ".join(str(word.text).strip() for word in words if str(word.text).strip())
+            if len(_content_tokens(text) - covered_tokens) < 3:
+                continue
+            refined[clip.clip_id] = replace(
+                clip, start=min(float(word.start) for word in words),
+                end=max(float(word.end) for word in words), text=text,
+                caption_text=text, words=words,
+            )
+            actions[index] = "select"
+            overrides[index] = "focused_av_clean_delivery_preserved"
+            covered_tokens.update(_content_tokens(text))
+            break
+    return refined
 
 
 def _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides):
@@ -731,6 +796,7 @@ def apply_unified_selection_reasoner(
 
     actions: list[str] = []
     overrides: list[str | None] = []
+    refined_clips = {}
     for clip in clips:
         decision = decisions[clip.clip_id]
         action, safety_override = _effective_action(decision, current.get(clip.clip_id, "swap"))
@@ -742,6 +808,9 @@ def apply_unified_selection_reasoner(
         retry_conflicts = _preserve_retry_alternates_with_unique_information(
             clips, decisions, actions, overrides)
         _preserve_unique_content_when_av_contradicts_failed(
+            draft, clips, decisions, actions, overrides,
+        )
+        refined_clips = _refine_failed_delivery_from_focused_av(
             draft, clips, decisions, actions, overrides,
         )
         _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides)
@@ -764,7 +833,8 @@ def apply_unified_selection_reasoner(
     for index, clip in enumerate(clips):
         decision = decisions[clip.clip_id]
         action = actions[index]
-        normalized_clip = replace(clip, selected=(action == "select"))
+        normalized_clip = replace(refined_clips.get(clip.clip_id, clip),
+                                  selected=(action == "select"))
         if v2_request and action == "select" and decision.trailing_recording_word_count:
             from .v2_recording_tail import trim_recording_tail
             coverage_clips = []
