@@ -1,4 +1,4 @@
-name: Extract V2 Regression 365307 Word Evidence
+name: Extract V2 Regression 365359 Focused Delivery
 on:
   push:
     branches: [feat/editorial-engine-v2-whole-video-rebuild]
@@ -20,8 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p raw compact
-          gh run download 36530757268 --repo "$GITHUB_REPOSITORY" \
-            --name cutsell-editorial-v2-06-09-10-verification-36530757268 \
+          gh run download 36535957538 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-10-verification-36535957538 \
             --dir raw
           python - <<'PY'
           import json
@@ -114,6 +114,15 @@ jobs:
                           "audio_observation": region.get("audio_observation"),
                           "reason": region.get("reason"),
                       })
+                  for region in evidence.get("focused_delivery_regions") or ():
+                      av_regions.append({
+                          "source_asset_id": source.get("source_asset_id"),
+                          "start": region.get("start"), "end": region.get("end"),
+                          "role": region.get("role"), "confidence": region.get("confidence"),
+                          "visual_observation": region.get("visual_observation"),
+                          "audio_observation": region.get("audio_observation"),
+                          "reason": region.get("reason"), "focused": True,
+                      })
               compact["sources"].append({
                   "source_key": result["source_key"],
                   "source_duration_sec": result.get("source_duration_sec"),
@@ -128,6 +137,10 @@ jobs:
                   "take_competitions": competitions,
                   "retry_claim_conflicts": retry_claim_conflicts,
                   "audiovisual_regions": av_regions,
+                  "av_probe_audit": [
+                      item for item in ((diag.get("whole_video_context") or {}).get("input_audit") or {}).get("native_av", ())
+                      if isinstance(item, dict) and 'focused_delivery' in str(item.get("contract_version"))
+                  ],
                   "focused_word_evidence": [
                       {"start": segment.get("start"), "end": segment.get("end"),
                        "text": segment.get("text"), "words": segment.get("words")}
@@ -143,7 +156,7 @@ jobs:
                   ],
                   "render_qc": (result.get("live_render_qc") or {}).get("status"),
               })
-          out = Path("compact/regression-365307-interval-decisions.json")
+          out = Path("compact/regression-365359-interval-decisions.json")
           out.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps({
               "source_count": compact["source_count"],
@@ -159,5 +172,5 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: v2-regression-365307-interval-decisions
-          path: compact/regression-365307-interval-decisions.json
+          name: v2-regression-365359-interval-decisions
+          path: compact/regression-365359-interval-decisions.json
