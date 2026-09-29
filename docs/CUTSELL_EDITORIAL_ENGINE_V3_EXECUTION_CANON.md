@@ -35,7 +35,7 @@ La implementación puede ubicar módulos nuevos junto a `cutsell_worker/editoria
 
 ### Puerta 0 — Inventario reproducible
 
-**Hacer:** fijar revisión V2 de referencia y reunir para cada 01–10 identidad del RAW, Gold, ASR por palabra, AV, candidatos, decisiones, intervalos finales y artefactos existentes. Registrar ausencias y diferencias de versiones. Alinear mecánicamente el Human Gold render de 07 al RAW antes de usar una comparación completa; sus ejemplos parciales no son un mapa microtemporal completo. Reproducir offline las decisiones solo donde se disponga de todas las entradas necesarias; un ASR guardado por sí solo no prueba replay completo.
+**Hacer:** fijar revisión V2 de referencia y reunir para cada 01–10 identidad del RAW, Gold, ASR por palabra, AV, candidatos, decisiones, intervalos finales y artefactos existentes. Registrar ausencias y diferencias de versiones. Video07 carece de Gold aprobado: la propietaria rechazó expresamente `Video00_Human_Gold.mp4` el 2026-09-29. Excluirlo y verificar la identidad del RAW y las decisiones editoriales reales antes de puntuarlo. Reproducir offline las decisiones solo donde se disponga de todas las entradas necesarias; un ASR guardado por sí solo no prueba replay completo.
 
 **Salida:** manifiesto de diez fuentes y tabla de errores con etapa de origen (`evidence`, `attempt_map`, `decision`, `boundary`, `render`) y enlace a evidencia. **Bloqueo:** una fuente sin datos necesarios queda `EVIDENCE_INCOMPLETE`; no se inventa el dato, no se declara reproducibilidad y no se lanza automáticamente un RAW para rellenarlo.
 
