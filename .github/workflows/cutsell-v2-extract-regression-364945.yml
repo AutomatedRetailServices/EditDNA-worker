@@ -1,4 +1,4 @@
-name: Extract V2 Regression 364945 Decisions
+name: Extract V2 Regression 365026 Decisions
 on:
   push:
     branches: [feat/editorial-engine-v2-whole-video-rebuild]
@@ -20,8 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p raw compact
-          gh run download 36494537658 --repo "$GITHUB_REPOSITORY" \
-            --name cutsell-editorial-v2-focused-regression-02-03-04-06-09-36494537658 \
+          gh run download 36502632708 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-focused-regression-02-03-04-06-09-36502632708 \
             --dir raw
           python - <<'PY'
           import json
@@ -42,7 +42,13 @@ jobs:
               "gold_comparison": gold,
               "sources": [],
               "failures": report.get("failures", []),
+              "boundary_failure_evidence": [],
           }
+          for path in sorted((root / "results").glob("*boundary-failure.json")):
+              compact["boundary_failure_evidence"].append({
+                  "file": path.name,
+                  "evidence": read(path),
+              })
           for path in sorted((root / "results").glob("*.json")):
               result = read(path)
               if "source_key" not in result:
@@ -117,7 +123,7 @@ jobs:
                   "audiovisual_regions": av_regions,
                   "render_qc": (result.get("live_render_qc") or {}).get("status"),
               })
-          out = Path("compact/regression-364945-interval-decisions.json")
+          out = Path("compact/regression-365026-interval-decisions.json")
           out.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps({
               "source_count": compact["source_count"],
@@ -133,5 +139,5 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: v2-regression-364945-interval-decisions
-          path: compact/regression-364945-interval-decisions.json
+          name: v2-regression-365026-interval-decisions
+          path: compact/regression-365026-interval-decisions.json
