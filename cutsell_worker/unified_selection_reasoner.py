@@ -344,6 +344,9 @@ def _apply_v2_take_competitions(
                         # claim for independent editorial resolution.
                         reason = 'material_claim_not_covered_by_winner'
                         continue
+                    if overrides[i] == "focused_av_clean_second_start_preserved":
+                        reason = "focused_av_clean_action_preserved"
+                        continue
                     if (covered_clip.audio_muted and not covered_clip.words
                             and not covered_clip.text.strip()
                             and not any(
@@ -408,7 +411,8 @@ def _apply_v2_take_competitions(
                 if reason not in {"conflicting_material_unique_preserved", "purchase_action_coverage_conflict",
                                   "distinct_focused_visual_action_preserved", "material_claim_not_covered_by_winner",
                                   "failed_delivery_preserved_against_equivalence",
-                                  "post_reset_complete_take_preserved"}:
+                                  "post_reset_complete_take_preserved",
+                                  "focused_av_clean_action_preserved"}:
                     reason = "covered_alternates_removed"
         audit.append({
             "winners": list(contest.winner_clip_ids),
@@ -808,6 +812,81 @@ def _refine_failed_delivery_from_focused_av(draft, clips, decisions, actions, ov
     return refined
 
 
+def _refine_repeated_opening_alternate(draft, clips, decisions, actions, overrides):
+    """Preserve a clean second start with a distinct physical instruction.
+
+    Require repeated source words, localized AV audience evidence and an
+    instruction absent from selected speech. The earlier false start remains
+    discarded; the clean words retain their original source timing.
+    """
+    focused = {}
+    for source in ((draft.diagnostics or {}).get("whole_video_context") or {}).get("sources") or ():
+        try:
+            evidence = json.loads(str(source.get("audiovisual_evidence") or ""))
+        except (TypeError, ValueError):
+            continue
+        spans = []
+        for region in evidence.get("focused_delivery_regions") or ():
+            try:
+                start, end = float(region["start"]), float(region["end"])
+                confidence = float(region.get("confidence", 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (region.get("role") == "audience" and confidence >= .95
+                    and math.isfinite(start) and math.isfinite(end) and start < end):
+                spans.append((start, end))
+        merged = []
+        for start, end in sorted(spans):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        focused[str(source.get("source_asset_id") or "")] = merged
+    refined = {}
+    selected_text = ' '.join(clip.text for i, clip in enumerate(clips) if actions[i] == "select")
+    selected_tokens = _content_tokens(selected_text)
+    for i, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if (actions[i] != "swap" or decision.reason_code != "usable_alternate"
+                or decision.relation != "retry_alternate" or len(clip.words) < 14
+                or clip.end - clip.start < 9):
+            continue
+        plain = [re.sub(r'[^a-z0-9]', '', unicodedata.normalize('NFKD', w.text.casefold()))
+                 for w in clip.words]
+        start_index = None
+        for second in range(8, len(plain) - 7):
+            phrase = plain[second:second + 4]
+            if not all(phrase) or not any(plain[first:first + 4] == phrase
+                                          for first in range(max(0, second - 24), second - 3)):
+                continue
+            start_index = second - 1 if second and plain[second - 1] in {'if', 'si'} else second
+            break
+        if start_index is None:
+            continue
+        tail = clip.words[start_index:]
+        if len(tail) < 8 or not clip.start + 4 <= tail[0].start < clip.end - 4:
+            continue
+        spans = focused.get(clip.source_asset_id, ())
+        if not any(abs(start - tail[0].start) <= 2 for start, end in spans):
+            continue
+        covered = sum(max(0., min(clip.end, end) - max(tail[0].start, start))
+                      for start, end in spans)
+        if covered < .7 * (clip.end - tail[0].start):
+            continue
+        text = ' '.join(w.text for w in tail)
+        unique = _content_tokens(text) - selected_tokens
+        action = re.search(r'\b(?:wash|clean|apply|pour|mix|spray|lavar|lava|aplica|mezcla|'
+                           r'echa|agrega|pones|poner)\b', text.casefold())
+        if not action or len(unique) < 2:
+            continue
+        refined[clip.clip_id] = replace(clip, start=float(tail[0].start),
+                                        end=float(tail[-1].end), text=text,
+                                        caption_text=text, words=tuple(tail))
+        actions[i] = "select"
+        overrides[i] = "focused_av_clean_second_start_preserved"
+    return refined
+
+
 def _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides):
     """Do not equate a repeated instruction with a repeated visual action.
 
@@ -949,6 +1028,9 @@ def apply_unified_selection_reasoner(
         refined_clips = _refine_failed_delivery_from_focused_av(
             draft, clips, decisions, actions, overrides,
         )
+        refined_clips.update(_refine_repeated_opening_alternate(
+            draft, clips, decisions, actions, overrides,
+        ))
         _preserve_continuous_demonstration(draft, clips, decisions, actions, overrides)
         competition_audit = _apply_v2_take_competitions(
             clips, decisions, actions, overrides, plan.take_competitions,

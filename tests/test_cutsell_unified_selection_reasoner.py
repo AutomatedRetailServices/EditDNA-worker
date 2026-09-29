@@ -62,8 +62,9 @@ def draft():
 
 
 class FakeReasoner:
-    def __init__(self, decisions):
+    def __init__(self, decisions, take_competitions=()):
         self.decisions = decisions
+        self.take_competitions = take_competitions
 
     def reason(self, _draft):
         return UnifiedSelectionPlan(
@@ -72,6 +73,7 @@ class FakeReasoner:
             model="human-style-test",
             estimated_input_tokens=100,
             estimated_output_tokens=40,
+            take_competitions=self.take_competitions,
         )
 
 
@@ -807,6 +809,40 @@ def test_v2_focused_av_rescues_only_word_aligned_clean_delivery_from_mixed_candi
     row = next(row for row in out.diagnostics["unified_selection_reasoner"]["decisions"]
                if row["clip_id"] == "mixed")
     assert row["safety_override"] == "focused_av_clean_delivery_preserved"
+
+
+def test_v2_focused_av_preserves_clean_second_start_of_usable_alternate():
+    from cutsell_worker.contracts import Word
+    first = "you're going to do this for skin care you wash with it every time every".split()
+    second = "if you're going to do this in skin care you put vinegar and wash your face every morning".split()
+    words = tuple(Word(token, 9 + i * .36, 9 + (i + 1) * .36)
+                  for i, token in enumerate(first)) + tuple(
+        Word(token, 15.1 + i * .48, 15.1 + (i + 1) * .48)
+        for i, token in enumerate(second))
+    alt = replace(clip("alt", 9, 25, " ".join(first + second), selected=False), words=words)
+    winner = clip("winner", 46, 65, "Put vinegar in your skin care each morning", selected=False)
+    def make_draft(regions):
+        return DraftTimeline(SCHEMA_VERSION, "p", EditStrategy.STORYTELLING,
+            (), (alt, winner), (), {
+                "editorial_engine_v2_request": True,
+                "whole_video_context": {"sources": [{"source_asset_id": "src",
+                    "audiovisual_evidence": json.dumps({"focused_delivery_regions": regions})}]},
+            })
+    reasoner = FakeReasoner([
+        v2_decision("alt", "swap", "retry_alternate", .95, 0, "usable_alternate", 0),
+        v2_decision("winner", "select", "retry_winner", .98, 0, "best_complete_take", 1),
+    ], take_competitions=(UnifiedTakeCompetition(("winner",), ("alt",), (),
+                                              "equivalent_take", .95),))
+    av = [{"start": 15, "end": 21, "role": "audience", "confidence": .96},
+          {"start": 20, "end": 25, "role": "audience", "confidence": .96}]
+    out = apply_unified_selection_reasoner(make_draft(av), reasoner)
+    assert [item.clip_id for item in out.selected] == ["alt", "winner"]
+    assert out.selected[0].start == 15.1
+    assert out.selected[0].text.startswith("if you're going to do this")
+    assert "wash your face" in out.selected[0].text
+    assert out.diagnostics["v2_take_competitions"][0]["decision"] == "focused_av_clean_action_preserved"
+    without_av = apply_unified_selection_reasoner(make_draft([]), reasoner)
+    assert [item.clip_id for item in without_av.selected] == ["winner"]
 
 
 def test_unified_request_requires_one_structured_human_style_decision_per_candidate():
