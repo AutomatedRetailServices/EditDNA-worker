@@ -520,10 +520,11 @@ def test_main_dispatches_normally_when_no_existing_result(monkeypatch, tmp_path)
     assert written["benchmark_result_uri"] == "s3://test-bucket/cutsell/benchmark-results/bench-fresh/compact-result.json"
 
 
-def test_experimental_alignment_image_isolated_and_default_image_unchanged(monkeypatch):
+@pytest.mark.parametrize('provider', ['gpt-transcribe-whisperx', 'faster-whisper-medium-whisperx'])
+def test_experimental_alignment_image_isolated_and_default_image_unchanged(monkeypatch, provider):
     image = _FakeImage()
     monkeypatch.setattr(sys.modules['modal'], 'Image', image)
-    monkeypatch.setenv('CUTSELL_VALIDATION_ASR_PROVIDER', 'gpt-transcribe-whisperx')
+    monkeypatch.setenv('CUTSELL_VALIDATION_ASR_PROVIDER', provider)
     monkeypatch.delenv('CUTSELL_ENV_JSON_PATH', raising=False)
     spec = importlib.util.spec_from_file_location('gpt_whisperx_image_test', mvb.__file__)
     module = importlib.util.module_from_spec(spec)
