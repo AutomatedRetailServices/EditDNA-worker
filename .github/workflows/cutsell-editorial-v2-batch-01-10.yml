@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Focused Verification 07-09
+name: CutSell Editorial Engine V2 Focused Verification 06-09-10
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-focused-verification-07-09
+  group: cutsell-editorial-v2-focused-verification-06-09-10
   cancel-in-progress: false
 
 jobs:
@@ -112,8 +112,9 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Yaskira/07.mp4",
+              "Yaskira/06.MP4",
               "Yaskira/09.mp4",
+              "Yaskira/10.MOV",
           ]
           root = Path("editorial-v2-focused-regression")
           results = []
@@ -124,7 +125,7 @@ jobs:
               try:
                   result = run_single_universal_clean_cut_validation(
                       key,
-                      project_id=f"cutsell-editorial-v2-07-09-verification-{index:02d}",
+                      project_id=f"cutsell-editorial-v2-06-09-10-verification-{index:02d}",
                       preview_output=str(preview),
                   )
                   v2_status = result.get("diagnostics", {}).get("editorial_engine_v2", {}).get("status")
@@ -149,7 +150,7 @@ jobs:
                       "error": str(exc)[:2000],
                   })
 
-          # Owner-declared rounded source-time Gold; 07 requires render alignment.
+          # Owner-declared rounded source-time Gold.
           gold_keep = {
               "Yaskira/03.mp4": [(0, 19.623)],
               "Yaskira/04.MP4": [(5, 27), (28, 44)],
@@ -166,9 +167,6 @@ jobs:
           comparisons = []
           for result in results:
               key = result["source_key"]
-              if key == "Yaskira/07.mp4":
-                  comparisons.append({"source_key": key, "status": "gold_render_alignment_required"})
-                  continue
               duration = float(result["source_duration_sec"])
               keep = gold_keep.get(key)
               if key in gold_delete:
@@ -232,7 +230,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-07-09-verification-${{ github.run_id }}
+          name: cutsell-editorial-v2-06-09-10-verification-${{ github.run_id }}
           path: editorial-v2-focused-regression/
           if-no-files-found: warn
           retention-days: 30
