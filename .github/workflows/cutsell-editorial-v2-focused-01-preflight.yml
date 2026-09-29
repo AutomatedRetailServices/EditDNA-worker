@@ -1,5 +1,4 @@
 name: CutSell Editorial Engine V2 Yaskira 01 Preflight Qualification
-# Fresh RAW evidence review requested 2026-09-29; never auto-approve historical Gold.
 
 on:
   workflow_dispatch:
@@ -161,7 +160,7 @@ jobs:
               "Yaskira/10.MOV": [(16, 25), (55, 64), (75, 79), (83, 97)],
           }
           gold_delete = {
-              # Gold for 01 is under fresh human review; no historic labels here.
+              # Video01 Gold remains under direct owner review.
               "Yaskira/02.mp4": [(49, 50), (68, 70)],
           }
           comparisons = []
