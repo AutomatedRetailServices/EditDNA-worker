@@ -683,9 +683,20 @@ class GoogleUnifiedSelectionReasoner:
 
     def _review_missing_competitions(self, payload, candidate_rows, decisions,
                                     existing_competitions=()):
-        """Bounded independent audit for a broad plan or a saturated first pass."""
+        """Bounded independent audit for broad, saturated, or reset-split plans."""
         selected_count = sum(row.action == "select" for row in decisions)
-        full_reaudit = len(existing_competitions) >= 3 and selected_count >= 4
+        reset_split = any(
+            middle.reason_code == "recording_process_bts" and
+            any(before.action == "select" and
+                candidate_rows[left]["source_asset_id"] == candidate_rows[index]["source_asset_id"]
+                for left, before in enumerate(decisions[:index])) and
+            any(after.action == "select" and
+                candidate_rows[right]["source_asset_id"] == candidate_rows[index]["source_asset_id"]
+                for right, after in enumerate(decisions[index + 1:], index + 1))
+            for index, middle in enumerate(decisions)
+        )
+        full_reaudit = selected_count >= 4 and bool(existing_competitions) and (
+            len(existing_competitions) >= 3 or reset_split)
         missing_competitions = not existing_competitions and selected_count >= 5
         if payload.get("engine_version") != "v2" or not (full_reaudit or missing_competitions):
             return (), {"status": "not_eligible", "first_pass_selected_count": selected_count}
@@ -1066,7 +1077,7 @@ class GoogleUnifiedSelectionReasoner:
                 competition_review = None
                 if payload.get("engine_version") == "v2":
                     selected_count = sum(row.action == "select" for row in decisions)
-                    if len(competitions) >= 3 and selected_count >= 4:
+                    if competitions and selected_count >= 4:
                         audited, competition_review = self._review_missing_competitions(
                             payload, candidate_rows, decisions, competitions,
                         )

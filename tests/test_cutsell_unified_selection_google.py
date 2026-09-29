@@ -519,6 +519,36 @@ def test_v2_reaudits_a_saturated_competition_list_without_changing_first_pass_ac
     assert overrides[3] is None  # unique audience context from an earlier take survives
 
 
+def test_v2_reaudits_partial_comparison_when_recording_reset_splits_selected_takes():
+    first = json.loads(v2_decisions_json(6))
+    first["decisions"][2].update({
+        "action": "discard", "relation": "bts", "reason_code": "recording_process_bts",
+    })
+    first["competitions"] = [{
+        "winner_candidate_indices": [4], "covered_candidate_indices": [3],
+        "material_unique_candidate_indices": [], "relation": "equivalent_take",
+        "confidence": .95, "reason": "One comparison left an earlier take unchecked",
+    }]
+    audited = {"competitions": [{
+        "winner_candidate_indices": [4], "covered_candidate_indices": [0, 1, 3],
+        "material_unique_candidate_indices": [], "relation": "equivalent_take",
+        "confidence": .96, "reason": "Complete later take covers earlier attempt",
+    }]}
+    fake = FakeSession([
+        gemini_response(json.dumps(first)), {"totalTokens": 1200},
+        gemini_response(json.dumps(audited), output_tokens=125),
+    ])
+    reasoner = make_reasoner(fake)
+    source = replace(draft(6), diagnostics={"editorial_engine_v2_request": True})
+
+    plan = reasoner.reason(source)
+
+    assert len(fake.calls) == 3
+    assert plan.competition_review["review_mode"] == "full_reaudit"
+    assert len(plan.take_competitions) == 1
+    assert set(plan.take_competitions[0].covered_clip_ids) == {"c0", "c1", "c3"}
+
+
 def test_v2_narrow_selection_does_not_pay_for_second_pass():
     fake = FakeSession([gemini_response(v2_decisions_json(3))])
     reasoner = make_reasoner(fake)
