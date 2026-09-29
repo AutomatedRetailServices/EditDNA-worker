@@ -32,8 +32,14 @@ the existing decision remains in force.
 - Full repository collection was attempted but is blocked in this environment
   by missing optional dependencies (`fastapi`, `modal`, `botocore`, `redis`) and
   a collection-time error in `tests/test_semantic_stitch.py`.
-- Paid V2 qualification run `36502227811` was triggered by the branch update;
-  its result must be reviewed before claiming video quality improvement.
+- Video08 run `36502227811` completed with HTTP 200, no block reason, 12
+  candidates, Selection applied, and render QC PASS. The selected timeline was
+  120.13–141.388, 142.709–145.1, and 145.1–147.05 s. It retained 25.549/27 s
+  of Gold, retained 0.05 s outside Gold, and omitted 1.451 s inside Gold
+  (0.13 s at the opening and a 1.321 s gap). Visual preview inspection found a
+  coherent try-on sequence; the earlier `PROHIBITED_CONTENT` block did not
+  recur, so its cause remains unconfirmed rather than fixed. This result is an
+  improvement in completion, not an exact Gold match or quality certification.
 
 This is a calibration change, not a release-quality certification. Gold remains
 an evaluation artifact and is not passed to production selection.
