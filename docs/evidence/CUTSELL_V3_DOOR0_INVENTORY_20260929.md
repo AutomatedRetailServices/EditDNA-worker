@@ -1,41 +1,47 @@
 # V3 Door 0 — existing evidence inventory
 
-**Date:** 2026-09-29. **Purpose:** read-only inventory for `CUTSELL_EDITORIAL_ENGINE_V3_EXECUTION_CANON.md`. No RAW was reprocessed and no provider call or paid run was started for this inventory. Saved artifacts were extracted/inspected only. Gold comes from `docs/CUTSELL_YASKIRA_01_10_HUMAN_GOLD.md`; none of it was added to production inputs.
+**Date:** 2026-09-29. **Purpose:** read-only inventory for `CUTSELL_EDITORIAL_ENGINE_V3_EXECUTION_CANON.md`. No RAW was reprocessed and no provider call or paid run was started for this inventory. Existing GitHub Actions artifacts were extracted and inspected only. Gold comes from `docs/CUTSELL_YASKIRA_01_10_HUMAN_GOLD.md`; none of it was added to production inputs.
 
-## Findings
+## Evidence packets
 
-The ten-video Gold and a historical offline comparison already exist. That 2026-09-27 comparison is a **historical baseline**, not a score for the current V2 revision. Latest saved evidence is uneven: there is recent evidence for 06, 08, 09 and 10, while 01–05 and 07 do not have a complete current-revision packet in the workspace. Therefore Door 0 is **IN_PROGRESS**, not PASS.
+- Historical V2 multi-video diagnostics: runs `36502632708` (02–06, 09) and `36502756185` (01, 05, 07, 10), extracted into Actions artifact `11026136307` (`v2-door0-saved-decision-evidence`). The runs are historical V2 results, not current V3 qualification. Source SHA was absent in this packet.
+- Later saved diagnostics: 06 run `36534356753`; 08 run `36546701227`; 09 run `36538958510`; 10 run `36546701251`, compacted from existing artifact by run `36553561580`. These help explain variation but do not replace a normalized, same-revision ten-video replay manifest.
+- The 2026-09-27 offline comparison remains a historical baseline only.
 
-| Source | Latest usable saved evidence | Gold result | What the evidence establishes | Still unknown / next artifact needed |
-| --- | --- | --- | --- | --- |
-| 01 | Historical baseline in `CUTSELL_YASKIRA_BASELINE_VS_GOLD_20260927.md` | 89.5% recall; 12.06 s KEEP lost; 1.00 s DELETE retained | Engine did not preserve all approved source time. | Current-revision candidate/word evidence and decision report to locate whether loss starts before or at selection. |
-| 02 | Same historical baseline | 95.0% recall; 4.80 s KEEP lost; 2.33 s DELETE retained | Both false deletion and extra retention occur. | Current-revision trace, then per-error layer attribution. |
-| 03 | Same historical baseline | 91.2% recall; 1.72 s of an all-KEEP source lost; 0 s extra | A technically clean output can still remove approved content. | Current-revision trace and exact source intervals. |
-| 04 | Same historical baseline | 87.7% recall; 4.66 s KEEP lost; 0.29 s extra | Material approved content is missing. | Current-revision trace. |
-| 05 | Historical baseline; approved reference also in `evidence/YASKIRA_05_HUMAN_EDITORIAL_REFERENCE_20260925.md` | 94.9% recall; 1.97 s KEEP lost; 0.92 s extra | Baseline is not the approved later result. | Current-revision run manifest and full decision evidence. |
-| 06 | Run `36534356753`, artifact `11018520264` | 22/22 s Gold retained; 0.34 s extra; QC PASS | One strong saved result is a useful regression control. | Stability across revisions is not established; do not call this source permanently solved. |
-| 07 | Gold doc plus partial known RAW-time events; historical baseline only | Full interval map unavailable; no valid full-source score | There is known partial editorial evidence, not a complete aligned Gold timeline. | Mechanically align the authoritative `Video00_Human_Gold.mp4` to `Yaskira/07.mp4`; until then mark EVIDENCE_INCOMPLETE. |
-| 08 | Run `36546701227`, artifact `11023061700`, revision `37cb7b8d`; prompt SHA `ca3c16aa…` | 25.199/27 s retained; 0 s outside Gold; QC PASS | Final delivery was selected and earlier attempts were absent from the selected intervals in this run. | 1.801 s Gold not intersected: 0.39 s leading margin, 1.321 s internal gap, 0.09 s trailing margin. The internal gap is measured silence in prior source analysis; inspect the relevant saved boundary evidence before calling it an editorial loss. One run does not establish repeatability. |
-| 09 | Latest available 09 run `36538958510`, artifact `11019339666`, revision `ae2a4366` | 65.146/73 s retained; 7.854 s KEEP lost; 11.252 s DELETE retained; QC PASS | Selection remains materially wrong. The optional competition review failed because its explanation exceeded parser length; the saved selection used the first-pass comparisons. | Need the full interval/decision trace on one frozen evidence packet to split attempt grouping, semantic comparison and silent visual action. Do not attribute all 19–28 or 97–120 failures to one layer without that trace. |
-| 10 | Run `36546701251`, artifact `11023682900`; compact extraction `36553561580` / artifact `11024579682`; revision `37cb7b8d` | 26.8/36 s retained; 9.2 s KEEP lost; 18.6 s DELETE retained; QC PASS | ASR includes the full approved phrase in candidate `8.95–24.77`. The selector labels that candidate `retry_alternate/redundant_retry` and swaps it out. It selects `33.98–41.16` (outside Gold) and `46.75–64.65` (first 8.25 s outside the 55–64 Gold block). The error reaches semantic selection despite the phrase being present in the input. | AV for this run was broad `audience 8–42 s` without a focused delivery judgment. Need determine how attempt comparison uses that evidence and why the candidate’s unique clean subspan cannot survive the selected whole-take decision. |
+## Per-video evidence
 
-Gold interval scoring uses the owner’s rounded source-time labels. It is useful for diagnosis but cannot by itself judge whether a short interior gap is meaningful, whether a visual action is part of the story, or whether two recordings sound like separate attempts.
+| Video | Saved V2 cross-video evidence vs owner Gold | Directly observed failure evidence | Attribution status |
+| --- | --- | --- | --- |
+| 01 | 107.198/114.561 s Gold retained; 7.363 s KEEP lost; 1.000 s outside Gold retained. | Attempt reconstruction formed a 0–29.18 s unit from five member fragments. The old selector discarded 105.33–114.30 s as `redundant_retry`; the later 2026-09-27 baseline is not this run. | Selection/attempt-unit concern is visible; exact Gold-loss-to-decision mapping needs replay and full boundary comparison. |
+| 02 | 90.380/96.262 s retained; 5.882 s lost; 2.503 s outside Gold retained. | Optional competion review completed in `missing_competitions` mode with zero comparisons. | Selection result is imperfect; packet does not establish which stage caused each interval error. |
+| 03 | 17.756/19.623 s Gold retained; 1.867 s lost; no extra retention. All three reconstructed units were selected. | No alternative-take competition was eligible. | Boundary/selection mapping not isolated; all-KEEP Gold does not mean any removed source span is editorially invalid. |
+| 04 | 34.160/38.000 s retained; 3.840 s lost; 0.440 s outside Gold retained. | Three complete units selected; 0.46 s `failed_delivery` discarded at 26.493–26.953 s. | Small failed segment is directly attributed; remaining Gold loss not isolated. |
+| 05 | 37.029/39.000 s retained; 1.971 s lost; 0.540 s outside Gold retained. | 5.17–13.41 s is labeled `swap/redundant_retry`; 26.88–48.48 s also `swap/redundant_retry`; AV evidence includes `mixed` and `recording_only` over several regions. Gold begins at 98 s, so earlier labels alone do not prove a Gold miss. | Selector/attempt classification is active; need inspect exact selected replacement and word boundaries against the approved 8;–137 s reference. |
+| 06 | Historical run: 21.904/22 s retained; 0.096 s lost; 26.630 s outside Gold retained. Later saved run: 22/22 s retained, 0.34 s extra, render QC PASS. | In historical run, the 17.85–25.19 s unit is discarded as `redundant_retry`; later run has a better Gold overlap. | Measured revision/run variance. One good later result does not establish stability; investigate extra retention. |
+| 07 | No valid full-source Gold score. | Run failed before selection: 72,502 input tokens vs 64,000 max, 37 candidates. | Confirmed selector input-budget failure; obtain full RAW-time alignment of the authoritative Human Gold before scoring. |
+| 08 | Latest saved run: 25.199/27 s retained; no out-of-Gold retention; render QC PASS. | Selected intervals contain only the final delivery; 1.801 s Gold not intersected (0.39 s lead, 1.321 s internal gap, 0.09 s tail). Prior audio analysis describes the internal gap as measured silence. | Final take selection succeeded on this run; boundary treatment/repeatability remains open. No further Video08 run is implied. |
+| 09 | Latest saved run: 65.146/73 s retained; 7.854 s Gold lost; 11.252 s outside Gold retained; QC PASS. | The historical run failed with `overlapping or empty competition`. Latest saved optional competition review failed because the explanation exceeded parser length; first-pass selection still yielded a render. | Confirmed malformed competition validation and review robustness issues on separate runs; current miss location needs frozen full-trace attribution. |
+| 10 | Historical packet: 25.380/36 s retained; 10.620 s lost; 13.413 s outside Gold retained. Later focused run: 26.8/36 retained; 9.2 s lost; 18.6 s outside Gold retained; QC PASS. | Approved speech exists in ASR within 8.95–24.77 s, but selector marked it `discard/redundant_retry`; selected alternatives include 33.98–41.16 s. Attempt grouping joins three fragments into 8.95–24.77 s. | Confirmed semantic selection error after transcription on this span. It does not prove a single cause for every 10 error. |
 
-## Cross-video diagnosis supported by these artifacts
+All overlap values are calculated against the owner’s rounded source-time Gold labels. Gold interval overlap is diagnostic, not a complete human-quality judgment.
 
-1. **A universal ASR failure is not supported.** In Video10 the approved speech is present in the saved ASR candidate, yet the candidate is demoted as a redundant retry. For that measured miss, transcription absence is not the cause.
-2. **The selector can commit a semantic error and still pass technical QC.** This is explicit in Video09 and Video10. Render/QC status cannot certify editorial correctness.
-3. **Attempt grouping and selection are not robust enough.** Video10’s selected whole-take alternative removes approved content along with failed starts; Video09’s comparison review is invalidated; Video08’s latest saved selection keeps only the final take but has boundary/gap omissions.
-4. **Not all ten can yet be diagnosed at the same evidence depth.** 01–05 are historical scores without current traces here. 07 lacks the full RAW-aligned Gold. Any stronger claim about their present failure layer would be speculation.
+## Cross-video findings supported by saved artifacts
+
+1. **The failures are not all in one layer.** Video07 fails before editorial selection because its input exceeds the token budget. Video09 also has invalid competition data/review handling. Videos05 and 10 show semantic labels (`redundant_retry`) affecting take decisions. Video08’s latest miss includes a measured silence gap and margins.
+2. **Attempt reconstruction can make a mixed editorial unit.** In the historical traces, Video01 combines five fragments into 0–29.18 s, Video10 combines three into 8.95–24.77 s, and Video05 combines multiple fragments into other long units. Selection then assigns one action/relation to the reconstructed unit. This is evidence that the current representation can hide useful subspans; it is not yet a measured root cause for every video.
+3. **ASR absence is not the cause of Video10’s 8.95–24.77 s approved phrase miss.** The phrase is in the saved ASR text, but the decision is to discard the candidate as a redundant retry.
+4. **Technical render QC does not certify editorial correctness.** Video09 and Video10 have QC PASS alongside measurable Gold misses and extra retention.
+5. **Saved cross-video figures are not apples-to-apples proof of a current revision.** The multi-video packet has no source SHA, and later runs use differing commits/configurations. Preserve the figures as historical diagnostics; do not call them a stable baseline.
 
 ## Door 0 exit checklist
 
 - [x] Canonical owner Gold found for 01–10.
-- [x] Historical 01–10 interval baseline found and explicitly marked historical.
-- [x] Recent, measured saved reports inspected for 06, 08, 09 and 10.
-- [x] Video10 failure located at semantic selection, with the approved phrase present in ASR input.
-- [ ] Current-revision evidence packet for 01–05.
+- [x] Historical interval baseline found and labeled historical.
+- [x] Saved cross-video V2 decisions and Gold overlap extracted for 01, 02, 03, 04, 05, 06, and 10.
+- [x] Failure records inspected for 07 and 09.
+- [x] Later saved evidence inspected for 06, 08, 09, and 10.
+- [ ] Current-revision evidence packet with source hashes and matching configs for 01–10.
 - [ ] Complete RAW-time alignment of Video07 Gold.
-- [ ] One normalized, replayable manifest schema containing media hash, provider/model/config versions, full ASR word timeline, AV evidence, attempt candidates, selector input/output, plan, selected intervals and rendered mapping for each of 01–10.
+- [ ] One normalized, replayable manifest schema with media hash, provider/model/config versions, full ASR word timeline, AV evidence, attempt candidates, selector input/output, plan, selected intervals, and render mapping for each source.
 
-**Gate status: IN_PROGRESS.** The existing evidence is sufficient to reject the claim that all failures are simply missing transcription or bad FFmpeg boundaries. It is not sufficient to close per-stage attribution for all ten. The next implementation decision should use the saved Video10 selector failure and Video09 review failure as concrete counterexamples, while Door 0 fills only the evidence gaps listed above. No new paid RAW run is required to write this inventory.
+**Gate status: IN_PROGRESS.** The diagnostic inventory now covers saved evidence across all ten source labels, but the packets are historical and not revision-normalized. Do not start paid RAW reruns to fill these gaps. The next V3 step is to define the normalized evidence manifest and replay the stored artifacts offline; Video07’s Gold alignment remains a separate prerequisite for a valid score.
