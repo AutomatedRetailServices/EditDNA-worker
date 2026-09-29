@@ -1,6 +1,6 @@
-# Yaskira 01–10 — canonical owner Human Gold
+# Yaskira 01–10 — historical editorial labels (provenance audit pending)
 
-Recovered 2026-09-27 from Swanny's explicit decisions in the prior engine-calibration conversation. These rules apply to the exact S3 RAW identities below. Times are RAW source times. A KEEP-all statement means all source time except listed DELETE windows.
+The table below was assembled 2026-09-27 from earlier conversations. The recovered user-message dates and the distinction between explicit instructions and contextual approvals are recorded in `evidence/CUTSELL_YASKIRA_OWNER_DECISIONS_RECOVERY_20260929.md`. The owner rejected the purported Video07 Gold on 2026-09-29. Before using any row as a final training or acceptance label, confirm its exact RAW identity, preserve the proposal preceding contextual «sí» responses, and align boundaries. Times purport to be RAW source times. A KEEP-all statement means all source time except listed DELETE windows.
 
 | Source | KEEP | DELETE |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ Recovered 2026-09-27 from Swanny's explicit decisions in the prior engine-calibr
 | `Yaskira/04.MP4` | 0:05–0:27; 0:28–0:44 | 0:00–0:05; 0:27–0:28 (“Voy a tener que editarlo, pero bueno”); 0:44–0:54.025 |
 | `Yaskira/05.MP4` | 1:38–2:17 only | 0:00–1:38; 2:17–2:19.965 |
 | `Yaskira/06.MP4` | 1:25–1:47 only | 0:00–1:25; 1:47–1:52.002 |
-| `Yaskira/07.mp4` | Exact identity confirmed as Video00; authoritative Human Gold render is `Video00_Human_Gold.mp4`. Explicit RAW keeps include clean sonography ~119.95–124.51; corrected stomach 258.77–268.51; authoritative conclusion 295.54–312.36; complete CTA 356.73–361.55 | Failed sonography ~108–116; failed stomach 236–245; losing/repeated conclusion ~319+ including 327.56–342.56. Full micro-boundary map must be aligned from the authoritative Human Gold artifact; do not substitute its 141.67-second output timeline as RAW time |
+| `Yaskira/07.mp4` | **NO APPROVED GOLD.** Owner rejected `Video00_Human_Gold.mp4` on 2026-09-29 as incorrectly edited. Previously recorded example KEEP/DELETE windows are unverified historical notes, not evaluation labels. | Do not use the rejected render or its inferred RAW windows to train, calibrate, score, or align this source. Recover the matching RAW and document the owner's actual edit decisions before defining Gold. |
 | `Yaskira/08.mp4` | 2:00–2:27 only | 0:00–2:00; 2:27–2:29.533 |
 | `Yaskira/09.mp4` | 0:05–0:14; 0:19–0:28; 0:52–1:06; 1:13–1:31; 1:37–2:00 | All other source time, including 1:06–1:13 |
 | `Yaskira/10.MOV` | 0:16–0:25; 0:55–1:04; 1:15–1:19; 1:23–1:37 | 0:00–0:16; 0:25–0:55; 1:04–1:15; 1:19–1:23; 1:37–1:37.972 |
@@ -18,10 +18,10 @@ Recovered 2026-09-27 from Swanny's explicit decisions in the prior engine-calibr
 ## Corrections to earlier records
 
 - Yaskira09 must not inherit Yaskira05's 1:38–2:17 reference. Its authority is the five KEEP blocks above.
-- Human references for 01–10 were already declared by the owner. The earlier batch inventory statement that references were not recovered for 01,02,03,04,06,08,10 is superseded.
-- Yaskira07 is confirmed to be Video00. Its Human Gold artifact and previously approved detailed editorial evidence remain authoritative. The remaining work is mechanical RAW-to-Gold alignment, not asking the owner to repeat editorial choices.
+- The 2026-09-27 assertion that all 01–10 references had been recovered conflicts with the earlier saved-result inventory. Require per-video owner-message provenance and RAW identity before promotion to approved Gold. A dedicated owner reference exists for 05; a provisional interval evaluation exists for 08; neither establishes the remaining rows.
+- Yaskira07: the owner explicitly rejected the previously labeled `Video00_Human_Gold.mp4`. Its prior claim of approval was unsupported; the identity and editorial labels for this source require independent verification. A same-named candidate RAW of 228.803 seconds is not the 366.997-second source in the batch record.
 - These references define evaluation labels. Processing or rendering a video does not automatically train the engine.
 
 ## Evaluation use
 
-Compare each saved or future engine output against these KEEP/DELETE labels. Record false deletion of KEEP content separately from retained DELETE debris. Do not infer editorial acceptance from technical QC or workflow success.
+Historical offline comparisons can be recalculated against these intervals, but they must be labeled provisional until the row's owner-message provenance and RAW identity are established. Do not train, calibrate, or certify editorial acceptance using an unverified row. Record false deletion of KEEP content separately from retained DELETE debris only for verified Gold.
