@@ -549,6 +549,30 @@ def test_v2_reaudits_partial_comparison_when_recording_reset_splits_selected_tak
     assert set(plan.take_competitions[0].covered_clip_ids) == {"c0", "c1", "c3"}
 
 
+def test_v2_reaudits_selected_earlier_take_omitted_from_partial_comparison():
+    first = json.loads(v2_decisions_json(6))
+    first["decisions"][4].update({
+        "relation": "retry_winner", "reason_code": "best_complete_take",
+    })
+    first["competitions"] = [{
+        "winner_candidate_indices": [4], "covered_candidate_indices": [0],
+        "material_unique_candidate_indices": [], "relation": "equivalent_take",
+        "confidence": .95, "reason": "Opening fragment covered; earlier selected take unchecked",
+    }]
+    fake = FakeSession([
+        gemini_response(json.dumps(first)), {"totalTokens": 1200},
+        gemini_response(json.dumps({"competitions": []}), output_tokens=50),
+    ])
+    reasoner = make_reasoner(fake)
+    source = replace(draft(6), diagnostics={"editorial_engine_v2_request": True})
+
+    plan = reasoner.reason(source)
+
+    assert len(fake.calls) == 3
+    assert plan.competition_review["review_mode"] == "full_reaudit"
+    assert plan.take_competitions == ()  # The audit may reject the proposed comparison.
+
+
 def test_v2_narrow_selection_does_not_pay_for_second_pass():
     fake = FakeSession([gemini_response(v2_decisions_json(3))])
     reasoner = make_reasoner(fake)

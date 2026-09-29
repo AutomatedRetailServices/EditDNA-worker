@@ -695,8 +695,18 @@ class GoogleUnifiedSelectionReasoner:
                 for right, after in enumerate(decisions[index + 1:], index + 1))
             for index, middle in enumerate(decisions)
         )
+        compared = {clip_id for contest in existing_competitions
+                    for clip_id in (*contest.winner_clip_ids, *contest.covered_clip_ids,
+                                    *contest.material_unique_clip_ids)}
+        unchecked_earlier_take = any(
+            earlier.action == "select" and candidate_rows[left]["clip_id"] not in compared and
+            any(later.action == "select" and later.reason_code == "best_complete_take" and
+                candidate_rows[right]["source_asset_id"] == candidate_rows[left]["source_asset_id"]
+                for right, later in enumerate(decisions[left + 1:], left + 1))
+            for left, earlier in enumerate(decisions)
+        )
         full_reaudit = selected_count >= 4 and bool(existing_competitions) and (
-            len(existing_competitions) >= 3 or reset_split)
+            len(existing_competitions) >= 3 or reset_split or unchecked_earlier_take)
         missing_competitions = not existing_competitions and selected_count >= 5
         if payload.get("engine_version") != "v2" or not (full_reaudit or missing_competitions):
             return (), {"status": "not_eligible", "first_pass_selected_count": selected_count}
