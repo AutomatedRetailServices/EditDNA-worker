@@ -6705,6 +6705,94 @@ jobs:
           print(json.dumps({k: v for k, v in summary.items() if k not in ("transitions", "handle_diagnostics")}, indent=2, sort_keys=True, default=str))
           PY
 
+      - name: Tail-safe editorial summary (sibling-safe; never fails)
+        # Placed LAST among the print steps on purpose: GitHub's job-log API
+        # only serves a bounded tail, and every step above echoes its whole
+        # script, so the editorial facts printed in "Print full canonical
+        # diagnostics" (step ~21) scroll out of reach on a real run. This
+        # step re-prints ONLY the compact editorial record from the already-
+        # downloaded engine JSON -- source identity, ASR audit, KEEP/DISCARD
+        # with source times and text, render QC/delivery status -- so a run
+        # can be inspected from the log tail alone. Pure re-projection: no
+        # editorial decision is recomputed, no Gold is consulted, and it
+        # never fails the job.
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYTAIL'
+          import json, os
+          from pathlib import Path
+
+          out = Path("artifact/editorial-summary-tail.json")
+          out.parent.mkdir(exist_ok=True)
+          path = Path("artifact/video00-modal.json")
+          if not path.is_file():
+              summary = {"source_status": "engine_json_missing", "source_key": os.environ.get("SOURCE_KEY")}
+              out.write_text(json.dumps(summary, indent=2))
+              print("--- TAIL-SAFE EDITORIAL SUMMARY ---")
+              print(json.dumps(summary, indent=2))
+              raise SystemExit(0)
+          try:
+              engine = json.loads(path.read_text())
+          except Exception as exc:  # noqa: BLE001 -- observability only
+              engine = {"_unparseable": str(exc)}
+          if not isinstance(engine, dict):
+              engine = {"_unexpected_type": type(engine).__name__}
+
+          def clip_rows(items):
+              rows = []
+              for c in items or []:
+                  if not isinstance(c, dict):
+                      continue
+                  rows.append({
+                      "clip_id": c.get("clip_id"),
+                      "start": c.get("start"),
+                      "end": c.get("end"),
+                      "duration": (round(float(c["end"]) - float(c["start"]), 3)
+                                   if c.get("start") is not None and c.get("end") is not None else None),
+                      "text": c.get("text"),
+                  })
+              return rows
+
+          audit = engine.get("asr_provider_audit") or {}
+          if not isinstance(audit, dict):
+              audit = {"_unexpected_type": type(audit).__name__}
+          asr = {k: audit.get(k) for k in (
+              "provider", "model", "status", "error", "detected_language", "word_count",
+              "segment_count", "elapsed_sec", "alignment_runtime", "fallback",
+              "timestamp_interpolation", "cache_hit_count", "config_fingerprint",
+              "source_media_sha256", "discarded_degenerate_asr_tails")}
+          qc = engine.get("live_render_qc") or {}
+          if not isinstance(qc, dict):
+              qc = {"_unexpected_type": type(qc).__name__}
+          selected = clip_rows(engine.get("selected"))
+          discarded = clip_rows(engine.get("discarded"))
+          summary = {
+              "source_status": "engine_json_present",
+              "source_key": os.environ.get("SOURCE_KEY"),
+              "source_media_sha256": engine.get("source_media_sha256"),
+              "source_duration_sec": engine.get("source_duration_sec"),
+              "output_duration_sec": engine.get("output_duration_sec"),
+              "ok": engine.get("ok"),
+              "asr_provider_audit_compact": asr,
+              "selected_count": len(selected),
+              "selected_total_sec": round(sum(r["duration"] or 0.0 for r in selected), 3),
+              "discarded_count": len(discarded),
+              "discarded_total_sec": round(sum(r["duration"] or 0.0 for r in discarded), 3),
+              "selected": selected,
+              "discarded": discarded,
+              "live_render_qc_compact": {k: qc.get(k) for k in (
+                  "status", "delivery_status", "deliverable", "story_completeness",
+                  "perceptual_review_status", "watch_listen_status",
+                  "human_watch_listen_required", "render_attempt_count",
+                  "plan_id", "plan_version", "semantic_hash")},
+              "stage_status": engine.get("stage_status"),
+          }
+          out.write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+          print("--- TAIL-SAFE EDITORIAL SUMMARY (pure re-projection of artifact/video00-modal.json; no decision recomputed) ---")
+          print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+          PYTAIL
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -6745,6 +6833,7 @@ jobs:
             artifact/exact-identity-observability.json
             artifact/lost-atom-ownership-materiality-diagnostics.json
             artifact/exact-p1-target-evidence.json
+            artifact/editorial-summary-tail.json
           retention-days: 14
           if-no-files-found: warn
 

@@ -42,3 +42,28 @@ Interpretación de la mecánica del workflow (no del error, que no se pudo leer)
 - **RAW COMPLETE: NO.** No existe MP4 ni JSON de selección para Yaskira/01 en esta corrida. No hay nada que comparar contra las decisiones recuperadas de la propietaria (DELETE solo 0:58–0:59; KEEP 0:29–0:32, 1:07–1:08, 1:27–1:30).
 - **Siguiente acción técnica:** leer las primeras ~300 líneas del log del job `109472885639` (o el artefacto `cutsell-video00-modal-run-log`) para obtener `error` / `error_type` / `terminal_state` del resultado; según eso, corregir en la capa responsable y relanzar **una** corrida. No relanzar a ciegas.
 - Este documento no altera Gold, canon ni estado de puertas V3.
+
+---
+
+## Actualización — causa confirmada y segunda corrida (36591488345)
+
+**Causa raíz de 36587713782 (leída del log completo, aportado por la propietaria):** `ValueError: AV budget and conservative multimodal prices must be explicitly configured`. `cutsell_worker/whole_video_av.py` (`GeminiWholeVideoAVProvider.__post_init__`) exige presupuesto por edición y los dos precios por millón de tokens finitos y positivos; el paso «Pin Yaskira01…» solo fijaba `CUTSELL_WATCH_LISTEN_AV_MAX_EDIT_USD`. Clasificación: `evidence` (configuración de la percepción AV), no una decisión editorial.
+
+**Corrección (`fec5193`):** el paso fija `CUTSELL_WATCH_LISTEN_AV_INPUT_USD_PER_MILLION=0.30` y `..._OUTPUT_USD_PER_MILLION=2.50` (las tarifas conservadoras que ya usan `cutsell-editorial-v2-focused-01-preflight.yml`, `cutsell-editorial-v2-ten-raws.yml`, `cutsell-editorial-v2-batch-01-10.yml`, `cutsell-v2-video08-block-diagnostic.yml` y `benchmarks/run_uploaded_asr_comparison.py` para `gemini-3.5-flash-lite`) más `CUTSELL_WATCH_LISTEN_AV_TIMEOUT_RETRY_ENABLED=1`, y valida las tres variables en el runner CPU antes de cualquier despacho GPU. Test `tests/test_cutsell_yaskira01_modal_av_preflight.py` (7 casos) ejecuta el script real del paso y pasa el entorno resultante por `build_av_provider`; falla contra la versión anterior del paso.
+
+**Segunda corrida:** <https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/36591488345> (job `109485435971`, SHA `fec5193`, mismos inputs).
+
+| Paso | Resultado | Duración |
+| --- | --- | --- |
+| Pin Yaskira01 (con validación AV) | success | <1 s |
+| Run Modal full benchmark (L4) | success | 5 min 09 s |
+| Print Modal run summary | **success** (`ok=true`) | <1 s |
+| Download Video00 Modal artifacts | success | 1 s |
+| Print full canonical diagnostics | success | 1 s |
+| Pasos Video00-específicos (D-235G/J, arquitectura Video00, Gold QA 18-check, Pacing V2 D-218R/221/225) | failure (esperado en clave sibling; no leen Yaskira) | — |
+
+Artefactos: `cutsell-video00-modal-run-log` 3 166 B (972 B en la corrida fallida); `cutsell-video00-modal-human-review` **106.8 MB** frente a 58.8 MB en la corrida fallida (esa contenía solo el RAW), es decir, ahora incluye el JSON del motor y un render; `cutsell-video00-modal-validator-reports` 36 KB.
+
+**Lo que aún NO está inspeccionado:** el registro editorial (KEEP/DISCARD con tiempos y texto, auditoría ASR Medium+WhisperX, `live_render_qc`/`delivery_status`) se imprime en los pasos 17 y 21, fuera de las últimas 5 000 líneas que la herramienta de logs de esta sesión puede leer; la cola visible (pasos 46+) solo trae diagnósticos legacy (P1/P2, ordering) sin intervalos de selección. Por tanto: **RAW técnicamente completo; resultado editorial NO evaluado; WhisperX NO confirmado en video; nada se compara todavía con las decisiones de la propietaria.**
+
+**Medida para que esto no se repita:** nuevo paso «Tail-safe editorial summary (sibling-safe; never fails)», último de los pasos de impresión, que reproyecta desde `artifact/video00-modal.json` la identidad de fuente, la auditoría ASR compacta, KEEP/DISCARD con `start/end/text` y el estado de QC/entrega, y lo guarda en `artifact/editorial-summary-tail.json`. No recalcula decisiones ni consulta Gold. Test `tests/test_cutsell_modal_raw_tail_safe_editorial_summary.py` (4 casos).
