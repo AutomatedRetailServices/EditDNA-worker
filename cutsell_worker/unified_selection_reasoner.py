@@ -359,11 +359,18 @@ def _apply_v2_take_competitions(
                             overrides[i] = "purchase_action_not_covered_by_winner"
                         reason = "purchase_action_coverage_conflict"
                         continue
-                    # A provider's own failed-delivery judgment is stronger
-                    # than an equivalent-take proposal. Do not let a broad
-                    # whole-plan comparison erase that explicit distinction.
+                    # Broad AV audience regions prove that someone addresses
+                    # the camera, not that this is the successful take. If
+                    # that evidence alone rescued a failed delivery and the
+                    # provider independently confirmed a complete winning
+                    # take, let the comparison remove the failed alternate.
+                    # Material amounts, conditions and destinations above
+                    # still require actual coverage by the winner.
                     if (decisions[clip_id].reason_code == "failed_delivery" or
-                            decisions[clip_id].relation == "failed"):
+                            decisions[clip_id].relation == "failed") and not (
+                                actions[i] == "select" and
+                                overrides[i] == "av_audience_unique_content_overrides_failed_label"
+                            ):
                         reason = "failed_delivery_preserved_against_equivalence"
                         continue
                     if (tuple(sorted(contest.winner_clip_ids)), clip_id) in protected:
