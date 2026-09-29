@@ -1,6 +1,6 @@
 {
   "manifest_schema": "cutsell.v3.door0.gold-overlap-manifest.v1",
-  "replay_scope": "selected interval vs Gold metric only",
+  "replay_scope": "saved selected interval vs provisional historical label; not an editorial acceptance score",
   "observations": [
     {
       "source_key": "Yaskira/01.mp4",
@@ -9,6 +9,7 @@
       "artifact_id": 11026136307,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 114.561,
@@ -27,6 +28,7 @@
       "artifact_id": 11026136307,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 96.262,
@@ -45,6 +47,7 @@
       "artifact_id": 11026136307,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 19.623,
@@ -63,6 +66,7 @@
       "artifact_id": 11026136307,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 38.0,
@@ -81,6 +85,7 @@
       "artifact_id": 11026136307,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 39.0,
@@ -99,6 +104,7 @@
       "artifact_id": 11026136307,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 22.0,
@@ -117,6 +123,7 @@
       "artifact_id": 11018520264,
       "selection_status": "applied",
       "source_sha256": "7ef73ebafc53ca405243c9613bd50d640cb7aa5ccd97ffa395994931b0a4028b",
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 22.0,
@@ -135,7 +142,8 @@
       "artifact_id": null,
       "selection_status": null,
       "source_sha256": null,
-      "metric_status": "incomplete_raw_time_alignment"
+      "label_provenance_status": "rejected_by_owner",
+      "metric_status": "rejected_by_owner_no_approved_gold"
     },
     {
       "source_key": "Yaskira/08.mp4",
@@ -144,6 +152,7 @@
       "artifact_id": 11023061700,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 27.0,
@@ -162,6 +171,7 @@
       "artifact_id": null,
       "selection_status": null,
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "failed_before_selection"
     },
     {
@@ -171,6 +181,7 @@
       "artifact_id": 11019339666,
       "selection_status": "applied",
       "source_sha256": "463e774293a518eecc4d568099183359f81b2b96381b8444ed63d617ee643381",
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 73.0,
@@ -189,6 +200,7 @@
       "artifact_id": 11026136307,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 36.0,
@@ -207,6 +219,7 @@
       "artifact_id": 11024579682,
       "selection_status": "applied",
       "source_sha256": null,
+      "label_provenance_status": "pending_owner_timestamp_and_source_identity_audit",
       "metric_status": "replayed",
       "metrics": {
         "gold_keep_seconds": 36.0,
