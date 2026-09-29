@@ -1,4 +1,4 @@
-name: Extract V2 Regression 365359 Focused Delivery
+name: Extract V2 Regression 365395 Focused Delivery
 on:
   push:
     branches: [feat/editorial-engine-v2-whole-video-rebuild]
@@ -20,8 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p raw compact
-          gh run download 36535957538 --repo "$GITHUB_REPOSITORY" \
-            --name cutsell-editorial-v2-10-verification-36535957538 \
+          gh run download 36539576297 --repo "$GITHUB_REPOSITORY" \
+            --name cutsell-editorial-v2-09-verification-36539576297 \
             --dir raw
           python - <<'PY'
           import json
@@ -156,7 +156,7 @@ jobs:
                   ],
                   "render_qc": (result.get("live_render_qc") or {}).get("status"),
               })
-          out = Path("compact/regression-365359-interval-decisions.json")
+          out = Path("compact/regression-365395-interval-decisions.json")
           out.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
           print(json.dumps({
               "source_count": compact["source_count"],
@@ -172,5 +172,5 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: v2-regression-365359-interval-decisions
-          path: compact/regression-365359-interval-decisions.json
+          name: v2-regression-365395-interval-decisions
+          path: compact/regression-365395-interval-decisions.json
