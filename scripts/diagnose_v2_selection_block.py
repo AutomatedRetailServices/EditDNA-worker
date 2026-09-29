@@ -41,14 +41,23 @@ def post_with_diagnostic(url, *args, **kwargs):
                          "prompt_tokens": (raw.get("usageMetadata") or {}).get("promptTokenCount"),
                          "has_candidates": bool(raw.get("candidates"))}
     if feedback.get("blockReason") == "PROHIBITED_CONTENT" and len(parts) > 1:
-        # The exact same text-only diagnostic already returned PROHIBITED_CONTENT
-        # in run 36488048062. Repeating it adds no new evidence and cannot be
-        # used to evade the provider's decision.
-        report["comparison"] = {
-            "status": "not_repeated",
-            "reason": "identical_text_only_probe_already_blocked",
-            "prior_run_id": 36488048062,
-        }
+        # This diagnostic does not feed a blocked answer into Selection. The
+        # prompt evolves with candidate reconstruction, so a previous block
+        # does not establish whether *this* request's AV attachment is the
+        # trigger. A single text-only control identifies which side differs.
+        text_body = {**body, "contents": [{**body["contents"][0], "parts": [parts[0]]}]}
+        try:
+            control = original_post(url, *args, **{**kwargs, "json": text_body})
+            control_raw = control.json() if control.ok else {}
+            report["comparison"] = {
+                "status": "observed", "http_status": control.status_code,
+                "block_reason": (control_raw.get("promptFeedback") or {}).get("blockReason"),
+                "has_candidates": bool(control_raw.get("candidates")),
+                "prompt_tokens": (control_raw.get("usageMetadata") or {}).get("promptTokenCount"),
+                "editorial_output_used": False,
+            }
+        except requests.RequestException as exc:
+            report["comparison"] = {"status": "request_failed", "error_type": type(exc).__name__}
     return response
 
 
