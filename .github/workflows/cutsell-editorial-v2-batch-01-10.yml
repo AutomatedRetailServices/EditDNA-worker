@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Focused Regression 02-03-04-06-09
+name: CutSell Editorial Engine V2 Focused Regression 02-03-04-06-09 with focused mixed-delivery evidence
 
 on:
   workflow_dispatch:
