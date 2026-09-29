@@ -1,0 +1,63 @@
+name: Inspect V2 editorial decisions for 06 and 10
+on:
+  push:
+    branches: [feat/editorial-engine-v2-whole-video-rebuild]
+    paths: [.github/workflows/cutsell-v2-inspect-06-10.yml]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract existing selection evidence without provider calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p raw06 raw10 compact
+          gh run download 36502632708 --repo "$GITHUB_REPOSITORY" --name cutsell-editorial-v2-focused-regression-02-03-04-06-09-36502632708 --dir raw06
+          gh run download 36502756185 --repo "$GITHUB_REPOSITORY" --name cutsell-editorial-v2-remaining-regression-01-05-07-10-36502756185 --dir raw10
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          output = []
+          for folder, target in (("raw06", "Yaskira/06.MP4"), ("raw10", "Yaskira/10.MOV")):
+              report = json.loads((Path(folder) / "report.json").read_text(encoding="utf-8"))
+              result = next(item for item in report["results"] if item["source_key"] == target)
+              diag = result.get("diagnostics") or {}
+              reasoner = diag.get("unified_selection_reasoner") or {}
+              clips = {item["clip_id"]: item for bucket in ("selected", "alternates", "discarded")
+                       for item in result.get(bucket, [])}
+              intervals = {item["clip_id"]: item for item in
+                           (diag.get("candidate_intervals") or reasoner.get("candidate_intervals") or [])
+                           if item.get("clip_id")}
+              decisions = []
+              for row in reasoner.get("decisions") or []:
+                  clip_id = row.get("clip_id")
+                  decisions.append({"clip_id": clip_id,
+                      "interval": intervals.get(clip_id),
+                      "text": (clips.get(clip_id) or {}).get("text"),
+                      "model_action": row.get("model_action"),
+                      "effective_action": row.get("effective_action"),
+                      "reason_code": row.get("reason_code"),
+                      "relation": row.get("relation"),
+                      "safety_override": row.get("safety_override")})
+              output.append({"source_key": target, "selected": result["selected"],
+                  "alternates": result["alternates"], "discarded": result["discarded"],
+                  "decisions": decisions, "whole_video_context": diag.get("whole_video_context"),
+                  "take_competitions": diag.get("v2_take_competitions"),
+                  "retry_claim_conflicts": diag.get("v2_retry_claim_conflicts")})
+          path = Path("compact/editorial-06-10.json")
+          path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps([{"source_key": row["source_key"],
+              "selected_count": len(row["selected"]),
+              "decision_count": len(row["decisions"])} for row in output], indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-v2-editorial-06-10
+          path: compact/editorial-06-10.json
