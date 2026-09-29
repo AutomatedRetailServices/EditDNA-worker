@@ -1,4 +1,4 @@
-name: CutSell Editorial Engine V2 Focused Verification 10
+name: CutSell Editorial Engine V2 Focused Verification 09
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cutsell-editorial-v2-focused-verification-10
+  group: cutsell-editorial-v2-focused-verification-09
   cancel-in-progress: false
 
 jobs:
@@ -112,7 +112,7 @@ jobs:
           from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
           keys = [
-              "Yaskira/10.MOV",
+              "Yaskira/09.mp4",
           ]
           root = Path("editorial-v2-focused-regression")
           results = []
@@ -123,7 +123,7 @@ jobs:
               try:
                   result = run_single_universal_clean_cut_validation(
                       key,
-                      project_id=f"cutsell-editorial-v2-10-verification-{index:02d}",
+                      project_id=f"cutsell-editorial-v2-09-verification-{index:02d}",
                       preview_output=str(preview),
                   )
                   v2_status = result.get("diagnostics", {}).get("editorial_engine_v2", {}).get("status")
@@ -228,7 +228,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-editorial-v2-10-verification-${{ github.run_id }}
+          name: cutsell-editorial-v2-09-verification-${{ github.run_id }}
           path: editorial-v2-focused-regression/
           if-no-files-found: warn
           retention-days: 30
