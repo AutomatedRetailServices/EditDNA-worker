@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .asr import FasterWhisperASR
 from .brain_runtime import build_brain_runtime
-from .config import load_runtime_config
+from .config import ENGINE_SIMPLE, load_runtime_config, selected_engine
 from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
 from .media_probe import probe_media
@@ -518,8 +518,13 @@ def run_flow_b_job(payload: dict) -> dict:
     )
 
     config = load_runtime_config()
-    brain = build_brain_runtime(config)
-    asr = FasterWhisperASR(model_name=config.asr_model)
+    # CUTSELL_ENGINE=simple runs cutsell_worker.simple_engine (Deepgram + Claude) instead of the
+    # legacy decision stack. It needs no brain runtime and no local Whisper model, so neither is
+    # built. Default ("legacy") is byte-identical to the behavior before this switch existed.
+    engine = selected_engine()
+    use_simple_engine = engine == ENGINE_SIMPLE
+    brain = None if use_simple_engine else build_brain_runtime(config)
+    asr = None if use_simple_engine else FasterWhisperASR(model_name=config.asr_model)
 
     measured_seconds = 0.0
     outcome = "failed"
@@ -559,26 +564,38 @@ def run_flow_b_job(payload: dict) -> dict:
                 # process_local_sources is called.
                 raise SourceFormatGateBlocked(blocked_sources)
 
-            result = process_local_sources(
-                request,
-                local_paths,
-                asr_provider=asr,
-                semantic_provider=brain.semantic_provider,
-                whole_video_provider=brain.whole_video_provider,
-                visual_provider=brain.visual_provider,
-                take_grouping_provider=brain.take_grouping_provider,
-                take_judge_provider=brain.take_judge_provider,
-                clean_cut_provider=brain.clean_cut_provider,
-                composer_provider=brain.composer_provider,
-                draft_review_provider=brain.draft_review_provider,
-                editorial_judge=brain.editorial_judge,
-                progress=publish,
-            )
-            serialized = result_to_dict(result)
-            serialized["brain_backend"] = brain.backend
-            serialized["external_brain_calls_enabled"] = brain.external_calls_enabled
-            serialized["hybrid_provider"] = brain.hybrid_settings.provider
-            serialized["hybrid_primary_model"] = brain.hybrid_settings.primary_model
+            if use_simple_engine:
+                from .simple_engine import llm as simple_engine_llm
+                from .simple_engine_adapter import process_with_simple_engine
+
+                result = process_with_simple_engine(request, local_paths, progress=publish)
+                serialized = result_to_dict(result)
+                serialized["brain_backend"] = "simple_engine"
+                serialized["external_brain_calls_enabled"] = True
+                serialized["hybrid_provider"] = "anthropic"
+                serialized["hybrid_primary_model"] = simple_engine_llm.model_name()
+                serialized["engine"] = engine
+            else:
+                result = process_local_sources(
+                    request,
+                    local_paths,
+                    asr_provider=asr,
+                    semantic_provider=brain.semantic_provider,
+                    whole_video_provider=brain.whole_video_provider,
+                    visual_provider=brain.visual_provider,
+                    take_grouping_provider=brain.take_grouping_provider,
+                    take_judge_provider=brain.take_judge_provider,
+                    clean_cut_provider=brain.clean_cut_provider,
+                    composer_provider=brain.composer_provider,
+                    draft_review_provider=brain.draft_review_provider,
+                    editorial_judge=brain.editorial_judge,
+                    progress=publish,
+                )
+                serialized = result_to_dict(result)
+                serialized["brain_backend"] = brain.backend
+                serialized["external_brain_calls_enabled"] = brain.external_calls_enabled
+                serialized["hybrid_provider"] = brain.hybrid_settings.provider
+                serialized["hybrid_primary_model"] = brain.hybrid_settings.primary_model
             serialized["source_format_diagnostics"] = source_format_diagnostics
             # D-274F Stage 16/17: additive, public-safe per-source
             # normalization lifecycle diagnostics -- never a local

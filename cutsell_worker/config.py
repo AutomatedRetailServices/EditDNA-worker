@@ -10,6 +10,20 @@ import os
 
 RUNPOD_LOCAL_BACKEND = "runpod_local"
 
+# Which editorial engine a Flow B job runs. "legacy" = the V2 decision stack (default, unchanged).
+# "simple" = cutsell_worker.simple_engine (Deepgram + Claude, no GPU). Any other value is an error.
+ENGINE_LEGACY = "legacy"
+ENGINE_SIMPLE = "simple"
+ENGINE_CHOICES = (ENGINE_LEGACY, ENGINE_SIMPLE)
+
+
+def selected_engine(env: dict[str, str] | None = None) -> str:
+    values = env if env is not None else os.environ
+    raw = str(values.get("CUTSELL_ENGINE", ENGINE_LEGACY) or ENGINE_LEGACY).strip().lower()
+    if raw not in ENGINE_CHOICES:
+        raise ValueError(f"CUTSELL_ENGINE must be one of {ENGINE_CHOICES}, got {raw!r}")
+    return raw
+
 
 def _env_bool(values: dict[str, str], key: str, default: bool = False) -> bool:
     raw = values.get(key)
