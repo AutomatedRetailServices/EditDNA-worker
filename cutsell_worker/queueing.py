@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from .config import load_runtime_config
 from .usage_limits import release_processing_slot, reserve_processing_slot
+from .worker_wake import wake_worker
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
             failure_ttl=86400,
             meta=meta,
         )
+        wake_worker()
         return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
     except Exception:
         if reserved:
@@ -66,6 +68,7 @@ def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
             "project_id": str(payload.get("project_id") or ""),
         },
     )
+    wake_worker()
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 
@@ -83,6 +86,7 @@ def enqueue_batch_item(
         failure_ttl=86400,
         meta={"user_id": user_id, "batch_id": batch_id, "batch_index": int(index)},
     )
+    wake_worker()
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 
