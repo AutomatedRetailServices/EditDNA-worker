@@ -312,3 +312,49 @@ def test_gold_file_and_scorer_reproduce_the_recorded_reference_score():
     video = gold["videos"][0]
     total, agree, removed, kept = module.score_video(video["decisions"], [[0.0, video["duration"]]])
     assert removed == 0 and agree == sum(d["mark"] == "keep" for d in video["decisions"]) and agree + kept == total
+
+
+# ------------------------------------------------------------------ export captions
+
+def test_simple_engine_export_uses_short_timed_captions_and_legacy_drafts_do_not(video, tmp_path):
+    from dataclasses import replace as dc_replace
+
+    from cutsell_worker.render import _caption_filter
+    from cutsell_worker.render_plan import build_render_plan
+
+    result = simple_engine_adapter.process_with_simple_engine(
+        _request({"s1": video}), {"s1": video}, transcribe=_fake_transcribe, llm=FakeLLM(),
+    )
+    draft = result.draft
+    plan = build_render_plan(draft, {"s1": video})
+    middle = plan[1]                                          # "Lo uso todos los días."
+    assert [text for _, _, text in middle.caption_cues] == ["Lo uso todos", "los días."]
+    assert all(0 <= a < b <= middle.duration_sec + 1e-6 for a, b, _ in middle.caption_cues)
+    assert all(x[1] <= y[0] + 1e-6 for x, y in zip(middle.caption_cues, middle.caption_cues[1:]))
+
+    assert _caption_filter(middle, tmp_path / "part.mp4")
+    srt = (tmp_path / "part.srt").read_text(encoding="utf-8")
+    assert srt.count("-->") == 2 and "Lo uso todos\n" in srt and "los días.\n" in srt
+
+    # captions off -> no cues, no caption text
+    off = build_render_plan(dc_replace(draft, captions_enabled=False), {"s1": video})
+    assert all(not seg.caption_cues and not seg.caption_text for seg in off)
+    # a caption the user rewrote by hand is shown whole, exactly as typed
+    edited_clip = dc_replace(draft.selected[1], caption_text="¡Mi favorito!")
+    edited = build_render_plan(dc_replace(draft, selected=(draft.selected[0], edited_clip, draft.selected[2])), {"s1": video})
+    assert edited[1].caption_cues == () and edited[1].caption_text == "¡Mi favorito!"
+    # any draft that is not from the simple engine keeps the single whole-clip caption
+    legacy = build_render_plan(dc_replace(draft, diagnostics={}), {"s1": video})
+    assert all(seg.caption_cues == () for seg in legacy)
+    assert _caption_filter(legacy[1], tmp_path / "legacy.mp4")
+    assert (tmp_path / "legacy.srt").read_text(encoding="utf-8").count("-->") == 1
+
+
+def test_timed_caption_text_cannot_inject_a_second_cue(tmp_path):
+    from cutsell_worker.render import _caption_filter
+    from cutsell_worker.render_plan import RenderSegment
+
+    seg = RenderSegment(clip_id="c", source_asset_id="s", source_path="x.mp4", start=0.0, end=2.0,
+                        caption_text="hola", caption_cues=((0.0, 1.0, "hola\n\n9\n00:00:00,000 --> 00:00:09,000\nmalo"),))
+    assert _caption_filter(seg, tmp_path / "p.mp4")
+    assert (tmp_path / "p.srt").read_text(encoding="utf-8").count("\n\n") == 0

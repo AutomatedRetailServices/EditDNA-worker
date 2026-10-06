@@ -70,6 +70,12 @@ class RenderSegment:
     # An upstream-authorized visual interval is not silent recording slack.
     # Renderer may trim after this source time, never through it.
     trailing_trim_floor: float | None = None
+    # Simple engine only (draft.diagnostics["engine"] == "simple"): short timed caption cues
+    # for this segment, as (start, end, text) in seconds RELATIVE to the segment's own start.
+    # Empty for every other draft, which keeps the single whole-clip caption exactly as before.
+    # Simple-engine clips run many seconds; one cue for the whole clip would put the entire
+    # paragraph on screen at once.
+    caption_cues: Tuple[Tuple[float, float, str], ...] = ()
 
     @property
     def duration_sec(self) -> float:
@@ -157,6 +163,52 @@ def _coalesce_contiguous_segments(segments: Tuple[RenderSegment, ...]) -> Tuple[
     return tuple(output)
 
 
+CAPTION_CUE_MAX_WORDS = 3
+CAPTION_CUE_MAX_GAP_SEC = 0.45
+CAPTION_CUE_TAIL_HOLD_SEC = 0.30
+
+
+def timed_caption_cues(clip) -> Tuple[Tuple[float, float, str], ...]:
+    """Groups of up to three spoken words with their own on-screen window, relative to the
+    clip start. A group closes at three words, at punctuation, or at a pause. Each cue stays
+    up until the next one starts (short hold after the last word otherwise), so text does not
+    flicker between words. Returns () when the clip has no word timings or its caption was
+    edited by hand (caption_text no longer equals the spoken text): the caller then falls
+    back to the single whole-clip caption."""
+    words = [w for w in (clip.words or ()) if float(w.end) > float(w.start)]
+    if not words:
+        return ()
+    if " ".join(str(clip.caption_text or "").split()) != " ".join(str(clip.text or "").split()):
+        return ()
+    start, end = float(clip.start), float(clip.end)
+    groups: list[list] = []
+    current: list = []
+    for word in words:
+        if float(word.end) <= start or float(word.start) >= end:
+            continue
+        if current and float(word.start) - float(current[-1].end) > CAPTION_CUE_MAX_GAP_SEC:
+            groups.append(current); current = []
+        current.append(word)
+        if len(current) >= CAPTION_CUE_MAX_WORDS or str(word.text).rstrip().endswith((".", "?", "!", ",")):
+            groups.append(current); current = []
+    if current:
+        groups.append(current)
+    cues = []
+    for index, group in enumerate(groups):
+        cue_start = max(0.0, float(group[0].start) - start)
+        last_end = float(group[-1].end) - start
+        if index + 1 < len(groups):
+            next_start = float(groups[index + 1][0].start) - start
+            cue_end = min(next_start, last_end + CAPTION_CUE_TAIL_HOLD_SEC * 2)
+        else:
+            cue_end = last_end + CAPTION_CUE_TAIL_HOLD_SEC
+        cue_end = min(cue_end, end - start)
+        text = " ".join(str(word.text) for word in group)
+        if cue_end - cue_start >= 0.05 and text.strip():
+            cues.append((round(cue_start, 3), round(cue_end, 3), text))
+    return tuple(cues)
+
+
 def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> Tuple[RenderSegment, ...]:
     """Translate selected draft clips to concrete source-safe media segments."""
     output = []
@@ -198,6 +250,11 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             fragment_count=getattr(clip, "fragment_count", None),
             boundary_reason=getattr(clip, "boundary_reason", None),
             trailing_trim_floor=max(visual_floors) if visual_floors else None,
+            caption_cues=(
+                timed_caption_cues(clip)
+                if draft.captions_enabled and (draft.diagnostics or {}).get("engine") == "simple"
+                else ()
+            ),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

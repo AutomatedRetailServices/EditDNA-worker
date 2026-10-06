@@ -412,6 +412,25 @@ def _srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
 
 
+def _timed_cue_lines(segment: RenderSegment) -> str:
+    """SRT body for a segment that carries short timed cues (simple engine). Every cue text gets
+    the same whitespace collapse as the single-cue path below, so text can never open a second
+    cue; cues are clamped to the segment's real duration (a trailing-silence trim may have
+    shortened it) and never overlap. Empty string when there is nothing usable."""
+    duration = float(segment.duration_sec)
+    lines: list[str] = []
+    previous_end = 0.0
+    for start, end, raw in getattr(segment, "caption_cues", ()) or ():
+        text = " ".join(str(raw or "").replace("\x00", "").split())[:120]
+        start = max(float(start), previous_end)
+        end = min(float(end), duration)
+        if not text or end - start < 0.05:
+            continue
+        lines.append(f"{len(lines) + 1}\n{_srt_timestamp(start)} --> {_srt_timestamp(end)}\n{text}\n")
+        previous_end = end
+    return "\n".join(lines)
+
+
 def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
     text = str(segment.caption_text or "").replace("\x00", "")
     # Collapse ALL whitespace -- including embedded newlines/carriage
@@ -426,10 +445,14 @@ def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
         return None
     text = text[:500]
     subtitle = part.with_suffix(".srt")
-    subtitle.write_text(
-        f"1\n00:00:00,000 --> {_srt_timestamp(segment.duration_sec)}\n{text}\n",
-        encoding="utf-8",
-    )
+    cue_lines = _timed_cue_lines(segment)
+    if cue_lines:
+        subtitle.write_text(cue_lines, encoding="utf-8")
+    else:
+        subtitle.write_text(
+            f"1\n00:00:00,000 --> {_srt_timestamp(segment.duration_sec)}\n{text}\n",
+            encoding="utf-8",
+        )
     preset = str(segment.caption_preset or "classic")
     if preset == "clean":
         style = "Fontsize=24,Alignment=2,MarginV=120,BorderStyle=3,Outline=0,Shadow=0,BackColour=&H66000000,PrimaryColour=&H00FFFFFF"
