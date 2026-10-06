@@ -39,6 +39,27 @@ def _env_int(values: dict[str, str], key: str, default: int) -> int:
         return default
 
 
+# What an export needs before it is delivered to the user.
+#   "human_review" (default, unchanged): the perceptual Watch+Listen gate applies. Today that gate
+#       cannot auto-pass, so every technically clean export is held as pending_review until the
+#       user approves it through the pending-review endpoints.
+#   "technical_qc": a render that passed technical QC and whose perceptual verdict is only
+#       HUMAN_REVIEW_REQUIRED is delivered directly. A BLOCKED verdict (a confirmed defect) still
+#       never delivers. Product Owner decision of 2026-10-06: the user reviews the cut in the
+#       editor before exporting, and the mobile app has no pending-review screen.
+EXPORT_GATE_HUMAN_REVIEW = "human_review"
+EXPORT_GATE_TECHNICAL_QC = "technical_qc"
+EXPORT_GATE_CHOICES = (EXPORT_GATE_HUMAN_REVIEW, EXPORT_GATE_TECHNICAL_QC)
+
+
+def export_delivery_gate(env: dict[str, str] | None = None) -> str:
+    values = env if env is not None else os.environ
+    raw = str(values.get("CUTSELL_EXPORT_DELIVERY_GATE", EXPORT_GATE_HUMAN_REVIEW) or EXPORT_GATE_HUMAN_REVIEW).strip().lower()
+    if raw not in EXPORT_GATE_CHOICES:
+        raise ValueError(f"CUTSELL_EXPORT_DELIVERY_GATE must be one of {EXPORT_GATE_CHOICES}, got {raw!r}")
+    return raw
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     redis_url: str | None

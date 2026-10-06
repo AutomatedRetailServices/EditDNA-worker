@@ -14,6 +14,7 @@ from .live_render_qc import PostRenderQCFailure, render_with_post_render_qc
 from .media_overlay_render import LocalMediaOverlay
 from .notifications import publish_notification
 from .overlay_uploads import validate_overlay_uri
+from .config import EXPORT_GATE_TECHNICAL_QC, export_delivery_gate
 from .perceptual_watch_listen import WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
 from .project_tracking import safe_update_project
 from .render import RENDER_FPS_DEFAULT
@@ -159,6 +160,18 @@ def _tenant_safe_deliver(
     else:
         perceptual = perceptual_review_for_rendered_candidate(output_path, draft, local_paths or {}, qc_result)
         watch_listen_status = (perceptual or {}).get("watch_listen_status") or WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
+        if (
+            watch_listen_status == WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
+            and export_delivery_gate() == EXPORT_GATE_TECHNICAL_QC
+        ):
+            # CUTSELL_EXPORT_DELIVERY_GATE=technical_qc (see config.py): "needs a human look" is
+            # not held for approval -- the D-288 gate is left unapplied, exactly like the
+            # `watch_listen_status=None` opt-in contract above. Only this one verdict is relaxed:
+            # BLOCKED keeps its value and still never delivers. The review itself is kept in the
+            # result for observability.
+            if isinstance(perceptual, dict):
+                perceptual = {**perceptual, "delivery_gate_policy": EXPORT_GATE_TECHNICAL_QC}
+            watch_listen_status = None
 
     local_delivery = rd.build_render_delivery_record(
         render_identity=render_identity,
