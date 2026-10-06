@@ -17,24 +17,42 @@ final class AppState: ObservableObject {
     }
 
     func bootstrap() async {
+        isBootstrapping = true
+        bootstrapError = nil
         defer { isBootstrapping = false }
         do {
-            let current: CutSellSession
             if let saved = try KeychainStore.load() {
-                current = saved
-            } else {
-                // Commercial Apple auth remains gated until Apple Developer App ID /
-                // entitlement setup is explicitly activated. Closed-beta staging keeps
-                // using the anonymous bootstrap so current recovery is not disrupted.
-                current = try await api.createSession()
-                try KeychainStore.save(current)
+                do {
+                    try await start(with: saved)
+                    return
+                } catch APIError.http(let code, _) where code == 401 {
+                    // The saved session expired or was revoked on the server (sessions last 90 days).
+                    // Without this the app stayed on the error screen forever. Closed-beta sessions are
+                    // anonymous, so the only recovery is a new one; it starts with an empty project list.
+                    KeychainStore.clear()
+                }
             }
-            session = current
-            await api.setSession(current)
-            try await refreshProjects()
+            // Commercial Apple auth remains gated until Apple Developer App ID /
+            // entitlement setup is explicitly activated. Closed-beta staging keeps
+            // using the anonymous bootstrap so current recovery is not disrupted.
+            let fresh = try await api.createSession()
+            try KeychainStore.save(fresh)
+            try await start(with: fresh)
         } catch {
             bootstrapError = error.localizedDescription
         }
+    }
+
+    private func start(with current: CutSellSession) async throws {
+        session = current
+        await api.setSession(current)
+        try await refreshProjects()
+    }
+
+    /// Call when a request made outside bootstrap fails: a 401 means the session is gone, so start over.
+    func recoverIfUnauthorized(_ error: Error) async {
+        guard let apiError = error as? APIError, case .http(let code, _) = apiError, code == 401 else { return }
+        await bootstrap()
     }
 
     func establishAppleSession(identityToken: String, nonce: String?) async throws {
@@ -90,7 +108,13 @@ final class AppState: ObservableObject {
             method: "DELETE",
             body: Body(user_id: session.userID, confirmation: "DELETE MY ACCOUNT")
         )
-        clearSession()
+        // Clear in order (not via clearSession's detached task) and open a fresh anonymous session,
+        // so the app is usable right after deletion instead of staying empty until relaunch.
+        KeychainStore.clear()
+        self.session = nil
+        projects = []
+        await api.setSession(nil)
+        await bootstrap()
     }
 
     func clearSession() {

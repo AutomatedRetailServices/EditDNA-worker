@@ -35,10 +35,16 @@ struct CutSellApp: App {
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    guard phase == .active, let session = appState.session else { return }
+                    guard phase == .active, appState.session != nil else { return }
                     Task {
-                        try? await appState.refreshProjects()
-                        await notificationCenter.refresh(session: session)
+                        do {
+                            try await appState.refreshProjects()
+                        } catch {
+                            await appState.recoverIfUnauthorized(error)
+                        }
+                        if let current = appState.session {
+                            await notificationCenter.refresh(session: current)
+                        }
                     }
                 }
         }
@@ -53,11 +59,16 @@ struct RootView: View {
             if appState.isBootstrapping {
                 ProgressView("Starting CutSell…")
             } else if let error = appState.bootstrapError {
-                ContentUnavailableView(
-                    "Couldn’t start CutSell",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(error)
-                )
+                ContentUnavailableView {
+                    Label("Couldn’t start CutSell", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Try Again") {
+                        Task { await appState.bootstrap() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             } else {
                 ProjectsView()
             }

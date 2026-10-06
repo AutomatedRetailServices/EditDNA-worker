@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Only the keys Xcode cannot generate from INFOPLIST_KEY_* build settings.
+	     Everything else (display name, usage strings, launch screen, version) is still
+	     generated from project.yml (GENERATE_INFOPLIST_FILE = YES) and merged with this file. -->
+	<key>CutSellAPIBaseURL</key>
+	<string>$(CUTSELL_API_BASE_URL)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

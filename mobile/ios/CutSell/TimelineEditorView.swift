@@ -68,6 +68,11 @@ private struct TimelineRowItem: Identifiable {
     /// `VisualTimelineView` already builds from the draft snapshot
     /// (`SourcePreviewAssetCatalog`); never a second/invented source.
     var previewFrames: [TimelineFrame] = []
+    /// Main Video only -- where this clip starts in its SOURCE file.
+    /// `startSec`/`endSec` are positions on the edited timeline (the same
+    /// scale the playhead uses), so a split has to be converted back to
+    /// source time before it is sent to the backend.
+    var sourceStartSec: Double? = nil
 }
 
 struct TimelineEditorView: View {
@@ -99,17 +104,27 @@ struct TimelineEditorView: View {
     }
 
     private var mainVideoItems: [TimelineRowItem] {
-        model.selectedClips.map { clip in
+        // Clips play back to back, so each one starts on the timeline where
+        // the previous one ended. (Before, the clip's SOURCE times were used
+        // here while the playhead ran on the timeline, so "split at playhead"
+        // only lined up by coincidence.)
+        var cursor = 0.0
+        var items: [TimelineRowItem] = []
+        for clip in model.selectedClips {
             let start = clip["start"]?.doubleValue ?? 0
             let end = clip["end"]?.doubleValue ?? start + 1
+            let duration = max(0, end - start)
             let label = clip["caption_text"]?.stringValue ?? clip["text"]?.stringValue ?? "Clip"
             let sourceAssets = assetCatalog[clip["source_asset_id"]?.stringValue ?? ""]
             let frames = (sourceAssets?.frames ?? []).filter { $0.time >= start && $0.time <= end }
-            return TimelineRowItem(
+            items.append(TimelineRowItem(
                 id: clip["clip_id"]?.stringValue ?? UUID().uuidString, track: .mainVideo,
-                startSec: start, endSec: end, label: label, previewFrames: frames
-            )
+                startSec: cursor, endSec: cursor + duration, label: label, previewFrames: frames,
+                sourceStartSec: start
+            ))
+            cursor += duration
         }
+        return items
     }
 
     private var voiceOverItems: [TimelineRowItem] {
@@ -419,7 +434,13 @@ struct TimelineEditorView: View {
         guard let selection, canSplitAtPlayhead else { return }
         switch selection.track {
         case .mainVideo:
-            await model.split(clipID: selection.itemID, at: playheadTime)
+            guard let item = selectedItem, let sourceStart = item.sourceStartSec else { return }
+            let wanted = sourceStart + (playheadTime - item.startSec)
+            guard let splitTime = model.safeSplitTime(clipID: selection.itemID, near: wanted) else {
+                model.errorMessage = "This clip can’t be split here. Move the playhead between two words."
+                return
+            }
+            await model.split(clipID: selection.itemID, at: splitTime)
             justMutatedMainVideo = true
             canRedoMainVideo = false
         case .voiceOver:

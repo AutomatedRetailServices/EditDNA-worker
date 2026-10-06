@@ -466,6 +466,30 @@ final class DraftEditorViewModel: ObservableObject {
         if let edited { await autosave(edited) }
     }
 
+    /// The closest place to `sourceTime` (source seconds) where a selected
+    /// clip can really be split: the middle of a gap between two spoken
+    /// words, leaving a usable piece on both sides. The backend refuses a
+    /// split that cuts through a word, so the playhead position is snapped
+    /// here first. `nil` when the clip has no safe place to split.
+    func safeSplitTime(clipID: String, near sourceTime: Double) -> Double? {
+        guard let clip = selectedClips.first(where: { $0["clip_id"]?.stringValue == clipID }) else { return nil }
+        let start = clip["start"]?.doubleValue ?? 0
+        let end = clip["end"]?.doubleValue ?? start
+        let words = clip["words"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        if words.isEmpty {
+            // No speech in this clip: any point that leaves both sides usable is safe.
+            return (sourceTime - start >= 0.15 && end - sourceTime >= 0.15) ? sourceTime : nil
+        }
+        var gaps: [Double] = []
+        for (left, right) in zip(words, words.dropFirst()) {
+            guard let leftEnd = left["end"]?.doubleValue,
+                  let rightStart = right["start"]?.doubleValue else { continue }
+            let candidate = (leftEnd + rightStart) / 2
+            if candidate - start >= 0.15, end - candidate >= 0.15 { gaps.append(candidate) }
+        }
+        return gaps.min(by: { abs($0 - sourceTime) < abs($1 - sourceTime) })
+    }
+
     func split(clipID: String, at sourceTime: Double) async {
         guard let snapshot else { return }
         let edited = await edit(path: "/v1/draft-edits/split", body: .object([
