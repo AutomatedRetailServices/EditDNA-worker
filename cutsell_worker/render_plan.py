@@ -81,6 +81,10 @@ class RenderSegment:
     caption_cue_words: Tuple[Tuple[Tuple[float, float, str], ...], ...] = ()
     # Caption typeface key (caption_render.CAPTION_FONTS); "" = the default face.
     caption_font: str = ""
+    # Caption placement / size for the whole video; None = the default (caption_render).
+    caption_x: float | None = None
+    caption_y: float | None = None
+    caption_scale: float | None = None
 
     @property
     def duration_sec(self) -> float:
@@ -143,7 +147,8 @@ def _can_coalesce(left: RenderSegment, right: RenderSegment, *, tolerance_sec: f
         return False
     if left.audio_muted != right.audio_muted or abs(left.audio_volume - right.audio_volume) > 1e-6:
         return False
-    if left.caption_preset != right.caption_preset or left.caption_font != right.caption_font:
+    if (left.caption_preset, left.caption_font, left.caption_x, left.caption_y, left.caption_scale) != (
+            right.caption_preset, right.caption_font, right.caption_x, right.caption_y, right.caption_scale):
         return False
     # Different active caption payloads still need independent timing in the current
     # render contract. Empty captions are safe to coalesce and are the common Clean Cut
@@ -275,6 +280,9 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             caption_cues=tuple((a, b, " ".join(w for _s, _e, w in ws)) for a, b, ws in word_groups),
             caption_cue_words=tuple(ws for _a, _b, ws in word_groups),
             caption_font=str(getattr(draft, "caption_font", "") or ""),
+            caption_x=getattr(draft, "caption_x", None),
+            caption_y=getattr(draft, "caption_y", None),
+            caption_scale=getattr(draft, "caption_scale", None),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

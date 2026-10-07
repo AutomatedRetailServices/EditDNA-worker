@@ -336,7 +336,7 @@ def test_simple_engine_export_uses_short_timed_captions_and_legacy_drafts_do_not
     ass = (tmp_path / "part.ass").read_text(encoding="utf-8")
     assert ass.count("Dialogue:") == 2 and "}Lo uso todos\n" in ass and "}los días.\n" in ass
     # Editor v2 look: lower third of a 1080x1920 frame, centred
-    assert "Style: Caption,Montserrat ExtraBold," in ass and "PlayResY: 1920" in ass and "\\an5\\pos(540,1456)" in ass
+    assert "Style: Caption,Montserrat ExtraBold," in ass and "PlayResY: 1920" in ass and "\\an5\\pos(540,1455)" in ass
     # each cue carries its own word timings, used by the Highlight looks
     assert [[w for _s, _e, w in ws] for ws in middle.caption_cue_words] == [["Lo", "uso", "todos"], ["los", "días."]]
 
@@ -422,3 +422,57 @@ def test_caption_font_choice_reaches_the_export_and_every_face_ships_with_its_li
     assert patch_caption_settings(draft, font="oswald")["caption_font"] == "oswald"
     with pytest.raises(ValueError):
         patch_caption_settings(draft, font="comic-sans")
+
+
+def test_caption_position_and_size_apply_to_the_whole_video_and_stay_inside_the_frame(tmp_path):
+    from cutsell_worker.caption_render import PLAY_RES_X, PLAY_RES_Y, build_caption_ass, caption_layout
+    from cutsell_worker.caption_settings import patch_caption_settings
+    from cutsell_worker.render import _caption_filter
+    from cutsell_worker.render_plan import RenderSegment, _can_coalesce
+    from dataclasses import replace as dc_replace
+    import re
+
+    cues = ((0.0, 1.0, "me salió este"), (1.0, 2.0, "innecesarias, esta compra"))
+
+    def events(**layout):
+        body = build_caption_ass(cues, (), preset="classic", duration_sec=3.0, **layout)
+        style = next(line for line in body.splitlines() if line.startswith("Style:")).split(",")
+        rows = [re.search(r"pos\((\d+),(\d+)\)(?:\\blur1\.2)?(?:\\fs(\d+))?", line).groups()
+                for line in body.splitlines() if line.startswith("Dialogue:")]
+        return int(style[2]), int(style[19]), int(style[20]), rows
+
+    size, left, right, rows = events()
+    assert (size, left, right) == (94, 36, 36)
+    assert [(int(a), int(b)) for a, b, _ in rows] == [(540, 1455)] * 2          # same place for every cue
+    # moved up and enlarged: one setting, every cue follows it
+    size, _l, _r, rows = events(y=0.2, scale=1.5)
+    assert size == 141 and {(a, b) for a, b, _ in rows} == {("540", "384")}
+    # dragged into a corner at the largest size: the centre is pulled in, the column stays
+    # symmetric and inside the frame, and a word too wide for the column is drawn smaller
+    size, left, right, rows = events(x=1.0, y=1.0, scale=2.0)
+    cx, cy = int(rows[0][0]), int(rows[0][1])
+    column = PLAY_RES_X - left - right
+    assert left == right and column >= 500
+    assert cx - column // 2 >= 0 and cx + column // 2 <= PLAY_RES_X
+    assert cy + size <= PLAY_RES_Y and size == 188
+    assert int(rows[1][2]) < int(rows[0][2]) < size                       # longer word -> smaller
+    assert events(x=0.0, y=0.0, scale=2.0)[3][0][:2] == (str(PLAY_RES_X - cx), str(PLAY_RES_Y - cy))
+
+    assert caption_layout() == (0.5, 0.758, 1.0)
+    for bad in ({"x": 1.2}, {"y": -0.1}, {"scale": 0.2}, {"scale": 3}, {"x": "izquierda"}, {"y": float("nan")}, {"scale": True}):
+        with pytest.raises(ValueError):
+            caption_layout(**bad)
+
+    draft = {"selected": [], "caption_x": 0.3}
+    moved = patch_caption_settings(draft, y=0.25, scale=1.4)
+    assert (moved["caption_x"], moved["caption_y"], moved["caption_scale"]) == (0.3, 0.25, 1.4)
+    assert draft == {"selected": [], "caption_x": 0.3}
+    with pytest.raises(ValueError):
+        patch_caption_settings(draft, scale=9)
+
+    seg = RenderSegment(clip_id="c", source_asset_id="s", source_path="x.mp4", start=0.0, end=2.0,
+                        caption_text="hola", caption_cues=((0.0, 1.0, "hola"),), caption_y=0.2, caption_scale=1.5)
+    assert _caption_filter(seg, tmp_path / "p.mp4")
+    assert "pos(540,384)" in (tmp_path / "p.ass").read_text(encoding="utf-8")
+    twin = dc_replace(seg, clip_id="d", start=2.0, end=4.0)
+    assert _can_coalesce(seg, twin) and not _can_coalesce(seg, dc_replace(twin, caption_scale=1.0))

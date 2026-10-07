@@ -436,6 +436,8 @@ def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
             cues, getattr(segment, "caption_cue_words", ()) or (),
             preset=preset, duration_sec=float(segment.duration_sec),
             font=str(getattr(segment, "caption_font", "") or ""),
+            x=getattr(segment, "caption_x", None), y=getattr(segment, "caption_y", None),
+            scale=getattr(segment, "caption_scale", None),
         )
         if body:
             styled = part.with_suffix(".ass")

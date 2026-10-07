@@ -36,9 +36,78 @@ CAPTION_FONTS = {
 }
 DEFAULT_CAPTION_FONT = "montserrat"
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
-CENTER_X = PLAY_RES_X // 2
-CENTER_Y = 1456            # caption centre at 75.8% of the frame height
 SIDE_MARGIN = 70
+
+# Where the caption sits and how big it is, for the WHOLE video (one setting per draft, the
+# way mobile editors do it): the creator drags it and pinches it on the preview.
+#   x, y   centre of the caption as a fraction of the frame width / height (0 = left / top)
+#   scale  multiplier on the face's own size
+DEFAULT_CAPTION_X = 0.5
+DEFAULT_CAPTION_Y = 0.758      # Figma: caption centre at 75.8% of the frame height
+DEFAULT_CAPTION_SCALE = 1.0
+CAPTION_SCALE_RANGE = (0.5, 2.0)
+
+
+def caption_layout(x: object = None, y: object = None, scale: object = None) -> Tuple[float, float, float]:
+    """Validated (x, y, scale). None means "the default". Raises ValueError on anything that
+    is not a finite number inside 0..1 (position) or the allowed scale range."""
+    def number(value, default, low, high, name):
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            raise ValueError(f"{name} must be a number")
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be a number") from None
+        if out != out or out in (float("inf"), float("-inf")) or not (low <= out <= high):
+            raise ValueError(f"{name} must be between {low} and {high}")
+        return out
+    return (
+        number(x, DEFAULT_CAPTION_X, 0.0, 1.0, "caption_x"),
+        number(y, DEFAULT_CAPTION_Y, 0.0, 1.0, "caption_y"),
+        number(scale, DEFAULT_CAPTION_SCALE, CAPTION_SCALE_RANGE[0], CAPTION_SCALE_RANGE[1], "caption_scale"),
+    )
+
+
+# Rough width of one character as a fraction of the font size, per face. Only used to keep a
+# caption inside the frame; it does not have to be exact.
+_CHAR_WIDTH = {
+    "montserrat": 0.68, "poppins": 0.64, "roboto": 0.58, "oswald": 0.47, "anton": 0.45,
+    "luckiest_guy": 0.66, "bebas_neue": 0.42, "inter": 0.62, "bangers": 0.44,
+}
+_EDGE_PAD = 36          # px kept free between the caption and the frame edge
+_MIN_COLUMN = 520       # px: narrowest column a caption may be wrapped into
+
+
+def _placement(x: float, y: float, scale: float, font: str) -> Tuple[int, int, int, int]:
+    """(centre_x, centre_y, side_margin, font_size) in script pixels.
+
+    The caption is drawn centred on the point the creator chose, inside a column that is
+    symmetric around that point and never crosses a frame edge; long phrases wrap inside the
+    column. Near an edge the centre is pulled in just enough for the column to keep a usable
+    width, and the vertical centre leaves room for two lines."""
+    key = str(font or "") if str(font or "") in CAPTION_FONTS else DEFAULT_CAPTION_FONT
+    size = max(1, int(round(CAPTION_FONTS[key][1] * scale)))
+    half_min = _MIN_COLUMN // 2 + _EDGE_PAD
+    cx = int(round(min(max(float(x) * PLAY_RES_X, half_min), PLAY_RES_X - half_min)))
+    half_column = min(cx, PLAY_RES_X - cx) - _EDGE_PAD
+    margin = max(0, (PLAY_RES_X - 2 * half_column) // 2)
+    half_height = int(size * 1.3) + _EDGE_PAD
+    cy = int(round(min(max(float(y) * PLAY_RES_Y, half_height), PLAY_RES_Y - half_height)))
+    return cx, cy, margin, size
+
+
+def _fit_size(text: str, size: int, column: int, font: str) -> int:
+    """Font size for one cue: the chosen size, or smaller when its longest word alone would
+    be wider than the column (a single word cannot wrap)."""
+    key = str(font or "") if str(font or "") in _CHAR_WIDTH else DEFAULT_CAPTION_FONT
+    longest = max((len(word) for word in text.split()), default=0)
+    if longest == 0:
+        return size
+    widest = longest * size * _CHAR_WIDTH[key]
+    return size if widest <= column else max(12, int(size * column / widest))
+
 
 WHITE = "FFFFFF"
 INK = "0B1020"             # Figma dark used for the box and for words on a white box
@@ -89,7 +158,7 @@ def clean_caption_text(raw: object, limit: int = 120) -> str:
     return " ".join(text.split())[:limit]
 
 
-def _style_line(look: str, font: str) -> str:
+def _style_line(look: str, font: str, scale: float = 1.0, margin: int = SIDE_MARGIN) -> str:
     # Name, Fontname, Fontsize, Primary, Secondary, Outline, Back, Bold, Italic, Underline,
     # StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment,
     # MarginL, MarginR, MarginV, Encoding
@@ -106,14 +175,17 @@ def _style_line(look: str, font: str) -> str:
         outline, back = _ass_colour("000000", 0x40), _ass_colour("000000", 0x26)
         border_style, outline_px, shadow_px = 1, 3, 3
     family, size, bold = CAPTION_FONTS.get(str(font or ""), CAPTION_FONTS[DEFAULT_CAPTION_FONT])
+    size = max(1, int(round(size * scale)))
+    outline_px = max(1, int(round(outline_px * scale)))
+    shadow_px = int(round(shadow_px * scale))
     return (
         f"Style: Caption,{family},{size},{primary},{primary},{outline},{back},"
         f"{bold},0,0,0,100,100,0,0,{border_style},{outline_px},{shadow_px},5,"
-        f"{SIDE_MARGIN},{SIDE_MARGIN},0,1"
+        f"{margin},{margin},0,1"
     )
 
 
-def _header(look: str, font: str) -> str:
+def _header(look: str, font: str, scale: float = 1.0, margin: int = SIDE_MARGIN) -> str:
     return "\n".join([
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -126,18 +198,19 @@ def _header(look: str, font: str) -> str:
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        _style_line(look, font),
+        _style_line(look, font, scale, margin),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ])
 
 
-def _event(start: float, end: float, body: str, look: str) -> str:
+def _event(start: float, end: float, body: str, look: str, centre: Tuple[int, int], size: int | None = None) -> str:
     blur = "" if look.startswith("box") else "\\blur1.2"
+    fit = f"\\fs{size}" if size else ""
     return (
         f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,"
-        f"{{\\an5\\pos({CENTER_X},{CENTER_Y}){blur}}}{body}"
+        f"{{\\an5\\pos({centre[0]},{centre[1]}){blur}{fit}}}{body}"
     )
 
 
@@ -148,6 +221,9 @@ def build_caption_ass(
     preset: str,
     duration_sec: float,
     font: str = "",
+    x: object = None,
+    y: object = None,
+    scale: object = None,
 ) -> str:
     """Body of the .ass file for one rendered segment, or "" when nothing is drawable.
 
@@ -156,6 +232,10 @@ def build_caption_ass(
     is missing or does not match, that cue is drawn without a highlighted word.
     Cues are clamped to the segment's real duration and never overlap."""
     look, highlight_name = _PRESET_LOOKS.get(str(preset or "classic"), _PRESET_LOOKS["classic"])
+    pos_x, pos_y, size_scale = caption_layout(x, y, scale)
+    centre_x, centre_y, margin, base_size = _placement(pos_x, pos_y, size_scale, font)
+    centre = (centre_x, centre_y)
+    column = PLAY_RES_X - 2 * margin
     duration = float(duration_sec)
     events: list[str] = []
     previous_end = 0.0
@@ -166,9 +246,11 @@ def build_caption_ass(
         if not text or end - start < 0.05:
             continue
         previous_end = end
+        fitted = _fit_size(text, base_size, column, font)
+        fit = fitted if fitted != base_size else None
         words = _usable_words(cue_words[index] if index < len(cue_words or ()) else (), text)
         if look != "highlight" or not words:
-            events.append(_event(start, end, text, look))
+            events.append(_event(start, end, text, look, centre, fit))
             continue
         active = _ass_colour(HIGHLIGHT_COLOURS[highlight_name or DEFAULT_HIGHLIGHT])
         base = _ass_colour(WHITE)
@@ -185,11 +267,11 @@ def build_caption_ass(
                 (f"{{\\1c{active}}}{word}{{\\1c{base}}}" if i == position else word)
                 for i, (_s, _e, word) in enumerate(words)
             ]
-            events.append(_event(step_start, step_end, " ".join(parts), look))
+            events.append(_event(step_start, step_end, " ".join(parts), look, centre, fit))
             cursor = step_end
     if not events:
         return ""
-    return _header(look, font) + "\n" + "\n".join(events) + "\n"
+    return _header(look, font, size_scale, margin) + "\n" + "\n".join(events) + "\n"
 
 
 def _usable_words(words: Iterable[Tuple[float, float, str]], cue_text: str):
