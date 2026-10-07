@@ -7,7 +7,10 @@ on:
       - 'mobile/ios/**'
       - '.github/workflows/cutsell-ios-ci.yml'
   push:
-    branches: [main]
+    # feat/ios-testflight-prep: temporary, so this build can run on that branch.
+    # GitHub only offers the manual "Run workflow" button when this file exists
+    # on the default branch (main), and it does not. Remove before merging.
+    branches: [main, feat/ios-testflight-prep]
     paths:
       - 'mobile/ios/**'
       - '.github/workflows/cutsell-ios-ci.yml'
