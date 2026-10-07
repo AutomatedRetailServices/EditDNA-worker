@@ -152,6 +152,8 @@ def _segment_identity_fields(segment: "RenderSegment") -> dict:
         "caption_text": str(segment.caption_text or ""),
         "caption_preset": str(segment.caption_preset or ""),
     }
+    if getattr(segment, "caption_font", ""):
+        fields["caption_font"] = str(segment.caption_font)
     if segment.audio_start is not None:
         fields["audio_start"] = round(float(segment.audio_start), 3)
     if segment.audio_end is not None:

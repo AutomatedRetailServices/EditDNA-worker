@@ -208,6 +208,7 @@ class DraftCaptionSettingsRequest(BaseModel):
     draft: dict[str, Any]
     enabled: bool | None = None
     preset: str | None = None
+    font: str | None = None
 
 
 def _draft_edit_error(exc: DraftEditError):
@@ -515,6 +516,6 @@ def edit_captions(payload: DraftCaptionRequest):
 @app.post("/v1/draft-edits/caption-settings")
 def edit_caption_settings(payload: DraftCaptionSettingsRequest):
     try:
-        return patch_caption_settings(payload.draft, enabled=payload.enabled, preset=payload.preset)
+        return patch_caption_settings(payload.draft, enabled=payload.enabled, preset=payload.preset, font=payload.font)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None

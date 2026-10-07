@@ -333,8 +333,12 @@ def test_simple_engine_export_uses_short_timed_captions_and_legacy_drafts_do_not
     assert all(x[1] <= y[0] + 1e-6 for x, y in zip(middle.caption_cues, middle.caption_cues[1:]))
 
     assert _caption_filter(middle, tmp_path / "part.mp4")
-    srt = (tmp_path / "part.srt").read_text(encoding="utf-8")
-    assert srt.count("-->") == 2 and "Lo uso todos\n" in srt and "los días.\n" in srt
+    ass = (tmp_path / "part.ass").read_text(encoding="utf-8")
+    assert ass.count("Dialogue:") == 2 and "}Lo uso todos\n" in ass and "}los días.\n" in ass
+    # Editor v2 look: lower third of a 1080x1920 frame, centred
+    assert "Style: Caption,Montserrat ExtraBold," in ass and "PlayResY: 1920" in ass and "\\an5\\pos(540,1456)" in ass
+    # each cue carries its own word timings, used by the Highlight looks
+    assert [[w for _s, _e, w in ws] for ws in middle.caption_cue_words] == [["Lo", "uso", "todos"], ["los", "días."]]
 
     # captions off -> no cues, no caption text
     off = build_render_plan(dc_replace(draft, captions_enabled=False), {"s1": video})
@@ -357,4 +361,64 @@ def test_timed_caption_text_cannot_inject_a_second_cue(tmp_path):
     seg = RenderSegment(clip_id="c", source_asset_id="s", source_path="x.mp4", start=0.0, end=2.0,
                         caption_text="hola", caption_cues=((0.0, 1.0, "hola\n\n9\n00:00:00,000 --> 00:00:09,000\nmalo"),))
     assert _caption_filter(seg, tmp_path / "p.mp4")
-    assert (tmp_path / "p.srt").read_text(encoding="utf-8").count("\n\n") == 0
+    body = (tmp_path / "p.ass").read_text(encoding="utf-8")
+    assert body.count("Dialogue:") == 1 and body.rstrip().endswith("hola 9 00:00:00,000 --> 00:00:09,000 malo")
+
+
+def test_caption_looks_highlight_only_the_spoken_word_and_strip_styling_commands():
+    from cutsell_worker.caption_render import CAPTION_PRESETS, build_caption_ass
+
+    cues = ((0.0, 1.2, "me salió este"),)
+    words = (((0.0, 0.3, "me"), (0.3, 0.8, "salió"), (0.8, 1.1, "este")),)
+    assert {"classic", "yellow", "highlight", "highlight_green", "highlight_red", "highlight_blue",
+            "box", "box_light", "clean"} == set(CAPTION_PRESETS)
+    green = build_caption_ass(cues, words, preset="highlight_green", duration_sec=5.0)
+    lines = [line for line in green.splitlines() if line.startswith("Dialogue:")]
+    assert len(lines) == 3                                   # one step per spoken word
+    assert "{\\1c&H0078FF39}me{" in lines[0] and "{\\1c&H0078FF39}salió{" in lines[1] and "{\\1c&H0078FF39}este{" in lines[2]
+    assert all(line.count("\\1c&H0078FF39") == 1 for line in lines)   # never more than one coloured word
+    assert "\\1c&H003A45FF" in build_caption_ass(cues, words, preset="highlight_red", duration_sec=5.0)
+    assert "\\1c&H00FFA61A" in build_caption_ass(cues, words, preset="highlight_blue", duration_sec=5.0)
+    # the other looks draw the phrase once, with no per-word colour
+    for preset in ("classic", "yellow", "box", "box_light", "clean"):
+        body = build_caption_ass(cues, words, preset=preset, duration_sec=5.0)
+        assert body.count("Dialogue:") == 1 and "\\1c" not in body
+    # word timings that do not match the cue text -> phrase drawn plainly, never dropped
+    plain = build_caption_ass(cues, (((0.0, 0.3, "otra"),),), preset="highlight", duration_sec=5.0)
+    assert plain.count("Dialogue:") == 1 and "\\1c" not in plain
+    # text can never carry its own styling commands or open another line
+    hostile = build_caption_ass(((0.0, 1.0, "hola {\\pos(0,0)}\\N x"),), (), preset="classic", duration_sec=5.0)
+    assert hostile.count("Dialogue:") == 1 and hostile.rstrip().endswith("}hola pos(0,0)N x")
+    # cues are clamped to the real duration and an unknown preset falls back to classic
+    assert build_caption_ass(((4.99, 6.0, "tarde"),), (), preset="classic", duration_sec=5.0) == ""
+    assert "Dialogue:" in build_caption_ass(cues, words, preset="no-existe", duration_sec=5.0)
+
+
+def test_caption_font_choice_reaches_the_export_and_every_face_ships_with_its_licence(tmp_path):
+    from cutsell_worker.caption_render import CAPTION_FONTS, DEFAULT_CAPTION_FONT, FONTS_DIR, build_caption_ass
+    from cutsell_worker.caption_settings import patch_caption_settings
+    from cutsell_worker.render import _caption_filter
+    from cutsell_worker.render_plan import RenderSegment
+
+    assert set(CAPTION_FONTS) == {"montserrat", "poppins", "roboto", "oswald", "anton", "luckiest_guy",
+                                  "bebas_neue", "inter", "bangers"}
+    assert DEFAULT_CAPTION_FONT == "montserrat"
+    shipped = {path.name for path in FONTS_DIR.iterdir()}
+    assert sum(name.endswith((".ttf", ".otf")) for name in shipped) == len(CAPTION_FONTS)
+    assert sum(name.startswith("LICENSE-") for name in shipped) == len(CAPTION_FONTS)
+
+    cues = ((0.0, 1.0, "hola"),)
+    assert "Style: Caption,Montserrat ExtraBold,94," in build_caption_ass(cues, (), preset="classic", duration_sec=2.0)
+    assert "Style: Caption,Anton,116," in build_caption_ass(cues, (), preset="classic", duration_sec=2.0, font="anton")
+    assert "Style: Caption,Montserrat ExtraBold," in build_caption_ass(cues, (), preset="classic", duration_sec=2.0, font="no-existe")
+
+    seg = RenderSegment(clip_id="c", source_asset_id="s", source_path="x.mp4", start=0.0, end=2.0,
+                        caption_text="hola", caption_cues=cues, caption_font="bebas_neue")
+    flt = _caption_filter(seg, tmp_path / "p.mp4")
+    assert "fontsdir=" in flt and str(FONTS_DIR) in flt
+    assert "Style: Caption,Bebas Neue,112," in (tmp_path / "p.ass").read_text(encoding="utf-8")
+
+    draft = {"selected": [], "caption_preset": "classic"}
+    assert patch_caption_settings(draft, font="oswald")["caption_font"] == "oswald"
+    with pytest.raises(ValueError):
+        patch_caption_settings(draft, font="comic-sans")

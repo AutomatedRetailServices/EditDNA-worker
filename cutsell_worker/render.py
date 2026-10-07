@@ -14,6 +14,7 @@ import time
 from typing import Iterable
 import uuid
 
+from .caption_render import FONTS_DIR, build_caption_ass
 from .contracts import TextOverlay
 from .media_overlay_render import (
     CANONICAL_OUTPUT_COLOR_METADATA_FLAGS,
@@ -412,25 +413,6 @@ def _srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
 
 
-def _timed_cue_lines(segment: RenderSegment) -> str:
-    """SRT body for a segment that carries short timed cues (simple engine). Every cue text gets
-    the same whitespace collapse as the single-cue path below, so text can never open a second
-    cue; cues are clamped to the segment's real duration (a trailing-silence trim may have
-    shortened it) and never overlap. Empty string when there is nothing usable."""
-    duration = float(segment.duration_sec)
-    lines: list[str] = []
-    previous_end = 0.0
-    for start, end, raw in getattr(segment, "caption_cues", ()) or ():
-        text = " ".join(str(raw or "").replace("\x00", "").split())[:120]
-        start = max(float(start), previous_end)
-        end = min(float(end), duration)
-        if not text or end - start < 0.05:
-            continue
-        lines.append(f"{len(lines) + 1}\n{_srt_timestamp(start)} --> {_srt_timestamp(end)}\n{text}\n")
-        previous_end = end
-    return "\n".join(lines)
-
-
 def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
     text = str(segment.caption_text or "").replace("\x00", "")
     # Collapse ALL whitespace -- including embedded newlines/carriage
@@ -444,17 +426,30 @@ def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
     if not text:
         return None
     text = text[:500]
-    subtitle = part.with_suffix(".srt")
-    cue_lines = _timed_cue_lines(segment)
-    if cue_lines:
-        subtitle.write_text(cue_lines, encoding="utf-8")
-    else:
-        subtitle.write_text(
-            f"1\n00:00:00,000 --> {_srt_timestamp(segment.duration_sec)}\n{text}\n",
-            encoding="utf-8",
-        )
     preset = str(segment.caption_preset or "classic")
-    if preset == "clean":
+    cues = getattr(segment, "caption_cues", ()) or ()
+    if cues:
+        # Short timed cues (simple engine): the Editor v2 look -- lower third, bold, four
+        # styles -- is described in an .ass file so position and size do not depend on the
+        # renderer's defaults.
+        body = build_caption_ass(
+            cues, getattr(segment, "caption_cue_words", ()) or (),
+            preset=preset, duration_sec=float(segment.duration_sec),
+            font=str(getattr(segment, "caption_font", "") or ""),
+        )
+        if body:
+            styled = part.with_suffix(".ass")
+            styled.write_text(body, encoding="utf-8")
+            return "subtitles='{}':fontsdir='{}'".format(
+                styled.as_posix().replace("'", "\\'"), FONTS_DIR.as_posix().replace("'", "\\'"))
+    subtitle = part.with_suffix(".srt")
+    subtitle.write_text(
+        f"1\n00:00:00,000 --> {_srt_timestamp(segment.duration_sec)}\n{text}\n",
+        encoding="utf-8",
+    )
+    # One whole-clip caption (drafts without word timings, or text edited by hand): the
+    # pre-v2 look. Every v2 preset maps onto one of the two looks this path has.
+    if preset in ("clean", "box", "box_light"):
         style = "Fontsize=24,Alignment=2,MarginV=120,BorderStyle=3,Outline=0,Shadow=0,BackColour=&H66000000,PrimaryColour=&H00FFFFFF"
     else:
         style = "Fontsize=24,Alignment=2,MarginV=120,BorderStyle=1,Outline=2,Shadow=0,OutlineColour=&H00000000,PrimaryColour=&H00FFFFFF"

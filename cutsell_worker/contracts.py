@@ -383,6 +383,8 @@ class DraftTimeline:
     # this field is a typed-object carrier, not a diagnostics/logging
     # channel; see this task's own decision-log entry).
     lost_atom_materiality_by_provenance_id: Dict[str, object] = field(default_factory=dict)
+    # Caption typeface chosen by the creator (a key of caption_render.CAPTION_FONTS).
+    caption_font: str = "montserrat"
 
 
 @dataclass(frozen=True)
