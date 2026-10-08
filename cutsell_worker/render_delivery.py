@@ -152,6 +152,14 @@ def _segment_identity_fields(segment: "RenderSegment") -> dict:
         "caption_text": str(segment.caption_text or ""),
         "caption_preset": str(segment.caption_preset or ""),
     }
+    if getattr(segment, "caption_font", ""):
+        fields["caption_font"] = str(segment.caption_font)
+    # Only a caption the creator actually moved or resized is part of the identity, so every
+    # export made before this setting existed keeps the fingerprint it always had.
+    for key, default in (("caption_x", 0.5), ("caption_y", 0.758), ("caption_scale", 1.0)):
+        value = getattr(segment, key, None)
+        if value is not None and abs(float(value) - default) > 1e-9:
+            fields[key] = round(float(value), 4)
     if segment.audio_start is not None:
         fields["audio_start"] = round(float(segment.audio_start), 3)
     if segment.audio_end is not None:

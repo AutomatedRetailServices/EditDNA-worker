@@ -72,7 +72,11 @@ def test_style_picker_offers_only_the_two_real_presets():
     for term in forbidden:
         assert f'.tag("{term.lower()}")' not in source
     settings_source = CAPTION_SETTINGS.read_text()
-    assert 'CAPTION_PRESETS = {"classic", "clean"}' in settings_source
+    # The server's preset list now lives in caption_render.py (Editor v2 looks); the iOS
+    # picker above still offers only the two it has always offered.
+    assert "CAPTION_PRESETS" in settings_source
+    from cutsell_worker.caption_render import CAPTION_PRESETS
+    assert {"classic", "clean"} <= set(CAPTION_PRESETS)
 
 
 def test_style_change_uses_real_authority():

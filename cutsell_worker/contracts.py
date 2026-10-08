@@ -383,6 +383,13 @@ class DraftTimeline:
     # this field is a typed-object carrier, not a diagnostics/logging
     # channel; see this task's own decision-log entry).
     lost_atom_materiality_by_provenance_id: Dict[str, object] = field(default_factory=dict)
+    # Caption typeface chosen by the creator (a key of caption_render.CAPTION_FONTS).
+    caption_font: str = "montserrat"
+    # Caption placement and size for the whole video (caption_render.caption_layout):
+    # centre as a fraction of the frame, and a multiplier on the font's own size.
+    caption_x: float = 0.5
+    caption_y: float = 0.758
+    caption_scale: float = 1.0
 
 
 @dataclass(frozen=True)

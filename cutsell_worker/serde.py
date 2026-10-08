@@ -17,7 +17,7 @@ from .contracts import (
     Word,
 )
 
-CAPTION_PRESETS = {"classic", "clean"}
+from .caption_render import CAPTION_FONTS, CAPTION_PRESETS, DEFAULT_CAPTION_FONT, caption_layout  # noqa: E402,F401
 
 
 #: D-134 current effective default for the Overlap pacing permission, taken
@@ -196,7 +196,12 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         raise ValueError("draft requires at least one selected clip")
     preset = str(payload.get("caption_preset") or "classic")
     if preset not in CAPTION_PRESETS:
-        raise ValueError("caption_preset must be classic or clean")
+        raise ValueError("caption_preset must be one of: " + ", ".join(sorted(CAPTION_PRESETS)))
+    caption_font = str(payload.get("caption_font") or DEFAULT_CAPTION_FONT)
+    if caption_font not in CAPTION_FONTS:
+        raise ValueError("caption_font must be one of: " + ", ".join(sorted(CAPTION_FONTS)))
+    caption_x, caption_y, caption_scale = caption_layout(
+        payload.get("caption_x"), payload.get("caption_y"), payload.get("caption_scale"))
     text_overlays = tuple(_text_overlay_from_dict(dict(item)) for item in payload.get("text_overlays") or ())
     media_overlays = tuple(_media_overlay_from_dict(dict(item)) for item in payload.get("media_overlays") or ())
     total_duration = sum(max(0.0, clip.end - clip.start) for clip in selected)
@@ -214,6 +219,10 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         diagnostics=dict(payload.get("diagnostics") or {}),
         captions_enabled=bool(payload.get("captions_enabled", True)),
         caption_preset=preset,
+        caption_font=caption_font,
+        caption_x=caption_x,
+        caption_y=caption_y,
+        caption_scale=caption_scale,
         text_overlays=text_overlays,
         media_overlays=media_overlays,
     )

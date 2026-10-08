@@ -76,6 +76,15 @@ class RenderSegment:
     # Simple-engine clips run many seconds; one cue for the whole clip would put the entire
     # paragraph on screen at once.
     caption_cues: Tuple[Tuple[float, float, str], ...] = ()
+    # Per-word timings of each cue above (same order, same length); only the Highlight caption
+    # looks read them, to colour the word being spoken.
+    caption_cue_words: Tuple[Tuple[Tuple[float, float, str], ...], ...] = ()
+    # Caption typeface key (caption_render.CAPTION_FONTS); "" = the default face.
+    caption_font: str = ""
+    # Caption placement / size for the whole video; None = the default (caption_render).
+    caption_x: float | None = None
+    caption_y: float | None = None
+    caption_scale: float | None = None
 
     @property
     def duration_sec(self) -> float:
@@ -138,7 +147,8 @@ def _can_coalesce(left: RenderSegment, right: RenderSegment, *, tolerance_sec: f
         return False
     if left.audio_muted != right.audio_muted or abs(left.audio_volume - right.audio_volume) > 1e-6:
         return False
-    if left.caption_preset != right.caption_preset:
+    if (left.caption_preset, left.caption_font, left.caption_x, left.caption_y, left.caption_scale) != (
+            right.caption_preset, right.caption_font, right.caption_x, right.caption_y, right.caption_scale):
         return False
     # Different active caption payloads still need independent timing in the current
     # render contract. Empty captions are safe to coalesce and are the common Clean Cut
@@ -168,13 +178,14 @@ CAPTION_CUE_MAX_GAP_SEC = 0.45
 CAPTION_CUE_TAIL_HOLD_SEC = 0.30
 
 
-def timed_caption_cues(clip) -> Tuple[Tuple[float, float, str], ...]:
+def timed_caption_word_groups(clip) -> Tuple[Tuple[float, float, Tuple[Tuple[float, float, str], ...]], ...]:
     """Groups of up to three spoken words with their own on-screen window, relative to the
-    clip start. A group closes at three words, at punctuation, or at a pause. Each cue stays
-    up until the next one starts (short hold after the last word otherwise), so text does not
-    flicker between words. Returns () when the clip has no word timings or its caption was
-    edited by hand (caption_text no longer equals the spoken text): the caller then falls
-    back to the single whole-clip caption."""
+    clip start: (cue_start, cue_end, ((word_start, word_end, word), ...)). A group closes at
+    three words, at punctuation, or at a pause. Each cue stays up until the next one starts
+    (short hold after the last word otherwise), so text does not flicker between words.
+    Returns () when the clip has no word timings or its caption was edited by hand
+    (caption_text no longer equals the spoken text): the caller then falls back to the
+    single whole-clip caption."""
     words = [w for w in (clip.words or ()) if float(w.end) > float(w.start)]
     if not words:
         return ()
@@ -205,8 +216,19 @@ def timed_caption_cues(clip) -> Tuple[Tuple[float, float, str], ...]:
         cue_end = min(cue_end, end - start)
         text = " ".join(str(word.text) for word in group)
         if cue_end - cue_start >= 0.05 and text.strip():
-            cues.append((round(cue_start, 3), round(cue_end, 3), text))
+            cues.append((round(cue_start, 3), round(cue_end, 3), tuple(
+                (round(max(0.0, float(word.start) - start), 3), round(float(word.end) - start, 3), str(word.text))
+                for word in group
+            )))
     return tuple(cues)
+
+
+def timed_caption_cues(clip) -> Tuple[Tuple[float, float, str], ...]:
+    """(cue_start, cue_end, text) for each group of `timed_caption_word_groups`."""
+    return tuple(
+        (cue_start, cue_end, " ".join(word for _s, _e, word in words))
+        for cue_start, cue_end, words in timed_caption_word_groups(clip)
+    )
 
 
 def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> Tuple[RenderSegment, ...]:
@@ -234,6 +256,11 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
         # window. Silence trimming must not silently erase its last frames.
         if clip.audio_muted and not clip.words and not clip.text.strip():
             visual_floors.append(float(clip.end))
+        word_groups = (
+            timed_caption_word_groups(clip)
+            if draft.captions_enabled and (draft.diagnostics or {}).get("engine") == "simple"
+            else ()
+        )
         output.append(RenderSegment(
             clip_id=clip.clip_id,
             source_asset_id=clip.source_asset_id,
@@ -250,11 +277,12 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             fragment_count=getattr(clip, "fragment_count", None),
             boundary_reason=getattr(clip, "boundary_reason", None),
             trailing_trim_floor=max(visual_floors) if visual_floors else None,
-            caption_cues=(
-                timed_caption_cues(clip)
-                if draft.captions_enabled and (draft.diagnostics or {}).get("engine") == "simple"
-                else ()
-            ),
+            caption_cues=tuple((a, b, " ".join(w for _s, _e, w in ws)) for a, b, ws in word_groups),
+            caption_cue_words=tuple(ws for _a, _b, ws in word_groups),
+            caption_font=str(getattr(draft, "caption_font", "") or ""),
+            caption_x=getattr(draft, "caption_x", None),
+            caption_y=getattr(draft, "caption_y", None),
+            caption_scale=getattr(draft, "caption_scale", None),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

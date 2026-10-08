@@ -1,0 +1,60 @@
+name: CutSell Modal worker deploy
+
+# Keeps the Modal worker (modal_cutsell_worker.py) in step with the branch the API runs.
+# A push that changes the worker runs the engine/caption tests and, only if they pass,
+# redeploys the Modal app -- so nobody has to run `modal deploy` by hand.
+#
+# One-time setup (repository Settings -> Secrets and variables -> Actions):
+#   MODAL_TOKEN_ID      id of a Modal API token for the workspace that owns the app
+#   MODAL_TOKEN_SECRET  secret of that same token
+# The worker's own keys (Redis, S3, Anthropic, Deepgram, wake token) are NOT needed here:
+# they live in the Modal secret "cutsell-worker" and never leave Modal.
+
+on:
+  push:
+    branches: [feat/simple-engine-v1]
+    paths:
+      - 'cutsell_worker/**'
+      - 'modal_cutsell_worker.py'
+      - 'requirements.cutsell.worker.cpu.txt'
+      - '.github/workflows/cutsell-modal-worker-deploy.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: cutsell-modal-worker-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install worker dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.cutsell.worker.cpu.txt pytest modal
+      - name: Engine, caption, delivery and wake tests
+        run: |
+          python -m pytest -q \
+            tests/test_cutsell_simple_engine.py \
+            tests/test_cutsell_export_delivery_gate_policy.py \
+            tests/test_cutsell_worker_wake.py
+      - name: Deploy the Modal worker
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::error::MODAL_TOKEN_ID / MODAL_TOKEN_SECRET are not set in this repository's Actions secrets."
+            exit 1
+          fi
+          modal deploy modal_cutsell_worker.py

@@ -41,7 +41,7 @@ def test_caption_settings_are_stateless_and_validate_presets():
     try:
         patch_caption_settings(original, preset="giant-neon")
     except ValueError as exc:
-        assert "classic or clean" in str(exc)
+        assert "classic" in str(exc) and "clean" in str(exc)
     else:
         raise AssertionError("unknown caption preset must be rejected")
 
