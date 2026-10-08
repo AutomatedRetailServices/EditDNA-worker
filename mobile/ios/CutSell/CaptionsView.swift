@@ -1,44 +1,20 @@
 import SwiftUI
 
-/// Mobile V1 Captions UI gate. Connects ONLY to real, already-existing
-/// backend authority -- `DraftEditorViewModel.setCaptionSettings`
-/// (`/v1/draft-edits/caption-settings`) and `.editCaption`
-/// (`/v1/draft-edits/captions`), both of which flow through the SAME real
-/// draft/`autosave`/revision system as every other draft mutation. Never
-/// invents a route, an ASR job, a timestamp, or a style/position this
-/// codebase's real contract does not already support.
+/// "Fix words": edits the text of one clip's caption. Opened by tapping the
+/// caption on the video while the Editor v2 Captions panel is open
+/// (CaptionsPanelView sets the whole-video look, typeface, position and size).
 ///
-/// Setup -> Creating -> Ready is derived entirely from two real signals,
-/// never a fabricated pipeline:
-/// - Setup:    `!model.captionsEnabled` (captions not turned on for this draft).
-/// - Creating: `model.isSaving` while a mutation triggered from this view is
-///             in flight -- the REAL network round trip to `caption-settings`
-///             or `captions`, not an ASR/caption-generation job. ASR already
-///             ran upstream during Clean Cut processing (`pipeline.py`
-///             populates every clip's real `caption_text` from its ASR
-///             transcript before the draft ever exists), so there is no
-///             separate captions-generation job for this state to represent.
-/// - Ready:    `model.captionsEnabled` confirmed true in the current snapshot.
+/// Connects ONLY to real, already-existing backend authority --
+/// `DraftEditorViewModel.editCaption` (`/v1/draft-edits/captions`), which
+/// flows through the SAME real draft/`autosave`/revision system as every
+/// other draft mutation, and `/draft/undo`. ASR already ran upstream during
+/// processing, so there is no separate captions-generation job here.
 ///
-/// PENDING (documented here per the gate's own requirement, never silently
-/// simulated):
-/// - Position (Top/Center/Bottom): NOT supported. `render.py`'s real caption
-///   filter hardcodes `Alignment=2` (bottom-center) for both presets and the
-///   backend contract (`caption_settings.py`, `DraftCaptionSettingsRequest`)
-///   has no position field at all. Shown as a fixed, honestly-disabled value.
-/// - Styles beyond Clean/Classic: `CAPTION_PRESETS = {"classic", "clean"}` is
-///   the entire real vocabulary; no third preset exists to offer.
-/// - Selected/All scope: style and enabled/disabled are ALWAYS draft-level
-///   (every clip, uniformly) -- there is no real per-clip style override, so
-///   "Selected" is honestly unavailable for style/enabled. Manual caption
-///   TEXT is always per-clip (`clip_id`-scoped) -- there is no real, coherent
-///   "apply this same text to All clips" capability intended for use here
-///   (the backend route technically accepts multiple edits per call, but
-///   stamping identical text across every clip has no real product meaning),
-///   so "All" is honestly unavailable for text editing.
-/// - Word-level/karaoke timestamp highlighting: NOT supported. `render.py`
-///   burns exactly one static SRT cue per clip spanning its full duration;
-///   no per-word timing is read or rendered.
+/// Text is always per-clip (`clip_id`-scoped): there is no real, coherent
+/// "apply this same text to All clips" capability, so "All" is honestly
+/// unavailable for text editing. A clip whose text is edited by hand is
+/// exported as one caption for the whole clip (the server can no longer time
+/// it word by word), which the preview shows the same way.
 struct CaptionsView: View {
     @ObservedObject var model: DraftEditorViewModel
     /// The Main Video clip selected in the timeline when this sheet was
@@ -54,13 +30,6 @@ struct CaptionsView: View {
     /// since caption mutations flow through the same draft/revision system.
     @State private var justMutatedCaptions = false
 
-    private enum CaptionsStage { case setup, creating, ready }
-
-    private var stage: CaptionsStage {
-        if model.isSaving { return .creating }
-        return model.captionsEnabled ? .ready : .setup
-    }
-
     private var clips: [[String: JSONValue]] { model.selectedClips }
 
     private var selectedClip: [String: JSONValue]? {
@@ -71,62 +40,6 @@ struct CaptionsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    stageRow
-                }
-
-                Section("Captions") {
-                    Toggle("Enable captions", isOn: Binding(
-                        get: { model.captionsEnabled },
-                        set: { newValue in
-                            Task {
-                                justMutatedCaptions = false
-                                await model.setCaptionSettings(enabled: newValue)
-                                justMutatedCaptions = true
-                            }
-                        }
-                    ))
-                    .accessibilityIdentifier("captions.enableToggle")
-                }
-
-                Section("Style — applies to all clips") {
-                    // Style is ALWAYS draft-level (every clip renders with
-                    // the same preset) -- there is no real per-clip style
-                    // authority, so a "Selected" scope is never offered here.
-                    Picker("Style", selection: Binding(
-                        get: { model.captionPreset },
-                        set: { newValue in
-                            Task {
-                                justMutatedCaptions = false
-                                await model.setCaptionSettings(preset: newValue)
-                                justMutatedCaptions = true
-                            }
-                        }
-                    )) {
-                        Text("Classic").tag("classic")
-                        Text("Clean").tag("clean")
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!model.captionsEnabled)
-                    .accessibilityIdentifier("captions.stylePicker")
-
-                    Text("\"Selected\" style scope is not available: this project's real caption contract only supports one style for every clip, never a per-clip override.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Position") {
-                    // No position field exists in the real contract or the
-                    // renderer -- captions always burn in bottom-center.
-                    // Never simulated as a working control.
-                    HStack {
-                        Text("Bottom (fixed)")
-                        Spacer()
-                        Text("Top/Center not yet supported").font(.caption).foregroundStyle(.secondary)
-                    }
-                    .accessibilityIdentifier("captions.positionUnavailable")
-                }
-
                 Section("Text — selected clip only") {
                     // Manual text editing is always per-clip; "All" has no
                     // real, coherent authority here (see the file doc).
@@ -184,14 +97,14 @@ struct CaptionsView: View {
                     .frame(minHeight: 44)
                 }
             }
-            .navigationTitle("Captions")
+            .navigationTitle("Fix words")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             }
             .onAppear {
-                // Never auto-enables captions -- only reads the real current
-                // state and seeds the clip/text pickers from it.
+                // Only reads the real current state and seeds the clip/text
+                // pickers from it; never changes a caption setting.
                 selectedClipID = initialClipID ?? clips.first?["clip_id"]?.stringValue
                 syncDraftText()
             }
@@ -199,23 +112,6 @@ struct CaptionsView: View {
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
-        }
-    }
-
-    @ViewBuilder
-    private var stageRow: some View {
-        switch stage {
-        case .setup:
-            Label("Setup — captions are off", systemImage: "captions.bubble")
-                .foregroundStyle(.secondary)
-        case .creating:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Saving…")
-            }
-        case .ready:
-            Label("Ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
         }
     }
 

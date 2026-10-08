@@ -45,6 +45,8 @@ struct CaptionOverlayView: View {
     let x: Double
     let y: Double
     let scale: Double
+    /// When set, the caption can be tapped (to fix its words).
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -59,6 +61,8 @@ struct CaptionOverlayView: View {
         .accessibilityHidden(cue == nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(cue?.text ?? "")
+        .accessibilityAddTraits(onTap == nil ? [] : .isButton)
+        .accessibilityAction { onTap?() }
         .accessibilityIdentifier("preview.captionOverlay")
     }
 
@@ -100,6 +104,7 @@ struct CaptionOverlayView: View {
         .padding(.vertical, CGFloat(verticalPadding))
         .background(look.boxHex.map { Color(captionHex: $0) } ?? Color.clear)
         .frame(width: CGFloat(placement.column * unitX + 2 * boxPadding))
+        .modifier(CaptionTapModifier(onTap: onTap))
         .position(x: CGFloat(placement.centerX * unitX), y: CGFloat(placement.centerY * unitY))
     }
 
@@ -140,7 +145,26 @@ struct CaptionOverlayView: View {
         .padding(boxed ? frame.height * 1.0 / 288.0 : 0)
         .background(boxed ? Color.black.opacity(0.6) : Color.clear)
         .frame(width: column)
+        .modifier(CaptionTapModifier(onTap: onTap))
         .frame(width: frame.width, height: max(0, frame.height - bottom), alignment: .bottom)
+    }
+}
+
+/// Makes the caption itself (only the caption, not the whole video) tappable.
+private struct CaptionTapModifier: ViewModifier {
+    let onTap: (() -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let onTap {
+            content
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onTap)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Fix the words of this caption")
+        } else {
+            content.allowsHitTesting(false)
+        }
     }
 }
 

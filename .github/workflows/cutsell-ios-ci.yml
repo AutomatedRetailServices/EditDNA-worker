@@ -44,6 +44,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build | xcpretty
 
+      - name: Check the caption fonts are inside the app
+        working-directory: mobile/ios
+        run: |
+          set -euo pipefail
+          APP_PATH="build/Build/Products/Debug-iphonesimulator/CutSell.app"
+          ls "$APP_PATH" | grep -E '\.(ttf|otf)$' || true
+          COUNT="$(ls "$APP_PATH" | grep -cE '\.(ttf|otf)$' || true)"
+          echo "caption font files inside the app: $COUNT (expected 9)"
+          test "$COUNT" -ge 9
+
       # D-132 (docs/CUTSELL_DECISIONS.md D-132): the ONLY change to the
       # build step above this comment is the added -derivedDataPath build
       # flag, so CutSell.app lands at a deterministic, known path for the

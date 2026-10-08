@@ -171,7 +171,9 @@ def test_overlay_is_drawn_over_the_preview_only_when_captions_are_on():
 def test_preview_reads_caption_settings_from_the_real_draft():
     source = VIEW_MODEL.read_text()
     for key in ("caption_font", "caption_x", "caption_y", "caption_scale"):
-        assert f'snapshot?.draft["{key}"]' in source
+        assert f'captionValue("{key}")' in source
+    # A choice just made shows at once; otherwise the draft decides.
+    assert "captionOverrides[key] ?? snapshot?.draft[key]" in source
     assert 'snapshot?.draft["diagnostics"]?["engine"]?.stringValue' in source
 
 

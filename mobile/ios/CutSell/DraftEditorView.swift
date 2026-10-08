@@ -4,6 +4,10 @@ struct DraftEditorView: View {
     @EnvironmentObject private var appState: AppState
     let project: Project
     @StateObject private var holder = Holder()
+    @State private var showCaptionsPanel = false
+    /// Clip whose caption words are being fixed (tapped on the video).
+    @State private var captionTextClipID: String?
+    private static let previewAnchor = "editor.preview"
 
     var body: some View {
         Group {
@@ -37,11 +41,26 @@ struct DraftEditorView: View {
             if model.isLoading {
                 Spacer(); ProgressView("Loading timeline…"); Spacer()
             } else {
+                ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 20) {
-                        DraftPlaybackView(model: model)
+                        DraftPlaybackView(
+                            model: model,
+                            onCaptionTap: showCaptionsPanel ? { (clipID: String) in captionTextClipID = clipID } : nil
+                        )
+                        .id(Self.previewAnchor)
 
-                        TimelineEditorView(model: model)
+                        if showCaptionsPanel {
+                            CaptionsPanelView(model: model) {
+                                withAnimation(.easeOut(duration: 0.2)) { showCaptionsPanel = false }
+                            }
+                            .padding(.horizontal)
+                            .transition(.opacity)
+                        }
+
+                        TimelineEditorView(model: model) {
+                            withAnimation(.easeOut(duration: 0.2)) { showCaptionsPanel = true }
+                        }
 
                         VisualTimelineView(model: model)
 
@@ -52,23 +71,6 @@ struct DraftEditorView: View {
                                 Text("Reorder").font(.caption).foregroundStyle(.secondary)
                             }
                             ReorderList(model: model)
-                        }
-                        .padding(.horizontal)
-
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Captions").font(.headline)
-                            Toggle("Show captions", isOn: Binding(
-                                get: { model.captionsEnabled },
-                                set: { value in Task { await model.setCaptionSettings(enabled: value) } }
-                            ))
-                            Picker("Style", selection: Binding(
-                                get: { model.captionPreset },
-                                set: { value in Task { await model.setCaptionSettings(preset: value) } }
-                            )) {
-                                Text("Classic").tag("classic")
-                                Text("Clean").tag("clean")
-                            }
-                            .pickerStyle(.segmented)
                         }
                         .padding(.horizontal)
 
@@ -104,6 +106,13 @@ struct DraftEditorView: View {
                     }
                     .padding(.vertical)
                 }
+                .onChange(of: showCaptionsPanel) { _, isOpen in
+                    // The Captions button sits below; bring the video and the
+                    // panel into view so every change is seen.
+                    guard isOpen else { return }
+                    withAnimation { scroller.scrollTo(Self.previewAnchor, anchor: .top) }
+                }
+                }
             }
         }
         .toolbar {
@@ -112,6 +121,12 @@ struct DraftEditorView: View {
                 Spacer()
                 Button { Task { await model.redo() } } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { captionTextClipID != nil },
+            set: { if !$0 { captionTextClipID = nil } }
+        )) {
+            CaptionsView(model: model, initialClipID: captionTextClipID)
         }
         .alert("CutSell", isPresented: Binding(
             get: { model.errorMessage != nil },

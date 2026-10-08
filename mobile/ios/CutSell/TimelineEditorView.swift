@@ -77,6 +77,9 @@ private struct TimelineRowItem: Identifiable {
 
 struct TimelineEditorView: View {
     @ObservedObject var model: DraftEditorViewModel
+    /// Opens the Editor v2 Captions panel, which lives right under the video
+    /// (DraftEditorView), so caption changes are seen on the preview at once.
+    var onOpenCaptions: () -> Void = {}
 
     @State private var selection: TimelineSelection?
     @State private var playheadTime: Double = 0
@@ -84,7 +87,6 @@ struct TimelineEditorView: View {
     @State private var isPlaying = false
     @State private var showBrollView = false
     @State private var showVoiceOverView = false
-    @State private var showCaptions = false
     @State private var showOverlayView = false
     @State private var justMutatedMainVideo = false
     @State private var canRedoMainVideo = false
@@ -202,12 +204,6 @@ struct TimelineEditorView: View {
             BrollView(
                 model: model,
                 initialPlacementID: selection?.track == .broll ? selection?.itemID : nil
-            )
-        }
-        .sheet(isPresented: $showCaptions) {
-            CaptionsView(
-                model: model,
-                initialClipID: selection?.track == .mainVideo ? selection?.itemID : nil
             )
         }
         .sheet(isPresented: $showOverlayView) {
@@ -386,11 +382,10 @@ struct TimelineEditorView: View {
             }
             .disabled(!canRedoMainVideo)
 
-            // Entry point into the real Mobile V1 Captions UI gate --
-            // never a decorative button. Reuses the same real draft
-            // captions authority CaptionsView is built on.
+            // Opens the Editor v2 Captions panel under the video (real
+            // `/v1/draft-edits/caption-settings` authority, see CaptionsPanelView).
             Button {
-                showCaptions = true
+                onOpenCaptions()
             } label: {
                 Label("Captions", systemImage: "captions.bubble")
             }

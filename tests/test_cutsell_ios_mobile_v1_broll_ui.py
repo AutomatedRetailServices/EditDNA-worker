@@ -315,7 +315,10 @@ def test_backend_errors_are_surfaced_via_the_real_error_alert():
 
 def test_captions_and_voiceover_entry_points_are_preserved():
     source = TIMELINE_EDITOR.read_text()
-    assert "CaptionsView(" in source
+    # Editor v2: the Captions button opens the panel under the video (DraftEditorView).
+    assert 'Label("Captions", systemImage: "captions.bubble")' in source
+    assert "onOpenCaptions()" in source
+    assert "CaptionsPanelView(" in (TIMELINE_EDITOR.parent / "DraftEditorView.swift").read_text()
     assert "VoiceOverView(" in source
     assert (TIMELINE_EDITOR.parent / "CaptionsView.swift").exists()
     assert (TIMELINE_EDITOR.parent / "VoiceOverView.swift").exists()

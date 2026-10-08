@@ -4,6 +4,9 @@ import AVFoundation
 
 struct DraftPlaybackView: View {
     @ObservedObject var model: DraftEditorViewModel
+    /// While the Captions panel is open the caption on the video can be
+    /// tapped; the clip it belongs to is handed back to fix its words.
+    var onCaptionTap: ((String) -> Void)? = nil
     @StateObject private var playback = DraftPlaybackController()
 
     var body: some View {
@@ -16,16 +19,17 @@ struct DraftPlaybackView: View {
                         // Captions as the export will burn them in. The export
                         // fits every video into a 9:16 frame and places captions
                         // on that frame, which is exactly this 9:16 box.
+                        let cue = playback.captionCue(at: playback.currentTime)
                         CaptionOverlayView(
-                            cue: playback.captionCue(at: playback.currentTime),
+                            cue: cue,
                             time: playback.currentTime,
                             preset: model.captionPreset,
                             fontKey: model.captionFont,
                             x: model.captionX,
                             y: model.captionY,
-                            scale: model.captionScale
+                            scale: model.captionScale,
+                            onTap: tapAction(for: cue)
                         )
-                        .allowsHitTesting(false)
                     }
                 }
                 .background(.black, in: RoundedRectangle(cornerRadius: 16))
@@ -74,6 +78,14 @@ struct DraftPlaybackView: View {
             await playback.rebuild(from: model)
         }
         .onDisappear { playback.pause() }
+    }
+
+    private func tapAction(for cue: CaptionPreviewCue?) -> (() -> Void)? {
+        guard let onCaptionTap, let cue else { return nil }
+        return {
+            playback.pause()
+            onCaptionTap(cue.clipID)
+        }
     }
 
     private func time(_ seconds: Double) -> String {

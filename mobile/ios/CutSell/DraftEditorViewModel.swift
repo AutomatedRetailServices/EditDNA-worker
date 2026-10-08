@@ -60,31 +60,45 @@ final class DraftEditorViewModel: ObservableObject {
         return alternateClips.filter { $0["take_group_id"]?.stringValue == groupID }
     }
 
+    // Caption settings the creator has just chosen, shown at once while the
+    // server confirms them. Each one is removed as soon as its save finishes:
+    // on success the draft already carries it, on failure the screen falls
+    // back to what the server really has (and the error is shown).
+    @Published private var captionOverrides: [String: JSONValue] = [:]
+    private var captionOverrideTokens: [String: Int] = [:]
+    private var captionOverrideCounter = 0
+    /// Caption saves run one after another, each on the latest draft revision.
+    private var captionSettingsChain: Task<Void, Never>?
+
+    private func captionValue(_ key: String) -> JSONValue? {
+        captionOverrides[key] ?? snapshot?.draft[key]
+    }
+
     var captionsEnabled: Bool {
-        snapshot?.draft["captions_enabled"]?.boolValue ?? true
+        captionValue("captions_enabled")?.boolValue ?? true
     }
 
     var captionPreset: String {
-        snapshot?.draft["caption_preset"]?.stringValue ?? "classic"
+        captionValue("caption_preset")?.stringValue ?? "classic"
     }
 
     /// One of `CaptionFontCatalog`'s keys (the server's `caption_font`).
     var captionFont: String {
-        snapshot?.draft["caption_font"]?.stringValue ?? CaptionFontCatalog.defaultKey
+        captionValue("caption_font")?.stringValue ?? CaptionFontCatalog.defaultKey
     }
 
     /// Caption centre for the whole video, 0...1 of the frame width / height.
     var captionX: Double {
-        snapshot?.draft["caption_x"]?.doubleValue ?? CaptionLayout.defaultX
+        captionValue("caption_x")?.doubleValue ?? CaptionLayout.defaultX
     }
 
     var captionY: Double {
-        snapshot?.draft["caption_y"]?.doubleValue ?? CaptionLayout.defaultY
+        captionValue("caption_y")?.doubleValue ?? CaptionLayout.defaultY
     }
 
     /// Caption size for the whole video (1 = the typeface's own size).
     var captionScale: Double {
-        snapshot?.draft["caption_scale"]?.doubleValue ?? CaptionLayout.defaultScale
+        captionValue("caption_scale")?.doubleValue ?? CaptionLayout.defaultScale
     }
 
     /// Which engine produced this draft; short timed captions exist only for "simple".
@@ -525,6 +539,18 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func editCaption(clipID: String, text: String) async {
+        // Same queue as the caption settings, so a text fix never races a
+        // look/typeface save on the same draft revision.
+        let previous = captionSettingsChain
+        let task = Task { [weak self] in
+            _ = await previous?.value
+            await self?.sendCaptionText(clipID: clipID, text: text)
+        }
+        captionSettingsChain = task
+        await task.value
+    }
+
+    private func sendCaptionText(clipID: String, text: String) async {
         guard let snapshot else { return }
         let edited = await edit(path: "/v1/draft-edits/captions", body: .object([
             "draft": snapshot.draft,
@@ -536,11 +562,59 @@ final class DraftEditorViewModel: ObservableObject {
         if let edited { await autosave(edited) }
     }
 
-    func setCaptionSettings(enabled: Bool? = nil, preset: String? = nil) async {
+    /// Whole-video caption settings through the real
+    /// `/v1/draft-edits/caption-settings` route, then the usual autosave.
+    /// Only the values passed are changed.
+    func setCaptionSettings(
+        enabled: Bool? = nil,
+        preset: String? = nil,
+        font: String? = nil,
+        x: Double? = nil,
+        y: Double? = nil,
+        scale: Double? = nil
+    ) async {
+        var changes: [String: JSONValue] = [:]
+        if let enabled { changes["captions_enabled"] = .bool(enabled) }
+        if let preset { changes["caption_preset"] = .string(preset) }
+        if let font { changes["caption_font"] = .string(font) }
+        if let x { changes["caption_x"] = .number(x) }
+        if let y { changes["caption_y"] = .number(y) }
+        if let scale { changes["caption_scale"] = .number(scale) }
+        guard !changes.isEmpty else { return }
+
+        captionOverrideCounter += 1
+        let token = captionOverrideCounter
+        for (key, value) in changes {
+            captionOverrides[key] = value
+            captionOverrideTokens[key] = token
+        }
+
+        let changedKeys = Array(changes.keys)
+        let previous = captionSettingsChain
+        let task = Task { [weak self] in
+            _ = await previous?.value
+            guard let self else { return }
+            await self.sendCaptionSettings(enabled: enabled, preset: preset, font: font, x: x, y: y, scale: scale)
+            for key in changedKeys where self.captionOverrideTokens[key] == token {
+                self.captionOverrides[key] = nil
+                self.captionOverrideTokens[key] = nil
+            }
+        }
+        captionSettingsChain = task
+        await task.value
+    }
+
+    private func sendCaptionSettings(
+        enabled: Bool?, preset: String?, font: String?, x: Double?, y: Double?, scale: Double?
+    ) async {
         guard let snapshot else { return }
         var object: [String: JSONValue] = ["draft": snapshot.draft]
         object["enabled"] = enabled.map(JSONValue.bool) ?? .null
         object["preset"] = preset.map(JSONValue.string) ?? .null
+        object["font"] = font.map(JSONValue.string) ?? .null
+        object["x"] = x.map(JSONValue.number) ?? .null
+        object["y"] = y.map(JSONValue.number) ?? .null
+        object["scale"] = scale.map(JSONValue.number) ?? .null
         let edited = await edit(path: "/v1/draft-edits/caption-settings", body: .object(object))
         if let edited { await autosave(edited) }
     }
