@@ -24,6 +24,10 @@ targets:
     platform: iOS
     sources:
       - CutSell
+      # The nine caption typefaces (and their licence texts) are the server's own files, so the
+      # editor preview and the exported video use exactly the same letters. One copy in the repo.
+      - path: ../../cutsell_worker/fonts
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app

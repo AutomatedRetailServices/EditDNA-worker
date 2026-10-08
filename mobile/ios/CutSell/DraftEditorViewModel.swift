@@ -68,6 +68,30 @@ final class DraftEditorViewModel: ObservableObject {
         snapshot?.draft["caption_preset"]?.stringValue ?? "classic"
     }
 
+    /// One of `CaptionFontCatalog`'s keys (the server's `caption_font`).
+    var captionFont: String {
+        snapshot?.draft["caption_font"]?.stringValue ?? CaptionFontCatalog.defaultKey
+    }
+
+    /// Caption centre for the whole video, 0...1 of the frame width / height.
+    var captionX: Double {
+        snapshot?.draft["caption_x"]?.doubleValue ?? CaptionLayout.defaultX
+    }
+
+    var captionY: Double {
+        snapshot?.draft["caption_y"]?.doubleValue ?? CaptionLayout.defaultY
+    }
+
+    /// Caption size for the whole video (1 = the typeface's own size).
+    var captionScale: Double {
+        snapshot?.draft["caption_scale"]?.doubleValue ?? CaptionLayout.defaultScale
+    }
+
+    /// Which engine produced this draft; short timed captions exist only for "simple".
+    var draftEngine: String? {
+        snapshot?.draft["diagnostics"]?["engine"]?.stringValue
+    }
+
     func load() async {
         isLoading = true
         defer { isLoading = false }

@@ -11,6 +11,23 @@ struct DraftPlaybackView: View {
             VideoPlayer(player: playback.player)
                 .aspectRatio(9.0 / 16.0, contentMode: .fit)
                 .frame(maxHeight: 430)
+                .overlay {
+                    if model.captionsEnabled {
+                        // Captions as the export will burn them in. The export
+                        // fits every video into a 9:16 frame and places captions
+                        // on that frame, which is exactly this 9:16 box.
+                        CaptionOverlayView(
+                            cue: playback.captionCue(at: playback.currentTime),
+                            time: playback.currentTime,
+                            preset: model.captionPreset,
+                            fontKey: model.captionFont,
+                            x: model.captionX,
+                            y: model.captionY,
+                            scale: model.captionScale
+                        )
+                        .allowsHitTesting(false)
+                    }
+                }
                 .background(.black, in: RoundedRectangle(cornerRadius: 16))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
 
@@ -74,14 +91,79 @@ final class DraftPlaybackController: ObservableObject {
     @Published private(set) var currentTime = 0.0
     @Published private(set) var duration = 0.0
     @Published private(set) var message: String?
+    /// Captions of the whole preview, in timeline order (`CaptionPreviewRules`).
+    @Published private(set) var captionCues: [CaptionPreviewCue] = []
 
     private var timeObserver: Any?
+    /// Where each clip sits on the preview timeline (same order and same
+    /// skipped clips as the composition built below).
+    private var clipWindows: [CaptionClipWindow] = []
+    private var compositionSignature: String?
+    private var compositionBuiltAt: Date?
+    /// How long the video links of the current composition can be trusted.
+    private var compositionReuseSec = 0.0
 
     init() {
+        CaptionFontLoader.registerIfNeeded()
         installTimeObserver()
     }
 
+    func captionCue(at time: Double) -> CaptionPreviewCue? {
+        captionCues.first { time >= $0.start && time < $0.end }
+    }
+
+    /// Clip under the playhead, if any.
+    func clipID(at time: Double) -> String? {
+        clipWindows.first { time >= $0.timelineStart && time < $0.timelineStart + $0.duration }?.clipID
+    }
+
+    private func refreshCaptionCues(from model: DraftEditorViewModel) {
+        captionCues = CaptionPreviewRules.cues(
+            clips: model.selectedClips,
+            windows: clipWindows,
+            engine: model.draftEngine
+        )
+    }
+
+    /// Everything the picture and sound of the preview depend on. A change
+    /// that leaves this untouched (caption style, typeface, text, position)
+    /// keeps the player where it is instead of rebuilding it from zero.
+    private static func signature(for model: DraftEditorViewModel, sourceURLs: [String: URL]) -> String {
+        var parts: [String] = []
+        for clip in model.selectedClips {
+            let clipID: String = clip["clip_id"]?.stringValue ?? ""
+            let sourceID: String = clip["source_asset_id"]?.stringValue ?? ""
+            let start: Double = clip["start"]?.doubleValue ?? 0
+            let end: Double = clip["end"]?.doubleValue ?? 0
+            let muted: Bool = clip["audio_muted"]?.boolValue ?? false
+            let volume: Double = clip["audio_volume"]?.doubleValue ?? 1
+            let playable: Bool = sourceURLs[sourceID] != nil
+            parts.append("\(clipID)|\(sourceID)|\(start)|\(end)|\(muted)|\(volume)|\(playable)")
+        }
+        return parts.joined(separator: ";")
+    }
+
+    /// Video links are signed and expire; reuse a composition only for half
+    /// of the shortest lifetime the server announced (5 minutes if unknown).
+    private static func reuseWindow(for snapshot: DraftSnapshot?) -> Double {
+        var shortest: Double?
+        for source in snapshot?.sources ?? [] {
+            guard let seconds = source["playback_expires_in"]?.doubleValue, seconds > 0 else { continue }
+            shortest = min(shortest ?? seconds, seconds)
+        }
+        return (shortest ?? 600) / 2
+    }
+
     func rebuild(from model: DraftEditorViewModel) async {
+        let signature = Self.signature(for: model, sourceURLs: sourceURLCatalog(from: model.snapshot))
+        if isReady, signature == compositionSignature, let builtAt = compositionBuiltAt,
+           Date().timeIntervalSince(builtAt) < compositionReuseSec {
+            refreshCaptionCues(from: model)
+            return
+        }
+        compositionSignature = nil
+        clipWindows = []
+        captionCues = []
         pause()
         isBuilding = true
         isReady = false
@@ -114,8 +196,9 @@ final class DraftPlaybackController: ObservableObject {
             var cursor = CMTime.zero
             var insertedVideo = false
             var setVideoTransform = false
+            var windows: [CaptionClipWindow] = []
 
-            for clip in model.selectedClips {
+            for (clipIndex, clip) in model.selectedClips.enumerated() {
                 guard let sourceID = clip["source_asset_id"]?.stringValue,
                       let sourceURL = sourceURLs[sourceID] else {
                     continue
@@ -133,6 +216,13 @@ final class DraftPlaybackController: ObservableObject {
                 let range = CMTimeRange(start: start, duration: durationTime)
                 try videoCompositionTrack.insertTimeRange(range, of: sourceVideo, at: cursor)
                 insertedVideo = true
+
+                windows.append(CaptionClipWindow(
+                    clipIndex: clipIndex,
+                    clipID: clip["clip_id"]?.stringValue ?? "",
+                    timelineStart: CMTimeGetSeconds(cursor),
+                    duration: clipDuration
+                ))
 
                 if !setVideoTransform {
                     videoCompositionTrack.preferredTransform = try await sourceVideo.load(.preferredTransform)
@@ -167,6 +257,11 @@ final class DraftPlaybackController: ObservableObject {
             player.replaceCurrentItem(with: item)
             duration = max(0, CMTimeGetSeconds(cursor))
             isReady = true
+            clipWindows = windows
+            compositionSignature = signature
+            compositionBuiltAt = Date()
+            compositionReuseSec = Self.reuseWindow(for: model.snapshot)
+            refreshCaptionCues(from: model)
             CutSellDiagnostics.log("playback_ready", ["duration_s": String(format: "%.2f", duration)])
         } catch {
             player.replaceCurrentItem(with: nil)
@@ -202,7 +297,9 @@ final class DraftPlaybackController: ObservableObject {
 
     private func installTimeObserver() {
         timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            // Often enough for a three-word caption (and the word being
+            // spoken in the Highlight look) to change on time.
+            forInterval: CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
             guard let self else { return }
