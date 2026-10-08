@@ -45,8 +45,16 @@ struct CaptionOverlayView: View {
     let x: Double
     let y: Double
     let scale: Double
-    /// When set, the caption can be tapped (to fix its words).
-    var onTap: (() -> Void)? = nil
+    /// Set while the Captions panel is open: the caption can be tapped (to
+    /// fix its words), dragged and pinched (position and size for the whole video).
+    var editing: CaptionEditing? = nil
+
+    /// Live finger movement, applied on top of the saved position until the
+    /// fingers lift; then the result is saved and these go back to zero.
+    @State private var dragTranslation: CGSize = .zero
+    @State private var pinchScale: Double = 1
+
+    private var onTap: (() -> Void)? { editing?.onTap }
 
     var body: some View {
         GeometryReader { proxy in
@@ -71,8 +79,14 @@ struct CaptionOverlayView: View {
     private func timedCaption(_ cue: CaptionPreviewCue, frame: CGSize) -> some View {
         let spec = CaptionFontCatalog.spec(for: fontKey)
         let look = CaptionLook.resolve(preset: preset)
-        let safeScale = CaptionLayout.clampedScale(scale)
-        let placement = CaptionLayout.placement(x: x, y: y, scale: safeScale, fontKey: fontKey)
+        // Start from where the caption really is (the saved point, kept
+        // inside the frame), then follow the fingers. `placement` keeps the
+        // result inside the frame at every moment, exactly as the export does.
+        let saved = CaptionLayout.placement(x: x, y: y, scale: CaptionLayout.clampedScale(scale), fontKey: fontKey)
+        let liveX = saved.centerX / CaptionLayout.frameWidth + Double(dragTranslation.width) / max(1, Double(frame.width))
+        let liveY = saved.centerY / CaptionLayout.frameHeight + Double(dragTranslation.height) / max(1, Double(frame.height))
+        let safeScale = CaptionLayout.clampedScale(CaptionLayout.clampedScale(scale) * pinchScale)
+        let placement = CaptionLayout.placement(x: liveX, y: liveY, scale: safeScale, fontKey: fontKey)
         let renderSize = CaptionLayout.fittedSize(
             text: cue.text, size: placement.fontSize, column: placement.column, fontKey: fontKey
         )
@@ -103,8 +117,39 @@ struct CaptionOverlayView: View {
         .padding(.horizontal, CGFloat(boxPadding))
         .padding(.vertical, CGFloat(verticalPadding))
         .background(look.boxHex.map { Color(captionHex: $0) } ?? Color.clear)
+        .overlay {
+            if editing != nil {
+                // Shows the caption can be moved and resized.
+                Rectangle()
+                    .stroke(Color.white.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .padding(-4)
+            }
+        }
         .frame(width: CGFloat(placement.column * unitX + 2 * boxPadding))
         .modifier(CaptionTapModifier(onTap: onTap))
+        .modifier(CaptionMoveModifier(
+            isActive: editing != nil,
+            onChange: { translation, magnification in
+                if dragTranslation == .zero && pinchScale == 1 { editing?.onBegin() }
+                dragTranslation = translation
+                pinchScale = magnification
+            },
+            onEnd: {
+                // Read the latest finger movement (not the values of the
+                // last drawing) so the saved spot is exactly where it was left.
+                let endX = saved.centerX / CaptionLayout.frameWidth + Double(dragTranslation.width) / max(1, Double(frame.width))
+                let endY = saved.centerY / CaptionLayout.frameHeight + Double(dragTranslation.height) / max(1, Double(frame.height))
+                let endScale = CaptionLayout.clampedScale(CaptionLayout.clampedScale(scale) * pinchScale)
+                let ended = CaptionLayout.placement(x: endX, y: endY, scale: endScale, fontKey: fontKey)
+                editing?.onLayoutChange(
+                    ended.centerX / CaptionLayout.frameWidth,
+                    ended.centerY / CaptionLayout.frameHeight,
+                    endScale
+                )
+                dragTranslation = .zero
+                pinchScale = 1
+            }
+        ))
         .position(x: CGFloat(placement.centerX * unitX), y: CGFloat(placement.centerY * unitY))
     }
 
@@ -147,6 +192,55 @@ struct CaptionOverlayView: View {
         .frame(width: column)
         .modifier(CaptionTapModifier(onTap: onTap))
         .frame(width: frame.width, height: max(0, frame.height - bottom), alignment: .bottom)
+    }
+}
+
+/// What the caption on the video can do while the Captions panel is open.
+struct CaptionEditing {
+    /// Tap: fix the words of this caption.
+    let onTap: () -> Void
+    /// Fingers start moving the caption.
+    let onBegin: () -> Void
+    /// Fingers lifted: new centre (0...1 of the frame) and size, for the whole video.
+    let onLayoutChange: (Double, Double, Double) -> Void
+}
+
+/// Drag to move, pinch to resize. The touch area is a little taller than
+/// the words so two fingers fit on a small caption.
+private struct CaptionMoveModifier: ViewModifier {
+    let isActive: Bool
+    let onChange: (CGSize, Double) -> Void
+    let onEnd: () -> Void
+
+    @State private var latestTranslation: CGSize = .zero
+    @State private var latestMagnification: Double = 1
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isActive {
+            content
+                .padding(.vertical, 24)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 6)
+                        .simultaneously(with: MagnifyGesture())
+                        .onChanged { value in
+                            // When one finger lifts, its part of the gesture
+                            // stops reporting: keep its last value, never reset.
+                            if let drag = value.first { latestTranslation = drag.translation }
+                            if let pinch = value.second { latestMagnification = Double(pinch.magnification) }
+                            onChange(latestTranslation, latestMagnification)
+                        }
+                        .onEnded { _ in
+                            onEnd()
+                            latestTranslation = .zero
+                            latestMagnification = 1
+                        }
+                )
+                .padding(.vertical, -24)
+        } else {
+            content
+        }
     }
 }
 

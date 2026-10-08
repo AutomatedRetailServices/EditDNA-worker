@@ -106,6 +106,9 @@ struct DraftEditorView: View {
                     }
                     .padding(.vertical)
                 }
+                // While the panel is open, a finger on the video moves the
+                // caption instead of scrolling the page (Done closes it).
+                .scrollDisabled(showCaptionsPanel)
                 .onChange(of: showCaptionsPanel) { _, isOpen in
                     // The Captions button sits below; bring the video and the
                     // panel into view so every change is seen.

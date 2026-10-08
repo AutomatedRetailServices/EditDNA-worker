@@ -37,6 +37,15 @@ struct CaptionsPanelView: View {
 
     private var enabled: Bool { model.captionsEnabled }
 
+    private var hint: String {
+        guard enabled else { return "Captions are off" }
+        // Position and size apply to the short timed captions only.
+        if model.draftEngine == CaptionPreviewRules.timedEngine {
+            return "Drag to move, pinch to resize, tap to fix words."
+        }
+        return "Tap the caption on the video to fix words."
+    }
+
     private var currentLook: Look {
         let preset = model.captionPreset
         if preset.hasPrefix("highlight") { return .highlight }
@@ -65,7 +74,7 @@ struct CaptionsPanelView: View {
             } else if enabled && currentLook == .box {
                 boxVariantRow
             }
-            Text(enabled ? "Tap the caption on the video to fix words." : "Captions are off")
+            Text(hint)
                 .font(.system(size: 10))
                 .foregroundStyle(CaptionPanelColours.hint)
                 .frame(maxWidth: .infinity)

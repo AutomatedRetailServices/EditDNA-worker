@@ -183,3 +183,46 @@ def test_preview_rules_never_touch_the_network_or_the_draft():
         assert "APIClient" not in source
         assert "api.request(" not in source
         assert "URLSession" not in source
+
+
+# ---------------------------------------------------------------------------
+# Delivery 3: drag to move, pinch to resize -- whole video, never off-frame.
+# ---------------------------------------------------------------------------
+
+def test_caption_can_be_dragged_and_pinched_while_the_panel_is_open():
+    source = OVERLAY.read_text()
+    assert "DragGesture(minimumDistance: 6)" in source
+    assert ".simultaneously(with: MagnifyGesture())" in source
+    assert "isActive: editing != nil" in source
+    # The panel being open is what turns editing on.
+    editor = (IOS / "CutSell/DraftEditorView.swift").read_text()
+    assert "onCaptionTap: showCaptionsPanel ?" in editor
+
+
+def test_live_and_saved_positions_go_through_the_servers_placement():
+    source = OVERLAY.read_text()
+    # While moving and when saving, the server's own clamp keeps the caption inside the frame.
+    assert "let placement = CaptionLayout.placement(x: liveX, y: liveY, scale: safeScale, fontKey: fontKey)" in source
+    assert "let ended = CaptionLayout.placement(x: endX, y: endY, scale: endScale, fontKey: fontKey)" in source
+    # What is saved is the centre actually shown, so it never jumps or hides behind an edge.
+    assert "ended.centerX / CaptionLayout.frameWidth" in source
+    assert "ended.centerY / CaptionLayout.frameHeight" in source
+    assert "CaptionLayout.clampedScale(CaptionLayout.clampedScale(scale) * pinchScale)" in source
+
+
+def test_position_and_size_are_saved_for_the_whole_video_through_the_real_route():
+    playback = PLAYBACK.read_text()
+    assert "draft.applyCaptionSettings(x: x, y: y, scale: scale)" in playback
+    # Only the short timed captions can move; the server draws whole-clip captions in a fixed place.
+    assert "let movable = cue.isTimed" in playback
+    assert "guard movable else { return }" in playback
+    vm = VIEW_MODEL.read_text()
+    assert "func applyCaptionSettings(" in vm
+    assert 'if let x { changes["caption_x"] = .number(x) }' in vm
+    assert 'if let scale { changes["caption_scale"] = .number(scale) }' in vm
+
+
+def test_panel_hint_matches_what_the_caption_can_do():
+    panel = (IOS / "CutSell/CaptionsPanelView.swift").read_text()
+    assert '"Drag to move, pinch to resize, tap to fix words."' in panel
+    assert "model.draftEngine == CaptionPreviewRules.timedEngine" in panel

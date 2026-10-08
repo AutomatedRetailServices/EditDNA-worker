@@ -573,6 +573,22 @@ final class DraftEditorViewModel: ObservableObject {
         y: Double? = nil,
         scale: Double? = nil
     ) async {
+        let task = applyCaptionSettings(enabled: enabled, preset: preset, font: font, x: x, y: y, scale: scale)
+        _ = await task?.value
+    }
+
+    /// Same as `setCaptionSettings`, but returns right away: the new values
+    /// are on screen before this returns (used when fingers lift off the
+    /// caption, so it never jumps back), and the save runs in the queue.
+    @discardableResult
+    func applyCaptionSettings(
+        enabled: Bool? = nil,
+        preset: String? = nil,
+        font: String? = nil,
+        x: Double? = nil,
+        y: Double? = nil,
+        scale: Double? = nil
+    ) -> Task<Void, Never>? {
         var changes: [String: JSONValue] = [:]
         if let enabled { changes["captions_enabled"] = .bool(enabled) }
         if let preset { changes["caption_preset"] = .string(preset) }
@@ -580,7 +596,7 @@ final class DraftEditorViewModel: ObservableObject {
         if let x { changes["caption_x"] = .number(x) }
         if let y { changes["caption_y"] = .number(y) }
         if let scale { changes["caption_scale"] = .number(scale) }
-        guard !changes.isEmpty else { return }
+        guard !changes.isEmpty else { return nil }
 
         captionOverrideCounter += 1
         let token = captionOverrideCounter
@@ -601,7 +617,7 @@ final class DraftEditorViewModel: ObservableObject {
             }
         }
         captionSettingsChain = task
-        await task.value
+        return task
     }
 
     private func sendCaptionSettings(

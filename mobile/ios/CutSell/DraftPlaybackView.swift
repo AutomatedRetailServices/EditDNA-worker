@@ -5,7 +5,8 @@ import AVFoundation
 struct DraftPlaybackView: View {
     @ObservedObject var model: DraftEditorViewModel
     /// While the Captions panel is open the caption on the video can be
-    /// tapped; the clip it belongs to is handed back to fix its words.
+    /// tapped (the clip it belongs to is handed back to fix its words),
+    /// dragged and pinched (position and size for the whole video).
     var onCaptionTap: ((String) -> Void)? = nil
     @StateObject private var playback = DraftPlaybackController()
 
@@ -28,7 +29,7 @@ struct DraftPlaybackView: View {
                             x: model.captionX,
                             y: model.captionY,
                             scale: model.captionScale,
-                            onTap: tapAction(for: cue)
+                            editing: editing(for: cue)
                         )
                     }
                 }
@@ -80,12 +81,25 @@ struct DraftPlaybackView: View {
         .onDisappear { playback.pause() }
     }
 
-    private func tapAction(for cue: CaptionPreviewCue?) -> (() -> Void)? {
+    @MainActor
+    private func editing(for cue: CaptionPreviewCue?) -> CaptionEditing? {
         guard let onCaptionTap, let cue else { return nil }
-        return {
-            playback.pause()
-            onCaptionTap(cue.clipID)
-        }
+        let controller = playback
+        let draft = model
+        // Moving and resizing only exist for the short timed captions; the
+        // server draws a whole-clip caption in a fixed place.
+        let movable = cue.isTimed
+        return CaptionEditing(
+            onTap: {
+                controller.pause()
+                onCaptionTap(cue.clipID)
+            },
+            onBegin: { controller.pause() },
+            onLayoutChange: { x, y, scale in
+                guard movable else { return }
+                draft.applyCaptionSettings(x: x, y: y, scale: scale)
+            }
+        )
     }
 
     private func time(_ seconds: Double) -> String {
