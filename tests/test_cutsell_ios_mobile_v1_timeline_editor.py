@@ -86,7 +86,7 @@ def test_split_is_gated_on_selection_and_playhead_span():
 
 def test_split_dispatches_to_the_selected_tracks_own_real_authority():
     source = TIMELINE_EDITOR.read_text()
-    assert "model.split(clipID: selection.itemID, at: playheadTime)" in source
+    assert "model.split(clipID: selection.itemID, at: splitTime)" in source
     assert "model.splitVoiceOverPlacement(id: selection.itemID, at: playheadTime)" in source
     assert "model.splitBrollPlacement(id: selection.itemID, at: playheadTime)" in source
 
@@ -187,7 +187,11 @@ def test_main_video_uses_the_pre_existing_draft_edits_system_not_d282a():
     editor_source = TIMELINE_EDITOR.read_text()
     # Main Video split/delete go through the ORIGINAL draft-edits model
     # methods, never through the new TimelineCompositionClient.
-    assert "case .mainVideo:\n            await model.split(clipID: selection.itemID, at: playheadTime)" in editor_source
+    assert "case .mainVideo:\n            guard let item = selectedItem, let sourceStart = item.sourceStartSec else { return }" in editor_source
+    # TestFlight prep split fix: the Main Video split now snaps to a safe point
+    # between two words (model.safeSplitTime) before calling the same authority.
+    assert "model.safeSplitTime(clipID: selection.itemID, near: wanted)" in editor_source
+    assert "await model.split(clipID: selection.itemID, at: splitTime)" in editor_source
     vm_source = VIEW_MODEL.read_text()
     assert '"/v1/draft-edits/split"' in vm_source
     assert '"/v1/draft-edits/remove"' in vm_source
@@ -373,7 +377,7 @@ def test_canredo_flag_is_invalidated_by_any_new_mutation_or_selection():
     tap_block = source[tap_idx:tap_idx + 200]
     assert "canRedoMainVideo = false" in tap_block
     # A fresh split/delete on Main Video also invalidates it.
-    split_idx = source.index("await model.split(clipID: selection.itemID, at: playheadTime)")
+    split_idx = source.index("await model.split(clipID: selection.itemID, at: splitTime)")
     split_block = source[split_idx:split_idx + 160]
     assert "canRedoMainVideo = false" in split_block
     remove_idx = source.index("await model.remove(clipID: selection.itemID)")
@@ -609,7 +613,7 @@ def test_a_new_mutation_still_invalidates_redo_under_the_typed_result_contract()
     tap_idx = source.index("selection = TimelineSelection(track: track, itemID: item.id)")
     tap_block = source[tap_idx:tap_idx + 200]
     assert "canRedoMainVideo = false" in tap_block
-    split_idx = source.index("await model.split(clipID: selection.itemID, at: playheadTime)")
+    split_idx = source.index("await model.split(clipID: selection.itemID, at: splitTime)")
     split_block = source[split_idx:split_idx + 160]
     assert "canRedoMainVideo = false" in split_block
     remove_idx = source.index("await model.remove(clipID: selection.itemID)")

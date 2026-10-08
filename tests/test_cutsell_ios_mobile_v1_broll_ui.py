@@ -326,7 +326,11 @@ def test_captions_and_voiceover_entry_points_are_preserved():
 
 def test_main_video_split_delete_undo_still_use_the_pre_existing_system():
     source = TIMELINE_EDITOR.read_text()
-    assert "case .mainVideo:\n            await model.split(clipID: selection.itemID, at: playheadTime)" in source
+    assert "case .mainVideo:\n            guard let item = selectedItem, let sourceStart = item.sourceStartSec else { return }" in source
+    # TestFlight prep split fix: the Main Video split now snaps to a safe point
+    # between two words (model.safeSplitTime) before calling the same authority.
+    assert "model.safeSplitTime(clipID: selection.itemID, near: wanted)" in source
+    assert "await model.split(clipID: selection.itemID, at: splitTime)" in source
     assert "case .mainVideo:\n            await model.remove(clipID: selection.itemID)" in source
 
 
