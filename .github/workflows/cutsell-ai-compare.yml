@@ -1,0 +1,48 @@
+name: CutSell AI compare (experiment)
+
+# One-off experiment: the same editing prompt on several OpenAI / Gemini models, run inside Modal.
+# Nothing is deployed: `modal run` starts a temporary app that stops by itself when done.
+# Private data never touches this public repository or its logs: the payloads are read from, and the
+# result is written to, CutSell's private storage (prefix below). The log shows only model names,
+# timings and token counts.
+
+on:
+  push:
+    branches: [exp/ai-compare]
+    paths:
+      - 'experiments/ai_compare/**'
+      - '.github/workflows/cutsell-ai-compare.yml'
+
+concurrency:
+  group: cutsell-ai-compare
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      S3_PREFIX: pruebas/ai-compare/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Modal
+        run: |
+          python -m pip install --upgrade pip
+          pip install modal
+      - name: Run the comparison in Modal (temporary run, nothing deployed)
+        working-directory: experiments/ai_compare
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::error::MODAL_TOKEN_ID / MODAL_TOKEN_SECRET are not set in this repository's Actions secrets."
+            exit 1
+          fi
+          modal run modal_compare.py --prefix "$S3_PREFIX"
