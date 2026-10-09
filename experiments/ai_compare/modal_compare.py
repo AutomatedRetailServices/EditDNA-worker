@@ -36,7 +36,12 @@ def run(prefix):
             d = json.load(urllib.request.urlopen(urllib.request.Request("https://api.openai.com/v1/models", headers={"Authorization": "Bearer " + ok}), timeout=60))
             om = sorted(m["id"] for m in d["data"])
         except Exception as e:
-            out["provider_errors"]["openai"] = "HTTP " + str(getattr(e, "code", type(e).__name__))
+            reason = ""
+            try:  # OpenAI says why (e.g. invalid_api_key); keep only that code, never the message.
+                reason = json.loads(e.read().decode("utf-8", "replace")).get("error", {}).get("code") or ""
+            except Exception:
+                pass
+            out["provider_errors"]["openai"] = ("HTTP " + str(getattr(e, "code", type(e).__name__)) + " " + reason).strip()
     gm = []
     if gk:
         try:
@@ -54,8 +59,14 @@ def run(prefix):
     for k in (["luna"], ["terra"], ["gpt-5-mini", "gpt-5.1-mini"], ["gpt-5-nano"]):
         m = pick(om, k)
         if m and ("openai", m) not in targets: targets.append(("openai", m))
-    for k in (["flash-lite"], ["flash"]):
-        m = pick(gm, k)
+    # Gemini: the newest numbered stable Flash-Lite and Flash (e.g. gemini-3.8-flash-lite, gemini-3.8-flash),
+    # never an alias like "-latest" or a special model (omni, image, tts, preview).
+    import re
+    def newest(pattern):
+        found = [m for m in gm if re.fullmatch(pattern, m)]
+        return max(found, key=lambda m: [int(x) for x in re.findall(r"\d+", m)]) if found else None
+    for pattern in (r"gemini-\d+(?:\.\d+)?-flash-lite", r"gemini-\d+(?:\.\d+)?-flash"):
+        m = newest(pattern)
         if m and ("gemini", m) not in targets: targets.append(("gemini", m))
     out["targets"] = targets
     for p in payloads:
