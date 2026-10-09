@@ -28,14 +28,22 @@ def run(prefix):
     ok, gk = os.environ.get("OPENAI_API_KEY", "").strip(), os.environ.get("GEMINI_API_KEY", "").strip()
     out = {"has_openai": bool(ok), "has_gemini": bool(gk), "results": []}
     # discover current model ids
+    # A provider whose key is refused is recorded (HTTP code only) and skipped; the other one still runs.
+    out["provider_errors"] = {}
     om = []
     if ok:
-        d = json.load(urllib.request.urlopen(urllib.request.Request("https://api.openai.com/v1/models", headers={"Authorization": "Bearer " + ok}), timeout=60))
-        om = sorted(m["id"] for m in d["data"])
+        try:
+            d = json.load(urllib.request.urlopen(urllib.request.Request("https://api.openai.com/v1/models", headers={"Authorization": "Bearer " + ok}), timeout=60))
+            om = sorted(m["id"] for m in d["data"])
+        except Exception as e:
+            out["provider_errors"]["openai"] = "HTTP " + str(getattr(e, "code", type(e).__name__))
     gm = []
     if gk:
-        d = json.load(urllib.request.urlopen(urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", headers={"x-goog-api-key": gk}), timeout=60))
-        gm = [m["name"].split("/")[-1] for m in d["models"] if "generateContent" in m.get("supportedGenerationMethods", [])]
+        try:
+            d = json.load(urllib.request.urlopen(urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", headers={"x-goog-api-key": gk}), timeout=60))
+            gm = [m["name"].split("/")[-1] for m in d["models"] if "generateContent" in m.get("supportedGenerationMethods", [])]
+        except Exception as e:
+            out["provider_errors"]["gemini"] = "HTTP " + str(getattr(e, "code", type(e).__name__))
     out["openai_models"] = [m for m in om if m.startswith("gpt-5")][:60]
     out["gemini_models"] = [m for m in gm if "flash" in m or "pro" in m][:60]
     def pick(lst, keys):
@@ -84,6 +92,7 @@ def run(prefix):
                   ContentType="application/json", ServerSideEncryption="AES256")
     # Only what is safe to show in a public log.
     summary = {"result_key": key, "has_openai": out["has_openai"], "has_gemini": out["has_gemini"],
+               "provider_errors": out["provider_errors"],
                "targets": out["targets"], "results": []}
     for r in out["results"]:
         u = r.get("usage") or {}
@@ -101,7 +110,7 @@ def run(prefix):
 def main(prefix: str = "pruebas/ai-compare/"):
     res = run.remote(prefix)
     print("guardado en el almacenamiento privado:", res["result_key"])
-    print("openai", res["has_openai"], "gemini", res["has_gemini"])
+    print("openai", res["has_openai"], "gemini", res["has_gemini"], "llaves rechazadas:", res["provider_errors"] or "ninguna")
     print("modelos:", res["targets"])
     for r in res["results"]:
         print(r["video"], r["model"], "ok" if r["ok"] else "ERROR " + str(r["error_code"]), f'{r["secs"]}s',
