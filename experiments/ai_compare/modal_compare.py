@@ -6,7 +6,7 @@ Privacy (this repository is public, and so are its workflow logs):
 - the two payloads (video frames + transcript) are read from the private storage, never from git;
 - the result (each model's edit plan) is written back to the private storage, never to git or logs;
 - the log shows only model names, timings, token counts and error codes. No keys, no video text."""
-import json, os, time, urllib.request
+import json, os, re, time, urllib.request
 import modal
 app = modal.App("cutsell-ai-compare")
 image = modal.Image.debian_slim().pip_install("boto3")
@@ -56,7 +56,11 @@ def run(prefix):
             c = [m for m in lst if k in m and "preview" not in m and "audio" not in m and "image" not in m and "tts" not in m and "live" not in m]
             if c: return sorted(c)[-1]
     targets = []
-    for k in (["luna"], ["terra"], ["gpt-5-mini", "gpt-5.1-mini"], ["gpt-5-nano"]):
+    # GPT-5.6 Luna and Terra by their official ids (limited preview: they may not appear in /v1/models
+    # even when callable). If the key has no access, the call records OpenAI's error code.
+    for m in ("gpt-5.6-luna", "gpt-5.6-terra"):
+        if ok: targets.append(("openai", m))
+    for k in (["gpt-5-mini", "gpt-5.1-mini"], ["gpt-5-nano"]):
         m = pick(om, k)
         if m and ("openai", m) not in targets: targets.append(("openai", m))
     # Gemini: the newest numbered stable Flash-Lite and Flash (e.g. gemini-3.8-flash-lite, gemini-3.8-flash),
@@ -110,7 +114,8 @@ def run(prefix):
         summary["results"].append({
             "video": r["video"], "model": r["model"], "secs": r.get("secs"),
             "ok": "error" not in r,
-            "error_code": (r["error"].split(":")[0][:60] if "error" in r else None),
+            "error_code": ((r["error"].split(":")[0][:40] + " " + " ".join(re.findall(r'"code":\s*"([a-z_]{3,40})"', r["error"])[:1])).strip()
+                           if "error" in r else None),
             "tokens_in": u.get("input_tokens", u.get("promptTokenCount")),
             "tokens_out": u.get("output_tokens", u.get("candidatesTokenCount")),
             "tokens_thinking": (u.get("output_tokens_details") or {}).get("reasoning_tokens", u.get("thoughtsTokenCount")),
