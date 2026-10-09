@@ -45,4 +45,10 @@ jobs:
             echo "::error::MODAL_TOKEN_ID / MODAL_TOKEN_SECRET are not set in this repository's Actions secrets."
             exit 1
           fi
-          modal run modal_compare.py --prefix "$S3_PREFIX"
+          set +e
+          modal run modal_compare.py --prefix "$S3_PREFIX" 2>&1 | tee run_output.txt
+          status=${PIPESTATUS[0]}
+          # Also as an annotation (readable through the API). The output never holds video text or keys.
+          summary="$(tail -n 25 run_output.txt | tr '\n' ' | ' | cut -c1-3500)"
+          if [ "$status" -ne 0 ]; then echo "::error title=modal run failed::$summary"; else echo "::notice title=modal run finished::$summary"; fi
+          exit "$status"
