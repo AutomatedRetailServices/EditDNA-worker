@@ -1,0 +1,30 @@
+name: CutSell Modal diagnosis (read-only)
+
+on:
+  push:
+    branches: [exp/ai-compare]
+    paths:
+      - 'experiments/modal_diag/**'
+      - '.github/workflows/cutsell-modal-diag.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -q modal
+      - name: Diagnose
+        working-directory: experiments/modal_diag
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          ./diag.sh 2>&1 | tee out.txt
+          echo "::notice title=diag::$(cut -c1-230 out.txt | tr '\n' '|' | cut -c1-3900)"
