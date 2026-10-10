@@ -157,6 +157,61 @@ def check_multipart_variants() -> None:
             record(f"parte PUT [{label}]", False, short_error(exc))
 
 
+class _FakeRedis:
+    def __init__(self):
+        self.data = {}
+
+    def set(self, key, value, ex=None):
+        self.data[key] = value
+        return True
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def delete(self, key):
+        self.data.pop(key, None)
+        return 1
+
+
+def check_product_multipart_functions() -> None:
+    """The real server code path the iPhone uses: start -> sign each part -> PUT -> list -> complete."""
+    from cutsell_worker import multipart_uploads as mp
+
+    redis = _FakeRedis()
+    size = 5 * 1024 * 1024 + 200 * 1024
+    data = os.urandom(size)
+    name = "video principal con el codigo real del servidor"
+    try:
+        start = mp.start_multipart_upload(project_id="r2-check-project", user_id="r2-check-user",
+                                          original_name="video.mp4", content_type="video/mp4",
+                                          size_bytes=size, part_size=5 * 1024 * 1024, redis_client=redis)
+    except Exception as exc:
+        record(f"{name}: empezar", False, short_error(exc))
+        return
+    upload_id = start["upload_id"]
+    parts = []
+    for number in range(1, int(start["part_count"]) + 1):
+        chunk = data[(number - 1) * 5 * 1024 * 1024: number * 5 * 1024 * 1024]
+        signed = mp.presign_multipart_part(upload_id=upload_id, user_id="r2-check-user",
+                                           project_id="r2-check-project", part_number=number, redis_client=redis)
+        resp = requests.put(signed["upload_url"], data=chunk, timeout=120)
+        if resp.status_code != 200:
+            record(f"{name}: parte {number}", False, body_error(resp))
+            mp.abort_multipart_upload(upload_id=upload_id, user_id="r2-check-user",
+                                      project_id="r2-check-project", redis_client=redis)
+            return
+        parts.append({"part_number": number, "etag": resp.headers.get("ETag", "")})
+    record(f"{name}: subir {len(parts)} partes con enlace firmado PUT", True)
+    listed = mp.list_multipart_parts(upload_id=upload_id, user_id="r2-check-user",
+                                     project_id="r2-check-project", redis_client=redis)
+    record(f"{name}: listar partes (reanudar)", listed["uploaded_part_numbers"] == list(range(1, len(parts) + 1)))
+    done = mp.complete_multipart_upload(upload_id=upload_id, user_id="r2-check-user",
+                                        project_id="r2-check-project", parts=parts, redis_client=redis)
+    CREATED.append(done["object_key"])
+    got = client().head_object(Bucket=BUCKET, Key=done["object_key"])["ContentLength"]
+    record(f"{name}: juntar partes", got == size)
+
+
 def try_post(name: str, presign: dict, payload: bytes, filename: str) -> None:
     files = {"file": (filename, payload, presign["fields"].get("Content-Type", "application/octet-stream"))}
     try:
@@ -225,7 +280,7 @@ def cleanup() -> None:
 
 def main() -> int:
     print(f"boto3 {boto3.__version__}", flush=True)
-    for step in (check_endpoint_is_r2, check_put_get_delete, check_multipart_put, check_multipart_variants,
+    for step in (check_endpoint_is_r2, check_put_get_delete, check_product_multipart_functions,
                  check_presigned_post, check_presigned_put_alternative):
         try:
             step()
