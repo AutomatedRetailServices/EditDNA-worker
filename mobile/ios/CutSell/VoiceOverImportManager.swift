@@ -23,6 +23,7 @@ private struct TimelineUploadAuthorization: Decodable {
     let method: String
     let uploadURL: String
     let fields: [String: String]
+    let headers: [String: String]?
     let contentType: String?
     let maxBytes: Int?
     let expiresIn: Int
@@ -32,6 +33,7 @@ private struct TimelineUploadAuthorization: Decodable {
         case method
         case uploadURL = "upload_url"
         case fields
+        case headers
         case contentType = "content_type"
         case maxBytes = "max_bytes"
         case expiresIn = "expires_in"
@@ -108,14 +110,20 @@ actor VoiceOverImportManager {
         return asset
     }
 
-    /// The real S3 presigned-POST upload step -- same multipart/form-data
-    /// mechanics `OverlayUploadManager` already uses successfully for its
-    /// own (different) presign route, applied here to the voice-over one.
+    /// The real direct upload step: a signed PUT when the server says
+    /// `method: "PUT"` (Cloudflare R2), otherwise the S3 presigned-POST with the
+    /// same multipart/form-data mechanics `OverlayUploadManager` uses.
     private static func uploadBytes(
         fileURL: URL, contentType: String, authorization: TimelineUploadAuthorization
     ) async throws {
         guard let uploadURL = URL(string: authorization.uploadURL) else {
             throw VoiceOverImportError.invalidUploadURL
+        }
+        if DirectPutUpload.isPut(authorization.method) {
+            let status = try await DirectPutUpload.send(fileURL: fileURL, to: uploadURL, contentType: contentType,
+                                                        headers: authorization.headers ?? [:])
+            guard (200..<300).contains(status) else { throw VoiceOverImportError.uploadFailed(status) }
+            return
         }
         let boundary = "CutSellVoiceOver-\(UUID().uuidString)"
         var request = URLRequest(url: uploadURL)

@@ -126,6 +126,7 @@ class TimelineUploadAuthorizationResponse(BaseModel):
     method: str
     upload_url: str
     fields: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
     content_type: str | None = None
     max_bytes: int | None = None
     expires_in: int

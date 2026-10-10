@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from .config import load_runtime_config
 from .storage import parse_s3_uri
+from .uploads import sign_direct_upload
 
 OVERLAY_PREFIX = "cutsell/overlay-assets/"
 MAX_OVERLAY_BYTES = 500 * 1024 * 1024
@@ -64,14 +65,10 @@ def create_overlay_presigned_upload(
     if client is None:
         import boto3
         client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
-    post = client.generate_presigned_post(
-        Bucket=config.s3_bucket, Key=key,
-        Fields={"Content-Type": resolved_type},
-        Conditions=[{"Content-Type": resolved_type}, ["content-length-range", 1, int(size_bytes)]],
-        ExpiresIn=int(expires_in),
-    )
+    signed = sign_direct_upload(client, bucket=config.s3_bucket, key=key, content_type=resolved_type,
+                                size_bytes=int(size_bytes), expires_in=expires_in)
     return {
-        "method": "POST", "upload_url": post["url"], "fields": post.get("fields", {}),
+        **signed,
         "uri": f"s3://{config.s3_bucket}/{key}", "object_key": key,
         "kind": kind, "content_type": resolved_type, "max_bytes": int(size_bytes), "expires_in": int(expires_in),
     }

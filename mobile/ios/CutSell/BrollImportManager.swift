@@ -50,13 +50,14 @@ private struct TimelineUploadAuthorization: Decodable {
     let method: String
     let uploadURL: String
     let fields: [String: String]
+    let headers: [String: String]?
     let contentType: String?
     let maxBytes: Int?
     let expiresIn: Int
 
     enum CodingKeys: String, CodingKey {
         case uploadID = "upload_id"; case method; case uploadURL = "upload_url"
-        case fields; case contentType = "content_type"; case maxBytes = "max_bytes"
+        case fields; case headers; case contentType = "content_type"; case maxBytes = "max_bytes"
         case expiresIn = "expires_in"
     }
 }
@@ -97,6 +98,12 @@ actor BrollImportManager {
 
     private static func uploadBytes(fileURL: URL, contentType: String, authorization: TimelineUploadAuthorization) async throws {
         guard let uploadURL = URL(string: authorization.uploadURL) else { throw BrollImportError.invalidUploadURL }
+        if DirectPutUpload.isPut(authorization.method) {
+            let status = try await DirectPutUpload.send(fileURL: fileURL, to: uploadURL, contentType: contentType,
+                                                        headers: authorization.headers ?? [:])
+            guard (200..<300).contains(status) else { throw BrollImportError.uploadFailed(status) }
+            return
+        }
         let boundary = "CutSellBroll-\(UUID().uuidString)"
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
