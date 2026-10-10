@@ -32,17 +32,47 @@ PREFIX = "pruebas/engine-temperature/"
 def sales_words():
     import boto3
     sys.path.insert(0, "/root")
-    from cutsell_worker.simple_engine.asr import extract_audio, transcribe_words
     s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-east-1")
-    s3.download_file(os.environ["S3_BUCKET"], SALES_KEY, "/tmp/v.mp4")
+    bucket, cache = os.environ["S3_BUCKET"], PREFIX + "sales_words.json"
+    try:
+        return json.loads(s3.get_object(Bucket=bucket, Key=cache)["Body"].read())
+    except Exception:
+        pass
+    from cutsell_worker.simple_engine.asr import extract_audio, transcribe_words
+    s3.download_file(bucket, SALES_KEY, "/tmp/v.mp4")
     out = transcribe_words(extract_audio("/tmp/v.mp4", "/tmp/a.wav"))
-    return {"id": "SALES", "duration": out["duration"], "words": out["words"], "decisions": None}
+    video = {"id": "SALES", "duration": out["duration"], "words": out["words"], "decisions": None}
+    s3.put_object(Bucket=bucket, Key=cache, Body=json.dumps(video).encode(), ContentType="application/json",
+                  ServerSideEncryption="AES256")
+    return video
+
+
+def _s3():
+    import boto3
+    return boto3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-east-1")
+
+
+def _row_key(vid, config, run):
+    return f"{PREFIX}rows/{vid}-{config}-{run}.json"
 
 
 @app.function(image=image, secrets=[secret], timeout=1200, max_containers=8)
 def one(job):
     sys.path.insert(0, "/root")
     video, config, run = job
+    s3, bucket, key = _s3(), os.environ["S3_BUCKET"], _row_key(video["id"], config, run)
+    try:                                   # already measured in an earlier (cut-off) run: reuse it
+        return json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
+    except Exception:
+        pass
+    row = _measure(video, config, run)
+    if "error" not in row:
+        s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(row).encode(), ContentType="application/json",
+                      ServerSideEncryption="AES256")
+    return row
+
+
+def _measure(video, config, run):
     if config == "default":
         os.environ["CUTSELL_SIMPLE_ENGINE_TEMPERATURE"] = "default"
     else:
