@@ -1,0 +1,54 @@
+name: CutSell cut compare on Gold (experiment)
+
+# One-off experiment: the same editing prompt on several OpenAI / Gemini models, run inside Modal.
+# Nothing is deployed: `modal run` starts a temporary app that stops by itself when done.
+# Private data never touches this public repository or its logs: the payloads are read from, and the
+# result is written to, CutSell's private storage (prefix below). The log shows only model names,
+# timings and token counts.
+
+on:
+  push:
+    branches: [exp/ai-compare]
+    paths:
+      - 'experiments/cut_gold/modal_corte_gold.py'
+      - '.github/workflows/cutsell-cut-gold.yml'
+
+concurrency:
+  group: cutsell-cut-gold
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      S3_PREFIX: pruebas/ai-compare/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Modal
+        run: |
+          python -m pip install --upgrade pip
+          pip install modal
+      - name: Run the comparison in Modal (temporary run, nothing deployed)
+        working-directory: experiments/cut_gold
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::error::MODAL_TOKEN_ID / MODAL_TOKEN_SECRET are not set in this repository's Actions secrets."
+            exit 1
+          fi
+          set +e
+          modal run modal_corte_gold.py --prefix "$S3_PREFIX" 2>&1 | tee run_output.txt
+          status=${PIPESTATUS[0]}
+          # Also as an annotation (readable through the API). The output never holds video text or keys.
+          summary="$(grep -E "ERROR|RESUMEN|modelos|Traceback|Error" run_output.txt | tail -n 30 | tr '\n' ' | ' | cut -c1-3500)"
+          if [ "$status" -ne 0 ]; then echo "::error title=modal run failed::$summary"; else echo "::notice title=modal run finished::$summary"; fi
+          exit "$status"
