@@ -1,0 +1,40 @@
+name: CutSell R2 storage check (test only)
+
+on:
+  push:
+    branches: [exp/r2-check]
+    paths:
+      - experiments/r2_check/**
+      - .github/workflows/cutsell-r2-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q -r requirements.cutsell.api.txt requests
+      - name: Check R2
+        env:
+          AWS_ENDPOINT_URL_S3: ${{ secrets.R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          S3_BUCKET: cutsell-videos
+        run: |
+          for v in AWS_ENDPOINT_URL_S3 AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            if [ -z "${!v}" ]; then echo "::error title=falta llave::falta $v en los secretos de GitHub"; exit 1; fi
+          done
+          python experiments/r2_check/check.py | tee out.txt
+          while IFS= read -r line; do
+            case "$line" in
+              RESUMEN*) echo "::notice title=resumen::${line#RESUMEN }" ;;
+              OK*|FALLA*) echo "::notice title=r2::$line" ;;
+            esac
+          done < out.txt
