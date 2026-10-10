@@ -128,6 +128,35 @@ def check_multipart_put() -> None:
         record("video principal: juntar partes", False, short_error(exc))
 
 
+def check_multipart_variants() -> None:
+    """Diagnose a failing part PUT: region and checksum settings; prints query param NAMES only."""
+    from urllib.parse import parse_qs, urlparse
+    from botocore.config import Config
+
+    variants = [
+        ("region us-east-1, checksum por defecto", "us-east-1", None),
+        ("region auto, checksum por defecto", "auto", None),
+        ("region us-east-1, checksum solo si hace falta", "us-east-1", "when_required"),
+        ("region auto, checksum solo si hace falta", "auto", "when_required"),
+    ]
+    for label, region, checksum in variants:
+        cfg = Config(request_checksum_calculation=checksum, response_checksum_validation=checksum) if checksum else None
+        s3 = boto3.client("s3", region_name=region, config=cfg)
+        key = f"pruebas/r2-check/variant-{uuid.uuid4().hex}.mp4"
+        try:
+            upload_id = s3.create_multipart_upload(Bucket=BUCKET, Key=key, ContentType="video/mp4")["UploadId"]
+            url = s3.generate_presigned_url("upload_part", Params={
+                "Bucket": BUCKET, "Key": key, "UploadId": upload_id, "PartNumber": 1}, ExpiresIn=900)
+            names = sorted(k for k in parse_qs(urlparse(url).query) if k.lower().startswith("x-amz-") and
+                           k not in ("X-Amz-Signature", "X-Amz-Credential", "X-Amz-Security-Token"))
+            resp = requests.put(url, data=os.urandom(5 * 1024 * 1024), timeout=120)
+            ok = resp.status_code == 200
+            record(f"parte PUT [{label}]", ok, ("" if ok else body_error(resp)) + f" params={','.join(names)}")
+            s3.abort_multipart_upload(Bucket=BUCKET, Key=key, UploadId=upload_id)
+        except Exception as exc:
+            record(f"parte PUT [{label}]", False, short_error(exc))
+
+
 def try_post(name: str, presign: dict, payload: bytes, filename: str) -> None:
     files = {"file": (filename, payload, presign["fields"].get("Content-Type", "application/octet-stream"))}
     try:
@@ -196,8 +225,8 @@ def cleanup() -> None:
 
 def main() -> int:
     print(f"boto3 {boto3.__version__}", flush=True)
-    for step in (check_endpoint_is_r2, check_put_get_delete, check_multipart_put, check_presigned_post,
-                 check_presigned_put_alternative):
+    for step in (check_endpoint_is_r2, check_put_get_delete, check_multipart_put, check_multipart_variants,
+                 check_presigned_post, check_presigned_put_alternative):
         try:
             step()
         except Exception as exc:

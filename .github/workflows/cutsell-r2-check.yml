@@ -32,9 +32,6 @@ jobs:
             if [ -z "${!v}" ]; then echo "::error title=falta llave::falta $v en los secretos de GitHub"; exit 1; fi
           done
           python experiments/r2_check/check.py | tee out.txt
-          while IFS= read -r line; do
-            case "$line" in
-              RESUMEN*) echo "::notice title=resumen::${line#RESUMEN }" ;;
-              OK*|FALLA*) echo "::notice title=r2::$line" ;;
-            esac
-          done < out.txt
+          # GitHub keeps at most 10 notices per step: one notice with every line.
+          summary=$(grep -E '^(OK|FALLA)' out.txt | sed 's/$/ ||/' | tr '\n' ' ')
+          echo "::notice title=r2::$summary"
