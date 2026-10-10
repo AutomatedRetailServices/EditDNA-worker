@@ -1,5 +1,6 @@
 """Says whether the Modal secret 'cutsell-worker' sets CUTSELL_SIMPLE_ENGINE_MODEL (which overrides the
 engine's DEFAULT_MODEL). Prints only that, and the value only if it looks like a model id. No keys."""
+# Re-run 2026-10-10 afternoon: confirm before the R2 work.
 import os, re
 import modal
 
