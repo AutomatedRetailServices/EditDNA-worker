@@ -41,7 +41,7 @@ def _s3_client(client=None, *, region: str | None = None):
     if client is not None:
         return client
     import boto3
-    return boto3.client("s3", region_name=region or "us-east-1")
+    return boto3.client("s3", region_name=region or load_runtime_config().aws_region or "us-east-1")
 
 
 def _load_session(upload_id: str, *, user_id: str, project_id: str, redis_client=None) -> dict[str, Any]:

@@ -221,3 +221,36 @@ def test_multipart_api_routes_are_mobile_friendly(monkeypatch):
     assert response.status_code == 200
     assert response.json()["upload_id"] == "upload-123"
     assert response.json()["part_count"] == 2
+
+
+def test_s3_client_uses_configured_region_when_none_given(monkeypatch):
+    # Part signing/listing/completion pass no region; they must follow AWS_REGION
+    # (e.g. "auto" for Cloudflare R2) instead of silently signing for us-east-1.
+    monkeypatch.setenv("AWS_REGION", "auto")
+    assert multipart._s3_client().meta.region_name == "auto"
+    assert multipart._s3_client(region="eu-west-1").meta.region_name == "eu-west-1"
+
+
+def test_s3_client_falls_back_to_us_east_1_without_config(monkeypatch):
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.setattr(multipart, "load_runtime_config",
+                        lambda: type("C", (), {"aws_region": None})())
+    assert multipart._s3_client().meta.region_name == "us-east-1"
+
+
+def test_part_url_is_sigv4_for_r2_endpoint(monkeypatch):
+    # R2 rejects the legacy us-east-1 query signature (401); with the configured
+    # region the part URL is SigV4 and accepted. Offline: presigning needs no network.
+    monkeypatch.setenv("AWS_REGION", "auto")
+    monkeypatch.setenv("AWS_ENDPOINT_URL_S3", "https://example.r2.cloudflarestorage.com")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-id")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
+    redis = FakeRedis()
+    session = {"upload_id": "up-1", "user_id": "u", "project_id": "p", "bucket": "cutsell-videos",
+               "object_key": "cutsell/uploads/u/p/video.mov", "part_count": 2}
+    redis.set(multipart._session_key("up-1"), json.dumps(session))
+    out = multipart.presign_multipart_part(upload_id="up-1", user_id="u", project_id="p",
+                                           part_number=1, redis_client=redis)
+    assert out["upload_url"].startswith("https://example.r2.cloudflarestorage.com/")
+    assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in out["upload_url"]
+    assert "/auto/s3/aws4_request" in out["upload_url"].replace("%2F", "/")
