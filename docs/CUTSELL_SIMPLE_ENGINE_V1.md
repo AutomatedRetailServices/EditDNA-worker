@@ -20,7 +20,7 @@ source video
   -> splits + captions                    full non-destructive timeline
 ```
 
-Everything after the two Claude calls is plain code. Default model: `claude-sonnet-4-6`.
+Everything after the two Claude calls is plain code. Default model: `claude-sonnet-5-5`.
 
 ## Files
 
@@ -44,7 +44,7 @@ Everything after the two Claude calls is plain code. Default model: `claude-sonn
 | `CUTSELL_ENGINE` | `legacy` (default) or `simple`. Anything else fails the job at start |
 | `ANTHROPIC_API_KEY` | Required when `simple` |
 | `DEEPGRAM_API_KEY` | Required when `simple` |
-| `CUTSELL_SIMPLE_ENGINE_MODEL` | Optional. Default `claude-sonnet-4-6` |
+| `CUTSELL_SIMPLE_ENGINE_MODEL` | Optional. Default `claude-sonnet-5-5` |
 
 With `simple`, the worker does not build the brain runtime and does not load Whisper. No GPU is needed.
 

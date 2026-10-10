@@ -6,7 +6,7 @@ import time
 
 import requests
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 API_URL = "https://api.anthropic.com/v1/messages"
 
 
