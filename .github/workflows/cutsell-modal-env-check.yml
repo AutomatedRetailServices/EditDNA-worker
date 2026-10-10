@@ -1,0 +1,37 @@
+name: CutSell Modal env check (experiment)
+
+# One-off read-only check: does the Modal secret override the simple engine's model?
+# Starts a temporary Modal function that prints one line and stops. Nothing is deployed.
+
+on:
+  push:
+    branches: [exp/ai-compare]
+    paths:
+      - 'experiments/env_check/**'
+      - '.github/workflows/cutsell-modal-env-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install modal
+      - name: Check
+        working-directory: experiments/env_check
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          set +e
+          out="$(modal run check_model_var.py 2>&1)"; status=$?
+          echo "$out"
+          line="$(echo "$out" | grep -E 'CUTSELL_SIMPLE_ENGINE_MODEL' | head -1)"
+          echo "::notice title=env check::${line:-no result (exit $status)}"
+          exit $status
