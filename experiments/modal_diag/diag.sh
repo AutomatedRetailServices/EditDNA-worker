@@ -17,6 +17,8 @@ while read -r id; do
   timeout 120 modal app logs "$id" > logs.txt 2>&1
   echo "lineas de registro: $(wc -l < logs.txt)"
   echo "ultima marca de tiempo visible: $(grep -oE '20[0-9]{2}-[0-9]{2}-[0-9]{2}[ T][0-9:]{8}' logs.txt | tail -1)"
+  echo "--- pila (solo archivos y lineas de codigo):"
+  grep -B1 -A1 -E '^\s+File "' logs.txt | grep -E '^\s+(File "|raise|return|[a-z_]+\s*=|for |if |.*\()' | cut -c1-200 | awk '!seen[$0]++' | head -40
   cat logs.txt \
     | grep -iE "error|exception|traceback|timeout|timed out|killed|memory|failed|anthropic http|stopp|retr" \
     | cut -c1-220 | sort | uniq -c | sort -rn | head -25
