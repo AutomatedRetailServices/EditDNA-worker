@@ -5,6 +5,7 @@ struct OverlayPresignResponse: Decodable {
     let method: String
     let uploadURL: String
     let fields: [String: String]
+    let headers: [String: String]?
     let uri: String
     let kind: String
     let contentType: String
@@ -12,7 +13,7 @@ struct OverlayPresignResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case method
         case uploadURL = "upload_url"
-        case fields, uri, kind
+        case fields, headers, uri, kind
         case contentType = "content_type"
     }
 }
@@ -61,6 +62,13 @@ actor OverlayUploadManager {
 
         guard let uploadURL = URL(string: presign.uploadURL) else {
             throw OverlayUploadError.invalidUploadURL
+        }
+
+        if DirectPutUpload.isPut(presign.method) {
+            let status = try await DirectPutUpload.send(fileURL: fileURL, to: uploadURL, contentType: presign.contentType,
+                                                        headers: presign.headers ?? [:])
+            guard (200..<300).contains(status) else { throw OverlayUploadError.uploadFailed(status) }
+            return presign
         }
 
         let boundary = "CutSellOverlay-\(UUID().uuidString)"
