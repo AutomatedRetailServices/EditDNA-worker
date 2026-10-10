@@ -11,7 +11,11 @@ from pathlib import Path
 
 import modal
 
-REPO = Path(__file__).resolve().parents[2]
+_HERE = Path(__file__).resolve()
+# Locally this file is experiments/engine_temperature/measure.py (repo two levels up). Inside the Modal
+# container it is /root/measure.py, where parents[2] does not exist: that IndexError crashed every
+# container at import, so the earlier runs never reached the engine and stored nothing.
+REPO = _HERE.parents[2] if len(_HERE.parents) > 2 and (_HERE.parents[2] / "cutsell_worker").is_dir() else Path("/root")
 app = modal.App("cutsell-engine-temperature")
 image = (
     modal.Image.debian_slim(python_version="3.11")
