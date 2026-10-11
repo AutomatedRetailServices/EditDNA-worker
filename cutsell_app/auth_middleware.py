@@ -95,8 +95,11 @@ class AuthScopeMiddleware:
             except RuntimeError:
                 return await _respond(send, 503, "job service unavailable")
 
-        claimed_query = (parse_qs((scope.get("query_string") or b"").decode()).get("user_id") or [None])[0]
-        if claimed_query is not None and str(claimed_query) != auth_user_id:
+        # Every `user_id` the route could read must be the session's own user. Check ALL query
+        # values: with `?user_id=A&user_id=B` FastAPI binds the LAST one, so checking only the
+        # first let a session act as another user.
+        claimed_queries = parse_qs((scope.get("query_string") or b"").decode(), keep_blank_values=True).get("user_id") or []
+        if any(str(value) != auth_user_id for value in claimed_queries):
             return await _respond(send, 403, "user scope mismatch")
 
         messages = []
@@ -113,14 +116,17 @@ class AuthScopeMiddleware:
             else:
                 more = False
 
+        # Parse the body whatever the Content-Type says. FastAPI also accepts `application/*+json`
+        # and reads the FIRST of duplicated Content-Type headers, so trusting the header here let
+        # a body with another user's id through unchecked. Any body FastAPI could read as JSON is
+        # read here the same way (json.loads on the raw bytes) and checked.
         payload = None
-        content_type = headers.get(b"content-type", b"").decode("utf-8", errors="ignore").lower()
-        if body and "application/json" in content_type:
+        if body:
             try:
                 payload = json.loads(body)
             except Exception:
                 payload = None
-            if isinstance(payload, dict) and payload.get("user_id") is not None:
+            if isinstance(payload, dict) and "user_id" in payload:
                 if str(payload.get("user_id")) != auth_user_id:
                     return await _respond(send, 403, "user scope mismatch")
 

@@ -81,6 +81,51 @@ def create_session(*, user_id: str | None = None, client=None) -> dict[str, Any]
     }
 
 
+# Anonymous accounts are free to create and each one carries its own processing quota, so
+# their creation is rate-limited. Per network (hashed IP, only when a trusted proxy header
+# gives the real client address) and overall. Limits are environment-tunable.
+ANON_PER_IP_HOUR_DEFAULT = 5
+ANON_PER_IP_DAY_DEFAULT = 20
+ANON_GLOBAL_HOUR_DEFAULT = 300
+
+
+def _env_limit(name: str, default: int) -> int:
+    import os
+    try:
+        return max(0, int(str(os.environ.get(name, "")).strip() or default))
+    except ValueError:
+        return default
+
+
+def check_anonymous_session_allowance(*, client_ip: str | None, client=None, now: datetime | None = None) -> tuple[bool, str]:
+    """Counts one anonymous-session request and says whether it is allowed.
+
+    Returns (allowed, reason). A limit of 0 disables that limit. The IP is never stored:
+    only a salted SHA-256 prefix is used as the counter key."""
+    target = _redis_client(client)
+    moment = now or datetime.now(timezone.utc)
+    hour, day = moment.strftime("%Y%m%d%H"), moment.strftime("%Y%m%d")
+    checks: list[tuple[str, int, int, str]] = []
+    global_limit = _env_limit("CUTSELL_ANON_SESSIONS_GLOBAL_PER_HOUR", ANON_GLOBAL_HOUR_DEFAULT)
+    if global_limit:
+        checks.append((f"cutsell:v1:anon:global:{hour}", global_limit, 3600, "anonymous_signup_global_limit"))
+    if client_ip:
+        scope = hashlib.sha256(("cutsell-anon-ip:" + client_ip).encode()).hexdigest()[:24]
+        per_hour = _env_limit("CUTSELL_ANON_SESSIONS_PER_IP_PER_HOUR", ANON_PER_IP_HOUR_DEFAULT)
+        per_day = _env_limit("CUTSELL_ANON_SESSIONS_PER_IP_PER_DAY", ANON_PER_IP_DAY_DEFAULT)
+        if per_hour:
+            checks.append((f"cutsell:v1:anon:ip:{scope}:{hour}", per_hour, 3600, "anonymous_signup_network_limit"))
+        if per_day:
+            checks.append((f"cutsell:v1:anon:ip:{scope}:d{day}", per_day, 86400, "anonymous_signup_network_limit"))
+    for key, limit, ttl, reason in checks:
+        count = int(target.incr(key))
+        if count == 1:
+            target.expire(key, ttl + 60)
+        if count > limit:
+            return False, reason
+    return True, "allowed"
+
+
 def resolve_session(token: str, *, client=None) -> dict[str, Any]:
     value = str(token or "").strip()
     if not value:
