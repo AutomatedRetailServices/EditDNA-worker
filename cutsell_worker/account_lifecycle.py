@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from .auth import revoke_all_sessions, session_index_key
+from .auth import delete_apple_binding, revoke_all_sessions, session_index_key
 from .config import load_runtime_config
 from .draft_store import draft_key
 from .exports import EXPORT_PREFIX
@@ -149,6 +149,7 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None) -> d
         deleted_objects += int(result.get("s3_objects_deleted") or 0)
 
     sessions = revoke_all_sessions(user_id=user_id, client=redis_client)
+    apple_binding_removed = delete_apple_binding(user_id=user_id, client=redis_client)
     pipe = redis_client.pipeline()
     pipe.delete(project_index_key(user_id=user_id))
     pipe.delete(notification_key(user_id))
@@ -171,5 +172,6 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None) -> d
         "projects_deleted": deleted_projects,
         "s3_objects_deleted": deleted_objects,
         "sessions": sessions,
+        "apple_binding_removed": apple_binding_removed,
         "durable": durable,
     }

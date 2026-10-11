@@ -139,7 +139,108 @@ def resolve_session(token: str, *, client=None) -> dict[str, Any]:
     record = json.loads(str(raw))
     if not isinstance(record, dict) or not str(record.get("user_id") or "").startswith("usr_"):
         raise PermissionError("invalid auth session")
+    # Sliding expiry: a session in use never runs out, so an active guest does not lose
+    # their projects 90 days after first opening the app.
+    if hasattr(target, "expire"):
+        try:
+            target.expire(session_key(value), SESSION_TTL_SEC)
+            target.expire(session_index_key(str(record["user_id"])), SESSION_TTL_SEC)
+        except Exception:
+            pass
     return record
+
+
+def revoke_session(token: str, *, client=None) -> dict[str, Any]:
+    """Log out: revoke just this one session token."""
+    value = str(token or "").strip()
+    if not value:
+        raise PermissionError("missing bearer token")
+    target = _redis_client(client)
+    key = session_key(value)
+    raw = target.get(key)
+    if raw is None:
+        return {"status": "already_signed_out"}
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        user_id = str(json.loads(str(raw)).get("user_id") or "")
+    except Exception:
+        user_id = ""
+    target.delete(key)
+    if user_id and hasattr(target, "srem"):
+        target.srem(session_index_key(user_id), key)
+    return {"status": "signed_out"}
+
+
+# ---- Sign in with Apple <-> CutSell account binding ----------------------------------
+# An Apple identity points to ONE CutSell user_id. All of a user's data (projects, drafts,
+# uploads, exports) is keyed by that user_id, so binding an Apple identity to the guest
+# account the person already used keeps every project without moving any data.
+
+def is_guest_user_id(user_id: str) -> bool:
+    value = str(user_id or "")
+    return value.startswith("usr_") and not value.startswith("usr_apple_")
+
+
+def _apple_scope(subject: str) -> str:
+    return hashlib.sha256(("cutsell-apple:" + str(subject)).encode()).hexdigest()[:32]
+
+
+def apple_binding_key(subject: str) -> str:
+    return f"cutsell:v1:apple:{_apple_scope(subject)}"
+
+
+def user_apple_key(user_id: str) -> str:
+    return f"cutsell:v1:user-apple:{_user_scope(user_id)}"
+
+
+def _decoded(raw) -> str | None:
+    if raw is None:
+        return None
+    return raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+
+
+def resolve_apple_account(subject: str, *, guest_user_id: str | None = None, client=None) -> tuple[str, str]:
+    """Returns (user_id, outcome) for an Apple identity.
+
+    outcome:
+    - "existing_account": this Apple ID already has a CutSell account (signing in again,
+      new phone, reinstall). Same user_id -> same projects.
+    - "guest_upgraded": first Apple sign-in on a phone that was using a guest account; the
+      Apple ID now points to that guest account, so its projects become the Apple account's.
+    - "new_account": first Apple sign-in with no guest account to keep.
+    - "existing_account_guest_not_merged": this Apple ID already had an account AND the phone
+      had a different guest account. The guest's projects stay on the guest account
+      (moving stored videos between accounts is not supported yet)."""
+    if not str(subject or "").strip():
+        raise ValueError("Apple subject is required")
+    target = _redis_client(client)
+    key = apple_binding_key(subject)
+    existing = _decoded(target.get(key))
+    if existing:
+        if guest_user_id and guest_user_id != existing and is_guest_user_id(guest_user_id):
+            return existing, "existing_account_guest_not_merged"
+        return existing, "existing_account"
+    candidate, outcome = stable_apple_user_id(subject), "new_account"
+    if guest_user_id and is_guest_user_id(guest_user_id) and target.get(user_apple_key(guest_user_id)) is None:
+        candidate, outcome = guest_user_id, "guest_upgraded"
+    # SET NX: if two sign-ins race, both end on the same account.
+    if not target.set(key, candidate, nx=True):
+        winner = _decoded(target.get(key)) or candidate
+        return winner, "existing_account"
+    target.set(user_apple_key(candidate), _apple_scope(subject))
+    return candidate, outcome
+
+
+def delete_apple_binding(*, user_id: str, client=None) -> bool:
+    """Called on account deletion: the Apple ID may sign up again as a fresh account."""
+    target = _redis_client(client)
+    scope = _decoded(target.get(user_apple_key(user_id)))
+    if not scope:
+        return False
+    target.delete(f"cutsell:v1:apple:{scope}")
+    target.delete(user_apple_key(user_id))
+    return True
 
 
 def revoke_all_sessions(*, user_id: str, client=None) -> dict[str, Any]:
