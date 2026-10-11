@@ -69,9 +69,22 @@ struct RootView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
+            } else if appState.needsSignIn {
+                WelcomeView()
             } else {
                 ProjectsView()
             }
+        }
+        .alert(
+            "Signed in",
+            isPresented: Binding(
+                get: { appState.accountNotice != nil },
+                set: { if !$0 { appState.accountNotice = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { appState.accountNotice = nil }
+        } message: {
+            Text(appState.accountNotice ?? "")
         }
     }
 }

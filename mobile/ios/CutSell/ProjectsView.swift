@@ -18,6 +18,8 @@ struct ProjectsView: View {
     @State private var resumeCut: PendingCutRecord?
     @State private var projectPendingDelete: Project?
     @State private var showingDeleteAccount = false
+    @State private var showingAppleSignIn = false
+    @State private var showingLogout = false
     @State private var errorMessage: String?
     @State private var selectedTab: EditsTab = .all
 
@@ -127,6 +129,11 @@ struct ProjectsView: View {
                     }
                     Button { showingNewCut = true } label: { Image(systemName: "plus") }
                     Menu {
+                        if appState.session?.isAppleAccount == true {
+                            Button("Log Out") { showingLogout = true }
+                        } else {
+                            Button("Sign in with Apple") { showingAppleSignIn = true }
+                        }
                         Button("Delete Account", role: .destructive) { showingDeleteAccount = true }
                     } label: {
                         Image(systemName: "person.crop.circle")
@@ -143,6 +150,20 @@ struct ProjectsView: View {
             .sheet(item: $resumeCut) { pending in
                 NewCutView(pending: pending)
                     .environmentObject(appState)
+            }
+            .sheet(isPresented: $showingAppleSignIn) {
+                AppleSignInSheet()
+                    .environmentObject(appState)
+            }
+            .confirmationDialog(
+                "Log out of CutSell?",
+                isPresented: $showingLogout,
+                titleVisibility: .visible
+            ) {
+                Button("Log Out") { Task { await appState.logout() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your projects stay in your account. Sign in with Apple again to see them.")
             }
             .sheet(isPresented: $showingNotifications) {
                 NotificationInboxView()

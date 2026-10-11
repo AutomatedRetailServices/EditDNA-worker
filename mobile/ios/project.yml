@@ -36,6 +36,9 @@ targets:
         # it with the generated keys below. A custom key set through INFOPLIST_KEY_* is not written
         # to the built Info.plist, which left the app pointing at 127.0.0.1.
         INFOPLIST_FILE: Config/Info.plist
+        # Sign in with Apple. Takes effect once DEVELOPMENT_TEAM is set and the App ID has the
+        # "Sign in with Apple" capability (Apple Developer account).
+        CODE_SIGN_ENTITLEMENTS: Config/CutSell.entitlements
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

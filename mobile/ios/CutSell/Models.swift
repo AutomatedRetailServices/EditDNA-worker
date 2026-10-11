@@ -4,17 +4,30 @@ struct SessionResponse: Codable {
     let userID: String
     let accessToken: String
     let expiresIn: Int
+    /// "apple" for Sign in with Apple sessions; absent for guest sessions.
+    let accountProvider: String?
+    /// Apple sign-in only: "guest_upgraded", "new_account", "existing_account" or
+    /// "existing_account_guest_not_merged".
+    let accountOutcome: String?
+    let guestProjectsNotMerged: Int?
 
     enum CodingKeys: String, CodingKey {
         case userID = "user_id"
         case accessToken = "access_token"
         case expiresIn = "expires_in"
+        case accountProvider = "account_provider"
+        case accountOutcome = "account_outcome"
+        case guestProjectsNotMerged = "guest_projects_not_merged"
     }
 }
 
 struct CutSellSession: Codable {
     let userID: String
     let accessToken: String
+    /// nil for guest sessions (and for sessions saved before this field existed).
+    var accountProvider: String? = nil
+
+    var isAppleAccount: Bool { accountProvider == "apple" }
 }
 
 struct Project: Codable, Identifiable, Hashable {

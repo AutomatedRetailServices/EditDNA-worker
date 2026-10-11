@@ -46,7 +46,9 @@ actor APIClient {
         return session
     }
 
-    func createAppleSession(identityToken: String, nonce: String?) async throws -> CutSellSession {
+    /// Sends the current guest session (if any) with the request, so the server can keep the
+    /// guest's projects on the Apple account the first time this phone signs in with Apple.
+    func createAppleSession(identityToken: String, nonce: String?) async throws -> SessionResponse {
         struct Body: Encodable {
             let identity_token: String
             let nonce: String?
@@ -56,9 +58,14 @@ actor APIClient {
             method: "POST",
             body: Body(identity_token: identityToken, nonce: nonce)
         )
-        let session = CutSellSession(userID: value.userID, accessToken: value.accessToken)
-        self.session = session
-        return session
+        self.session = CutSellSession(userID: value.userID, accessToken: value.accessToken, accountProvider: "apple")
+        return value
+    }
+
+    /// Signs out this phone only. Errors are ignored by the caller: the local sign-out happens anyway.
+    func logout() async throws {
+        struct Result: Decodable { let status: String }
+        let _: Result = try await request("/v1/auth/logout", method: "POST")
     }
 
     func request<T: Decodable>(
