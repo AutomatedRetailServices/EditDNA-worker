@@ -52,7 +52,7 @@ struct PermissionScreen: View {
                 HStack {
                     BrandLogo()
                     Spacer()
-                    if let onClose {
+                    if let onClose, deniedBefore {
                         Button(action: onClose) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 17, weight: .semibold))
@@ -86,7 +86,7 @@ struct PermissionScreen: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 12)
                     PrimaryButton(
-                        title: deniedBefore ? "Open Settings" : kind.buttonTitle,
+                        title: deniedBefore ? "Open Settings" : "Continue",
                         height: 54,
                         cornerRadius: 16,
                         fontSize: 16,
@@ -314,6 +314,10 @@ enum CreateProblem: Identifiable, Equatable {
 
 /// The limits shown on Figma's "Supported video files" screen (952:42).
 enum CreateLimits {
+    /// The 10-minute and 1 GB limits from Figma are not applied yet: the app accepted longer and
+    /// bigger videos before (it shrinks big ones itself), so turning them on is the Product
+    /// Owner's decision. Formats and the 10-clip limit always apply.
+    static let sizeAndLengthLimitsOn = false
     static let maxDurationSeconds: Double = 10 * 60
     static let maxFileBytes: Int64 = 1_000_000_000
     static let maxClips = 10

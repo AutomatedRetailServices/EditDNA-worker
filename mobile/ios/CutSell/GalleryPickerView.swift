@@ -113,7 +113,7 @@ enum GalleryExport {
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        guard size <= CreateLimits.maxFileBytes else {
+        guard !CreateLimits.sizeAndLengthLimitsOn || size <= CreateLimits.maxFileBytes else {
             try? FileManager.default.removeItem(at: destination)
             throw Failure.tooLarge(size)
         }
@@ -316,7 +316,7 @@ struct GalleryPickerView: View {
             selection.remove(at: index)
             return
         }
-        if asset.duration > CreateLimits.maxDurationSeconds + 0.5 {
+        if CreateLimits.sizeAndLengthLimitsOn, asset.duration > CreateLimits.maxDurationSeconds + 0.5 {
             problem = .tooLong(detail: CreateLimits.durationText(asset.duration))
             return
         }

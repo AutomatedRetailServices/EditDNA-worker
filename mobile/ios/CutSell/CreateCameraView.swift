@@ -30,6 +30,8 @@ struct CreateCameraView: View {
     let onUpload: () -> Void
     /// A finished recording, ready for "Choose your style".
     let onRecorded: (LocalVideo) -> Void
+    /// false while another screen covers the camera (gallery, upload): camera and light off.
+    var isActive = true
     /// Design screenshots only: show the camera screen without a real camera.
     var previewMode = false
 
@@ -69,6 +71,16 @@ struct CreateCameraView: View {
         .task {
             if previewMode { gate = .ready; return }
             await evaluateGate()
+        }
+        .onChange(of: isActive) { _, active in
+            guard !previewMode, gate == .ready else { return }
+            if active {
+                camera.startSession()
+            } else {
+                if camera.isRecording { stopTimer(); camera.stopRecording() }
+                if torchOn { camera.setTorch(false); torchOn = false }
+                camera.stopSession()
+            }
         }
         .onDisappear {
             stopTimer()
@@ -294,7 +306,6 @@ struct CreateCameraView: View {
             return
         }
         elapsed = 0
-        startTimer(limit: TimeInterval(preset.rawValue))
         camera.record { result in
             stopTimer()
             switch result {
@@ -326,6 +337,8 @@ struct CreateCameraView: View {
                 recordingFailed = true
             }
         }
+        // `record` sets isRecording only when the recording really started.
+        if camera.isRecording { startTimer(limit: TimeInterval(preset.rawValue)) }
     }
 
     private func startTimer(limit: TimeInterval) {

@@ -158,7 +158,16 @@ final class CutSubmitter: ObservableObject {
             if !pendingSaved {
                 for url in transientPreparedFiles { try? FileManager.default.removeItem(at: url) }
             }
-            throw error
+            throw CutSubmitError(underlying: error, savedForResume: pendingSaved)
         }
     }
+}
+
+/// A failed submission. `savedForResume` tells whether the upload record was already saved
+/// (Edits then offers "Resume upload"); the message is the original error's.
+struct CutSubmitError: LocalizedError {
+    let underlying: Error
+    let savedForResume: Bool
+
+    var errorDescription: String? { underlying.localizedDescription }
 }

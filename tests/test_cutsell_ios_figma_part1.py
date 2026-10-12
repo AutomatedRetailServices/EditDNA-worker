@@ -113,3 +113,27 @@ def test_no_secrets_or_qa_media_in_new_files():
         source = read(name)
         for term in ("BEGIN PRIVATE KEY", "sk-", "VIDEO-2026-07-30", "5E01F214", "D40F1D43"):
             assert term not in source, (name, term)
+
+
+def test_failed_start_offers_retry_unless_saved_for_resume():
+    submitter = read("CutSubmission.swift")
+    assert "throw CutSubmitError(underlying: error, savedForResume: pendingSaved)" in submitter
+    flow = read("CreateFlowView.swift")
+    assert "failure = submitError.savedForResume ? .savedForResume : .notSaved" in flow
+    assert 'primaryTitle: "Try again"' in flow
+    # The upload screen opens only after the gallery finished closing (no timer race).
+    assert "fullScreenCover(isPresented: $showingGallery, onDismiss:" in flow
+    assert "asyncAfter" not in flow
+
+
+def test_camera_pauses_while_covered_and_permission_screen_is_review_safe():
+    camera = read("CreateCameraView.swift")
+    assert ".onChange(of: isActive)" in camera and "camera.stopSession()" in camera
+    assert "if camera.isRecording { startTimer(limit:" in camera
+    alerts = read("AlertScreens.swift")
+    assert 'deniedBefore ? "Open Settings" : "Continue"' in alerts
+    assert "if let onClose, deniedBefore {" in alerts
+
+
+def test_size_and_length_limits_wait_for_product_decision():
+    assert "static let sizeAndLengthLimitsOn = false" in read("AlertScreens.swift")
