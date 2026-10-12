@@ -66,8 +66,10 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      # Signed for distribution directly: an App Store profile needs no registered devices
-      # (a development-signed archive failed: "Your team has no devices").
+      # The archive is only ad-hoc signed (keeps the entitlements, needs no profile); the export
+      # step below signs it for the App Store with automatic signing through the API key.
+      # (Automatic signing in the archive wants a development profile, which needs registered
+      # devices: "Your team has no devices"; forcing "Apple Distribution" there conflicts.)
       - name: Archive (Release, automatic signing with the API key)
         working-directory: mobile/ios
         run: |
@@ -80,8 +82,9 @@ jobs:
             -authenticationKeyPath "$ASC_KEY_PATH" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            PROVISIONING_PROFILE_SPECIFIER="" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             archive > "$RUNNER_TEMP/archive.log" 2>&1
           status=$?
@@ -91,7 +94,8 @@ jobs:
             echo "::error title=archive::${msg:-el archivo no se pudo crear (sin lineas error:)}"
             exit "$status"
           fi
-          echo "::notice title=archive::archivo creado (build $BUILD_NUMBER)"
+          ent="$(codesign -d --entitlements :- "$RUNNER_TEMP/CutSell.xcarchive/Products/Applications/CutSell.app" 2>/dev/null | grep -c applesignin || true)"
+          echo "::notice title=archive::archivo creado (build $BUILD_NUMBER); entitlement Sign in with Apple en el archivo: $([ "$ent" -gt 0 ] && echo si || echo no)"
 
       - name: Export and upload to TestFlight
         working-directory: mobile/ios
