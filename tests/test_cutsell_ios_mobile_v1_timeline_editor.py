@@ -280,13 +280,13 @@ def test_ready_and_drafts_tabs_are_mutually_exclusive_filters():
     assert '$0.state != "draft_ready"' in source
 
 
-def test_edits_tab_picker_is_segmented_and_reuses_default_accent_tint():
+def test_edits_filters_use_the_figma_chips_and_the_shared_theme():
+    # Figma 05 Edits (195:39) replaced the system segmented picker with the
+    # All / Ready / Drafts filter chips. Colors come from the one design
+    # system (Theme.swift), never re-typed RGB values in this screen.
     source = PROJECTS_VIEW.read_text()
-    assert '.pickerStyle(.segmented)' in source
-    # No custom hardcoded hex/RGB color invented for "official CutSell
-    # blue" -- this codebase's own only existing brand-tint mechanism is
-    # the system accentColor (used everywhere else: VisualTimelineView's
-    # selection outline, every .borderedProminent button).
+    assert 'FilterChip(title: "\\(tab.rawValue) (\\(count(tab)))"' in source
+    assert "ForEach(EditsTab.allCases)" in source
     assert "#0000" not in source and "Color(red:" not in source
 
 

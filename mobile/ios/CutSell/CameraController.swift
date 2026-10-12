@@ -71,6 +71,25 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
+    /// Whether the current camera has a light (the front camera usually does not).
+    var hasTorch: Bool {
+        videoInput?.device.hasTorch == true
+    }
+
+    /// Turns the camera light on or off (used as "Flash" while recording video).
+    func setTorch(_ on: Bool) {
+        guard let device = videoInput?.device, device.hasTorch else { return }
+        sessionQueue.async {
+            do {
+                try device.lockForConfiguration()
+                device.torchMode = on ? .on : .off
+                device.unlockForConfiguration()
+            } catch {
+                // The light is optional; recording works without it.
+            }
+        }
+    }
+
     func record(completion: @escaping (Result<URL, Error>) -> Void) {
         guard isConfigured, !movieOutput.isRecording else { return }
         self.completion = completion

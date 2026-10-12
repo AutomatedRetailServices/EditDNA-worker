@@ -24,7 +24,20 @@ struct CutSellApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            #if DEBUG
+            if let screen = DesignScreenshots.requestedScreen {
+                DesignScreenshotRoot(screen: screen)
+            } else {
+                mainRoot
+            }
+            #else
+            mainRoot
+            #endif
+        }
+    }
+
+    private var mainRoot: some View {
+        RootView()
                 .environmentObject(appState)
                 .environmentObject(notificationCenter)
                 .task {
@@ -47,7 +60,6 @@ struct CutSellApp: App {
                         }
                     }
                 }
-        }
     }
 }
 
@@ -57,7 +69,13 @@ struct RootView: View {
     var body: some View {
         Group {
             if appState.isBootstrapping {
-                ProgressView("Starting CutSell…")
+                ZStack {
+                    ScreenBackground()
+                    VStack(spacing: 18) {
+                        BrandLogo()
+                        ProgressView().tint(CS.cyan)
+                    }
+                }
             } else if let error = appState.bootstrapError {
                 ContentUnavailableView {
                     Label("Couldn’t start CutSell", systemImage: "exclamationmark.triangle")
@@ -72,9 +90,10 @@ struct RootView: View {
             } else if appState.needsSignIn {
                 WelcomeView()
             } else {
-                ProjectsView()
+                MainTabView()
             }
         }
+        .preferredColorScheme(.dark)
         .alert(
             "Signed in",
             isPresented: Binding(

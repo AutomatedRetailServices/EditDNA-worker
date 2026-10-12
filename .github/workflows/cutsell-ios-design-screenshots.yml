@@ -1,0 +1,115 @@
+name: CutSell iOS design screenshots
+
+# Builds the iPhone app for the Simulator (Debug) and takes one screenshot of every redesigned
+# screen using the Debug-only "-CutSellScreen <name>" launch argument (sample content, no network,
+# no camera, no photo library). The PNGs are pushed to the branch "design-screenshots" so they can
+# be placed next to the Figma frames. Contains no keys, videos or personal data.
+# Temporary trigger on feat/ios-captions-v2 (no manual button until this file is on main).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [feat/ios-captions-v2]
+    paths:
+      - 'mobile/ios/**'
+      - '.github/workflows/cutsell-ios-design-screenshots.yml'
+
+concurrency:
+  group: cutsell-ios-design-screenshots
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  screenshots:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+          xcodebuild -version
+
+      - name: Generate the Xcode project
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build for the Simulator
+        working-directory: mobile/ios
+        run: |
+          set +e
+          xcodebuild -project CutSell.xcodeproj -scheme CutSell -sdk iphonesimulator \
+            -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO build \
+            > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:|BUILD (SUCCEEDED|FAILED)" "$RUNNER_TEMP/build.log" | sort -u | head -40
+          if [ "$status" -ne 0 ]; then
+            grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -10 | while IFS= read -r line; do
+              echo "::error title=build::$(echo "$line" | sed 's#.*/mobile/ios/##' | cut -c1-400)"
+            done
+            exit "$status"
+          fi
+          echo "::notice title=build::build ok"
+
+      - name: Boot an iPhone Simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=[(r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone") and "Pro" not in x["name"] and "Plus" not in x["name"] and "Max" not in x["name"] and "SE" not in x["name"]]
+          c=c or [(r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone")]
+          c.sort(); print(c[-1][2])')"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl ui "$udid" appearance dark || true
+          xcrun simctl status_bar "$udid" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+          xcrun simctl list devices | grep "$udid"
+
+      - name: Take one screenshot per screen
+        working-directory: mobile/ios
+        run: |
+          set -euo pipefail
+          UDID="${{ steps.sim.outputs.udid }}"
+          APP="build/Build/Products/Debug-iphonesimulator/CutSell.app"
+          BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+          xcrun simctl install "$UDID" "$APP"
+          mkdir -p "$RUNNER_TEMP/shots"
+          screens="$(sed -n '/static let all = \[/,/\]/p' CutSell/DesignScreenshots.swift | grep -oE '"[a-z_]+"' | tr -d '"')"
+          ok=0
+          for s in $screens; do
+            xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
+            xcrun simctl launch "$UDID" "$BUNDLE" -CutSellScreen "$s" >/dev/null
+            sleep 4
+            xcrun simctl io "$UDID" screenshot "$RUNNER_TEMP/shots/$s.png" >/dev/null 2>&1 && ok=$((ok+1))
+          done
+          echo "::notice title=screenshots::$ok screenshots"
+
+      - name: Push the screenshots to the design-screenshots branch
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --no-checkout "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
+          git checkout --quiet --orphan design-screenshots
+          git rm -rf --quiet . >/dev/null 2>&1 || true
+          mkdir -p ios
+          cp "$RUNNER_TEMP"/shots/*.png ios/
+          echo "source commit: ${{ github.sha }}" > ios/SOURCE.txt
+          git add ios
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "iOS design screenshots for ${{ github.sha }}"
+          git push --quiet --force origin design-screenshots
+          echo "::notice title=screenshots::pushed to design-screenshots for ${{ github.sha }}"
+
+      - name: Shut down the Simulator
+        if: always()
+        run: xcrun simctl shutdown all || true

@@ -9,19 +9,22 @@ enum EditsTab: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 }
 
+/// Edits tab (Figma 05 Edits, 195:39; empty state 207:92): the saved cuts as a grid with the
+/// All / Ready / Drafts filters. Opening a cut keeps the existing processing / editor screens.
 struct ProjectsView: View {
+    var selectTab: (MainTab) -> Void = { _ in }
+
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notificationCenter: NotificationCenterModel
-    @State private var showingNewCut = false
-    @State private var showingNotifications = false
     @State private var pendingCuts: [PendingCutRecord] = []
     @State private var resumeCut: PendingCutRecord?
     @State private var projectPendingDelete: Project?
-    @State private var showingDeleteAccount = false
-    @State private var showingAppleSignIn = false
-    @State private var showingLogout = false
     @State private var errorMessage: String?
     @State private var selectedTab: EditsTab = .all
+    @State private var showingSearch = false
+    @State private var searchText = ""
+
+    private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: 3) }
 
     private var visibleProjects: [Project] {
         switch selectedTab {
@@ -36,138 +39,102 @@ struct ProjectsView: View {
         }
     }
 
+    private var shownProjects: [Project] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return visibleProjects }
+        return visibleProjects.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    private func count(_ tab: EditsTab) -> Int {
+        switch tab {
+        case .all: return appState.projects.count
+        case .ready: return appState.projects.filter { $0.state == "draft_ready" }.count
+        case .drafts:
+            return appState.projects.filter {
+                !Project.processingStates.contains($0.state) && $0.state != "draft_ready"
+            }.count
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            List {
-                if !pendingCuts.isEmpty {
-                    Section("Uploads to resume") {
-                        ForEach(pendingCuts) { pending in
-                            Button {
-                                resumeCut = pending
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "arrow.clockwise.icloud")
-                                        .foregroundStyle(.orange)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(pending.title.isEmpty ? "Interrupted Cut" : pending.title)
-                                            .foregroundStyle(.primary)
-                                        Text("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                    }
-                }
+            ZStack {
+                ScreenBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        header
+                        Text("Edits")
+                            .font(CS.inter(34, .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.top, 12)
+                        Text("Your saved cuts, ready to review or share.")
+                            .font(CS.inter(14))
+                            .foregroundStyle(CS.textSecondary)
+                            .padding(.top, 2)
 
-                Section {
-                    Picker("Edits", selection: $selectedTab) {
-                        ForEach(EditsTab.allCases) { tab in
-                            Text(tab.rawValue).tag(tab)
+                        if showingSearch {
+                            TextField("", text: $searchText, prompt: Text("Search edits").foregroundStyle(CS.textMuted))
+                                .font(CS.inter(15))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .frame(height: 42)
+                                .background(CS.fieldBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.fieldBorder, lineWidth: 1))
+                                .padding(.top, 14)
+                                .accessibilityIdentifier("editsSearchField")
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets())
-                    .padding(.vertical, 4)
-                    .accessibilityIdentifier("editsTabPicker")
-                }
-                .listRowSeparator(.hidden)
 
-                Section(pendingCuts.isEmpty ? "Projects" : "Your projects") {
-                    if visibleProjects.isEmpty {
-                        ContentUnavailableView(
-                            selectedTab == .all ? "No cuts yet" : "No \(selectedTab.rawValue.lowercased()) edits",
-                            systemImage: "scissors",
-                            description: Text(
-                                selectedTab == .all
-                                    ? "Upload raw product footage and CutSell will build your first draft."
-                                    : "Nothing here yet."
-                            )
-                        )
-                    } else {
-                        ForEach(visibleProjects) { project in
-                            NavigationLink(value: project) {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(project.title).font(.headline)
-                                    HStack {
-                                        Text(project.state.replacingOccurrences(of: "_", with: " ").capitalized)
-                                        if let count = project.sourceCount { Text("• \(count) clip\(count == 1 ? "" : "s")") }
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                        HStack(spacing: 0) {
+                            ForEach(EditsTab.allCases) { tab in
+                                FilterChip(title: "\(tab.rawValue) (\(count(tab)))", isSelected: selectedTab == tab) {
+                                    selectedTab = tab
                                 }
-                                .padding(.vertical, 4)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) { projectPendingDelete = project } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
+                                .frame(width: 96)
+                                if tab != EditsTab.allCases.last { Spacer(minLength: 8) }
                             }
                         }
-                    }
-                }
-            }
-            .refreshable { await refreshAll() }
-            .navigationTitle("CutSell")
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showingNotifications = true } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "bell")
-                            if notificationCenter.unreadCount > 0 {
-                                Text("\(min(notificationCenter.unreadCount, 9))")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 15, height: 15)
-                                    .background(.red, in: Circle())
-                                    .offset(x: 7, y: -7)
+                        .padding(.top, 22)
+                        .accessibilityIdentifier("editsTabPicker")
+
+                        if !pendingCuts.isEmpty {
+                            VStack(spacing: 8) {
+                                ForEach(pendingCuts) { pending in
+                                    Button { resumeCut = pending } label: { resumeRow(pending) }
+                                        .buttonStyle(.plain)
+                                }
                             }
+                            .padding(.top, 16)
                         }
-                    }
-                    Button { showingNewCut = true } label: { Image(systemName: "plus") }
-                    Menu {
-                        if appState.session?.isAppleAccount == true {
-                            Button("Log Out") { showingLogout = true }
+
+                        if shownProjects.isEmpty {
+                            emptyState
+                                .padding(.top, 60)
                         } else {
-                            Button("Sign in with Apple") { showingAppleSignIn = true }
+                            LazyVGrid(columns: columns, spacing: 8) {
+                                ForEach(shownProjects) { project in
+                                    NavigationLink(value: project) {
+                                        EditTile(project: project) { projectPendingDelete = project }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.top, 10)
                         }
-                        Button("Delete Account", role: .destructive) { showingDeleteAccount = true }
-                    } label: {
-                        Image(systemName: "person.crop.circle")
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
                 }
+                .refreshable { await refreshAll() }
             }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .bottom) { CSTabBar(current: .edits, select: selectTab) }
             .navigationDestination(for: Project.self) { project in
                 ProjectDetailView(project: project)
-            }
-            .sheet(isPresented: $showingNewCut) {
-                NewCutView()
-                    .environmentObject(appState)
             }
             .sheet(item: $resumeCut) { pending in
                 NewCutView(pending: pending)
                     .environmentObject(appState)
-            }
-            .sheet(isPresented: $showingAppleSignIn) {
-                AppleSignInSheet()
-                    .environmentObject(appState)
-            }
-            .confirmationDialog(
-                "Log out of CutSell?",
-                isPresented: $showingLogout,
-                titleVisibility: .visible
-            ) {
-                Button("Log Out") { Task { await appState.logout() } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Your projects stay in your account. Sign in with Apple again to see them.")
-            }
-            .sheet(isPresented: $showingNotifications) {
-                NotificationInboxView()
-                    .environmentObject(notificationCenter)
+                    .onDisappear { Task { await refreshPendingCuts() } }
             }
             .task { await refreshPendingCuts() }
             .confirmationDialog(
@@ -187,23 +154,99 @@ struct ProjectsView: View {
             } message: {
                 Text("This permanently removes the project, its uploaded media, exports, overlays, timeline assets and feedback.")
             }
-            .confirmationDialog(
-                "Delete CutSell account?",
-                isPresented: $showingDeleteAccount,
-                titleVisibility: .visible
-            ) {
-                Button("Delete My Account", role: .destructive) {
-                    Task { await deleteAccount() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This permanently deletes your CutSell projects and account data and signs out all indexed sessions.")
-            }
             .alert("CutSell", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
         }
+        .tint(CS.cyan)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            BrandLogo()
+            Spacer()
+            CircleIconButton(size: 32, action: {
+                showingSearch.toggle()
+                if !showingSearch { searchText = "" }
+            }) {
+                Image("IconSearch").resizable().frame(width: 16, height: 16)
+            }
+            .accessibilityLabel("Search")
+            Menu {
+                Button("New cut") { selectTab(.create) }
+                Button("Refresh") { Task { await refreshAll() } }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color(hex: 0x050A17), in: Circle())
+                    .overlay(Circle().stroke(CS.circleButtonBorder, lineWidth: 1))
+            }
+            .accessibilityLabel("More")
+        }
+        .padding(.top, 8)
+    }
+
+    private func resumeRow(_ pending: PendingCutRecord) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.clockwise.icloud")
+                .foregroundStyle(CS.cyan)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(pending.title.isEmpty ? "Interrupted Cut" : pending.title)
+                    .font(CS.inter(14, .semibold))
+                    .foregroundStyle(.white)
+                Text("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload")
+                    .font(CS.inter(12))
+                    .foregroundStyle(CS.textSecondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(CS.textMuted)
+        }
+        .padding(12)
+        .background(CS.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.tileBorder, lineWidth: 1))
+    }
+
+    private var emptyState: some View {
+        HStack(spacing: 20) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(hex: 0x050A17))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x1A8CFF), lineWidth: 1.5))
+                .overlay(Image("EmptyPlay").resizable().frame(width: 22, height: 22))
+                .frame(width: 76, height: 134)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(emptyTitle)
+                    .font(CS.inter(19, .semibold))
+                    .foregroundStyle(.white)
+                Text(emptyMessage)
+                    .font(CS.inter(13))
+                    .foregroundStyle(Color(hex: 0x99B2E0))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 184)
+        .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
+        .padding(.horizontal, 10)
+    }
+
+    private var emptyTitle: String {
+        if !searchText.isEmpty { return "No matches" }
+        switch selectedTab {
+        case .all: return "No edits yet"
+        case .ready: return "No ready edits"
+        case .drafts: return "No drafts"
+        }
+    }
+
+    private var emptyMessage: String {
+        if !searchText.isEmpty { return "Try another name." }
+        return "Your finished and draft edits will appear here."
     }
 
     @MainActor
@@ -230,71 +273,55 @@ struct ProjectsView: View {
             errorMessage = error.localizedDescription
         }
     }
-
-    @MainActor
-    private func deleteAccount() async {
-        do {
-            try await appState.deleteAccount()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
 }
 
-private struct NotificationInboxView: View {
-    @EnvironmentObject private var notificationCenter: NotificationCenterModel
-    @Environment(\.dismiss) private var dismiss
+/// One saved cut in the Edits grid (Figma tile: status dot, "•••" menu, radius 12).
+struct EditTile: View {
+    let project: Project
+    let onDelete: () -> Void
+
+    private var isReady: Bool { project.state == "draft_ready" }
+    private var isProcessing: Bool { Project.processingStates.contains(project.state) }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if notificationCenter.items.isEmpty {
-                    ContentUnavailableView("No updates", systemImage: "bell", description: Text("Draft and export updates will appear here."))
-                } else {
-                    List(notificationCenter.items) { item in
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: icon(item.kind))
-                                .foregroundStyle(item.kind.contains("failed") ? .red : .accentColor)
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(title(item.kind)).font(.headline)
-                                Text(item.projectID).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color(hex: 0x050A17))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.tileBorder, lineWidth: 1))
+            .aspectRatio(108.0 / 96.0, contentMode: .fit)
+            .overlay(alignment: .topLeading) {
+                Circle()
+                    .fill(isReady ? CS.ready : CS.draft)
+                    .frame(width: 10, height: 10)
+                    .padding(10)
+            }
+            .overlay(alignment: .topTrailing) {
+                Menu {
+                    Button("Delete", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 28)
+                }
+                .accessibilityLabel("Options for \(project.title)")
+            }
+            .overlay {
+                if isProcessing {
+                    ProgressView().tint(CS.cyan)
                 }
             }
-            .navigationTitle("Updates")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Mark read") { notificationCenter.markAllRead() }
-                        .disabled(notificationCenter.unreadCount == 0)
-                }
+            .overlay(alignment: .bottomLeading) {
+                Text(project.title)
+                    .font(CS.inter(11, .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 9)
+                    .padding(.bottom, 8)
             }
-            .onAppear { notificationCenter.markAllRead() }
-        }
-    }
-
-    private func title(_ kind: String) -> String {
-        switch kind {
-        case "draft_ready": return "Draft ready"
-        case "render_finished": return "Export ready"
-        case "processing_failed": return "Cut needs another try"
-        case "render_failed": return "Export failed"
-        default: return kind.replacingOccurrences(of: "_", with: " ").capitalized
-        }
-    }
-
-    private func icon(_ kind: String) -> String {
-        switch kind {
-        case "draft_ready": return "wand.and.stars"
-        case "render_finished": return "checkmark.circle"
-        case "processing_failed", "render_failed": return "exclamationmark.triangle"
-        default: return "bell"
-        }
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(project.title), \(isReady ? "ready" : isProcessing ? "processing" : "draft")")
     }
 }
 

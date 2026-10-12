@@ -32,11 +32,13 @@ def test_guest_session_goes_with_the_apple_request():
     assert '"/v1/auth/apple"' in client and 'accountProvider: "apple"' in client
 
 
-def test_logout_and_menu():
+def test_logout_and_account_actions_live_in_you():
     assert '"/v1/auth/logout"' in read("APIClient.swift")
-    menu = read("ProjectsView.swift")
-    assert 'Button("Log Out")' in menu and 'Button("Sign in with Apple")' in menu
-    assert "appState.session?.isAppleAccount == true" in menu
+    you = read("YouView.swift")
+    assert 'SecondaryButton(title: "Log Out"' in you and 'PrimaryButton(title: "Sign in with Apple"' in you
+    assert 'Button("Delete Account", role: .destructive)' in you
+    assert "appState.session?.isAppleAccount == true" in you
+    assert "AppleSignInSheet()" in you and "await appState.logout()" in you
 
 
 def test_ended_apple_session_shows_welcome_not_a_new_account():

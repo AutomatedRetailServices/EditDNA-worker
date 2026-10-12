@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 
 struct NewCutView: View {
     enum Mode: String, CaseIterable, Identifiable {
-        case single = "Single clip"
-        case multiple = "Multiple clips"
+        case single = "Single clip"     // == CutSubmitter.singleMode
+        case multiple = "Multiple clips" // == CutSubmitter.multipleMode
         var id: String { rawValue }
     }
 
@@ -18,8 +18,7 @@ struct NewCutView: View {
     @State private var title: String
     @State private var audioOverlap: Bool
     @State private var isSubmitting = false
-    @State private var progress = 0.0
-    @State private var statusText = ""
+    @StateObject private var submitter = CutSubmitter()
     @State private var errorMessage: String?
     @State private var showCamera = false
     @State private var isImportingFromPhotos = false
@@ -125,8 +124,8 @@ struct NewCutView: View {
 
                 if isSubmitting {
                     Section {
-                        ProgressView(value: progress)
-                        Text(statusText).font(.caption).foregroundStyle(.secondary)
+                        ProgressView(value: submitter.progress)
+                        Text(submitter.statusText).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -238,128 +237,18 @@ struct NewCutView: View {
     }
 
     private func submit() async {
-        guard let session = appState.session else { return }
         isSubmitting = true
-        progress = 0
-        var transientPreparedFiles: [URL] = []
-        var pendingSaved = resumeProjectID != nil
-
         do {
-            let uploadVideos: [LocalVideo]
-            if resumeProjectID != nil {
-                uploadVideos = selected
-                statusText = "Resuming upload…"
-            } else {
-                var preparedVideos: [LocalVideo] = []
-                for (index, video) in selected.enumerated() {
-                    statusText = "Preparing \(index + 1) of \(selected.count)…"
-                    let prepared = try await VideoPreparation.shared.prepare(
-                        fileURL: video.url,
-                        contentType: video.contentType
-                    )
-                    if prepared.wasTranscoded { transientPreparedFiles.append(prepared.url) }
-                    preparedVideos.append(LocalVideo(
-                        url: prepared.url,
-                        name: video.name,
-                        duration: video.duration,
-                        contentType: prepared.contentType
-                    ))
-                }
-                uploadVideos = preparedVideos
-            }
-
-            let projectID: String
-            if let resumeProjectID {
-                projectID = resumeProjectID
-            } else {
-                statusText = "Creating project…"
-                let project = try await appState.createProject(
-                    title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title
-                )
-                projectID = project.projectID
-                let pending = PendingCutRecord(
-                    projectID: projectID,
-                    title: project.title,
-                    mode: mode.rawValue,
-                    audioOverlap: audioOverlap,
-                    videos: uploadVideos.map {
-                        PendingCutVideo(
-                            filePath: $0.url.path,
-                            name: $0.name,
-                            duration: $0.duration,
-                            contentType: $0.contentType
-                        )
-                    },
-                    createdAt: Date()
-                )
-                await PendingCutStore.shared.save(pending)
-                pendingSaved = true
-                transientPreparedFiles.removeAll()
-            }
-
-            var sources: [SourceInput] = []
-            for (index, video) in uploadVideos.enumerated() {
-                statusText = "Uploading \(index + 1) of \(uploadVideos.count)…"
-                let base = Double(index) / Double(uploadVideos.count)
-                // D-133: bounded, diagnostics-only upload-timing log around
-                // the EXISTING multipart upload call -- no networking change.
-                let uploadStartedAt = Date()
-                CutSellDiagnostics.log("upload_started", [
-                    "source_order": String(index),
-                    "content_type": video.contentType,
-                ])
-                let result = try await MultipartUploadManager.shared.upload(
-                    fileURL: video.url,
-                    projectID: projectID,
-                    session: session,
-                    contentType: video.contentType
-                ) { partProgress in
-                    Task { @MainActor in progress = base + partProgress / Double(uploadVideos.count) }
-                }
-                CutSellDiagnostics.log("upload_completed", [
-                    "source_order": String(index),
-                    "elapsed_s": String(format: "%.2f", Date().timeIntervalSince(uploadStartedAt)),
-                ])
-                sources.append(SourceInput(
-                    originalName: video.url.lastPathComponent,
-                    uri: result.sourceURI,
-                    sourceOrder: index,
-                    durationSec: video.duration
-                ))
-            }
-
-            statusText = "Starting AI edit…"
-            struct Body: Encodable {
-                let project_id: String
-                let user_id: String
-                let sources: [SourceInput]
-                let language_hint: String?
-                let audio_overlap: Bool
-            }
-            let submitResponse: FlowBSubmitResponse = try await APIClient.shared.request(
-                "/v1/flow-b/jobs",
-                method: "POST",
-                body: Body(
-                    project_id: projectID,
-                    user_id: session.userID,
-                    sources: sources,
-                    language_hint: nil,
-                    audio_overlap: audioOverlap
-                )
+            try await submitter.submit(
+                videos: selected,
+                title: title,
+                mode: mode.rawValue,
+                audioOverlap: audioOverlap,
+                resumeProjectID: resumeProjectID,
+                appState: appState
             )
-            // D-133: bounded diagnostics only -- the response was previously
-            // discarded (`let _:`); this now also logs the backend job id
-            // D-133 requires capturing. No request/behavior change.
-            CutSellDiagnostics.log("job_submitted", ["job_id": submitResponse.jobID])
-            await PendingCutStore.shared.remove(projectID: projectID, deleteLocalFiles: true)
-            progress = 1
-            try await appState.refreshProjects()
             dismiss()
         } catch {
-            CutSellDiagnostics.log("cut_submit_failed", ["reason": String(describing: type(of: error))])
-            if !pendingSaved {
-                for url in transientPreparedFiles { try? FileManager.default.removeItem(at: url) }
-            }
             errorMessage = error.localizedDescription
             isSubmitting = false
         }
