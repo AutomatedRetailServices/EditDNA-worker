@@ -20,10 +20,13 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.1"
+VERSION = "1.2"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
+REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
+FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v1.txt").read_text(encoding="utf-8")
+BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
 OV = 0.08                                   # audio crossfade assumed at every junction (s)
 WHY = {"r": "retoma", "a": "frase abandonada", "n": "ruido", "p": "otra pasada"}
@@ -208,8 +211,87 @@ def decide(words, duration, call: LLMCall, run: int = 0):
         lab2 = labels(d2, words, units)
         if sum(1 for st, _ in lab2 if st == "keep") > kept:
             lab = lab2
+    lab, u, rv = review(words, units, lab, call, run); usage += u
     splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
-    return splits, {"passes": len(passes) if multi else 1, "usage": usage}
+    return splits, {"passes": len(passes) if multi else 1, "usage": usage, "review": rv}
+
+
+# ---------------------------------------------------------------- editor review (hauls / try-ons only)
+
+def _line_kept(lab, units):
+    return [sum(1 for k in u if lab[k][0] == "keep") * 2 >= len(u) for u in units]
+
+
+def review_text(words, units, kept) -> str:
+    out = []
+    for n, u in enumerate(units):
+        if n:
+            gap = words[u[0]]["s"] - words[u[0] - 1]["e"]
+            if gap >= 0.7:
+                out.append(f"[pause {gap:.1f}s]")
+        out.append(f"L{n + 1} [{'KEEP' if kept[n] else 'CUT'}]| " + " ".join(words[k]["w"] for k in u))
+    return "\n".join(out)
+
+
+def _parse_review(text: str) -> dict:
+    for match in reversed(list(re.finditer(r"\{", text))):
+        try:
+            obj = json.JSONDecoder().raw_decode(text[match.start():])[0]
+        except Exception:
+            continue
+        if isinstance(obj, dict) and ("hide" in obj or "unhide" in obj or "type" in obj):
+            return obj
+    raise ValueError("no review JSON")
+
+
+def _line_no(x):
+    try:
+        return int(x[0]) if isinstance(x, (list, tuple)) else int(x)
+    except Exception:
+        return None
+
+
+def review(words, units, lab, call: LLMCall, run: int = 0):
+    """An editor reads the finished cut. Only for a haul / try-on (several different items) it may hide a repeated
+    announcement and fix mixed takes. A change is applied only when 2 of 3 independent answers agree; when the first
+    answer says "other" or proposes nothing, no confirmation calls are made (cheap for ordinary pitches)."""
+    kept = _line_kept(lab, units)
+    prompt = REVIEW_PROMPT + "\nFIRST CUT:\n" + review_text(words, units, kept)
+    answers, usage = [], []
+    errors = 0
+    for r in range(3):
+        answer = None
+        for attempt in range(3):                     # transport errors / unreadable answers: ask again, never guess
+            try:
+                text, u = call(prompt + f"\n(review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
+                answer = _parse_review(text)
+                break
+            except Exception:
+                errors += 1
+        answers.append(answer or {"type": "error", "hide": [], "unhide": []})
+        first = answers[0]
+        if r == 0 and (first.get("type") != "haul" or not (first.get("hide") or first.get("unhide"))):
+            break
+    haul = sum(1 for a in answers if a.get("type") == "haul") >= 2
+
+    def votes(key):
+        count = {}
+        for a in answers:
+            for ln in {_line_no(x) for x in a.get(key, []) or []} - {None}:
+                count[ln] = count.get(ln, 0) + 1
+        return {ln for ln, c in count.items() if c >= 2 and 1 <= ln <= len(units)}
+
+    hide, unhide = (votes("hide"), votes("unhide")) if haul else (set(), set())
+    lab = list(lab)
+    for ln in hide:
+        if kept[ln - 1]:
+            for k in units[ln - 1]:
+                lab[k] = ("hide", "retoma")
+    for ln in unhide:
+        if not kept[ln - 1]:
+            for k in units[ln - 1]:
+                lab[k] = ("keep", "se queda")
+    return lab, usage, {"haul": haul, "hide": sorted(hide), "unhide": sorted(unhide), "calls": len(answers), "errors": errors}
 
 
 # ---------------------------------------------------------------- finishing (no AI)
@@ -245,6 +327,77 @@ def _threshold(db):
     import numpy as np
     floor, loud = np.percentile(db, 15), np.percentile(db, 90)
     return floor + 0.30 * (loud - floor)
+
+
+def breathe(splits, words, duration):
+    """Leave a short natural pause after (and a shorter one before) each kept part, taken only from the silence
+    next to it, never over a hidden word. The cut sounds like an editor, not like phrases glued end to end."""
+    out = [dict(s) for s in splits]
+    has_word = lambda a, b: any(a < (w["s"] + w["e"]) / 2 < b for w in words)
+    for i, s in enumerate(out):
+        if not s["visible"]:
+            continue
+        if i + 1 < len(out) and not out[i + 1]["visible"]:
+            n = out[i + 1]; ext = min(BREATH_AFTER, (n["end"] - n["start"]) * 0.5)
+            while ext > 0.02 and has_word(s["end"], s["end"] + ext):
+                ext -= 0.05
+            if ext > 0.02:
+                s["end"] = round(s["end"] + ext, 3); n["start"] = s["end"]
+        if i > 0 and not out[i - 1]["visible"]:
+            p = out[i - 1]; ext = min(BREATH_BEFORE, (p["end"] - p["start"]) * 0.5)
+            while ext > 0.02 and has_word(s["start"] - ext, s["start"]):
+                ext -= 0.05
+            if ext > 0.02:
+                s["start"] = round(s["start"] - ext, 3); p["end"] = s["start"]
+    out = [s for s in out if s["end"] - s["start"] > 0.001]
+    out[0]["start"], out[-1]["end"] = 0.0, duration
+    return out
+
+
+def fix_words(words, splits, call: LLMCall):
+    """Caption text only: an LLM fixes clearly misheard words in the kept part. Edit decisions never change.
+    Returns (words for captions, [[index, old, new]], usage). On repeated failure the captions keep the raw words."""
+    vis = [(s["start"], s["end"]) for s in splits if s["visible"]]
+    idx = [i for i, w in enumerate(words) if any(a <= (w["s"] + w["e"]) / 2 <= b for a, b in vis)]
+    if not idx:
+        return words, [], []
+    prompt = FIXWORDS_PROMPT + "\n" + " ".join(f"{i}:{words[i]['w']}" for i in idx)
+    usage = []
+    for attempt in range(3):
+        try:
+            text, u = call(prompt + (f"\n(retry {attempt})" if attempt else "")); usage.append(u)
+            m = re.search(r"\[.*\]", text, re.S)
+            pairs = json.loads(m.group(0)) if m else []
+            break
+        except Exception:
+            pairs = None
+    if not pairs:
+        return words, ([] if pairs == [] else [["error"]]), usage
+    shown = [dict(w) for w in words]; fixes = []; allowed = set(idx)
+    for p in pairs:
+        try:
+            i, new = int(p[0]), str(p[1]).strip()
+        except Exception:
+            continue
+        if i in allowed and new and new != shown[i]["w"] and len(new) <= 3 * len(shown[i]["w"]) + 8:
+            fixes.append([i, shown[i]["w"], new]); shown[i]["w"] = new
+    return shown, fixes, usage
+
+
+def keep_spoken_words(splits, words):
+    """A part hidden as silence (short gap, reason 'silencio') must never contain a spoken word: quiet words such as
+    a soft "set de short" would otherwise vanish. Adjacent visible parts are merged back."""
+    for s in splits:
+        if not s["visible"] and s.get("reason") in ("silencio", None) and s["end"] - s["start"] < 3.0:
+            if any(s["start"] < (w["s"] + w["e"]) / 2 < s["end"] for w in words):
+                s["visible"] = True; s["reason"] = "se queda"
+    out = []
+    for s in splits:
+        if out and out[-1]["visible"] and s["visible"]:
+            out[-1]["end"] = s["end"]
+        else:
+            out.append(dict(s))
+    return out
 
 
 def refine(splits, audio_path, duration, words):
@@ -393,10 +546,13 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
     call = llm or _llm.call_anthropic
     splits, info = decide(words, float(duration), call, run)
     log = {"sueltos": orphans(splits, words)}
-    splits = refine(splits, audio_path, float(duration), words)
+    splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
     if scene_cut_list is None and video_path:
         scene_cut_list = scene_cuts(video_path)
     log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
-    caps, cut_duration = captions(words, splits)
+    splits = breathe(splits, words, float(duration))
+    shown, fixes, u = fix_words(words, splits, call); info["usage"] += u
+    caps, cut_duration = captions(shown, splits)
+    log["revision"] = info.get("review"); log["palabras"] = fixes
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
             "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"]}

@@ -69,6 +69,8 @@ class FakeLLM:
         self.prompts.append(prompt)
         if prompt.startswith(se.PASS_PROMPT):
             return 'One pass.\n{"passes": [[1, 4, true]], "backbone": [1, 4]}', {"input_tokens": 10, "output_tokens": 5}
+        if prompt.startswith(se.FIXWORDS_PROMPT):
+            return "[]", {"input_tokens": 5, "output_tokens": 1}
         decision = self.decisions[0] if len(self.decisions) == 1 else self.decisions.pop(0)
         return "Notes first.\n" + json.dumps(decision), {"input_tokens": 20, "output_tokens": 8}
 
@@ -114,7 +116,7 @@ def test_process_hides_abandoned_line_and_never_chops_a_kept_word(video):
     assert [c["w"] for c in out["captions"]] == [w["w"] for w in words[3:]]
     assert out["captions"][0]["s"] < 0.5 and out["captions"][-1]["e"] <= out["cut_duration"] + 1e-6
     assert all(len(g["words"]) <= 3 for g in out["caption_groups"])
-    assert out["passes"] == 1 and len(out["usage"]) == 2
+    assert out["passes"] == 1 and len(out["usage"]) == 4   # pass + decision + one review call + word fixer
 
 
 def test_malformed_answer_is_asked_again(video):
@@ -137,7 +139,7 @@ def test_answer_that_hides_almost_everything_is_asked_once_more(video):
              for i, w in enumerate(words)]
     llm = FakeLLM(decisions=[{"hide": [[1, 99, "n"]]}, {"hide": []}])
     splits, info = se.decide(words, 36.0, llm)
-    assert any(s["visible"] for s in splits) and len(info["usage"]) == 3
+    assert any(s["visible"] for s in splits) and len(info["usage"]) == 4
 
 
 def test_loose_piece_rule_hides_a_lone_word():
@@ -478,34 +480,111 @@ def test_caption_position_and_size_apply_to_the_whole_video_and_stay_inside_the_
     assert _can_coalesce(seg, twin) and not _can_coalesce(seg, dc_replace(twin, caption_scale=1.0))
 
 
-def test_deepgram_request_carries_keyterms_and_keeps_smart_format_off(monkeypatch, tmp_path):
-    audio = tmp_path / "a.mp3"
-    audio.write_bytes(b"x")
-    sent = {}
+def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
+    from cutsell_worker.simple_engine import asr
+    seen = {}
 
-    class Response:
+    class R:
         status_code = 200
+        def json(self):
+            return {"metadata": {"duration": 1.0}, "results": {"channels": [{"detected_language": "es", "alternatives": [
+                {"words": [{"word": "shein", "punctuated_word": "Shein", "start": 0.1, "end": 0.4}]}]}]}}
 
-        @staticmethod
-        def json():
-            return {"metadata": {"duration": 1.0},
-                    "results": {"channels": [{"alternatives": [{"words": []}]}]}}
+    def fake_post(url, params=None, **kw):
+        seen["params"] = params
+        return R()
 
-    def fake_post(url, params=None, **kwargs):
-        sent["params"] = list(params)
-        return Response()
-
-    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
-    monkeypatch.setattr(se_asr.requests, "post", fake_post)
-    se_asr.transcribe_words(str(audio))
-    params = sent["params"]
-    assert ("keyterm", "Shein") in params
-    assert [v for k, v in params if k == "keyterm"] == list(se_asr.KEYTERMS)
-    assert ("smart_format", "false") in params and ("detect_language", "true") in params
-    se_asr.transcribe_words(str(audio), language_hint="es")
-    assert ("language", "es") in sent["params"] and ("detect_language", "true") not in sent["params"]
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "test")
+    monkeypatch.setattr(asr.requests, "post", fake_post)
+    audio = tmp_path / "a.mp3"; audio.write_bytes(b"x")
+    out = asr.transcribe_words(str(audio))
+    terms = [v for k, v in seen["params"] if k == "keyterm"]
+    assert "Shein" in terms and ("smart_format", "false") in seen["params"] and ("detect_language", "true") in seen["params"]
+    assert out["words"][0]["w"] == "Shein"
 
 
-def test_engine_1_1_has_the_restarted_section_rule():
-    assert "RESTARTED SECTION" in se.DECISION_PROMPT
-    assert se.VERSION == "1.1"
+def test_decision_prompt_has_restarted_section_rule():
+    from cutsell_worker.simple_engine import engine
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2"
+
+
+def _review_words():
+    text = ["Compre este set.", "Tambien tengo otro vestido, en rojo.", "Tambien tengo este vestido en rojo, trae su cinturon.", "Chao."]
+    words, t = [], 0.0
+    for line in text:
+        for w in line.split():
+            words.append({"w": w, "s": round(t, 2), "e": round(t + 0.3, 2)}); t += 0.35
+        t += 1.0
+    return words
+
+
+def test_review_hides_a_repeated_announcement_only_when_two_answers_agree():
+    from cutsell_worker.simple_engine import engine
+    words = _review_words(); units = engine.lines_of(words)
+    lab = [("keep", "se queda")] * len(words)
+    answers = iter(['{"type":"haul","hide":[[2,3]],"unhide":[]}', '{"type":"haul","hide":[[2,3]],"unhide":[]}', '{"type":"haul","hide":[],"unhide":[]}'])
+    calls = []
+    def call(prompt):
+        calls.append(prompt); return next(answers), {"input_tokens": 1, "output_tokens": 1}
+    new, usage, info = engine.review(words, units, lab, call)
+    assert info["haul"] and info["hide"] == [2] and len(calls) == 3 and len(usage) == 3
+    assert all(new[k][0] == "hide" for k in units[1]) and all(new[k][0] == "keep" for k in units[2])
+
+
+def test_review_on_an_ordinary_pitch_costs_one_call_and_changes_nothing():
+    from cutsell_worker.simple_engine import engine
+    words = _review_words(); units = engine.lines_of(words)
+    lab = [("keep", "se queda")] * len(words)
+    calls = []
+    def call(prompt):
+        calls.append(prompt); return '{"type":"other","hide":[[2,3]],"unhide":[]}', {}
+    new, usage, info = engine.review(words, units, lab, call)
+    assert len(calls) == 1 and new == lab and not info["haul"]
+
+
+def test_a_silence_split_never_hides_a_spoken_word():
+    from cutsell_worker.simple_engine import engine
+    words = [{"w": "este", "s": 1.0, "e": 1.3}, {"w": "set", "s": 1.6, "e": 1.9}, {"w": "blusa.", "s": 2.4, "e": 2.8}]
+    splits = [{"start": 0.0, "end": 1.4, "visible": True, "reason": "se queda"},
+              {"start": 1.4, "end": 2.0, "visible": False, "reason": "silencio"},
+              {"start": 2.0, "end": 3.0, "visible": True, "reason": "se queda"}]
+    out = engine.keep_spoken_words(splits, words)
+    assert out == [{"start": 0.0, "end": 3.0, "visible": True, "reason": "se queda"}]
+
+
+def test_review_retries_a_failed_call_instead_of_skipping_the_review():
+    from cutsell_worker.simple_engine import engine
+    words = _review_words(); units = engine.lines_of(words)
+    lab = [("keep", "se queda")] * len(words)
+    replies = iter([RuntimeError("network"), '{"type":"haul","hide":[[2,3]],"unhide":[]}',
+                    '{"type":"haul","hide":[[2,3]],"unhide":[]}', '{"type":"haul","hide":[[2,3]],"unhide":[]}'])
+    def call(prompt):
+        r = next(replies)
+        if isinstance(r, Exception): raise r
+        return r, {}
+    new, usage, info = engine.review(words, units, lab, call)
+    assert info["errors"] == 1 and info["hide"] == [2]
+
+
+def test_breathe_keeps_a_short_pause_but_never_reaches_a_hidden_word():
+    from cutsell_worker.simple_engine import engine
+    words = [{"w": "uno.", "s": 1.0, "e": 1.5}, {"w": "dos", "s": 1.9, "e": 2.2}, {"w": "tres.", "s": 4.0, "e": 4.5}]
+    splits = [{"start": 0.0, "end": 0.9, "visible": False}, {"start": 0.9, "end": 1.6, "visible": True},
+              {"start": 1.6, "end": 3.9, "visible": False}, {"start": 3.9, "end": 4.6, "visible": True},
+              {"start": 4.6, "end": 6.0, "visible": False}]
+    out = engine.breathe(splits, words, 6.0)
+    assert out[1]["end"] <= 1.9 + 1e-9 and out[1]["end"] > 1.6           # pause added, hidden "dos" stays out
+    assert abs(out[3]["end"] - 4.9) < 1e-6 and abs(out[3]["start"] - 3.75) < 1e-6
+    assert all(a["end"] == b["start"] for a, b in zip(out, out[1:])) and out[0]["start"] == 0.0 and out[-1]["end"] == 6.0
+
+
+def test_fix_words_changes_caption_text_only_for_kept_words():
+    from cutsell_worker.simple_engine import engine
+    words = [{"w": "compre", "s": 0.0, "e": 0.4}, {"w": "en", "s": 0.4, "e": 0.6}, {"w": "por", "s": 0.6, "e": 0.9},
+             {"w": "malo", "s": 5.0, "e": 5.3}]
+    splits = [{"start": 0.0, "end": 1.0, "visible": True}, {"start": 1.0, "end": 6.0, "visible": False}]
+    def call(prompt):
+        return '[[2, "Shein"], [3, "bueno"]]', {}
+    shown, fixes, usage = engine.fix_words(words, splits, call)
+    assert shown[2]["w"] == "Shein" and shown[3]["w"] == "malo" and words[2]["w"] == "por"
+    assert fixes == [[2, "por", "Shein"]] and len(usage) == 1

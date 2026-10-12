@@ -8,7 +8,9 @@ import subprocess
 import requests
 
 API_URL = "https://api.deepgram.com/v1/listen"
-KEYTERMS = ("Shein", "TikTok Shop", "TikTok", "Temu", "Amazon", "leggings", "jumpsuit", "gym", "top", "short", "size", "bra", "pads", "link")
+# Brand and shop words creators say often; Deepgram keyterm prompting (Nova-3) spells them right ("Shein", not "en por").
+KEYTERMS = ("Shein", "TikTok Shop", "TikTok", "Temu", "Amazon", "leggings", "jumpsuit", "gym", "top", "short", "size",
+            "bra", "pads", "link")
 
 
 def extract_audio(video_path: str, audio_path: str) -> str:
@@ -25,7 +27,6 @@ def transcribe_words(audio_path: str, *, language_hint: str | None = None) -> di
     key = os.environ.get("DEEPGRAM_API_KEY", "").strip()
     if not key:
         raise RuntimeError("DEEPGRAM_API_KEY missing")
-    # A list of pairs, not a dict: "keyterm" is repeated once per term.
     params = [("model", "nova-3"), ("punctuate", "true"), ("filler_words", "true"), ("smart_format", "false")]
     if language_hint in ("en", "es"):
         params.append(("language", language_hint))
