@@ -197,7 +197,8 @@ struct TimelineEditorView: View {
         .sheet(isPresented: $showVoiceOverView) {
             VoiceOverView(
                 model: model,
-                initialPlacementID: selection?.track == .voiceOver ? selection?.itemID : nil
+                initialPlacementID: selection?.track == .voiceOver ? selection?.itemID : nil,
+                playheadTime: playheadTime
             )
         }
         .sheet(isPresented: $showBrollView) {

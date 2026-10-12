@@ -175,6 +175,43 @@ final class DraftEditorViewModel: ObservableObject {
         }
     }
 
+    enum RecordedVoiceOverOutcome: Equatable {
+        /// Uploaded and placed on the voice-over track at the cursor.
+        case placed
+        /// Uploaded and saved as a voice-over, but the timeline can't take placements yet
+        /// (this project has no registered primary source).
+        case savedNotPlaced
+        /// Upload or registration failed; `errorMessage` says why.
+        case failed
+    }
+
+    /// A take recorded with the microphone: uploaded by the SAME path as an imported file
+    /// (`/timeline-uploads` + `/timeline-assets`), then placed on the voice-over track starting
+    /// at `start` (the timeline cursor) for its full length.
+    func addRecordedVoiceOver(fileURL: URL, at start: Double) async -> RecordedVoiceOverOutcome {
+        let asset: TimelineMediaAsset
+        do {
+            asset = try await VoiceOverImportManager.shared.importAudio(
+                fileURL: fileURL, projectID: project.projectID, session: session, api: api
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return .failed
+        }
+        await refreshTimelineAssetLibrary()
+        guard asset.isReady, asset.durationSec > 0 else {
+            errorMessage = "The recording couldn't be used. Please record again."
+            return .failed
+        }
+        guard baseEditAssetID != nil else { return .savedNotPlaced }
+        let begin = max(0, start)
+        await addVoiceOverPlacement(
+            assetID: asset.assetID, start: begin, end: begin + asset.durationSec,
+            sourceIn: 0, sourceOut: asset.durationSec
+        )
+        return errorMessage == nil ? .placed : .failed
+    }
+
     /// Imports an already-existing local video file as a new
     /// SUPPLEMENTAL_BROLL asset via the real D-282A upload+registration
     /// routes (`BrollImportManager`) -- never a fabricated capture/import

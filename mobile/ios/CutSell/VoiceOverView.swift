@@ -21,12 +21,11 @@ import UniformTypeIdentifiers
 ///   same real captured-pre-mutation-snapshot Undo already used for
 ///   Overlay placements -- Voice-over shares the identical authority).
 ///
+/// - Microphone RECORDING (`VoiceRecorder`, .m4a/AAC): the take is uploaded by
+///   the SAME import path above and placed on the voice-over track at the
+///   timeline cursor (`model.addRecordedVoiceOver`).
+///
 /// PENDING / honestly unsupported (documented here, never simulated):
-/// - Microphone RECORDING: not implemented anywhere in this codebase.
-///   `cutsell_worker/timeline_asset_registry_store.py`'s own
-///   `create_voice_over_asset` docstring states this directly -- Import
-///   (an already-recorded/existing audio file) is the only real "add new
-///   audio" capability today.
 /// - Volume / fade-in / fade-out / pan: `VoiceOverPlacementModel`
 ///   (`cutsell_app/timeline_routes.py`) carries exactly `placement_id,
 ///   asset_id, timeline_start_sec, timeline_end_sec, source_in_sec,
@@ -38,12 +37,17 @@ import UniformTypeIdentifiers
 struct VoiceOverView: View {
     @ObservedObject var model: DraftEditorViewModel
     let initialPlacementID: String?
+    /// The timeline cursor when the sheet opened: a recorded take starts here.
+    var playheadTime: Double = 0
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPlacementID: String?
     @State private var splitTime: Double = 0
     @State private var isImporting = false
     @State private var justMutated = false
+    @StateObject private var recorder = VoiceRecorder()
+    @State private var isUsingTake = false
+    @State private var recordNotice: String?
 
     private enum VoiceOverStage { case empty, saving, ready, error }
 
@@ -91,9 +95,10 @@ struct VoiceOverView: View {
                     }
                     .accessibilityIdentifier("voiceover.importButton")
 
-                    Label("Record (not available)", systemImage: "mic.slash")
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("voiceover.recordUnavailable")
+                }
+
+                Section("Record") {
+                    recordSection
                 }
 
                 Section("Add existing to timeline") {
@@ -219,6 +224,7 @@ struct VoiceOverView: View {
                 selectedPlacementID = initialPlacementID ?? placements.first?.placementID
                 syncSplitTime()
             }
+            .onDisappear { recorder.discardTake() }
             .fileImporter(isPresented: $isImporting, allowedContentTypes: [.audio]) { result in
                 switch result {
                 case .success(let url):
@@ -231,6 +237,91 @@ struct VoiceOverView: View {
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
+        }
+    }
+
+    @ViewBuilder
+    private var recordSection: some View {
+        switch recorder.state {
+        case .idle, .failed, .permissionDenied:
+            Button {
+                recordNotice = nil
+                Task { await recorder.start() }
+            } label: {
+                Label("Record", systemImage: "mic.fill")
+            }
+            .accessibilityIdentifier("voiceover.recordButton")
+            Text("Starts at \(String(format: "%.1f", playheadTime))s on the timeline.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if case .failed(let message) = recorder.state {
+                Text(message).font(.caption).foregroundStyle(.red)
+            }
+            if recorder.state == .permissionDenied {
+                Text("CutSell can't use the microphone. Turn it on in Settings > CutSell > Microphone.")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("voiceover.micDenied")
+            }
+        case .recording:
+            HStack {
+                Image(systemName: "record.circle.fill").foregroundStyle(.red)
+                Text(VoiceRecorder.formatted(recorder.elapsed))
+                    .monospacedDigit()
+                    .accessibilityIdentifier("voiceover.recordingTime")
+                Spacer()
+                Button("Stop") { recorder.stop() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .accessibilityIdentifier("voiceover.stopButton")
+            }
+        case .recorded:
+            HStack {
+                Image(systemName: "waveform")
+                Text("Take: \(VoiceRecorder.formatted(recorder.elapsed))").monospacedDigit()
+            }
+            HStack(spacing: 14) {
+                Button {
+                    Task {
+                        recorder.discardTake()
+                        await recorder.start()
+                    }
+                } label: {
+                    Label("Record again", systemImage: "arrow.counterclockwise")
+                }
+                .accessibilityIdentifier("voiceover.recordAgainButton")
+                Button {
+                    Task { await useTake() }
+                } label: {
+                    if isUsingTake { ProgressView() } else { Label("Use", systemImage: "checkmark") }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isUsingTake)
+                .accessibilityIdentifier("voiceover.useTakeButton")
+            }
+            .buttonStyle(.bordered)
+        }
+        if let recordNotice {
+            Text(recordNotice).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func useTake() async {
+        guard let url = recorder.recordedURL else { return }
+        isUsingTake = true
+        defer { isUsingTake = false }
+        justMutated = false
+        switch await model.addRecordedVoiceOver(fileURL: url, at: playheadTime) {
+        case .placed:
+            recorder.finishTake()
+            justMutated = true
+            recordNotice = "Added to the voice-over track."
+            selectedPlacementID = placements.last?.placementID
+        case .savedNotPlaced:
+            recorder.finishTake()
+            recordNotice = "Saved. It can be placed on the timeline once this project's timeline is ready."
+        case .failed:
+            break   // the take is kept so "Use" can be tried again; the alert shows why
         }
     }
 

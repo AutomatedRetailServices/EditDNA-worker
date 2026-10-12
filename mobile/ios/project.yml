@@ -48,4 +48,4 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: CutSell needs access to videos you choose to edit.
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: CutSell can save finished videos to your library.
         INFOPLIST_KEY_NSCameraUsageDescription: CutSell can record product footage.
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: CutSell records audio with your product footage.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: CutSell uses the microphone to record your voice-over and the sound of your videos.
