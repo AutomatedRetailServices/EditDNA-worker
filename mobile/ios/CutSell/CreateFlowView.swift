@@ -17,15 +17,21 @@ struct CreateFlowView: View {
     @State private var uploadFailed = false
 
     var body: some View {
-        CreateCameraView(
-            onBack: onBack,
-            onUpload: { showingGallery = true },
-            onRecorded: { recorded = $0 }
-        )
-        .sheet(item: $recorded) { video in
-            StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { style in
-                recorded = nil
-                start(CreateJob(mode: .single, source: .recorded(video), style: style))
+        ZStack {
+            CreateCameraView(
+                onBack: onBack,
+                onUpload: { showingGallery = true },
+                onRecorded: { recorded = $0 }
+            )
+            BottomSheetOverlay(isPresented: Binding(
+                get: { recorded != nil },
+                set: { if !$0 { recorded = nil } }
+            )) {
+                StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { style in
+                    guard let video = recorded else { return }
+                    recorded = nil
+                    start(CreateJob(mode: .single, source: .recorded(video), style: style))
+                }
             }
         }
         .fullScreenCover(isPresented: $showingGallery) {
@@ -149,7 +155,7 @@ struct SubmittingView: View {
         ZStack {
             ScreenBackground()
             VStack(alignment: .leading, spacing: 0) {
-                BrandLogo(width: 112).padding(.top, 8)
+                BrandLogo().padding(.top, 8)
                 Spacer()
                 VStack(spacing: 16) {
                     Text(job.mode == .bulk ? "Uploading your videos" : "Uploading your video")

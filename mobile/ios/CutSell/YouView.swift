@@ -7,7 +7,6 @@ struct YouView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notificationCenter: NotificationCenterModel
     @State private var showingNotifications = false
-    @State private var showingAppleSignIn = false
     @State private var showingLogout = false
     @State private var showingDeleteAccount = false
     @State private var errorMessage: String?
@@ -62,9 +61,7 @@ struct YouView: View {
                                 .font(CS.inter(13))
                                 .foregroundStyle(CS.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            PrimaryButton(title: "Sign in with Apple", height: 50, cornerRadius: 16, fontSize: 16) {
-                                showingAppleSignIn = true
-                            }
+                            AppleSignInButton()
                         }
                         Button("Delete Account", role: .destructive) { showingDeleteAccount = true }
                             .font(CS.inter(14, .semibold))
@@ -85,10 +82,6 @@ struct YouView: View {
         .sheet(isPresented: $showingNotifications) {
             NotificationInboxView()
                 .environmentObject(notificationCenter)
-        }
-        .sheet(isPresented: $showingAppleSignIn) {
-            AppleSignInSheet()
-                .environmentObject(appState)
         }
         .confirmationDialog("Log out of CutSell?", isPresented: $showingLogout, titleVisibility: .visible) {
             Button("Log Out") { Task { await appState.logout() } }

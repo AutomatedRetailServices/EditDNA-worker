@@ -42,13 +42,6 @@ struct StyleSheetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Capsule()
-                .fill(Color(hex: 0x3A5280))
-                .frame(width: 40, height: 4)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 10)
-                .padding(.bottom, 18)
-
             Text("Choose your style")
                 .font(CS.inter(18, .semibold))
                 .foregroundStyle(.white)
@@ -86,7 +79,7 @@ struct StyleSheetView: View {
             CheckboxRow(title: "Use this style for my next videos", isOn: $remember)
                 .padding(.top, 18)
 
-            Spacer(minLength: 24)
+            Spacer().frame(height: 34)
 
             PrimaryButton(title: ctaTitle) {
                 StyleChoice.remember = remember
@@ -96,12 +89,7 @@ struct StyleSheetView: View {
             .accessibilityIdentifier("styleCreateButton")
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 12)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CS.sheet.ignoresSafeArea())
-        .presentationDetents([.height(430)])
-        .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(24)
-        .presentationBackground(CS.sheet)
     }
 }

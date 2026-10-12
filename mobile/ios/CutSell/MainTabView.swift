@@ -76,7 +76,7 @@ struct CSTabBar: View {
                             .resizable()
                             .interpolation(.high)
                             .scaledToFit()
-                            .frame(width: 44, height: 36)
+                            .frame(width: 44, height: 44)
                             .shadow(color: isActive ? CS.cyan.opacity(0.75) : .clear, radius: 8)
                         Text(item.title)
                             .font(CS.inter(13, isActive ? .semibold : .regular))
@@ -92,7 +92,7 @@ struct CSTabBar: View {
             }
         }
         .padding(.horizontal, 4)
-        .frame(height: 76)
+        .frame(height: 88)
         .background(Color(hex: 0x060E1D, opacity: 0.96), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color(hex: 0x143866, opacity: 0.9), lineWidth: 1))
         .padding(.horizontal, 16)
@@ -113,10 +113,6 @@ struct PlanView: View {
                     .font(CS.inter(34, .semibold))
                     .foregroundStyle(.white)
                     .padding(.top, 14)
-                Text("Plan your content here.")
-                    .font(CS.inter(14))
-                    .foregroundStyle(CS.textSecondary)
-                    .padding(.top, 4)
                 Spacer()
                 VStack(spacing: 10) {
                     Image("TabPlan").resizable().scaledToFit().frame(width: 64, height: 64)

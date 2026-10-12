@@ -108,7 +108,7 @@ struct ProjectsView: View {
 
                         if shownProjects.isEmpty {
                             emptyState
-                                .padding(.top, 60)
+                                .padding(.top, 80)
                         } else {
                             LazyVGrid(columns: columns, spacing: 8) {
                                 ForEach(shownProjects) { project in
@@ -214,8 +214,8 @@ struct ProjectsView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color(hex: 0x050A17))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x1A8CFF), lineWidth: 1.5))
-                .overlay(Image("EmptyPlay").resizable().frame(width: 22, height: 22))
-                .frame(width: 76, height: 134)
+                .overlay(Image("EmptyPlay").resizable().frame(width: 44, height: 44))
+                .frame(width: 90, height: 160)
             VStack(alignment: .leading, spacing: 8) {
                 Text(emptyTitle)
                     .font(CS.inter(19, .semibold))
@@ -229,7 +229,7 @@ struct ProjectsView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 184)
+        .frame(minHeight: 220)
         .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
         .padding(.horizontal, 10)

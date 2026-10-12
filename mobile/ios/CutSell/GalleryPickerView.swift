@@ -162,6 +162,13 @@ struct GalleryPickerView: View {
             default:
                 PermissionScreen(kind: .photos, deniedBefore: true, onClose: onCancel) {}
             }
+            BottomSheetOverlay(isPresented: $showingStyle) {
+                StyleSheetView(ctaTitle: mode.ctaTitle(selection.count)) { style in
+                    showingStyle = false
+                    let chosen = selection.compactMap { id in library.assets.first { $0.localIdentifier == id } }
+                    onCreate(mode, chosen, style)
+                }
+            }
             if showingLimitedCard {
                 GalleryAccessCard(
                     onSelectMore: {
@@ -193,13 +200,6 @@ struct GalleryPickerView: View {
             if library.status == .limited { showingLimitedCard = true }
         }
         .onDisappear { library.stop() }
-        .sheet(isPresented: $showingStyle) {
-            StyleSheetView(ctaTitle: mode.ctaTitle(selection.count)) { style in
-                showingStyle = false
-                let chosen = selection.compactMap { id in library.assets.first { $0.localIdentifier == id } }
-                onCreate(mode, chosen, style)
-            }
-        }
         .fullScreenCover(item: $problem) { current in
             CreateProblemView(
                 problem: current,

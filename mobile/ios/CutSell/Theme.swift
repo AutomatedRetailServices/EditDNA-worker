@@ -141,6 +141,7 @@ struct PrimaryButton: View {
     var cornerRadius: CGFloat = 20
     var fontSize: CGFloat = 18
     var gradient: LinearGradient = CS.ctaGradient
+    var textColor: Color = .white
     var isEnabled: Bool = true
     let action: () -> Void
 
@@ -148,7 +149,7 @@ struct PrimaryButton: View {
         Button(action: action) {
             Text(title)
                 .font(CS.inter(fontSize, .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(textColor)
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
                 .background(gradient, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -165,12 +166,13 @@ struct SecondaryButton: View {
     let title: String
     var height: CGFloat = 46
     var cornerRadius: CGFloat = 16
+    var fontSize: CGFloat = 14
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(CS.inter(14, .semibold))
+                .font(CS.inter(fontSize, .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
@@ -328,6 +330,55 @@ struct CheckboxRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// Edge-to-edge bottom sheet drawn by the app (Figma "Choose your style"), so it looks the
+/// same on every iOS version (the system sheet floats with side margins on newer iOS).
+struct BottomSheetOverlay<Content: View>: View {
+    @Binding var isPresented: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var drag: CGFloat = 0
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if isPresented {
+                Color.black.opacity(0.55)
+                    .ignoresSafeArea()
+                    .onTapGesture { isPresented = false }
+                    .transition(.opacity)
+                VStack(spacing: 0) {
+                    Capsule()
+                        .fill(Color(hex: 0x3A5280))
+                        .frame(width: 40, height: 4)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 10)
+                        .padding(.bottom, 14)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture()
+                                .onChanged { drag = max(0, $0.translation.height) }
+                                .onEnded { value in
+                                    if value.translation.height > 80 { isPresented = false }
+                                    drag = 0
+                                }
+                        )
+                    content()
+                }
+                .background(alignment: .top) {
+                    UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24, style: .continuous)
+                        .fill(CS.sheet)
+                        .overlay(
+                            UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24, style: .continuous)
+                                .stroke(CS.cardBorder, lineWidth: 1)
+                        )
+                        .ignoresSafeArea(edges: .bottom)
+                }
+                .offset(y: drag)
+                .transition(.move(edge: .bottom))
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: isPresented)
     }
 }
 

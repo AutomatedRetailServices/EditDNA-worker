@@ -163,7 +163,7 @@ struct CreateCameraView: View {
     }
 
     private var controlsColumn: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 24) {
             controlButton(title: "Flip", image: "IconFlip", size: CGSize(width: 42, height: 34)) {
                 Task {
                     if torchOn { camera.setTorch(false); torchOn = false }

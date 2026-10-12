@@ -50,7 +50,7 @@ struct PermissionScreen: View {
             ScreenBackground()
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    BrandLogo(width: 112)
+                    BrandLogo()
                     Spacer()
                     if let onClose {
                         Button(action: onClose) {
@@ -64,7 +64,7 @@ struct PermissionScreen: View {
                 }
                 .padding(.top, 8)
                 Text(kind.screenTitle)
-                    .font(CS.inter(24, .bold))
+                    .font(CS.inter(28, .bold))
                     .foregroundStyle(.white)
                     .padding(.top, 14)
 
@@ -72,32 +72,33 @@ struct PermissionScreen: View {
 
                 VStack(spacing: 0) {
                     icon
-                        .frame(height: 52)
-                        .padding(.top, 28)
+                        .frame(height: 64)
+                        .padding(.top, 34)
                     Text(kind.heading)
-                        .font(CS.inter(20, .bold))
+                        .font(CS.inter(23, .bold))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
                         .padding(.top, 18)
                     Text(kind.message)
-                        .font(CS.inter(13))
+                        .font(CS.inter(15))
                         .foregroundStyle(CS.textSecondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 10)
+                        .padding(.top, 12)
                     PrimaryButton(
                         title: deniedBefore ? "Open Settings" : kind.buttonTitle,
-                        height: 46,
-                        cornerRadius: 14,
-                        fontSize: 13,
+                        height: 54,
+                        cornerRadius: 16,
+                        fontSize: 16,
                         gradient: CS.alertButtonGradient,
                         action: deniedBefore ? Self.openSettings : onAllow
                     )
-                    .padding(.top, 24)
+                    .padding(.top, 44)
+                    .padding(.horizontal, 6)
                     Text("You can change this later in Settings.")
-                        .font(CS.inter(11))
+                        .font(CS.inter(13))
                         .foregroundStyle(CS.textMuted)
-                        .padding(.top, 14)
+                        .padding(.top, 22)
                         .padding(.bottom, 18)
                 }
                 .padding(.horizontal, 22)
@@ -106,7 +107,7 @@ struct PermissionScreen: View {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .stroke(LinearGradient(colors: [Color(hex: 0x7C3AED), Color(hex: 0xF01ADB)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5)
                 )
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 20)
 
                 Spacer()
                 Spacer()
@@ -117,9 +118,9 @@ struct PermissionScreen: View {
 
     @ViewBuilder private var icon: some View {
         switch kind {
-        case .camera: Image("TabCreate").resizable().scaledToFit().frame(width: 52)
-        case .microphone: Text("🎙️").font(.system(size: 40))
-        case .photos: Image("IconUpload").resizable().scaledToFit().frame(width: 44)
+        case .camera: Image("TabCreate").resizable().scaledToFit().frame(width: 64)
+        case .microphone: Text("🎙️").font(.system(size: 50))
+        case .photos: Image("IconUpload").resizable().scaledToFit().frame(width: 54)
         }
     }
 
@@ -146,10 +147,10 @@ struct ProblemScreen: View {
         ZStack {
             ScreenBackground()
             VStack(alignment: .leading, spacing: 0) {
-                BrandLogo(width: 112)
+                BrandLogo()
                     .padding(.top, 8)
                 Text(screenTitle)
-                    .font(CS.inter(24, .bold))
+                    .font(CS.inter(28, .bold))
                     .foregroundStyle(.white)
                     .padding(.top, 14)
 
@@ -157,15 +158,15 @@ struct ProblemScreen: View {
 
                 VStack(spacing: 0) {
                     Text("!")
-                        .font(CS.inter(46, .bold))
+                        .font(CS.inter(54, .bold))
                         .foregroundStyle(tone == .error ? CS.alert : CS.cyan)
                     Text(heading)
-                        .font(CS.inter(22, .bold))
+                        .font(CS.inter(25, .bold))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
-                        .padding(.top, 18)
+                        .padding(.top, 22)
                     Text(message)
-                        .font(CS.inter(13))
+                        .font(CS.inter(15))
                         .foregroundStyle(CS.textSecondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -173,15 +174,15 @@ struct ProblemScreen: View {
                         .padding(.horizontal, 20)
                     VStack(spacing: 12) {
                         PrimaryButton(
-                            title: primaryTitle, height: 46, cornerRadius: 14, fontSize: 13,
+                            title: primaryTitle, height: 56, cornerRadius: 16, fontSize: 16,
                             gradient: CS.alertButtonGradient, action: primaryAction
                         )
                         if let secondaryTitle, let secondaryAction {
-                            SecondaryButton(title: secondaryTitle, height: 44, cornerRadius: 14, action: secondaryAction)
+                            SecondaryButton(title: secondaryTitle, height: 52, cornerRadius: 16, fontSize: 15, action: secondaryAction)
                         }
                     }
-                    .frame(width: 226)
-                    .padding(.top, 58)
+                    .frame(width: 270)
+                    .padding(.top, 76)
                 }
                 .frame(maxWidth: .infinity)
 
@@ -217,35 +218,35 @@ struct LimitScreen: View {
                     .accessibilityLabel("Close")
                     Spacer()
                     Text(detail)
-                        .font(CS.inter(12, .medium))
+                        .font(CS.inter(14, .medium))
                         .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 12)
                 Spacer()
                 Text("Selected video")
-                    .font(CS.inter(20, .semibold))
+                    .font(CS.inter(23, .semibold))
                     .foregroundStyle(Color(hex: 0x8FB0E8))
                 Spacer()
                 Spacer()
                 VStack(alignment: .leading, spacing: 0) {
                     Text(heading)
-                        .font(CS.inter(23, .bold))
+                        .font(CS.inter(26, .bold))
                         .foregroundStyle(.white)
                     Text(message)
-                        .font(CS.inter(13))
+                        .font(CS.inter(15))
                         .foregroundStyle(CS.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 10)
+                        .padding(.top, 12)
                     PrimaryButton(
-                        title: "Choose another video", height: 46, cornerRadius: 14, fontSize: 14,
-                        gradient: CS.alertButtonGradient, action: onChooseAnother
+                        title: "Choose another video", height: 54, cornerRadius: 16, fontSize: 16,
+                        gradient: CS.alertButtonGradient, textColor: Color(hex: 0x0B1A40), action: onChooseAnother
                     )
                     .padding(.top, 16)
                     Spacer(minLength: 0)
                 }
-                .padding(20)
+                .padding(22)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: 236)
+                .frame(height: 282)
                 .background(Color(hex: 0x070C1D, opacity: 0.96), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x1A6BFF), lineWidth: 1))
                 .padding(.horizontal, 16)
@@ -265,20 +266,20 @@ struct GalleryAccessCard: View {
             Color.black.opacity(0.55).ignoresSafeArea()
             VStack(spacing: 0) {
                 Text("Gallery  access")
-                    .font(CS.inter(22, .bold))
+                    .font(CS.inter(25, .bold))
                     .foregroundStyle(.white)
                 Text("Choose videos from your library to create a CutSell edit.")
-                    .font(CS.inter(14))
+                    .font(CS.inter(16))
                     .foregroundStyle(CS.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 14)
                 PrimaryButton(
-                    title: "Select More Photos…", height: 54, cornerRadius: 18, fontSize: 15,
+                    title: "Select More Photos…", height: 54, cornerRadius: 18, fontSize: 17,
                     gradient: CS.alertButtonGradient, action: onSelectMore
                 )
                 .padding(.top, 30)
-                SecondaryButton(title: "Keep Current Selection", height: 50, cornerRadius: 18, action: onKeep)
+                SecondaryButton(title: "Keep Current Selection", height: 54, cornerRadius: 18, fontSize: 17, action: onKeep)
                     .padding(.top, 10)
             }
             .padding(.horizontal, 26)
