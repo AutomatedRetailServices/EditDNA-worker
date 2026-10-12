@@ -330,7 +330,10 @@ struct ProjectDetailView: View {
 
     var body: some View {
         Group {
-            if Project.processingStates.contains(project.state) {
+            if project.state == Project.uploadNotFinishedState {
+                // No video reached the server yet, so there is no cut and no draft to edit.
+                UploadNotFinishedView(project: project)
+            } else if Project.processingStates.contains(project.state) {
                 ProcessingView(project: project)
             } else {
                 DraftEditorView(project: project)
@@ -338,5 +341,58 @@ struct ProjectDetailView: View {
         }
         .navigationTitle(project.title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// A project whose video never finished uploading (state "created"): there is nothing to edit yet.
+/// Offers to resume the saved upload instead of opening an editor that can only fail.
+struct UploadNotFinishedView: View {
+    let project: Project
+    @EnvironmentObject private var appState: AppState
+    @State private var pending: PendingCutRecord?
+    @State private var checked = false
+    @State private var resuming: PendingCutRecord?
+
+    var body: some View {
+        ZStack {
+            ScreenBackground()
+            VStack(spacing: 14) {
+                Text("!")
+                    .font(CS.inter(46, .bold))
+                    .foregroundStyle(CS.alert)
+                Text("This video didn’t finish uploading")
+                    .font(CS.inter(22, .bold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                Text(pending != nil
+                     ? "Your video is saved on this iPhone. Resume the upload and CutSell will make the cut."
+                     : (checked ? "The video isn’t on this iPhone anymore. Create a new cut from Create." : ""))
+                    .font(CS.inter(15))
+                    .foregroundStyle(CS.textSecondary)
+                    .multilineTextAlignment(.center)
+                if let pending {
+                    PrimaryButton(title: "Resume upload", height: 54, cornerRadius: 16, fontSize: 16) {
+                        resuming = pending
+                    }
+                    .frame(width: 270)
+                    .padding(.top, 20)
+                    .accessibilityIdentifier("resumeUploadButton")
+                }
+            }
+            .padding(.horizontal, 28)
+        }
+        .task {
+            pending = await PendingCutStore.shared.list().first { $0.projectID == project.projectID }
+            checked = true
+        }
+        .sheet(item: $resuming, onDismiss: {
+            Task {
+                pending = await PendingCutStore.shared.list().first { $0.projectID == project.projectID }
+                try? await appState.refreshProjects()
+            }
+        }) { record in
+            NewCutView(pending: record)
+                .environmentObject(appState)
+        }
     }
 }

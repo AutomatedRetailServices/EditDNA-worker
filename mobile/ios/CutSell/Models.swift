@@ -44,6 +44,9 @@ struct Project: Codable, Identifiable, Hashable {
     /// States a project passes through before its draft is editable --
     /// the single source of truth `ProjectDetailView`'s routing and the
     /// Edits "Drafts"/"Ready" tab filters both reuse (never duplicated).
+    /// A new project before its video finished uploading (server `project_store.create_project`).
+    static let uploadNotFinishedState = "created"
+
     static let processingStates: Set<String> = [
         "processing", "uploaded", "preparing", "transcribing", "analyzing", "composing",
     ]

@@ -8,6 +8,8 @@ import Foundation
 final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate, @unchecked Sendable {
     static let shared = BackgroundPartUploader()
     static let sessionIdentifier = "ai.cutsell.background.multipart"
+    /// Must stay empty: it is part of the part link's signature (see `upload`).
+    static let partContentType = ""
 
     private struct Pending {
         let continuation: CheckedContinuation<HTTPURLResponse, Error>
@@ -32,6 +34,11 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
     func upload(fileURL: URL, to signedURL: URL, headers: [String: String] = [:]) async throws -> HTTPURLResponse {
         var request = URLRequest(url: signedURL)
         request.httpMethod = "PUT"
+        // The server signs each part link with an EMPTY Content-Type. Left alone, URLSession adds
+        // "Content-Type: application/octet-stream" to a file upload, the signature no longer
+        // matches and Amazon S3 answers 403 SignatureDoesNotMatch -- no part ever uploaded from an
+        // iPhone (TestFlight builds 3-4). An empty value makes URLSession send no Content-Type.
+        request.setValue(Self.partContentType, forHTTPHeaderField: "Content-Type")
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
 
         return try await withCheckedThrowingContinuation { continuation in
