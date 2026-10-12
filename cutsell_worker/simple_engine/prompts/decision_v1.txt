@@ -46,6 +46,13 @@ EXCEPTION - RESTARTED PITCH: when the creator starts the script again from its b
 for example after "otra vez", "vamos otra vez", an interruption, or a long pause), every sentence of the earlier run that the
 later run says again is a retake, however far apart they are: hide the earlier one and keep the one in the best complete run.
 The callback rule above applies only INSIDE one run of the script, never between an earlier run and a later run.
+EXCEPTION - RESTARTED SECTION: when the creator introduces an item or section (for example "este es el primer conjunto",
+"el segundo producto", "ahora la parte de atrás"), explains it, and then says that SAME introduction again and explains the
+same item again, the two explanations are two runs of one section, not two ideas. Keep only the better run (most complete,
+then cleanest, tie -> the later run) and hide every sentence of the other run with code "r" (Lw = a line of the kept run),
+even if its sentences are worded differently. Rescue from the hidden run only a whole sentence with a concrete fact the kept
+run lacks (a number, a size, a price, a name); a feeling, a benefit or a description already covered in other words is not
+a new fact. This applies only when the same introduction is said again for the same item; a new item is new content.
 The short goodbye at the very end ("bye", "chao", "besitos", "me cuentan en los comentarios") is always kept.
 When you are not sure whether a complete sentence is a retake or new content, KEEP it: hiding real content is a worse error
 than leaving a repetition.

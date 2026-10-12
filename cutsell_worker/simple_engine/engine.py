@@ -20,7 +20,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.0"
+VERSION = "1.1"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
@@ -198,7 +198,7 @@ def decide(words, duration, call: LLMCall, run: int = 0):
             "except a whole sentence with a fact the backbone truly lacks." % (backbone[0], backbone[1])) if multi else (
             "SINGLE PASS: the recording is one continuous story/pitch. When a sentence is retaken and each version has a concrete detail the other "
             "lacks (a body part or place, a number, a name, an example, a cause), keep BOTH versions; when one version only rephrases the other with "
-            "nothing new, keep the most complete one.")
+            "nothing new, keep the most complete one. A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
     prompt = DECISION_PROMPT + "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text
     d, u = _ask(call, f"v3dec-{run}", prompt); usage += u
     lab = labels(d, words, units)

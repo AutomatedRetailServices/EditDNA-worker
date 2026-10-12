@@ -476,3 +476,36 @@ def test_caption_position_and_size_apply_to_the_whole_video_and_stay_inside_the_
     assert "pos(540,384)" in (tmp_path / "p.ass").read_text(encoding="utf-8")
     twin = dc_replace(seg, clip_id="d", start=2.0, end=4.0)
     assert _can_coalesce(seg, twin) and not _can_coalesce(seg, dc_replace(twin, caption_scale=1.0))
+
+
+def test_deepgram_request_carries_keyterms_and_keeps_smart_format_off(monkeypatch, tmp_path):
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"x")
+    sent = {}
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"metadata": {"duration": 1.0},
+                    "results": {"channels": [{"alternatives": [{"words": []}]}]}}
+
+    def fake_post(url, params=None, **kwargs):
+        sent["params"] = list(params)
+        return Response()
+
+    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-key")
+    monkeypatch.setattr(se_asr.requests, "post", fake_post)
+    se_asr.transcribe_words(str(audio))
+    params = sent["params"]
+    assert ("keyterm", "Shein") in params
+    assert [v for k, v in params if k == "keyterm"] == list(se_asr.KEYTERMS)
+    assert ("smart_format", "false") in params and ("detect_language", "true") in params
+    se_asr.transcribe_words(str(audio), language_hint="es")
+    assert ("language", "es") in sent["params"] and ("detect_language", "true") not in sent["params"]
+
+
+def test_engine_1_1_has_the_restarted_section_rule():
+    assert "RESTARTED SECTION" in se.DECISION_PROMPT
+    assert se.VERSION == "1.1"
