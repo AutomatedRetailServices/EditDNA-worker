@@ -29,9 +29,10 @@ struct CutProgressView: View {
             } else {
                 ProcessingContent(
                     stage: stage,
-                    fileName: cut?.fileName ?? fileName,
-                    thumbnail: cut?.thumbnail ?? thumbnail,
-                    failed: cut?.isFailed == true,
+                    fileName: uploading ? fileName : (cut?.fileName ?? fileName),
+                    thumbnail: uploading ? thumbnail : (cut?.thumbnail ?? thumbnail),
+                    failed: !uploading && cut?.isFailed == true,
+                    uploading: uploading,
                     onClose: onClose,
                     onOpenEdits: onOpenEdits
                 )
@@ -50,9 +51,17 @@ struct CutProgressView: View {
         .onDisappear { if tracker.visibleProjectID == projectID { tracker.visibleProjectID = nil } }
     }
 
+    /// Videos are still going up from this iPhone (also cuts 2..N of a Bulk).
+    private var uploading: Bool { submitter?.isSubmitting == true || (projectID == nil && submitter != nil) }
+
     private var stage: CutTracker.Stage {
+        if uploading, let submitter {
+            let base = CutTracker.uploadStage(progress: submitter.progress, status: submitter.statusText)
+            let label = submitter.statusText.components(separatedBy: " · ").first ?? ""
+            let bulkLabel = label.hasPrefix("Cut ") ? label + " · " : ""
+            return CutTracker.Stage(step: base.step, title: bulkLabel + base.title, percent: base.percent)
+        }
         if let cut { return CutTracker.serverStage(cut) }
-        if let submitter { return CutTracker.uploadStage(progress: submitter.progress, status: submitter.statusText) }
         return CutTracker.Stage(step: 1, title: "Uploading your video", percent: 0)
     }
 
@@ -75,6 +84,8 @@ struct ProcessingContent: View {
     let fileName: String
     let thumbnail: UIImage?
     var failed = false
+    /// While the video uploads from this iPhone CutSell must stay open, so there is no way out.
+    var uploading = false
     let onClose: () -> Void
     let onOpenEdits: () -> Void
 
@@ -85,6 +96,8 @@ struct ProcessingContent: View {
                     Image("ControlBack").resizable().frame(width: 36, height: 36)
                 }
                 .accessibilityLabel("Back")
+                .opacity(uploading ? 0.3 : 1)
+                .disabled(uploading)
                 Spacer()
                 Text("Processing")
                     .font(CS.inter(22, .semibold))
@@ -94,6 +107,8 @@ struct ProcessingContent: View {
                     .font(CS.inter(15, .semibold))
                     .foregroundStyle(CS.cyan)
                     .frame(width: 44, alignment: .trailing)
+                    .opacity(uploading ? 0.3 : 1)
+                    .disabled(uploading)
             }
             .frame(height: 46)
 
@@ -142,7 +157,7 @@ struct ProcessingContent: View {
             Spacer(minLength: 8)
 
             VStack(spacing: 12) {
-                Text("Processing continues if you leave this screen.")
+                Text(uploading ? "Keep CutSell open while your video uploads." : "Processing continues if you leave this screen.")
                     .font(CS.sf(13))
                     .foregroundStyle(Color(hex: 0xB8D1F5))
                     .frame(maxWidth: .infinity)
@@ -166,8 +181,10 @@ struct ProcessingContent: View {
                         .shadow(color: Color(hex: 0x1969FF, opacity: 0.25), radius: 9, y: 6)
                 }
                 .buttonStyle(.plain)
+                .disabled(uploading)
+                .opacity(uploading ? 0.4 : 1)
                 .accessibilityIdentifier("continueInBackground")
-                Text("We’ll notify you when your cut is ready.")
+                Text("We’ll let you know in CutSell when your cut is ready.")
                     .font(CS.sf(12))
                     .foregroundStyle(Color(hex: 0x94ADD6))
             }
@@ -270,7 +287,7 @@ struct ReadyContent: View {
                     BrandLogo()
                     HStack {
                         Button(action: onBack) {
-                            Image("ControlBack").resizable().frame(width: 28, height: 28)
+                            Image("ControlBack").resizable().frame(width: 36, height: 36)
                                 .frame(width: 44, height: 44)
                         }
                         .accessibilityLabel("Back")

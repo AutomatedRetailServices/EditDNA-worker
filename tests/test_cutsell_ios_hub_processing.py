@@ -46,7 +46,7 @@ def test_processing_stays_open_and_follows_the_cut():
     assert "startTracking(projectID: projectID" in flow
     assert "onStarted()" not in flow
     screen = read("ProcessingScreen.swift")
-    for text in ('"Continue in background"', '"We’ll notify you when your cut is ready."',
+    for text in ('"Continue in background"', '"We’ll let you know in CutSell when your cut is ready."',
                  '"Processing continues if you leave this screen."', '"Your cut is ready"', '"Review & edit"'):
         assert text in screen, text
     assert "DraftEditorView(project: project)" in screen
@@ -61,3 +61,24 @@ def test_ready_numbers_come_from_the_draft_not_invented():
     screen = read("ProcessingScreen.swift")
     assert '"/v1/projects/\\(project.projectID)/draft"' in screen
     assert "YOU JUST SAVED" not in screen and "42h" not in screen
+
+
+def test_no_leaving_during_upload_and_one_cut_at_a_time():
+    screen = read("ProcessingScreen.swift")
+    assert "private var uploading: Bool { submitter?.isSubmitting == true || (projectID == nil && submitter != nil) }" in screen
+    assert '"Keep CutSell open while your video uploads."' in screen
+    assert screen.count(".disabled(uploading)") >= 3
+    flow = read("CreateFlowView.swift")
+    assert "guard !submitter.isSubmitting else { return }" in flow and "submitter.reset()" in flow
+
+
+def test_polling_stops_on_cancel_or_missing_project():
+    tracker = read("CutTracker.swift")
+    assert 'jobState == "canceled"' in tracker
+    assert "if cut.clientErrors >= 3 { cut.gone = true" in tracker
+
+
+def test_notification_copy_is_honest():
+    screen = read("ProcessingScreen.swift")
+    assert "We’ll notify you when your cut is ready." not in screen
+    assert "We’ll let you know in CutSell when your cut is ready." in screen

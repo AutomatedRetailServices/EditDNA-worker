@@ -11,6 +11,13 @@ final class CutSubmitter: ObservableObject {
     /// The server job of the last cut started (for the Processing screen).
     @Published private(set) var lastJobID: String?
 
+    /// Clears the previous cut's progress before a new one starts.
+    func reset() {
+        progress = 0
+        statusText = ""
+        lastJobID = nil
+    }
+
     /// Shows a step that happens before uploading (e.g. copying from Photos).
     func announce(_ text: String) {
         statusText = text

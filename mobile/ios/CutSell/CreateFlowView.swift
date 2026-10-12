@@ -48,7 +48,7 @@ struct CreateFlowView: View {
             )
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Project.self) { project in
-                ProjectDetailView(project: project)
+                ProjectDetailView(project: project, onOpenEdits: { selectTab(.edits) })
             }
         }
         .tint(CS.cyan)
@@ -155,6 +155,11 @@ struct CreateFlowView: View {
     }
 
     private func launch(_ newJob: CreateJob) {
+        // One cut at a time from this screen: the upload screen cannot be left until it is done.
+        guard !submitter.isSubmitting else { return }
+        submitter.reset()
+        problem = nil
+        failure = nil
         CutSellDiagnostics.log("create_style_chosen", ["pace": newJob.style.pace.rawValue, "zoom": newJob.style.zoom.rawValue, "mode": newJob.mode.rawValue])
         startedInJob = 0
         processingProjectID = nil

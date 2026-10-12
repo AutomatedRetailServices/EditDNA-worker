@@ -22,7 +22,10 @@ final class CutTracker: ObservableObject {
         var jobProgress: Int?
         var error: String?
         var isReady: Bool { projectState == "draft_ready" || jobState == "finished" }
-        var isFailed: Bool { jobState == "failed" || projectState == "failed" }
+        var isFailed: Bool { jobState == "failed" || jobState == "canceled" || projectState == "failed" || gone }
+        /// The server kept answering 403/404 (project deleted or not ours): stop asking.
+        var gone = false
+        var clientErrors = 0
     }
 
     @Published private(set) var cuts: [String: Cut] = [:]
@@ -91,7 +94,11 @@ final class CutTracker: ObservableObject {
                 cut.jobProgress = status.progress
                 cut.error = status.state == "failed" ? (status.error ?? "processing_failed") : nil
             }
+            cut.clientErrors = 0
             cut.error = cut.isFailed ? (cut.error ?? "processing_failed") : nil
+        } catch APIError.http(let code, _) where (400..<500).contains(code) && code != 429 {
+            cut.clientErrors += 1
+            if cut.clientErrors >= 3 { cut.gone = true; cut.error = "not_found" }
         } catch {
             // A temporary network problem: try again on the next round.
         }
@@ -126,7 +133,7 @@ final class CutTracker: ObservableObject {
 
     /// Upload is step 1 (its real %), then the server's job: 0-100 % of the job maps to 20-100 %.
     static func uploadStage(progress: Double, status: String) -> Stage {
-        let starting = status.hasPrefix("Starting") || status.hasPrefix("Creating")
+        let starting = status.contains("Starting AI edit") || status.contains("Creating project")
         if starting && progress >= 0.999 {
             return Stage(step: 2, title: "Starting your cut", percent: 20)
         }

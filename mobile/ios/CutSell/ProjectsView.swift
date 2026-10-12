@@ -327,6 +327,8 @@ struct EditTile: View {
 
 struct ProjectDetailView: View {
     let project: Project
+    /// "Edits" on the Processing screen (from the Home Hub it switches to the Edits tab).
+    var onOpenEdits: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -338,7 +340,7 @@ struct ProjectDetailView: View {
                 // Figma Processing → Ready, following the cut's real state on the server.
                 CutProgressView(
                     projectID: project.projectID, fileName: project.title, thumbnail: nil,
-                    onClose: { dismiss() }, onOpenEdits: { dismiss() }
+                    onClose: { dismiss() }, onOpenEdits: { if let open = onOpenEdits { open() } else { dismiss() } }
                 )
                 .onAppear { CutTracker.shared.follow(project: project) }
             } else {
