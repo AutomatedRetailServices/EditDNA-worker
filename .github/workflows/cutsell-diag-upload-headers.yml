@@ -32,4 +32,5 @@ jobs:
           PY
           )"
           swift .github/diag/s3_probe.swift "$url" 2>&1 | tee out2.txt
+          swift .github/diag/s3_probe.swift "$url" fixed 2>&1 | tee -a out2.txt
           while IFS= read -r l; do echo "::notice title=s3::$l"; done < out2.txt
