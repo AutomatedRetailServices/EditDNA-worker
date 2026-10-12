@@ -1,0 +1,35 @@
+name: CutSell diag upload headers
+# Temporary diagnostic (no keys, no videos): what Content-Type does URLSession send on a part upload,
+# and does the live presigned S3 part URL accept the app's request?
+on:
+  push:
+    branches: [diag/upload-headers]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: URLSession header probe
+        run: |
+          swift .github/diag/put_probe.swift 2>&1 | tee out1.txt
+          while IFS= read -r l; do echo "::notice title=headers::$l"; done < out1.txt
+      - name: Live presigned part URL probe
+        run: |
+          url="$(python3 - <<'PY'
+          import json, urllib.request
+          API="https://cutsell-api.onrender.com"; T=None
+          def call(m,p,b=None):
+              r=urllib.request.Request(API+p,method=m,data=None if b is None else json.dumps(b).encode(),headers={"content-type":"application/json",**({"authorization":"Bearer "+T} if T else {})})
+              with urllib.request.urlopen(r,timeout=60) as x: return json.load(x)
+          s=call("POST","/v1/auth/session"); T=s["access_token"]; u=s["user_id"]
+          p=call("POST","/v1/projects",{"user_id":u,"title":"diag"}); pid=p["project_id"]
+          st=call("POST","/v1/uploads/multipart/start",{"project_id":pid,"user_id":u,"original_name":"a.mp4","content_type":"video/mp4","size_bytes":1000})
+          sg=call("POST",f"/v1/uploads/multipart/{st['upload_id']}/parts/1/presign",{"project_id":pid,"user_id":u})
+          print(sg["upload_url"])
+          PY
+          )"
+          swift .github/diag/s3_probe.swift "$url" 2>&1 | tee out2.txt
+          while IFS= read -r l; do echo "::notice title=s3::$l"; done < out2.txt
