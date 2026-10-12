@@ -57,10 +57,25 @@ def test_edits_route_uses_the_new_processing_screen():
     assert "CutProgressView(" in detail and "CutTracker.shared.follow(project: project)" in detail
 
 
-def test_ready_numbers_come_from_the_draft_not_invented():
+def test_ready_numbers_come_from_the_draft():
     screen = read("ProcessingScreen.swift")
     assert '"/v1/projects/\\(project.projectID)/draft"' in screen
-    assert "YOU JUST SAVED" not in screen and "42h" not in screen
+    assert '"YOU JUST SAVED"' in screen and "TimeSavedLedger.saved(forFootage: footage)" in screen
+
+
+def test_time_saved_is_counted_per_account_once_per_cut():
+    ledger = read("TimeSavedLedger.swift")
+    assert "static let editingMinutesPerFootageMinute = 2.0" in ledger
+    assert '"cutsell.timeSaved.\\(userID)"' in ledger
+    assert "if perCut[projectID] == nil, footageSeconds > 0" in ledger
+    assert "TimeSavedLedger.record(userID: session.userID, projectID: project.projectID" in read("ProcessingScreen.swift")
+
+
+def test_editor_load_is_not_cancelled_by_its_spinner():
+    editor = read("DraftEditorView.swift")
+    spinner = editor.split('ProgressView("Opening draft…")', 1)[1].split("}", 1)[0]
+    assert ".task" not in spinner
+    assert ".task(id: project.projectID)" in editor and "await model.load()" in editor
 
 
 def test_no_leaving_during_upload_and_one_cut_at_a_time():

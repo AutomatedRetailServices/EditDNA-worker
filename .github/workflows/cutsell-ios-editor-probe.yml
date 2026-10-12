@@ -1,0 +1,119 @@
+name: CutSell iOS editor probe
+
+# One-off check that the iPhone editor really opens a finished cut (TestFlight report:
+# "tapping a project does not open the Editor"). Makes ONE short cut on the live server from a
+# synthetic spoken clip (macOS "say", no real video or personal data), then opens it in the
+# Debug app in the Simulator and takes a screenshot. The throwaway session token is masked.
+# Runs only when pushed to probe/editor (manual).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/editor]
+
+concurrency:
+  group: cutsell-ios-editor-probe
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+
+      - name: Build for the Simulator
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen ffmpeg >/dev/null
+          xcodegen generate
+          set +e
+          xcodebuild -project CutSell.xcodeproj -scheme CutSell -sdk iphonesimulator -configuration Debug \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -8 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          exit $status
+
+      - name: Make a short spoken test clip
+        run: |
+          say -v Samantha -o "$RUNNER_TEMP/speech.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. It fits in any car cup holder. And right now it is on sale in my shop. Grab yours today."
+          ffmpeg -loglevel error -f lavfi -i color=c=0x203060:s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" \
+            -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac "$RUNNER_TEMP/probe.mp4"
+          ls -la "$RUNNER_TEMP/probe.mp4"
+
+      - name: Make one cut on the live server (same calls as the app)
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          API = "https://cutsell-api.onrender.com"; T = None
+          video = os.path.join(os.environ["RUNNER_TEMP"], "probe.mp4")
+          def call(m, p, b=None, q=""):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=120) as x: return json.load(x)
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          p = call("POST", "/v1/projects", {"user_id": u, "title": "Editor probe"}); pid = p["project_id"]
+          data = open(video, "rb").read()
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "probe.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(data)})
+          parts = []
+          for n in range(1, st["part_count"] + 1):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{n}/presign", {"project_id": pid, "user_id": u})
+              req = urllib.request.Request(sg["upload_url"], data=data[(n-1)*st["part_size"]: n*st["part_size"]], method="PUT")
+              req.add_header("Content-Type", "")
+              with urllib.request.urlopen(req, timeout=300) as r: parts.append({"part_number": n, "etag": r.headers["ETag"]})
+          done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+          job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": False, "language_hint": None,
+                     "sources": [{"original_name": "probe.mp4", "uri": done["source_uri"], "source_order": 0, "duration_sec": 20.0}]})
+          t0 = time.time()
+          while True:
+              j = call("GET", f"/v1/jobs/{job['job_id']}")
+              if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 900: break
+              time.sleep(5)
+          proj = call("GET", f"/v1/projects/{pid}", q=f"?user_id={u}")
+          print(f"::notice title=cut::job {j['state']} in {int(time.time()-t0)} s, project {proj['state']}")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"PROBE_TOKEN={T}\nPROBE_USER={u}\nPROBE_PROJECT={pid}\n")
+          PY
+
+      - name: Open the cut in the editor (Simulator)
+        working-directory: mobile/ios
+        run: |
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          print(c[-1][2])')"
+          xcrun simctl boot "$udid"; xcrun simctl bootstatus "$udid" -b
+          xcrun simctl ui "$udid" appearance dark || true
+          APP="build/Build/Products/Debug-iphonesimulator/CutSell.app"
+          BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
+          xcrun simctl install "$udid" "$APP"
+          SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+          SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+            xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+          mkdir -p "$RUNNER_TEMP/probe"
+          sleep 12; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/editor_12s.png" >/dev/null 2>&1
+          sleep 18; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/editor_30s.png" >/dev/null 2>&1
+          echo "::notice title=probe::screenshots taken"
+
+      - name: Push the screenshots to design-screenshots/probe
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
+          mkdir -p probe && cp "$RUNNER_TEMP"/probe/*.png probe/
+          echo "source commit: ${{ github.sha }}" > probe/SOURCE.txt
+          git add probe
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "editor probe for ${{ github.sha }}"
+          git push --quiet origin design-screenshots

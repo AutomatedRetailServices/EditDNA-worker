@@ -56,6 +56,8 @@ struct DesignScreenshotRoot: View {
                 project: Self.sampleProjects[0], onBack: {}, onReview: {}
             )
             .background(CS.base.ignoresSafeArea())
+        case "editor_probe":
+            EditorProbe()
         case "camera":
             CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true)
         case "gallery_single":
@@ -109,6 +111,34 @@ struct DesignScreenshotRoot: View {
             sourceCount: 1,
             updatedAt: nil
         )
+    }
+}
+
+/// CI only (Debug): opens the real editor on a real cut, to prove the draft loads.
+/// The session comes from environment variables set by the workflow (never in arguments or logs).
+private struct EditorProbe: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var project: Project?
+
+    var body: some View {
+        NavigationStack {
+            if let project {
+                DraftEditorView(project: project)
+            } else {
+                ProgressView("Probe…")
+            }
+        }
+        .task {
+            let env = ProcessInfo.processInfo.environment
+            guard let token = env["CUTSELL_PROBE_TOKEN"], let user = env["CUTSELL_PROBE_USER"],
+                  let projectID = env["CUTSELL_PROBE_PROJECT"], let api = env["CUTSELL_PROBE_API"] else { return }
+            UserDefaults.standard.set(api, forKey: "cutsell.api.baseURL")
+            let session = CutSellSession(userID: user, accessToken: token)
+            await APIClient.shared.setSession(session)
+            appState.session = session
+            project = Project(projectID: projectID, userID: user, title: "Editor probe", state: "draft_ready",
+                              latestJobID: nil, sourceCount: 1, updatedAt: nil)
+        }
     }
 }
 #endif

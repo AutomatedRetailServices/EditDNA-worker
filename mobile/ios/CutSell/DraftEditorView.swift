@@ -15,13 +15,16 @@ struct DraftEditorView: View {
                 editor(model)
             } else {
                 ProgressView("Opening draft…")
-                    .task {
-                        guard let session = appState.session else { return }
-                        let model = DraftEditorViewModel(project: project, session: session)
-                        holder.model = model
-                        await model.load()
-                    }
             }
+        }
+        // The load belongs to the whole screen. It used to hang off the "Opening draft…" spinner:
+        // setting the model removed the spinner, iOS cancelled its task, and the draft request
+        // was cut off (Render log: 499 on /draft and /timeline-assets) -- the editor never loaded.
+        .task(id: project.projectID) {
+            guard holder.model == nil, let session = appState.session else { return }
+            let model = DraftEditorViewModel(project: project, session: session)
+            holder.model = model
+            await model.load()
         }
         .navigationTitle(project.title)
         .navigationBarTitleDisplayMode(.inline)

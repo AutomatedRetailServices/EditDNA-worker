@@ -279,6 +279,7 @@ struct ReadyContent: View {
     @State private var finalSeconds: Double?
     @State private var keptClips: Int?
     @State private var footageSeconds: Double?
+    @State private var totalSaved: Double?
 
     var body: some View {
         ScrollView {
@@ -321,6 +322,22 @@ struct ReadyContent: View {
                     .lineLimit(1)
                     .padding(.top, 4)
 
+                if let footage = footageSeconds ?? cut.footageSeconds, footage > 0 {
+                    Text("YOU JUST SAVED")
+                        .font(CS.sf(11, .semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(Color(hex: 0x4DDBFF))
+                        .padding(.top, 14)
+                    Text(Self.clock(TimeSavedLedger.saved(forFootage: footage)))
+                        .font(CS.sf(54, .semibold))
+                        .tracking(-1.8)
+                        .foregroundStyle(.white)
+                        .accessibilityIdentifier("timeSaved")
+                    Text("of editing time back in your day")
+                        .font(CS.sf(14))
+                        .foregroundStyle(Color(hex: 0xB2BDD1))
+                }
+
                 HStack(spacing: 0) {
                     metric("ReadyFootage", footage, "your footage")
                     Rectangle().fill(Color(hex: 0x384766, opacity: 0.7)).frame(width: 1, height: 56)
@@ -331,7 +348,45 @@ struct ReadyContent: View {
                 .frame(height: 88)
                 .background(Color(hex: 0x0E111A, opacity: 0.94), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x33456B, opacity: 0.65), lineWidth: 1))
-                .padding(.top, 28)
+                .padding(.top, 20)
+
+                if let totalSaved, totalSaved > 0 {
+                    HStack(alignment: .top, spacing: 16) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x4DEBFF))
+                            .frame(width: 46, height: 46)
+                            .background(Circle().fill(Color(hex: 0x0A1A33)))
+                            .overlay(Circle().stroke(Color(hex: 0x4DEBFF).opacity(0.6), lineWidth: 1.5))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(TimeSavedLedger.hoursMinutes(totalSaved))
+                                .font(CS.sf(28, .semibold))
+                                .foregroundStyle(.white)
+                            Text("Your total editing time saved")
+                                .font(CS.sf(12))
+                                .foregroundStyle(Color(hex: 0xADB8D1))
+                        }
+                        Spacer(minLength: 0)
+                        if let days = TimeSavedLedger.workdays(totalSaved) {
+                            Text("\(days)+ WORKDAY\(days == 1 ? "" : "S")")
+                                .font(CS.sf(10, .semibold))
+                                .tracking(1.1)
+                                .foregroundStyle(Color(hex: 0x73D9FF))
+                                .padding(.top, 4)
+                        }
+                    }
+                    .padding(17)
+                    .background(
+                        LinearGradient(stops: [.init(color: Color(hex: 0x0A172B), location: 0),
+                                               .init(color: Color(hex: 0x120E29), location: 0.55),
+                                               .init(color: Color(hex: 0x1F0929), location: 1)],
+                                       startPoint: .leading, endPoint: .trailing),
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    )
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x6B38C7, opacity: 0.72), lineWidth: 1))
+                    .padding(.top, 14)
+                    .accessibilityIdentifier("totalTimeSaved")
+                }
 
                 HStack(spacing: 10) {
                     Button(action: onReview) {
@@ -382,7 +437,17 @@ struct ReadyContent: View {
 
     /// Real numbers from the saved draft: kept clips, final length, and the footage length.
     private func loadNumbers() async {
-        guard let session = appState.session else { return }
+        guard let session = appState.session else {
+            if let footage = cut.footageSeconds { totalSaved = TimeSavedLedger.saved(forFootage: footage) }
+            return
+        }
+        defer {
+            if let footage = footageSeconds ?? cut.footageSeconds {
+                totalSaved = TimeSavedLedger.record(userID: session.userID, projectID: project.projectID, footageSeconds: footage)
+            } else {
+                totalSaved = TimeSavedLedger.total(userID: session.userID)
+            }
+        }
         guard let snapshot: DraftSnapshot = try? await APIClient.shared.request(
             "/v1/projects/\(project.projectID)/draft",
             query: [URLQueryItem(name: "user_id", value: session.userID)]
