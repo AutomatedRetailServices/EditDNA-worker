@@ -97,3 +97,9 @@ def test_notification_copy_is_honest():
     screen = read("ProcessingScreen.swift")
     assert "We’ll notify you when your cut is ready." not in screen
     assert "We’ll let you know in CutSell when your cut is ready." in screen
+
+
+def test_editor_screen_hears_the_model_changes():
+    editor = read("DraftEditorView.swift")
+    holder = editor.split("private final class Holder", 1)[1]
+    assert "model?.objectWillChange.sink" in holder and "self?.objectWillChange.send()" in holder

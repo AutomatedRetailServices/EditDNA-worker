@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct DraftEditorView: View {
@@ -189,6 +190,14 @@ private struct ReorderList: View {
 }
 
 @MainActor
+/// Keeps the editor's model and passes ITS changes on to the editor screen. The screen only
+/// watches this holder; without forwarding, "Loading timeline…" stayed on screen forever even
+/// after the draft had loaded (the screen never heard that isLoading/snapshot changed).
 private final class Holder: ObservableObject {
-    @Published var model: DraftEditorViewModel?
+    @Published var model: DraftEditorViewModel? {
+        didSet {
+            forward = model?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        }
+    }
+    private var forward: AnyCancellable?
 }
