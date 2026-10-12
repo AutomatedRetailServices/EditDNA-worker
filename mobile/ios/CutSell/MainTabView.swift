@@ -25,8 +25,12 @@ enum MainTab: String, CaseIterable, Hashable {
 
 struct MainTabView: View {
     @State private var tab: MainTab
-    /// The tab to return to from the camera's back arrow.
-    @State private var lastNonCreateTab: MainTab = .edits
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var tracker = CutTracker.shared
+    /// A ready cut opened from the "Your cut is ready" banner.
+    @State private var openReady: ReadyRoute?
+
+    struct ReadyRoute: Identifiable { let id: String }
 
     init(initialTab: MainTab = .create) {
         _tab = State(initialValue: initialTab)
@@ -36,12 +40,8 @@ struct MainTabView: View {
         Group {
             switch tab {
             case .create:
-                // Full-screen camera, as in Figma (no tab bar on the camera); the back arrow
-                // returns to the last tab.
-                CreateFlowView(
-                    onBack: { select(lastNonCreateTab) },
-                    onStarted: { select(.edits) }
-                )
+                // Home Hub (Figma 1068:22); camera and gallery open full screen from it.
+                CreateFlowView(selectTab: select)
             case .edits:
                 ProjectsView(selectTab: select)
             case .plan:
@@ -50,12 +50,65 @@ struct MainTabView: View {
                 YouView(selectTab: select)
             }
         }
+        .overlay(alignment: .top) {
+            if let projectID = tracker.readyBanner {
+                ReadyBanner {
+                    tracker.readyBanner = nil
+                    openReady = ReadyRoute(id: projectID)
+                } onDismiss: {
+                    tracker.readyBanner = nil
+                }
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: tracker.readyBanner)
+        .fullScreenCover(item: $openReady) { route in
+            NavigationStack {
+                CutProgressView(
+                    projectID: route.id, fileName: "", thumbnail: nil,
+                    onClose: { openReady = nil },
+                    onOpenEdits: { openReady = nil; select(.edits) }
+                )
+            }
+            .environmentObject(appState)
+        }
+        .task { AppStateBridge.refreshProjects = { try await appState.refreshProjects() } }
         .preferredColorScheme(.dark)
     }
 
     private func select(_ next: MainTab) {
-        if next != .create { lastNonCreateTab = next }
         tab = next
+    }
+}
+
+/// "Your cut is ready" banner shown in any tab when a cut finishes in the background.
+struct ReadyBanner: View {
+    let onOpen: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image("ProcessingLogo").resizable().frame(width: 34, height: 34).blendMode(.screen)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your cut is ready").font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text("Tap to review it").font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+            }
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.textMutedF)
+                    .frame(width: 32, height: 32)
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(12)
+        .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(CS.cyan.opacity(0.5), lineWidth: 1))
+        .shadow(color: CS.cyan.opacity(0.25), radius: 12)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("readyBanner")
     }
 }
 

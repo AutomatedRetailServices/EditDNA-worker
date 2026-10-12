@@ -94,7 +94,8 @@ enum GalleryExport {
         case unavailable
     }
 
-    static func export(_ asset: PHAsset, name: String) async throws -> LocalVideo {
+    /// `name` nil = the video's own file name from Photos (shown on the Processing screen).
+    static func export(_ asset: PHAsset, name: String?) async throws -> LocalVideo {
         let resources = PHAssetResource.assetResources(for: asset)
         guard let resource = resources.first(where: { $0.type == .fullSizeVideo })
             ?? resources.first(where: { $0.type == .video }) else {
@@ -123,7 +124,7 @@ enum GalleryExport {
         case "m4v": contentType = "video/x-m4v"
         default: contentType = "video/quicktime"
         }
-        return LocalVideo(url: destination, name: name, duration: asset.duration, contentType: contentType)
+        return LocalVideo(url: destination, name: name ?? resource.originalFilename, duration: asset.duration, contentType: contentType)
     }
 }
 
@@ -141,6 +142,8 @@ struct GalleryPickerView: View {
     /// Called after "Choose your style": the mode, the videos in selection order and the style.
     let onCreate: (CreateMode, [PHAsset], StyleChoice) -> Void
     var preview: GalleryPreview?
+    /// The mode chip tapped on the Home Hub.
+    var initialMode: CreateMode = .single
 
     @StateObject private var library = GalleryLibrary()
     @State private var mode: CreateMode = .single
@@ -196,6 +199,7 @@ struct GalleryPickerView: View {
                 }
                 return
             }
+            mode = initialMode
             await library.start()
             if library.status == .limited { showingLimitedCard = true }
         }

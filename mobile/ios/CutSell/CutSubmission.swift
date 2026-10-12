@@ -8,6 +8,8 @@ final class CutSubmitter: ObservableObject {
     @Published private(set) var progress = 0.0
     @Published private(set) var statusText = ""
     @Published private(set) var isSubmitting = false
+    /// The server job of the last cut started (for the Processing screen).
+    @Published private(set) var lastJobID: String?
 
     /// Shows a step that happens before uploading (e.g. copying from Photos).
     func announce(_ text: String) {
@@ -149,6 +151,7 @@ final class CutSubmitter: ObservableObject {
             )
             // D-133: bounded diagnostics only -- logs the backend job id.
             CutSellDiagnostics.log("job_submitted", ["job_id": submitResponse.jobID])
+            lastJobID = submitResponse.jobID
             await PendingCutStore.shared.remove(projectID: projectID, deleteLocalFiles: true)
             report(1)
             try? await appState.refreshProjects()

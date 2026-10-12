@@ -327,6 +327,7 @@ struct EditTile: View {
 
 struct ProjectDetailView: View {
     let project: Project
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Group {
@@ -334,7 +335,12 @@ struct ProjectDetailView: View {
                 // No video reached the server yet, so there is no cut and no draft to edit.
                 UploadNotFinishedView(project: project)
             } else if Project.processingStates.contains(project.state) {
-                ProcessingView(project: project)
+                // Figma Processing → Ready, following the cut's real state on the server.
+                CutProgressView(
+                    projectID: project.projectID, fileName: project.title, thumbnail: nil,
+                    onClose: { dismiss() }, onOpenEdits: { dismiss() }
+                )
+                .onAppear { CutTracker.shared.follow(project: project) }
             } else {
                 DraftEditorView(project: project)
             }

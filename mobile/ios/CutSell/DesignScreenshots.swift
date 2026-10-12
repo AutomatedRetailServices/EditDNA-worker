@@ -15,7 +15,7 @@ enum DesignScreenshots {
     }
 
     static let all = [
-        "camera", "gallery_single", "gallery_bulk", "gallery_combine", "style", "gallery_access",
+        "hub", "processing", "ready", "camera", "gallery_single", "gallery_bulk", "gallery_combine", "style", "gallery_access",
         "perm_camera", "perm_mic", "edits", "edits_empty", "you", "plan",
         "err_unsupported", "err_too_large", "err_too_long", "err_clip_limit", "err_could_not_add", "err_formats",
     ]
@@ -36,12 +36,26 @@ struct DesignScreenshotRoot: View {
             .preferredColorScheme(.dark)
             .onAppear {
                 appState.isBootstrapping = false
-                if screen == "edits" { appState.projects = Self.sampleProjects }
+                if screen == "edits" || screen == "hub" { appState.projects = Self.sampleProjects }
             }
     }
 
     @ViewBuilder private var content: some View {
         switch screen {
+        case "hub":
+            HomeHubView(onUpload: { _ in }, onRecord: {}, onOpenProject: { _ in }, selectTab: { _ in })
+        case "processing":
+            ProcessingContent(
+                stage: CutTracker.Stage(step: 6, title: "Structuring your cut", percent: 68),
+                fileName: "IMG_4821.MOV", thumbnail: nil, onClose: {}, onOpenEdits: {}
+            )
+            .background(CS.base.ignoresSafeArea())
+        case "ready":
+            ReadyContent(
+                cut: CutTracker.Cut(id: "sample", title: "Sample edit", fileName: "IMG_4821.MOV", footageSeconds: 366),
+                project: Self.sampleProjects[0], onBack: {}, onReview: {}
+            )
+            .background(CS.base.ignoresSafeArea())
         case "camera":
             CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true)
         case "gallery_single":

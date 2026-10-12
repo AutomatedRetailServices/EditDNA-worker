@@ -28,6 +28,18 @@ enum CS {
     static let textCaption = Color(hex: 0x9EB2E0)
     static let textTab = Color(hex: 0xB0C4E8)
 
+    // Foundations (Figma 01_Foundations 50:2 / FICHA_01 §1)
+    static let base = Color(hex: 0x050814)
+    static let surfaceCard = Color(hex: 0x0C1730)
+    static let surfaceControl = Color(hex: 0x0A1326)
+    static let borderDefault = Color(hex: 0x19345F)
+    static let textPrimaryF = Color(hex: 0xF7FAFF)
+    static let textSecondaryF = Color(hex: 0xAFC4E8)
+    static let textMutedF = Color(hex: 0x6F86AE)
+    static let magenta = Color(hex: 0xFF21D7)
+    static let success = Color(hex: 0x25E6A2)
+    static let error = Color(hex: 0xFF4D67)
+
     static let cyan = Color(hex: 0x19E6FF)
     static let selection = Color(hex: 0x0DD1FF)
     static let selectedCardBorder = Color(hex: 0x1AA6FF)
@@ -56,6 +68,16 @@ enum CS {
     /// Selected recording length chip and record ring.
     static let brandGradient = LinearGradient(
         colors: [Color(hex: 0x7C3AED), Color(hex: 0x1769FF), Color(hex: 0x19E6FF)],
+        startPoint: .leading, endPoint: .trailing
+    )
+    /// Brand gradient: Cyan → ElectricBlue → Violet → Magenta.
+    static let brandFull = LinearGradient(
+        stops: [
+            .init(color: Color(hex: 0x19E6FF), location: 0),
+            .init(color: Color(hex: 0x1769FF), location: 0.38),
+            .init(color: Color(hex: 0x7C3AED), location: 0.72),
+            .init(color: Color(hex: 0xFF21D7), location: 1),
+        ],
         startPoint: .leading, endPoint: .trailing
     )
     static let screenBackground = LinearGradient(

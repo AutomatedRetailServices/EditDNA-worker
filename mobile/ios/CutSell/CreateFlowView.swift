@@ -1,16 +1,18 @@
 import Photos
 import SwiftUI
 
-/// The Create tab: camera → (Upload → gallery) → "Choose your style" → upload and start the cut.
+/// The Create tab: Home Hub (Figma 1068:22) → Upload (gallery) or Record (camera) → "Choose your
+/// style" → Processing (upload %, then the cut's real progress on the server) → Ready → editor.
 /// Uploading and starting the cut use `CutSubmitter`, the same pipeline as before.
 struct CreateFlowView: View {
-    let onBack: () -> Void
-    /// Called after the cut(s) started, to show them in Edits.
-    let onStarted: () -> Void
+    let selectTab: (MainTab) -> Void
 
     @EnvironmentObject private var appState: AppState
     @StateObject private var submitter = CutSubmitter()
+    @State private var showingCamera = false
+    @State private var afterCamera: AfterCamera?
     @State private var showingGallery = false
+    @State private var galleryMode: CreateMode = .single
     @State private var recorded: LocalVideo?
     @State private var job: CreateJob?
     /// Chosen in the gallery; started once the gallery has finished closing.
@@ -20,6 +22,13 @@ struct CreateFlowView: View {
     @State private var failure: SubmitFailure?
     /// Bulk: cuts already started before a failure (not repeated on "Try again").
     @State private var startedInJob = 0
+    /// The cut shown on the Processing screen once the server created it.
+    @State private var processingProjectID: String?
+    @State private var processingFileName = ""
+    @State private var processingThumbnail: UIImage?
+    @State private var path: [Project] = []
+
+    enum AfterCamera { case gallery, job(CreateJob) }
 
     enum SubmitFailure: Identifiable {
         /// The upload record is saved on the phone: Edits shows "Resume upload".
@@ -30,21 +39,43 @@ struct CreateFlowView: View {
     }
 
     var body: some View {
-        ZStack {
-            CreateCameraView(
-                onBack: onBack,
-                onUpload: { showingGallery = true },
-                onRecorded: { recorded = $0 },
-                isActive: !showingGallery && job == nil && jobAfterGallery == nil
+        NavigationStack(path: $path) {
+            HomeHubView(
+                onUpload: { mode in galleryMode = mode; showingGallery = true },
+                onRecord: { showingCamera = true },
+                onOpenProject: { path.append($0) },
+                selectTab: selectTab
             )
-            BottomSheetOverlay(isPresented: Binding(
-                get: { recorded != nil },
-                set: { if !$0, let video = recorded { recorded = nil; discardRecording(video) } }
-            )) {
-                StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { style in
-                    guard let video = recorded else { return }
-                    recorded = nil
-                    launch(CreateJob(mode: .single, source: .recorded(video), style: style))
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: Project.self) { project in
+                ProjectDetailView(project: project)
+            }
+        }
+        .tint(CS.cyan)
+        .fullScreenCover(isPresented: $showingCamera, onDismiss: {
+            switch afterCamera {
+            case .gallery: showingGallery = true
+            case .job(let next): launch(next)
+            case nil: break
+            }
+            afterCamera = nil
+        }) {
+            ZStack {
+                CreateCameraView(
+                    onBack: { showingCamera = false },
+                    onUpload: { afterCamera = .gallery; showingCamera = false },
+                    onRecorded: { recorded = $0 }
+                )
+                BottomSheetOverlay(isPresented: Binding(
+                    get: { recorded != nil },
+                    set: { if !$0, let video = recorded { recorded = nil; discardRecording(video) } }
+                )) {
+                    StyleSheetView(ctaTitle: CreateMode.single.ctaTitle(1)) { style in
+                        guard let video = recorded else { return }
+                        recorded = nil
+                        afterCamera = .job(CreateJob(mode: .single, source: .recorded(video), style: style))
+                        showingCamera = false
+                    }
                 }
             }
         }
@@ -59,7 +90,8 @@ struct CreateFlowView: View {
                 onCreate: { mode, assets, style in
                     jobAfterGallery = CreateJob(mode: mode, source: .library(assets), style: style)
                     showingGallery = false
-                }
+                },
+                initialMode: galleryMode
             )
         }
         .fullScreenCover(item: $job, onDismiss: {
@@ -68,53 +100,69 @@ struct CreateFlowView: View {
                 showingGallery = true
             }
         }) { current in
-            SubmittingView(submitter: submitter, job: current)
-                .fullScreenCover(item: $problem) { shown in
-                    CreateProblemView(
-                        problem: shown,
-                        onBack: {
-                            reopenGalleryAfterJob = true
-                            problem = nil
-                            job = nil
+            NavigationStack {
+                CutProgressView(
+                    submitter: submitter,
+                    projectID: processingProjectID,
+                    fileName: processingFileName,
+                    thumbnail: processingThumbnail,
+                    onClose: { job = nil },
+                    onOpenEdits: { job = nil; selectTab(.edits) }
+                )
+            }
+            .environmentObject(appState)
+            .fullScreenCover(item: $problem) { shown in
+                CreateProblemView(
+                    problem: shown,
+                    onBack: {
+                        reopenGalleryAfterJob = true
+                        problem = nil
+                        job = nil
+                    },
+                    onShowFormats: { problem = .supportedFormats }
+                )
+            }
+            .fullScreenCover(item: $failure) { shown in
+                switch shown {
+                case .savedForResume:
+                    ProblemScreen(
+                        screenTitle: "Upload paused",
+                        heading: "Something went wrong",
+                        message: "Your video is saved on this iPhone. Open Edits to resume the upload.",
+                        primaryTitle: "Go to Edits",
+                        primaryAction: { failure = nil; job = nil; selectTab(.edits) }
+                    )
+                case .notSaved:
+                    ProblemScreen(
+                        screenTitle: "Couldn’t start the cut",
+                        heading: "Something went wrong",
+                        message: "Check your connection and try again. Your video is still here.",
+                        primaryTitle: "Try again",
+                        primaryAction: {
+                            failure = nil
+                            Task { await run(current) }
                         },
-                        onShowFormats: { problem = .supportedFormats }
+                        secondaryTitle: "Cancel",
+                        secondaryAction: {
+                            failure = nil
+                            job = nil
+                            if case .recorded(let video) = current.source { discardRecording(video) }
+                        }
                     )
                 }
-                .fullScreenCover(item: $failure) { shown in
-                    switch shown {
-                    case .savedForResume:
-                        ProblemScreen(
-                            screenTitle: "Upload paused",
-                            heading: "Something went wrong",
-                            message: "Your video is saved on this iPhone. Open Edits to resume the upload.",
-                            primaryTitle: "Go to Edits",
-                            primaryAction: { failure = nil; job = nil; onStarted() }
-                        )
-                    case .notSaved:
-                        ProblemScreen(
-                            screenTitle: "Couldn’t start the cut",
-                            heading: "Something went wrong",
-                            message: "Check your connection and try again. Your video is still here.",
-                            primaryTitle: "Try again",
-                            primaryAction: {
-                                failure = nil
-                                Task { await run(current) }
-                            },
-                            secondaryTitle: "Cancel",
-                            secondaryAction: {
-                                failure = nil
-                                job = nil
-                                if case .recorded(let video) = current.source { discardRecording(video) }
-                            }
-                        )
-                    }
-                }
+            }
         }
     }
 
     private func launch(_ newJob: CreateJob) {
         CutSellDiagnostics.log("create_style_chosen", ["pace": newJob.style.pace.rawValue, "zoom": newJob.style.zoom.rawValue, "mode": newJob.mode.rawValue])
         startedInJob = 0
+        processingProjectID = nil
+        processingThumbnail = nil
+        switch newJob.source {
+        case .recorded(let video): processingFileName = video.url.lastPathComponent
+        case .library: processingFileName = ""
+        }
         job = newJob
         Task { await run(newJob) }
     }
@@ -124,43 +172,72 @@ struct CreateFlowView: View {
         try? FileManager.default.removeItem(at: video.url)
     }
 
+    /// Shows the video on the Processing screen and, once the cut started, follows it on the server.
+    @MainActor
+    private func startTracking(projectID: String, videos: [LocalVideo], thumbnail: UIImage?) {
+        let footage = videos.reduce(0) { $0 + $1.duration }
+        CutTracker.shared.track(
+            projectID: projectID, jobID: submitter.lastJobID,
+            title: appState.projects.first { $0.projectID == projectID }?.title ?? "Untitled Cut",
+            fileName: videos.count == 1 ? videos[0].name : "\(videos.count) clips",
+            thumbnail: thumbnail, footageSeconds: footage
+        )
+        if processingProjectID == nil { processingProjectID = projectID }
+    }
+
+    @MainActor
+    private func prepareScreen(for videos: [LocalVideo]) async -> UIImage? {
+        guard let first = videos.first else { return nil }
+        if processingFileName.isEmpty || videos.count > 1 {
+            processingFileName = videos.count == 1 ? first.name : "\(videos.count) clips"
+        }
+        let image = await CutTracker.firstFrame(of: first.url)
+        if processingProjectID == nil { processingThumbnail = image }
+        return image
+    }
+
     @MainActor
     private func run(_ current: CreateJob) async {
         do {
             switch current.source {
             case .recorded(let video):
-                try await submitter.submit(
+                let thumbnail = await prepareScreen(for: [video])
+                let projectID = try await submitter.submit(
                     videos: [video], title: nil, mode: CutSubmitter.singleMode,
                     audioOverlap: false, resumeProjectID: nil, appState: appState
                 )
+                startTracking(projectID: projectID, videos: [video], thumbnail: thumbnail)
             case .library(let assets):
                 if current.mode == .combine {
                     var videos: [LocalVideo] = []
                     for (index, asset) in assets.enumerated() {
-                        videos.append(try await export(asset, name: "Video \(index + 1)", index: index, count: assets.count))
+                        videos.append(try await export(asset, index: index, count: assets.count))
                     }
-                    try await submitter.submit(
+                    let thumbnail = await prepareScreen(for: videos)
+                    let projectID = try await submitter.submit(
                         videos: videos, title: nil, mode: CutSubmitter.multipleMode,
                         audioOverlap: false, resumeProjectID: nil, appState: appState
                     )
+                    startTracking(projectID: projectID, videos: videos, thumbnail: thumbnail)
                 } else {
                     // Single: one asset. Bulk: one separate cut per video, one after another.
                     let count = assets.count
                     for (index, asset) in assets.enumerated() where index >= startedInJob {
-                        let video = try await export(asset, name: "Video 1", index: index, count: count)
+                        let video = try await export(asset, index: index, count: count)
+                        let thumbnail = await prepareScreen(for: [video])
                         let lower = Double(index) / Double(count)
-                        try await submitter.submit(
+                        let projectID = try await submitter.submit(
                             videos: [video], title: nil, mode: CutSubmitter.singleMode,
                             audioOverlap: false, resumeProjectID: nil, appState: appState,
                             progressRange: lower...(lower + 1 / Double(count)),
                             label: count > 1 ? "Cut \(index + 1) of \(count)" : ""
                         )
+                        startTracking(projectID: projectID, videos: [video], thumbnail: thumbnail)
                         startedInJob = index + 1
                     }
                 }
             }
-            job = nil
-            onStarted()
+            // The Processing screen stays open and now follows the cut on the server.
         } catch let exportFailure as GalleryExport.Failure {
             switch exportFailure {
             case .unsupported: problem = .unsupportedMedia
@@ -178,9 +255,9 @@ struct CreateFlowView: View {
         }
     }
 
-    private func export(_ asset: PHAsset, name: String, index: Int, count: Int) async throws -> LocalVideo {
+    private func export(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {
         submitter.announce(count > 1 ? "Getting video \(index + 1) of \(count) from Photos…" : "Getting your video from Photos…")
-        return try await GalleryExport.export(asset, name: name)
+        return try await GalleryExport.export(asset, name: nil)
     }
 }
 
@@ -194,46 +271,4 @@ struct CreateJob: Identifiable {
     let mode: CreateMode
     let source: Source
     let style: StyleChoice
-}
-
-/// Shown while the videos upload and the cut starts.
-struct SubmittingView: View {
-    @ObservedObject var submitter: CutSubmitter
-    let job: CreateJob
-
-    var body: some View {
-        ZStack {
-            ScreenBackground()
-            VStack(alignment: .leading, spacing: 0) {
-                BrandLogo().padding(.top, 8)
-                Spacer()
-                VStack(spacing: 16) {
-                    Text(job.mode == .bulk ? "Uploading your videos" : "Uploading your video")
-                        .font(CS.inter(22, .bold))
-                        .foregroundStyle(.white)
-                    GeometryReader { proxy in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(CS.fieldBackground)
-                            Capsule().fill(CS.brandGradient)
-                                .frame(width: max(8, proxy.size.width * submitter.progress))
-                        }
-                    }
-                    .frame(height: 8)
-                    Text(submitter.statusText.isEmpty ? "Getting ready…" : submitter.statusText)
-                        .font(CS.inter(13))
-                        .foregroundStyle(CS.textSecondary)
-                        .multilineTextAlignment(.center)
-                    Text("Keep CutSell open until the upload finishes.")
-                        .font(CS.inter(12))
-                        .foregroundStyle(CS.textMuted)
-                }
-                .padding(.horizontal, 24)
-                Spacer()
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-        }
-        .preferredColorScheme(.dark)
-        .interactiveDismissDisabled()
-    }
 }

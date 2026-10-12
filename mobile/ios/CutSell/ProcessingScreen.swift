@@ -1,0 +1,384 @@
+import SwiftUI
+
+/// Processing → Ready (Figma 08: "Prototype/Master/Single/Processing · Canonical" 670:409 and
+/// "Ready · Canonical" 672:405). Step 1 is the upload (its real %); the rest follows the cut's
+/// REAL state on the server (CutTracker) until it is ready. Then "Review & edit" opens the editor.
+struct CutProgressView: View {
+    /// Set while the video is still uploading from this iPhone (Create flow).
+    var submitter: CutSubmitter?
+    /// The project, once the server created it (always set when opened from Edits).
+    var projectID: String?
+    var fileName: String
+    var thumbnail: UIImage?
+    /// Back arrow / "Continue in background".
+    let onClose: () -> Void
+    /// "Edits" in the top right.
+    let onOpenEdits: () -> Void
+
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var tracker = CutTracker.shared
+    @State private var openEditor = false
+
+    private var cut: CutTracker.Cut? { projectID.flatMap { tracker.cut($0) } }
+
+    var body: some View {
+        ZStack {
+            CS.base.ignoresSafeArea()
+            if let cut, cut.isReady, let project = readyProject(cut) {
+                ReadyContent(cut: cut, project: project, onBack: onClose, onReview: { openEditor = true })
+            } else {
+                ProcessingContent(
+                    stage: stage,
+                    fileName: cut?.fileName ?? fileName,
+                    thumbnail: cut?.thumbnail ?? thumbnail,
+                    failed: cut?.isFailed == true,
+                    onClose: onClose,
+                    onOpenEdits: onOpenEdits
+                )
+            }
+        }
+        .navigationDestination(isPresented: $openEditor) {
+            if let cut, let project = readyProject(cut) {
+                DraftEditorView(project: project)
+                    .toolbar(.visible, for: .navigationBar)
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .preferredColorScheme(.dark)
+        .onAppear { tracker.visibleProjectID = projectID }
+        .onChange(of: projectID) { _, id in tracker.visibleProjectID = id }
+        .onDisappear { if tracker.visibleProjectID == projectID { tracker.visibleProjectID = nil } }
+    }
+
+    private var stage: CutTracker.Stage {
+        if let cut { return CutTracker.serverStage(cut) }
+        if let submitter { return CutTracker.uploadStage(progress: submitter.progress, status: submitter.statusText) }
+        return CutTracker.Stage(step: 1, title: "Uploading your video", percent: 0)
+    }
+
+    private func readyProject(_ cut: CutTracker.Cut) -> Project? {
+        if let known = appState.projects.first(where: { $0.projectID == cut.id }) {
+            var project = known
+            project.state = "draft_ready"
+            return project
+        }
+        guard let userID = appState.session?.userID else { return nil }
+        return Project(projectID: cut.id, userID: userID, title: cut.title, state: "draft_ready",
+                       latestJobID: cut.jobID, sourceCount: nil, updatedAt: nil)
+    }
+}
+
+// MARK: - Processing (670:409)
+
+struct ProcessingContent: View {
+    let stage: CutTracker.Stage
+    let fileName: String
+    let thumbnail: UIImage?
+    var failed = false
+    let onClose: () -> Void
+    let onOpenEdits: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Button(action: onClose) {
+                    Image("ControlBack").resizable().frame(width: 36, height: 36)
+                }
+                .accessibilityLabel("Back")
+                Spacer()
+                Text("Processing")
+                    .font(CS.inter(22, .semibold))
+                    .foregroundStyle(Color(hex: 0xF2F7FF))
+                Spacer()
+                Button("Edits", action: onOpenEdits)
+                    .font(CS.inter(15, .semibold))
+                    .foregroundStyle(CS.cyan)
+                    .frame(width: 44, alignment: .trailing)
+            }
+            .frame(height: 46)
+
+            VStack(spacing: 14) {
+                VideoFirstFrame(image: thumbnail, width: 88, height: 156, cornerRadius: 16)
+                Text(fileName)
+                    .font(CS.sf(14, .semibold))
+                    .foregroundStyle(CS.textPrimaryF)
+                    .lineLimit(1)
+                    .frame(maxWidth: 240)
+            }
+            .padding(.top, 4)
+
+            VStack(spacing: 0) {
+                Text(failed ? "This cut needs another try" : "Hold on…")
+                    .font(CS.sf(failed ? 26 : 32, .semibold))
+                    .foregroundStyle(Color(hex: 0xC4D6F7))
+                Text(failed ? "Something went wrong on our side." : "We’re saving you hours per day…")
+                    .font(CS.sf(18, .semibold))
+                    .foregroundStyle(Color(hex: 0xC4D6F7))
+            }
+            .multilineTextAlignment(.center)
+            .padding(.top, 8)
+
+            BrandRing(animating: !failed)
+                .frame(width: 150, height: 140)
+                .padding(.vertical, 6)
+
+            VStack(spacing: 6) {
+                Text(stage.title)
+                    .font(CS.sf(16, .semibold))
+                    .foregroundStyle(Color(hex: 0xF2F7FF))
+                Text("\(stage.percent)%")
+                    .font(CS.sf(24, .semibold))
+                    .foregroundStyle(CS.cyan)
+                    .contentTransition(.numericText())
+                    .animation(.easeOut, value: stage.percent)
+                    .accessibilityIdentifier("processingPercent")
+                Text("Step \(stage.step) of \(CutTracker.stepCount)")
+                    .font(CS.sf(13))
+                    .foregroundStyle(CS.textSecondaryF)
+                StageDots(current: stage.step, total: CutTracker.stepCount)
+                    .padding(.top, 6)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(spacing: 12) {
+                Text("Processing continues if you leave this screen.")
+                    .font(CS.sf(13))
+                    .foregroundStyle(Color(hex: 0xB8D1F5))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(Color(hex: 0x060E1C), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.cyan.opacity(0.18), lineWidth: 1))
+                Button(action: onClose) {
+                    Text("Continue in background")
+                        .font(CS.sf(15, .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(
+                            LinearGradient(
+                                stops: [.init(color: Color(hex: 0x1969FF), location: 0),
+                                        .init(color: Color(hex: 0x7C3AED), location: 0.55),
+                                        .init(color: Color(hex: 0x19E6FF), location: 1)],
+                                startPoint: .leading, endPoint: .trailing),
+                            in: Capsule()
+                        )
+                        .shadow(color: Color(hex: 0x1969FF, opacity: 0.25), radius: 9, y: 6)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("continueInBackground")
+                Text("We’ll notify you when your cut is ready.")
+                    .font(CS.sf(12))
+                    .foregroundStyle(Color(hex: 0x94ADD6))
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+        .padding(.horizontal, 16)
+    }
+}
+
+/// 9:16 first frame with the neon border (Processing/VideoFirstFrame9x16).
+struct VideoFirstFrame: View {
+    let image: UIImage?
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                LinearGradient(colors: [Color(hex: 0x2A3F6B), Color(hex: 0x0C1730)], startPoint: .top, endPoint: .bottom)
+                Image("ProcessingLogo").resizable().scaledToFit().frame(width: width * 0.6).blendMode(.screen)
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).stroke(Color(hex: 0x00E8FF), lineWidth: 2.5))
+        .shadow(color: Color(hex: 0x331FFF, opacity: 0.46), radius: 10, y: 1)
+        .shadow(color: Color(hex: 0xFF00BF, opacity: 0.64), radius: 7, x: -4, y: 5)
+        .shadow(color: Color(hex: 0x00DBFF, opacity: 0.72), radius: 6, x: 4, y: -2)
+    }
+}
+
+/// The rotating brand ring with the CutSell bag in the middle (Processing/BrandRingMotion).
+struct BrandRing: View {
+    var animating = true
+    @State private var spin = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(AngularGradient(colors: [CS.cyan, Color(hex: 0x1769FF), Color(hex: 0x7C3AED), CS.cyan], center: .center),
+                        style: StrokeStyle(lineWidth: 9, lineCap: .round, dash: [42, 20]))
+                .frame(width: 120, height: 120)
+                .shadow(color: CS.cyan.opacity(0.6), radius: 10)
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .animation(animating ? .linear(duration: 6).repeatForever(autoreverses: false) : .default, value: spin)
+            Circle()
+                .fill(Color(hex: 0x050813))
+                .overlay(Circle().stroke(CS.cyan.opacity(0.35), lineWidth: 1))
+                .frame(width: 94, height: 94)
+            Image("ProcessingLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 112, height: 112)
+                .blendMode(.screen)
+        }
+        .onAppear { spin = animating }
+        .accessibilityHidden(true)
+    }
+}
+
+struct StageDots: View {
+    let current: Int
+    let total: Int
+
+    var body: some View {
+        HStack(spacing: 11) {
+            ForEach(1...total, id: \.self) { index in
+                Circle()
+                    .fill(index < current ? CS.cyan : index == current ? Color(hex: 0x7C3AED) : Color(hex: 0x2A3D63))
+                    .frame(width: index == current ? 9 : 7, height: index == current ? 9 : 7)
+                    .shadow(color: index == current ? Color(hex: 0x7C3AED).opacity(0.8) : .clear, radius: 4)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(current) of \(total)")
+    }
+}
+
+// MARK: - Ready (672:405)
+
+struct ReadyContent: View {
+    let cut: CutTracker.Cut
+    let project: Project
+    let onBack: () -> Void
+    let onReview: () -> Void
+
+    @EnvironmentObject private var appState: AppState
+    @State private var finalSeconds: Double?
+    @State private var keptClips: Int?
+    @State private var footageSeconds: Double?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ZStack {
+                    BrandLogo()
+                    HStack {
+                        Button(action: onBack) {
+                            Image("ControlBack").resizable().frame(width: 28, height: 28)
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Back")
+                        Spacer()
+                    }
+                }
+                .padding(.top, 4)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 25)
+                        .fill(AngularGradient(colors: [Color(hex: 0x00EDFF), Color(hex: 0x1445FF), Color(hex: 0xB800FF), Color(hex: 0xFF0D75), Color(hex: 0x00EDFF)], center: .center))
+                        .frame(width: 134, height: 220)
+                        .blur(radius: 10)
+                        .opacity(0.9)
+                    VideoFirstFrame(image: cut.thumbnail, width: 112, height: 199, cornerRadius: 20)
+                        .overlay {
+                            Circle().fill(Color.black.opacity(0.45)).frame(width: 42, height: 42)
+                                .overlay(Image(systemName: "play.fill").font(.system(size: 18)).foregroundStyle(.white))
+                        }
+                }
+                .padding(.top, 8)
+                .onTapGesture(perform: onReview)
+
+                Text("Your cut is ready")
+                    .font(CS.sf(28, .semibold))
+                    .foregroundStyle(Color(hex: 0xFAFCFF))
+                    .padding(.top, 18)
+                Text(cut.fileName)
+                    .font(CS.sf(13))
+                    .foregroundStyle(Color(hex: 0x8594B2))
+                    .lineLimit(1)
+                    .padding(.top, 4)
+
+                HStack(spacing: 0) {
+                    metric("ReadyFootage", footage, "your footage")
+                    Rectangle().fill(Color(hex: 0x384766, opacity: 0.7)).frame(width: 1, height: 56)
+                    metric("ReadyTrims", keptClips.map { "\($0)" } ?? "–", "clips kept")
+                    Rectangle().fill(Color(hex: 0x384766, opacity: 0.7)).frame(width: 1, height: 56)
+                    metric("ReadyFinalCut", finalSeconds.map(Self.clock) ?? "–", "your final cut")
+                }
+                .frame(height: 88)
+                .background(Color(hex: 0x0E111A, opacity: 0.94), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(hex: 0x33456B, opacity: 0.65), lineWidth: 1))
+                .padding(.top, 28)
+
+                HStack(spacing: 10) {
+                    Button(action: onReview) {
+                        Text("Review & edit")
+                            .font(CS.inter(16, .semibold))
+                            .foregroundStyle(Color(hex: 0xFAFCFF))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(Color(hex: 0x02060F), in: Capsule())
+                            .overlay(Capsule().stroke(Color(hex: 0x265EA3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("readyReviewButton")
+                    Button(action: onReview) {
+                        Text("Export video")
+                            .font(CS.sf(16, .semibold))
+                            .foregroundStyle(Color(hex: 0x03050D))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(LinearGradient(
+                                stops: [.init(color: Color(hex: 0x14E0FF), location: 0),
+                                        .init(color: Color(hex: 0x1F70FF), location: 0.48),
+                                        .init(color: Color(hex: 0xFF14D9), location: 1)],
+                                startPoint: .leading, endPoint: .trailing), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 28)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        }
+        .task { await loadNumbers() }
+    }
+
+    private var footage: String {
+        (footageSeconds ?? cut.footageSeconds).map(Self.clock) ?? "–"
+    }
+
+    private func metric(_ icon: String, _ value: String, _ label: String) -> some View {
+        VStack(spacing: 4) {
+            Image(icon).resizable().frame(width: 20, height: 20)
+            Text(value).font(CS.sf(19, .semibold)).foregroundStyle(.white)
+            Text(label).font(CS.sf(11)).foregroundStyle(Color(hex: 0x8F9CB8))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Real numbers from the saved draft: kept clips, final length, and the footage length.
+    private func loadNumbers() async {
+        guard let session = appState.session else { return }
+        guard let snapshot: DraftSnapshot = try? await APIClient.shared.request(
+            "/v1/projects/\(project.projectID)/draft",
+            query: [URLQueryItem(name: "user_id", value: session.userID)]
+        ) else { return }
+        let selected = snapshot.draft["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        keptClips = selected.count
+        finalSeconds = selected.reduce(0) { $0 + max(0, ($1["end"]?.doubleValue ?? 0) - ($1["start"]?.doubleValue ?? 0)) }
+        let sourceSeconds = snapshot.sources.compactMap { $0.objectValue?["duration_sec"]?.doubleValue }
+        if !sourceSeconds.isEmpty { footageSeconds = sourceSeconds.reduce(0, +) }
+    }
+
+    static func clock(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
