@@ -1,0 +1,5 @@
+/* Permission texts shown by iOS (English). */
+"NSMicrophoneUsageDescription" = "CutSell uses the microphone to record your voice-over and the sound of your videos.";
+"NSPhotoLibraryUsageDescription" = "CutSell needs access to the videos you choose to edit.";
+"NSPhotoLibraryAddUsageDescription" = "CutSell saves your finished videos to your library.";
+"NSCameraUsageDescription" = "CutSell uses the camera to record your product videos.";

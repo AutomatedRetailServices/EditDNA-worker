@@ -1,0 +1,5 @@
+/* Textos de permisos que muestra iOS (español). */
+"NSMicrophoneUsageDescription" = "CutSell usa el micrófono para grabar tu voz en off y el sonido de tus videos.";
+"NSPhotoLibraryUsageDescription" = "CutSell necesita acceso a los videos que elijas editar.";
+"NSPhotoLibraryAddUsageDescription" = "CutSell guarda tus videos terminados en tu galería.";
+"NSCameraUsageDescription" = "CutSell usa la cámara para grabar tus videos de producto.";

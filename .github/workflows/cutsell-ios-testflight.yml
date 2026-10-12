@@ -1,0 +1,168 @@
+name: CutSell iOS TestFlight (manual)
+
+# Builds the iPhone app (Release, pointing at the live Render API), signs it with the App Store
+# Connect API key and uploads it to TestFlight (internal testing only; never submits for App Store
+# review). Manual only:
+# - "Run workflow" (workflow_dispatch) once this file exists on the default branch.
+# - Until then, pushing to the branch testflight/request is the manual "run" button: nothing else
+#   pushes there. It never runs on ordinary pushes.
+# Secrets (never printed): ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, APPLE_TEAM_ID.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [testflight/request]
+
+concurrency:
+  group: cutsell-ios-testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  testflight:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      BUNDLE_ID: ai.cutsell.app
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the secrets exist (names only)
+        run: |
+          missing=""
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then missing="$missing $v"; fi
+          done
+          if [ -n "$missing" ]; then echo "::error title=secretos::faltan en GitHub:$missing"; exit 1; fi
+          if ! printf '%s' "$ASC_KEY_P8" | grep -q "BEGIN PRIVATE KEY"; then
+            echo "::error title=secretos::ASC_KEY_P8 no parece el contenido de un archivo .p8 (debe empezar con -----BEGIN PRIVATE KEY-----)"; exit 1
+          fi
+          echo "::notice title=secretos::los 4 secretos existen"
+
+      - name: Write the API key to a private temp file
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+          xcodebuild -version | tee xcode_version.txt
+          echo "::notice title=xcode::$(tr '\n' ' ' < xcode_version.txt)"
+
+      - name: Generate the Xcode project
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Archive (Release, automatic signing with the API key)
+        working-directory: mobile/ios
+        run: |
+          set +e
+          xcodebuild \
+            -project CutSell.xcodeproj -scheme CutSell -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/CutSell.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            archive > "$RUNNER_TEMP/archive.log" 2>&1
+          status=$?
+          grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)" "$RUNNER_TEMP/archive.log" | sort -u | head -40
+          if [ "$status" -ne 0 ]; then
+            msg="$(grep -E 'error:' "$RUNNER_TEMP/archive.log" | sort -u | head -8 | cut -c1-300 | tr '\n' '|')"
+            echo "::error title=archive::${msg:-el archivo no se pudo crear (sin lineas error:)}"
+            exit "$status"
+          fi
+          echo "::notice title=archive::archivo creado (build $BUILD_NUMBER)"
+
+      - name: Export and upload to TestFlight
+        working-directory: mobile/ios
+        run: |
+          set +e
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/CutSell.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            > "$RUNNER_TEMP/export.log" 2>&1
+          status=$?
+          grep -E "error:|Upload|EXPORT (SUCCEEDED|FAILED)" "$RUNNER_TEMP/export.log" | sort -u | head -40
+          if [ "$status" -ne 0 ]; then
+            msg="$(grep -E 'error:|rror' "$RUNNER_TEMP/export.log" | sort -u | head -8 | cut -c1-300 | tr '\n' '|')"
+            echo "::error title=upload::${msg:-no se pudo exportar/subir (sin lineas de error)}"
+            exit "$status"
+          fi
+          echo "::notice title=upload::subido a App Store Connect (build $BUILD_NUMBER)"
+
+      - name: Wait for the build to appear in TestFlight
+        run: |
+          pip3 install --quiet --break-system-packages pyjwt cryptography requests 2>/dev/null || pip3 install --quiet pyjwt cryptography requests
+          python3 - <<'PY'
+          import os, time, jwt, requests
+          key = open(os.environ["ASC_KEY_PATH"]).read()
+          def token():
+              now = int(time.time())
+              return jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": now, "exp": now + 1100, "aud": "appstoreconnect-v1"},
+                                key, algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          def get(path, **params):
+              r = requests.get("https://api.appstoreconnect.apple.com" + path, params=params,
+                               headers={"Authorization": "Bearer " + token()}, timeout=60)
+              return r.status_code, (r.json() if r.content else {})
+          code, apps = get("/v1/apps", **{"filter[bundleId]": os.environ["BUNDLE_ID"]})
+          if code != 200 or not apps.get("data"):
+              print(f"::error title=testflight::no encuentro la app {os.environ['BUNDLE_ID']} en App Store Connect (HTTP {code})"); raise SystemExit(1)
+          app_id = apps["data"][0]["id"]
+          state = None
+          for _ in range(40):                      # up to ~30 minutes
+              code, builds = get("/v1/builds", **{"filter[app]": app_id, "filter[version]": os.environ["BUILD_NUMBER"], "limit": 1})
+              if code == 200 and builds.get("data"):
+                  state = builds["data"][0]["attributes"].get("processingState")
+                  print("build", os.environ["BUILD_NUMBER"], "state", state, flush=True)
+                  if state in ("VALID", "INVALID", "FAILED"):
+                      break
+              else:
+                  print("build not visible yet (HTTP", code, ")", flush=True)
+              time.sleep(45)
+          if state == "VALID":
+              print(f"::notice title=testflight::build {os.environ['BUILD_NUMBER']} listo en TestFlight (VALID)")
+          elif state:
+              print(f"::error title=testflight::build {os.environ['BUILD_NUMBER']} en TestFlight con estado {state}"); raise SystemExit(1)
+          else:
+              print(f"::warning title=testflight::el build {os.environ['BUILD_NUMBER']} se subio pero todavia no aparece; Apple sigue procesandolo")
+          PY
+
+      - name: Remove the API key file
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"

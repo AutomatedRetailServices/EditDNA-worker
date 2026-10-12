@@ -1,6 +1,7 @@
 name: CutSell
 options:
   bundleIdPrefix: ai.cutsell
+  developmentLanguage: en
 settings:
   base:
     IPHONEOS_DEPLOYMENT_TARGET: 17.0
