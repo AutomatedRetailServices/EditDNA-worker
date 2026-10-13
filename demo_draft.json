@@ -1,0 +1,551 @@
+{
+ "selected": [
+  {
+   "clip_id": "se-000-0001",
+   "source_asset_id": "src_b048f3da021701b8d249",
+   "source_order": 0,
+   "start": 0.0,
+   "end": 1.49,
+   "text": "Hi, everyone.",
+   "caption_text": "Hi, everyone.",
+   "words": [
+    {
+     "text": "Hi,",
+     "start": 0.0,
+     "end": 0.56,
+     "confidence": null
+    },
+    {
+     "text": "everyone.",
+     "start": 0.56,
+     "end": 1.2,
+     "confidence": null
+    }
+   ],
+   "semantic_role": "OTHER",
+   "take_group_id": null,
+   "selected": true,
+   "audio_muted": false,
+   "audio_volume": 1.0,
+   "signals": null,
+   "render_fragment_id": null,
+   "parent_semantic_clip_id": null,
+   "fragment_index": null,
+   "fragment_count": null,
+   "boundary_reason": null,
+   "realization_id": null,
+   "semantic_idea_id": null,
+   "retry_family_id": null,
+   "parent_realization_id": null,
+   "source_span_id": null,
+   "attempt_id": null,
+   "complete_idea": null,
+   "word_indices": []
+  },
+  {
+   "clip_id": "se-000-0002",
+   "source_asset_id": "src_b048f3da021701b8d249",
+   "source_order": 0,
+   "start": 1.615,
+   "end": 5.22,
+   "text": "Today I want to show you my favorite water bottle.",
+   "caption_text": "Today I want to show you my favorite water bottle.",
+   "words": [
+    {
+     "text": "Today",
+     "start": 1.76,
+     "end": 2.16,
+     "confidence": null
+    },
+    {
+     "text": "I",
+     "start": 2.16,
+     "end": 2.4,
+     "confidence": null
+    },
+    {
+     "text": "want",
+     "start": 2.4,
+     "end": 2.64,
+     "confidence": null
+    },
+    {
+     "text": "to",
+     "start": 2.64,
+     "end": 2.8,
+     "confidence": null
+    },
+    {
+     "text": "show",
+     "start": 2.8,
+     "end": 3.04,
+     "confidence": null
+    },
+    {
+     "text": "you",
+     "start": 3.04,
+     "end": 3.2,
+     "confidence": null
+    },
+    {
+     "text": "my",
+     "start": 3.2,
+     "end": 3.44,
+     "confidence": null
+    },
+    {
+     "text": "favorite",
+     "start": 3.44,
+     "end": 3.76,
+     "confidence": null
+    },
+    {
+     "text": "water",
+     "start": 3.76,
+     "end": 4.16,
+     "confidence": null
+    },
+    {
+     "text": "bottle.",
+     "start": 4.16,
+     "end": 4.88,
+     "confidence": null
+    }
+   ],
+   "semantic_role": "OTHER",
+   "take_group_id": null,
+   "selected": true,
+   "audio_muted": false,
+   "audio_volume": 1.0,
+   "signals": null,
+   "render_fragment_id": null,
+   "parent_semantic_clip_id": null,
+   "fragment_index": null,
+   "fragment_count": null,
+   "boundary_reason": null,
+   "realization_id": null,
+   "semantic_idea_id": null,
+   "retry_family_id": null,
+   "parent_realization_id": null,
+   "source_span_id": null,
+   "attempt_id": null,
+   "complete_idea": null,
+   "word_indices": []
+  },
+  {
+   "clip_id": "se-000-0003",
+   "source_asset_id": "src_b048f3da021701b8d249",
+   "source_order": 0,
+   "start": 9.99,
+   "end": 13.49,
+   "text": "It keeps drinks cold for a full twenty four hours.",
+   "caption_text": "It keeps drinks cold for a full twenty four hours.",
+   "words": [
+    {
+     "text": "It",
+     "start": 10.16,
+     "end": 10.4,
+     "confidence": null
+    },
+    {
+     "text": "keeps",
+     "start": 10.4,
+     "end": 10.72,
+     "confidence": null
+    },
+    {
+     "text": "drinks",
+     "start": 10.72,
+     "end": 11.12,
+     "confidence": null
+    },
+    {
+     "text": "cold",
+     "start": 11.12,
+     "end": 11.44,
+     "confidence": null
+    },
+    {
+     "text": "for",
+     "start": 11.44,
+     "end": 11.6,
+     "confidence": null
+    },
+    {
+     "text": "a",
+     "start": 11.6,
+     "end": 11.76,
+     "confidence": null
+    },
+    {
+     "text": "full",
+     "start": 11.76,
+     "end": 12.0,
+     "confidence": null
+    },
+    {
+     "text": "twenty",
+     "start": 12.0,
+     "end": 12.32,
+     "confidence": null
+    },
+    {
+     "text": "four",
+     "start": 12.32,
+     "end": 12.56,
+     "confidence": null
+    },
+    {
+     "text": "hours.",
+     "start": 12.56,
+     "end": 13.2,
+     "confidence": null
+    }
+   ],
+   "semantic_role": "OTHER",
+   "take_group_id": null,
+   "selected": true,
+   "audio_muted": false,
+   "audio_volume": 1.0,
+   "signals": null,
+   "render_fragment_id": null,
+   "parent_semantic_clip_id": null,
+   "fragment_index": null,
+   "fragment_count": null,
+   "boundary_reason": null,
+   "realization_id": null,
+   "semantic_idea_id": null,
+   "retry_family_id": null,
+   "parent_realization_id": null,
+   "source_span_id": null,
+   "attempt_id": null,
+   "complete_idea": null,
+   "word_indices": []
+  },
+  {
+   "clip_id": "se-000-0004",
+   "source_asset_id": "src_b048f3da021701b8d249",
+   "source_order": 0,
+   "start": 13.615,
+   "end": 15.94,
+   "text": "It fits in any car cup holder.",
+   "caption_text": "It fits in any car cup holder.",
+   "words": [
+    {
+     "text": "It",
+     "start": 13.76,
+     "end": 14.0,
+     "confidence": null
+    },
+    {
+     "text": "fits",
+     "start": 14.0,
+     "end": 14.32,
+     "confidence": null
+    },
+    {
+     "text": "in",
+     "start": 14.32,
+     "end": 14.48,
+     "confidence": null
+    },
+    {
+     "text": "any",
+     "start": 14.48,
+     "end": 14.72,
+     "confidence": null
+    },
+    {
+     "text": "car",
+     "start": 14.72,
+     "end": 14.96,
+     "confidence": null
+    },
+    {
+     "text": "cup",
+     "start": 14.96,
+     "end": 15.2,
+     "confidence": null
+    },
+    {
+     "text": "holder.",
+     "start": 15.2,
+     "end": 15.6,
+     "confidence": null
+    }
+   ],
+   "semantic_role": "OTHER",
+   "take_group_id": null,
+   "selected": true,
+   "audio_muted": false,
+   "audio_volume": 1.0,
+   "signals": null,
+   "render_fragment_id": null,
+   "parent_semantic_clip_id": null,
+   "fragment_index": null,
+   "fragment_count": null,
+   "boundary_reason": null,
+   "realization_id": null,
+   "semantic_idea_id": null,
+   "retry_family_id": null,
+   "parent_realization_id": null,
+   "source_span_id": null,
+   "attempt_id": null,
+   "complete_idea": null,
+   "word_indices": []
+  },
+  {
+   "clip_id": "se-000-0005",
+   "source_asset_id": "src_b048f3da021701b8d249",
+   "source_order": 0,
+   "start": 16.33,
+   "end": 20.01,
+   "text": "And right now, is on sale for only nineteen dollars.",
+   "caption_text": "And right now, is on sale for only nineteen dollars.",
+   "words": [
+    {
+     "text": "And",
+     "start": 16.499,
+     "end": 16.739,
+     "confidence": null
+    },
+    {
+     "text": "right",
+     "start": 16.739,
+     "end": 17.059,
+     "confidence": null
+    },
+    {
+     "text": "now,",
+     "start": 17.059,
+     "end": 17.379,
+     "confidence": null
+    },
+    {
+     "text": "is",
+     "start": 17.379,
+     "end": 17.539,
+     "confidence": null
+    },
+    {
+     "text": "on",
+     "start": 17.539,
+     "end": 17.699,
+     "confidence": null
+    },
+    {
+     "text": "sale",
+     "start": 17.699,
+     "end": 17.939,
+     "confidence": null
+    },
+    {
+     "text": "for",
+     "start": 17.939,
+     "end": 18.179,
+     "confidence": null
+    },
+    {
+     "text": "only",
+     "start": 18.179,
+     "end": 18.499,
+     "confidence": null
+    },
+    {
+     "text": "nineteen",
+     "start": 18.499,
+     "end": 18.899,
+     "confidence": null
+    },
+    {
+     "text": "dollars.",
+     "start": 18.899,
+     "end": 19.699,
+     "confidence": null
+    }
+   ],
+   "semantic_role": "OTHER",
+   "take_group_id": null,
+   "selected": true,
+   "audio_muted": false,
+   "audio_volume": 1.0,
+   "signals": null,
+   "render_fragment_id": null,
+   "parent_semantic_clip_id": null,
+   "fragment_index": null,
+   "fragment_count": null,
+   "boundary_reason": null,
+   "realization_id": null,
+   "semantic_idea_id": null,
+   "retry_family_id": null,
+   "parent_realization_id": null,
+   "source_span_id": null,
+   "attempt_id": null,
+   "complete_idea": null,
+   "word_indices": []
+  },
+  {
+   "clip_id": "se-000-0006",
+   "source_asset_id": "src_b048f3da021701b8d249",
+   "source_order": 0,
+   "start": 20.145,
+   "end": 22.51,
+   "text": "Tap the link and grab yours today.",
+   "caption_text": "Tap the link and grab yours today.",
+   "words": [
+    {
+     "text": "Tap",
+     "start": 20.339,
+     "end": 20.659,
+     "confidence": null
+    },
+    {
+     "text": "the",
+     "start": 20.659,
+     "end": 20.819,
+     "confidence": null
+    },
+    {
+     "text": "link",
+     "start": 20.819,
+     "end": 21.059,
+     "confidence": null
+    },
+    {
+     "text": "and",
+     "start": 21.059,
+     "end": 21.219,
+     "confidence": null
+    },
+    {
+     "text": "grab",
+     "start": 21.219,
+     "end": 21.459,
+     "confidence": null
+    },
+    {
+     "text": "yours",
+     "start": 21.459,
+     "end": 21.779,
+     "confidence": null
+    },
+    {
+     "text": "today.",
+     "start": 21.779,
+     "end": 22.179,
+     "confidence": null
+    }
+   ],
+   "semantic_role": "OTHER",
+   "take_group_id": null,
+   "selected": true,
+   "audio_muted": false,
+   "audio_volume": 1.0,
+   "signals": null,
+   "render_fragment_id": null,
+   "parent_semantic_clip_id": null,
+   "fragment_index": null,
+   "fragment_count": null,
+   "boundary_reason": null,
+   "realization_id": null,
+   "semantic_idea_id": null,
+   "retry_family_id": null,
+   "parent_realization_id": null,
+   "source_span_id": null,
+   "attempt_id": null,
+   "complete_idea": null,
+   "word_indices": []
+  }
+ ],
+ "alternates": [
+  {
+   "clip_id": "se-000-h0001",
+   "source_asset_id": "src_b048f3da021701b8d249",
+   "source_order": 0,
+   "start": 5.22,
+   "end": 9.99,
+   "text": "It keeps drinks cold for twelve hours. Wait. Sorry.",
+   "caption_text": "It keeps drinks cold for twelve hours. Wait. Sorry.",
+   "words": [
+    {
+     "text": "It",
+     "start": 5.6,
+     "end": 5.76,
+     "confidence": null
+    },
+    {
+     "text": "keeps",
+     "start": 5.76,
+     "end": 6.08,
+     "confidence": null
+    },
+    {
+     "text": "drinks",
+     "start": 6.08,
+     "end": 6.48,
+     "confidence": null
+    },
+    {
+     "text": "cold",
+     "start": 6.48,
+     "end": 6.8,
+     "confidence": null
+    },
+    {
+     "text": "for",
+     "start": 6.8,
+     "end": 6.96,
+     "confidence": null
+    },
+    {
+     "text": "twelve",
+     "start": 6.96,
+     "end": 7.28,
+     "confidence": null
+    },
+    {
+     "text": "hours.",
+     "start": 7.28,
+     "end": 7.92,
+     "confidence": null
+    },
+    {
+     "text": "Wait.",
+     "start": 8.32,
+     "end": 9.04,
+     "confidence": null
+    },
+    {
+     "text": "Sorry.",
+     "start": 9.04,
+     "end": 9.76,
+     "confidence": null
+    }
+   ],
+   "semantic_role": "OTHER",
+   "take_group_id": null,
+   "selected": false,
+   "audio_muted": false,
+   "audio_volume": 1.0,
+   "signals": null,
+   "render_fragment_id": null,
+   "parent_semantic_clip_id": null,
+   "fragment_index": null,
+   "fragment_count": null,
+   "boundary_reason": null,
+   "realization_id": null,
+   "semantic_idea_id": null,
+   "retry_family_id": null,
+   "parent_realization_id": null,
+   "source_span_id": null,
+   "attempt_id": null,
+   "complete_idea": null,
+   "word_indices": []
+  }
+ ],
+ "captions_enabled": true,
+ "caption_preset": "classic",
+ "audio_overlap_enabled": null,
+ "auto_zoom_enabled": null,
+ "zoom_keyframes": null
+}
