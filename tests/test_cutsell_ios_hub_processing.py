@@ -73,7 +73,7 @@ def test_time_saved_is_counted_per_account_once_per_cut():
 
 def test_editor_load_is_not_cancelled_by_its_spinner():
     editor = read("DraftEditorView.swift")
-    spinner = editor.split('ProgressView("Opening draft…")', 1)[1].split("}", 1)[0]
+    spinner = editor.split('ProgressView("Opening your cut…")', 1)[1].split("}", 1)[0]
     assert ".task" not in spinner
     assert ".task(id: project.projectID)" in editor and "await model.load()" in editor
 
