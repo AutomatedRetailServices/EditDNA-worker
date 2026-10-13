@@ -1,0 +1,80 @@
+name: CutSell overlap + zoom demo source
+
+# One-off: makes ONE short cut on the live server from a synthetic spoken clip (macOS "say",
+# a test pattern picture, no real video or personal data) and saves the clip and the cut's draft
+# as a workflow artifact, so the Overlap audio / Auto Zoom AI export can be rendered ON vs OFF
+# offline with the branch code. The throwaway session token is masked. Runs only when pushed to
+# probe/overlap-demo (manual).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/overlap-demo]
+
+concurrency:
+  group: cutsell-overlap-zoom-demo
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Make a spoken test clip with a retake and pauses
+        run: |
+          brew install ffmpeg >/dev/null
+          say -v Samantha -o "$RUNNER_TEMP/speech.aiff" "Hi everyone! [[slnc 700]] Today I want to show you my favorite water bottle. [[slnc 900]] It keeps drinks cold for twelve hours. [[slnc 500]] Wait, sorry. [[slnc 600]] It keeps drinks cold for a full twenty four hours. [[slnc 700]] It fits in any car cup holder. [[slnc 800]] And right now it is on sale for only nineteen dollars. [[slnc 700]] Tap the link and grab yours today."
+          ffmpeg -loglevel error -y -f lavfi -i testsrc2=s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" \
+            -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 48000 "$RUNNER_TEMP/demo.mp4"
+          mkdir -p "$RUNNER_TEMP/out" && cp "$RUNNER_TEMP/demo.mp4" "$RUNNER_TEMP/out/demo_source.mp4"
+          ffprobe -v error -show_entries format=duration -of csv=p=0 "$RUNNER_TEMP/demo.mp4"
+
+      - name: Make one cut on the live server (same calls as the app)
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+          API = "https://cutsell-api.onrender.com"; T = None
+          tmp = os.environ["RUNNER_TEMP"]; video = os.path.join(tmp, "demo.mp4")
+          def call(m, p, b=None, q=""):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=120) as x: return json.load(x)
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          p = call("POST", "/v1/projects", {"user_id": u, "title": "Overlap zoom demo"}); pid = p["project_id"]
+          data = open(video, "rb").read()
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "demo.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(data)})
+          parts = []
+          for n in range(1, st["part_count"] + 1):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{n}/presign", {"project_id": pid, "user_id": u})
+              req = urllib.request.Request(sg["upload_url"], data=data[(n-1)*st["part_size"]: n*st["part_size"]], method="PUT")
+              req.add_header("Content-Type", "")
+              with urllib.request.urlopen(req, timeout=300) as r: parts.append({"part_number": n, "etag": r.headers["ETag"]})
+          done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+          job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": True,
+                     "dialogue_overlap_enabled": True, "auto_zoom_enabled": True, "language_hint": None,
+                     "sources": [{"original_name": "demo.mp4", "uri": done["source_uri"], "source_order": 0, "duration_sec": 30.0}]})
+          t0 = time.time()
+          while True:
+              j = call("GET", f"/v1/jobs/{job['job_id']}")
+              if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 900: break
+              time.sleep(5)
+          print(f"::notice title=cut::job {j['state']} in {int(time.time()-t0)} s")
+          snap = call("GET", f"/v1/projects/{pid}/draft", q=f"?user_id={u}")
+          draft = snap["draft"]
+          # Only what the offline render needs (no tokens, no URLs).
+          keep = {k: draft.get(k) for k in ("selected", "alternates", "captions_enabled", "caption_preset",
+                                             "audio_overlap_enabled", "auto_zoom_enabled", "zoom_keyframes")}
+          json.dump(keep, open(os.path.join(tmp, "out", "demo_draft.json"), "w"), indent=1)
+          print(f"::notice title=draft::{len(draft.get('selected', []))} kept clips, {len(draft.get('alternates', []))} hidden")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: overlap-zoom-demo
+          path: ${{ runner.temp }}/out
+          retention-days: 3
