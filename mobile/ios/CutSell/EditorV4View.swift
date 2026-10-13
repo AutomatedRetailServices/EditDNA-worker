@@ -98,7 +98,8 @@ struct EditorV4View: View {
         let toolbar = ToolbarV4.height
         let controls: CGFloat = 9 + 24 + 9
         switch panel {
-        case .captions(let clipID): return (clipID == nil ? controls : 0) + 236 + 4 + toolbar
+        // Captions menu 2b (Figma 1083:5746, 1049:2492...): no controls; the menu takes their place.
+        case .captions: return controls + 1 + TimelineV4.height + toolbar
         // Style (Figma 1054:2497): no controls; the panel sits where the controls and timeline were.
         case .style: return controls + 1 + TimelineV4.height + toolbar
         case .none, .micPermission, .voiceRecord, .voiceReview: return controls + 1 + TimelineV4.height + toolbar
@@ -107,8 +108,7 @@ struct EditorV4View: View {
 
     private var showsControls: Bool {
         switch panel {
-        case .style: return false
-        case .captions(let clipID): return clipID == nil
+        case .style, .captions: return false
         default: return true
         }
     }

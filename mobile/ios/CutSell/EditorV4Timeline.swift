@@ -546,6 +546,7 @@ struct VoiceBlockV4: View {
                 .padding(.leading, 6)
                 Spacer(minLength: 0)
             }
+            .frame(width: width, alignment: .leading)
             .clipped()
         }
         .frame(width: width, height: 30)
