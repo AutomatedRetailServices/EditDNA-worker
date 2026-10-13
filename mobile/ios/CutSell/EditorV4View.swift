@@ -52,22 +52,38 @@ struct EditorV4View: View {
             GeometryReader { geo in
                 // The video keeps its size whatever is open below it (Figma: 266 x 472 on a 390 x 844
                 // iPhone); the timeline, a menu or the voice-over panel use the space under the controls.
-                let previewHeight = max(220, min(472, geo.size.height - 48 - 8 - 46 - 227 - max(0, ToolbarV4.bottomInset - 10)))
+                let previewHeight = max(200, min(472, geo.size.height - 48 - 8 - reservedBelowVideo))
                 VStack(spacing: 0) {
                     header
                     preview
                         .frame(height: previewHeight)
                         .padding(.top, 8)
-                    controlsRow
-                        .padding(.top, 8)
+                    if editingCaptionClip == nil {
+                        controlsRow
+                            .padding(.top, 8)
+                    }
                     bottomArea
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
+                .animation(.easeOut(duration: 0.22), value: panel)
             }
             .ignoresSafeArea(.container, edges: .bottom)
             if panel == .micPermission {
                 micPermissionCard
             }
+        }
+    }
+
+    /// Height used under the video: controls, then the timeline, a menu (captions 2b, style) or the
+    /// voice-over panel, then the toolbar (Figma: the video is 472 high with the timeline and while
+    /// writing a caption, 408 with a menu open).
+    private var reservedBelowVideo: CGFloat {
+        let toolbar: CGFloat = 67 + max(0, ToolbarV4.bottomInset - 10)
+        switch panel {
+        case .voiceRecord, .voiceReview: return 46 + 290
+        case .captions(let clipID): return (clipID == nil ? 46 : 0) + 236 + 4 + toolbar
+        case .style: return 46 + 236 + 4 + toolbar
+        case .none, .micPermission: return 46 + 156 + 4 + toolbar
         }
     }
 
@@ -278,6 +294,9 @@ struct EditorV4View: View {
             }
             if playback.isBuilding && !playback.isReady {
                 ProgressView().tint(CS.cyan)
+            } else if let message = playback.message, !playback.isReady {
+                Text(message).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+                    .multilineTextAlignment(.center).padding(20)
             }
         }
     }
@@ -357,8 +376,10 @@ struct EditorV4View: View {
                     Self.highlightedText(captionText, color: highlight)
                         .font(.custom(spec.postScriptName, size: 21))
                         .multilineTextAlignment(.center)
+                        .lineLimit(3)
                 }
                 TextField("", text: $captionText, axis: .vertical)
+                    .lineLimit(1...3)
                     .font(.custom(spec.postScriptName, size: 21))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(captionFocused ? .white : .clear)

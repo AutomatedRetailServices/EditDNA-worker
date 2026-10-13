@@ -113,12 +113,15 @@ jobs:
           xcrun simctl install "$udid" "$APP"
           SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
           SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
-            xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen perf_probe >/dev/null
+            xcrun simctl launch --stdout="$RUNNER_TEMP/app_stdout.txt" --stderr="$RUNNER_TEMP/app_stderr.txt" "$udid" "$BUNDLE" -CutSellScreen perf_probe >/dev/null
           data="$(xcrun simctl get_app_container "$udid" "$BUNDLE" data)"
           for i in $(seq 1 120); do
             if [ -f "$data/Documents/perf.json" ] && grep -q '"done"\|"error"' "$data/Documents/perf.json"; then break; fi
             sleep 5
           done
+          grep -h "CUTSELL_PERF" "$RUNNER_TEMP/app_stdout.txt" | tail -25 | while IFS= read -r l; do echo "::notice title=app::$l"; done || true
+          tail -5 "$RUNNER_TEMP/app_stderr.txt" 2>/dev/null | while IFS= read -r l; do echo "::warning title=stderr::$(echo "$l" | cut -c1-200)"; done || true
+          ls ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i cutsell | head -3 | while IFS= read -r l; do echo "::warning title=crash::$l"; done || true
           mkdir -p "$RUNNER_TEMP/perf"
           cp "$data/Documents/perf.json" "$RUNNER_TEMP/perf/app.json" || echo '[]' > "$RUNNER_TEMP/perf/app.json"
           python3 -c "import json,sys; json.dump(json.load(open(sys.argv[1]))+json.load(open(sys.argv[2])), open(sys.argv[3],'w'), indent=1)" \

@@ -191,6 +191,8 @@ final class DraftPlaybackController: ObservableObject {
     /// One opened video per source, reused by every rebuild while its link is still valid, so an
     /// edit does not reopen every clip over the network (it used to, once per clip, one by one).
     private struct LoadedSource {
+        /// Kept alive with its tracks: a track whose asset is gone cannot be inserted (black preview).
+        let asset: AVURLAsset
         let video: AVAssetTrack
         let audio: AVAssetTrack?
         let transform: CGAffineTransform
@@ -212,7 +214,7 @@ final class DraftPlaybackController: ObservableObject {
                     guard let video = try? await asset.loadTracks(withMediaType: .video).first else { return (id, nil) }
                     let audio = try? await asset.loadTracks(withMediaType: .audio).first
                     let transform = (try? await video.load(.preferredTransform)) ?? .identity
-                    return (id, LoadedSource(video: video, audio: audio, transform: transform, openedAt: Date()))
+                    return (id, LoadedSource(asset: asset, video: video, audio: audio, transform: transform, openedAt: Date()))
                 }
             }
             for await (id, loaded) in group {
