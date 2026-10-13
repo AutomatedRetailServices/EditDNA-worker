@@ -339,11 +339,25 @@ struct EditorV4View: View {
             captionEditor(clipID: clipID, frame: frame)
         } else {
             let cue = playback.captionCue(at: playback.currentTime)
+            let menuOpen: Bool = { if case .captions = panel { return true } else { return false } }()
+            // With the captions menu open the caption can be dragged and pinched (dashed box);
+            // otherwise it looks like the export, and tapping it starts writing on it.
             CaptionOverlayView(
                 cue: cue, time: playback.currentTime, preset: model.captionPreset, fontKey: model.captionFont,
                 x: model.captionX, y: model.captionY, scale: model.captionScale,
-                editing: captionEditing(for: cue)
+                editing: menuOpen ? captionEditing(for: cue) : nil
             )
+            if !menuOpen, let cue {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: frame.width * 0.8, height: 56)
+                    .position(x: frame.width * CGFloat(model.captionX), y: frame.height * CGFloat(model.captionY))
+                    .onTapGesture {
+                        playback.pause()
+                        startCaptionEditing(cue.clipID)
+                    }
+                    .accessibilityIdentifier("captionTapZone")
+            }
         }
     }
 

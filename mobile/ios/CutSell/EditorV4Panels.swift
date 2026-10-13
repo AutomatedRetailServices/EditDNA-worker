@@ -53,6 +53,7 @@ struct CaptionStylePanel: View {
             }
             .padding(.horizontal, 10)
 
+            ScrollViewReader { reader in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(CaptionFontCatalog.all, id: \.key) { spec in
@@ -67,10 +68,14 @@ struct CaptionStylePanel: View {
                                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color(hex: 0x1AA6FF) : Color(hex: 0x1C2E52), lineWidth: selected ? 2 : 1))
                         }
                         .buttonStyle(.plain)
+                        .id(spec.key)
                         .accessibilityIdentifier("captionFont_\(spec.key)")
                     }
                 }
                 .padding(.horizontal, 10)
+            }
+            .onAppear { reader.scrollTo(model.captionFont, anchor: .center) }
+            .onChange(of: model.captionFont) { _, key in withAnimation { reader.scrollTo(key, anchor: .center) } }
             }
 
             switch look {
