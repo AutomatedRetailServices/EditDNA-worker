@@ -58,12 +58,18 @@ def test_gallery_modes_and_texts_match_figma():
     assert "if current.mode == .combine" in flow and "CutSubmitter.multipleMode" in flow
 
 
-def test_style_sheet_is_local_only():
+def test_style_sheet_overlap_and_auto_zoom_are_sent_with_the_cut():
     sheet = read("StyleSheetView.swift")
     assert '"Choose your style"' in sheet and '"Use this style for my next videos"' in sheet
+    assert '"Overlap audio"' in sheet and '"Auto Zoom AI"' in sheet
+    assert "Pace" not in sheet  # Pace was removed (FICHA_03)
+    assert "var overlapAudio: Bool = true" in sheet and "var autoZoom: Bool = true" in sheet  # both ON by default
     assert "UserDefaults.standard" in sheet
-    # Pace / Zoom are not sent to the server yet.
-    assert "StyleChoice" not in read("CutSubmission.swift") and ".zoom" not in read("CutSubmission.swift")
+    submit = read("CutSubmission.swift")
+    assert "dialogue_overlap_enabled: audioOverlap" in submit and "audio_overlap: audioOverlap" in submit
+    assert "auto_zoom_enabled: autoZoom" in submit
+    flow = read("CreateFlowView.swift")
+    assert flow.count("audioOverlap: current.style.overlapAudio, autoZoom: current.style.autoZoom") == 3
 
 
 def test_limits_and_problem_screens_follow_figma():

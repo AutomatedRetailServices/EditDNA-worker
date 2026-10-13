@@ -25,6 +25,7 @@ struct NewCutView: View {
     @State private var importStatusText = ""
 
     private let resumeProjectID: String?
+    private let autoZoom: Bool
     private let maxMultiClipSources = 10
 
     init(pending: PendingCutRecord? = nil) {
@@ -34,7 +35,8 @@ struct NewCutView: View {
             LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType)
         })
         _title = State(initialValue: pending?.title ?? "")
-        _audioOverlap = State(initialValue: pending?.audioOverlap ?? false)
+        _audioOverlap = State(initialValue: pending?.audioOverlap ?? StyleChoice.saved().overlapAudio)
+        autoZoom = pending?.autoZoom ?? StyleChoice.saved().autoZoom
     }
 
     var body: some View {
@@ -244,6 +246,7 @@ struct NewCutView: View {
                 title: title,
                 mode: mode.rawValue,
                 audioOverlap: audioOverlap,
+                autoZoom: autoZoom,
                 resumeProjectID: resumeProjectID,
                 appState: appState
             )

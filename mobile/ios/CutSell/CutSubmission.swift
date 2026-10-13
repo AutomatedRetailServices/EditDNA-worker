@@ -35,6 +35,7 @@ final class CutSubmitter: ObservableObject {
         title: String?,
         mode: String,
         audioOverlap: Bool,
+        autoZoom: Bool = true,
         resumeProjectID: String?,
         appState: AppState,
         progressRange: ClosedRange<Double> = 0...1,
@@ -89,6 +90,7 @@ final class CutSubmitter: ObservableObject {
                     title: project.title,
                     mode: mode,
                     audioOverlap: audioOverlap,
+                    autoZoom: autoZoom,
                     videos: uploadVideos.map {
                         PendingCutVideo(
                             filePath: $0.url.path,
@@ -144,6 +146,9 @@ final class CutSubmitter: ObservableObject {
                 let sources: [SourceInput]
                 let language_hint: String?
                 let audio_overlap: Bool
+                /// Same choice under its canonical name (the API reads either).
+                let dialogue_overlap_enabled: Bool
+                let auto_zoom_enabled: Bool
             }
             let submitResponse: FlowBSubmitResponse = try await APIClient.shared.request(
                 "/v1/flow-b/jobs",
@@ -153,7 +158,9 @@ final class CutSubmitter: ObservableObject {
                     user_id: session.userID,
                     sources: sources,
                     language_hint: nil,
-                    audio_overlap: audioOverlap
+                    audio_overlap: audioOverlap,
+                    dialogue_overlap_enabled: audioOverlap,
+                    auto_zoom_enabled: autoZoom
                 )
             )
             // D-133: bounded diagnostics only -- logs the backend job id.

@@ -58,9 +58,10 @@ struct EditorV4View: View {
                     preview
                         .frame(height: previewHeight)
                         .padding(.top, 8)
-                    if editingCaptionClip == nil {
+                    if showsControls {
                         controlsRow
-                            .padding(.top, 8)
+                            .padding(.top, 9)
+                            .padding(.bottom, 9)
                     }
                     bottomArea
                         .frame(maxHeight: .infinity, alignment: .top)
@@ -68,6 +69,22 @@ struct EditorV4View: View {
                 .animation(.easeOut(duration: 0.22), value: panel)
             }
             .ignoresSafeArea(.container, edges: .bottom)
+            if isVoicePanel {
+                // Figma 1084:2562: the voice-over sheet comes up over the video.
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    VoiceOverPanel(model: model, recorder: recorder, start: playback.currentTime, mode: $panel) { outcome in
+                        switch outcome {
+                        case .placed: show(.message("Voice-over added"))
+                        case .savedNotPlaced: show(.message("Voice-over saved. It will be placed when this cut's main video is registered."))
+                        case .failed: break
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
+                .ignoresSafeArea(.container, edges: .bottom)
+                .transition(.move(edge: .bottom))
+            }
             if panel == .micPermission {
                 micPermissionCard
             }
@@ -78,14 +95,25 @@ struct EditorV4View: View {
     /// voice-over panel, then the toolbar (Figma: the video is 472 high with the timeline and while
     /// writing a caption, 408 with a menu open).
     private var reservedBelowVideo: CGFloat {
-        let toolbar: CGFloat = 67 + max(0, ToolbarV4.bottomInset - 10)
+        let toolbar = ToolbarV4.height
+        let controls: CGFloat = 9 + 24 + 9
         switch panel {
-        case .voiceRecord, .voiceReview: return 46 + 290
-        case .captions(let clipID): return (clipID == nil ? 46 : 0) + 236 + 4 + toolbar
-        case .style: return 46 + 236 + 4 + toolbar
-        case .none, .micPermission: return 46 + 156 + 4 + toolbar
+        case .captions(let clipID): return (clipID == nil ? controls : 0) + 236 + 4 + toolbar
+        // Style (Figma 1054:2497): no controls; the panel sits where the controls and timeline were.
+        case .style: return controls + 1 + TimelineV4.height + toolbar
+        case .none, .micPermission, .voiceRecord, .voiceReview: return controls + 1 + TimelineV4.height + toolbar
         }
     }
+
+    private var showsControls: Bool {
+        switch panel {
+        case .style: return false
+        case .captions(let clipID): return clipID == nil
+        default: return true
+        }
+    }
+
+    private var isVoicePanel: Bool { panel == .voiceRecord || panel == .voiceReview }
 
     private func lifecycle<V: View>(_ view: V) -> some View {
         view
@@ -214,41 +242,40 @@ struct EditorV4View: View {
     // MARK: Header (no logo)
 
     private var header: some View {
-        ZStack {
+        HStack(spacing: 0) {
+            Button { dismiss() } label: {
+                Image("ControlBack").resizable().frame(width: 44, height: 44).frame(width: 46, height: 47)
+            }
+            .accessibilityLabel("Back")
             Button {
                 newTitle = shownTitle
                 renaming = true
             } label: {
-                HStack(spacing: 8) {
-                    Text(shownTitle).lineLimit(1)
-                    Image(systemName: "pencil").font(.system(size: 13, weight: .semibold))
-                }
-                .font(CS.sf(16, .semibold))
-                .foregroundStyle(Color(hex: 0xF7FAFF))
-                .padding(.horizontal, 100)
+                Text("\(shownTitle) ✎")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(CS.textPrimaryF)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 124, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .padding(.leading, 4)
             .accessibilityIdentifier("editorTitle")
-            HStack {
-                Button { dismiss() } label: {
-                    Image("ControlBack").resizable().frame(width: 44, height: 44).frame(width: 46, height: 47)
-                }
-                .accessibilityLabel("Back")
-                Spacer()
-                Button { sheet = .export } label: {
-                    Text("Export")
-                        .font(CS.sf(15, .semibold))
-                        .foregroundStyle(Color(hex: 0xFAFCFF))
-                        .frame(width: 91, height: 38)
-                        .background(Color(hex: 0x040813, opacity: 0.95), in: Capsule())
-                        .overlay(Capsule().stroke(LinearGradient(colors: [CS.cyan, Color(hex: 0xFF21D7)], startPoint: .leading, endPoint: .trailing), lineWidth: 1.5))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("editorExport")
+            Spacer(minLength: 6)
+            ExportQualityMenu()
+            Button { sheet = .export } label: {
+                Text("Export")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 74, height: 32)
+                    .background(Color(hex: 0x1769FF), in: RoundedRectangle(cornerRadius: 10))
             }
+            .buttonStyle(.plain)
             .padding(.leading, 8)
-            .padding(.trailing, 13)
+            .accessibilityIdentifier("editorExport")
         }
+        .padding(.leading, 8)
+        .padding(.trailing, 12)
         .frame(height: 48)
     }
 
@@ -277,6 +304,7 @@ struct EditorV4View: View {
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Self.borderGradient, lineWidth: 2))
             .contentShape(Rectangle())
             .onTapGesture { videoTapped() }
+            .overlay(alignment: .topLeading) { zoomBadge }
             .overlay(alignment: .bottom) { videoBottomPill }
     }
 
@@ -326,11 +354,29 @@ struct EditorV4View: View {
     private var videoLayer: some View {
         let quarter = model.rotationDegrees % 180 != 0
         return PlayerLayerView(player: playback.player)
+            .scaleEffect(zoomNow)
             .scaleEffect(x: model.isMirrored ? -1 : 1, y: 1)
             .rotationEffect(.degrees(Double(model.rotationDegrees)))
             .scaleEffect(quarter ? 266.0 / 472.0 : 1)
             .animation(.easeOut(duration: 0.25), value: model.isMirrored)
             .animation(.easeOut(duration: 0.25), value: model.rotationDegrees)
+    }
+
+    /// Auto Zoom AI in the preview: the same push-in as the export at this moment.
+    private var zoomNow: CGFloat { CGFloat(model.zoomScale(at: playback.currentTime)) }
+
+    /// "◇ Zoom 4%" while a zoom is on screen (Figma 1054:2497).
+    @ViewBuilder
+    private var zoomBadge: some View {
+        let percent = Int(((zoomNow - 1) * 100).rounded())
+        if percent >= 1 {
+            Text("◇ Zoom \(percent)%")
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color(hex: 0x040812, opacity: 0.85), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.leading, 12).padding(.top, 12)
+                .accessibilityIdentifier("zoomBadge")
+        }
     }
 
     @ViewBuilder
@@ -452,41 +498,69 @@ struct EditorV4View: View {
         .frame(width: frame.width, height: frame.height)
     }
 
-    // MARK: Controls (no keyframe)
+    // MARK: Controls (Figma: blue line icons, no boxes) — full screen · play · ◇ undo redo
 
     private var controlsRow: some View {
-        HStack(spacing: 0) {
-            control("EdExpand", "Full screen") { fullScreen = true }
-                .padding(.leading, 20)
-            Spacer()
-            control(playback.isPlaying ? "EdPause" : "EdPlay", playback.isPlaying ? "Pause" : "Play") { playback.togglePlayback() }
-                .accessibilityIdentifier("editorPlay")
-            Spacer()
-            control("EdUndo", "Undo") { Task { await model.undo() } }
-                .accessibilityIdentifier("editorUndo")
-            control("EdRedo", "Redo") { Task { await model.redo() } }
-                .padding(.leading, 18)
-                .padding(.trailing, 20)
+        ZStack {
+            HStack(spacing: 0) {
+                control("Ed4CtlExpand", "Full screen") { fullScreen = true }
+                Spacer()
+            }
+            .padding(.leading, 12)
+            Button { playback.togglePlayback() } label: {
+                Group {
+                    if playback.isPlaying {
+                        HStack(spacing: 5) {
+                            RoundedRectangle(cornerRadius: 1).stroke(Color(hex: 0x1769FF), lineWidth: 2).frame(width: 5, height: 16)
+                            RoundedRectangle(cornerRadius: 1).stroke(Color(hex: 0x1769FF), lineWidth: 2).frame(width: 5, height: 16)
+                        }
+                    } else {
+                        Image("Ed4CtlPlay").resizable().frame(width: 24, height: 24)
+                    }
+                }
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(playback.isPlaying ? "Pause" : "Play")
+            .accessibilityIdentifier("editorPlay")
+            HStack(spacing: 0) {
+                Spacer()
+                control("Ed4CtlKeyframe", "Add zoom keyframe") { addKeyframe() }
+                    .accessibilityIdentifier("editorKeyframe")
+                control("Ed4CtlUndo", "Undo") { Task { await model.undo() } }
+                    .accessibilityIdentifier("editorUndo")
+                    .padding(.leading, 0)
+                control("Ed4CtlRedo", "Redo") { Task { await model.redo() } }
+                    .padding(.leading, -4)
+            }
+            .padding(.trailing, 10)
         }
-        .frame(height: 30)
+        .frame(height: 24)
     }
 
-    @ViewBuilder
     private func control(_ image: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            if image == "EdPause" {
-                Image(systemName: "pause.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color(hex: 0x1769FF))
-                    .frame(width: 30, height: 30)
-                    .background(Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(hex: 0x1769FF), lineWidth: 1))
-            } else {
-                Image(image).resizable().frame(width: 41, height: 41).frame(width: 30, height: 30)
-            }
+            Image(image).resizable().frame(width: 24, height: 24)
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(width: 36, height: 24)
         .accessibilityLabel(label)
+    }
+
+    private func addKeyframe() {
+        playback.pause()
+        let at = playback.currentTime
+        Task {
+            if let id = await model.addZoomKeyframe(at: at) {
+                selection = .zoom(id)
+                show(.message("Zoom added at \(EditorTime.short(at))", undo: true))
+            } else {
+                show(.message("Move the cursor onto a clip to add a zoom."))
+            }
+        }
     }
 
     // MARK: Bottom: timeline, menus, toolbar
@@ -494,15 +568,6 @@ struct EditorV4View: View {
     @ViewBuilder
     private var bottomArea: some View {
         switch panel {
-        case .voiceRecord, .voiceReview:
-            VoiceOverPanel(model: model, recorder: recorder, start: playback.currentTime, mode: $panel) { outcome in
-                switch outcome {
-                case .placed: show(.message("Voice-over added"))
-                case .savedNotPlaced: show(.message("Voice-over saved. It will be placed when this cut's main video is registered."))
-                case .failed: break
-                }
-            }
-            .padding(.top, 10)
         default:
             VStack(spacing: 0) {
                 switch panel {
@@ -510,19 +575,22 @@ struct EditorV4View: View {
                     CaptionStylePanel(model: model) { finishCaptionEditing(); panel = .none }
                         .padding(.top, 8)
                 case .style:
-                    StylePanel { panel = .none }
-                        .padding(.top, 8)
+                    Spacer(minLength: 0)
+                    StylePanel(model: model) { panel = .none }
+                        .padding(.bottom, 12)
                 default:
                     TimelineV4(
                         model: model, playback: playback, selection: $selection,
                         pixelsPerSecond: $pixelsPerSecond,
+                        onAddVideo: { sheet = .broll },
                         onAddVoice: { openVoiceOver() },
-                        onAddOverlay: { choosingOverlay = true }
+                        onAddOverlay: { choosingOverlay = true },
+                        onToggleVideoSound: { toggleVideoSound() }
                     )
-                    .padding(.top, 10)
+                    .padding(.top, 1)
                     .overlay(alignment: .bottom) { volumeStrip }
                 }
-                Spacer(minLength: 4)
+                if case .style = panel {} else { Spacer(minLength: 0) }
                 ToolbarV4(active: activeTool) { tool in toolTapped(tool) }
             }
         }
@@ -541,6 +609,14 @@ struct EditorV4View: View {
         default:
             EmptyView()
         }
+    }
+
+    /// Speaker on the video row: mute the video's own sound, or bring it back.
+    private func toggleVideoSound() {
+        let muted = model.videoTrackVolume <= 0.001
+        videoVolume = muted ? 1 : 0
+        Task { await model.setVideoTrackVolume(videoVolume) }
+        show(.message(muted ? "Video sound on" : "Video sound muted", undo: !muted))
     }
 
     private var activeTool: EditorTool? {
@@ -715,6 +791,9 @@ struct EditorV4View: View {
         case .caption(let clipID):
             show(.captionDeleted)
             await model.editCaption(clipID: clipID, text: "")
+        case .zoom(let id):
+            show(.message("Zoom deleted", undo: true))
+            await model.removeZoomKeyframe(id: id)
         case nil:
             if let clipID = editingCaptionClip {
                 show(.captionDeleted)
@@ -858,12 +937,16 @@ enum EditorTool: String, CaseIterable {
     }
 }
 
-/// Editor/Toolbar/v4 (Figma 1087:2573): compact 34 pt icons, slides sideways, active tool in cyan.
+/// Editor/Toolbar/v4 (Figma 1087:2573): outline gradient icons without boxes, 53 pt per tool,
+/// slides sideways (Style is last), active tool in cyan.
 struct ToolbarV4: View {
     /// The home indicator area under the toolbar (the editor draws to the bottom edge).
     static var bottomInset: CGFloat {
         (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom ?? 0
     }
+
+    /// 6 + 51 (icon 34 · 4 · label) + bottom padding (at least 10, or what the home indicator needs).
+    static var height: CGFloat { 6 + 51 + max(10, bottomInset - 14) }
 
     let active: EditorTool?
     let onTap: (EditorTool) -> Void
@@ -874,14 +957,19 @@ struct ToolbarV4: View {
                 ForEach(EditorTool.allCases, id: \.self) { tool in
                     Button { onTap(tool) } label: {
                         VStack(spacing: 4) {
-                            Image(tool.icon).resizable().frame(width: 34, height: 34)
+                            if active == tool {
+                                Image(tool.icon).renderingMode(.template).resizable().foregroundStyle(CS.cyan)
+                                    .frame(width: 34, height: 34)
+                            } else {
+                                Image(tool.icon).resizable().frame(width: 34, height: 34)
+                            }
                             Text(tool.title)
-                                .font(CS.inter(10, .medium))
-                                .foregroundStyle(active == tool ? CS.cyan : Color(hex: 0xC7D6F5))
+                                .font(CS.inter(10.5, .medium))
+                                .foregroundStyle(active == tool ? CS.cyan : CS.textSecondaryF)
                                 .lineLimit(1)
                                 .fixedSize()
                         }
-                        .frame(width: 50, height: 50)
+                        .frame(width: 53, height: 51)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -891,14 +979,44 @@ struct ToolbarV4: View {
                     }
                 }
             }
-            .padding(.horizontal, 6)
+            .padding(.leading, 4)
+            .padding(.trailing, 6)
         }
         .padding(.top, 6)
-        .padding(.bottom, 10)
-        .frame(height: 67)
-        .padding(.bottom, max(0, Self.bottomInset - 10))
+        .frame(height: Self.height, alignment: .top)
         .background(Color(hex: 0x02040A))
         .overlay(alignment: .top) { Rectangle().fill(Color(hex: 0x14336B, opacity: 0.7)).frame(height: 1) }
+    }
+}
+
+/// Export quality (Figma: "4K Ultra HD ▾" in the logo gradient). Honest: the export makes 1080p
+/// today, so 2K and 4K are listed as coming soon instead of pretending.
+struct ExportQualityMenu: View {
+    private static let gradient = LinearGradient(
+        colors: [CS.cyan, Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
+        startPoint: .leading, endPoint: .trailing
+    )
+
+    var body: some View {
+        Menu {
+            Button {} label: { Label("1080p Full HD", systemImage: "checkmark") }
+            Button("2K · coming soon") {}.disabled(true)
+            Button("4K Ultra HD · coming soon") {}.disabled(true)
+        } label: {
+            HStack(spacing: 6) {
+                Text("1080p HD")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Self.gradient)
+                    .lineLimit(1)
+                Image("Ed4Chevron").resizable().frame(width: 10, height: 10)
+            }
+            .padding(.leading, 12).padding(.trailing, 10)
+            .frame(width: 108, height: 32)
+            .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(CS.borderDefault, lineWidth: 1))
+        }
+        .accessibilityLabel("Export quality: 1080p")
+        .accessibilityIdentifier("exportQuality")
     }
 }
 

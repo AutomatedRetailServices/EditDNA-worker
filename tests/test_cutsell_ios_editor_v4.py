@@ -16,15 +16,20 @@ def test_editor_screen_is_v4():
     assert "#else\n        return nil" in read("DraftEditorView.swift")  # Release builds never open a probe state
 
 
-def test_header_has_no_logo_and_controls_have_no_keyframe():
+def test_header_quality_menu_and_controls_with_keyframe():
     v4 = read("EditorV4View.swift")
     header = v4.split("private var header: some View {", 1)[1].split("private var shownTitle", 1)[0]
     assert "BrandLogo" not in header
     assert '"Export"' in header and "renaming = true" in header
-    controls = v4.split("private var controlsRow: some View {", 1)[1].split("@ViewBuilder", 1)[0]
-    assert "EdKeyframe" not in controls
-    for image in ("EdExpand", "EdUndo", "EdRedo"):
-        assert f'"{image}"' in controls
+    assert "Color(hex: 0x1769FF)" in header and "width: 74, height: 32" in header  # blue Export
+    assert "ExportQualityMenu()" in header
+    # Honest quality menu: the export makes 1080p; 2K / 4K are not offered as working.
+    assert '"2K · coming soon"' in v4 and '"4K Ultra HD · coming soon"' in v4
+    controls = v4.split("private var controlsRow: some View {", 1)[1].split("// MARK: Bottom", 1)[0]
+    for image in ("Ed4CtlExpand", "Ed4CtlPlay", "Ed4CtlKeyframe", "Ed4CtlUndo", "Ed4CtlRedo"):
+        assert f'"{image}"' in controls, image
+        assert (APP / "Assets.xcassets" / "Figma" / f"{image}.imageset" / f"{image}@3x.png").exists(), image
+    assert "model.addZoomKeyframe(at: at)" in controls  # ◇ adds a zoom keyframe at the cursor
     assert "CGSize(width: 266, height: 472)" in v4  # bigger video (Figma 266 x 472)
 
 
@@ -39,17 +44,24 @@ def test_toolbar_v4_order_and_icons():
     assert "active == tool ? CS.cyan" in v4  # active tool in cyan
 
 
-def test_timeline_cursor_fixed_in_the_middle_with_zoom():
+def test_timeline_starts_at_the_left_with_fixed_cursor_and_zoom():
     tl = read("EditorV4Timeline.swift")
-    assert "center + CGFloat(seconds - now) * pixelsPerSecond" in tl  # tracks slide under a fixed cursor
+    assert "static let cursorX: CGFloat = 54" in tl
+    assert "Self.cursorX + CGFloat(seconds - now) * pps" in tl  # tracks slide under a fixed cursor
+    for icon in ("Ed4RowSpeaker", "Ed4RowMic", "Ed4RowLayers"):
+        assert f'"{icon}"' in tl, icon
+    assert "onToggleVideoSound" in tl  # speaker = mute the video's sound
     assert "MagnificationGesture()" in tl and "pixelsPerSecond = max(Self.minZoom" in tl
     assert "playback.seek(to:" in tl
     # caption inside each clip, no separate captions track
     assert "ClipBlockV4(" in tl and "caption: caption" in tl
     assert "captionLane" not in tl
-    # voice-over track always visible
-    assert '"+  Voice over"' in tl and "VoiceBlockV4(" in tl
-    assert '"+  Text · photo · B-roll"' in tl and '"brollBlock"' in tl
+    # voice-over track always visible; "+" only on rows that have something
+    assert "VoiceBlockV4(" in tl and "if let lastEnd" in tl
+    assert '"Add video"' in tl and '"brollBlock"' in tl
+    assert '"+  Text · photo · B-roll"' not in tl
+    # Auto Zoom keyframes on the video track: tap = select, drag = move
+    assert "ZoomDiamond(" in tl and "model.moveZoomKeyframe(id: mark.id" in tl
 
 
 def test_caption_written_on_the_video_with_menu_2b():
@@ -131,3 +143,27 @@ def test_readable_and_renamable_title():
 def test_recorder_can_pause():
     recorder = read("VoiceRecorder.swift")
     assert "func pause()" in recorder and "func resume()" in recorder
+
+
+def test_style_panel_only_has_auto_zoom_and_voice_sheet_is_one_screen():
+    panels = read("EditorV4Panels.swift")
+    style = panels.split("struct StylePanel: View {", 1)[1].split("struct VoiceOverPanel", 1)[0]
+    assert '"Auto Zoom AI"' in style and "model.setAutoZoom(value)" in style
+    assert "title: \"Overlap" not in style and "Pace" not in style  # Overlap is NOT in the editor
+    voice = panels.split("struct VoiceOverPanel: View {", 1)[1].split("private struct TrailingIconLabel", 1)[0]
+    for text in ('"Recording voice-over"', '"Tap to pause"', '"Tap / hold to record"', '"Tap to finish"',
+                 '"Preview your recording before saving."', '"↻  Retake"', '"✓  Save"', '"Enhance voice"'):
+        assert text in voice, text
+    assert "static let height: CGFloat = 491" in voice
+
+
+def test_zoom_keyframes_in_the_draft_and_preview():
+    vm = read("DraftEditorViewModel.swift")
+    assert '"zoom_keyframes"' in vm and '"auto_zoom_enabled"' in vm
+    assert "func addZoomKeyframe(at time: Double)" in vm and "func moveZoomKeyframe(id: String, to time: Double)" in vm
+    assert "func removeZoomKeyframe(id: String)" in vm
+    # same easing as the export (smoothstep, 0.35 s ramp)
+    assert "min(0.35, mark.duration / 3)" in vm and "v * v * (3 - 2 * v)" in vm
+    v4 = read("EditorV4View.swift")
+    assert ".scaleEffect(zoomNow)" in v4 and '"◇ Zoom \\(percent)%"' in v4
+    assert "await model.removeZoomKeyframe(id: id)" in v4

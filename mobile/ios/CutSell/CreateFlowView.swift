@@ -160,7 +160,7 @@ struct CreateFlowView: View {
         submitter.reset()
         problem = nil
         failure = nil
-        CutSellDiagnostics.log("create_style_chosen", ["pace": newJob.style.pace.rawValue, "zoom": newJob.style.zoom.rawValue, "mode": newJob.mode.rawValue])
+        CutSellDiagnostics.log("create_style_chosen", ["overlap_audio": String(newJob.style.overlapAudio), "auto_zoom": String(newJob.style.autoZoom), "mode": newJob.mode.rawValue])
         startedInJob = 0
         processingProjectID = nil
         processingThumbnail = nil
@@ -210,7 +210,7 @@ struct CreateFlowView: View {
                 let thumbnail = await prepareScreen(for: [video])
                 let projectID = try await submitter.submit(
                     videos: [video], title: Self.cutTitle([video]), mode: CutSubmitter.singleMode,
-                    audioOverlap: false, resumeProjectID: nil, appState: appState
+                    audioOverlap: current.style.overlapAudio, autoZoom: current.style.autoZoom, resumeProjectID: nil, appState: appState
                 )
                 startTracking(projectID: projectID, videos: [video], thumbnail: thumbnail)
             case .library(let assets):
@@ -222,7 +222,7 @@ struct CreateFlowView: View {
                     let thumbnail = await prepareScreen(for: videos)
                     let projectID = try await submitter.submit(
                         videos: videos, title: Self.cutTitle(videos), mode: CutSubmitter.multipleMode,
-                        audioOverlap: false, resumeProjectID: nil, appState: appState
+                        audioOverlap: current.style.overlapAudio, autoZoom: current.style.autoZoom, resumeProjectID: nil, appState: appState
                     )
                     startTracking(projectID: projectID, videos: videos, thumbnail: thumbnail)
                 } else {
@@ -234,7 +234,7 @@ struct CreateFlowView: View {
                         let lower = Double(index) / Double(count)
                         let projectID = try await submitter.submit(
                             videos: [video], title: Self.cutTitle([video]), mode: CutSubmitter.singleMode,
-                            audioOverlap: false, resumeProjectID: nil, appState: appState,
+                            audioOverlap: current.style.overlapAudio, autoZoom: current.style.autoZoom, resumeProjectID: nil, appState: appState,
                             progressRange: lower...(lower + 1 / Double(count)),
                             label: count > 1 ? "Cut \(index + 1) of \(count)" : ""
                         )

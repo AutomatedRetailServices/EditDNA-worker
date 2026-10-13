@@ -344,6 +344,9 @@ struct EditorV2View: View {
         case .caption(let clipID):
             await model.editCaption(clipID: clipID, text: "")
             show(.captionDeleted)
+        case .zoom(let id):
+            await model.removeZoomKeyframe(id: id)
+            show(.message("Zoom deleted", undo: true))
         case nil:
             show(.message("Select a clip, voice-over, overlay or caption first."))
         }
@@ -391,9 +394,12 @@ enum EditorSelection: Equatable {
     case voiceOver(String)
     case overlay(String, isText: Bool)
     case caption(String)
+    /// An Auto Zoom AI keyframe (◇) on the video track.
+    case zoom(String)
 
     var pillTitle: String {
         switch self {
+        case .zoom: return "Zoom selected"
         case .video: return "Video clip selected"
         case .broll: return "B-roll selected"
         case .voiceOver: return "Voice-over selected"

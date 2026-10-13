@@ -14,6 +14,8 @@ struct PendingCutRecord: Codable, Hashable, Identifiable {
     let title: String
     let mode: String
     let audioOverlap: Bool
+    /// Auto Zoom AI chosen in "Choose your style" (nil on records saved before it existed = on).
+    var autoZoom: Bool? = nil
     let videos: [PendingCutVideo]
     let createdAt: Date
 

@@ -145,6 +145,116 @@ final class DraftEditorViewModel: ObservableObject {
         }.value
     }
 
+    // MARK: Auto Zoom AI keyframes (◇ on the timeline)
+
+    /// Auto Zoom AI on/off for this cut (the export only draws the zooms when it is on).
+    var autoZoomEnabled: Bool { displayDraft?["auto_zoom_enabled"]?.boolValue ?? false }
+
+    /// One zoom keyframe placed on the edited timeline. The draft anchors it to the SOURCE time
+    /// (so splits and deletes never move it onto other words); `time` is where it falls now.
+    struct ZoomMark: Identifiable, Equatable {
+        let id: String
+        let time: Double
+        let duration: Double
+        let scale: Double
+        let kind: String
+    }
+
+    var zoomKeyframes: [[String: JSONValue]] {
+        displayDraft?["zoom_keyframes"]?.arrayValue?.compactMap(\.objectValue) ?? []
+    }
+
+    /// Keyframes whose source moment is still in the cut, at their place on the edited timeline.
+    var zoomMarks: [ZoomMark] {
+        let windows = EditorTracks.clipWindows(self)
+        return zoomKeyframes.compactMap { item in
+            guard let id = item["keyframe_id"]?.stringValue,
+                  let sourceTime = item["source_time"]?.doubleValue else { return nil }
+            let source = item["source_asset_id"]?.stringValue ?? ""
+            guard let window = windows.first(where: { window in
+                (source.isEmpty || window.sourceID == source)
+                    && sourceTime >= window.sourceStart
+                    && sourceTime < window.sourceStart + (window.end - window.start)
+            }) else { return nil }
+            return ZoomMark(id: id, time: window.start + (sourceTime - window.sourceStart),
+                            duration: item["duration"]?.doubleValue ?? 1.2,
+                            scale: item["scale"]?.doubleValue ?? 1.08,
+                            kind: item["kind"]?.stringValue ?? "key")
+        }
+        .sorted { $0.time < $1.time }
+    }
+
+    /// How much the preview is zoomed at `time` (the same smooth push-in and release as the export).
+    func zoomScale(at time: Double) -> Double {
+        guard autoZoomEnabled else { return 1 }
+        var factor = 1.0
+        for mark in zoomMarks where time >= mark.time && time < mark.time + mark.duration {
+            let ramp = min(0.35, mark.duration / 3)
+            let into = time - mark.time, left = mark.time + mark.duration - time
+            func ease(_ x: Double) -> Double { let v = max(0, min(1, x)); return v * v * (3 - 2 * v) }
+            factor += (mark.scale - 1) * min(ease(into / ramp), ease(left / ramp))
+        }
+        return factor
+    }
+
+    /// Source position under a point of the edited timeline.
+    private func sourcePoint(at time: Double) -> (source: String, seconds: Double)? {
+        let windows = EditorTracks.clipWindows(self)
+        guard let window = windows.first(where: { time >= $0.start && time < $0.end }) ?? windows.last(where: { time >= $0.end - 0.01 }) else { return nil }
+        let into = min(max(0, time - window.start), max(0, window.end - window.start - 0.05))
+        return (window.sourceID ?? "", window.sourceStart + into)
+    }
+
+    private func saveZoomKeyframes(_ items: [[String: JSONValue]], enable: Bool? = nil) async {
+        let change: (inout [String: JSONValue]) -> Void = { object in
+            object["zoom_keyframes"] = .array(items.map(JSONValue.object))
+            if let enable { object["auto_zoom_enabled"] = .bool(enable) }
+        }
+        await perform(predict: change) { [weak self] in
+            guard let self, var object = self.snapshot?.draft.objectValue else { return }
+            change(&object)
+            await self.autosave(.object(object))
+        }.value
+    }
+
+    /// The ◇ control: a zoom keyframe at the cursor (turns Auto Zoom AI on so it shows in the export).
+    @discardableResult
+    func addZoomKeyframe(at time: Double) async -> String? {
+        guard let point = sourcePoint(at: time) else { return nil }
+        let id = "zk_" + UUID().uuidString.prefix(8).lowercased()
+        var items = zoomKeyframes
+        items.append([
+            "keyframe_id": .string(id), "source_asset_id": .string(point.source),
+            "source_time": .number((point.seconds * 1000).rounded() / 1000),
+            "duration": .number(1.2), "scale": .number(1.1),
+            "kind": .string("manual"), "origin": .string("user"),
+        ])
+        await saveZoomKeyframes(items, enable: true)
+        return id
+    }
+
+    /// Drag a ◇ to another moment of the cut.
+    func moveZoomKeyframe(id: String, to time: Double) async {
+        guard let point = sourcePoint(at: max(0, time)) else { return }
+        let items = zoomKeyframes.map { item -> [String: JSONValue] in
+            guard item["keyframe_id"]?.stringValue == id else { return item }
+            var moved = item
+            moved["source_asset_id"] = .string(point.source)
+            moved["source_time"] = .number((point.seconds * 1000).rounded() / 1000)
+            return moved
+        }
+        await saveZoomKeyframes(items)
+    }
+
+    func removeZoomKeyframe(id: String) async {
+        await saveZoomKeyframes(zoomKeyframes.filter { $0["keyframe_id"]?.stringValue != id })
+    }
+
+    /// Editor → Style → Auto Zoom AI. The keyframes stay in the draft either way; off = not drawn.
+    func setAutoZoom(_ enabled: Bool) async {
+        await setDraftValue("auto_zoom_enabled", .bool(enabled))
+    }
+
     var timelineDuration: Double {
         selectedClips.reduce(0) { total, clip in
             total + max(0, (clip["end"]?.doubleValue ?? 0) - (clip["start"]?.doubleValue ?? 0))

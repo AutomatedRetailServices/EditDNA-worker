@@ -174,63 +174,42 @@ struct CaptionStylePanel: View {
 
 // MARK: - Style (Figma 1054:2497)
 
-/// Pace and zoom. Honest: the server does not apply pace or zoom to a finished cut yet, so the panel
-/// says so instead of pretending; the choice is remembered for when it does.
+/// Editor → Style.
 struct StylePanel: View {
+    @ObservedObject var model: DraftEditorViewModel
     let onDone: () -> Void
-    @AppStorage("cutsell.style.pace") private var pace = "normal"
-    @AppStorage("cutsell.style.zoom") private var zoom = "subtle"
 
+    /// Editor v4/11 (Figma 1054:2497): only the Auto Zoom AI switch. Overlap audio is chosen
+    /// before the cut and is not changed here.
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Style").font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text("Style").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0xF2F7FF))
                 Spacer()
                 Button(action: onDone) {
-                    Text("Done").font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                    Text("Done").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: 0xFAFCFF))
                         .frame(width: 62, height: 28)
-                        .background(Color(hex: 0x040813), in: Capsule())
-                        .overlay(Capsule().stroke(LinearGradient(colors: [CS.cyan, Color(hex: 0xFF21D7)], startPoint: .leading, endPoint: .trailing), lineWidth: 1.5))
+                        .background(Color(hex: 0x040813, opacity: 0.95), in: Capsule())
+                        .overlay(Capsule().stroke(Color(hex: 0x1AA6FF), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("styleDone")
             }
-            .padding(.horizontal, 14)
-            Text("Pace").font(CS.inter(11)).foregroundStyle(CS.textSecondaryF).padding(.horizontal, 14)
-            HStack(spacing: 8) {
-                card("Normal", "Natural pauses", selected: pace == "normal") { pace = "normal" }
-                card("Fast", "Cuts the pauses", selected: pace == "fast") { pace = "fast" }
-            }
-            .padding(.horizontal, 10)
-            Text("Zoom").font(CS.inter(11)).foregroundStyle(CS.textSecondaryF).padding(.horizontal, 14)
-            HStack(spacing: 8) {
-                card("Off", "No zoom", selected: zoom == "off") { zoom = "off" }
-                card("Subtle", "2–5%", selected: zoom == "subtle") { zoom = "subtle" }
-                card("Dynamic", "2–12%", selected: zoom == "dynamic") { zoom = "dynamic" }
-            }
-            .padding(.horizontal, 10)
-            Text("Coming soon: pace and zoom are not applied to this cut yet.")
-                .font(CS.inter(10)).foregroundStyle(CS.textMutedF)
-                .frame(maxWidth: .infinity)
+            .padding(.leading, 4)
+            StyleToggleRow(
+                title: "Auto Zoom AI", subtitle: "Zooms in on key moments automatically.",
+                isOn: Binding(get: { model.autoZoomEnabled }, set: { value in Task { await model.setAutoZoom(value) } }),
+                identifier: "editorAutoZoomToggle"
+            )
+            .frame(height: 66)
+            .background(Color(hex: 0x040812), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(hex: 0x14336B), lineWidth: 1))
         }
-        .padding(.top, 6)
-        .accessibilityIdentifier("stylePanel")
-    }
-
-    private func card(_ title: String, _ subtitle: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Text(title).font(CS.inter(14, .semibold)).foregroundStyle(.white)
-                Text(subtitle).font(CS.inter(10)).foregroundStyle(CS.textSecondaryF)
-            }
-            .frame(maxWidth: .infinity).frame(height: 50)
-            .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Color(hex: 0x1AA6FF) : Color(hex: 0x1C2E52), lineWidth: selected ? 2 : 1))
-        }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
     }
 }
 
-// MARK: - Voice-over: recording (1084:2562) and review (1084:2778)
+// MARK: - Voice-over: one sheet to record, listen, retake and save (1084:2562)
 
 struct VoiceOverPanel: View {
     @ObservedObject var model: DraftEditorViewModel
@@ -243,119 +222,284 @@ struct VoiceOverPanel: View {
     @State private var samples: [Float] = []
     @State private var enhance = true
     @State private var saving = false
+    @State private var holding = false
+    @State private var pressID: UUID?
+
+    /// Figma 1084:2562: one sheet over the video — record (pause · mic · finish) on top, and the
+    /// take's preview (waveform · Play · Retake · Save) below.
+    static let height: CGFloat = 491
+
+    private var takeURL: URL? { recorder.recordedURL }
+    private var isRecording: Bool { recorder.state == .recording }
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 8)
-            if mode == .voiceReview, let url = recorder.recordedURL {
-                review(url)
-            } else {
-                recording
-            }
+            Capsule().fill(Color(hex: 0x455987)).frame(width: 38, height: 5).padding(.top, 13)
+            recordSection
+            previewSection
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(hex: 0x0A1326), in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
-        .overlay(UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24).stroke(Color(hex: 0x1F3A6B), lineWidth: 1))
-        .ignoresSafeArea(edges: .bottom)
-        .task {
-            if recorder.state != .recording && recorder.recordedURL == nil && mode == .voiceRecord {
-                await recorder.start()
-            }
-        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.height, alignment: .top)
+        .background(Color(hex: 0x060D1F, opacity: 0.98), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color(hex: 0x294D85, opacity: 0.9), lineWidth: 1.5))
         .onChange(of: recorder.recordedURL) { _, url in
             if url != nil { mode = .voiceReview }
+        }
+        .task(id: takeURL) {
+            if let url = takeURL { samples = await Waveform.samples(url: url, count: 60) } else { samples = [] }
         }
         .onDisappear { listener.stop() }
         .accessibilityIdentifier("voiceOverPanel")
     }
 
-    // Recording: the wave follows the voice live (newest bars in red).
+    // MARK: Record: pause · mic (tap or hold) · finish
 
-    private var recording: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 8) {
-                Circle().fill(Color(hex: 0xFF4D6D)).frame(width: 8, height: 8)
-                Text("Recording voice-over").font(CS.inter(16, .bold)).foregroundStyle(.white)
-                Spacer()
-                Text(VoiceRecorder.formatted(recorder.elapsed))
-                    .font(CS.sf(16, .bold)).monospacedDigit().foregroundStyle(Color(hex: 0xFF4D6D))
+    private var recordSection: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Text("Recording voice-over").font(CS.inter(18, .bold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                Image("Ed4OfficialMic").resizable().frame(width: 28, height: 28)
+                    .offset(x: -(195 - 58 - 14))
             }
-            .padding(.horizontal, 20).padding(.top, 14)
-            LiveWave(levels: recorder.levels)
-                .frame(height: 62)
-                .padding(.horizontal, 10)
-                .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 20)
-                .accessibilityIdentifier("liveWave")
-            Text("The wave follows your voice live")
-                .font(CS.inter(11)).foregroundStyle(CS.textMutedF)
-            HStack(spacing: 34) {
-                VStack(spacing: 6) {
+            .frame(height: 28)
+            .padding(.top, 15)
+            Text(statusLine)
+                .font(CS.inter(13, .bold)).foregroundStyle(Color(hex: 0x9EB5DB))
+                .monospacedDigit()
+                .padding(.top, 4)
+            HStack(spacing: 6) {
+                Text("Enhance voice").font(CS.inter(12, .medium)).foregroundStyle(Color(hex: 0xF7FAFF))
+                Button { enhance.toggle() } label: {
+                    ZStack(alignment: enhance ? .trailing : .leading) {
+                        Capsule().fill(enhance ? Color(hex: 0x08CCFA) : Color(hex: 0x2A3A5C))
+                            .overlay(Capsule().stroke(Color(hex: 0x59739E, opacity: 0.8), lineWidth: 1))
+                        Circle().fill(.white).frame(width: 16, height: 16).padding(3)
+                    }
+                    .frame(width: 38, height: 22)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("enhanceVoice")
+                Spacer()
+            }
+            .padding(.leading, 30)
+            .padding(.top, 6)
+            HStack(alignment: .top, spacing: 0) {
+                control(label: recorder.isPaused ? "Tap to resume" : "Tap to pause") {
                     Button {
+                        guard isRecording else { return }
                         if recorder.isPaused { recorder.resume() } else { recorder.pause() }
                     } label: {
-                        Image(systemName: recorder.isPaused ? "play.fill" : "pause.fill")
-                            .font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 52, height: 52)
-                            .background(Color(hex: 0x111B30), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    Text(recorder.isPaused ? "Resume" : "Pause").font(CS.inter(11)).foregroundStyle(CS.textSecondaryF)
-                }
-                VStack(spacing: 6) {
-                    Button {
-                        if recorder.state == .recording { recorder.stop() } else { Task { await recorder.start() } }
-                    } label: {
                         ZStack {
-                            Circle().stroke(LinearGradient(colors: [CS.cyan, Color(hex: 0x7C3AED), CS.magenta], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 4)
-                                .frame(width: 72, height: 72)
-                            if recorder.state == .recording {
-                                RoundedRectangle(cornerRadius: 6).fill(Color(hex: 0xFF4D6D)).frame(width: 26, height: 26)
+                            Circle().fill(Color(hex: 0x1A0F2E, opacity: 0.98))
+                            Circle().stroke(.white, lineWidth: 1.5)
+                            if recorder.isPaused {
+                                Image(systemName: "play.fill").font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
                             } else {
-                                Circle().fill(Color(hex: 0xFF4D6D)).frame(width: 30, height: 30)
+                                HStack(spacing: 6) {
+                                    RoundedRectangle(cornerRadius: 3.5).fill(.white).frame(width: 7, height: 22)
+                                    RoundedRectangle(cornerRadius: 3.5).fill(.white).frame(width: 7, height: 22)
+                                }
                             }
                         }
+                        .frame(width: 48, height: 48)
+                        .opacity(isRecording ? 1 : 0.45)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("voicePause")
+                }
+                control(label: "Tap / hold to record") { micButton }
+                control(label: "Tap to finish") {
+                    Button {
+                        if isRecording { recorder.stop() }
+                    } label: {
+                        ZStack {
+                            Circle().fill(Color(hex: 0x1A0F2E, opacity: 0.98))
+                            Circle().stroke(Color(hex: 0xFF3861, opacity: 0.95), lineWidth: 1.5)
+                            RoundedRectangle(cornerRadius: 5).fill(Color(hex: 0xFF3861)).frame(width: 20, height: 20)
+                        }
+                        .frame(width: 48, height: 48)
+                        .opacity(isRecording ? 1 : 0.45)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("voiceFinish")
-                    Text(recorder.state == .recording ? "Finish" : "Record").font(CS.inter(11)).foregroundStyle(CS.textSecondaryF)
                 }
             }
+            .padding(.top, 2)
             switch recorder.state {
             case .permissionDenied:
-                Text("Allow the microphone in Settings to record.").font(CS.inter(12)).foregroundStyle(CS.error)
+                Text("Allow the microphone in Settings to record.").font(CS.inter(11)).foregroundStyle(CS.error)
             case .failed(let message):
-                Text(message).font(CS.inter(12)).foregroundStyle(CS.error)
+                Text(message).font(CS.inter(11)).foregroundStyle(CS.error).lineLimit(1)
             default:
                 EmptyView()
             }
-            Button("Cancel") {
-                recorder.discardTake()
-                mode = .none
-            }
-            .font(CS.inter(13, .semibold)).foregroundStyle(CS.textSecondaryF)
         }
     }
 
-    // Review: the real waveform; the part already heard lights up and the line moves.
+    private var statusLine: String {
+        if isRecording { return (recorder.isPaused ? "Paused · " : "● REC · ") + VoiceRecorder.formatted(recorder.elapsed) }
+        return "Add your voice to this video"
+    }
 
-    private func review(_ url: URL) -> some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("Voice-over \((model.timelineComposition?.voiceOverPlacements.count ?? 0) + 1)")
-                    .font(CS.inter(16, .bold)).foregroundStyle(.white)
-                Spacer()
-                Text("Enhance voice").font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
-                Toggle("", isOn: $enhance).labelsHidden().tint(CS.cyan)
-                    .accessibilityIdentifier("enhanceVoice")
+    private func control<Content: View>(label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 8) {
+            ZStack { content() }.frame(height: 86)
+            Text(label).font(CS.inter(10, .medium)).foregroundStyle(Color(hex: 0xA3B2D6))
+                .lineLimit(1).minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The big mic: tap starts (or resumes) recording; holding it records only while held.
+    private var micButton: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(AngularGradient(colors: [Color(hex: 0x18E6FF), Color(hex: 0x1669FF), Color(hex: 0x7B39EC), Color(hex: 0xF119D8), Color(hex: 0x18E6FF)], center: .center), lineWidth: 3)
+                .frame(width: 84, height: 85)
+                .shadow(color: Color(hex: 0x1669FF, opacity: 0.6), radius: isRecording && !recorder.isPaused ? 12 : 6)
+            Image("Ed4VoiceMicBig").resizable().frame(width: 84, height: 84)
+                .scaleEffect(holding ? 0.94 : 1)
+            if isRecording && !recorder.isPaused {
+                Circle().stroke(Color(hex: 0xFF3861), lineWidth: 2).frame(width: 92, height: 92)
             }
-            .padding(.horizontal, 20).padding(.top, 12)
+        }
+        .contentShape(Circle())
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { _ in
+                guard !holding, pressID == nil else { return }
+                let id = UUID()
+                pressID = id
+                // Still down after 0.35 s: record while the finger stays on the button.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    guard pressID == id, !isRecording else { return }
+                    holding = true
+                    Task { await beginRecording() }
+                }
+            }
+            .onEnded { _ in
+                pressID = nil
+                if holding {
+                    holding = false
+                    if isRecording { recorder.stop() }
+                } else {
+                    tapMic()
+                }
+            })
+        .accessibilityElement()
+        .accessibilityLabel(isRecording ? "Recording" : "Record")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("voiceRecord")
+    }
+
+    private func tapMic() {
+        if isRecording {
+            if recorder.isPaused { recorder.resume() } else { recorder.pause() }
+        } else {
+            Task { await beginRecording() }
+        }
+    }
+
+    private func beginRecording() async {
+        guard !isRecording else { return }
+        listener.stop()
+        if takeURL != nil { recorder.discardTake() }
+        mode = .voiceRecord
+        await recorder.start()
+    }
+
+    // MARK: Preview: waveform · Play · Retake · Save
+
+    private var previewSection: some View {
+        let ready = takeURL != nil && !isRecording
+        return VStack(spacing: 0) {
+            ZStack {
+                Text("Voice-over").font(CS.inter(18, .bold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                Image("Ed4OfficialMic").resizable().frame(width: 28, height: 28).offset(x: -77)
+            }
+            .frame(height: 33)
+            .padding(.top, 14)
+            Text("Preview your recording before saving.")
+                .font(CS.inter(13)).foregroundStyle(Color(hex: 0x8FA8D1))
+                .padding(.top, 2)
+            waveform
+                .frame(height: 34)
+                .padding(.horizontal, 40)
+                .padding(.top, 22)
+            HStack {
+                Text(VoiceRecorder.formatted(ready ? listener.time : 0))
+                Spacer()
+                Text(VoiceRecorder.formatted(ready ? (listener.duration > 0 ? listener.duration : recorder.elapsed) : recorder.elapsed))
+            }
+            .font(CS.inter(12, .medium)).monospacedDigit().foregroundStyle(Color(hex: 0x8FA8D1))
+            .padding(.horizontal, 30)
+            .padding(.top, 10)
+            HStack(spacing: 0) {
+                Button {
+                    if let url = takeURL { listener.toggle(url: url) }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: listener.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.cyan)
+                        Text(listener.isPlaying ? "Pause" : "Play").font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                    }
+                    .frame(width: 100, height: 46)
+                    .background(Color(hex: 0x0F081A), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(CS.magenta, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("voicePlay")
+                Spacer(minLength: 0)
+                Button {
+                    listener.stop()
+                    recorder.discardTake()
+                    mode = .voiceRecord
+                    Task { await recorder.start() }
+                } label: {
+                    Text("↻  Retake").font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                        .frame(width: 104, height: 46)
+                        .background(Color(hex: 0x0F081A), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0x731F8C), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("voiceRetake")
+                Spacer(minLength: 0)
+                Button { if let url = takeURL { Task { await save(url) } } } label: {
+                    Text(saving ? "Saving…" : "✓  Save").font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                        .frame(width: 112, height: 46)
+                        .background(LinearGradient(colors: [Color(hex: 0x0AD6FF), Color(hex: 0x3366FF), Color(hex: 0xF01FD6)], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .disabled(saving)
+                .accessibilityIdentifier("voiceSave")
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .disabled(!ready)
+            .opacity(ready ? 1 : 0.45)
+            Button("Cancel") {
+                listener.stop()
+                if isRecording { recorder.stop() }
+                recorder.discardTake()
+                mode = .none
+            }
+            .font(CS.inter(12, .semibold)).foregroundStyle(CS.textMutedF)
+            .padding(.top, 8)
+            .accessibilityIdentifier("voiceCancel")
+        }
+    }
+
+    /// While recording: the live bars. With a take: its real waveform, the heard part in blue.
+    @ViewBuilder
+    private var waveform: some View {
+        if isRecording {
+            LiveWave(levels: recorder.levels)
+                .accessibilityIdentifier("liveWave")
+        } else {
             GeometryReader { proxy in
                 let progress = listener.duration > 0 ? listener.time / listener.duration : 0
                 ZStack(alignment: .leading) {
                     PlayedWave(samples: samples, progress: progress)
-                    Rectangle().fill(.white).frame(width: 2, height: 52)
+                    Rectangle().fill(.white).frame(width: 2, height: 34)
                         .offset(x: proxy.size.width * CGFloat(progress))
                 }
                 .contentShape(Rectangle())
@@ -363,56 +507,8 @@ struct VoiceOverPanel: View {
                     listener.seek(fraction: Double(value.location.x / max(1, proxy.size.width)))
                 })
             }
-            .frame(height: 58)
-            .padding(.horizontal, 10)
-            .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 20)
             .accessibilityIdentifier("reviewWave")
-            HStack {
-                Text(VoiceRecorder.formatted(listener.time))
-                Spacer()
-                Text(VoiceRecorder.formatted(listener.duration > 0 ? listener.duration : recorder.elapsed))
-            }
-            .font(CS.sf(11, .semibold)).foregroundStyle(CS.textSecondaryF)
-            .padding(.horizontal, 22)
-            Text("The part you already heard lights up and the line moves while you listen")
-                .font(CS.inter(10)).foregroundStyle(CS.textMutedF)
-                .multilineTextAlignment(.center).padding(.horizontal, 20)
-            HStack(spacing: 10) {
-                outlined(listener.isPlaying ? "Pause" : "Play", icon: listener.isPlaying ? "pause.fill" : "play.fill") {
-                    listener.toggle(url: url)
-                }
-                outlined("Retake", icon: "arrow.counterclockwise") {
-                    listener.stop()
-                    recorder.discardTake()
-                    mode = .voiceRecord
-                    Task { await recorder.start() }
-                }
-                Button { Task { await save(url) } } label: {
-                    Label(saving ? "Saving…" : "Save", systemImage: "checkmark")
-                        .labelStyle(TrailingIconLabel())
-                        .font(CS.inter(15, .semibold)).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).frame(height: 48)
-                        .background(LinearGradient(colors: [CS.cyan, Color(hex: 0x7C3AED), CS.magenta], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-                .disabled(saving)
-                .accessibilityIdentifier("voiceSave")
-            }
-            .padding(.horizontal, 20)
         }
-        .task(id: url) { samples = await Waveform.samples(url: url, count: 64) }
-    }
-
-    private func outlined(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(CS.inter(15, .semibold)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity).frame(height: 48)
-                .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: 0x2A3A60), lineWidth: 1.5))
-        }
-        .buttonStyle(.plain)
     }
 
     private func save(_ url: URL) async {
