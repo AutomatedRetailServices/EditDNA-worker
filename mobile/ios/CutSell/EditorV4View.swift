@@ -49,15 +49,22 @@ struct EditorV4View: View {
     private var content: some View {
         ZStack {
             Color(hex: 0x050814).ignoresSafeArea()
-            VStack(spacing: 0) {
-                header
-                preview
-                    .padding(.top, 8)
-                    .layoutPriority(-1)
-                controlsRow
-                    .padding(.top, 8)
-                bottomArea
+            GeometryReader { geo in
+                // The video keeps its size whatever is open below it (Figma: 266 x 472 on a 390 x 844
+                // iPhone); the timeline, a menu or the voice-over panel use the space under the controls.
+                let previewHeight = max(220, min(472, geo.size.height - 48 - 8 - 46 - 227 - max(0, ToolbarV4.bottomInset - 10)))
+                VStack(spacing: 0) {
+                    header
+                    preview
+                        .frame(height: previewHeight)
+                        .padding(.top, 8)
+                    controlsRow
+                        .padding(.top, 8)
+                    bottomArea
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
             }
+            .ignoresSafeArea(.container, edges: .bottom)
             if panel == .micPermission {
                 micPermissionCard
             }
@@ -223,7 +230,7 @@ struct EditorV4View: View {
             videoCard(size: Self.fit(CGSize(width: 266, height: 472), in: proxy.size))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: 472)
+        .frame(maxWidth: .infinity)
         .animation(.easeOut(duration: 0.2), value: toast)
     }
 
@@ -537,7 +544,7 @@ struct EditorV4View: View {
     private func sheetView(_ which: EditorSheet) -> some View {
         switch which {
         case .overlay:
-            OverlayGallerySheet { url in
+            OverlayGallerySheet(onPick: { url in
                 let at = playback.currentTime
                 Task {
                     await model.addMediaOverlay(fileURL: url, start: at, end: at + 4)
@@ -545,7 +552,7 @@ struct EditorV4View: View {
                         selection = .overlay(added, isText: false)
                     }
                 }
-            }
+            }, sampleTiles: previewState != nil)
         case .broll:
             BrollView(model: model, initialPlacementID: nil)
         case .export:
@@ -798,6 +805,11 @@ enum EditorTool: String, CaseIterable {
 
 /// Editor/Toolbar/v4 (Figma 1087:2573): compact 34 pt icons, slides sideways, active tool in cyan.
 struct ToolbarV4: View {
+    /// The home indicator area under the toolbar (the editor draws to the bottom edge).
+    static var bottomInset: CGFloat {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom ?? 0
+    }
+
     let active: EditorTool?
     let onTap: (EditorTool) -> Void
 
@@ -829,6 +841,7 @@ struct ToolbarV4: View {
         .padding(.top, 6)
         .padding(.bottom, 10)
         .frame(height: 67)
+        .padding(.bottom, max(0, Self.bottomInset - 10))
         .background(Color(hex: 0x02040A))
         .overlay(alignment: .top) { Rectangle().fill(Color(hex: 0x14336B, opacity: 0.7)).frame(height: 1) }
     }

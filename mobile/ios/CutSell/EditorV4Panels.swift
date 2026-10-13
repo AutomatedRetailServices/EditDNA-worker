@@ -523,6 +523,8 @@ final class TakePlayer: ObservableObject {
 /// "Photos & Videos": pick one photo or video to place over the video.
 struct OverlayGallerySheet: View {
     let onPick: (URL) -> Void
+    /// Design screenshots only: show sample tiles instead of the photo library.
+    var sampleTiles = false
     @Environment(\.dismiss) private var dismiss
     @State private var assets: [PHAsset] = []
     @State private var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -541,7 +543,23 @@ struct OverlayGallerySheet: View {
                 }
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
-            if status == .authorized || status == .limited {
+            if sampleTiles {
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(0..<9, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(LinearGradient(colors: [Color(hex: 0x1C3566), Color(hex: 0x2A4F8F)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .aspectRatio(1, contentMode: .fit)
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(index == 1 ? CS.cyan : .clear, lineWidth: 2))
+                            .overlay(alignment: .bottomTrailing) {
+                                if index == 1 || index == 5 {
+                                    Text(index == 1 ? "0:08" : "0:15").font(CS.inter(10, .semibold)).foregroundStyle(.white).padding(5)
+                                }
+                            }
+                    }
+                }
+                .padding(.horizontal, 20)
+                Spacer()
+            } else             if status == .authorized || status == .limited {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 6) {
                         ForEach(assets, id: \.localIdentifier) { asset in
