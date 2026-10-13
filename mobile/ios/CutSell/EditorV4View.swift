@@ -43,6 +43,10 @@ struct EditorV4View: View {
     }
 
     var body: some View {
+        presentations(lifecycle(content))
+    }
+
+    private var content: some View {
         ZStack {
             Color(hex: 0x050814).ignoresSafeArea()
             VStack(spacing: 0) {
@@ -58,80 +62,111 @@ struct EditorV4View: View {
                 micPermissionCard
             }
         }
-        .toolbar(.hidden, for: .navigationBar)
-        .preferredColorScheme(.dark)
-        .task(id: previewKey) { await playback.rebuild(from: model) }
-        .onChange(of: playback.currentTime) { _, time in
-            if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }
-        }
-        .onAppear {
-            EditorAudio.preparePlayback()
-            videoVolume = model.videoTrackVolume
-            guard let previewState else { return }
-            selection = previewState.selection
-            toast = previewState.toast
-            #if DEBUG
-            if previewState.panel == .voiceRecord {
-                recorder.previewRecording(levels: (0..<80).map { i in Float(0.25 + 0.6 * abs(sin(Double(i) * 0.7)) * (0.5 + 0.5 * abs(cos(Double(i) * 0.23)))) }, elapsed: 7)
-            } else if previewState.panel == .voiceReview, let url = Self.sampleTone() {
-                recorder.previewRecorded(url: url, elapsed: 8)
-            }
-            #endif
-            if let opened = previewState.panel { panel = opened }
-            if case .captions(let clipID?) = previewState.panel {
-                captionText = captionTextFor(clipID)
-            }
-            if let opened = previewState.sheet {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { sheet = opened }
-            }
-        }
-        .onDisappear {
-            playback.pause()
-            if recorder.state == .recording { recorder.stop() }
-        }
-        .sheet(item: $sheet) { which in sheetView(which) }
-        .fullScreenCover(isPresented: $fullScreen) {
-            ZStack(alignment: .topLeading) {
-                Color.black.ignoresSafeArea()
-                VideoPlayer(player: playback.player).ignoresSafeArea()
-                    .scaleEffect(x: model.isMirrored ? -1 : 1, y: 1)
-                Button { fullScreen = false } label: {
-                    Image(systemName: "xmark").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 44, height: 44).background(Color.black.opacity(0.4), in: Circle())
-                }
-                .padding(16)
-                .accessibilityLabel("Close full screen")
-            }
-        }
-        .alert("Rename cut", isPresented: $renaming) {
-            TextField("Name", text: $newTitle)
-            Button("Save") { Task { await rename() } }
-            Button("Cancel", role: .cancel) {}
-        }
-        .confirmationDialog("Add to the video", isPresented: $choosingOverlay, titleVisibility: .visible) {
-            Button("Text") { addingText = true }
-            Button("Photo or video") { sheet = .overlay }
-            Button("B-roll (full screen)") { sheet = .broll }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("Add text", isPresented: $addingText) {
-            TextField("Text", text: $overlayText)
-            Button("Add") {
-                let text = overlayText.trimmingCharacters(in: .whitespacesAndNewlines)
-                overlayText = ""
-                guard !text.isEmpty else { return }
-                let at = playback.currentTime
-                Task { await model.addTextOverlay(text: text, start: at, end: at + 3) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("It appears on the video at the cursor for 3 seconds.")
-        }
-        .alert("CutSell", isPresented: Binding(
-            get: { model.errorMessage != nil },
-            set: { if !$0 { model.errorMessage = nil } }
-        )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
     }
+
+    private func lifecycle<V: View>(_ view: V) -> some View {
+        view
+            .toolbar(.hidden, for: .navigationBar)
+            .preferredColorScheme(.dark)
+            .task(id: previewKey) { await playback.rebuild(from: model) }
+            .onChange(of: playback.currentTime) { _, time in
+                if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }
+            }
+            .onAppear { appeared() }
+            .onDisappear {
+                playback.pause()
+                if recorder.state == .recording { recorder.stop() }
+            }
+    }
+
+    private func appeared() {
+        EditorAudio.preparePlayback()
+        videoVolume = model.videoTrackVolume
+        guard let previewState else { return }
+        selection = previewState.selection
+        toast = previewState.toast
+        #if DEBUG
+        if previewState.panel == .voiceRecord {
+            recorder.previewRecording(levels: Self.sampleLevels(), elapsed: 7)
+        } else if previewState.panel == .voiceReview, let url = Self.sampleTone() {
+            recorder.previewRecorded(url: url, elapsed: 8)
+        }
+        #endif
+        if let opened = previewState.panel { panel = opened }
+        if case .captions(let clipID?) = previewState.panel {
+            captionText = captionTextFor(clipID)
+        }
+        if let opened = previewState.sheet {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { sheet = opened }
+        }
+    }
+
+    private func presentations<V: View>(_ view: V) -> some View {
+        view
+            .sheet(item: $sheet) { which in sheetView(which) }
+            .fullScreenCover(isPresented: $fullScreen) { fullScreenPlayer }
+            .alert("Rename cut", isPresented: $renaming) {
+                TextField("Name", text: $newTitle)
+                Button("Save") { Task { await rename() } }
+                Button("Cancel", role: .cancel) {}
+            }
+            .confirmationDialog("Add to the video", isPresented: $choosingOverlay, titleVisibility: .visible) {
+                Button("Text") { addingText = true }
+                Button("Photo or video") { sheet = .overlay }
+                Button("B-roll (full screen)") { sheet = .broll }
+                Button("Cancel", role: .cancel) {}
+            }
+            .alert("Add text", isPresented: $addingText) {
+                TextField("Text", text: $overlayText)
+                Button("Add") { addTextOverlay() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("It appears on the video at the cursor for 3 seconds.")
+            }
+            .alert("CutSell", isPresented: errorShown) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(model.errorMessage ?? "")
+            }
+    }
+
+    private var errorShown: Binding<Bool> {
+        Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
+    }
+
+    private var fullScreenPlayer: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            VideoPlayer(player: playback.player).ignoresSafeArea()
+                .scaleEffect(x: model.isMirrored ? -1 : 1, y: 1)
+            Button { fullScreen = false } label: {
+                Image(systemName: "xmark").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 44, height: 44).background(Color.black.opacity(0.4), in: Circle())
+            }
+            .padding(16)
+            .accessibilityLabel("Close full screen")
+        }
+    }
+
+    private func addTextOverlay() {
+        let text = overlayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        overlayText = ""
+        guard !text.isEmpty else { return }
+        let at = playback.currentTime
+        Task { await model.addTextOverlay(text: text, start: at, end: at + 3) }
+    }
+
+    #if DEBUG
+    static func sampleLevels() -> [Float] {
+        var levels: [Float] = []
+        for i in 0..<80 {
+            let a: Double = abs(sin(Double(i) * 0.7))
+            let b: Double = 0.5 + 0.5 * abs(cos(Double(i) * 0.23))
+            levels.append(Float(0.25 + 0.6 * a * b))
+        }
+        return levels
+    }
+    #endif
 
     // MARK: Header (no logo)
 
@@ -185,44 +220,55 @@ struct EditorV4View: View {
 
     private var preview: some View {
         GeometryReader { proxy in
-            let size = Self.fit(CGSize(width: 266, height: 472), in: proxy.size)
-            ZStack {
-                ZStack {
-                    Color(hex: 0x070B16)
-                    videoLayer
-                    overlaysOnVideo(frame: size)
-                    if model.captionsEnabled {
-                        captionLayer(frame: size)
-                    }
-                    if playback.isBuilding && !playback.isReady {
-                        ProgressView().tint(CS.cyan)
-                    }
-                }
-                .frame(width: size.width, height: size.height)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(LinearGradient(colors: [CS.cyan, Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)], startPoint: .bottomLeading, endPoint: .topTrailing), lineWidth: 2)
-                )
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if captionFocused { finishCaptionEditing(); return }
-                    playback.togglePlayback()
-                }
-                .overlay(alignment: .bottom) {
-                    if let toast {
-                        ToastPillV4(toast: toast) { Task { await undoFromToast() } }
-                            .padding(.bottom, 12)
-                            .transition(.opacity)
-                    } else if case .overlay(_, isText: false) = selection {
-                        hintPill("Drag to move · Pinch to resize").padding(.bottom, 14)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(.easeOut(duration: 0.2), value: toast)
+            videoCard(size: Self.fit(CGSize(width: 266, height: 472), in: proxy.size))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: 472)
+        .animation(.easeOut(duration: 0.2), value: toast)
+    }
+
+    private func videoCard(size: CGSize) -> some View {
+        videoStack(size: size)
+            .frame(width: size.width, height: size.height)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Self.borderGradient, lineWidth: 2))
+            .contentShape(Rectangle())
+            .onTapGesture { videoTapped() }
+            .overlay(alignment: .bottom) { videoBottomPill }
+    }
+
+    private static let borderGradient = LinearGradient(
+        colors: [CS.cyan, Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)], startPoint: .bottomLeading, endPoint: .topTrailing
+    )
+
+    private func videoStack(size: CGSize) -> some View {
+        ZStack {
+            Color(hex: 0x070B16)
+            videoLayer
+            overlaysOnVideo(frame: size)
+            if model.captionsEnabled {
+                captionLayer(frame: size)
+            }
+            if playback.isBuilding && !playback.isReady {
+                ProgressView().tint(CS.cyan)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var videoBottomPill: some View {
+        if let toast {
+            ToastPillV4(toast: toast) { Task { await undoFromToast() } }
+                .padding(.bottom, 12)
+                .transition(.opacity)
+        } else if case .overlay(_, isText: false) = selection {
+            hintPill("Drag to move · Pinch to resize").padding(.bottom, 14)
+        }
+    }
+
+    private func videoTapped() {
+        if captionFocused { finishCaptionEditing(); return }
+        playback.togglePlayback()
     }
 
     static func fit(_ target: CGSize, in box: CGSize) -> CGSize {
@@ -302,7 +348,7 @@ struct EditorV4View: View {
             .overlay { cornerHandles }
             .onTapGesture { captionFocused = true }
         }
-        .position(x: frame.width * model.captionX, y: frame.height * min(0.8, max(0.2, model.captionY)))
+        .position(x: frame.width * CGFloat(model.captionX), y: frame.height * CGFloat(min(0.8, max(0.2, model.captionY))))
     }
 
     private var cornerHandles: some View {
@@ -326,7 +372,8 @@ struct EditorV4View: View {
                         .font(CS.inter(CGFloat(18 * (item["scale"]?.doubleValue ?? 1)), .bold))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.6), radius: 2)
-                        .position(x: frame.width * (item["x"]?.doubleValue ?? 0.5), y: frame.height * (item["y"]?.doubleValue ?? 0.2))
+                        .position(x: frame.width * CGFloat(item["x"]?.doubleValue ?? 0.5),
+                                  y: frame.height * CGFloat(item["y"]?.doubleValue ?? 0.2))
                 }
             }
             ForEach(Array(model.mediaOverlays.enumerated()), id: \.offset) { _, item in
@@ -859,51 +906,66 @@ private struct MediaOverlayOnVideo: View {
     @State private var drag: CGSize = .zero
     @State private var pinch: CGFloat = 1
 
+    private var start: Double { item["start"]?.doubleValue ?? 0 }
+    private var end: Double { item["end"]?.doubleValue ?? start }
+    private var x: Double { item["x"]?.doubleValue ?? 0.5 }
+    private var y: Double { item["y"]?.doubleValue ?? 0.5 }
+    private var width: Double { item["width"]?.doubleValue ?? 0.4 }
+    private var visible: Bool { isSelected || (time >= start && time < end) }
+
     var body: some View {
-        let start = item["start"]?.doubleValue ?? 0
-        let end = item["end"]?.doubleValue ?? start
-        let x = item["x"]?.doubleValue ?? 0.5
-        let y = item["y"]?.doubleValue ?? 0.5
-        let width = item["width"]?.doubleValue ?? 0.4
-        let w = frame.width * width * pinch
-        let visible = isSelected || (time >= start && time < end)
         if visible {
-            OverlayMediaThumb(item: item)
-                .frame(width: w, height: w * 0.42)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 2).stroke(.white, lineWidth: 1.5).padding(-4)
-                        GeometryReader { proxy in
-                            ForEach(0..<4, id: \.self) { index in
-                                Circle().fill(.white).frame(width: 10, height: 10)
-                                    .position(x: index % 2 == 0 ? -4 : proxy.size.width + 4, y: index < 2 ? -4 : proxy.size.height + 4)
-                            }
-                        }
-                    }
-                }
-                .position(x: frame.width * x + drag.width, y: frame.height * y + drag.height)
+            thumb
+                .position(x: frame.width * CGFloat(x) + drag.width, y: frame.height * CGFloat(y) + drag.height)
                 .onTapGesture { onSelect() }
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in if isSelected { drag = value.translation } }
-                        .onEnded { value in
-                            guard isSelected else { return }
-                            let nx = max(0, min(1, x + value.translation.width / frame.width))
-                            let ny = max(0, min(1, y + value.translation.height / frame.height))
-                            drag = .zero
-                            onChange(nx, ny, width)
-                        }
-                        .simultaneously(with: MagnificationGesture()
-                            .onChanged { value in if isSelected { pinch = value } }
-                            .onEnded { value in
-                                guard isSelected else { return }
-                                let nw = max(0.1, min(1, width * value))
-                                pinch = 1
-                                onChange(x, y, nw)
-                            })
-                )
+                .gesture(moveGesture.simultaneously(with: resizeGesture))
                 .accessibilityIdentifier("mediaOverlayOnVideo")
+        }
+    }
+
+    private var thumb: some View {
+        let w = frame.width * CGFloat(width) * pinch
+        return OverlayMediaThumb(item: item)
+            .frame(width: w, height: w * 0.42)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay { if isSelected { SelectionHandles() } }
+    }
+
+    private var moveGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in if isSelected { drag = value.translation } }
+            .onEnded { value in
+                guard isSelected else { return }
+                let nx = max(0, min(1, x + Double(value.translation.width / frame.width)))
+                let ny = max(0, min(1, y + Double(value.translation.height / frame.height)))
+                drag = .zero
+                onChange(nx, ny, width)
+            }
+    }
+
+    private var resizeGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in if isSelected { pinch = value } }
+            .onEnded { value in
+                guard isSelected else { return }
+                let nw = max(0.1, min(1, width * Double(value)))
+                pinch = 1
+                onChange(x, y, nw)
+            }
+    }
+}
+
+/// White box with the four corner handles around a selected item.
+private struct SelectionHandles: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 2).stroke(.white, lineWidth: 1.5).padding(-4)
+            GeometryReader { proxy in
+                ForEach(0..<4, id: \.self) { index in
+                    Circle().fill(.white).frame(width: 10, height: 10)
+                        .position(x: index % 2 == 0 ? -4 : proxy.size.width + 4, y: index < 2 ? -4 : proxy.size.height + 4)
+                }
+            }
         }
     }
 }

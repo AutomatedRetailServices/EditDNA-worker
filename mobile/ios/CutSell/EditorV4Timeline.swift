@@ -245,6 +245,17 @@ struct TimelineV4: View {
         selection = selection == target ? nil : target
     }
 
+    private static func fill(_ kind: OverlayItem.Kind) -> AnyShapeStyle {
+        switch kind {
+        case .media: return AnyShapeStyle(Color(hex: 0xF0F2F7))
+        case .broll:
+            return AnyShapeStyle(LinearGradient(colors: [Color(hex: 0xD61FFF, opacity: 0.7), Color(hex: 0x1A6BFF, opacity: 0.6)],
+                                                startPoint: .leading, endPoint: .trailing))
+        case .text:
+            return AnyShapeStyle(LinearGradient(colors: [Color(hex: 0x0A5CDB), Color(hex: 0x1A1F5C)], startPoint: .leading, endPoint: .trailing))
+        }
+    }
+
     private func overlayTrack(width: CGFloat, x: (Double) -> CGFloat) -> some View {
         let items = overlayItems
         return ZStack(alignment: .topLeading) {
@@ -272,14 +283,7 @@ struct TimelineV4: View {
                             .lineLimit(1)
                             .padding(.horizontal, 6)
                             .frame(width: itemWidth, height: 24, alignment: .leading)
-                            .background(
-                                item.kind == .media
-                                    ? AnyShapeStyle(Color(hex: 0xF0F2F7))
-                                    : item.kind == .broll
-                                        ? AnyShapeStyle(LinearGradient(colors: [Color(hex: 0xD61FFF, opacity: 0.7), Color(hex: 0x1A6BFF, opacity: 0.6)], startPoint: .leading, endPoint: .trailing))
-                                        : AnyShapeStyle(LinearGradient(colors: [Color(hex: 0x0A5CDB), Color(hex: 0x1A1F5C)], startPoint: .leading, endPoint: .trailing)),
-                                in: RoundedRectangle(cornerRadius: 7)
-                            )
+                            .background(Self.fill(item.kind), in: RoundedRectangle(cornerRadius: 7))
                             .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected(item) ? CS.cyan : .clear, lineWidth: 2))
                             .offset(x: left)
                             .onTapGesture { select(item) }
