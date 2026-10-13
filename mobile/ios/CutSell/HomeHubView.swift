@@ -209,7 +209,7 @@ struct HomeHubView: View {
                 if isProcessing { ProgressView().tint(CS.cyan) }
             }
             .overlay(alignment: .bottomLeading) {
-                Text(project.title)
+                Text(CutNaming.readable(project: project))
                     .font(CS.inter(11, .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(2)

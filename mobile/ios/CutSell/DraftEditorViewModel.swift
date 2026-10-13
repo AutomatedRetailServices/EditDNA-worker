@@ -880,3 +880,12 @@ final class DraftEditorViewModel: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+extension DraftEditorViewModel {
+    /// Design screenshots only: show sample voice-over placements without a server.
+    func setPreviewComposition(_ composition: TimelineComposition) {
+        timelineComposition = composition
+    }
+}
+#endif

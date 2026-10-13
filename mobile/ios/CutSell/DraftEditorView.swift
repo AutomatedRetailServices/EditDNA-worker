@@ -12,10 +12,31 @@ struct DraftEditorView: View {
 
     var body: some View {
         Group {
-            if let model = holder.model {
-                editor(model)
+            if let model = holder.model, !model.isLoading, model.snapshot != nil {
+                // Editor v2 (Figma 04_Editor). The old list-style sections ("Editor", "Timeline",
+                // "Clip order", "Text & overlays", big Export button) are no longer shown.
+                EditorV2View(model: model, project: project)
+            } else if let model = holder.model, !model.isLoading, model.snapshot == nil, model.errorMessage != nil {
+                VStack(spacing: 14) {
+                    Text("Couldn’t open this cut").font(CS.inter(18, .semibold)).foregroundStyle(.white)
+                    Text(model.errorMessage ?? "Please try again.").font(CS.inter(13)).foregroundStyle(CS.textSecondaryF)
+                        .multilineTextAlignment(.center)
+                    PrimaryButton(title: "Try again", height: 48, cornerRadius: 14, fontSize: 15) {
+                        Task { await model.load() }
+                    }
+                    .frame(width: 200)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(hex: 0x02040A).ignoresSafeArea())
             } else {
-                ProgressView("Opening draft…")
+                ZStack {
+                    Color(hex: 0x02040A).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        BrandLogo()
+                        ProgressView("Opening your cut…").tint(CS.cyan).foregroundStyle(CS.textSecondaryF)
+                    }
+                }
             }
         }
         // The load belongs to the whole screen. It used to hang off the "Opening draft…" spinner:

@@ -15,6 +15,7 @@ final class VoiceRecorder: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var elapsed: TimeInterval = 0
+    @Published private(set) var isPaused = false
 
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
@@ -62,9 +63,23 @@ final class VoiceRecorder: ObservableObject {
         }
     }
 
+    /// Pauses the take (Editor v2 "Tap to pause"); `resume()` continues the same file.
+    func pause() {
+        guard let recorder, state == .recording, recorder.isRecording else { return }
+        recorder.pause()
+        isPaused = true
+    }
+
+    func resume() {
+        guard let recorder, state == .recording, isPaused else { return }
+        recorder.record()
+        isPaused = false
+    }
+
     /// Stops the take and keeps the file for "Use" or "Record again".
     func stop() {
         guard let recorder, state == .recording else { return }
+        isPaused = false
         elapsed = recorder.currentTime
         recorder.stop()
         timer?.invalidate()

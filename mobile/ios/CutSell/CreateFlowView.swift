@@ -265,7 +265,8 @@ struct CreateFlowView: View {
     static func cutTitle(_ videos: [LocalVideo]) -> String? {
         guard let first = videos.first else { return nil }
         let base = (first.name as NSString).deletingPathExtension
-        guard !base.isEmpty else { return nil }
+        // Internal file names ("media-B3E6…", "Recorded clip") become "Cut 13 Oct".
+        guard !CutNaming.isInternal(base) else { return CutNaming.dated() }
         return videos.count > 1 ? "\(base) +\(videos.count - 1)" : base
     }
 
