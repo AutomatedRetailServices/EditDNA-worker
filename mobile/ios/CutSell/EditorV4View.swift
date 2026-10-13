@@ -164,7 +164,13 @@ struct EditorV4View: View {
             default: break
             }
             // Move the cursor into the cut, like the Figma screens.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { playback.seek(to: min(3, playback.duration / 3)) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                let at = min(3, playback.duration / 3)
+                if probe == "base" || probe == "style" {
+                    model.probeShowZoomKeyframes(at: [max(0, at - 0.6), at + 4])
+                }
+                playback.seek(to: probe == "base" ? 0 : at)
+            }
         }
         #endif
         if let opened = previewState.sheet {

@@ -250,6 +250,26 @@ final class DraftEditorViewModel: ObservableObject {
         await saveZoomKeyframes(zoomKeyframes.filter { $0["keyframe_id"]?.stringValue != id })
     }
 
+    #if DEBUG
+    /// Editor probe only: shows two sample zoom keyframes on a real cut (the live server keeps
+    /// keyframes once the new engine is deployed); nothing is saved.
+    func probeShowZoomKeyframes(at times: [Double]) {
+        guard var object = displayDraft?.objectValue else { return }
+        var items: [JSONValue] = []
+        for (index, time) in times.enumerated() {
+            guard let point = sourcePoint(at: time) else { continue }
+            items.append(.object([
+                "keyframe_id": .string("probe-\(index)"), "source_asset_id": .string(point.source),
+                "source_time": .number(point.seconds), "duration": .number(1.5), "scale": .number(index == 0 ? 1.08 : 1.12),
+                "kind": .string(index == 0 ? "hook" : "price"), "origin": .string("ai"),
+            ]))
+        }
+        object["zoom_keyframes"] = .array(items)
+        object["auto_zoom_enabled"] = .bool(true)
+        optimisticDraft = .object(object)
+    }
+    #endif
+
     /// Editor → Style → Auto Zoom AI. The keyframes stay in the draft either way; off = not drawn.
     func setAutoZoom(_ enabled: Bool) async {
         await setDraftValue("auto_zoom_enabled", .bool(enabled))
