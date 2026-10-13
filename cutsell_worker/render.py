@@ -480,10 +480,13 @@ def _audio_join_fade_filters(duration_sec: float, *, fade_in: float | None = Non
     fade = float(_AUDIO_JOIN_FADE_SEC)
     if fade <= 0.0 or duration_sec < _AUDIO_JOIN_FADE_MIN_SEGMENT_SEC:
         return []
-    fade_in = max(fade, float(fade_in)) if fade_in else fade
-    fade_out = max(fade, float(fade_out)) if fade_out else fade
-    fade_out_start = max(0.0, float(duration_sec) - fade_out)
-    return [f"afade=t=in:st=0:d={fade_in:.3f}", f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}"]
+    if fade_in or fade_out:
+        roll_in = max(fade, float(fade_in)) if fade_in else fade
+        roll_out = max(fade, float(fade_out)) if fade_out else fade
+        roll_out_start = max(0.0, float(duration_sec) - roll_out)
+        return [f"afade=t=in:st=0:d={roll_in:.3f}", f"afade=t=out:st={roll_out_start:.3f}:d={roll_out:.3f}"]
+    fade_out_start = max(0.0, float(duration_sec) - fade)
+    return [f"afade=t=in:st=0:d={fade:.3f}", f"afade=t=out:st={fade_out_start:.3f}:d={fade:.3f}"]
 
 
 def _orientation_filters(segment: RenderSegment) -> list[str]:
@@ -1051,7 +1054,12 @@ def _concat_render_command_with_audio_windows(
             trail = max(0.0, audio_end - segment.end)
             audio_chain = [
                 f"[{audio_input}:a]volume={effective_volume:.3f}",
-                *_audio_join_fade_filters(audio_duration, fade_in=lead or None, fade_out=trail or None),
+                *_audio_join_fade_filters(
+                    audio_duration,
+                    # Only Overlap audio rolls crossfade; J/L-cut windows keep the 12 ms anti-click.
+                    fade_in=lead if getattr(segment, "audio_pre_roll", 0) > 0 else None,
+                    fade_out=trail if getattr(segment, "audio_post_roll", 0) > 0 else None,
+                ),
                 audio_format,
                 f"atrim=duration={audio_duration:.6f}",
                 "asetpts=PTS-STARTPTS",
