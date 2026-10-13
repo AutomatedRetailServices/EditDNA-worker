@@ -208,6 +208,9 @@ class DraftClip:
     # by the silence around the clip in its source (never another phrase's words). 0 = hard cut.
     audio_pre_roll: float = 0.0
     audio_post_roll: float = 0.0
+    # Editor v4 Mirror on this clip only (left-right flip of its picture in the export; captions,
+    # overlays and logo are never flipped). The cut engine never sets or reads it.
+    mirror: bool = False
     # Local face/pose/motion evidence carried through from the CandidateTake
     # this clip was built from (see local_performance.py). Optional and
     # defaulted to None so every existing construction site (serde.py's

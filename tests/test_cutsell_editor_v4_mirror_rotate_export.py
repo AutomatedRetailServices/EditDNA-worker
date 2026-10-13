@@ -99,3 +99,55 @@ def test_real_export_mirrors_the_picture(tmp_path, half_red_clip, mirror):
         assert b > 150 and r < 100, (r, g, b)   # left side is now the blue half
     else:
         assert r > 150 and b < 100, (r, g, b)
+
+
+# --- Mirror on one clip (Editor v4: the selected clip, or every clip when none is selected) ---
+
+def _two_clips(**first):
+    return {
+        "project_id": "prj_test", "captions_enabled": False,
+        "selected": [
+            {"clip_id": "c1", "source_asset_id": "s1", "start": 0.0, "end": 0.5, "text": "a", **first},
+            {"clip_id": "c2", "source_asset_id": "s1", "start": 0.5, "end": 1.0, "text": "b"},
+        ],
+    }
+
+
+def test_clip_mirror_parses_serializes_and_survives_a_split():
+    from cutsell_worker.draft_edits import split_clip
+    draft = draft_from_dict(_two_clips(mirror=True))
+    assert draft.selected[0].mirror is True and draft.selected[1].mirror is False
+    data = result_to_dict(draft)
+    assert data["selected"][0]["mirror"] is True and "mirror" not in data["selected"][1]
+    words = [{"text": "x", "start": 0.0, "end": 0.2}, {"text": "y", "start": 0.3, "end": 0.45}]
+    payload = _two_clips(mirror=True)
+    payload["selected"][0]["words"] = words
+    payload["alternates"] = []
+    payload["discarded"] = []
+    halves = split_clip(payload, "c1", split_time=0.25, min_duration_sec=0.05)["selected"][:2]
+    assert all(half["mirror"] is True for half in halves)
+
+
+def test_plan_flips_only_the_mirrored_clip_and_never_merges_it():
+    segments = build_render_plan(draft_from_dict(_two_clips(mirror=True)), {"s1": "/x.mp4"})
+    assert [seg.mirror for seg in segments] == [True, False]          # contiguous, but not coalesced
+    plain = build_render_plan(draft_from_dict(_two_clips()), {"s1": "/x.mp4"})
+    assert len(plain) == 1 and plain[0].mirror is False                # unchanged behaviour
+
+
+def test_real_export_mirrors_only_that_clip(tmp_path, half_red_clip):
+    draft = draft_from_dict(_two_clips(mirror=True))
+    output = tmp_path / "out.mp4"
+    render.render_preview(build_render_plan(draft, {"s1": half_red_clip}), str(output), width=180, height=320)
+
+    def left_at(t):
+        raw = subprocess.run([
+            "ffmpeg", "-loglevel", "error", "-ss", str(t), "-i", str(output), "-frames:v", "1",
+            "-vf", "scale=180:320,crop=1:1:30:160", "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+        ], check=True, capture_output=True).stdout
+        return raw[0], raw[2]
+
+    r, b = left_at(0.25)
+    assert b > 150 and r < 100, (r, b)       # first clip flipped: blue on the left
+    r, b = left_at(0.75)
+    assert r > 150 and b < 100, (r, b)       # second clip as recorded

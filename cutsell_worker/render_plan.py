@@ -157,6 +157,8 @@ def _can_coalesce(left: RenderSegment, right: RenderSegment, *, tolerance_sec: f
         return False
     if left.audio_muted != right.audio_muted or abs(left.audio_volume - right.audio_volume) > 1e-6:
         return False
+    if getattr(left, "mirror", False) != getattr(right, "mirror", False):
+        return False  # a mirrored clip next to a plain one keeps its own segment
     if (left.caption_preset, left.caption_font, left.caption_x, left.caption_y, left.caption_scale) != (
             right.caption_preset, right.caption_font, right.caption_x, right.caption_y, right.caption_scale):
         return False
@@ -296,7 +298,8 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             caption_x=getattr(draft, "caption_x", None),
             caption_y=getattr(draft, "caption_y", None),
             caption_scale=getattr(draft, "caption_scale", None),
-            mirror=bool(getattr(draft, "mirror", False)),
+            # Whole-video Mirror (draft) or this clip's own Mirror; either flips the picture once.
+            mirror=bool(getattr(draft, "mirror", False)) or bool(getattr(clip, "mirror", False)),
             rotation=int(getattr(draft, "rotation", 0) or 0),
             audio_pre_roll=float(getattr(clip, "audio_pre_roll", 0.0) or 0.0) if overlap else 0.0,
             audio_post_roll=float(getattr(clip, "audio_post_roll", 0.0) or 0.0) if overlap else 0.0,
