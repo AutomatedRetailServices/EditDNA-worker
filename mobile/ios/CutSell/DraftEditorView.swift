@@ -109,6 +109,8 @@ struct DraftEditorView: View {
                         .padding()
                     }
                     .padding(.vertical)
+                    // Exactly the screen width: nothing may push the editor past the edges.
+                    .containerRelativeFrame(.horizontal)
                 }
                 // While the panel is open, a finger on the video moves the
                 // caption instead of scrolling the page (Done closes it).
@@ -122,13 +124,8 @@ struct DraftEditorView: View {
                 }
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .bottomBar) {
-                Button { Task { await model.undo() } } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-                Spacer()
-                Button { Task { await model.redo() } } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
-            }
-        }
+        // Undo / Redo live once, in the timeline's tool bar (no floating copies over the content).
+        .navigationTitle(model.videoTitle ?? project.title)
         .sheet(isPresented: Binding(
             get: { captionTextClipID != nil },
             set: { if !$0 { captionTextClipID = nil } }

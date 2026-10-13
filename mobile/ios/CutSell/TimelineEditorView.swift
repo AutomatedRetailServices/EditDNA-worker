@@ -73,6 +73,8 @@ private struct TimelineRowItem: Identifiable {
     /// scale the playhead uses), so a split has to be converted back to
     /// source time before it is sent to the backend.
     var sourceStartSec: Double? = nil
+    /// Main Video only -- the cut's own video, for a real frame when there are no preview frames.
+    var frameURL: URL? = nil
 }
 
 struct TimelineEditorView: View {
@@ -82,9 +84,9 @@ struct TimelineEditorView: View {
     var onOpenCaptions: () -> Void = {}
 
     @State private var selection: TimelineSelection?
-    @State private var playheadTime: Double = 0
+    /// Follows the video player (one time bar only, the player's).
+    private var playheadTime: Double { model.playheadTime }
     @State private var isExpanded = false
-    @State private var isPlaying = false
     @State private var showBrollView = false
     @State private var showVoiceOverView = false
     @State private var showOverlayView = false
@@ -122,7 +124,8 @@ struct TimelineEditorView: View {
             items.append(TimelineRowItem(
                 id: clip["clip_id"]?.stringValue ?? UUID().uuidString, track: .mainVideo,
                 startSec: cursor, endSec: cursor + duration, label: label, previewFrames: frames,
-                sourceStartSec: start
+                sourceStartSec: start,
+                frameURL: model.playbackURL(forSource: clip["source_asset_id"]?.stringValue)
             ))
             cursor += duration
         }
@@ -183,7 +186,6 @@ struct TimelineEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            transportRow
             timelineTracks
             if !canAddBrollOrVoiceOver {
                 Text("B-roll and Voice-over placement need this project's primary source registered first.")
@@ -229,30 +231,6 @@ struct TimelineEditorView: View {
                     .labelStyle(.iconOnly)
             }
             .accessibilityLabel(isExpanded ? "Collapse timeline" : "Expand timeline")
-        }
-    }
-
-    private var transportRow: some View {
-        HStack(spacing: 16) {
-            Button {
-                isPlaying.toggle()
-            } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title3)
-            }
-            .accessibilityLabel(isPlaying ? "Pause" : "Play")
-
-            Text(String(format: "%.1fs / %.1fs", playheadTime, totalDuration))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-
-            Slider(value: $playheadTime, in: 0...totalDuration)
-                .accessibilityLabel("Playhead")
-                .accessibilityValue("\(String(format: "%.1f", playheadTime)) seconds of \(String(format: "%.1f", totalDuration))")
-
-            if model.isSavingTimeline {
-                ProgressView().controlSize(.small)
-            }
         }
     }
 
@@ -343,8 +321,18 @@ struct TimelineEditorView: View {
 
     // MARK: - Actions
 
+    /// Seven bordered buttons are wider than an iPhone screen (they pushed the whole editor off
+    /// the left and right edges), so the bar scrolls sideways instead of widening the editor.
     private var actionBar: some View {
-        HStack(spacing: 14) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            actionButtons
+                .padding(.vertical, 2)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 8) {
             Button {
                 Task { await performSplit() }
             } label: {
@@ -517,7 +505,10 @@ private struct TimelineRowCell: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 7)
                     .fill(.secondary.opacity(0.15))
-                if !displayFrames.isEmpty {
+                if displayFrames.isEmpty, item.frameURL != nil {
+                    ClipFrameImage(url: item.frameURL, seconds: (item.sourceStartSec ?? 0) + 0.2)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                } else if !displayFrames.isEmpty {
                     HStack(spacing: 1) {
                         ForEach(displayFrames) { frame in
                             AsyncImage(url: frame.url) { image in

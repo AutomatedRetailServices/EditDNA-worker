@@ -38,6 +38,7 @@ struct Project: Codable, Identifiable, Hashable {
     var latestJobID: String?
     var sourceCount: Int?
     var updatedAt: String?
+    var createdAt: String? = nil
 
     var id: String { projectID }
 
@@ -58,6 +59,7 @@ struct Project: Codable, Identifiable, Hashable {
         case latestJobID = "latest_job_id"
         case sourceCount = "source_count"
         case updatedAt = "updated_at"
+        case createdAt = "created_at"
     }
 }
 

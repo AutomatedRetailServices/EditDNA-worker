@@ -75,6 +75,9 @@ struct DraftPlaybackView: View {
             }
         }
         .padding(.horizontal)
+        .onChange(of: playback.currentTime) { _, time in
+            if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }
+        }
         .task(id: model.snapshot?.revision) {
             await playback.rebuild(from: model)
         }

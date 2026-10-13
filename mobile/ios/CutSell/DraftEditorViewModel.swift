@@ -4,6 +4,8 @@ import Foundation
 final class DraftEditorViewModel: ObservableObject {
     @Published var snapshot: DraftSnapshot?
     @Published var isLoading = false
+    /// The one playhead of the editor: the video player's current time (the timeline follows it).
+    @Published var playheadTime: Double = 0
     @Published var isSaving = false
     @Published var exportJob: JobStatus?
     @Published private(set) var timelineAssetLibrary: TimelineAssetLibrary?

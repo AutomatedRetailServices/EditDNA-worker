@@ -10,6 +10,7 @@ struct HomeHubView: View {
 
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var tracker = CutTracker.shared
+    @ObservedObject private var thumbnails = ThumbnailStore.shared
     @State private var voiceOverSoon = false
 
     private var recent: [Project] { Array(appState.projects.prefix(3)) }
@@ -19,7 +20,7 @@ struct HomeHubView: View {
             CS.base.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack { BrandLogo(); Spacer() }
+                    HStack { BrandLogo(); Spacer(); planMeter }
                         .padding(.top, 6)
 
                     VStack(alignment: .leading, spacing: 2) {
@@ -72,11 +73,44 @@ struct HomeHubView: View {
             }
         }
         .safeAreaInset(edge: .bottom) { CSTabBar(current: .create, select: selectTab) }
+        .task(id: recent.filter { Project.processingStates.contains($0.state) }.map(\.id)) {
+            for project in recent where Project.processingStates.contains(project.state) {
+                CutTracker.shared.follow(project: project)
+            }
+        }
         .alert("Voice Over project", isPresented: $voiceOverSoon) {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Coming soon. For now you can record a voice over inside the editor of any cut.")
         }
+    }
+
+    /// "7 / 30 cuts · Plan" (Figma). The count is real: cuts this account made this month.
+    /// 30 is the number in the Figma design; no plan limit is enforced yet.
+    private var planMeter: some View {
+        let used = PlanMeter.cutsThisMonth(appState.projects)
+        let limit = PlanMeter.figmaMonthlyCuts
+        return Button { selectTab(.plan) } label: {
+            HStack(spacing: 8) {
+                ZStack(alignment: .leading) {
+                    Capsule().fill(CS.borderDefault).frame(width: 44, height: 5)
+                    Capsule().fill(CS.brandFull)
+                        .frame(width: max(5, 44 * min(1, CGFloat(used) / CGFloat(limit))), height: 5)
+                }
+                Text("\(used) / \(limit) cuts ·")
+                    .font(CS.inter(12, .medium))
+                    .foregroundStyle(CS.textSecondaryF)
+                Text("Plan")
+                    .font(CS.inter(12, .semibold))
+                    .foregroundStyle(CS.cyan)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(CS.surfaceControl, in: Capsule())
+            .overlay(Capsule().stroke(CS.borderDefault, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("planMeter")
     }
 
     private var uploadCard: some View {
@@ -158,8 +192,16 @@ struct HomeHubView: View {
         return RoundedRectangle(cornerRadius: 16, style: .continuous)
             .fill(LinearGradient(colors: [Color(hex: Self.tileColors[index % 3]), CS.surfaceCard],
                                  startPoint: .topLeading, endPoint: .bottomTrailing))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
             .frame(height: 92)
+            .overlay {
+                if let image = thumbnails.image(for: project.projectID) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                        .overlay(LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .center, endPoint: .bottom))
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
+            .task(id: project.state) { await thumbnails.load(project: project, session: appState.session) }
             .overlay(alignment: .topLeading) {
                 Circle().fill(isReady ? CS.ready : CS.draft).frame(width: 8, height: 8).padding(7)
             }
@@ -174,5 +216,21 @@ struct HomeHubView: View {
                     .padding(8)
             }
             .accessibilityLabel(project.title)
+    }
+}
+
+enum PlanMeter {
+    /// The monthly number shown in the Figma design (1068:22). Not enforced.
+    static let figmaMonthlyCuts = 30
+
+    /// Cuts this account created in the current calendar month (from the server's created_at).
+    /// The server writes ISO dates ("2026-10-12T22:28:05.952628+00:00"); the month is the first 7 characters.
+    static func cutsThisMonth(_ projects: [Project], now: Date = Date()) -> Int {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM"
+        let month = formatter.string(from: now)
+        return projects.filter { ($0.createdAt ?? $0.updatedAt ?? "").hasPrefix(month) }.count
     }
 }

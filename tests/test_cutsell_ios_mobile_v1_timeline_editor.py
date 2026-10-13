@@ -438,7 +438,8 @@ def test_filmstrip_is_never_rendered_for_voiceover_or_broll_rows():
 
 def test_playhead_spans_all_three_tracks_and_gates_split():
     source = TIMELINE_EDITOR.read_text()
-    assert "@State private var playheadTime: Double = 0" in source
+    # One playhead for the whole editor: the video player's time (Swanny 2026-10-12: one time bar).
+    assert "private var playheadTime: Double { model.playheadTime }" in source
     assert "private var playheadLine: some View" in source
     tracks_idx = source.index("private var timelineTracks")
     playhead_line_idx = source.index("playheadLine", tracks_idx)
@@ -454,13 +455,13 @@ def test_playhead_spans_all_three_tracks_and_gates_split():
     assert "canSplitAtPlayhead" in source
 
 
-def test_playhead_slider_has_honest_accessibility_value():
+def test_only_the_player_has_a_time_bar():
+    # Swanny 2026-10-12: two time bars -> keep only the player's; the timeline follows it.
     source = TIMELINE_EDITOR.read_text()
-    slider_idx = source.index("Slider(value: $playheadTime, in: 0...totalDuration)")
-    slider_block = source[slider_idx:slider_idx + 300]
-    assert '.accessibilityLabel("Playhead")' in slider_block
-    assert ".accessibilityValue(" in slider_block
-    assert "playheadTime" in slider_block and "totalDuration" in slider_block
+    assert "Slider(" not in source and "transportRow" not in source
+    playback = (ROOT / "mobile/ios/CutSell/DraftPlaybackView.swift").read_text()
+    assert "model.playheadTime = time" in playback
+    assert '"@Published var playheadTime: Double = 0"'.strip('"') in (ROOT / "mobile/ios/CutSell/DraftEditorViewModel.swift").read_text()
 
 
 # ---------------------------------------------------------------------------

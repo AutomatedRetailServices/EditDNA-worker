@@ -18,8 +18,8 @@ def test_create_tab_opens_on_home_hub():
     for text in ('"Upload videos"', '"Record with CutSell"', '"Voice Over project"', '"Recent cuts"', '"See all in Edits"',
                  '"Turn your raw video into a ready-to-sell cut."'):
         assert text in hub, text
-    # No invented plan numbers.
-    assert "Text(\"7 / 30" not in hub and "cuts ·" not in hub.split("struct HomeHubView", 1)[1]
+    # Plan meter: the count is real (this month's cuts); 30 is the Figma number, not enforced.
+    assert "static let figmaMonthlyCuts = 30" in hub and "PlanMeter.cutsThisMonth(appState.projects)" in hub
 
 
 def test_tracker_polls_the_real_server_state():
@@ -103,3 +103,22 @@ def test_editor_screen_hears_the_model_changes():
     editor = read("DraftEditorView.swift")
     holder = editor.split("private final class Holder", 1)[1]
     assert "model?.objectWillChange.sink" in holder and "self?.objectWillChange.send()" in holder
+
+
+def test_editor_fixes_from_the_iphone_review():
+    editor = read("DraftEditorView.swift")
+    assert "placement: .bottomBar" not in editor  # no floating undo/redo
+    assert ".containerRelativeFrame(.horizontal)" in editor
+    assert ".navigationTitle(model.videoTitle ?? project.title)" in editor
+    timeline = read("TimelineEditorView.swift")
+    assert "ScrollView(.horizontal, showsIndicators: false) {\n            actionButtons" in timeline
+    assert "ClipFrameImage(url: item.frameURL" in timeline
+    assert "ClipFrameImage(url: frameURL" in read("VisualTimelineView.swift")
+    assert "static func cutTitle(_ videos: [LocalVideo]) -> String?" in read("CreateFlowView.swift")
+
+
+def test_edits_cards_follow_cuts_and_show_thumbnails():
+    edits = read("ProjectsView.swift")
+    assert "CutTracker.shared.follow(project: project)" in edits
+    assert "thumbnails.image(for: project.projectID)" in edits
+    assert "ThumbnailStore.shared.save(thumbnail, for: projectID)" in read("CreateFlowView.swift")

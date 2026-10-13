@@ -26,6 +26,7 @@ struct VisualTimelineView: View {
                             index: index,
                             clip: clip,
                             assets: assetCatalog[clip["source_asset_id"]?.stringValue ?? ""],
+                            frameURL: model.playbackURL(forSource: clip["source_asset_id"]?.stringValue),
                             zoom: zoom,
                             selected: selectedClipID == clip["clip_id"]?.stringValue
                         )
@@ -67,6 +68,7 @@ private struct TimelineClipCell: View {
     let index: Int
     let clip: [String: JSONValue]
     let assets: SourceTimelineAssets?
+    var frameURL: URL? = nil
     let zoom: CGFloat
     let selected: Bool
 
@@ -90,7 +92,10 @@ private struct TimelineClipCell: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 9)
                     .fill(.secondary.opacity(0.12))
-                if frames.isEmpty {
+                if frames.isEmpty, frameURL != nil {
+                    ClipFrameImage(url: frameURL, seconds: start + 0.2)
+                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                } else if frames.isEmpty {
                     Image(systemName: "video")
                         .font(.title2)
                         .foregroundStyle(.secondary)
@@ -117,7 +122,7 @@ private struct TimelineClipCell: View {
 
             HStack(spacing: 6) {
                 Text("#\(index + 1)").fontWeight(.semibold)
-                if let role = clip["semantic_role"]?.stringValue {
+                if let role = clip["semantic_role"]?.stringValue, role.lowercased() != "other", !role.isEmpty {
                     Text(role.capitalized)
                 }
                 Text(String(format: "%.1fs", duration))

@@ -188,6 +188,7 @@ struct CreateFlowView: View {
             thumbnail: thumbnail, footageSeconds: footage
         )
         if processingProjectID == nil { processingProjectID = projectID }
+        if let thumbnail { ThumbnailStore.shared.save(thumbnail, for: projectID) }
     }
 
     @MainActor
@@ -208,7 +209,7 @@ struct CreateFlowView: View {
             case .recorded(let video):
                 let thumbnail = await prepareScreen(for: [video])
                 let projectID = try await submitter.submit(
-                    videos: [video], title: nil, mode: CutSubmitter.singleMode,
+                    videos: [video], title: Self.cutTitle([video]), mode: CutSubmitter.singleMode,
                     audioOverlap: false, resumeProjectID: nil, appState: appState
                 )
                 startTracking(projectID: projectID, videos: [video], thumbnail: thumbnail)
@@ -220,7 +221,7 @@ struct CreateFlowView: View {
                     }
                     let thumbnail = await prepareScreen(for: videos)
                     let projectID = try await submitter.submit(
-                        videos: videos, title: nil, mode: CutSubmitter.multipleMode,
+                        videos: videos, title: Self.cutTitle(videos), mode: CutSubmitter.multipleMode,
                         audioOverlap: false, resumeProjectID: nil, appState: appState
                     )
                     startTracking(projectID: projectID, videos: videos, thumbnail: thumbnail)
@@ -232,7 +233,7 @@ struct CreateFlowView: View {
                         let thumbnail = await prepareScreen(for: [video])
                         let lower = Double(index) / Double(count)
                         let projectID = try await submitter.submit(
-                            videos: [video], title: nil, mode: CutSubmitter.singleMode,
+                            videos: [video], title: Self.cutTitle([video]), mode: CutSubmitter.singleMode,
                             audioOverlap: false, resumeProjectID: nil, appState: appState,
                             progressRange: lower...(lower + 1 / Double(count)),
                             label: count > 1 ? "Cut \(index + 1) of \(count)" : ""
@@ -258,6 +259,14 @@ struct CreateFlowView: View {
         } catch {
             failure = .notSaved
         }
+    }
+
+    /// The project is named after the video (not "Untitled Cut").
+    static func cutTitle(_ videos: [LocalVideo]) -> String? {
+        guard let first = videos.first else { return nil }
+        let base = (first.name as NSString).deletingPathExtension
+        guard !base.isEmpty else { return nil }
+        return videos.count > 1 ? "\(base) +\(videos.count - 1)" : base
     }
 
     private func export(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {

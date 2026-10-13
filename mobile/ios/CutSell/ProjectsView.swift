@@ -125,6 +125,13 @@ struct ProjectsView: View {
                     .padding(.bottom, 20)
                 }
                 .refreshable { await refreshAll() }
+            // Cuts still being made: follow them on the server until they are Ready
+            // (the card then turns green and gets its thumbnail).
+            .task(id: appState.projects.filter { Project.processingStates.contains($0.state) }.map(\.id)) {
+                for project in appState.projects where Project.processingStates.contains(project.state) {
+                    CutTracker.shared.follow(project: project)
+                }
+            }
             }
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom) { CSTabBar(current: .edits, select: selectTab) }
@@ -279,6 +286,8 @@ struct ProjectsView: View {
 struct EditTile: View {
     let project: Project
     let onDelete: () -> Void
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var thumbnails = ThumbnailStore.shared
 
     private var isReady: Bool { project.state == "draft_ready" }
     private var isProcessing: Bool { Project.processingStates.contains(project.state) }
@@ -286,8 +295,16 @@ struct EditTile: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
             .fill(Color(hex: 0x050A17))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.tileBorder, lineWidth: 1))
             .aspectRatio(108.0 / 96.0, contentMode: .fit)
+            .overlay {
+                if let image = thumbnails.image(for: project.projectID) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                        .overlay(LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .center, endPoint: .bottom))
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.tileBorder, lineWidth: 1))
+            .task(id: project.state) { await thumbnails.load(project: project, session: appState.session) }
             .overlay(alignment: .topLeading) {
                 Circle()
                     .fill(isReady ? CS.ready : CS.draft)
