@@ -8,10 +8,10 @@ D-281 Stage 42: additively wires the D-279/D-281 manual-timeline asset
 registry's own live Redis records (`timeline_asset_registry_store.py` --
 NOT `timeline_asset_storage.py`'s unrelated filmstrip/waveform presentation
 assets, already covered by `ASSET_PREFIX` below) into project deletion, via
-`delete_project_timeline_assets`. Real durable timeline-asset media bytes
-(today: fake/local storage only, per D-281's own scope) are not deleted by
-this pass -- that is a real-storage-backend concern for whichever future
-gate wires real S3 for timeline assets.
+`delete_project_timeline_assets`. Timeline media bytes stored in S3
+(`timeline_asset_s3`: B-roll, primary video) live inside the project's upload
+prefix and voice-over recordings under the voice-over prefix; both prefixes
+are deleted below.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from .overlay_uploads import OVERLAY_PREFIX
 from .project_store import get_project, list_projects, project_index_key, project_key
 from .timeline_asset_registry_store import delete_project_timeline_assets
 from .timeline_asset_storage import ASSET_PREFIX
-from .uploads import upload_prefix
+from .uploads import upload_prefix, voice_over_upload_prefix
 
 
 def _scope16(value: str) -> str:
@@ -48,6 +48,9 @@ def _project_prefixes(*, user_id: str, project_id: str) -> tuple[str, ...]:
         f"{ASSET_PREFIX}{user16}/{project16}/",
         f"{EXPORT_PREFIX}{user16}/{project16}/",
         f"{FEEDBACK_PREFIX}{user16}/{project16}/",
+        # Voice-over recordings (D-282) live under their own prefix; timeline media
+        # (B-roll, primary video) lives inside the upload prefix (first entry).
+        f"{voice_over_upload_prefix()}{user16}/{project16}/",
     )
 
 

@@ -307,7 +307,8 @@ def test_gold_file_and_scorer_reproduce_the_recorded_reference_score():
     spec.loader.exec_module(module)
 
     gold = json.loads(module.GOLD.read_text(encoding="utf-8"))
-    assert len(gold["videos"]) == 25 and sum(len(v["decisions"]) for v in gold["videos"]) == 555
+    # 26 videos since G01 (Swanny's own Gold, 37 decisions) was added; it has no frozen run yet
+    assert len(gold["videos"]) == 26 and sum(len(v["decisions"]) for v in gold["videos"]) == 592
     result = module.score()                                # frozen v1.0 run on the 24 videos that have one
     assert (result["agree"], result["total"]) == (478, 514)
     # a cut that keeps everything agrees only with the "keep" marks

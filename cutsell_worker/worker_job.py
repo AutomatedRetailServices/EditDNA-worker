@@ -20,6 +20,7 @@ from . import source_normalization_executor as sne
 from . import source_normalization_plan as snp
 from .source_format_policy import DECISION_ACCEPT, evaluate_source_format_policy
 from .storage import download_source
+from .timeline_asset_s3 import register_primary_video
 from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
@@ -466,6 +467,25 @@ def _build_timeline_assets(request, local_paths: dict[str, str], directory: str)
     return output
 
 
+def _register_primary_video(
+    request, downloaded_paths: dict[str, str], local_paths: dict[str, str], directory: str,
+) -> dict:
+    """The cut's first source becomes the project's PRIMARY_SOURCE timeline asset
+    (the base voice-over and B-roll are placed on). Never fails the cut."""
+    try:
+        first = min(request.sources, key=lambda source: source.source_order)
+        return register_primary_video(
+            user_id=request.user_id,
+            project_id=request.project_id,
+            source_uri=first.uri,
+            original_local_path=downloaded_paths[first.source_asset_id],
+            cut_local_path=local_paths[first.source_asset_id],
+            scratch_dir=directory,
+        )
+    except Exception as exc:
+        return {"status": "degraded", "reason": exc.__class__.__name__}
+
+
 def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | None = None) -> dict:
     try:
         event = publish_notification(
@@ -547,6 +567,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 measured_seconds += max(0.0, float(probe.duration_sec))
                 publish("preparing", min(10, 2 + int((index + 1) * 8 / len(request.sources))))
 
+            downloaded_paths = dict(local_paths)
             (
                 local_paths,
                 source_format_diagnostics,
@@ -624,6 +645,11 @@ def run_flow_b_job(payload: dict) -> dict:
                 sources=source_records,
             )
             serialized["timeline_assets"] = timeline_assets
+            # The primary video is registered before the project reads draft_ready, so
+            # the editor can place voice-over and B-roll as soon as it opens.
+            serialized["primary_video"] = _register_primary_video(
+                request, downloaded_paths, local_paths, directory,
+            )
             serialized["project_tracking_start"] = tracking_start
             serialized["project_tracking"] = safe_update_project(
                 user_id=request.user_id,

@@ -51,8 +51,15 @@ Two authority leaks D-282A closes, both entirely within this route layer
 """
 from __future__ import annotations
 
+import dataclasses
+import logging
 import os
-from typing import Any
+import shutil
+import tempfile
+import time
+from pathlib import Path
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -60,6 +67,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from cutsell_worker import timeline_asset_registry as reg
 from cutsell_worker import timeline_asset_registry_store as store
+from cutsell_worker import timeline_asset_s3 as s3_media
 from cutsell_worker import timeline_asset_upload_bridge as bridge
 from cutsell_worker import timeline_composition as tc
 from cutsell_worker import timeline_composition_executor as tce
@@ -100,6 +108,96 @@ def _durable_media_dir() -> str:
 
 def _persist_media():
     return store.local_directory_persister(_durable_media_dir())
+
+
+class _MediaStorage:
+    """The storage seams one request uses. Local mode (an explicit
+    CUTSELL_TIMELINE_ASSET_DURABLE_DIR, used by tests) is unchanged. Without
+    it, a configured S3 bucket is the real backend (`timeline_asset_s3`) and
+    scratch files live in a per-request temp directory. With neither, ingest
+    stays unavailable (503), as before -- never a silent tempdir store."""
+
+    def __init__(self, *, user_id: str, project_id: str, scratch_dir: str | None):
+        local_dir = os.environ.get("CUTSELL_TIMELINE_ASSET_DURABLE_DIR")
+        if local_dir:
+            self.persist = store.local_directory_persister(local_dir)
+            self.fetch = None
+            self.materialize = None
+            self.work_dir = local_dir
+            return
+        if not s3_media.s3_configured():
+            raise RuntimeError("timeline asset storage is not configured")
+        if scratch_dir is None:
+            raise RuntimeError("a scratch directory is required for S3 timeline storage")
+        self.persist = s3_media.s3_persister(user_id=user_id, project_id=project_id)
+        self.fetch = s3_media.s3_fetcher(user_id=user_id, project_id=project_id, scratch_dir=scratch_dir)
+        self.materialize = self.fetch
+        self.work_dir = scratch_dir
+
+
+EXPORT_FILE_MAX_AGE_SEC = 24 * 3600
+
+
+def _export_output_dir() -> str:
+    """Rendered timeline exports are served later by the download route, so
+    they are written outside the per-request scratch directory. In S3 mode
+    this is the instance's own temp disk: files older than a day are removed
+    each time a new export is written."""
+    local_dir = os.environ.get("CUTSELL_TIMELINE_ASSET_DURABLE_DIR")
+    if local_dir:
+        return local_dir
+    directory = os.path.join(tempfile.gettempdir(), "cutsell-timeline-exports")
+    os.makedirs(directory, exist_ok=True)
+    cutoff = time.time() - EXPORT_FILE_MAX_AGE_SEC
+    for old in Path(directory).iterdir():
+        try:
+            if old.is_file() and old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+    return directory
+
+
+def _keep_export_output(result):
+    """A base-only export returns the base video itself, which in S3 mode is
+    a download inside the request's scratch directory (deleted afterwards).
+    Any output outside the export directory is copied into it."""
+    if not isinstance(result, tce.CompositionExecutionResult) or not result.output_path:
+        return result
+    directory = Path(_export_output_dir()).resolve()
+    output = Path(result.output_path).resolve()
+    if output.parent == directory or directory in output.parents:
+        return result
+    kept = directory / f"export-{os.urandom(8).hex()}{output.suffix or '.mp4'}"
+    shutil.copyfile(output, kept)
+    return dataclasses.replace(result, output_path=str(kept))
+
+
+def _require_media_storage() -> None:
+    """Checked before an upload_id is consumed, so a misconfigured server
+    never burns the client's upload."""
+    if not os.environ.get("CUTSELL_TIMELINE_ASSET_DURABLE_DIR") and not s3_media.s3_configured():
+        raise HTTPException(status_code=503, detail="timeline asset storage is not configured")
+
+
+_LOG = logging.getLogger("cutsell.timeline")
+
+
+def _storage_unavailable(exc: Exception) -> str:
+    _LOG.warning("timeline media request failed: %s", exc.__class__.__name__, exc_info=exc)
+    if isinstance(exc, RuntimeError):
+        return str(exc)
+    return f"timeline media storage is unavailable ({exc.__class__.__name__})"
+
+
+@contextmanager
+def _media_storage(*, user_id: str, project_id: str) -> Iterator[_MediaStorage]:
+    scratch = None if os.environ.get("CUTSELL_TIMELINE_ASSET_DURABLE_DIR") else tempfile.mkdtemp(prefix="cutsell-timeline-")
+    try:
+        yield _MediaStorage(user_id=user_id, project_id=project_id, scratch_dir=scratch)
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 # =============================================================================
@@ -328,6 +426,7 @@ def create_timeline_asset(project_id: str, payload: TimelineAssetCreateRequest):
     role = reg.TimelineAssetRole(payload.role)
     media_kind = reg.TimelineMediaKind(payload.media_kind)
     expected_media_class = _media_class_for(role=role, media_kind=media_kind)
+    _require_media_storage()
     try:
         source_uri = upload_reg.resolve_and_consume_timeline_upload(
             upload_id=payload.upload_id, user_id=payload.user_id, project_id=project_id,
@@ -336,18 +435,23 @@ def create_timeline_asset(project_id: str, payload: TimelineAssetCreateRequest):
     except upload_reg.TimelineUploadResolutionError as exc:
         _bounded_error(exc.outcome)
     try:
-        if expected_media_class == upload_reg.MEDIA_CLASS_VOICE_OVER:
-            asset = bridge.ingest_voice_over_asset_from_upload(
-                user_id=payload.user_id, project_id=project_id, source_uri=source_uri,
-                persist_media=_persist_media(), replaces_asset_id=payload.replaces_asset_id,
-            )
-        else:
-            asset = bridge.ingest_broll_asset_from_upload(
-                user_id=payload.user_id, project_id=project_id, role=role, source_uri=source_uri,
-                persist_media=_persist_media(), normalization_output_dir=_durable_media_dir(),
-            )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from None
+        with _media_storage(user_id=payload.user_id, project_id=project_id) as media:
+            if expected_media_class == upload_reg.MEDIA_CLASS_VOICE_OVER:
+                asset = bridge.ingest_voice_over_asset_from_upload(
+                    user_id=payload.user_id, project_id=project_id, source_uri=source_uri,
+                    persist_media=media.persist, fetch_media=media.fetch,
+                    replaces_asset_id=payload.replaces_asset_id,
+                )
+            else:
+                asset = bridge.ingest_broll_asset_from_upload(
+                    user_id=payload.user_id, project_id=project_id, role=role, source_uri=source_uri,
+                    persist_media=media.persist, fetch_media=media.fetch,
+                    normalization_output_dir=media.work_dir,
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:  # storage/download failures stay bounded
+        raise HTTPException(status_code=503, detail=_storage_unavailable(exc)) from None
     return _asset_to_response(asset)
 
 
@@ -446,18 +550,26 @@ def export_timeline(project_id: str, payload: TimelineExportRequest):
             "base_edit_asset_id does not match the base edit identity recorded in the saved revision",
         ))
 
-    base_resolution = store.resolve_timeline_asset_live(
-        user_id=payload.user_id, project_id=project_id, asset_id=payload.base_edit_asset_id,
-        required_media_kind=reg.TimelineMediaKind.VIDEO,
-    )
-    if base_resolution.outcome != reg.ASSET_RESOLVED or base_resolution.resolved is None:
-        _bounded_error(base_resolution.outcome, base_resolution.reason_codes)
-    base_edit_asset = base_resolution.resolved
+    try:
+        with _media_storage(user_id=payload.user_id, project_id=project_id) as media:
+            base_resolution = store.resolve_timeline_asset_live(
+                user_id=payload.user_id, project_id=project_id, asset_id=payload.base_edit_asset_id,
+                required_media_kind=reg.TimelineMediaKind.VIDEO, materialize=media.materialize,
+            )
+            if base_resolution.outcome != reg.ASSET_RESOLVED or base_resolution.resolved is None:
+                _bounded_error(base_resolution.outcome, base_resolution.reason_codes)
+            base_edit_asset = base_resolution.resolved
 
-    result = store.export_timeline_revision(
-        user_id=payload.user_id, project_id=project_id, revision_identity=payload.revision_identity,
-        base_edit_asset=base_edit_asset, output_directory=_durable_media_dir(),
-    )
+            result = store.export_timeline_revision(
+                user_id=payload.user_id, project_id=project_id, revision_identity=payload.revision_identity,
+                base_edit_asset=base_edit_asset, output_directory=_export_output_dir(),
+                materialize=media.materialize,
+            )
+            result = _keep_export_output(result)
+    except HTTPException:
+        raise
+    except Exception as exc:  # storage/download failures stay bounded
+        raise HTTPException(status_code=503, detail=_storage_unavailable(exc)) from None
     if isinstance(result, tce.CompositionExecutionResult):
         if result.outcome not in (tce.COMPOSITION_SUCCEEDED, tce.BASE_ONLY_BYPASS):
             _bounded_error(result.outcome, tuple(result.errors))
@@ -497,4 +609,7 @@ def download_timeline_export(project_id: str, export_id: str, user_id: str):
         )
     except export_ref.ExportReferenceResolutionError as exc:
         _bounded_error(exc.outcome)
+    if not os.path.isfile(record["local_output_path"]):
+        # the file lives on one server instance's temp disk; after a restart it is gone
+        raise HTTPException(status_code=404, detail={"outcome": "EXPORT_FILE_EXPIRED", "reasons": []})
     return FileResponse(record["local_output_path"], media_type="video/mp4")
