@@ -1,0 +1,89 @@
+[
+ {
+  "step": "upload_one_by_one",
+  "ms": "15446",
+  "mb": "79.3",
+  "mb_per_s": "5.13",
+  "parts": "5"
+ },
+ {
+  "step": "upload_3_at_a_time",
+  "ms": "9372",
+  "mb": "79.3",
+  "mb_per_s": "8.46",
+  "parts": "5"
+ },
+ {
+  "step": "server_cut",
+  "ms": "74671",
+  "state": "finished"
+ },
+ {
+  "ms": "422",
+  "step": "server_ping"
+ },
+ {
+  "ms": "96",
+  "step": "server_ping_2"
+ },
+ {
+  "ms": "2955",
+  "step": "editor_load"
+ },
+ {
+  "clips": "1",
+  "duration_s": "29.3",
+  "step": "editor_info"
+ },
+ {
+  "ms": "1338",
+  "step": "preview_build"
+ },
+ {
+  "duration_s": "29.3",
+  "message": "none",
+  "ready": "true",
+  "step": "preview_state"
+ },
+ {
+  "saved_ms": "2005",
+  "step": "action_split",
+  "visible_ms": "12"
+ },
+ {
+  "ms": "13",
+  "step": "preview_rebuild_after_split"
+ },
+ {
+  "ready": "true",
+  "step": "preview_state_after_split"
+ },
+ {
+  "saved_ms": "2076",
+  "step": "action_caption_text",
+  "visible_ms": "13"
+ },
+ {
+  "saved_ms": "2084",
+  "step": "action_caption_style",
+  "visible_ms": "7"
+ },
+ {
+  "saved_ms": "4203",
+  "step": "action_volume",
+  "visible_ms": "5"
+ },
+ {
+  "saved_ms": "2168",
+  "step": "action_delete",
+  "visible_ms": "5"
+ },
+ {
+  "saved_ms": "1533",
+  "step": "action_undo",
+  "visible_ms": "5"
+ },
+ {
+  "step": "done"
+ }
+]
