@@ -85,6 +85,9 @@ class RenderSegment:
     caption_x: float | None = None
     caption_y: float | None = None
     caption_scale: float | None = None
+    # Editor v4 whole-video orientation (contracts.DraftTimeline.mirror / rotation).
+    mirror: bool = False
+    rotation: int = 0
 
     @property
     def duration_sec(self) -> float:
@@ -283,6 +286,8 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             caption_x=getattr(draft, "caption_x", None),
             caption_y=getattr(draft, "caption_y", None),
             caption_scale=getattr(draft, "caption_scale", None),
+            mirror=bool(getattr(draft, "mirror", False)),
+            rotation=int(getattr(draft, "rotation", 0) or 0),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

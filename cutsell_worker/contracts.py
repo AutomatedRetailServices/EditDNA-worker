@@ -390,6 +390,10 @@ class DraftTimeline:
     caption_x: float = 0.5
     caption_y: float = 0.758
     caption_scale: float = 1.0
+    # Editor v4: flip the whole video left-right (front-camera videos) and turn it in quarter
+    # turns. Applied to every clip in the export; captions and overlays are drawn upright.
+    mirror: bool = False
+    rotation: int = 0
 
 
 @dataclass(frozen=True)

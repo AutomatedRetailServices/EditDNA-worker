@@ -481,10 +481,37 @@ def _audio_join_fade_filters(duration_sec: float) -> list[str]:
     return [f"afade=t=in:st=0:d={fade:.3f}", f"afade=t=out:st={fade_out_start:.3f}:d={fade:.3f}"]
 
 
+def _orientation_filters(segment: RenderSegment) -> list[str]:
+    """Editor v4 Mirror / Rotate, applied to the source picture before it is fitted into the
+    frame (so captions and overlays drawn later stay upright). Empty when not set, which keeps
+    every existing command byte-for-byte."""
+    filters: list[str] = []
+    if getattr(segment, "mirror", False):
+        filters.append("hflip")
+    rotation = int(getattr(segment, "rotation", 0) or 0) % 360
+    if rotation == 90:
+        filters.append("transpose=1")
+    elif rotation == 180:
+        filters += ["hflip", "vflip"]
+    elif rotation == 270:
+        filters.append("transpose=2")
+    return filters
+
+
+def _with_orientation(chain_head: str, label: str, segment: RenderSegment) -> str:
+    orientation = _orientation_filters(segment)
+    if not orientation:
+        return chain_head
+    return chain_head.replace(label, label + ",".join(orientation) + ",", 1)
+
+
 def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str]:
     probe = probe_media(segment.source_path)
     effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
     caption = _caption_filter(segment, part)
+    orientation = _orientation_filters(segment)
+    if orientation:
+        vf = ",".join(orientation + [vf])
     video_filter = f"{vf},{caption}" if caption else vf
     common_video = [
         "-vf", video_filter,
@@ -598,6 +625,7 @@ def _concat_render_command(
                 "setsar=1",
                 f"fps={fps}",
             ]
+        video_chain[0] = _with_orientation(video_chain[0], f"[{video_input}:v]", segment)
         caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
         if caption:
             video_chain.append(caption)
@@ -919,6 +947,7 @@ def _concat_render_command_with_audio_windows(
             "setsar=1",
             f"fps={fps}",
         ]
+        video_chain[0] = _with_orientation(video_chain[0], f"[{video_input}:v]", segment)
         caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
         if caption:
             video_chain.append(caption)

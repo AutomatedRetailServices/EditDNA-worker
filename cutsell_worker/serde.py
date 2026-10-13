@@ -202,6 +202,12 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         raise ValueError("caption_font must be one of: " + ", ".join(sorted(CAPTION_FONTS)))
     caption_x, caption_y, caption_scale = caption_layout(
         payload.get("caption_x"), payload.get("caption_y"), payload.get("caption_scale"))
+    try:
+        rotation = int(float(payload.get("rotation") or 0)) % 360
+    except (TypeError, ValueError):
+        raise ValueError("rotation must be 0, 90, 180 or 270") from None
+    if rotation not in VIDEO_ROTATIONS:
+        raise ValueError("rotation must be 0, 90, 180 or 270")
     text_overlays = tuple(_text_overlay_from_dict(dict(item)) for item in payload.get("text_overlays") or ())
     media_overlays = tuple(_media_overlay_from_dict(dict(item)) for item in payload.get("media_overlays") or ())
     total_duration = sum(max(0.0, clip.end - clip.start) for clip in selected)
@@ -225,7 +231,12 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         caption_scale=caption_scale,
         text_overlays=text_overlays,
         media_overlays=media_overlays,
+        mirror=bool(payload.get("mirror", False)),
+        rotation=rotation,
     )
+
+
+VIDEO_ROTATIONS = (0, 90, 180, 270)
 
 
 def _json_safe(value: Any) -> Any:
@@ -237,6 +248,15 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, DraftTimeline):
+        data = asdict(value)
+        # Editor-only settings are written only when the creator set them, so cut results and
+        # stored drafts stay exactly as before for everyone else.
+        if not data.get("mirror"):
+            data.pop("mirror", None)
+        if not data.get("rotation"):
+            data.pop("rotation", None)
+        return _json_safe(data)
     if hasattr(value, "__dataclass_fields__"):
         return _json_safe(asdict(value))
     return value
