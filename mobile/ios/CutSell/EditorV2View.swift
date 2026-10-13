@@ -826,6 +826,8 @@ struct EditorPreviewState {
     var toast: EditorToast?
     var sheet: EditorSheet?
     var panel: EditorPanel?
+    /// Set when a real cut is opened by the editor probe (Debug only).
+    var probe: String?
 }
 
 enum EditorSheet: String, Identifiable {

@@ -99,10 +99,30 @@ struct EditorV4View: View {
             recorder.previewRecorded(url: url, elapsed: 8)
         }
         #endif
-        if let opened = previewState.panel { panel = opened }
-        if case .captions(let clipID?) = previewState.panel {
+        var opening = previewState.panel
+        if case .captions(.some("first")) = opening, let first = model.selectedClips.first?["clip_id"]?.stringValue {
+            opening = .captions(first)
+        }
+        if case .overlay("first_media", _) = previewState.selection {
+            selection = model.mediaOverlays.first?["overlay_id"]?.stringValue.map { .overlay($0, isText: false) }
+        }
+        if let opened = opening { panel = opened }
+        if case .captions(let clipID?) = opening {
             captionText = captionTextFor(clipID)
         }
+        #if DEBUG
+        if let probe = previewState.probe {
+            switch probe {
+            case "cap_highlight": model.applyCaptionSettings(enabled: true, preset: "highlight_green", font: "montserrat")
+            case "cap_box": model.applyCaptionSettings(enabled: true, preset: "box", font: "montserrat")
+            case "cap_fonts": model.applyCaptionSettings(enabled: true, preset: "classic", font: "bebas_neue")
+            case "caption_edit": model.applyCaptionSettings(enabled: true, preset: "highlight_green")
+            default: break
+            }
+            // Move the cursor into the cut, like the Figma screens.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { playback.seek(to: min(3, playback.duration / 3)) }
+        }
+        #endif
         if let opened = previewState.sheet {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { sheet = opened }
         }

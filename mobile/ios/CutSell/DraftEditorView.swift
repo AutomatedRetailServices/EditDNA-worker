@@ -10,12 +10,32 @@ struct DraftEditorView: View {
     @State private var captionTextClipID: String?
     private static let previewAnchor = "editor.preview"
 
+    /// Debug builds only: the editor probe opens a real cut in one Editor v4 state
+    /// (`CUTSELL_PROBE_STATE`), so each Figma screen can be shown on a real cut. Release: nil.
+    static var probeState: EditorPreviewState? {
+        #if DEBUG
+        guard let name = ProcessInfo.processInfo.environment["CUTSELL_PROBE_STATE"] else { return nil }
+        switch name {
+        case "caption_edit": return EditorPreviewState(panel: .captions("first"), probe: name)
+        case "vo_record": return EditorPreviewState(panel: .voiceRecord, probe: name)
+        case "vo_review": return EditorPreviewState(panel: .voiceReview, probe: name)
+        case "cap_highlight", "cap_box", "cap_fonts": return EditorPreviewState(panel: .captions(nil), probe: name)
+        case "overlay_gallery": return EditorPreviewState(sheet: .overlay, probe: name)
+        case "overlay_selected": return EditorPreviewState(selection: .overlay("first_media", isText: false), probe: name)
+        case "mic": return EditorPreviewState(panel: .micPermission, probe: name)
+        case "style": return EditorPreviewState(panel: .style, probe: name)
+        default: return EditorPreviewState(probe: name)
+        }
+        #else
+        return nil
+        #endif
+    }
+
     var body: some View {
         Group {
             if let model = holder.model, !model.isLoading, model.snapshot != nil {
-                // Editor v2 (Figma 04_Editor). The old list-style sections ("Editor", "Timeline",
-                // "Clip order", "Text & overlays", big Export button) are no longer shown.
-                EditorV4View(model: model, project: project)
+                // Editor v4 (Figma 04_Editor "Editor v4", approved 13 Oct 2026).
+                EditorV4View(model: model, project: project, previewState: Self.probeState)
             } else if let model = holder.model, !model.isLoading, model.snapshot == nil, model.errorMessage != nil {
                 VStack(spacing: 14) {
                     Text("Couldn’t open this cut").font(CS.inter(18, .semibold)).foregroundStyle(.white)

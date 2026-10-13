@@ -132,6 +132,20 @@ jobs:
                   "timeline_end_sec": br_end, "source_in_sec": 0.0, "source_out_sec": br_end - 4.0}]})
           tl = call("GET", f"/v1/projects/{pid}/timeline", q=f"?user_id={u}")
           print(f"::notice title=timeline::{saved['outcome']}; voice-over placements {len(tl['voice_over_placements'])}, B-roll placements {len(tl['broll_placements'])}")
+          # A photo overlay (synthetic graphic), the same calls as the app's Overlay tool.
+          png = f"{tmp}/overlay.png"
+          subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=0x19E6FF:s=600x250", "-frames:v", "1", png], check=True)
+          size = os.path.getsize(png)
+          pre = call("POST", "/v1/overlays/uploads/presign", {"project_id": pid, "user_id": u, "original_name": "overlay.png",
+                     "content_type": "image/png", "size_bytes": size})
+          form = []
+          for k in sorted(pre["fields"]): form += ["-F", f"{k}={pre['fields'][k]}"]
+          subprocess.run(["curl", "-s", "-o", "/dev/null", *form, "-F", f"file=@{png};type=image/png", pre["upload_url"]], check=True)
+          snap = call("GET", f"/v1/projects/{pid}/draft", q=f"?user_id={u}")
+          edited = call("POST", "/v1/overlays/add", {"project_id": pid, "user_id": u, "draft": snap["draft"], "kind": pre["kind"],
+                        "uri": pre["uri"], "start": 0.0, "end": min(dur, 6.0), "x": 0.5, "y": 0.3, "width": 0.55})
+          call("PUT", f"/v1/projects/{pid}/draft", {"user_id": u, "expected_revision": snap["revision"], "draft": edited})
+          print("::notice title=overlay::photo overlay added")
           PY
 
       - name: Open the cut in the editor (Simulator)
@@ -153,6 +167,16 @@ jobs:
           mkdir -p "$RUNNER_TEMP/probe"
           sleep 12; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/editor_12s.png" >/dev/null 2>&1
           sleep 18; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/editor_30s.png" >/dev/null 2>&1
+          # The same real cut opened in each Editor v4 state (Figma screens 1-11).
+          for state in base caption_edit vo_record vo_review cap_highlight cap_box cap_fonts overlay_gallery overlay_selected mic style; do
+            xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+            SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+            SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+            SIMCTL_CHILD_CUTSELL_PROBE_STATE="$state" \
+              xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+            sleep 14
+            xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/real_$state.png" >/dev/null 2>&1
+          done
           echo "::notice title=probe::screenshots taken"
 
       - name: Push the screenshots to design-screenshots/probe
