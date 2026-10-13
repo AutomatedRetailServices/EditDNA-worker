@@ -244,8 +244,9 @@ struct EditorV2View: View {
                     .font(CS.inter(10, .medium))
                     .foregroundStyle(Color(hex: 0xEDF5FF))
                     .multilineTextAlignment(.center)
-                    .lineSpacing(-2)
-                    .frame(height: 22, alignment: .top)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(height: 24, alignment: .top)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 72)
@@ -433,7 +434,7 @@ struct EditorTracks: View {
                     .frame(width: 92, alignment: .leading)
                 Ruler(duration: duration)
                     .frame(height: 24)
-                Color.clear.frame(width: 28)
+                Color.clear.frame(width: 28, height: 24)
             }
             .padding(.leading, 3)
 
@@ -479,12 +480,14 @@ struct EditorTracks: View {
 
     private var muteLabel: some View {
         Button(action: onToggleMute) {
-            HStack(spacing: 6) {
-                Image("EdVolume").resizable().frame(width: 28, height: 28)
+            HStack(spacing: 4) {
+                Image("EdVolume").resizable().frame(width: 24, height: 24)
                     .overlay { if allMuted { Rectangle().fill(CS.error).frame(width: 2, height: 26).rotationEffect(.degrees(45)) } }
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Mute clip").font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
+                        .lineLimit(1).fixedSize()
                     Text(allMuted ? "muted" : "audio").font(CS.sf(9)).foregroundStyle(Color(hex: 0x8CA8D6))
+                        .lineLimit(1).fixedSize()
                 }
                 Spacer(minLength: 0)
             }
@@ -501,6 +504,7 @@ struct EditorTracks: View {
             Image(icon).resizable().frame(width: iconSize, height: iconSize)
                 .frame(width: 24)
             Text(title).font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
+                .lineLimit(1).fixedSize()
             Spacer(minLength: 0)
         }
         .padding(.leading, 6)
@@ -781,7 +785,7 @@ private struct ToastPill: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 42)
-        .frame(maxWidth: toast.hasUndo ? .infinity : nil)
+        .frame(maxWidth: .infinity)
         .background(Color(hex: 0x040812, opacity: 0.97), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: 0x7C3AED, opacity: 0.8), lineWidth: 1))
         .padding(.horizontal, 10)
