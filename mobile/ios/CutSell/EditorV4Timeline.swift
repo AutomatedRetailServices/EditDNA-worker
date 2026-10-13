@@ -404,6 +404,14 @@ struct TimelineV4: View {
                         .accessibilityIdentifier(item.kind == .broll ? "brollBlock" : "overlayBlock")
                 }
             }
+            // "+" once the row has something: right after the last item (Figma 1026:3400).
+            if let lastEnd = items.map(\.end).max() {
+                let px = max(Self.cursorX + 4, x(lastEnd) + 6)
+                if px < width - 24 {
+                    plusButton(action: onAddOverlay, label: "Add text, photo or B-roll")
+                        .offset(x: px, y: 3)
+                }
+            }
         }
         .frame(width: width, height: 30, alignment: .topLeading)
     }
