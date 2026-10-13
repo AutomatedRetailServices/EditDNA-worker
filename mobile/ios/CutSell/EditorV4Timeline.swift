@@ -89,7 +89,7 @@ struct TimelineV4: View {
 
     // MARK: Ruler
 
-    private func ruler(width: CGFloat, x: (Double) -> CGFloat) -> some View {
+    private func ruler(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let step = Self.labelStep(pixelsPerSecond)
         let first = max(0, Int((playback.currentTime - Double(width / 2 / pixelsPerSecond)) / step) - 1)
         let last = Int((playback.currentTime + Double(width / 2 / pixelsPerSecond)) / step) + 1
@@ -124,7 +124,7 @@ struct TimelineV4: View {
 
     // MARK: Video track (frames + number + caption inside each clip)
 
-    private func videoTrack(width: CGFloat, x: (Double) -> CGFloat) -> some View {
+    private func videoTrack(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let windows = EditorTracks.clipWindows(model)
         let clips = model.selectedClips
         return ZStack(alignment: .topLeading) {
@@ -158,7 +158,7 @@ struct TimelineV4: View {
 
     // MARK: Voice-over track (always visible)
 
-    private func voiceTrack(width: CGFloat, x: (Double) -> CGFloat) -> some View {
+    private func voiceTrack(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let placements = model.timelineComposition?.voiceOverPlacements ?? []
         return ZStack(alignment: .topLeading) {
             if placements.isEmpty {
@@ -256,7 +256,7 @@ struct TimelineV4: View {
         }
     }
 
-    private func overlayTrack(width: CGFloat, x: (Double) -> CGFloat) -> some View {
+    private func overlayTrack(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let items = overlayItems
         return ZStack(alignment: .topLeading) {
             if items.isEmpty {

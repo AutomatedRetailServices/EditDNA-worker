@@ -69,9 +69,10 @@ final class PerfProbe: ObservableObject {
     func run(appState: AppState) async {
         let env = ProcessInfo.processInfo.environment
         guard let token = env["CUTSELL_PROBE_TOKEN"], let user = env["CUTSELL_PROBE_USER"],
-              let api = env["CUTSELL_PROBE_API"], let videoPath = env["CUTSELL_PROBE_VIDEO"] else {
+              let api = env["CUTSELL_PROBE_API"] else {
             record("setup", ["error": "missing_env"]); return
         }
+        let videoPath = env["CUTSELL_PROBE_VIDEO"] ?? ""
         UserDefaults.standard.set(api, forKey: "cutsell.api.baseURL")
         let session = CutSellSession(userID: user, accessToken: token)
         await APIClient.shared.setSession(session)
@@ -83,8 +84,16 @@ final class PerfProbe: ObservableObject {
             try await time("server_ping_2") { let _: JSONValue = try await APIClient.shared.request("/v1/healthz") }
 
             var project: Project?
-            try await time("create_project") { project = try await appState.createProject(title: "Perf probe") }
+            if let existing = env["CUTSELL_PROBE_PROJECT"] {
+                // The cut was made outside the app (the Simulator cannot run iOS background uploads);
+                // only the editor steps are timed here.
+                project = Project(projectID: existing, userID: user, title: "Perf probe", state: "draft_ready",
+                                  latestJobID: nil, sourceCount: 1, updatedAt: nil)
+            } else {
+                try await time("create_project") { project = try await appState.createProject(title: "Perf probe") }
+            }
             guard let project else { return }
+            if env["CUTSELL_PROBE_PROJECT"] == nil {
 
             let size = ((try? FileManager.default.attributesOfItem(atPath: videoPath))?[.size] as? NSNumber)?.int64Value ?? 0
             var sourceURI = ""
@@ -120,6 +129,8 @@ final class PerfProbe: ObservableObject {
                     if ["finished", "failed", "canceled"].contains(status.state) { break }
                     try await Task.sleep(for: .seconds(2))
                 }
+            }
+
             }
 
             let model = DraftEditorViewModel(project: project, session: session)
