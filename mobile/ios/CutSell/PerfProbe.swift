@@ -148,6 +148,8 @@ final class PerfProbe: ObservableObject {
             record("editor_info", ["clips": String(model.selectedClips.count), "duration_s": String(format: "%.1f", model.timelineDuration)])
             let playback = DraftPlaybackController()
             await time("preview_build") { await playback.rebuild(from: model) }
+            record("preview_state", ["ready": String(playback.isReady), "duration_s": String(format: "%.1f", playback.duration),
+                                     "message": playback.message ?? "none"])
 
             // Actions, each timed until visible and until saved.
             if let clip = model.selectedClips.first, let id = clip["clip_id"]?.stringValue {
@@ -159,6 +161,7 @@ final class PerfProbe: ObservableObject {
                         await model.split(clipID: id, at: at)
                     }
                     await time("preview_rebuild_after_split") { await playback.rebuild(from: model) }
+                    record("preview_state_after_split", ["ready": String(playback.isReady)])
                 }
             }
             if let id = model.selectedClips.first?["clip_id"]?.stringValue {
