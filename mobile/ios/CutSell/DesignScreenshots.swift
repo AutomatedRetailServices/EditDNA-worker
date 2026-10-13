@@ -60,6 +60,8 @@ struct DesignScreenshotRoot: View {
             .background(CS.base.ignoresSafeArea())
         case "editor_probe":
             EditorProbe()
+        case "perf_probe":
+            PerfProbeScreen()
         case "editor":
             SampleEditor(state: EditorPreviewState())
         case "editor_sel_video":
