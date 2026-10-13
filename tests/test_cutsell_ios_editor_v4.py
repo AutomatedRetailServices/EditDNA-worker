@@ -12,7 +12,8 @@ def read(name: str) -> str:
 
 def test_editor_screen_is_v4():
     body = read("DraftEditorView.swift").split("var body: some View {", 1)[1].split("@ViewBuilder", 1)[0]
-    assert "EditorV4View(model: model, project: project)" in body
+    assert "EditorV4View(model: model, project: project, previewState: Self.probeState)" in body
+    assert "#else\n        return nil" in read("DraftEditorView.swift")  # Release builds never open a probe state
 
 
 def test_header_has_no_logo_and_controls_have_no_keyframe():
