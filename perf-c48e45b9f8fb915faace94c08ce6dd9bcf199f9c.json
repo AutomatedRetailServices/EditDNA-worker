@@ -1,0 +1,79 @@
+[
+ {
+  "step": "upload_one_by_one",
+  "ms": "14786",
+  "mb": "79.2",
+  "mb_per_s": "5.36",
+  "parts": "5"
+ },
+ {
+  "step": "upload_3_at_a_time",
+  "ms": "9683",
+  "mb": "79.2",
+  "mb_per_s": "8.18",
+  "parts": "5"
+ },
+ {
+  "step": "server_cut",
+  "ms": "31681",
+  "state": "finished"
+ },
+ {
+  "ms": "234",
+  "step": "server_ping"
+ },
+ {
+  "ms": "53",
+  "step": "server_ping_2"
+ },
+ {
+  "ms": "3821",
+  "step": "editor_load"
+ },
+ {
+  "clips": "1",
+  "duration_s": "29.3",
+  "step": "editor_info"
+ },
+ {
+  "ms": "1348",
+  "step": "preview_build"
+ },
+ {
+  "saved_ms": "2191",
+  "step": "action_split",
+  "visible_ms": "2191"
+ },
+ {
+  "ms": "1433",
+  "step": "preview_rebuild_after_split"
+ },
+ {
+  "saved_ms": "2109",
+  "step": "action_caption_text",
+  "visible_ms": "2109"
+ },
+ {
+  "saved_ms": "2176",
+  "step": "action_caption_style",
+  "visible_ms": "8"
+ },
+ {
+  "saved_ms": "2837",
+  "step": "action_volume",
+  "visible_ms": "2837"
+ },
+ {
+  "saved_ms": "3150",
+  "step": "action_delete",
+  "visible_ms": "3150"
+ },
+ {
+  "saved_ms": "1616",
+  "step": "action_undo",
+  "visible_ms": "1616"
+ },
+ {
+  "step": "done"
+ }
+]
