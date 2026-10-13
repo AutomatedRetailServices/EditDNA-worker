@@ -215,7 +215,7 @@ struct EditorV4View: View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
             VideoPlayer(player: playback.player).ignoresSafeArea()
-                .scaleEffect(x: model.isMirrored ? -1 : 1, y: 1)
+                .scaleEffect(x: model.isMirrored(at: playback.currentTime) ? -1 : 1, y: 1)
             Button { fullScreen = false } label: {
                 Image(systemName: "xmark").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
                     .frame(width: 44, height: 44).background(Color.black.opacity(0.4), in: Circle())
@@ -361,10 +361,10 @@ struct EditorV4View: View {
         let quarter = model.rotationDegrees % 180 != 0
         return PlayerLayerView(player: playback.player)
             .scaleEffect(zoomNow)
-            .scaleEffect(x: model.isMirrored ? -1 : 1, y: 1)
+            .scaleEffect(x: model.isMirrored(at: playback.currentTime) ? -1 : 1, y: 1)
             .rotationEffect(.degrees(Double(model.rotationDegrees)))
             .scaleEffect(quarter ? 266.0 / 472.0 : 1)
-            .animation(.easeOut(duration: 0.25), value: model.isMirrored)
+            .animation(.easeOut(duration: 0.2), value: model.isMirrored(at: playback.currentTime))
             .animation(.easeOut(duration: 0.25), value: model.rotationDegrees)
     }
 
@@ -708,9 +708,12 @@ struct EditorV4View: View {
         case .split: Task { await split() }
         case .delete: Task { await delete() }
         case .mirror:
-            let mirrored = !model.isMirrored
-            Task { await model.setDraftValue("mirror", .bool(mirrored)) }
-            show(.message(mirrored ? "Video mirrored" : "Mirror off"))
+            var clipID: String? = nil
+            if case .video(let id) = selection { clipID = id }
+            Task {
+                let on = await model.toggleMirror(clipID: clipID)
+                show(.message(clipID == nil ? (on ? "Video mirrored" : "Mirror off") : (on ? "Clip mirrored" : "Clip mirror off")))
+            }
         case .rotate:
             let next = (model.rotationDegrees + 90) % 360
             Task { await model.setDraftValue("rotation", .number(Double(next))) }

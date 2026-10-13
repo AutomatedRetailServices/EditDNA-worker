@@ -101,8 +101,7 @@ def test_preview_has_sound_and_separate_volumes():
 
 def test_mirror_and_rotate_preview_and_saved_on_the_draft():
     v4 = read("EditorV4View.swift")
-    assert '.scaleEffect(x: model.isMirrored ? -1 : 1, y: 1)' in v4
-    assert 'model.setDraftValue("mirror", .bool(mirrored))' in v4
+    assert '.scaleEffect(x: model.isMirrored(at: playback.currentTime) ? -1 : 1, y: 1)' in v4
     assert 'model.setDraftValue("rotation", .number(Double(next)))' in v4
 
 
@@ -167,3 +166,21 @@ def test_zoom_keyframes_in_the_draft_and_preview():
     v4 = read("EditorV4View.swift")
     assert ".scaleEffect(zoomNow)" in v4 and '"◇ Zoom \\(percent)%"' in v4
     assert "await model.removeZoomKeyframe(id: id)" in v4
+
+
+def test_mirror_camera_off_by_default_and_editor_per_clip():
+    camera = read("CameraController.swift")
+    assert "connection.isVideoMirrored = cameraPosition == .front" not in camera  # no forced front flip
+    assert "connection.isVideoMirrored = mirrorOn" in camera
+    assert 'UserDefaults.standard.bool(forKey: CameraController.mirrorKey)' in camera  # off by default, remembered
+    preview = read("CameraPreview.swift")
+    assert "connection.isVideoMirrored = mirrored" in preview  # preview flips like the file
+    ui = read("CreateCameraView.swift")
+    assert 'Text("Mirror")' in ui and '"cameraMirror"' in ui
+    assert "if !camera.isRecording {\n                        controlsColumn" in ui  # hidden while recording
+    assert (APP / "Assets.xcassets" / "Figma" / "IconMirror.imageset" / "IconMirror@3x.png").exists()
+    vm = read("DraftEditorViewModel.swift")
+    assert "func toggleMirror(clipID: String?)" in vm and 'clip["mirror"] = .bool(turnOn)' in vm
+    v4 = read("EditorV4View.swift")
+    assert "model.toggleMirror(clipID: clipID)" in v4
+    assert "model.isMirrored(at: playback.currentTime)" in v4

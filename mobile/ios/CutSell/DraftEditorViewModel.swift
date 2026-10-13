@@ -69,6 +69,48 @@ final class DraftEditorViewModel: ObservableObject {
 
     /// Mirror (flip left-right) and rotation (0, 90, 180, 270) of the whole video.
     var isMirrored: Bool { displayDraft?["mirror"]?.boolValue ?? false }
+
+    /// Mirror of the clip playing at `time` (its own Mirror, or the older whole-video one).
+    func isMirrored(at time: Double) -> Bool {
+        if isMirrored { return true }
+        let windows = EditorTracks.clipWindows(self)
+        guard let window = windows.first(where: { time >= $0.start && time < $0.end }) ?? windows.last,
+              let clip = selectedClips.first(where: { $0["clip_id"]?.stringValue == window.clipID }) else { return false }
+        return clip["mirror"]?.boolValue ?? false
+    }
+
+    func clipIsMirrored(_ clipID: String) -> Bool {
+        isMirrored || (selectedClips.first { $0["clip_id"]?.stringValue == clipID }?["mirror"]?.boolValue ?? false)
+    }
+
+    /// Editor v4 Mirror: flips the selected clip, or every clip when none is selected; tapping again
+    /// takes it off. Saved per clip (`mirror` on the clip); the export flips only those clips' picture.
+    @discardableResult
+    func toggleMirror(clipID: String?) async -> Bool {
+        let clips = selectedClips
+        let targets = clipID.map { [$0] } ?? clips.compactMap { $0["clip_id"]?.stringValue }
+        let turnOn = !targets.allSatisfy { clipIsMirrored($0) }
+        let change: (inout [String: JSONValue]) -> Void = { object in
+            let wasWhole = object["mirror"]?.boolValue ?? false
+            object["mirror"] = nil   // the whole-video flag becomes per clip
+            Self.mapClips(&object) { clips in clips.map { clip in
+                var clip = clip
+                let id = clip["clip_id"]?.stringValue ?? ""
+                if targets.contains(id) {
+                    clip["mirror"] = .bool(turnOn)
+                } else if wasWhole {
+                    clip["mirror"] = .bool(true)
+                }
+                return clip
+            } }
+        }
+        await perform(predict: change) { [weak self] in
+            guard let self, var object = self.snapshot?.draft.objectValue else { return }
+            change(&object)
+            await self.autosave(.object(object))
+        }.value
+        return turnOn
+    }
     var rotationDegrees: Int { Int(displayDraft?["rotation"]?.doubleValue ?? 0) % 360 }
 
     /// Volume of the video's own sound (0...2, the server's `audio_volume`), the same on every clip.

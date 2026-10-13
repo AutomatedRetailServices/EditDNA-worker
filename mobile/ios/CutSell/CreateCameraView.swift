@@ -101,7 +101,7 @@ struct CreateCameraView: View {
         ZStack {
             CS.screenBackground.ignoresSafeArea()
             if !previewMode {
-                CameraPreview(session: camera.session)
+                CameraPreview(session: camera.session, mirrored: camera.mirrorOn, position: camera.cameraPosition)
                     .ignoresSafeArea()
             }
             if showGrid {
@@ -140,7 +140,10 @@ struct CreateCameraView: View {
 
                 HStack {
                     Spacer()
-                    controlsColumn
+                    // Hidden while recording (Figma 645:23 / 626:361); back between clips.
+                    if !camera.isRecording {
+                        controlsColumn
+                    }
                 }
                 .padding(.top, camera.isRecording || elapsed > 0 ? 6 : 20)
 
@@ -192,6 +195,22 @@ struct CreateCameraView: View {
             controlButton(title: "Grid", image: "IconGrid", size: CGSize(width: 38, height: 38)) {
                 showGrid.toggle()
             }
+            Button {
+                camera.mirrorOn.toggle()
+            } label: {
+                VStack(spacing: 4) {
+                    Image("IconMirror").renderingMode(.template).resizable()
+                        .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
+                        .frame(width: 36, height: 36)
+                    Text("Mirror")
+                        .font(CS.sf(13, .semibold))
+                        .foregroundStyle(camera.mirrorOn ? CS.cyan : .white)
+                }
+                .frame(width: 62)
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(camera.mirrorOn ? "On" : "Off")
+            .accessibilityIdentifier("cameraMirror")
         }
         .frame(width: 62)
         .padding(.trailing, 8)
@@ -313,7 +332,7 @@ struct CreateCameraView: View {
                 // D-133: bounded, diagnostics-only capture-metadata log.
                 let side = camera.cameraPosition == .front ? "front" : "back"
                 Task {
-                    let snapshot = await MediaDiagnostics.capture(fileURL: url, mirroredHint: side == "front")
+                    let snapshot = await MediaDiagnostics.capture(fileURL: url, mirroredHint: camera.mirrorOn)
                     var fields: [String: String] = [
                         "device_model": CutSellDiagnostics.deviceModel,
                         "ios_version": CutSellDiagnostics.iosVersion,

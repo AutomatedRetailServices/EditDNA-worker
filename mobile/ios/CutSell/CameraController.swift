@@ -27,6 +27,12 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var cameraPosition: AVCaptureDevice.Position = .back
     @Published var errorMessage: String?
+    /// Mirror (FICHA_03): off by default so the saved file shows text the right way round; when on,
+    /// the preview and the recorded file are flipped the same way. The last choice is remembered.
+    @Published var mirrorOn: Bool = UserDefaults.standard.bool(forKey: CameraController.mirrorKey) {
+        didSet { UserDefaults.standard.set(mirrorOn, forKey: Self.mirrorKey) }
+    }
+    static let mirrorKey = "cutsell.camera.mirror"
 
     func prepare() async {
         guard !isConfigured else {
@@ -107,7 +113,9 @@ final class CameraController: NSObject, ObservableObject {
                 connection.preferredVideoStabilizationMode = .auto
             }
             if connection.isVideoMirroringSupported {
-                connection.isVideoMirrored = cameraPosition == .front
+                // What is saved is what the preview shows: flipped only with Mirror on.
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = mirrorOn
             }
         }
         isRecording = true
