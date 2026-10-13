@@ -308,6 +308,9 @@ struct EditorV2View: View {
         case .voiceOver(let id):
             await model.splitVoiceOverPlacement(id: id, at: time)
             show(.message(String(format: "Voice-over split at %@", EditorTime.short(time))))
+        case .broll(let id):
+            await model.splitBrollPlacement(id: id, at: time)
+            show(.message(String(format: "B-roll split at %@", EditorTime.short(time))))
         default:
             guard let window = EditorTracks.clipWindows(model).first(where: { time > $0.start + 0.05 && time < $0.end - 0.05 }) else {
                 show(.message("Move the playhead inside a clip to split it."))
@@ -332,6 +335,9 @@ struct EditorV2View: View {
         case .voiceOver(let id):
             await model.removeVoiceOverPlacement(id: id)
             show(.message("Voice-over deleted"))
+        case .broll(let id):
+            await model.removeBrollPlacement(id: id)
+            show(.message("B-roll deleted"))
         case .overlay(let id, let isText):
             if isText { await model.removeTextOverlay(id: id) } else { await model.removeMediaOverlay(id: id) }
             show(.message("Overlay deleted", undo: true))
@@ -381,6 +387,7 @@ enum EditorTrack { case video, voiceOver, overlay, captions }
 
 enum EditorSelection: Equatable {
     case video(String)
+    case broll(String)
     case voiceOver(String)
     case overlay(String, isText: Bool)
     case caption(String)
@@ -388,6 +395,7 @@ enum EditorSelection: Equatable {
     var pillTitle: String {
         switch self {
         case .video: return "Video clip selected"
+        case .broll: return "B-roll selected"
         case .voiceOver: return "Voice-over selected"
         case .overlay: return "Overlay selected"
         case .caption: return "Caption selected"
@@ -549,6 +557,26 @@ struct EditorTracks: View {
                     .onTapGesture {
                         selection = isSelected ? nil : .video(window.clipID)
                     }
+            }
+            // B-roll placed over the main video: a labelled block on top of the clips.
+            ForEach(model.timelineComposition?.brollPlacements ?? []) { placement in
+                let isSelected = selection == .broll(placement.placementID)
+                Text("B-roll")
+                    .font(CS.sf(9, .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+                    .frame(width: max(8, x(placement.timelineEndSec - placement.timelineStartSec, width) - 2), height: 34, alignment: .topLeading)
+                    .padding(.top, 2)
+                    .background(
+                        LinearGradient(colors: [Color(hex: 0xD61FFF, opacity: 0.55), Color(hex: 0x1A6BFF, opacity: 0.45)],
+                                       startPoint: .leading, endPoint: .trailing),
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(isSelected ? CS.cyan : Color(hex: 0xD61FFF), lineWidth: isSelected ? 2 : 1))
+                    .offset(x: x(placement.timelineStartSec, width) + 1)
+                    .onTapGesture { selection = isSelected ? nil : .broll(placement.placementID) }
+                    .accessibilityIdentifier("brollBlock")
             }
         }
         .frame(width: width)

@@ -16,7 +16,7 @@ enum DesignScreenshots {
 
     static let all = [
         "editor", "editor_sel_video", "editor_sel_voice", "editor_sel_overlay", "editor_captions",
-        "editor_caption_deleted", "editor_voiceover", "editor_split",
+        "editor_caption_deleted", "editor_voiceover", "editor_split", "editor_sel_broll",
         "hub", "processing", "ready", "camera", "gallery_single", "gallery_bulk", "gallery_combine", "style", "gallery_access",
         "perm_camera", "perm_mic", "edits", "edits_empty", "you", "plan",
         "err_unsupported", "err_too_large", "err_too_long", "err_clip_limit", "err_could_not_add", "err_formats",
@@ -74,6 +74,8 @@ struct DesignScreenshotRoot: View {
             SampleEditor(state: EditorPreviewState(toast: .captionDeleted), captions: true)
         case "editor_voiceover":
             SampleEditor(state: EditorPreviewState(sheet: .voiceOver))
+        case "editor_sel_broll":
+            SampleEditor(state: EditorPreviewState(selection: .broll("b1")), broll: true)
         case "editor_split":
             SampleEditor(state: EditorPreviewState(selection: .video("c2"), toast: .split("00:06.0")))
         case "camera":
@@ -164,6 +166,7 @@ private struct EditorProbe: View {
 private struct SampleEditor: View {
     let state: EditorPreviewState
     var captions = false
+    var broll = false
     @StateObject private var holder = SampleEditorHolder()
 
     var body: some View {
@@ -172,7 +175,7 @@ private struct SampleEditor: View {
                 EditorV2View(model: model, project: holder.project, previewState: state)
             }
         }
-        .onAppear { holder.build(captions: captions) }
+        .onAppear { holder.build(captions: captions, broll: broll) }
     }
 }
 
@@ -182,7 +185,7 @@ private final class SampleEditorHolder: ObservableObject {
     let project = Project(projectID: "sample", userID: "sample", title: "Untitled Cut", state: "draft_ready",
                           latestJobID: nil, sourceCount: 1, updatedAt: nil, createdAt: "2026-10-13T08:00:00+00:00")
 
-    func build(captions: Bool) {
+    func build(captions: Bool, broll: Bool = false) {
         guard model == nil else { return }
         let model = DraftEditorViewModel(project: project, session: CutSellSession(userID: "sample", accessToken: "sample"))
         let clips: [JSONValue] = [
@@ -202,7 +205,10 @@ private final class SampleEditorHolder: ObservableObject {
         model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: draft, sources: [])
         model.setPreviewComposition(TimelineComposition(
             contractVersion: 1, baseEditIdentity: "sample", timelineDurationSec: 32, timelineRevisionIdentity: "r1",
-            brollPlacements: [],
+            brollPlacements: broll
+                ? [BrollPlacement(placementID: "b1", assetID: "b1", timelineStartSec: 8, timelineEndSec: 14,
+                                  sourceInSec: 0, sourceOutSec: 6, audioMode: .keepPrimaryVoice)]
+                : [],
             voiceOverPlacements: [VoiceOverPlacement(placementID: "v1", assetID: "a1", timelineStartSec: 0, timelineEndSec: 32,
                                                      sourceInSec: 0, sourceOutSec: 32, transcriptReference: nil)]
         ))

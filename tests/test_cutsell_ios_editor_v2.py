@@ -1,7 +1,8 @@
 """Editor v2 (Figma 04_Editor 242:1532 / 950:1165 and its states) replaces the old list editor."""
 from pathlib import Path
 
-APP = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / "mobile" / "ios" / "CutSell"
 
 
 def read(name: str) -> str:
@@ -49,3 +50,20 @@ def test_readable_and_renamable_title():
 def test_recorder_can_pause():
     recorder = read("VoiceRecorder.swift")
     assert "func pause()" in recorder and "func resume()" in recorder
+
+
+def test_broll_shows_on_the_video_track_and_can_be_deleted_or_split():
+    v2 = read("EditorV2View.swift")
+    assert "model.timelineComposition?.brollPlacements" in v2
+    assert 'accessibilityIdentifier("brollBlock")' in v2
+    assert "case broll(String)" in v2 and 'return "B-roll selected"' in v2
+    assert "await model.removeBrollPlacement(id: id)" in v2
+    assert "await model.splitBrollPlacement(id: id, at: time)" in v2
+    assert '"editor_sel_broll"' in read("DesignScreenshots.swift")
+
+
+def test_editor_probe_places_voice_over_and_broll_with_the_apps_calls():
+    probe = (ROOT / ".github/workflows/cutsell-ios-editor-probe.yml").read_text()
+    for needle in ('"PRIMARY_SOURCE"', "/timeline-uploads", "/timeline-assets", '"PUT", f"/v1/projects/{pid}/timeline"',
+                   '"VOICE_OVER", "AUDIO"', '"SUPPLEMENTAL_BROLL", "VIDEO"'):
+        assert needle in probe, needle

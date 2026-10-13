@@ -85,6 +85,55 @@ jobs:
               f.write(f"PROBE_TOKEN={T}\nPROBE_USER={u}\nPROBE_PROJECT={pid}\n")
           PY
 
+      - name: Place a voice-over and a B-roll (same calls as the app)
+        run: |
+          say -v Samantha -o "$RUNNER_TEMP/vo.aiff" "This is a test voice over."
+          ffmpeg -loglevel error -y -i "$RUNNER_TEMP/vo.aiff" -c:a aac -ar 48000 "$RUNNER_TEMP/voice-over.m4a"
+          ffmpeg -loglevel error -y -f lavfi -i color=c=0x30A060:s=720x1280:r=30:d=3 -f lavfi -i sine=frequency=440:duration=3 \
+            -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac "$RUNNER_TEMP/broll.mp4"
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request, urllib.error
+          API = "https://cutsell-api.onrender.com"; T = os.environ["PROBE_TOKEN"]; u = os.environ["PROBE_USER"]
+          pid = os.environ["PROBE_PROJECT"]; tmp = os.environ["RUNNER_TEMP"]
+          def call(m, p, b=None, q=""):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", "authorization": "Bearer " + T})
+              try:
+                  with urllib.request.urlopen(r, timeout=180) as x: return json.load(x)
+              except urllib.error.HTTPError as e:
+                  print(f"::error title={m} {p.split('/')[-1]}::HTTP {e.code} {e.read()[:300]!r}"); raise
+          assets = call("GET", f"/v1/projects/{pid}/timeline-assets", q=f"?user_id={u}")["assets"]
+          primary = [a for a in assets if a["role"] == "PRIMARY_SOURCE" and a["qualification_status"] == "READY"]
+          print(f"::notice title=primary video::{'registered' if primary else 'MISSING'} ({len(assets)} timeline assets)")
+          if not primary: raise SystemExit(1)
+          def add(path, media_class, name, ctype, role, kind):
+              size = os.path.getsize(path)
+              auth = call("POST", f"/v1/projects/{pid}/timeline-uploads", {"user_id": u, "media_class": media_class,
+                          "original_name": name, "content_type": ctype, "size_bytes": size})
+              form = []
+              for k in sorted(auth["fields"]): form += ["-F", f"{k}={auth['fields'][k]}"]
+              code = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", *form,
+                                     "-F", f"file=@{path};type={ctype}", auth["upload_url"]], capture_output=True, text=True).stdout
+              print(f"::notice title=upload {name}::storage answered {code}")
+              made = call("POST", f"/v1/projects/{pid}/timeline-assets", {"user_id": u, "role": role,
+                          "media_kind": kind, "upload_id": auth["upload_id"]})
+              print(f"::notice title=asset {name}::{made['qualification_status']} {made['duration_sec']:.1f}s")
+              return made
+          vo = add(f"{tmp}/voice-over.m4a", "voice_over", "voice-over.m4a", "audio/mp4", "VOICE_OVER", "AUDIO")
+          br = add(f"{tmp}/broll.mp4", "video", "broll.mp4", "video/mp4", "SUPPLEMENTAL_BROLL", "VIDEO")
+          draft = call("GET", f"/v1/projects/{pid}/draft", q=f"?user_id={u}")["draft"]
+          dur = sum(max(0, c["end"] - c["start"]) for c in draft.get("selected", []))
+          vo_end = min(dur, 1.0 + vo["duration_sec"]); br_end = min(dur, 4.0 + br["duration_sec"])
+          saved = call("PUT", f"/v1/projects/{pid}/timeline", {"user_id": u, "base_edit_asset_id": primary[0]["asset_id"],
+              "timeline_duration_sec": dur,
+              "voice_over_placements": [{"placement_id": "probe-vo", "asset_id": vo["asset_id"], "timeline_start_sec": 1.0,
+                  "timeline_end_sec": vo_end, "source_in_sec": 0.0, "source_out_sec": vo_end - 1.0}],
+              "broll_placements": [{"placement_id": "probe-broll", "asset_id": br["asset_id"], "timeline_start_sec": 4.0,
+                  "timeline_end_sec": br_end, "source_in_sec": 0.0, "source_out_sec": br_end - 4.0}]})
+          tl = call("GET", f"/v1/projects/{pid}/timeline", q=f"?user_id={u}")
+          print(f"::notice title=timeline::{saved['outcome']}; voice-over placements {len(tl['voice_over_placements'])}, B-roll placements {len(tl['broll_placements'])}")
+          PY
+
       - name: Open the cut in the editor (Simulator)
         working-directory: mobile/ios
         run: |
