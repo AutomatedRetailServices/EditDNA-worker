@@ -1,0 +1,19 @@
+[
+  {
+    "ms" : "637",
+    "step" : "server_ping"
+  },
+  {
+    "ms" : "120",
+    "step" : "server_ping_2"
+  },
+  {
+    "ms" : "1040",
+    "step" : "create_project"
+  },
+  {
+    "detail" : "unknown error",
+    "error" : "NSURLError",
+    "step" : "error"
+  }
+]
