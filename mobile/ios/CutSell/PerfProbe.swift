@@ -48,16 +48,26 @@ final class PerfProbe: ObservableObject {
 
     /// Runs `action`; `visible` is checked every 5 ms on the main actor until it turns true.
     private func timeAction(_ step: String, visible: @escaping @MainActor () -> Bool, _ action: @escaping @MainActor () async -> Void) async {
+        print("CUTSELL_PERF begin=\(step)")
         let clock = ContinuousClock()
         let start = clock.now
         var visibleAt: ContinuousClock.Instant?
-        let task = Task { @MainActor in await action() }
+        let finished = PerfFlag()
+        let task = Task { @MainActor in await action(); finished.value = true }
         while visibleAt == nil {
             if visible() { visibleAt = clock.now; break }
             if clock.now - start > .seconds(30) { break }
             try? await Task.sleep(for: .milliseconds(5))
         }
-        await task.value
+        // Wait for the server's answer, at most 60 s (a step that never finishes is reported, not hung on).
+        while !finished.value && clock.now - start < .seconds(60) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        if !finished.value {
+            record(step, ["visible_ms": visibleAt.map { Self.ms($0 - start) } ?? "never", "saved_ms": "timeout_60s"])
+            task.cancel()
+            return
+        }
         let saved = clock.now
         if visibleAt == nil, visible() { visibleAt = saved }
         record(step, [
@@ -179,6 +189,11 @@ final class PerfProbe: ObservableObject {
             record("error", ["error": String(describing: type(of: error)), "detail": String(error.localizedDescription.prefix(160))])
         }
     }
+}
+
+@MainActor
+final class PerfFlag {
+    var value = false
 }
 
 struct PerfProbeScreen: View {
