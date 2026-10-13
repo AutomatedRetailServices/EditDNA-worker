@@ -169,6 +169,11 @@ final class DraftPlaybackController: ObservableObject {
             let playable: Bool = sourceURLs[sourceID] != nil
             parts.append("\(clipID)|\(sourceID)|\(start)|\(end)|\(muted)|\(volume)|\(playable)")
         }
+        for placement in model.timelineComposition?.voiceOverPlacements ?? [] {
+            let local = VoiceOverStore.url(for: placement.assetID) != nil
+            parts.append("vo|\(placement.placementID)|\(placement.timelineStartSec)|\(placement.timelineEndSec)|\(placement.sourceInSec)|\(local)")
+        }
+        parts.append("vovol|\(model.voiceOverVolume)")
         return parts.joined(separator: ";")
     }
 
@@ -183,27 +188,59 @@ final class DraftPlaybackController: ObservableObject {
         return (shortest ?? 600) / 2
     }
 
+    /// One opened video per source, reused by every rebuild while its link is still valid, so an
+    /// edit does not reopen every clip over the network (it used to, once per clip, one by one).
+    private struct LoadedSource {
+        let video: AVAssetTrack
+        let audio: AVAssetTrack?
+        let transform: CGAffineTransform
+        let openedAt: Date
+    }
+    private var sourceCache: [String: LoadedSource] = [:]
+
+    private func loadSources(_ urls: [String: URL], needed: Set<String>, validFor: Double) async -> [String: LoadedSource] {
+        var result: [String: LoadedSource] = [:]
+        var missing: [String: URL] = [:]
+        for id in needed {
+            if let hit = sourceCache[id], Date().timeIntervalSince(hit.openedAt) < validFor { result[id] = hit }
+            else if let url = urls[id] { missing[id] = url }
+        }
+        await withTaskGroup(of: (String, LoadedSource?).self) { group in
+            for (id, url) in missing {
+                group.addTask {
+                    let asset = AVURLAsset(url: url)
+                    guard let video = try? await asset.loadTracks(withMediaType: .video).first else { return (id, nil) }
+                    let audio = try? await asset.loadTracks(withMediaType: .audio).first
+                    let transform = (try? await video.load(.preferredTransform)) ?? .identity
+                    return (id, LoadedSource(video: video, audio: audio, transform: transform, openedAt: Date()))
+                }
+            }
+            for await (id, loaded) in group {
+                if let loaded { result[id] = loaded; sourceCache[id] = loaded }
+            }
+        }
+        return result
+    }
+
     func rebuild(from model: DraftEditorViewModel) async {
-        let signature = Self.signature(for: model, sourceURLs: sourceURLCatalog(from: model.snapshot))
+        let sourceURLs = sourceURLCatalog(from: model.snapshot)
+        let signature = Self.signature(for: model, sourceURLs: sourceURLs)
         if isReady, signature == compositionSignature, let builtAt = compositionBuiltAt,
            Date().timeIntervalSince(builtAt) < compositionReuseSec {
             refreshCaptionCues(from: model)
             return
         }
+        let resumeAt = currentTime
+        let wasPlaying = isPlaying
         compositionSignature = nil
-        clipWindows = []
-        captionCues = []
         pause()
         isBuilding = true
-        isReady = false
         message = nil
-        currentTime = 0
-        duration = 0
         defer { isBuilding = false }
 
-        let sourceURLs = sourceURLCatalog(from: model.snapshot)
         guard !model.selectedClips.isEmpty else {
             player.replaceCurrentItem(with: nil)
+            isReady = false
             message = "No selected clips to preview."
             return
         }
@@ -216,11 +253,16 @@ final class DraftPlaybackController: ObservableObject {
             ) else {
                 throw DraftPlaybackError.compositionTrackUnavailable
             }
+            // The video's own sound and the voice-over are separate tracks, each with its volume.
             let audioCompositionTrack = composition.addMutableTrack(
                 withMediaType: .audio,
                 preferredTrackID: kCMPersistentTrackID_Invalid
             )
             let audioParameters = audioCompositionTrack.map { AVMutableAudioMixInputParameters(track: $0) }
+            var mixInputs: [AVMutableAudioMixInputParameters] = []
+
+            let needed = Set(model.selectedClips.compactMap { $0["source_asset_id"]?.stringValue })
+            let sources = await loadSources(sourceURLs, needed: needed, validFor: Self.reuseWindow(for: model.snapshot))
 
             var cursor = CMTime.zero
             var insertedVideo = false
@@ -229,7 +271,7 @@ final class DraftPlaybackController: ObservableObject {
 
             for (clipIndex, clip) in model.selectedClips.enumerated() {
                 guard let sourceID = clip["source_asset_id"]?.stringValue,
-                      let sourceURL = sourceURLs[sourceID] else {
+                      let source = sources[sourceID] else {
                     continue
                 }
                 let startSeconds = max(0, clip["start"]?.doubleValue ?? 0)
@@ -237,13 +279,10 @@ final class DraftPlaybackController: ObservableObject {
                 let clipDuration = endSeconds - startSeconds
                 guard clipDuration >= 0.05 else { continue }
 
-                let asset = AVURLAsset(url: sourceURL)
-                let videoTracks = try await asset.loadTracks(withMediaType: .video)
-                guard let sourceVideo = videoTracks.first else { continue }
                 let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
                 let durationTime = CMTime(seconds: clipDuration, preferredTimescale: 600)
                 let range = CMTimeRange(start: start, duration: durationTime)
-                try videoCompositionTrack.insertTimeRange(range, of: sourceVideo, at: cursor)
+                try videoCompositionTrack.insertTimeRange(range, of: source.video, at: cursor)
                 insertedVideo = true
 
                 windows.append(CaptionClipWindow(
@@ -254,35 +293,51 @@ final class DraftPlaybackController: ObservableObject {
                 ))
 
                 if !setVideoTransform {
-                    videoCompositionTrack.preferredTransform = try await sourceVideo.load(.preferredTransform)
+                    videoCompositionTrack.preferredTransform = source.transform
                     setVideoTransform = true
                 }
 
-                if let audioCompositionTrack {
-                    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
-                    if let sourceAudio = audioTracks.first {
-                        try audioCompositionTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
-                        let muted = clip["audio_muted"]?.boolValue ?? false
-                        let volume = Float(max(0, min(1, clip["audio_volume"]?.doubleValue ?? 1)))
-                        audioParameters?.setVolume(muted ? 0 : volume, at: cursor)
-                    }
+                if let audioCompositionTrack, let sourceAudio = source.audio {
+                    try audioCompositionTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
+                    let muted = clip["audio_muted"]?.boolValue ?? false
+                    let volume = Float(max(0, min(1, clip["audio_volume"]?.doubleValue ?? 1)))
+                    audioParameters?.setVolume(muted ? 0 : volume, at: cursor)
                 }
                 cursor = CMTimeAdd(cursor, durationTime)
             }
 
             guard insertedVideo, CMTimeGetSeconds(cursor) > 0 else {
                 player.replaceCurrentItem(with: nil)
+                isReady = false
                 message = "Preview video is temporarily unavailable."
                 CutSellDiagnostics.log("playback_failed", ["reason": "no_playable_clips"])
                 return
             }
+            if let audioParameters { mixInputs.append(audioParameters) }
+
+            // Voice-over track(s): recordings kept on this iPhone, placed where the timeline says.
+            for placement in model.timelineComposition?.voiceOverPlacements ?? [] {
+                guard let url = VoiceOverStore.url(for: placement.assetID),
+                      let voice = try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio).first,
+                      let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                else { continue }
+                let length = min(placement.sourceOutSec - placement.sourceInSec,
+                                 max(0, CMTimeGetSeconds(cursor) - placement.timelineStartSec))
+                guard length > 0.05 else { continue }
+                try? track.insertTimeRange(
+                    CMTimeRange(start: CMTime(seconds: placement.sourceInSec, preferredTimescale: 600),
+                                duration: CMTime(seconds: length, preferredTimescale: 600)),
+                    of: voice, at: CMTime(seconds: placement.timelineStartSec, preferredTimescale: 600)
+                )
+                let parameters = AVMutableAudioMixInputParameters(track: track)
+                parameters.setVolume(Float(max(0, min(1, model.voiceOverVolume))), at: .zero)
+                mixInputs.append(parameters)
+            }
 
             let item = AVPlayerItem(asset: composition)
-            if let audioParameters {
-                let mix = AVMutableAudioMix()
-                mix.inputParameters = [audioParameters]
-                item.audioMix = mix
-            }
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = mixInputs
+            item.audioMix = mix
             player.replaceCurrentItem(with: item)
             duration = max(0, CMTimeGetSeconds(cursor))
             isReady = true
@@ -291,9 +346,13 @@ final class DraftPlaybackController: ObservableObject {
             compositionBuiltAt = Date()
             compositionReuseSec = Self.reuseWindow(for: model.snapshot)
             refreshCaptionCues(from: model)
+            // Stay where the creator was (an edit no longer jumps back to the start).
+            seek(to: min(resumeAt, max(0, duration - 0.05)))
+            if wasPlaying { togglePlayback() }
             CutSellDiagnostics.log("playback_ready", ["duration_s": String(format: "%.2f", duration)])
         } catch {
             player.replaceCurrentItem(with: nil)
+            isReady = false
             message = "Preview is temporarily unavailable. The draft is still safe."
             CutSellDiagnostics.log("playback_failed", ["reason": String(describing: type(of: error))])
         }
@@ -307,6 +366,7 @@ final class DraftPlaybackController: ObservableObject {
             if duration > 0, currentTime >= duration - 0.05 {
                 seek(to: 0)
             }
+            EditorAudio.preparePlayback()
             player.play()
             isPlaying = true
         }

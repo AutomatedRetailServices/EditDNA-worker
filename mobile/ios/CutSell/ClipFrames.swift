@@ -7,17 +7,26 @@ import UIKit
 actor ClipFrameCache {
     static let shared = ClipFrameCache()
     private let cache = NSCache<NSString, UIImage>()
+    private var generators: [String: AVAssetImageGenerator] = [:]
 
     func frame(url: URL, at seconds: Double) async -> UIImage? {
         // The link's signature changes; the file path does not.
         let key = "\(url.path)|\(Int((seconds * 10).rounded()))" as NSString
         if let hit = cache.object(forKey: key) { return hit }
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 180, height: 320)
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+        // One opened video per file for all its frames (each frame used to open the video again).
+        let generator: AVAssetImageGenerator
+        if let existing = generators[url.path] {
+            generator = existing
+        } else {
+            generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 180, height: 320)
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+            generators[url.path] = generator
+        }
         guard let cg = try? await generator.image(at: CMTime(seconds: max(0, seconds), preferredTimescale: 600)).image else {
+            generators[url.path] = nil  // the link may have expired: open it again next time
             return nil
         }
         let image = UIImage(cgImage: cg)

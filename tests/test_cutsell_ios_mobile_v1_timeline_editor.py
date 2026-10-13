@@ -516,7 +516,8 @@ def test_undo_and_redo_expose_a_real_typed_success_result_not_void():
 
 def test_undo_returns_true_only_on_confirmed_success_false_on_caught_error():
     vm_source = VIEW_MODEL.read_text()
-    undo_idx = vm_source.index("func undo() async -> Bool")
+    assert "result.value = await self?.undoNow() ?? false" in vm_source
+    undo_idx = vm_source.index("private func undoNow() async -> Bool")
     redo_idx = vm_source.index("func redo() async -> Bool")
     undo_body = vm_source[undo_idx:redo_idx]
     # Success path: the real snapshot assignment is followed by `return true`.
@@ -533,7 +534,10 @@ def test_undo_returns_true_only_on_confirmed_success_false_on_caught_error():
 
 def test_redo_returns_true_only_on_confirmed_success_false_on_caught_error():
     vm_source = VIEW_MODEL.read_text()
-    redo_idx = vm_source.index("func redo() async -> Bool")
+    # Editor v4: undo()/redo() queue the real call behind earlier edits; the call itself and its
+    # honest true/false result live in redoNow().
+    assert "result.value = await self?.redoNow() ?? false" in vm_source
+    redo_idx = vm_source.index("private func redoNow() async -> Bool")
     redo_body = vm_source[redo_idx:redo_idx + 700]
     assign_idx = redo_body.index("self.snapshot = try await api.request(")
     return_true_idx = redo_body.index("return true", assign_idx)
@@ -602,7 +606,7 @@ def test_failed_redo_preserves_honest_state_and_surfaces_the_real_error():
     editor_source = TIMELINE_EDITOR.read_text()
     assert "errorMessage" not in editor_source.split("private func performRedo() async")[1].split("\n}")[0]
     vm_source = VIEW_MODEL.read_text()
-    redo_fn_idx = vm_source.index("func redo() async -> Bool")
+    redo_fn_idx = vm_source.index("private func redoNow() async -> Bool")
     assert "errorMessage = error.localizedDescription" in vm_source[redo_fn_idx:redo_fn_idx + 700]
 
 

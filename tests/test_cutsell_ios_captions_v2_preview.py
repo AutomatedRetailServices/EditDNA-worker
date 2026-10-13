@@ -173,8 +173,8 @@ def test_preview_reads_caption_settings_from_the_real_draft():
     for key in ("caption_font", "caption_x", "caption_y", "caption_scale"):
         assert f'captionValue("{key}")' in source
     # A choice just made shows at once; otherwise the draft decides.
-    assert "captionOverrides[key] ?? snapshot?.draft[key]" in source
-    assert 'snapshot?.draft["diagnostics"]?["engine"]?.stringValue' in source
+    assert "captionOverrides[key] ?? displayDraft?[key]" in source
+    assert 'displayDraft?["diagnostics"]?["engine"]?.stringValue' in source
 
 
 def test_preview_rules_never_touch_the_network_or_the_draft():

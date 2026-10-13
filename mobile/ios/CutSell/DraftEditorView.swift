@@ -15,7 +15,7 @@ struct DraftEditorView: View {
             if let model = holder.model, !model.isLoading, model.snapshot != nil {
                 // Editor v2 (Figma 04_Editor). The old list-style sections ("Editor", "Timeline",
                 // "Clip order", "Text & overlays", big Export button) are no longer shown.
-                EditorV2View(model: model, project: project)
+                EditorV4View(model: model, project: project)
             } else if let model = holder.model, !model.isLoading, model.snapshot == nil, model.errorMessage != nil {
                 VStack(spacing: 14) {
                     Text("Couldn’t open this cut").font(CS.inter(18, .semibold)).foregroundStyle(.white)

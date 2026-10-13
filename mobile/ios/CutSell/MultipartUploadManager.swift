@@ -151,33 +151,43 @@ actor MultipartUploadManager {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
 
-        for partNumber in 1...start.partCount {
-            if completedParts[partNumber] != nil { continue }
-            let offset = UInt64((partNumber - 1) * start.partSize)
-            try handle.seek(toOffset: offset)
-            let remaining = max(0, Int(size) - Int(offset))
-            let readCount = min(start.partSize, remaining)
-            let data = try handle.read(upToCount: readCount) ?? Data()
-            guard !data.isEmpty else { throw UploadError.missingPart(partNumber) }
-
-            struct OwnerBody: Encodable { let project_id: String; let user_id: String }
-            let signed: MultipartPartSignResponse = try await api.request(
-                "/v1/uploads/multipart/\(start.uploadID)/parts/\(partNumber)/presign",
-                method: "POST",
-                body: OwnerBody(project_id: projectID, user_id: session.userID)
-            )
-
-            let response = try await uploadPart(
-                data,
-                uploadID: start.uploadID,
-                partNumber: partNumber,
-                signedURL: signed.uploadURL
-            )
-            guard let etagValue = response.value(forHTTPHeaderField: "ETag"), !etagValue.isEmpty else {
-                throw UploadError.missingETag(partNumber)
+        // Up to three parts at a time (they used to go one after another, each waiting for its own
+        // link first), so the phone's connection stays busy instead of idle between parts.
+        let missing = (1...start.partCount).filter { completedParts[$0] == nil }
+        let maxInFlight = 3
+        try await withThrowingTaskGroup(of: (Int, String).self) { group in
+            var next = 0
+            func launch(_ partNumber: Int) throws {
+                let offset = UInt64((partNumber - 1) * start.partSize)
+                try handle.seek(toOffset: offset)
+                let remaining = max(0, Int(size) - Int(offset))
+                let readCount = min(start.partSize, remaining)
+                let data = try handle.read(upToCount: readCount) ?? Data()
+                guard !data.isEmpty else { throw UploadError.missingPart(partNumber) }
+                let uploadID = start.uploadID
+                let userID = session.userID
+                group.addTask {
+                    struct OwnerBody: Encodable { let project_id: String; let user_id: String }
+                    let signed: MultipartPartSignResponse = try await self.api.request(
+                        "/v1/uploads/multipart/\(uploadID)/parts/\(partNumber)/presign",
+                        method: "POST",
+                        body: OwnerBody(project_id: projectID, user_id: userID)
+                    )
+                    let response = try await self.uploadPart(
+                        data, uploadID: uploadID, partNumber: partNumber, signedURL: signed.uploadURL
+                    )
+                    guard let etagValue = response.value(forHTTPHeaderField: "ETag"), !etagValue.isEmpty else {
+                        throw UploadError.missingETag(partNumber)
+                    }
+                    return (partNumber, etagValue)
+                }
             }
-            completedParts[partNumber] = etagValue
-            progress(Double(completedParts.count) / Double(start.partCount))
+            while next < missing.count && next < maxInFlight { try launch(missing[next]); next += 1 }
+            while let (partNumber, etag) = try await group.next() {
+                completedParts[partNumber] = etag
+                progress(Double(completedParts.count) / Double(start.partCount))
+                if next < missing.count { try launch(missing[next]); next += 1 }
+            }
         }
 
         struct CompleteBody: Encodable {

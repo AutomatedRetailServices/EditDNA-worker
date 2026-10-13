@@ -825,6 +825,7 @@ struct EditorPreviewState {
     var selection: EditorSelection?
     var toast: EditorToast?
     var sheet: EditorSheet?
+    var panel: EditorPanel?
 }
 
 enum EditorSheet: String, Identifiable {

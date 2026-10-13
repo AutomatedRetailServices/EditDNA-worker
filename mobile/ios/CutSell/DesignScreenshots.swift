@@ -15,8 +15,9 @@ enum DesignScreenshots {
     }
 
     static let all = [
-        "editor", "editor_sel_video", "editor_sel_voice", "editor_sel_overlay", "editor_captions",
-        "editor_caption_deleted", "editor_voiceover", "editor_split", "editor_sel_broll",
+        "editor_v4_base", "editor_v4_caption_edit", "editor_v4_vo_record", "editor_v4_vo_review",
+        "editor_v4_cap_highlight", "editor_v4_cap_box", "editor_v4_cap_fonts", "editor_v4_overlay_gallery",
+        "editor_v4_overlay_selected", "editor_v4_mic", "editor_v4_style", "editor_v4_sel_video",
         "hub", "processing", "ready", "camera", "gallery_single", "gallery_bulk", "gallery_combine", "style", "gallery_access",
         "perm_camera", "perm_mic", "edits", "edits_empty", "you", "plan",
         "err_unsupported", "err_too_large", "err_too_long", "err_clip_limit", "err_could_not_add", "err_formats",
@@ -62,24 +63,30 @@ struct DesignScreenshotRoot: View {
             EditorProbe()
         case "perf_probe":
             PerfProbeScreen()
-        case "editor":
+        case "editor_v4_base":
             SampleEditor(state: EditorPreviewState())
-        case "editor_sel_video":
+        case "editor_v4_caption_edit":
+            SampleEditor(state: EditorPreviewState(panel: .captions("c1")), preset: "highlight_green")
+        case "editor_v4_vo_record":
+            SampleEditor(state: EditorPreviewState(panel: .voiceRecord))
+        case "editor_v4_vo_review":
+            SampleEditor(state: EditorPreviewState(panel: .voiceReview))
+        case "editor_v4_cap_highlight":
+            SampleEditor(state: EditorPreviewState(panel: .captions(nil)), preset: "highlight_green")
+        case "editor_v4_cap_box":
+            SampleEditor(state: EditorPreviewState(panel: .captions(nil)), preset: "box")
+        case "editor_v4_cap_fonts":
+            SampleEditor(state: EditorPreviewState(panel: .captions(nil)), preset: "classic", font: "bebas_neue")
+        case "editor_v4_overlay_gallery":
+            SampleEditor(state: EditorPreviewState(sheet: .overlay))
+        case "editor_v4_overlay_selected":
+            SampleEditor(state: EditorPreviewState(selection: .overlay("m1", isText: false)), overlays: true)
+        case "editor_v4_mic":
+            SampleEditor(state: EditorPreviewState(panel: .micPermission), overlays: true)
+        case "editor_v4_style":
+            SampleEditor(state: EditorPreviewState(panel: .style))
+        case "editor_v4_sel_video":
             SampleEditor(state: EditorPreviewState(selection: .video("c2")))
-        case "editor_sel_voice":
-            SampleEditor(state: EditorPreviewState(selection: .voiceOver("v1")))
-        case "editor_sel_overlay":
-            SampleEditor(state: EditorPreviewState(selection: .overlay("t1", isText: true)))
-        case "editor_captions":
-            SampleEditor(state: EditorPreviewState(sheet: .captions))
-        case "editor_caption_deleted":
-            SampleEditor(state: EditorPreviewState(toast: .captionDeleted), captions: true)
-        case "editor_voiceover":
-            SampleEditor(state: EditorPreviewState(sheet: .voiceOver))
-        case "editor_sel_broll":
-            SampleEditor(state: EditorPreviewState(selection: .broll("b1")), broll: true)
-        case "editor_split":
-            SampleEditor(state: EditorPreviewState(selection: .video("c2"), toast: .split("00:06.0")))
         case "camera":
             CreateCameraView(onBack: {}, onUpload: {}, onRecorded: { _ in }, previewMode: true)
         case "gallery_single":
@@ -164,20 +171,21 @@ private struct EditorProbe: View {
     }
 }
 
-/// Editor v2 with a sample cut (no server): 4 clips, a voice-over, two overlays.
+/// Editor v4 with a sample cut (no server): 5 clips with captions, a voice-over, optional overlays.
 private struct SampleEditor: View {
     let state: EditorPreviewState
-    var captions = false
-    var broll = false
+    var preset = "classic"
+    var font = "montserrat"
+    var overlays = false
     @StateObject private var holder = SampleEditorHolder()
 
     var body: some View {
         NavigationStack {
             if let model = holder.model {
-                EditorV2View(model: model, project: holder.project, previewState: state)
+                EditorV4View(model: model, project: holder.project, previewState: state)
             }
         }
-        .onAppear { holder.build(captions: captions, broll: broll) }
+        .onAppear { holder.build(preset: preset, font: font, overlays: overlays) }
     }
 }
 
@@ -187,34 +195,40 @@ private final class SampleEditorHolder: ObservableObject {
     let project = Project(projectID: "sample", userID: "sample", title: "Untitled Cut", state: "draft_ready",
                           latestJobID: nil, sourceCount: 1, updatedAt: nil, createdAt: "2026-10-13T08:00:00+00:00")
 
-    func build(captions: Bool, broll: Bool = false) {
+    func build(preset: String, font: String, overlays: Bool) {
         guard model == nil else { return }
         let model = DraftEditorViewModel(project: project, session: CutSellSession(userID: "sample", accessToken: "sample"))
         let clips: [JSONValue] = [
-            (0.0, 8.0, "This deal"), (8.0, 15.0, "saves you"), (15.0, 24.0, "hours."), (24.0, 32.0, "Grab it today."),
+            (0.0, 6.2, "This deal saves you money every week"), (6.2, 13.9, "Every time I walk into the store"),
+            (13.9, 22.9, "It smells amazing and lasts all day"), (22.9, 31.2, "I didn't want to spend, but I bought it"),
+            (31.2, 38.0, "Grab yours today"),
         ].enumerated().map { index, item in
             .object(["clip_id": .string("c\(index + 1)"), "source_asset_id": .string("s1"),
                      "start": .number(item.0), "end": .number(item.1), "caption_text": .string(item.2)])
         }
-        let draft: JSONValue = .object([
+        var object: [String: JSONValue] = [
             "selected": .array(clips),
-            "captions_enabled": .bool(captions),
-            "text_overlays": .array([.object(["overlay_id": .string("t1"), "text": .string("COSTCO Deals! 🔥"),
-                                              "start": .number(0), "end": .number(15)])]),
-            "media_overlays": .array([.object(["overlay_id": .string("m1"), "kind": .string("costco"),
-                                               "start": .number(15.5), "end": .number(31)])]),
-        ])
-        model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: draft, sources: [])
+            "captions_enabled": .bool(true),
+            "caption_preset": .string(preset),
+            "caption_font": .string(font),
+            "text_overlays": .array([]),
+            "media_overlays": .array([]),
+        ]
+        if overlays {
+            object["text_overlays"] = .array([.object(["overlay_id": .string("t1"), "text": .string("50% OFF 🔥"),
+                                                       "start": .number(0), "end": .number(12)])])
+            object["media_overlays"] = .array([.object(["overlay_id": .string("m1"), "kind": .string("photo"),
+                                                        "x": .number(0.5), "y": .number(0.3), "width": .number(0.55),
+                                                        "start": .number(0), "end": .number(30)])])
+        }
+        model.snapshot = DraftSnapshot(projectID: "sample", userID: "sample", revision: 1, draft: .object(object), sources: [])
         model.setPreviewComposition(TimelineComposition(
-            contractVersion: 1, baseEditIdentity: "sample", timelineDurationSec: 32, timelineRevisionIdentity: "r1",
-            brollPlacements: broll
-                ? [BrollPlacement(placementID: "b1", assetID: "b1", timelineStartSec: 8, timelineEndSec: 14,
-                                  sourceInSec: 0, sourceOutSec: 6, audioMode: .keepPrimaryVoice)]
-                : [],
-            voiceOverPlacements: [VoiceOverPlacement(placementID: "v1", assetID: "a1", timelineStartSec: 0, timelineEndSec: 32,
-                                                     sourceInSec: 0, sourceOutSec: 32, transcriptReference: nil)]
+            contractVersion: 1, baseEditIdentity: "sample", timelineDurationSec: 38, timelineRevisionIdentity: "r1",
+            brollPlacements: [],
+            voiceOverPlacements: [VoiceOverPlacement(placementID: "v1", assetID: "a1", timelineStartSec: 3, timelineEndSec: 11,
+                                                     sourceInSec: 0, sourceOutSec: 8, transcriptReference: nil)]
         ))
-        model.playheadTime = 6
+        model.playheadTime = 0
         self.model = model
     }
 }

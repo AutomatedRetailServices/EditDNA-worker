@@ -1,5 +1,11 @@
 import Foundation
 
+/// Carries one result out of a queued edit.
+@MainActor
+final class ResultBox {
+    var value = false
+}
+
 @MainActor
 final class DraftEditorViewModel: ObservableObject {
     @Published var snapshot: DraftSnapshot?
@@ -33,22 +39,110 @@ final class DraftEditorViewModel: ObservableObject {
     init(project: Project, session: CutSellSession) {
         self.project = project
         self.session = session
+        if let saved = UserDefaults.standard.object(forKey: "cutsell.voVolume.\(project.projectID)") as? Double {
+            voiceOverVolume = saved
+        }
     }
 
+    /// The change the creator just made, shown at once while the server confirms it (Editor v4:
+    /// every tap reacts immediately). `nil` when nothing is waiting; on a server error the screen
+    /// falls back to what the server really has.
+    @Published private(set) var optimisticDraft: JSONValue?
+    /// What the editor shows: the predicted draft while an edit is on its way, else the server's.
+    var displayDraft: JSONValue? { optimisticDraft ?? snapshot?.draft }
+
     var selectedClips: [[String: JSONValue]] {
-        snapshot?.draft["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        displayDraft?["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
     }
 
     var alternateClips: [[String: JSONValue]] {
-        snapshot?.draft["alternates"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        displayDraft?["alternates"]?.arrayValue?.compactMap(\.objectValue) ?? []
     }
 
     var textOverlays: [[String: JSONValue]] {
-        snapshot?.draft["text_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        displayDraft?["text_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
     }
 
     var mediaOverlays: [[String: JSONValue]] {
-        snapshot?.draft["media_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        displayDraft?["media_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
+    }
+
+    /// Mirror (flip left-right) and rotation (0, 90, 180, 270) of the whole video.
+    var isMirrored: Bool { displayDraft?["mirror"]?.boolValue ?? false }
+    var rotationDegrees: Int { Int(displayDraft?["rotation"]?.doubleValue ?? 0) % 360 }
+
+    /// Volume of the video's own sound (0...2, the server's `audio_volume`), the same on every clip.
+    var videoTrackVolume: Double {
+        let clips = selectedClips
+        guard !clips.isEmpty else { return 1 }
+        if clips.allSatisfy({ $0["audio_muted"]?.boolValue == true }) { return 0 }
+        return clips.compactMap { $0["audio_volume"]?.doubleValue }.max() ?? 1
+    }
+
+    /// Volume of the voice-over track in the preview (kept on this iPhone; 0...1).
+    @Published var voiceOverVolume: Double = 1 {
+        didSet { UserDefaults.standard.set(voiceOverVolume, forKey: "cutsell.voVolume.\(project.projectID)") }
+    }
+
+    // MARK: One queue for every draft edit
+
+    private var actionChain: Task<Void, Never>?
+    private var pendingActions = 0
+    /// Drafts the server confirmed before each edit (newest last), so Undo can show at once.
+    private var confirmedHistory: [JSONValue] = []
+
+    /// Shows `predict`'s result at once, then runs `work` after every earlier edit finished (each
+    /// server call builds on the latest revision, so edits never race).
+    @discardableResult
+    func perform(predict: ((inout [String: JSONValue]) -> Void)?, _ work: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        if let predict, var object = displayDraft?.objectValue {
+            predict(&object)
+            optimisticDraft = .object(object)
+        }
+        pendingActions += 1
+        let previous = actionChain
+        let task = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            await work()
+            guard let self else { return }
+            self.pendingActions -= 1
+            if self.pendingActions == 0 { self.optimisticDraft = nil }
+        }
+        actionChain = task
+        return task
+    }
+
+    static func mapClips(_ object: inout [String: JSONValue], _ transform: ([[String: JSONValue]]) -> [[String: JSONValue]]) {
+        let clips = object["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        object["selected"] = .array(transform(clips).map(JSONValue.object))
+    }
+
+    /// Sets the video's own volume on every clip (0 mutes) with one save.
+    func setVideoTrackVolume(_ volume: Double) async {
+        let value = max(0, min(2, volume))
+        let change: (inout [String: JSONValue]) -> Void = { object in
+            Self.mapClips(&object) { clips in clips.map { clip in
+                var clip = clip
+                clip["audio_volume"] = .number((value * 1000).rounded() / 1000)
+                clip["audio_muted"] = .bool(value <= 0.001)
+                return clip
+            } }
+        }
+        await perform(predict: change) { [weak self] in
+            guard let self, var object = self.snapshot?.draft.objectValue else { return }
+            change(&object)
+            await self.autosave(.object(object))
+        }.value
+    }
+
+    /// Mirror / rotation are whole-video settings saved on the draft (the export reads them).
+    func setDraftValue(_ key: String, _ value: JSONValue) async {
+        let change: (inout [String: JSONValue]) -> Void = { $0[key] = value }
+        await perform(predict: change) { [weak self] in
+            guard let self, var object = self.snapshot?.draft.objectValue else { return }
+            change(&object)
+            await self.autosave(.object(object))
+        }.value
     }
 
     var timelineDuration: Double {
@@ -69,11 +163,9 @@ final class DraftEditorViewModel: ObservableObject {
     @Published private var captionOverrides: [String: JSONValue] = [:]
     private var captionOverrideTokens: [String: Int] = [:]
     private var captionOverrideCounter = 0
-    /// Caption saves run one after another, each on the latest draft revision.
-    private var captionSettingsChain: Task<Void, Never>?
 
     private func captionValue(_ key: String) -> JSONValue? {
-        captionOverrides[key] ?? snapshot?.draft[key]
+        captionOverrides[key] ?? displayDraft?[key]
     }
 
     var captionsEnabled: Bool {
@@ -105,7 +197,7 @@ final class DraftEditorViewModel: ObservableObject {
 
     /// Which engine produced this draft; short timed captions exist only for "simple".
     var draftEngine: String? {
-        snapshot?.draft["diagnostics"]?["engine"]?.stringValue
+        displayDraft?["diagnostics"]?["engine"]?.stringValue
     }
 
     func load() async {
@@ -121,14 +213,15 @@ final class DraftEditorViewModel: ObservableObject {
                 userID: session.userID,
                 api: api
             )
+            async let compositionRequest: Void = refreshTimelineComposition()
             let loadedDraft = try await draftRequest
             snapshot = loadedDraft
             let loadedAssets = try await assetRequest
             timelineAssetLibrary = loadedAssets
+            await compositionRequest
         } catch {
             errorMessage = error.localizedDescription
         }
-        await refreshTimelineComposition()
     }
 
     /// D-282A Stage 6: "refresh the snapshot and library after a confirmed
@@ -200,6 +293,8 @@ final class DraftEditorViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             return .failed
         }
+        // Kept on this iPhone so the preview plays it on its own track.
+        VoiceOverStore.save(fileURL, assetID: asset.assetID)
         await refreshTimelineAssetLibrary()
         guard asset.isReady, asset.durationSec > 0 else {
             errorMessage = "The recording couldn't be used. Please record again."
@@ -515,6 +610,12 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func remove(clipID: String) async {
+        await perform(predict: { object in
+            Self.mapClips(&object) { $0.filter { $0["clip_id"]?.stringValue != clipID } }
+        }) { [weak self] in await self?.removeNow(clipID: clipID) }.value
+    }
+
+    private func removeNow(clipID: String) async {
         guard let snapshot else { return }
         let edited = await edit(path: "/v1/draft-edits/remove", body: .object([
             "draft": snapshot.draft,
@@ -568,6 +669,36 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func split(clipID: String, at sourceTime: Double) async {
+        await perform(predict: { object in
+            Self.mapClips(&object) { clips in clips.flatMap { clip -> [[String: JSONValue]] in
+                guard clip["clip_id"]?.stringValue == clipID else { return [clip] }
+                return Self.predictedSplit(clip, at: sourceTime)
+            } }
+        }) { [weak self] in await self?.splitNow(clipID: clipID, at: sourceTime) }.value
+    }
+
+    /// The two halves the server will make (shown until it answers).
+    static func predictedSplit(_ clip: [String: JSONValue], at time: Double) -> [[String: JSONValue]] {
+        var first = clip, second = clip
+        let words = clip["words"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        let before = words.filter { ($0["end"]?.doubleValue ?? 0) <= time }
+        let after = words.filter { ($0["end"]?.doubleValue ?? 0) > time }
+        first["end"] = .number(time)
+        second["start"] = .number(time)
+        second["clip_id"] = .string((clip["clip_id"]?.stringValue ?? "clip") + "-b")
+        first["words"] = .array(before.map(JSONValue.object))
+        second["words"] = .array(after.map(JSONValue.object))
+        func text(_ items: [[String: JSONValue]]) -> String {
+            items.compactMap { $0["word"]?.stringValue ?? $0["text"]?.stringValue }.joined(separator: " ")
+        }
+        if !words.isEmpty {
+            first["caption_text"] = .string(text(before))
+            second["caption_text"] = .string(text(after))
+        }
+        return [first, second]
+    }
+
+    private func splitNow(clipID: String, at sourceTime: Double) async {
         guard let snapshot else { return }
         let edited = await edit(path: "/v1/draft-edits/split", body: .object([
             "draft": snapshot.draft,
@@ -578,15 +709,15 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func editCaption(clipID: String, text: String) async {
-        // Same queue as the caption settings, so a text fix never races a
-        // look/typeface save on the same draft revision.
-        let previous = captionSettingsChain
-        let task = Task { [weak self] in
-            _ = await previous?.value
-            await self?.sendCaptionText(clipID: clipID, text: text)
-        }
-        captionSettingsChain = task
-        await task.value
+        // Same queue as every other edit, so a text fix never races a look/typeface save.
+        await perform(predict: { object in
+            Self.mapClips(&object) { clips in clips.map { clip in
+                guard clip["clip_id"]?.stringValue == clipID else { return clip }
+                var clip = clip
+                clip["caption_text"] = .string(text)
+                return clip
+            } }
+        }) { [weak self] in await self?.sendCaptionText(clipID: clipID, text: text) }.value
     }
 
     private func sendCaptionText(clipID: String, text: String) async {
@@ -645,9 +776,7 @@ final class DraftEditorViewModel: ObservableObject {
         }
 
         let changedKeys = Array(changes.keys)
-        let previous = captionSettingsChain
-        let task = Task { [weak self] in
-            _ = await previous?.value
+        return perform(predict: nil) { [weak self] in
             guard let self else { return }
             await self.sendCaptionSettings(enabled: enabled, preset: preset, font: font, x: x, y: y, scale: scale)
             for key in changedKeys where self.captionOverrideTokens[key] == token {
@@ -655,8 +784,6 @@ final class DraftEditorViewModel: ObservableObject {
                 self.captionOverrideTokens[key] = nil
             }
         }
-        captionSettingsChain = task
-        return task
     }
 
     private func sendCaptionSettings(
@@ -675,6 +802,18 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func setAudio(clipID: String, muted: Bool? = nil, volume: Double? = nil) async {
+        await perform(predict: { object in
+            Self.mapClips(&object) { clips in clips.map { clip in
+                guard clip["clip_id"]?.stringValue == clipID else { return clip }
+                var clip = clip
+                if let muted { clip["audio_muted"] = .bool(muted) }
+                if let volume { clip["audio_volume"] = .number(volume) }
+                return clip
+            } }
+        }) { [weak self] in await self?.setAudioNow(clipID: clipID, muted: muted, volume: volume) }.value
+    }
+
+    private func setAudioNow(clipID: String, muted: Bool?, volume: Double?) async {
         guard let snapshot else { return }
         var object: [String: JSONValue] = ["draft": snapshot.draft, "clip_id": .string(clipID)]
         object["muted"] = muted.map(JSONValue.bool) ?? .null
@@ -710,6 +849,13 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func removeTextOverlay(id: String) async {
+        await perform(predict: { object in
+            let items = object["text_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
+            object["text_overlays"] = .array(items.filter { $0["overlay_id"]?.stringValue != id }.map(JSONValue.object))
+        }) { [weak self] in await self?.removeTextOverlayNow(id: id) }.value
+    }
+
+    private func removeTextOverlayNow(id: String) async {
         guard let snapshot else { return }
         let edited = await edit(path: "/v1/draft-edits/text/remove", body: .object([
             "draft": snapshot.draft,
@@ -764,6 +910,13 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func removeMediaOverlay(id: String) async {
+        await perform(predict: { object in
+            let items = object["media_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
+            object["media_overlays"] = .array(items.filter { $0["overlay_id"]?.stringValue != id }.map(JSONValue.object))
+        }) { [weak self] in await self?.removeMediaOverlayNow(id: id) }.value
+    }
+
+    private func removeMediaOverlayNow(id: String) async {
         guard let snapshot else { return }
         let edited = await edit(path: "/v1/overlays/remove", body: .object([
             "draft": snapshot.draft,
@@ -778,8 +931,17 @@ final class DraftEditorViewModel: ObservableObject {
     /// `snapshot` was left exactly as it was and this returns `false`.
     @discardableResult
     func undo() async -> Bool {
+        let result = ResultBox()
+        var predict: ((inout [String: JSONValue]) -> Void)?
+        if let restored = confirmedHistory.last?.objectValue { predict = { $0 = restored } }
+        await perform(predict: predict) { [weak self] in result.value = await self?.undoNow() ?? false }.value
+        return result.value
+    }
+
+    private func undoNow() async -> Bool {
         guard let snapshot else { return false }
         do {
+            if !confirmedHistory.isEmpty { confirmedHistory.removeLast() }
             self.snapshot = try await api.request(
                 "/v1/projects/\(project.projectID)/draft/undo",
                 method: "POST",
@@ -798,6 +960,12 @@ final class DraftEditorViewModel: ObservableObject {
     /// Same honest success/failure contract as `undo()` -- see above.
     @discardableResult
     func redo() async -> Bool {
+        let result = ResultBox()
+        await perform(predict: nil) { [weak self] in result.value = await self?.redoNow() ?? false }.value
+        return result.value
+    }
+
+    private func redoNow() async -> Bool {
         guard let snapshot else { return false }
         do {
             self.snapshot = try await api.request(
@@ -853,6 +1021,8 @@ final class DraftEditorViewModel: ObservableObject {
         guard let snapshot else { return }
         isSaving = true
         defer { isSaving = false }
+        confirmedHistory.append(snapshot.draft)
+        if confirmedHistory.count > 20 { confirmedHistory.removeFirst() }
         do {
             self.snapshot = try await api.request(
                 "/v1/projects/\(project.projectID)/draft",

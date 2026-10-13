@@ -16,6 +16,8 @@ final class VoiceRecorder: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var isPaused = false
+    /// Live loudness of the microphone (0...1), newest last: the wave that follows the voice.
+    @Published private(set) var levels: [Float] = []
 
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
@@ -45,17 +47,25 @@ final class VoiceRecorder: ObservableObject {
                 AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
             ]
             let recorder = try AVAudioRecorder(url: url, settings: settings)
+            recorder.isMeteringEnabled = true
             guard recorder.record() else {
                 state = .failed("The microphone couldn't start. Please try again.")
                 return
             }
             self.recorder = recorder
             elapsed = 0
+            levels = []
             state = .recording
-            timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let recorder = self.recorder else { return }
                     self.elapsed = recorder.currentTime
+                    guard !self.isPaused else { return }
+                    recorder.updateMeters()
+                    let power = recorder.averagePower(forChannel: 0)   // dB, -160...0
+                    let level = Float(max(0.04, min(1, pow(10, Double(power) / 20) * 2.2)))
+                    self.levels.append(level)
+                    if self.levels.count > 120 { self.levels.removeFirst(self.levels.count - 120) }
                 }
             }
         } catch {
@@ -85,7 +95,8 @@ final class VoiceRecorder: ObservableObject {
         timer?.invalidate()
         timer = nil
         self.recorder = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        // Back to normal playback sound for the editor preview.
+        EditorAudio.preparePlayback()
         state = elapsed >= 0.3 ? .recorded(recorder.url) : .failed("That take was too short. Please record again.")
     }
 
@@ -103,6 +114,20 @@ final class VoiceRecorder: ObservableObject {
         state = .idle
         elapsed = 0
     }
+
+    #if DEBUG
+    /// Design screenshots only: show a take in progress / a finished take without a microphone.
+    func previewRecording(levels: [Float], elapsed: TimeInterval) {
+        self.levels = levels
+        self.elapsed = elapsed
+        state = .recording
+    }
+
+    func previewRecorded(url: URL, elapsed: TimeInterval) {
+        self.elapsed = elapsed
+        state = .recorded(url)
+    }
+    #endif
 
     static func requestPermission() async -> Bool {
         switch AVAudioApplication.shared.recordPermission {

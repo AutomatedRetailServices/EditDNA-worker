@@ -112,7 +112,7 @@ def test_settings_are_sent_to_the_real_route_with_every_field():
 def test_choices_show_at_once_and_fall_back_to_the_server_on_failure():
     vm = VIEW_MODEL.read_text()
     assert "@Published private var captionOverrides" in vm
-    assert "captionOverrides[key] ?? snapshot?.draft[key]" in vm
+    assert "captionOverrides[key] ?? displayDraft?[key]" in vm
     # Saves run one after another on the latest revision; each choice is
     # dropped once its own save finishes (success or failure).
     assert "await previous?.value" in vm
