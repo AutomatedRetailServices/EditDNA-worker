@@ -169,7 +169,7 @@ private struct SampleEditor: View {
     var body: some View {
         NavigationStack {
             if let model = holder.model {
-                EditorV2View(model: model, project: holder.project, preview: state)
+                EditorV2View(model: model, project: holder.project, previewState: state)
             }
         }
         .onAppear { holder.build(captions: captions) }

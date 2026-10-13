@@ -22,7 +22,7 @@ struct EditorV2View: View {
     @State private var newTitle = ""
     @State private var displayTitle: String?
     /// Design screenshots only (Debug): open in a given state.
-    var preview: EditorPreviewState? = nil
+    var previewState: EditorPreviewState? = nil
 
     private var duration: Double { max(0.1, playback.duration > 0 ? playback.duration : model.timelineDuration) }
 
@@ -58,10 +58,10 @@ struct EditorV2View: View {
         }
         .onDisappear { playback.pause() }
         .onAppear {
-            guard let preview else { return }
-            selection = preview.selection
-            toast = preview.toast
-            if let opened = preview.sheet {
+            guard let previewState else { return }
+            selection = previewState.selection
+            toast = previewState.toast
+            if let opened = previewState.sheet {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { sheet = opened }
             }
         }
