@@ -2,7 +2,7 @@ name: CutSell overlap + zoom demo source
 
 # One-off: makes ONE short cut on the live server from a synthetic spoken clip (macOS "say",
 # a test pattern picture, no real video or personal data) and saves the clip and the cut's draft
-# as a workflow artifact, so the Overlap audio / Auto Zoom AI export can be rendered ON vs OFF
+# on the `demo-results` branch (synthetic only), so the Overlap audio / Auto Zoom AI export can be rendered ON vs OFF
 # offline with the branch code. The throwaway session token is masked. Runs only when pushed to
 # probe/overlap-demo (manual).
 
@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   demo:
@@ -73,8 +73,10 @@ jobs:
           print(f"::notice title=draft::{len(draft.get('selected', []))} kept clips, {len(draft.get('alternates', []))} hidden")
           PY
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: overlap-zoom-demo
-          path: ${{ runner.temp }}/out
-          retention-days: 3
+      - name: Save the synthetic clip and the draft on the demo-results branch
+        run: |
+          cd "$RUNNER_TEMP/out"
+          git init -q -b demo-results
+          git config user.name "cutsell-ci"; git config user.email "ci@cutsell.invalid"
+          git add -A && git commit -q -m "Overlap + zoom demo source (synthetic)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" demo-results
