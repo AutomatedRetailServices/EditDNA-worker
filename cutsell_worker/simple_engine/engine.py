@@ -25,7 +25,8 @@ _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
-FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v1.txt").read_text(encoding="utf-8")
+FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
+ZOOM_KINDS = ("hook", "product", "price", "cta")
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
 OV = 0.08                                   # audio crossfade assumed at every junction (s)
@@ -357,23 +358,56 @@ def breathe(splits, words, duration):
 def fix_words(words, splits, call: LLMCall):
     """Caption text only: an LLM fixes clearly misheard words in the kept part. Edit decisions never change.
     Returns (words for captions, [[index, old, new]], usage). On repeated failure the captions keep the raw words."""
+    shown, fixes, _moments, usage = fix_words_and_moments(words, splits, call)
+    return shown, fixes, usage
+
+
+def _parse_fix_answer(text: str):
+    """v2 answer {"fix": [...], "zoom": [...]}; a bare v1 list [[i, "w"], ...] is still accepted."""
+    m = re.search(r"\{.*\}", text, re.S)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            if isinstance(data, dict):
+                return list(data.get("fix") or []), list(data.get("zoom") or [])
+        except ValueError:
+            pass
+    m = re.search(r"\[.*\]", text, re.S)
+    if not m:
+        raise ValueError("no JSON in the word-fix answer")
+    return json.loads(m.group(0)), []
+
+
+def fix_words_and_moments(words, splits, call: LLMCall):
+    """The word-fix call (already made for every video) also marks the key moments for Auto Zoom AI:
+    hook, product, price, call to action -- no extra call, no extra cost, and the edit decisions are
+    never touched. Returns (shown words, fixes, moments [{"i", "kind"}], usage)."""
     vis = [(s["start"], s["end"]) for s in splits if s["visible"]]
     idx = [i for i, w in enumerate(words) if any(a <= (w["s"] + w["e"]) / 2 <= b for a, b in vis)]
     if not idx:
-        return words, [], []
+        return words, [], [], []
     prompt = FIXWORDS_PROMPT + "\n" + " ".join(f"{i}:{words[i]['w']}" for i in idx)
     usage = []
+    pairs, marks = None, []
     for attempt in range(3):
         try:
             text, u = call(prompt + (f"\n(retry {attempt})" if attempt else "")); usage.append(u)
-            m = re.search(r"\[.*\]", text, re.S)
-            pairs = json.loads(m.group(0)) if m else []
+            pairs, marks = _parse_fix_answer(text)
             break
         except Exception:
             pairs = None
+    allowed = set(idx)
+    moments = []
+    for mark in marks or []:
+        try:
+            i, kind = int(mark[0]), str(mark[1]).strip().lower()
+        except Exception:
+            continue
+        if i in allowed and kind in ZOOM_KINDS and not any(m["i"] == i for m in moments):
+            moments.append({"i": i, "kind": kind})
     if not pairs:
-        return words, ([] if pairs == [] else [["error"]]), usage
-    shown = [dict(w) for w in words]; fixes = []; allowed = set(idx)
+        return words, ([] if pairs == [] else [["error"]]), moments, usage
+    shown = [dict(w) for w in words]; fixes = []
     for p in pairs:
         try:
             i, new = int(p[0]), str(p[1]).strip()
@@ -381,7 +415,7 @@ def fix_words(words, splits, call: LLMCall):
             continue
         if i in allowed and new and new != shown[i]["w"] and len(new) <= 3 * len(shown[i]["w"]) + 8:
             fixes.append([i, shown[i]["w"], new]); shown[i]["w"] = new
-    return shown, fixes, usage
+    return shown, fixes, moments, usage
 
 
 def keep_spoken_words(splits, words):
@@ -551,8 +585,9 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
         scene_cut_list = scene_cuts(video_path)
     log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
     splits = breathe(splits, words, float(duration))
-    shown, fixes, u = fix_words(words, splits, call); info["usage"] += u
+    shown, fixes, moments, u = fix_words_and_moments(words, splits, call); info["usage"] += u
     caps, cut_duration = captions(shown, splits)
     log["revision"] = info.get("review"); log["palabras"] = fixes
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
-            "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"]}
+            "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"],
+            "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"]} for m in moments]}

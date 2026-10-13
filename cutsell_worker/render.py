@@ -473,12 +473,17 @@ _AUDIO_JOIN_FADE_SEC = 0.012
 _AUDIO_JOIN_FADE_MIN_SEGMENT_SEC = 0.20
 
 
-def _audio_join_fade_filters(duration_sec: float) -> list[str]:
+def _audio_join_fade_filters(duration_sec: float, *, fade_in: float | None = None,
+                             fade_out: float | None = None) -> list[str]:
+    """`fade_in`/`fade_out` (Overlap audio) widen a side's fade to its audio roll, so the two
+    clips of a join crossfade over the overlap; unset, both sides keep the 12 ms anti-click."""
     fade = float(_AUDIO_JOIN_FADE_SEC)
     if fade <= 0.0 or duration_sec < _AUDIO_JOIN_FADE_MIN_SEGMENT_SEC:
         return []
-    fade_out_start = max(0.0, float(duration_sec) - fade)
-    return [f"afade=t=in:st=0:d={fade:.3f}", f"afade=t=out:st={fade_out_start:.3f}:d={fade:.3f}"]
+    fade_in = max(fade, float(fade_in)) if fade_in else fade
+    fade_out = max(fade, float(fade_out)) if fade_out else fade
+    fade_out_start = max(0.0, float(duration_sec) - fade_out)
+    return [f"afade=t=in:st=0:d={fade_in:.3f}", f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}"]
 
 
 def _orientation_filters(segment: RenderSegment) -> list[str]:
@@ -503,6 +508,54 @@ def _with_orientation(chain_head: str, label: str, segment: RenderSegment) -> st
     if not orientation:
         return chain_head
     return chain_head.replace(label, label + ",".join(orientation) + ",", 1)
+
+
+MAX_ZOOMS_PER_SEGMENT = 6
+_ZOOM_RAMP_SEC = 0.35
+
+
+def _zoom_expression(segment: RenderSegment) -> str | None:
+    """Auto Zoom AI: the zoom factor as a function of the segment's own time `t`, a smooth push-in
+    (smoothstep) and release for every keyframe inside the segment. None when there is none."""
+    terms = []
+    for source_time, duration, scale in tuple(getattr(segment, "zoom_keyframes", ()) or ())[: MAX_ZOOMS_PER_SEGMENT * 4]:
+        a = float(source_time) - float(segment.start)
+        b = min(a + float(duration), float(segment.end) - float(segment.start))
+        a = max(0.0, a)
+        if b - a < 0.3 or len(terms) >= MAX_ZOOMS_PER_SEGMENT:
+            continue
+        r = min(_ZOOM_RAMP_SEC, (b - a) / 3)
+        up = f"((t-{a:.3f})/{r:.3f})"
+        down = f"(({b:.3f}-t)/{r:.3f})"
+        ease_up = f"({up}*{up}*(3-2*{up}))"
+        ease_down = f"({down}*{down}*(3-2*{down}))"
+        envelope = (f"if(lt(t,{a:.3f}),0,if(lt(t,{a + r:.3f}),{ease_up},"
+                    f"if(lt(t,{b - r:.3f}),1,if(lt(t,{b:.3f}),{ease_down},0))))")
+        terms.append(f"{float(scale) - 1.0:.4f}*{envelope}")
+    if not terms:
+        return None
+    return "1+" + "+".join(terms)
+
+
+def _zoom_filters(segment: RenderSegment, *, width: int, height: int) -> list[str]:
+    """Scale the fitted frame up by the zoom factor (evaluated every frame) and keep the centre."""
+    expression = _zoom_expression(segment)
+    if expression is None:
+        return []
+    return [
+        f"scale=w='2*trunc(iw*({expression})/2)':h='2*trunc(ih*({expression})/2)':eval=frame",
+        f"crop={width}:{height}",
+    ]
+
+
+def _insert_zoom(video_chain: list[str], segment: RenderSegment, *, width: int, height: int) -> list[str]:
+    zoom = _zoom_filters(segment, width=width, height=height)
+    if not zoom:
+        return video_chain
+    for index, item in enumerate(video_chain):
+        if item.startswith("fps="):
+            return video_chain[: index + 1] + zoom + video_chain[index + 1:]
+    return video_chain
 
 
 def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str]:
@@ -626,6 +679,7 @@ def _concat_render_command(
                 f"fps={fps}",
             ]
         video_chain[0] = _with_orientation(video_chain[0], f"[{video_input}:v]", segment)
+        video_chain = _insert_zoom(video_chain, segment, width=width, height=height)
         caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
         if caption:
             video_chain.append(caption)
@@ -666,6 +720,31 @@ def _concat_render_command(
         str(output),
     ]
     return command
+
+
+def _with_audio_rolls(segments: tuple[RenderSegment, ...]) -> tuple[RenderSegment, ...]:
+    """Overlap audio: at each join the clip that ends keeps playing its own source audio for its
+    post-roll and the clip that starts begins its audio its pre-roll early; both fade over that
+    time (a crossfade). The first clip has no lead and the last no tail; windows never go past
+    the source file. Segments without rolls are returned unchanged."""
+    if not any(seg.audio_pre_roll > 0 or seg.audio_post_roll > 0 for seg in segments):
+        return segments
+    output = []
+    last = len(segments) - 1
+    for index, seg in enumerate(segments):
+        pre = float(seg.audio_pre_roll) if index > 0 else 0.0
+        post = float(seg.audio_post_roll) if index < last else 0.0
+        if pre <= 0.001 and post <= 0.001:
+            output.append(seg)
+            continue
+        probe = probe_media(seg.source_path)
+        if not probe.has_audio:
+            output.append(seg)
+            continue
+        audio_start = max(0.0, float(seg.start) - pre)
+        audio_end = min(float(probe.duration_sec), float(seg.end) + post)
+        output.append(replace(seg, audio_start=audio_start, audio_end=max(audio_end, float(seg.end))))
+    return tuple(output)
 
 
 def render_preview(
@@ -714,7 +793,7 @@ def render_preview(
                 "owner": "render.tighten_trailing_silence",
             })
         segment_tuple.append(tightened)
-    segment_tuple = tuple(segment_tuple)
+    segment_tuple = _with_audio_rolls(tuple(segment_tuple))
     text_tuple = tuple(text_overlays)
     media_tuple = tuple(media_overlays)
     if not segment_tuple:
@@ -744,8 +823,10 @@ def render_preview(
             joined = temp_output if not has_final_overlays else Path(directory) / "joined.mp4"
             # D-097.2: one pass, exact frame-aligned per-segment durations, gapless
             # concat filter -- see the module comment above render_preview.
+            # Overlap audio joins need independent audio windows; with none (every draft without
+            # Overlap audio) this delegates to `_concat_render_command`, byte for byte.
             _run(
-                _concat_render_command(
+                _concat_render_command_with_audio_windows(
                     segment_tuple, joined, width=width, height=height, fps=fps, workdir=Path(directory),
                 ),
                 output_path=joined, source_identity=source_identity,
@@ -948,6 +1029,7 @@ def _concat_render_command_with_audio_windows(
             f"fps={fps}",
         ]
         video_chain[0] = _with_orientation(video_chain[0], f"[{video_input}:v]", segment)
+        video_chain = _insert_zoom(video_chain, segment, width=width, height=height)
         caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
         if caption:
             video_chain.append(caption)
@@ -965,9 +1047,11 @@ def _concat_render_command_with_audio_windows(
             command += ["-ss", f"{audio_start:.3f}", "-to", f"{audio_end:.3f}", "-i", segment.source_path]
             audio_input = input_index
             input_index += 1
+            lead = max(0.0, segment.start - audio_start)
+            trail = max(0.0, audio_end - segment.end)
             audio_chain = [
                 f"[{audio_input}:a]volume={effective_volume:.3f}",
-                *_audio_join_fade_filters(audio_duration),
+                *_audio_join_fade_filters(audio_duration, fade_in=lead or None, fade_out=trail or None),
                 audio_format,
                 f"atrim=duration={audio_duration:.6f}",
                 "asetpts=PTS-STARTPTS",

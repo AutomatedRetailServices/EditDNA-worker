@@ -203,6 +203,11 @@ class DraftClip:
     selected: bool = True
     audio_muted: bool = False
     audio_volume: float = 1.0
+    # Overlap audio (simple engine 1.2+): how much of this clip's own source audio may be heard
+    # just before its start / just after its end, so a cut crossfades instead of jumping. Bounded
+    # by the silence around the clip in its source (never another phrase's words). 0 = hard cut.
+    audio_pre_roll: float = 0.0
+    audio_post_roll: float = 0.0
     # Local face/pose/motion evidence carried through from the CandidateTake
     # this clip was built from (see local_performance.py). Optional and
     # defaulted to None so every existing construction site (serde.py's
@@ -394,6 +399,27 @@ class DraftTimeline:
     # turns. Applied to every clip in the export; captions and overlays are drawn upright.
     mirror: bool = False
     rotation: int = 0
+    # Overlap audio: crossfade each join with the clips' own pre/post rolls (DraftClip).
+    audio_overlap_enabled: bool = False
+    # Auto Zoom AI: apply `zoom_keyframes` in the export (they are kept when this is off, so the
+    # editor's toggle can bring them back without a new cut).
+    auto_zoom_enabled: bool = False
+    zoom_keyframes: Tuple["ZoomKeyframe", ...] = ()
+
+
+@dataclass(frozen=True)
+class ZoomKeyframe:
+    """Auto Zoom AI: a smooth push-in on a key moment (hook, product, price, call to action).
+    Anchored to the SOURCE time it was found at, so splitting, deleting or reordering clips never
+    moves it onto other content; a keyframe whose source moment is no longer in the cut is simply
+    not drawn."""
+    keyframe_id: str
+    source_asset_id: str
+    source_time: float
+    duration: float
+    scale: float
+    kind: str = "key"
+    origin: str = "ai"
 
 
 @dataclass(frozen=True)
@@ -414,6 +440,8 @@ class ProcessingRequest:
     # `audio_overlap` (see serde._normalize_dialogue_overlap). No consumer
     # reads it yet; it changes zero current editorial behavior.
     dialogue_overlap_enabled: bool = False
+    # Auto Zoom AI requested for this cut ("Choose your style"). Default off here; the API sends it.
+    auto_zoom_enabled: bool = False
     # D-134: compact, request-level (not per-family) normalized diagnostics
     # for the Overlap field -- see serde._normalize_dialogue_overlap for the
     # precedence rule that produces these four values.

@@ -88,6 +88,13 @@ class RenderSegment:
     # Editor v4 whole-video orientation (contracts.DraftTimeline.mirror / rotation).
     mirror: bool = False
     rotation: int = 0
+    # Overlap audio: source audio this segment may play before its start / after its end
+    # (0 = hard cut). Turned into an audio window by render_preview, after trailing-silence trim.
+    audio_pre_roll: float = 0.0
+    audio_post_roll: float = 0.0
+    # Auto Zoom AI: (source_time, duration, scale) of the zooms on this segment's source; the
+    # renderer draws the ones that fall inside the segment.
+    zoom_keyframes: tuple = ()
 
     @property
     def duration_sec(self) -> float:
@@ -170,7 +177,8 @@ def _coalesce_contiguous_segments(segments: Tuple[RenderSegment, ...]) -> Tuple[
             previous = output[-1]
             floors = [f for f in (previous.trailing_trim_floor, current.trailing_trim_floor) if f is not None]
             output[-1] = replace(previous, end=max(previous.end, current.end),
-                                 trailing_trim_floor=max(floors) if floors else None)
+                                 trailing_trim_floor=max(floors) if floors else None,
+                                 audio_post_roll=current.audio_post_roll)
             continue
         output.append(current)
     return tuple(output)
@@ -237,6 +245,8 @@ def timed_caption_cues(clip) -> Tuple[Tuple[float, float, str], ...]:
 def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> Tuple[RenderSegment, ...]:
     """Translate selected draft clips to concrete source-safe media segments."""
     output = []
+    overlap = bool(getattr(draft, "audio_overlap_enabled", False))
+    zooms = tuple(getattr(draft, "zoom_keyframes", ()) or ()) if getattr(draft, "auto_zoom_enabled", False) else ()
     for clip in draft.selected:
         path = local_paths.get(clip.source_asset_id)
         if not path:
@@ -288,6 +298,12 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             caption_scale=getattr(draft, "caption_scale", None),
             mirror=bool(getattr(draft, "mirror", False)),
             rotation=int(getattr(draft, "rotation", 0) or 0),
+            audio_pre_roll=float(getattr(clip, "audio_pre_roll", 0.0) or 0.0) if overlap else 0.0,
+            audio_post_roll=float(getattr(clip, "audio_post_roll", 0.0) or 0.0) if overlap else 0.0,
+            zoom_keyframes=tuple(
+                (float(k.source_time), float(k.duration), float(k.scale))
+                for k in zooms if k.source_asset_id in ("", clip.source_asset_id)
+            ),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

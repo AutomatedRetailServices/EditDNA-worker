@@ -32,6 +32,7 @@ class BatchProject(BaseModel):
     # D-134: canonical Overlap field, same semantics as FlowBSubmitRequest's
     # field of the same name -- see docs/CUTSELL_DECISIONS.md D-134 Part 2.
     dialogue_overlap_enabled: bool | None = None
+    auto_zoom_enabled: bool = True
 
 
 class BatchCreateRequest(BaseModel):
@@ -75,6 +76,7 @@ def create_batch_job(payload: BatchCreateRequest):
                 "sources": sources,
                 "language_hint": project.language_hint,
                 "audio_overlap": project.audio_overlap,
+                "auto_zoom_enabled": project.auto_zoom_enabled,
             }
             # D-134: forward the canonical field only when explicitly sent
             # -- see cutsell_app/main.py::submit_flow_b for the same rule.

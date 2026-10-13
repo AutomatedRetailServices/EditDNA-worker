@@ -1,7 +1,7 @@
 """JSON-safe serialization helpers for RQ/API boundaries."""
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from enum import Enum
 from typing import Any
 
@@ -15,6 +15,7 @@ from .contracts import (
     SourceAsset,
     TextOverlay,
     Word,
+    ZoomKeyframe,
 )
 
 from .caption_render import CAPTION_FONTS, CAPTION_PRESETS, DEFAULT_CAPTION_FONT, caption_layout  # noqa: E402,F401
@@ -108,6 +109,7 @@ def request_from_dict(payload: dict) -> ProcessingRequest:
         audio_overlap=bool(payload.get("audio_overlap", False)),
         language_hint=(str(payload["language_hint"]) if payload.get("language_hint") else None),
         dialogue_overlap_enabled=dialogue_overlap_enabled,
+        auto_zoom_enabled=bool(payload.get("auto_zoom_enabled", False)),
         overlap_diagnostics=overlap_diagnostics,
     )
 
@@ -140,6 +142,43 @@ def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
         selected=bool(item.get("selected", selected_default)),
         audio_muted=bool(item.get("audio_muted", False)),
         audio_volume=volume,
+        audio_pre_roll=_roll(item.get("audio_pre_roll")),
+        audio_post_roll=_roll(item.get("audio_post_roll")),
+    )
+
+
+#: Longest audio roll a clip may carry on one side of a join (a join overlaps pre + post <= 0.12 s).
+MAX_AUDIO_ROLL_SEC = 0.06
+ZOOM_SCALE_RANGE = (1.0, 1.25)
+ZOOM_DURATION_RANGE = (0.4, 4.0)
+
+
+def _roll(value) -> float:
+    try:
+        number = float(value or 0.0)
+    except (TypeError, ValueError):
+        raise ValueError("audio roll must be a number") from None
+    return round(max(0.0, min(MAX_AUDIO_ROLL_SEC, number)), 3)
+
+
+def _zoom_keyframe_from_dict(item: dict) -> ZoomKeyframe:
+    try:
+        source_time = float(item["source_time"])
+        duration = float(item.get("duration", 1.5))
+        scale = float(item.get("scale", 1.08))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("zoom keyframe needs source_time, duration and scale") from None
+    if source_time < 0:
+        raise ValueError("zoom keyframe source_time must not be negative")
+    if not ZOOM_DURATION_RANGE[0] <= duration <= ZOOM_DURATION_RANGE[1]:
+        raise ValueError("zoom keyframe duration out of range")
+    if not ZOOM_SCALE_RANGE[0] <= scale <= ZOOM_SCALE_RANGE[1]:
+        raise ValueError("zoom keyframe scale out of range")
+    return ZoomKeyframe(
+        keyframe_id=str(item.get("keyframe_id") or f"z{int(source_time * 1000)}"),
+        source_asset_id=str(item.get("source_asset_id") or ""),
+        source_time=source_time, duration=duration, scale=scale,
+        kind=str(item.get("kind") or "key")[:32], origin=str(item.get("origin") or "ai")[:16],
     )
 
 
@@ -233,6 +272,9 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         media_overlays=media_overlays,
         mirror=bool(payload.get("mirror", False)),
         rotation=rotation,
+        audio_overlap_enabled=bool(payload.get("audio_overlap_enabled", False)),
+        auto_zoom_enabled=bool(payload.get("auto_zoom_enabled", False)),
+        zoom_keyframes=tuple(_zoom_keyframe_from_dict(dict(item)) for item in payload.get("zoom_keyframes") or ()),
     )
 
 
@@ -248,17 +290,20 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, DraftTimeline):
-        data = asdict(value)
-        # Editor-only settings are written only when the creator set them, so cut results and
-        # stored drafts stay exactly as before for everyone else.
-        if not data.get("mirror"):
-            data.pop("mirror", None)
-        if not data.get("rotation"):
-            data.pop("rotation", None)
-        return _json_safe(data)
     if hasattr(value, "__dataclass_fields__"):
-        return _json_safe(asdict(value))
+        # One level at a time (nested dataclasses come back through here), so editor-only
+        # settings can be left out while they are at their defaults: cut results and stored
+        # drafts stay exactly as before for every draft that does not use them.
+        data = {item.name: getattr(value, item.name) for item in fields(value)}
+        if isinstance(value, DraftTimeline):
+            for key in ("mirror", "rotation", "audio_overlap_enabled", "auto_zoom_enabled", "zoom_keyframes"):
+                if not data.get(key):
+                    data.pop(key, None)
+        elif isinstance(value, DraftClip):
+            for key in ("audio_pre_roll", "audio_post_roll"):
+                if not data.get(key):
+                    data.pop(key, None)
+        return _json_safe(data)
     return value
 
 

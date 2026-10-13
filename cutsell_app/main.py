@@ -114,6 +114,8 @@ class FlowBSubmitRequest(BaseModel):
     # No pacing behavior is implemented; this only lets the request contract
     # carry the field without a future migration rewriting it.
     dialogue_overlap_enabled: bool | None = None
+    # Auto Zoom AI ("Choose your style"): on unless the creator turns it off.
+    auto_zoom_enabled: bool = True
 
 
 class FlowBSubmitResponse(BaseModel):
@@ -319,6 +321,7 @@ def submit_flow_b(payload: FlowBSubmitRequest):
         "sources": sources,
         "language_hint": payload.language_hint,
         "audio_overlap": payload.audio_overlap,
+        "auto_zoom_enabled": payload.auto_zoom_enabled,
     }
     # D-134: only forward the canonical field when the client explicitly
     # sent it, so the normalization point's presence-detection (D-134 Part

@@ -20,6 +20,7 @@ from typing import Callable, Mapping, Optional
 
 from .contracts import (
     SCHEMA_VERSION, DraftClip, DraftTimeline, EditStrategy, JobState, ProcessingRequest, ProcessingResult, Word,
+    ZoomKeyframe,
 )
 from .media_probe import probe_media
 from .simple_engine import VERSION as ENGINE_VERSION
@@ -38,7 +39,56 @@ def _words_inside(words, start: float, end: float):
     return [w for w in words if start <= (w["s"] + w["e"]) / 2 <= end]
 
 
-def _clip(*, clip_id: str, source, split: Mapping, words, selected: bool) -> DraftClip:
+# Overlap audio: each side of a join may borrow up to this much of the clip's own source audio,
+# stopping this far short of any other spoken word (so no other phrase is ever heard in a join).
+ROLL_MAX_SEC = 0.06
+ROLL_WORD_MARGIN_SEC = 0.02
+# Auto Zoom AI: soft push-ins on key moments.
+ZOOM_SCALE = {"hook": 1.08, "product": 1.10, "price": 1.12, "cta": 1.08}
+ZOOM_LEAD_SEC, ZOOM_MAX_SEC, ZOOM_MIN_SEC = 0.10, 1.8, 0.8
+ZOOM_EDGE_SEC = 0.30          # never during a join
+ZOOM_MIN_SPACING_SEC = 3.0
+
+
+def _rolls(split: Mapping, words, duration: float) -> tuple[float, float]:
+    """Silence available right before / after a kept part in its source, capped for a short crossfade."""
+    start, end = float(split["start"]), float(split["end"])
+    before = [float(w["e"]) for w in words if float(w["e"]) <= start + 1e-6]
+    after = [float(w["s"]) for w in words if float(w["s"]) >= end - 1e-6]
+    room_before = start - (max(before) + ROLL_WORD_MARGIN_SEC if before else 0.0)
+    room_after = (min(after) - ROLL_WORD_MARGIN_SEC if after else duration) - end
+    pre = max(0.0, min(ROLL_MAX_SEC, room_before, start))
+    post = max(0.0, min(ROLL_MAX_SEC, room_after, duration - end))
+    return round(pre, 3), round(post, 3)
+
+
+def _zoom_keyframes(source, moments, splits) -> list[ZoomKeyframe]:
+    """Key moments -> zooms inside kept parts, away from joins, at most one every 3 s."""
+    visible = [(float(s["start"]), float(s["end"])) for s in splits if s["visible"]]
+    out: list[ZoomKeyframe] = []
+    for moment in sorted(moments, key=lambda m: float(m["s"])):
+        t = float(moment["s"]) - ZOOM_LEAD_SEC
+        part = next(((a, b) for a, b in visible if a <= float(moment["s"]) <= b), None)
+        if part is None:
+            continue
+        a, b = part
+        t = max(t, a + ZOOM_EDGE_SEC)
+        length = min(ZOOM_MAX_SEC, b - ZOOM_EDGE_SEC - t)
+        if length < ZOOM_MIN_SEC:
+            continue
+        if out and t - out[-1].source_time < ZOOM_MIN_SPACING_SEC:
+            continue
+        kind = str(moment["kind"])
+        out.append(ZoomKeyframe(
+            keyframe_id=f"z-{source.source_order:03d}-{len(out) + 1:02d}",
+            source_asset_id=source.source_asset_id, source_time=round(t, 3), duration=round(length, 3),
+            scale=ZOOM_SCALE.get(kind, 1.08), kind=kind, origin="ai",
+        ))
+    return out
+
+
+def _clip(*, clip_id: str, source, split: Mapping, words, selected: bool,
+          rolls: tuple[float, float] = (0.0, 0.0)) -> DraftClip:
     text = " ".join(w["w"] for w in words)
     return DraftClip(
         clip_id=clip_id,
@@ -51,6 +101,8 @@ def _clip(*, clip_id: str, source, split: Mapping, words, selected: bool) -> Dra
         words=tuple(Word(w["w"], float(w["s"]), float(w["e"]), None) for w in words),
         take_group_id=None,
         selected=selected,
+        audio_pre_roll=rolls[0],
+        audio_post_roll=rolls[1],
     )
 
 
@@ -86,6 +138,7 @@ def process_with_simple_engine(
     alternates: list[DraftClip] = []
     per_source: list[dict] = []
     timeline_captions: list[dict] = []
+    zoom_keyframes: list[ZoomKeyframe] = []
     timeline_offset = 0.0
     total = len(sources)
 
@@ -115,6 +168,7 @@ def process_with_simple_engine(
                     selected.append(_clip(
                         clip_id=f"se-{source.source_order:03d}-{source_selected:04d}",
                         source=source, split=split, words=inside, selected=True,
+                        rolls=_rolls(split, words, duration),
                     ))
                 elif inside:
                     hidden_index += 1
@@ -122,6 +176,8 @@ def process_with_simple_engine(
                         clip_id=f"se-{source.source_order:03d}-h{hidden_index:04d}",
                         source=source, split=split, words=inside, selected=False,
                     ))
+
+            zoom_keyframes.extend(_zoom_keyframes(source, out.get("moments") or [], out["splits"]))
 
             # captions are on the cut timeline of THIS source; shift them onto the whole draft timeline
             shifted = [{"w": c["w"], "s": round(c["s"] + timeline_offset, 3), "e": round(c["e"] + timeline_offset, 3)}
@@ -167,6 +223,9 @@ def process_with_simple_engine(
         alternates=tuple(alternates),
         discarded=(),
         diagnostics=diagnostics,
+        audio_overlap_enabled=bool(request.dialogue_overlap_enabled),
+        auto_zoom_enabled=bool(request.auto_zoom_enabled),
+        zoom_keyframes=tuple(zoom_keyframes),
     )
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,

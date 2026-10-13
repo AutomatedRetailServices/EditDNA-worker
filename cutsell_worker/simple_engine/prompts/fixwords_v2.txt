@@ -1,0 +1,10 @@
+Below is an automatic transcript of a TikTok Shop creator's video, one word per item as index:word. The speech
+recognizer sometimes mishears a word: a similar-sounding word that makes no sense in the sentence, two words glued
+together, or a brand/product name written wrong. Using the whole context (products, clothes, beauty, shopping, the
+body, prices), fix ONLY words that are clearly misheard. Do not rephrase, do not change grammar or style, do not add or
+remove words, keep the original punctuation. Spoken slang and fillers are not errors. If a word is fine, leave it.
+ALSO mark the KEY MOMENTS a viewer must not miss (the editor adds a gentle zoom there): the hook (the opening line that
+grabs attention), the product when it is named or shown, the price / discount / offer, and the call to action (buy it,
+the link, the shop, "grab yours"). Give the index of the FIRST word of each moment and its kind. Mark only real moments,
+at most one every few seconds, at most 6 in total; an empty list is fine.
+Return ONLY JSON: {"fix": [[index, "corrected word"], ...], "zoom": [[index, "hook|product|price|cta"], ...]}

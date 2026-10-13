@@ -589,3 +589,70 @@ def test_fix_words_changes_caption_text_only_for_kept_words():
     shown, fixes, usage = engine.fix_words(words, splits, call)
     assert shown[2]["w"] == "Shein" and shown[3]["w"] == "malo" and words[2]["w"] == "por"
     assert fixes == [[2, "por", "Shein"]] and len(usage) == 1
+
+
+# ------------------------------------------------------------------ Overlap audio + Auto Zoom AI
+
+class MomentLLM(FakeLLM):
+    """Like FakeLLM, but the word-fix answer (v2) also marks two key moments."""
+
+    def __call__(self, prompt: str):
+        if prompt.startswith(se.FIXWORDS_PROMPT):
+            self.prompts.append(prompt)
+            indices = [int(item.split(":", 1)[0]) for item in prompt.split("\n")[-1].split()]
+            marks = [[indices[0], "hook"], [indices[-1], "cta"], [indices[1], "bogus_kind"]]
+            return json.dumps({"fix": [], "zoom": marks}), {"input_tokens": 5, "output_tokens": 3}
+        return super().__call__(prompt)
+
+
+def _request_with(paths, **flags):
+    base = _request(paths)
+    from dataclasses import replace
+    return replace(base, **flags)
+
+
+def test_overlap_flag_sets_the_draft_and_every_kept_clip_gets_bounded_rolls(video):
+    on = simple_engine_adapter.process_with_simple_engine(
+        _request_with({"s1": video}, dialogue_overlap_enabled=True), {"s1": video},
+        transcribe=_fake_transcribe, llm=FakeLLM())
+    off = simple_engine_adapter.process_with_simple_engine(
+        _request_with({"s1": video}, dialogue_overlap_enabled=False), {"s1": video},
+        transcribe=_fake_transcribe, llm=FakeLLM())
+    assert on.draft.audio_overlap_enabled is True and off.draft.audio_overlap_enabled is False
+    words = _words()
+    for clip in on.draft.selected:
+        assert 0.0 <= clip.audio_pre_roll <= 0.06 and 0.0 <= clip.audio_post_roll <= 0.06
+        # a roll never reaches another spoken word
+        assert not any(clip.start - clip.audio_pre_roll < w["e"] <= clip.start for w in words)
+        assert not any(clip.end <= w["s"] < clip.end + clip.audio_post_roll for w in words)
+    assert any(clip.audio_pre_roll > 0 or clip.audio_post_roll > 0 for clip in on.draft.selected)
+
+
+def test_auto_zoom_keyframes_come_from_the_existing_word_fix_call(video):
+    llm = MomentLLM()
+    result = simple_engine_adapter.process_with_simple_engine(
+        _request_with({"s1": video}, auto_zoom_enabled=True), {"s1": video}, transcribe=_fake_transcribe, llm=llm)
+    calls = len(llm.prompts)
+    assert calls == len(FakeLLM().prompts) or calls == 4      # same four calls as before: no extra call
+    keys = result.draft.zoom_keyframes
+    assert result.draft.auto_zoom_enabled is True and keys
+    assert {k.kind for k in keys} <= {"hook", "product", "price", "cta"}       # unknown kinds dropped
+    assert all(1.0 < k.scale <= 1.12 and 0.8 <= k.duration <= 1.8 for k in keys)
+    assert all(b.source_time - a.source_time >= 3.0 for a, b in zip(keys, keys[1:]))
+    for k in keys:   # inside a kept clip and away from its joins
+        assert any(c.start + 0.3 - 1e-6 <= k.source_time and k.source_time + k.duration <= c.end - 0.3 + 1e-6
+                   for c in result.draft.selected), k
+    off = simple_engine_adapter.process_with_simple_engine(
+        _request_with({"s1": video}, auto_zoom_enabled=False), {"s1": video}, transcribe=_fake_transcribe, llm=MomentLLM())
+    assert off.draft.auto_zoom_enabled is False and off.draft.zoom_keyframes   # kept, so the editor can turn them on
+
+
+def test_word_fix_still_accepts_the_old_list_answer():
+    from cutsell_worker.simple_engine import engine
+    words = [{"w": "compre", "s": 0.0, "e": 0.4}, {"w": "por", "s": 0.6, "e": 0.9}]
+    splits = [{"start": 0.0, "end": 1.0, "visible": True}]
+    shown, fixes, moments, _ = engine.fix_words_and_moments(words, splits, lambda p: ('[[1, "Shein"]]', {}))
+    assert fixes == [[1, "por", "Shein"]] and moments == []
+    shown, fixes, moments, _ = engine.fix_words_and_moments(
+        words, splits, lambda p: ('{"fix": [], "zoom": [[0, "price"], [9, "price"]]}', {}))
+    assert fixes == [] and moments == [{"i": 0, "kind": "price"}]      # index 9 is not a kept word
