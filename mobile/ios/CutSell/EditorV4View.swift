@@ -270,9 +270,10 @@ struct EditorV4View: View {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         let seconds = Date().timeIntervalSince(started)
         let error = model.errorMessage
-        toast = .message(String(format: "10 edits in %.1f s · %d quiet retries · %@", seconds, model.saveConflicts,
-                                error == nil ? "no errors" : "ERROR: \(error!)"))
-        NSLog("CUTSELL_STRESS edits=10 seconds=\(seconds) retries=\(model.saveConflicts) error=\(error ?? "none")")
+        let summary = String(format: "10 edits in %.1f s · %d quiet retries · %d skipped · %@", seconds, model.saveConflicts,
+                             model.skippedEdits, error == nil ? "no errors" : "ERROR: \(error!)")
+        toast = .message(summary)
+        NSLog("CUTSELLSTRESS %@", summary)
     }
 
     /// Editor probe "flow" (screen recording): play the whole cut (it must stop at its end and the

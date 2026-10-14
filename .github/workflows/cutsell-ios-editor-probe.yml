@@ -185,7 +185,7 @@ jobs:
             xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
           sleep 50
           xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/real_stress.png" >/dev/null 2>&1
-          line="$(xcrun simctl spawn "$udid" log show --last 3m --style compact --predicate 'eventMessage CONTAINS "CUTSELL_STRESS"' 2>/dev/null | grep CUTSELL_STRESS | tail -1 | sed 's/.*CUTSELL_STRESS/CUTSELL_STRESS/')"
+          line="$(xcrun simctl spawn "$udid" log show --last 3m --style compact --predicate 'eventMessage CONTAINS "CUTSELLSTRESS"' 2>/dev/null | grep -v predicate | grep CUTSELLSTRESS | tail -1 | sed 's/.*CUTSELLSTRESS//')"
           echo "::notice title=stress::${line:-no stress line found}"
           # Screen recording of the same flow as the report: play to the end, then quick edits.
           xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true

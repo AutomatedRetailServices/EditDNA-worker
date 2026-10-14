@@ -59,6 +59,8 @@ final class DraftEditorViewModel: ObservableObject {
     @Published private(set) var optimisticDraft: JSONValue?
     /// Saves that met a 409 and were retried quietly (shown by the editor probe).
     @Published private(set) var saveConflicts = 0
+    /// Edits that no longer applied to the latest draft (their clip was undone or deleted); skipped.
+    @Published private(set) var skippedEdits = 0
     /// What the editor shows: the predicted draft while an edit is on its way, else the server's.
     var displayDraft: JSONValue? { optimisticDraft ?? snapshot?.draft }
 
@@ -1191,6 +1193,13 @@ final class DraftEditorViewModel: ObservableObject {
             do {
                 edited = try await build(base.draft)
             } catch {
+                // The edit route refused this change on the latest draft (409/422: e.g. the clip it
+                // was for was just undone or deleted). Nothing is lost that is still in the cut, and
+                // it is not a save failure: skip it quietly instead of showing an error.
+                if case APIError.http(let code, _) = error, code == 409 || code == 422 {
+                    skippedEdits += 1
+                    return false
+                }
                 errorMessage = Self.friendly(error)
                 return false
             }
