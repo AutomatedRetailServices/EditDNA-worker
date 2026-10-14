@@ -1,0 +1,17 @@
+2026-10-14 23:18:24+00:00 23:18:24 Worker 85c8c5db912a4bfeae1440ded16ef77e: cutsell: cutsell_worker.export_job.run_export_job({'project_id': 'prj_8a61af957d684131b99cd989291b0cab', 'user_id': 'usr_4130...) (76349353-7cf5-401b-a3d0-1d33a4f2ae69)
+2026-10-14 23:18:38+00:00 23:18:38 Successfully completed cutsell_worker.export_job.run_export_job({'project_id': 'prj_8a61af957d684131b99cd989291b0cab', 'user_id': 'usr_4130...) job in 0:00:12.789541s on worker 85c8c5db912a4bfeae1440ded16ef77e
+2026-10-14 23:18:45+00:00 23:18:45 Worker 8f740312fbc947e18fb3f88df064379c: cutsell: cutsell_worker.export_job.run_export_job({'project_id': 'prj_8a61af957d684131b99cd989291b0cab', 'user_id': 'usr_4130...) (c1047239-ce77-46a6-a3f8-c36304d59f52)
+2026-10-14 23:18:59+00:00 23:18:59 Successfully completed cutsell_worker.export_job.run_export_job({'project_id': 'prj_8a61af957d684131b99cd989291b0cab', 'user_id': 'usr_4130...) job in 0:00:12.288107s on worker 8f740312fbc947e18fb3f88df064379c
+2026-10-14 23:19:56+00:00 23:19:56 Worker f066988bf8324d59abd571f336a0b148: cutsell: cutsell_worker.export_job.run_export_job({'project_id': 'prj_71732fdcebb947b5a06e8e116f85940c', 'user_id': 'usr_4130...) (f85e7b4f-7042-4cf5-9279-1eea9929f498)
+2026-10-14 23:20:15+00:00 23:20:15 Successfully completed cutsell_worker.export_job.run_export_job({'project_id': 'prj_71732fdcebb947b5a06e8e116f85940c', 'user_id': 'usr_4130...) job in 0:00:16.701469s on worker f066988bf8324d59abd571f336a0b148
+2026-10-14 23:20:23+00:00 23:20:23 Worker 1aec49020e554fb88b3550653ecacad0: cutsell: cutsell_worker.export_job.run_export_job({'project_id': 'prj_71732fdcebb947b5a06e8e116f85940c', 'user_id': 'usr_4130...) (f4373c53-dda5-4c12-8aab-b57e6dfe66c3)
+2026-10-14 23:20:44+00:00 23:20:44 Successfully completed cutsell_worker.export_job.run_export_job({'project_id': 'prj_71732fdcebb947b5a06e8e116f85940c', 'user_id': 'usr_4130...) job in 0:00:19.287304s on worker 1aec49020e554fb88b3550653ecacad0
+2026-10-14 23:33:23+00:00 23:33:23 Worker e97f3b793f824e66922e29ac88771781: cutsell: cutsell_worker.export_job.run_export_job({'project_id': 'prj_44c5b79af6d74961ab8aec5ba7272212', 'user_id': 'usr_5507...) (198dce41-e7a6-45e2-abd9-eefebdccf7a9)
+2026-10-14 23:34:38+00:00 23:34:38 Worker e97f3b793f824e66922e29ac88771781: job 198dce41-e7a6-45e2-abd9-eefebdccf7a9: exception raised while executing (cutsell_worker.export_job.run_export_job)
+2026-10-14 23:34:38+00:00 Traceback (most recent call last):
+2026-10-14 23:34:38+00:00   File "/usr/local/lib/python3.11/site-packages/rq/worker/base.py", line 1552, in perform_job
+2026-10-14 23:34:38+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1368, in perform
+2026-10-14 23:34:38+00:00   File "/usr/local/lib/python3.11/site-packages/rq/job.py", line 1428, in _execute
+2026-10-14 23:34:38+00:00   File "/root/cutsell_worker/export_job.py", line 782, in run_export_job
+2026-10-14 23:34:38+00:00     raise PostRenderQCFailure(qc_result)
+2026-10-14 23:34:38+00:00 cutsell_worker.live_render_qc.PostRenderQCFailure: post_render_watch_listen_qc_failed:NEEDS_HUMAN_REVIEW
