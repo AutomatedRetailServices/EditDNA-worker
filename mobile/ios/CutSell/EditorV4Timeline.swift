@@ -300,7 +300,8 @@ struct TimelineV4: View {
 
     private func voiceTrack(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let placements = model.timelineComposition?.voiceOverPlacements ?? []
-        let lastEnd = placements.map(\.timelineEndSec).max()
+        let pending = model.pendingVoiceOvers
+        let lastEnd = (placements.map(\.timelineEndSec) + pending.map(\.end)).max()
         return ZStack(alignment: .topLeading) {
             ForEach(Array(placements.enumerated()), id: \.element.id) { index, placement in
                 let left = x(placement.timelineStartSec)
@@ -316,6 +317,24 @@ struct TimelineV4: View {
                     .onTapGesture {
                         selection = selection == .voiceOver(placement.placementID) ? nil : .voiceOver(placement.placementID)
                     }
+                }
+            }
+            // Saved a moment ago: on the row at once while it uploads (tap to retry if it failed).
+            ForEach(Array(pending.enumerated()), id: \.element.id) { index, item in
+                let left = x(item.start)
+                let blockWidth = max(8, CGFloat(item.duration) * pixelsPerSecond)
+                if left + blockWidth > 0, left < width + 20 {
+                    VoiceBlockV4(
+                        title: "Voiceover \(placements.count + index + 1)",
+                        assetID: item.id,
+                        width: blockWidth,
+                        isSelected: false,
+                        localURL: PendingVoiceOverStore.fileURL(item),
+                        status: item.failed ? .failed : .uploading
+                    )
+                    .offset(x: left)
+                    .onTapGesture { if item.failed { model.retryPendingVoiceOver(id: item.id) } }
+                    .accessibilityLabel(item.failed ? "Voice-over not uploaded. Tap to try again." : "Voice-over uploading")
                 }
             }
             // "+" only when the row already has a voice: right after the last one.
@@ -528,45 +547,80 @@ private struct ClipBlockV4: View {
 }
 
 /// One voice-over on its track (Figma: blue #1769FF block, cyan border, "Voiceover 1" and the
-/// recording's real waveform in cyan).
+/// recording's real waveform in cyan). The label is never cut: on a short block it runs past the
+/// block's end on its own blue tab.
 struct VoiceBlockV4: View {
+    enum Status { case saved, uploading, failed }
+
     let title: String
     let assetID: String
     let width: CGFloat
     let isSelected: Bool
+    var localURL: URL? = nil
+    var status: Status = .saved
     @State private var samples: [Float] = []
 
+    /// Room the label needs inside the block (text + paddings).
+    static let labelRoom: CGFloat = 74
+
     var body: some View {
-        let bars = max(4, Int((width - 72) / 3.4))
+        let room = Self.labelRoom + (status == .saved ? 0 : 14)
+        let labelInside = width >= room
+        let waveStart: CGFloat = labelInside ? room - 6 : 4
+        let bars = max(2, Int((width - waveStart - 4) / 3.4))
         ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 7).fill(Color(hex: 0x1769FF))
-            HStack(spacing: 0) {
-                Text(title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.leading, 7)
-                HStack(alignment: .center, spacing: 1.4) {
-                    ForEach(0..<bars, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(CS.cyan)
-                            .frame(width: 2, height: max(3, 17 * CGFloat(level(index, of: bars))))
-                    }
+            RoundedRectangle(cornerRadius: 7).fill(Color(hex: 0x1769FF).opacity(status == .saved ? 1 : 0.7))
+            HStack(alignment: .center, spacing: 1.4) {
+                ForEach(0..<bars, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(CS.cyan)
+                        .frame(width: 2, height: max(3, 17 * CGFloat(level(index, of: bars))))
                 }
-                .padding(.leading, 6)
-                Spacer(minLength: 0)
             }
+            .padding(.leading, waveStart)
             .frame(width: width, alignment: .leading)
             .clipped()
         }
         .frame(width: width, height: 30)
         .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? Color.white : CS.cyan, lineWidth: isSelected ? 2 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(borderColor, style: borderStyle))
+        .overlay(alignment: .leading) { label(inside: labelInside) }
         .task(id: assetID) {
-            if let url = VoiceOverStore.url(for: assetID) { samples = await Waveform.samples(url: url, count: 90) }
+            if let url = localURL ?? VoiceOverStore.url(for: assetID) { samples = await Waveform.samples(url: url, count: 90) }
         }
-        .accessibilityIdentifier("voiceBlock")
+        .accessibilityIdentifier(status == .saved ? "voiceBlock" : "voiceBlockPending")
+    }
+
+    private var borderColor: Color {
+        if isSelected { return .white }
+        return status == .failed ? CS.error : CS.cyan
+    }
+
+    private var borderStyle: StrokeStyle {
+        StrokeStyle(lineWidth: isSelected ? 2 : 1, dash: status == .uploading ? [4, 3] : [])
+    }
+
+    private func label(inside: Bool) -> some View {
+        HStack(spacing: 4) {
+            if status == .uploading {
+                ProgressView().controlSize(.mini).tint(.white)
+            } else if status == .failed {
+                Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+            }
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .padding(.horizontal, inside ? 0 : 6)
+        .frame(height: 20)
+        .background {
+            if !inside { Capsule().fill(Color(hex: 0x1769FF)).overlay(Capsule().stroke(CS.cyan, lineWidth: 1)) }
+        }
+        .padding(.leading, 7)
+        .fixedSize()
+        .allowsHitTesting(false)
     }
 
     /// Real loudness when the recording is on this iPhone; otherwise an even placeholder pattern.

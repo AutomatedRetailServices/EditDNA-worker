@@ -32,13 +32,14 @@ struct EditorV4View: View {
     @State private var captionText = ""
     @FocusState private var captionFocused: Bool
     @State private var videoVolume: Double = 1
+    /// "Video sound" panel under the timeline: opened only by the speaker or by tapping a voice clip.
+    @State private var soundPanel: SoundPanelTarget?
 
     private var duration: Double { max(0.1, playback.duration > 0 ? playback.duration : model.timelineDuration) }
 
     /// Rebuild the preview when what it plays changes (the predicted draft included, so it follows at once).
     private var previewKey: String {
-        let placements = (model.timelineComposition?.voiceOverPlacements ?? [])
-            .map { "\($0.placementID)@\($0.timelineStartSec)" }.joined(separator: ",")
+        let placements = model.previewVoices.map { "\($0.key)@\($0.start)" }.joined(separator: ",")
         return "\(model.displayDraft?.hashValue ?? 0)|\(placements)|\(model.voiceOverVolume)|\(model.loadGeneration)"
     }
 
@@ -102,7 +103,8 @@ struct EditorV4View: View {
         case .captions: return controls + 1 + TimelineV4.height + toolbar
         // Style (Figma 1054:2497): no controls; the panel sits where the controls and timeline were.
         case .style: return controls + 1 + TimelineV4.height + toolbar
-        case .none, .micPermission, .voiceRecord, .voiceReview: return controls + 1 + TimelineV4.height + toolbar
+        case .none, .micPermission, .voiceRecord, .voiceReview:
+            return controls + 1 + TimelineV4.height + toolbar + (soundPanel == nil ? 0 : SoundPanelV4.height)
         }
     }
 
@@ -123,6 +125,7 @@ struct EditorV4View: View {
             .onChange(of: playback.currentTime) { _, time in
                 if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }
             }
+            .onChange(of: selection) { _, newValue in selectionChanged(newValue) }
             .onAppear { appeared() }
             .onDisappear {
                 playback.pause()
@@ -161,6 +164,10 @@ struct EditorV4View: View {
         }
         if previewState.probe == "flow" {
             Task { await runFlowProbe() }
+            return
+        }
+        if previewState.probe == "voiceover" {
+            Task { await runVoiceOverProbe() }
             return
         }
         if let probe = previewState.probe {
@@ -301,6 +308,53 @@ struct EditorV4View: View {
         show(.message("Undo"))
         await wait(2.5)
         show(.message(model.errorMessage == nil ? "Done · no errors" : "Error: \(model.errorMessage!)"))
+    }
+
+    /// Editor probe "voiceover": Save a recording (it must be on the mic row at once while it
+    /// uploads), then the speaker's "Video sound" panel and a voice clip's panel. Logs CUTSELLVO.
+    private func runVoiceOverProbe() async {
+        func wait(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        await wait(4)
+        guard let take = Self.sampleVoiceM4A(seconds: 6) else { NSLog("CUTSELLVO no sample"); return }
+        let started = Date()
+        let before = model.pendingVoiceOvers.count + (model.timelineComposition?.voiceOverPlacements.count ?? 0)
+        let outcome = await model.addRecordedVoiceOver(fileURL: take, at: 1)
+        let shownAfter = Date().timeIntervalSince(started)
+        let after = model.pendingVoiceOvers.count + (model.timelineComposition?.voiceOverPlacements.count ?? 0)
+        show(.message(String(format: "Voice-over on the mic row after %.2f s", shownAfter)))
+        NSLog("CUTSELLVO shown=%.3f outcome=%@ blocks=%d->%d", shownAfter, "\(outcome)", before, after)
+        // Wait for the background upload (or its retries) to finish.
+        var waited = 0.0
+        while !model.pendingVoiceOvers.isEmpty, waited < 40 { await wait(1); waited += 1 }
+        let uploaded = model.pendingVoiceOvers.isEmpty
+        NSLog("CUTSELLVO uploaded=%@ after=%.0fs placements=%d", uploaded ? "yes" : "no", waited,
+              model.timelineComposition?.voiceOverPlacements.count ?? 0)
+        show(.message(uploaded ? "Uploaded in the background" : "Still uploading (kept on the phone)"))
+        await wait(2)
+        toggleVideoSound()
+        await wait(3)
+        if let voice = model.timelineComposition?.voiceOverPlacements.last {
+            selection = .voiceOver(voice.placementID)
+        }
+    }
+
+    /// A short spoken-like tone saved as .m4a (the same format the recorder makes).
+    static func sampleVoiceM4A(seconds: Double) -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("probe-voice-\(UUID().uuidString.prefix(6)).m4a")
+        let rate = 44_100.0
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate, AVNumberOfChannelsKey: 1]
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate * seconds)),
+              let file = try? AVAudioFile(forWriting: url, settings: settings) else { return nil }
+        buffer.frameLength = buffer.frameCapacity
+        let data = buffer.floatChannelData![0]
+        for i in 0..<Int(buffer.frameLength) {
+            let t = Double(i) / rate
+            let envelope = abs(sin(t * 2.3)) * (0.4 + 0.6 * abs(sin(t * 7.1)))
+            data[i] = Float(envelope * sin(2 * .pi * 180 * t) * 0.6)
+        }
+        do { try file.write(from: buffer) } catch { return nil }
+        return url
     }
 
     static func sampleLevels() -> [Float] {
@@ -669,7 +723,11 @@ struct EditorV4View: View {
                         onToggleVideoSound: { toggleVideoSound() }
                     )
                     .padding(.top, 1)
-                    .overlay(alignment: .bottom) { volumeStrip }
+                    // Under the timeline (never over its rows).
+                    if let soundPanel {
+                        soundPanelView(soundPanel)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
                 if case .style = panel {} else { Spacer(minLength: 0) }
                 ToolbarV4(active: activeTool) { tool in toolTapped(tool) }
@@ -677,27 +735,42 @@ struct EditorV4View: View {
         }
     }
 
-    /// Volume of the selected track: the video's own sound, or the voice-over.
+    /// The "Video sound" panel: the video's own sound (0–200%, 100% in the middle), or the
+    /// voice-over's level (0–100%, 100% at the end). The dot sits exactly at the % shown.
     @ViewBuilder
-    private var volumeStrip: some View {
-        switch selection {
+    private func soundPanelView(_ target: SoundPanelTarget) -> some View {
+        switch target {
         case .video:
-            VolumeStrip(title: "Video sound", icon: "speaker.wave.2.fill", value: $videoVolume, range: 0...2) {
+            SoundPanelV4(title: "Video sound", icon: "speaker.wave.2.fill", value: $videoVolume, maximum: 2,
+                         onClose: { closeSoundPanel() }) {
                 Task { await model.setVideoTrackVolume(videoVolume) }
             }
-        case .voiceOver:
-            VolumeStrip(title: "Voice-over", icon: "mic.fill", value: $model.voiceOverVolume, range: 0...1) {}
-        default:
-            EmptyView()
+        case .voice:
+            SoundPanelV4(title: "Voice-over", icon: "mic.fill", value: $model.voiceOverVolume, maximum: 1,
+                         onClose: { closeSoundPanel() }) {}
         }
     }
 
-    /// Speaker on the video row: mute the video's own sound, or bring it back.
+    private func closeSoundPanel() {
+        withAnimation(.easeOut(duration: 0.2)) { soundPanel = nil }
+        if case .voiceOver = selection { selection = nil }
+    }
+
+    /// Speaker on the video row: opens (or closes) the "Video sound" panel.
     private func toggleVideoSound() {
-        let muted = model.videoTrackVolume <= 0.001
-        videoVolume = muted ? 1 : 0
-        Task { await model.setVideoTrackVolume(videoVolume) }
-        show(.message(muted ? "Video sound on" : "Video sound muted", undo: !muted))
+        videoVolume = model.videoTrackVolume
+        withAnimation(.easeOut(duration: 0.2)) { soundPanel = soundPanel == .video ? nil : .video }
+    }
+
+    /// Tapping a voice clip opens its sound panel; selecting anything else closes a voice panel.
+    private func selectionChanged(_ newValue: EditorSelection?) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            if case .voiceOver = newValue {
+                soundPanel = .voice
+            } else if soundPanel == .voice {
+                soundPanel = nil
+            }
+        }
     }
 
     private var activeTool: EditorTool? {
@@ -1104,11 +1177,18 @@ struct ExportQualityMenu: View {
     }
 }
 
-private struct VolumeStrip: View {
+enum SoundPanelTarget: Equatable { case video, voice }
+
+/// "Video sound" panel (under the timeline): mute button, title, a slider whose dot is exactly at
+/// the % shown, and the %. `maximum` 2 = 0–200% with a mark at 100%; 1 = 0–100%.
+struct SoundPanelV4: View {
+    static let height: CGFloat = 46
+
     let title: String
     let icon: String
     @Binding var value: Double
-    let range: ClosedRange<Double>
+    let maximum: Double
+    let onClose: () -> Void
     let onCommit: () -> Void
 
     var body: some View {
@@ -1118,22 +1198,99 @@ private struct VolumeStrip: View {
                 onCommit()
             } label: {
                 Image(systemName: value > 0.001 ? icon : "speaker.slash.fill")
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(CS.cyan).frame(width: 26)
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(CS.cyan).frame(width: 26, height: 30)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(value > 0.001 ? "Mute" : "Sound on")
             Text(title).font(CS.inter(11, .semibold)).foregroundStyle(.white).fixedSize()
-            Slider(value: $value, in: range) { editing in if !editing { onCommit() } }
-                .tint(CS.cyan)
-            Text("\(Int((value * 100).rounded()))%")
+            SoundSlider(value: $value, maximum: maximum, onCommit: onCommit)
+                .frame(height: 30)
+            Text(SoundSlider.percentText(value))
                 .font(CS.sf(11, .semibold)).monospacedDigit().foregroundStyle(CS.textSecondaryF)
                 .frame(width: 40, alignment: .trailing)
+                .accessibilityIdentifier("soundPercent")
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(CS.textSecondaryF)
+                    .frame(width: 24, height: 30)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
         }
         .padding(.horizontal, 12)
-        .frame(height: 34)
+        .frame(height: 36)
         .background(Color(hex: 0x0A1326, opacity: 0.97), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color(hex: 0x14336B), lineWidth: 1))
         .padding(.horizontal, 16)
+        .padding(.vertical, 5)
+        .frame(height: Self.height)
         .accessibilityIdentifier("volumeStrip")
+    }
+}
+
+/// Slider drawn by hand so the dot's centre is exactly at `value / maximum` of the track
+/// (the system slider insets its ends, so the dot and the % disagreed). Snaps to 100%.
+struct SoundSlider: View {
+    @Binding var value: Double
+    let maximum: Double
+    let onCommit: () -> Void
+    static let knob: CGFloat = 18
+
+    static func percentText(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+
+    /// Value for a finger at `x` on a track `width` wide (dot centre = finger); snaps within 3% of 100%.
+    static func value(atX x: CGFloat, width: CGFloat, maximum: Double) -> Double {
+        let usable = max(1, width - knob)
+        let fraction = Double(min(max(0, (x - knob / 2) / usable), 1))
+        var result = (fraction * maximum * 100).rounded() / 100
+        if abs(result - 1) < 0.03 { result = 1 }
+        return result
+    }
+
+    /// Dot centre for `value` on a track `width` wide.
+    static func knobCenter(value: Double, width: CGFloat, maximum: Double) -> CGFloat {
+        let usable = max(1, width - knob)
+        return knob / 2 + usable * CGFloat(min(max(0, value / maximum), 1))
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let center = Self.knobCenter(value: value, width: width, maximum: maximum)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.18)).frame(height: 4)
+                    .padding(.horizontal, Self.knob / 2)
+                Capsule().fill(CS.cyan).frame(width: max(0, center - Self.knob / 2), height: 4)
+                    .offset(x: Self.knob / 2)
+                if maximum > 1 {
+                    // 100% mark.
+                    Rectangle().fill(Color.white.opacity(0.55)).frame(width: 2, height: 10)
+                        .offset(x: Self.knobCenter(value: 1, width: width, maximum: maximum) - 1)
+                }
+                Circle().fill(.white).frame(width: Self.knob, height: Self.knob)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+                    .offset(x: center - Self.knob / 2)
+            }
+            .frame(height: proxy.size.height)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in value = Self.value(atX: drag.location.x, width: width, maximum: maximum) }
+                    .onEnded { _ in onCommit() }
+            )
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Volume")
+        .accessibilityValue(Self.percentText(value))
+        .accessibilityAdjustableAction { direction in
+            let step = 0.05
+            switch direction {
+            case .increment: value = min(maximum, value + step)
+            case .decrement: value = max(0, value - step)
+            @unknown default: break
+            }
+            onCommit()
+        }
+        .accessibilityIdentifier("soundSlider")
     }
 }
 

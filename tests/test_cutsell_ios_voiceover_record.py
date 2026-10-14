@@ -36,8 +36,11 @@ def test_screen_has_record_stop_again_use_and_no_unavailable_label():
 def test_use_uploads_by_the_import_path_and_places_at_the_cursor():
     model = read("DraftEditorViewModel.swift")
     body = model.split("func addRecordedVoiceOver(fileURL: URL, at start: Double)", 1)[1].split("\n    }\n", 1)[0]
-    assert "VoiceOverImportManager.shared.importAudio(" in body
-    assert "addVoiceOverPlacement(" in body and "start: begin, end: begin + asset.durationSec" in body
+    # Saved on the phone and shown at once; the upload (same import path) runs in the background.
+    assert "uploadPendingVoiceOver(id: id)" in body and "start: max(0, start)" in body
+    finish = model.split("private func finishPendingVoiceOver(", 1)[1].split("\n    }\n", 1)[0]
+    assert "VoiceOverImportManager.shared.importAudio(" in finish
+    assert "addVoiceOverPlacement(" in finish and "start: item.start, end: item.start + length" in finish
     assert "playheadTime: playheadTime" in read("TimelineEditorView.swift")
     assert "model.addRecordedVoiceOver(fileURL: url, at: playheadTime)" in read("VoiceOverView.swift")
 

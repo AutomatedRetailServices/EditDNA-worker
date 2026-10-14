@@ -93,11 +93,12 @@ def test_preview_has_sound_and_separate_volumes():
     assert "setCategory(.playback, mode: .moviePlayback" in tools
     playback = read("DraftPlaybackView.swift")
     assert "EditorAudio.preparePlayback()" in playback
-    assert "VoiceOverStore.url(for: placement.assetID)" in playback
+    assert "for placement in model.previewVoices" in playback
+    assert "VoiceOverStore.url(for: placement.assetID)" in read("DraftEditorViewModel.swift")
     assert "model.voiceOverVolume" in playback
     vm = read("DraftEditorViewModel.swift")
     assert "func setVideoTrackVolume(_ volume: Double) async" in vm
-    assert "VoiceOverStore.save(fileURL, assetID: asset.assetID)" in vm
+    assert "VoiceOverStore.save(file, assetID: asset.assetID)" in vm
 
 
 def test_mirror_and_rotate_preview_and_saved_on_the_draft():

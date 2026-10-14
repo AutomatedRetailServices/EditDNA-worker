@@ -1,0 +1,121 @@
+"""Voice Over: on the mic row at once when Save is tapped, uploaded in the background, kept on the
+phone and retried when the upload fails; "Video sound" panel under the timeline; label not cut."""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+IOS = ROOT / "mobile" / "ios" / "CutSell"
+
+
+def read(name: str) -> str:
+    return (IOS / name).read_text()
+
+
+def body_of(source: str, signature: str) -> str:
+    return source.split(signature, 1)[1].split("\n    }\n", 1)[0]
+
+
+def test_save_shows_the_voice_at_once_and_uploads_in_the_background():
+    vm = read("DraftEditorViewModel.swift")
+    add = body_of(vm, "func addRecordedVoiceOver(fileURL: URL, at start: Double)")
+    # No network call before the voice is on the row: only reading its length and keeping the file.
+    assert "importAudio" not in add and "await self" not in add
+    assert "PendingVoiceOverStore.duration(of: fileURL)" in add
+    assert "PendingVoiceOverStore.keep(fileURL, id: id)" in add
+    assert add.index("pendingVoiceOvers.append(item)") < add.index("uploadPendingVoiceOver(id: id)")
+    assert "return .placed" in add
+    # The upload runs in its own task.
+    upload = body_of(vm, "private func uploadPendingVoiceOver(id: String)")
+    assert "Task { @MainActor" in upload
+
+
+def test_failed_upload_keeps_the_recording_and_retries():
+    store = read("PendingVoiceOvers.swift")
+    assert ".applicationSupportDirectory" in store and "PendingVoiceOvers" in store
+    assert "temporaryDirectory" not in store
+    assert "static let attemptsPerRound = 4" in store
+    vm = read("DraftEditorViewModel.swift")
+    upload = body_of(vm, "private func uploadPendingVoiceOver(id: String)")
+    assert "for attempt in 0..<PendingVoiceOverStore.attemptsPerRound" in upload
+    assert "retryDelay(afterAttempt: attempt)" in upload
+    assert "$0.failed = true" in upload
+    finish = vm.split("private func finishPendingVoiceOver(", 1)[1].split("\n    }\n", 1)[0]
+    # The file is removed only once the voice is on the server.
+    assert finish.index("importAudio") < finish.index("PendingVoiceOverStore.discardFile(item)")
+    assert "return false" in finish
+    # Tried again when the editor opens, and when the block is tapped.
+    load = body_of(vm, "func load() async")
+    assert "resumePendingVoiceOvers()" in load
+    timeline = read("EditorV4Timeline.swift")
+    assert "model.retryPendingVoiceOver(id: item.id)" in timeline
+
+
+def test_pending_voice_is_on_the_mic_row_and_in_the_preview():
+    timeline = read("EditorV4Timeline.swift")
+    assert "let pending = model.pendingVoiceOvers" in timeline
+    assert "status: item.failed ? .failed : .uploading" in timeline
+    playback = read("DraftPlaybackView.swift")
+    assert "for placement in model.previewVoices" in playback
+    vm = read("DraftEditorViewModel.swift")
+    assert 'key: "pending_\\(item.id)"' in vm
+
+
+def test_retry_delays_grow():
+    store = read("PendingVoiceOvers.swift")
+    assert "case 1: return 2" in store and "case 2: return 6" in store and "default: return 15" in store
+
+
+def test_video_sound_panel_opens_only_from_the_speaker_or_a_voice_clip():
+    v4 = read("EditorV4View.swift")
+    # Not drawn over the timeline any more.
+    assert ".overlay(alignment: .bottom) { volumeStrip }" not in v4
+    assert "soundPanelView(soundPanel)" in v4
+    toggle = body_of(v4, "private func toggleVideoSound()")
+    assert "soundPanel = soundPanel == .video ? nil : .video" in toggle
+    changed = body_of(v4, "private func selectionChanged(_ newValue: EditorSelection?)")
+    assert "if case .voiceOver = newValue" in changed and "soundPanel = .voice" in changed
+    assert "case .video" not in changed
+    # The space under the video makes room for it, so no row is covered.
+    assert "(soundPanel == nil ? 0 : SoundPanelV4.height)" in v4
+
+
+def test_slider_dot_matches_the_percentage():
+    v4 = read("EditorV4View.swift")
+    assert 'SoundPanelV4(title: "Video sound", icon: "speaker.wave.2.fill", value: $videoVolume, maximum: 2' in v4
+    assert 'value: $model.voiceOverVolume, maximum: 1' in v4
+    assert "static func knobCenter(value: Double, width: CGFloat, maximum: Double) -> CGFloat" in v4
+    assert "knob / 2 + usable * CGFloat(min(max(0, value / maximum), 1))" in v4
+    assert '"\\(Int((value * 100).rounded()))%"' in v4
+
+
+def slider_center(value, width, maximum, knob=18.0):
+    usable = max(1.0, width - knob)
+    return knob / 2 + usable * min(max(0.0, value / maximum), 1.0)
+
+
+def slider_value(x, width, maximum, knob=18.0):
+    usable = max(1.0, width - knob)
+    fraction = min(max(0.0, (x - knob / 2) / usable), 1.0)
+    result = round(fraction * maximum * 100) / 100
+    return 1.0 if abs(result - 1) < 0.03 else result
+
+
+def test_slider_math_round_trips():
+    # Same formulas as SoundSlider: 0% at the start, 200% at the end, 100% exactly in the middle.
+    width = 200.0
+    assert slider_center(0, width, 2) == 9
+    assert slider_center(2, width, 2) == width - 9
+    assert slider_center(1, width, 2) == width / 2
+    assert slider_center(1, width, 1) == width - 9  # voice-over: 100% at the end
+    for pct in range(0, 201, 5):
+        value = pct / 100
+        assert abs(slider_value(slider_center(value, width, 2), width, 2) - value) < 0.011
+
+
+def test_voiceover_label_is_never_cut():
+    timeline = read("EditorV4Timeline.swift")
+    block = timeline.split("struct VoiceBlockV4: View {", 1)[1].split("\n}\n", 1)[0]
+    assert ".overlay(alignment: .leading) { label(inside: labelInside) }" in block
+    # The label sits outside the clipped block, never truncated.
+    assert ".fixedSize()" in block and ".lineLimit(1)" in block
+    label = block.split("private func label(inside: Bool)", 1)[1]
+    assert "Capsule().fill(Color(hex: 0x1769FF))" in label

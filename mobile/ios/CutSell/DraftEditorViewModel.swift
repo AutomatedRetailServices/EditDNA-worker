@@ -414,6 +414,8 @@ final class DraftEditorViewModel: ObservableObject {
         }
         if let loadedAssets = try? await assetRequest { timelineAssetLibrary = loadedAssets }
         await compositionRequest
+        // Voice-overs saved earlier that did not finish uploading: show them and try again.
+        resumePendingVoiceOvers()
     }
 
     /// D-282A Stage 6: "refresh the snapshot and library after a confirmed
@@ -472,33 +474,129 @@ final class DraftEditorViewModel: ObservableObject {
         case failed
     }
 
-    /// A take recorded with the microphone: uploaded by the SAME path as an imported file
-    /// (`/timeline-uploads` + `/timeline-assets`), then placed on the voice-over track starting
-    /// at `start` (the timeline cursor) for its full length.
-    func addRecordedVoiceOver(fileURL: URL, at start: Double) async -> RecordedVoiceOverOutcome {
-        let asset: TimelineMediaAsset
-        do {
-            asset = try await VoiceOverImportManager.shared.importAudio(
-                fileURL: fileURL, projectID: project.projectID, session: session, api: api
-            )
-        } catch {
-            errorMessage = error.localizedDescription
-            return .failed
+    // MARK: Voice-over saved at once, uploaded in the background
+
+    /// Voice-overs saved on this iPhone that are still uploading (or waiting to retry). They show on
+    /// the mic row and play in the preview right away.
+    @Published private(set) var pendingVoiceOvers: [PendingVoiceOver] = []
+    private var pendingUploads: Set<String> = []
+
+    /// Every voice the preview plays: placed voice-overs whose recording is on this iPhone, then
+    /// the ones still uploading (from their own file).
+    var previewVoices: [PreviewVoice] {
+        var voices: [PreviewVoice] = []
+        for placement in timelineComposition?.voiceOverPlacements ?? [] {
+            guard let url = VoiceOverStore.url(for: placement.assetID) else { continue }
+            voices.append(PreviewVoice(key: placement.placementID, url: url, start: placement.timelineStartSec,
+                                       sourceIn: placement.sourceInSec, sourceOut: placement.sourceOutSec))
         }
-        // Kept on this iPhone so the preview plays it on its own track.
-        VoiceOverStore.save(fileURL, assetID: asset.assetID)
-        await refreshTimelineAssetLibrary()
-        guard asset.isReady, asset.durationSec > 0 else {
+        for item in pendingVoiceOvers {
+            voices.append(PreviewVoice(key: "pending_\(item.id)", url: PendingVoiceOverStore.fileURL(item),
+                                       start: item.start, sourceIn: 0, sourceOut: item.duration))
+        }
+        return voices
+    }
+
+    /// A take recorded with the microphone. It goes on the mic row at once (kept on this iPhone),
+    /// then uploads by the SAME path as an imported file (`/timeline-uploads` +
+    /// `/timeline-assets`) and is placed on the voice-over track at `start` for its full length.
+    /// `.failed` only when the recording itself can't be read or kept.
+    func addRecordedVoiceOver(fileURL: URL, at start: Double) async -> RecordedVoiceOverOutcome {
+        let duration = await PendingVoiceOverStore.duration(of: fileURL)
+        guard duration > 0.05 else {
             errorMessage = "The recording couldn't be used. Please record again."
             return .failed
         }
-        guard baseEditAssetID != nil else { return .savedNotPlaced }
-        let begin = max(0, start)
-        await addVoiceOverPlacement(
-            assetID: asset.assetID, start: begin, end: begin + asset.durationSec,
-            sourceIn: 0, sourceOut: asset.durationSec
-        )
-        return errorMessage == nil ? .placed : .failed
+        let id = "pvo_\(UUID().uuidString.prefix(12))"
+        guard let fileName = PendingVoiceOverStore.keep(fileURL, id: id) else {
+            errorMessage = "There isn't enough space on this iPhone to keep the recording."
+            return .failed
+        }
+        let item = PendingVoiceOver(id: id, projectID: project.projectID, start: max(0, start),
+                                    duration: duration, fileName: fileName, createdAt: Date())
+        pendingVoiceOvers.append(item)
+        PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)
+        uploadPendingVoiceOver(id: id)
+        return .placed
+    }
+
+    /// Uploads waiting recordings again (editor opened, or the creator tapped "retry").
+    func resumePendingVoiceOvers() {
+        if pendingVoiceOvers.isEmpty {
+            pendingVoiceOvers = PendingVoiceOverStore.load(projectID: project.projectID)
+        }
+        for item in pendingVoiceOvers { uploadPendingVoiceOver(id: item.id) }
+    }
+
+    func retryPendingVoiceOver(id: String) { uploadPendingVoiceOver(id: id) }
+
+    func discardPendingVoiceOver(id: String) {
+        guard let item = pendingVoiceOvers.first(where: { $0.id == id }) else { return }
+        pendingVoiceOvers.removeAll { $0.id == id }
+        PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)
+        PendingVoiceOverStore.discardFile(item)
+    }
+
+    private func updatePending(_ id: String, _ change: (inout PendingVoiceOver) -> Void) {
+        guard let index = pendingVoiceOvers.firstIndex(where: { $0.id == id }) else { return }
+        change(&pendingVoiceOvers[index])
+        PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)
+    }
+
+    /// One background upload per recording; a few tries with a short wait, then "tap to retry".
+    private func uploadPendingVoiceOver(id: String) {
+        guard !pendingUploads.contains(id), pendingVoiceOvers.contains(where: { $0.id == id }) else { return }
+        pendingUploads.insert(id)
+        updatePending(id) { $0.failed = false }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.pendingUploads.remove(id) }
+            for attempt in 0..<PendingVoiceOverStore.attemptsPerRound {
+                let wait = PendingVoiceOverStore.retryDelay(afterAttempt: attempt)
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+                guard let item = self.pendingVoiceOvers.first(where: { $0.id == id }) else { return }
+                self.updatePending(id) { $0.attempts += 1 }
+                if await self.finishPendingVoiceOver(item) { return }
+            }
+            self.updatePending(id) { $0.failed = true }
+        }
+    }
+
+    /// Upload + registration + placement of one waiting recording. `true` when it is done (placed,
+    /// or kept in the library when the cut can't take placements yet).
+    private func finishPendingVoiceOver(_ item: PendingVoiceOver) async -> Bool {
+        let file = PendingVoiceOverStore.fileURL(item)
+        let asset: TimelineMediaAsset
+        do {
+            asset = try await VoiceOverImportManager.shared.importAudio(
+                fileURL: file, projectID: project.projectID, session: session, api: api
+            )
+        } catch {
+            CutSellDiagnostics.log("voice_over_upload_retry", ["attempt": "\(item.attempts)"])
+            return false
+        }
+        // Kept on this iPhone so the preview plays it on its own track.
+        VoiceOverStore.save(file, assetID: asset.assetID)
+        await refreshTimelineAssetLibrary()
+        if baseEditAssetID != nil {
+            let length = asset.durationSec > 0 ? asset.durationSec : item.duration
+            var placed = await addVoiceOverPlacement(
+                assetID: asset.assetID, start: item.start, end: item.start + length, sourceIn: 0, sourceOut: length
+            )
+            if !placed {
+                // Another change moved the timeline on (409): read it again and place once more.
+                await refreshTimelineComposition()
+                placed = await addVoiceOverPlacement(
+                    assetID: asset.assetID, start: item.start, end: item.start + length, sourceIn: 0, sourceOut: length
+                )
+            }
+            if !placed { return false }
+            errorMessage = nil
+        }
+        pendingVoiceOvers.removeAll { $0.id == item.id }
+        PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)
+        PendingVoiceOverStore.discardFile(item)
+        return true
     }
 
     /// Imports an already-existing local video file as a new
@@ -667,14 +765,15 @@ final class DraftEditorViewModel: ObservableObject {
         )
     }
 
-    func addVoiceOverPlacement(assetID: String, start: Double, end: Double, sourceIn: Double, sourceOut: Double) async {
+    @discardableResult
+    func addVoiceOverPlacement(assetID: String, start: Double, end: Double, sourceIn: Double, sourceOut: Double) async -> Bool {
         var placements = currentVoiceOverPlacements
         placements.append(VoiceOverPlacement(
             placementID: "vo_\(UUID().uuidString.prefix(8))", assetID: assetID,
             timelineStartSec: start, timelineEndSec: end,
             sourceInSec: sourceIn, sourceOutSec: sourceOut, transcriptReference: nil
         ))
-        await saveTimelineComposition(
+        return await saveTimelineComposition(
             brollPlacements: currentBrollPlacements, voiceOverPlacements: placements,
             timelineDurationSec: max(currentTimelineDuration, end), capturePreviousForUndo: false
         )

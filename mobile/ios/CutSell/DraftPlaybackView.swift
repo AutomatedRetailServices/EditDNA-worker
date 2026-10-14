@@ -179,9 +179,8 @@ final class DraftPlaybackController: ObservableObject {
             let playable: Bool = sourceURLs[sourceID] != nil
             parts.append("\(clipID)|\(sourceID)|\(start)|\(end)|\(muted)|\(volume)|\(playable)")
         }
-        for placement in model.timelineComposition?.voiceOverPlacements ?? [] {
-            let local = VoiceOverStore.url(for: placement.assetID) != nil
-            parts.append("vo|\(placement.placementID)|\(placement.timelineStartSec)|\(placement.timelineEndSec)|\(placement.sourceInSec)|\(local)")
+        for voice in model.previewVoices {
+            parts.append("vo|\(voice.key)|\(voice.start)|\(voice.sourceIn)|\(voice.sourceOut)")
         }
         parts.append("vovol|\(model.voiceOverVolume)")
         return parts.joined(separator: ";")
@@ -334,19 +333,19 @@ final class DraftPlaybackController: ObservableObject {
             }
             if let audioParameters { mixInputs.append(audioParameters) }
 
-            // Voice-over track(s): recordings kept on this iPhone, placed where the timeline says.
-            for placement in model.timelineComposition?.voiceOverPlacements ?? [] {
-                guard let url = VoiceOverStore.url(for: placement.assetID),
-                      let voice = try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio).first,
+            // Voice-over track(s): recordings kept on this iPhone (placed, or still uploading),
+            // where the timeline says.
+            for placement in model.previewVoices {
+                guard let voice = try? await AVURLAsset(url: placement.url).loadTracks(withMediaType: .audio).first,
                       let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
                 else { continue }
-                let length = min(placement.sourceOutSec - placement.sourceInSec,
-                                 max(0, CMTimeGetSeconds(cursor) - placement.timelineStartSec))
+                let length = min(placement.sourceOut - placement.sourceIn,
+                                 max(0, CMTimeGetSeconds(cursor) - placement.start))
                 guard length > 0.05 else { continue }
                 try? track.insertTimeRange(
-                    CMTimeRange(start: CMTime(seconds: placement.sourceInSec, preferredTimescale: 600),
+                    CMTimeRange(start: CMTime(seconds: placement.sourceIn, preferredTimescale: 600),
                                 duration: CMTime(seconds: length, preferredTimescale: 600)),
-                    of: voice, at: CMTime(seconds: placement.timelineStartSec, preferredTimescale: 600)
+                    of: voice, at: CMTime(seconds: placement.start, preferredTimescale: 600)
                 )
                 let parameters = AVMutableAudioMixInputParameters(track: track)
                 parameters.setVolume(Float(max(0, min(1, model.voiceOverVolume))), at: .zero)
