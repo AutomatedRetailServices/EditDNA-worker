@@ -86,6 +86,9 @@ actor MultipartUploadManager {
         session: CutSellSession,
         contentType: String,
         existingUploadID: String? = nil,
+        /// Short uploads made while the editor is open (a B-roll video): sent directly, not
+        /// through the background session that keeps a long cut upload going when CutSell closes.
+        foreground: Bool = false,
         progress: @Sendable @escaping (Double) -> Void
     ) async throws -> MultipartCompleteResponse {
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
@@ -174,7 +177,8 @@ actor MultipartUploadManager {
                         body: OwnerBody(project_id: projectID, user_id: userID)
                     )
                     let response = try await self.uploadPart(
-                        data, uploadID: uploadID, partNumber: partNumber, signedURL: signed.uploadURL
+                        data, uploadID: uploadID, partNumber: partNumber, signedURL: signed.uploadURL,
+                        foreground: foreground
                     )
                     guard let etagValue = response.value(forHTTPHeaderField: "ETag"), !etagValue.isEmpty else {
                         throw UploadError.missingETag(partNumber)
@@ -241,8 +245,20 @@ actor MultipartUploadManager {
         _ data: Data,
         uploadID: String,
         partNumber: Int,
-        signedURL: URL
+        signedURL: URL,
+        foreground: Bool = false
     ) async throws -> HTTPURLResponse {
+        if foreground {
+            var request = URLRequest(url: signedURL)
+            request.httpMethod = "PUT"
+            // Same empty Content-Type the server signs (see BackgroundPartUploader).
+            request.setValue(BackgroundPartUploader.partContentType, forHTTPHeaderField: "Content-Type")
+            let (_, response) = try await URLSession.shared.upload(for: request, from: data)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw UploadError.missingETag(partNumber)
+            }
+            return http
+        }
         let partFile = try writePartFile(data, uploadID: uploadID, partNumber: partNumber)
         defer { try? FileManager.default.removeItem(at: partFile) }
         return try await backgroundUploader.upload(fileURL: partFile, to: signedURL)

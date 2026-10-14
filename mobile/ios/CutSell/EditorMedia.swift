@@ -99,7 +99,7 @@ struct PendingOverlay: Identifiable, Equatable {
     let kind: EditorMediaKind
     var start: Double
     var end: Double
-    let sourceDuration: Double?
+    var sourceDuration: Double?
     var x: Double = 0.5
     var y: Double = 0.5
     var width: Double = 0.4

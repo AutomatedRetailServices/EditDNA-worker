@@ -22,15 +22,17 @@ enum EditorMediaProbe {
         }
         // 1. Photo overlay.
         var started = Date()
+        let photoBefore = model.mediaOverlays.count
         model.addOverlay(fileURL: photo, at: 0.5)
         await wait(0.3)
         log(String(format: "photo_overlay shown_after=%.2f pending=%d", Date().timeIntervalSince(started), model.pendingOverlays.count))
-        await until(40) { model.pendingOverlays.isEmpty }
+        await until(60) { model.pendingOverlays.isEmpty && model.mediaOverlays.count > photoBefore }
         log(String(format: "photo_overlay uploaded_after=%.1f overlays=%d", Date().timeIntervalSince(started), model.mediaOverlays.count))
         // 2. Video overlay.
         started = Date()
+        let overlaysBefore = model.mediaOverlays.count
         model.addOverlay(fileURL: video, at: 2.0)
-        await until(60) { model.pendingOverlays.isEmpty }
+        await until(90) { model.pendingOverlays.isEmpty && model.mediaOverlays.count > overlaysBefore }
         log(String(format: "video_overlay uploaded_after=%.1f overlays=%d", Date().timeIntervalSince(started), model.mediaOverlays.count))
         // Move / resize the photo, move the video overlay later.
         if let first = model.mediaOverlays.first?["overlay_id"]?.stringValue {
@@ -90,6 +92,7 @@ enum EditorMediaProbe {
         await until(900) { ["finished", "failed", "canceled"].contains(model.exportJob?.state ?? "") }
         _ = await exporting.value
         log(String(format: "export state=%@ total=%.1f", model.exportJob?.state ?? "none", Date().timeIntervalSince(started)))
+        if let reason = model.exportJob?.error { log("export error=\(reason.prefix(400))") }
         if let link = model.exportJob?.result?["download_url"]?.stringValue, let url = URL(string: link) {
             let downloadStart = Date()
             if let pair = try? await URLSession.shared.download(from: url) {

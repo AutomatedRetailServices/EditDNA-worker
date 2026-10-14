@@ -160,19 +160,25 @@ final class DraftEditorViewModel: ObservableObject {
             return
         }
         let kind = EditorMediaInfo.kind(of: fileURL)
+        let total = max(1, timelineDuration)
+        let begin = min(max(0, start), max(0, total - 0.5))
+        // On the video and the overlay row at once; its real length and shape follow a moment later.
+        pendingOverlays.append(PendingOverlay(id: id, fileName: name, kind: kind, start: begin,
+                                              end: min(total, begin + 4), sourceDuration: nil))
+        lastAddedOverlayID = id
         Task { @MainActor in
             let local = OverlayMediaStore.fileURL(name)
-            let length = kind == .video ? await EditorMediaInfo.duration(of: local) : 0
-            let total = max(1, timelineDuration)
-            let begin = min(max(0, start), max(0, total - 0.5))
-            let end = min(total, begin + (kind == .video ? max(0.5, length) : 4))
-            var item = PendingOverlay(id: id, fileName: name, kind: kind, start: begin, end: end,
-                                      sourceDuration: kind == .video ? length : nil)
             let aspect = await EditorMediaInfo.aspect(of: local, kind: kind)
-            // Tall media a little narrower so it never covers the whole frame.
-            item.width = aspect < 0.8 ? 0.34 : 0.42
-            pendingOverlays.append(item)
-            lastAddedOverlayID = id
+            var length: Double?
+            if kind == .video { length = await EditorMediaInfo.duration(of: local) }
+            if let index = pendingOverlays.firstIndex(where: { $0.id == id }) {
+                // Tall media a little narrower so it never covers the whole frame.
+                pendingOverlays[index].width = aspect < 0.8 ? 0.34 : 0.42
+                if let length, length > 0 {
+                    pendingOverlays[index].end = min(total, begin + max(0.5, length))
+                    pendingOverlays[index].sourceDuration = length
+                }
+            }
             uploadPendingOverlay(id: id)
         }
     }
@@ -346,11 +352,15 @@ final class DraftEditorViewModel: ObservableObject {
                         }
                     }
                 }
-                let result = try? await MultipartUploadManager.shared.upload(
-                    fileURL: local, projectID: self.project.projectID, session: self.session,
-                    contentType: EditorMediaInfo.contentType(for: local), progress: progress
-                )
-                if let result { uri = result.sourceURI }
+                do {
+                    let result = try await MultipartUploadManager.shared.upload(
+                        fileURL: local, projectID: self.project.projectID, session: self.session,
+                        contentType: EditorMediaInfo.contentType(for: local), foreground: true, progress: progress
+                    )
+                    uri = result.sourceURI
+                } catch {
+                    NSLog("CUTSELLMEDIA broll_upload_failed attempt=%d reason=%@", attempt, String(describing: error))
+                }
             }
             guard let uri else {
                 self.pendingBroll?.failed = true
@@ -441,7 +451,10 @@ final class DraftEditorViewModel: ObservableObject {
                   let index = previous.voiceOverPlacements.firstIndex(where: { $0.placementID == id }) else { return }
             var placements = previous.voiceOverPlacements
             let length = placements[index].timelineEndSec - placements[index].timelineStartSec
-            let begin = (max(0, start) * 1000).rounded() / 1000
+            // Voices never overlap on the row (the server refuses it): the first free place from there.
+            let others = placements.filter { $0.placementID != id }.map { (start: $0.timelineStartSec, end: $0.timelineEndSec) }
+            let free = PendingVoiceOverStore.freeStart(start, duration: length, taken: others)
+            let begin = (max(0, free) * 1000).rounded() / 1000
             placements[index].timelineStartSec = begin
             placements[index].timelineEndSec = begin + length
             let shownError = errorMessage
@@ -454,8 +467,10 @@ final class DraftEditorViewModel: ObservableObject {
                 redoSteps.removeAll()
                 return
             }
-            if attempt == 0 { errorMessage = shownError; await refreshTimelineComposition() }
+            errorMessage = shownError
+            if attempt == 0 { await refreshTimelineComposition() }
         }
+        errorMessage = "That voice-over couldn't be moved. Please try again."
     }
 
     /// Puts the voice row back to `composition` (Undo / Redo of a voice change).
