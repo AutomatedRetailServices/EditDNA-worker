@@ -1,6 +1,8 @@
 """Redis/RQ queue wiring for CutSell jobs."""
 from __future__ import annotations
 
+import threading
+
 from dataclasses import dataclass
 
 from .config import load_runtime_config
@@ -68,7 +70,9 @@ def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
             "project_id": str(payload.get("project_id") or ""),
         },
     )
-    wake_worker()
+    # The export is queued; waking the worker runs alongside so the iPhone gets its job id at once
+    # (it used to wait up to ~2 s for the wake call before Export could show anything).
+    threading.Thread(target=wake_worker, name="wake-worker", daemon=True).start()
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 

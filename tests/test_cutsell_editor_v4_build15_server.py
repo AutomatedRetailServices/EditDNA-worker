@@ -106,3 +106,31 @@ def test_export_accepts_a_broll_clip_from_its_own_source():
     })
     plan = build_render_plan(draft, {"s1": "/a.mp4", "src_broll_ab12": "/b.mp4"})
     assert [seg.source_asset_id for seg in plan] == ["s1", "src_broll_ab12"]
+
+
+def test_export_submit_does_not_wait_for_the_worker_wake(monkeypatch):
+    import threading
+    import time as _time
+    from cutsell_worker import queueing
+
+    class FakeJob:
+        id = "job-1"
+
+    class FakeQueue:
+        name = "cutsell"
+
+        def enqueue(self, *args, **kwargs):
+            return FakeJob()
+
+    woke = threading.Event()
+
+    def slow_wake():
+        _time.sleep(1.0)
+        woke.set()
+
+    monkeypatch.setattr(queueing, "wake_worker", slow_wake)
+    started = _time.monotonic()
+    submission = queueing.enqueue_export({"user_id": "u", "project_id": "p"}, queue=FakeQueue())
+    assert submission.job_id == "job-1"
+    assert _time.monotonic() - started < 0.5          # returned before the wake call finished
+    assert woke.wait(3)                                # ...and the wake call still happens
