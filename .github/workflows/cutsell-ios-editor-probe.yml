@@ -267,6 +267,55 @@ jobs:
           ls -la "$RUNNER_TEMP/rec" || true
           echo "::notice title=probe::screenshots taken"
 
+      - name: When Export failed, run the same render and QC here to see why
+        if: always()
+        continue-on-error: true
+        run: |
+          grep -q "export state=failed" "$RUNNER_TEMP/probe/probe_log.txt" 2>/dev/null || { echo "export did not fail"; exit 0; }
+          git clone --quiet --depth 1 --branch feat/simple-engine-v1 "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$RUNNER_TEMP/srv"
+          python3 -m pip install -q --break-system-packages numpy requests >/dev/null 2>&1 || python3 -m pip install -q numpy requests
+          mkdir -p "$RUNNER_TEMP/qc"
+          cd "$RUNNER_TEMP/srv"
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          sys.path.insert(0, ".")
+          API = "https://cutsell-api.onrender.com"; T = os.environ["PROBE_TOKEN"]; u = os.environ["PROBE_USER"]
+          pid = os.environ["PROBE_PROJECT"]; d = os.path.join(os.environ["RUNNER_TEMP"], "qc")
+          r = urllib.request.Request(f"{API}/v1/projects/{pid}/draft?user_id={u}", headers={"authorization": "Bearer " + T})
+          snap = json.load(urllib.request.urlopen(r, timeout=120))
+          payload = snap["draft"]
+          def fetch(url, name):
+              path = os.path.join(d, name)
+              with urllib.request.urlopen(url, timeout=300) as x, open(path, "wb") as f: f.write(x.read())
+              return path
+          paths = {}
+          for i, s in enumerate(snap.get("sources") or []):
+              if s.get("playback_url"): paths[str(s["source_asset_id"])] = fetch(s["playback_url"], f"src{i}.mp4")
+          for i, b in enumerate(payload.get("broll_sources") or []):
+              if b.get("playback_url"): paths[str(b["source_asset_id"])] = fetch(b["playback_url"], f"broll{i}.mp4")
+          from cutsell_worker.serde import draft_from_dict
+          from cutsell_worker.render_plan import build_render_plan
+          from cutsell_worker.live_render_qc import render_with_post_render_qc
+          from cutsell_worker.media_overlay_render import LocalMediaOverlay
+          draft = draft_from_dict(payload)
+          ov = []
+          raw = {str(o.get("overlay_id")): o for o in payload.get("media_overlays") or []}
+          for i, o in enumerate(draft.media_overlays):
+              url = (raw.get(str(o.overlay_id)) or {}).get("preview_url")
+              if url: ov.append(LocalMediaOverlay(overlay=o, path=fetch(url, f"ov{i}" + (".jpg" if o.kind == "photo" else ".mp4"))))
+          def note(t, m): print(f"::notice title={t}::{str(m)[:900]}")
+          note("qc clips", " | ".join(f"{c.clip_id[-12:]} {c.source_asset_id[-10:]} {c.start:.2f}-{c.end:.2f} words={len(c.words)} manual_end={getattr(c, 'manual_end', False)}" for c in draft.selected))
+          note("qc media", f"overlays={len(draft.media_overlays)} downloaded={len(ov)} text_overlays={len(draft.text_overlays)} user_media={sorted(getattr(draft, 'user_media_source_ids', ()) or ())}")
+          plan = build_render_plan(draft, paths)
+          note("qc plan", " | ".join(f"{seg.start:.2f}-{seg.end:.2f}" for seg in plan))
+          res = render_with_post_render_qc(draft, plan, os.path.join(d, "out.mp4"), text_overlays=draft.text_overlays, media_overlays=tuple(ov))
+          note("qc status", res.status)
+          for n, a in enumerate(res.attempts):
+              note(f"qc attempt {n}", f"{a.status} {a.findings}")
+          for k, v in vars(res).items():
+              if k != "attempts": print(f"::warning title=qc {k}::{str(v)[:900]}")
+          PY
+
       - name: Push the screenshots to design-screenshots/probe
         run: |
           set -euo pipefail
