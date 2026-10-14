@@ -304,7 +304,12 @@ struct EditTile: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CS.tileBorder, lineWidth: 1))
-            .task(id: project.state) { await thumbnails.load(project: project, session: appState.session) }
+            .task(id: project.state) {
+                await thumbnails.load(project: project, session: appState.session)
+                if project.state == "draft_ready" {
+                    await EditorPrewarm.prewarm(projectID: project.projectID, session: appState.session)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 Circle()
                     .fill(isReady ? CS.ready : CS.draft)

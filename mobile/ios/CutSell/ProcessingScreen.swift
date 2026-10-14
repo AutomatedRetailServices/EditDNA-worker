@@ -452,6 +452,8 @@ struct ReadyContent: View {
             "/v1/projects/\(project.projectID)/draft",
             query: [URLQueryItem(name: "user_id", value: session.userID)]
         ) else { return }
+        // The cut is ready: keep its draft (and, on Wi-Fi, its video) so the editor opens at once.
+        Task { await EditorPrewarm.prewarm(projectID: project.projectID, session: session, snapshot: snapshot) }
         let selected = snapshot.draft["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
         keptClips = selected.count
         finalSeconds = selected.reduce(0) { $0 + max(0, ($1["end"]?.doubleValue ?? 0) - ($1["start"]?.doubleValue ?? 0)) }

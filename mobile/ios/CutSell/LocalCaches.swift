@@ -58,12 +58,21 @@ actor SourceVideoCache {
         trim()
     }
 
+    private static let wifiOnly: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.allowsExpensiveNetworkAccess = false
+        config.allowsConstrainedNetworkAccess = false
+        return URLSession(configuration: config)
+    }()
+
     /// Downloads a cut's source once, in the background, for the next time it plays.
-    func prefetch(uri: String, remote: URL) async {
+    /// `onlyOnWiFi` for cuts that are merely listed (never spend cellular data on those).
+    func prefetch(uri: String, remote: URL, onlyOnWiFi: Bool = false) async {
         guard Self.localURL(forURI: uri) == nil, !downloading.contains(uri) else { return }
         downloading.insert(uri)
         defer { downloading.remove(uri) }
-        guard let (temp, response) = try? await URLSession.shared.download(from: remote),
+        let session = onlyOnWiFi ? Self.wifiOnly : URLSession.shared
+        guard let (temp, response) = try? await session.download(from: remote),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
         let target = Self.file(forURI: uri)
         try? FileManager.default.removeItem(at: target)
@@ -118,5 +127,33 @@ enum ProjectListCache {
     static func save(_ projects: [Project], userID: String) {
         guard let data = try? JSONEncoder().encode(projects) else { return }
         try? data.write(to: file(userID), options: .atomic)
+    }
+}
+
+/// Gets a ready cut ready to open at once: its draft kept on the phone, and its video downloaded
+/// (on Wi-Fi) for the preview. Called for cuts shown in Edits and right after a cut finishes.
+enum EditorPrewarm {
+    @MainActor private static var done: Set<String> = []
+
+    @MainActor
+    static func prewarm(projectID: String, session: CutSellSession?, snapshot known: DraftSnapshot? = nil) async {
+        guard !done.contains(projectID), let session else { return }
+        done.insert(projectID)
+        var snapshot = known
+        if let known { DraftSnapshotCache.save(known) }
+        if snapshot == nil, DraftSnapshotCache.load(projectID: projectID) == nil {
+            snapshot = try? await APIClient.shared.request(
+                "/v1/projects/\(projectID)/draft",
+                query: [URLQueryItem(name: "user_id", value: session.userID)]
+            )
+            if let snapshot { DraftSnapshotCache.save(snapshot) }
+        }
+        for source in snapshot?.sources ?? [] {
+            guard let object = source.objectValue, let uri = object["uri"]?.stringValue,
+                  let raw = object["playback_url"]?.stringValue, let url = URL(string: raw) else { continue }
+            Task.detached(priority: .background) {
+                await SourceVideoCache.shared.prefetch(uri: uri, remote: url, onlyOnWiFi: true)
+            }
+        }
     }
 }
