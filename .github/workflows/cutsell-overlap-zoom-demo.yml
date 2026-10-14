@@ -29,7 +29,8 @@ jobs:
           say -v Samantha -o "$RUNNER_TEMP/speech.aiff" "Hi everyone! [[slnc 700]] Today I want to show you my favorite water bottle. [[slnc 900]] It keeps drinks cold for twelve hours. [[slnc 500]] Wait, sorry. [[slnc 600]] It keeps drinks cold for a full twenty four hours. [[slnc 700]] It fits in any car cup holder. [[slnc 800]] And right now it is on sale for only nineteen dollars. [[slnc 700]] Tap the link and grab yours today."
           ffmpeg -loglevel error -y -f lavfi -i testsrc2=s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" \
             -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 48000 "$RUNNER_TEMP/demo.mp4"
-          mkdir -p "$RUNNER_TEMP/out" && cp "$RUNNER_TEMP/demo.mp4" "$RUNNER_TEMP/out/demo_source.mp4"
+          # The clip stays on this test machine: no video goes to the results branch.
+          mkdir -p "$RUNNER_TEMP/out"
           ffprobe -v error -show_entries format=duration -of csv=p=0 "$RUNNER_TEMP/demo.mp4"
 
       - name: Make one cut on the live server (same calls as the app)

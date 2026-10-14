@@ -443,8 +443,15 @@ final class DraftPlaybackController: ObservableObject {
             guard let object = source.objectValue,
                   let sourceID = object["source_asset_id"]?.stringValue else { continue }
             let uri = object["uri"]?.stringValue
+            // The 720p copy of the whole original first (lighter, and a stretched clip has its
+            // hidden material), then the original kept on this iPhone (the copy is made from it).
+            if let uri, let proxy = PreviewProxyCache.localURL(forURI: uri) {
+                output[sourceID] = proxy
+                continue
+            }
             if let uri, let local = SourceVideoCache.localURL(forURI: uri) {
                 output[sourceID] = local
+                Task.detached(priority: .utility) { await PreviewProxyCache.shared.ensure(uri: uri, original: local) }
                 continue
             }
             guard let rawURL = object["playback_url"]?.stringValue, let url = URL(string: rawURL) else { continue }

@@ -193,11 +193,46 @@ jobs:
           SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
           SIMCTL_CHILD_CUTSELL_PROBE_STATE="flow" \
             xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
-          xcrun simctl io "$udid" recordVideo --codec=h264 --force "$RUNNER_TEMP/probe/flow.mp4" > /dev/null 2>&1 &
+          # Recordings stay on this test machine ($RUNNER_TEMP/rec, never pushed): only frames go to the repo.
+          mkdir -p "$RUNNER_TEMP/rec"
+          xcrun simctl io "$udid" recordVideo --codec=h264 --force "$RUNNER_TEMP/rec/flow.mp4" > /dev/null 2>&1 &
           rec=$!
           sleep 45
           kill -INT $rec; sleep 3
-          ls -la "$RUNNER_TEMP/probe/flow.mp4" || true
+          # Trim by the edges and Voice Over on the same real cut: screenshots at key moments, a
+          # recording kept here, and the app's own log lines (CUTSELLTRIM / CUTSELLVO).
+          for state in trim voiceover; do
+            xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+            SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+            SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+            SIMCTL_CHILD_CUTSELL_PROBE_STATE="$state" \
+              xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+            xcrun simctl io "$udid" recordVideo --codec=h264 --force "$RUNNER_TEMP/rec/$state.mp4" > /dev/null 2>&1 &
+            rec=$!
+            if [ "$state" = trim ]; then
+              sleep 7;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/trim_1_handles.png" >/dev/null 2>&1
+              sleep 2;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/trim_2_drag_frame.png" >/dev/null 2>&1
+              sleep 6;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/trim_3_stretched.png" >/dev/null 2>&1
+              sleep 16; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/trim_4_after_undo_redo.png" >/dev/null 2>&1
+            else
+              sleep 5;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_1_saved_at_once.png" >/dev/null 2>&1
+              sleep 20; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_2_uploaded.png" >/dev/null 2>&1
+              sleep 4;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_3_video_sound.png" >/dev/null 2>&1
+              sleep 4;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_4_voice_panel.png" >/dev/null 2>&1
+            fi
+            kill -INT $rec; sleep 3
+            xcrun simctl spawn "$udid" log show --last 2m --style compact \
+              --predicate 'eventMessage CONTAINS "CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"' 2>/dev/null \
+              | grep -oE 'CUTSELL(TRIM|VO).*' >> "$RUNNER_TEMP/probe/probe_log.txt" || true
+          done
+          cat "$RUNNER_TEMP/probe/probe_log.txt" 2>/dev/null | while read -r l; do echo "::notice title=probe::$l"; done
+          # Frames (PNG) from each recording: one every 2 s. The MP4s themselves stay here.
+          for f in "$RUNNER_TEMP"/rec/*.mp4; do
+            [ -s "$f" ] || continue
+            name="$(basename "$f" .mp4)"
+            ffmpeg -loglevel error -i "$f" -vf "fps=1/2,scale=390:-2" "$RUNNER_TEMP/probe/${name}_frame_%02d.png" || true
+          done
+          ls -la "$RUNNER_TEMP/rec" || true
           echo "::notice title=probe::screenshots taken"
 
       - name: Push the screenshots to design-screenshots/probe
@@ -206,8 +241,11 @@ jobs:
           dir="$RUNNER_TEMP/out"
           git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
           cd "$dir"
-          mkdir -p probe && cp "$RUNNER_TEMP"/probe/*.png probe/ && (cp "$RUNNER_TEMP"/probe/*.mp4 probe/ 2>/dev/null || true)
+          # Only pictures and the log text: never a video or audio file in the repo.
+          rm -rf probe && mkdir -p probe && cp "$RUNNER_TEMP"/probe/*.png probe/
+          cp "$RUNNER_TEMP"/probe/probe_log.txt probe/ 2>/dev/null || true
+          find probe -type f \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4a' -o -iname '*.caf' -o -iname '*.wav' \) -delete
           echo "source commit: ${{ github.sha }}" > probe/SOURCE.txt
-          git add probe
+          git add -A probe
           git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "editor probe for ${{ github.sha }}"
           git push --quiet origin design-screenshots

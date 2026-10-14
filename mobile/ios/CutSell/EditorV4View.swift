@@ -166,6 +166,10 @@ struct EditorV4View: View {
             Task { await runFlowProbe() }
             return
         }
+        if previewState.probe == "trim" {
+            Task { await runTrimProbe() }
+            return
+        }
         if previewState.probe == "voiceover" {
             Task { await runVoiceOverProbe() }
             return
@@ -308,6 +312,63 @@ struct EditorV4View: View {
         show(.message("Undo"))
         await wait(2.5)
         show(.message(model.errorMessage == nil ? "Done · no errors" : "Error: \(model.errorMessage!)"))
+    }
+
+    /// Editor probe "trim" (real cut): select the first clip (white handles), show the drag frame
+    /// with "+0,4 s", stretch its end outward 0.4 s over hidden material (one save), shorten its
+    /// start 0.3 s, then Undo and Redo. Logs CUTSELLTRIM lines with the windows and revisions.
+    private func runTrimProbe() async {
+        func wait(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        func describe(_ label: String) {
+            let clips = model.selectedClips
+            let first = clips.first
+            let line = String(format: "%@ rev=%d clips=%d first=%.3f-%.3f manual_end=%@ caption=%@ total=%.2f",
+                              label, model.snapshot?.revision ?? -1, clips.count,
+                              first?["start"]?.doubleValue ?? -1, first?["end"]?.doubleValue ?? -1,
+                              first?["manual_end"]?.boolValue == true ? "yes" : "no",
+                              "\"\(first?["caption_text"]?.stringValue ?? "")\"", model.timelineDuration)
+            NSLog("CUTSELLTRIM %@", line)
+        }
+        await wait(4)
+        let clips = model.selectedClips
+        guard let first = clips.first, let id = first["clip_id"]?.stringValue,
+              let start = first["start"]?.doubleValue, let end = first["end"]?.doubleValue else {
+            NSLog("CUTSELLTRIM no clip"); return
+        }
+        describe("before")
+        selection = .video(id)
+        await wait(2.5)
+        let sourceID = first["source_asset_id"]?.stringValue
+        let limits = TrimMath.limits(clips: clips, index: 0, edge: .end, sourceDuration: model.sourceDuration(forSource: sourceID))
+        let target = TrimMath.resolve(proposed: end + 0.4 + (limits.neighbor.map { $0 < end + 0.4 ? TrimMath.passThrough : 0 } ?? 0),
+                                      edge: .end, limits: limits)
+        NSLog("CUTSELLTRIM limits lower=%.3f upper=%.3f neighbor=%.3f target=%.3f",
+              limits.lower, limits.upper == .greatestFiniteMagnitude ? -1 : limits.upper, limits.neighbor ?? -1, target.value)
+        // What the video shows while the handle is dragged.
+        model.trimScrub = TrimScrub(sourceID: sourceID, sourceTime: target.value - 1.0 / 30,
+                                    delta: target.value - end, mirrored: first["mirror"]?.boolValue == true)
+        await wait(4)
+        model.trimScrub = nil
+        let saveStart = model.snapshot?.revision ?? 0
+        await model.trimClip(clipID: id, edge: .end, to: target.value).value
+        describe("stretched_end")
+        NSLog("CUTSELLTRIM saves_for_one_drag=%d", (model.snapshot?.revision ?? 0) - saveStart)
+        show(.message("End stretched \(TrimMath.deltaLabel(target.value - end))"))
+        await wait(3)
+        await model.trimClip(clipID: id, edge: .start, to: min(start + 0.3, target.value - 0.2)).value
+        describe("shortened_start")
+        show(.message("Start shortened"))
+        await wait(3)
+        _ = await model.undo()
+        describe("undo")
+        show(.message("Undo"))
+        await wait(3)
+        _ = await model.redo()
+        describe("redo")
+        await wait(1)
+        selection = .video(id)
+        NSLog("CUTSELLTRIM done error=%@", model.errorMessage ?? "none")
+        show(.message(model.errorMessage == nil ? "Trim done · no errors" : "Error: \(model.errorMessage!)"))
     }
 
     /// Editor probe "voiceover": Save a recording (it must be on the mic row at once while it
@@ -454,6 +515,11 @@ struct EditorV4View: View {
             overlaysOnVideo(frame: size)
             if model.captionsEnabled {
                 captionLayer(frame: size)
+            }
+            // Dragging a clip's edge: the original's exact frame at the handle, and "+0,4 s".
+            if let scrub = model.trimScrub {
+                TrimFrameOverlay(scrub: scrub, url: model.previewVideoURL(forSource: scrub.sourceID))
+                    .frame(width: size.width, height: size.height)
             }
             if playback.isBuilding && !playback.isReady {
                 ProgressView().tint(CS.cyan)

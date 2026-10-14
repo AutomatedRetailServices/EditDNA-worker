@@ -18,6 +18,8 @@ struct TimelineV4: View {
     @State private var dragStartTime: Double?
     @State private var zoomStart: CGFloat?
     @State private var keyframeDrag: (id: String, dx: CGFloat)?
+    /// A clip edge being dragged (trim by the edges).
+    @State private var trimDrag: TrimDragState?
 
     static let height: CGFloat = 162
     static let minZoom: CGFloat = 6
@@ -220,37 +222,139 @@ struct TimelineV4: View {
     // MARK: Video track (frames · caption on top · audio at the bottom)
 
     private func videoTrack(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
-        let windows = EditorTracks.clipWindows(model)
         let clips = model.selectedClips
+        let windows = Self.windows(clips: clips, trim: trimDrag)
         return ZStack(alignment: .topLeading) {
             ForEach(Array(windows.enumerated()), id: \.element.clipID) { index, window in
-                let left = x(window.start)
+                // While the START edge is dragged its right side stays put and the left side
+                // follows the finger; the clips after it move when the finger lifts (ripple).
+                let shift = Self.startDragShift(window: window, trim: trimDrag)
+                let left = x(window.start) + CGFloat(shift) * pixelsPerSecond
                 let clipWidth = max(4, CGFloat(window.end - window.start) * pixelsPerSecond - 2)
-                if left + clipWidth > 0, left < width + 20 {
+                if left + clipWidth > -40, left < width + 40 {
                     let clip = clips.first { $0["clip_id"]?.stringValue == window.clipID }
-                    let caption = model.captionsEnabled
-                        ? (clip?["caption_text"]?.stringValue ?? clip?["text"]?.stringValue ?? "")
-                        : ""
+                    let isSelected = selection == .video(window.clipID)
+                    let caption = model.captionsEnabled ? Self.caption(of: clip, window: window, trim: trimDrag, model: model) : ""
                     ClipBlockV4(
-                        url: model.playbackURL(forSource: window.sourceID),
+                        url: model.previewVideoURL(forSource: window.sourceID),
                         sourceStart: window.sourceStart,
                         length: window.end - window.start,
                         number: index + 1,
                         caption: caption,
-                        speech: Self.speech(of: clip),
+                        speech: trimDrag?.clipID == window.clipID ? trimDrag?.speech ?? [] : Self.speech(of: clip),
                         muted: clip?["audio_muted"]?.boolValue == true,
                         width: clipWidth,
-                        isSelected: selection == .video(window.clipID)
+                        isSelected: isSelected
                     )
                     .offset(x: left)
                     .onTapGesture {
                         selection = selection == .video(window.clipID) ? nil : .video(window.clipID)
+                    }
+                    if isSelected {
+                        trimHandle(.start, clipID: window.clipID, index: index)
+                            .offset(x: left - TrimHandleV4.outside)
+                        trimHandle(.end, clipID: window.clipID, index: index)
+                            .offset(x: left + clipWidth - TrimHandleV4.width + TrimHandleV4.outside)
                     }
                 }
             }
         }
         .frame(width: width, height: 50, alignment: .topLeading)
         .accessibilityIdentifier("videoTrack")
+    }
+
+    /// The cut's clips one after the other (no gaps), with the clip being trimmed at its new size.
+    static func windows(clips: [[String: JSONValue]], trim: TrimDragState?) -> [EditorTracks.ClipWindow] {
+        var cursor = 0.0
+        return clips.compactMap { clip in
+            let id = clip["clip_id"]?.stringValue
+            var start = clip["start"]?.doubleValue ?? 0
+            var end = clip["end"]?.doubleValue ?? start
+            if let trim, trim.clipID == id {
+                if trim.edge == .start { start = trim.value } else { end = trim.value }
+            }
+            let length = max(0, end - start)
+            defer { cursor += length }
+            guard let id, length > 0 else { return nil }
+            return EditorTracks.ClipWindow(clipID: id, start: cursor, end: cursor + length, sourceStart: start,
+                              sourceID: clip["source_asset_id"]?.stringValue)
+        }
+    }
+
+    /// Seconds the trimmed clip is drawn to the left while its start edge is dragged outward
+    /// (to the right when shortened), so its right side does not move under the finger.
+    static func startDragShift(window: EditorTracks.ClipWindow, trim: TrimDragState?) -> Double {
+        guard let trim, trim.clipID == window.clipID, trim.edge == .start else { return 0 }
+        return trim.value - trim.original
+    }
+
+    /// The caption on the clip: the words heard in its (new) window, unless it was written by hand.
+    static func caption(of clip: [String: JSONValue]?, window: EditorTracks.ClipWindow, trim: TrimDragState?,
+                        model: DraftEditorViewModel) -> String {
+        guard let clip else { return "" }
+        if let trim, trim.clipID == window.clipID, !TrimMath.captionEditedByHand(clip) {
+            return trim.caption
+        }
+        return clip["caption_text"]?.stringValue ?? clip["text"]?.stringValue ?? ""
+    }
+
+    // MARK: Trim handles (white, on the selected clip's edges)
+
+    private func trimHandle(_ edge: TrimEdge, clipID: String, index: Int) -> some View {
+        TrimHandleV4(edge: edge, active: trimDrag?.clipID == clipID && trimDrag?.edge == edge,
+                     blocked: trimDrag?.clipID == clipID && trimDrag?.edge == edge && trimDrag?.atNeighbor == true)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in trimChanged(edge: edge, clipID: clipID, index: index, dx: value.translation.width) }
+                    .onEnded { _ in trimEnded() }
+            )
+            .accessibilityLabel(edge == .start ? "Trim the start of the clip" : "Trim the end of the clip")
+            .accessibilityIdentifier(edge == .start ? "trimHandleStart" : "trimHandleEnd")
+    }
+
+    private func trimChanged(edge: TrimEdge, clipID: String, index: Int, dx: CGFloat) {
+        let clips = model.selectedClips
+        guard index < clips.count, clips[index]["clip_id"]?.stringValue == clipID else { return }
+        if trimDrag == nil {
+            playback.pause()
+            let clip = clips[index]
+            let original = edge == .start ? (clip["start"]?.doubleValue ?? 0) : (clip["end"]?.doubleValue ?? 0)
+            let sourceID = clip["source_asset_id"]?.stringValue
+            let pool = model.displayDraft?.objectValue.map { TrimMath.wordPool($0, sourceID: sourceID) } ?? []
+            trimDrag = TrimDragState(
+                clipID: clipID, edge: edge, original: original, value: original,
+                limits: TrimMath.limits(clips: clips, index: index, edge: edge,
+                                        sourceDuration: model.sourceDuration(forSource: sourceID)),
+                otherEdge: edge == .start ? (clip["end"]?.doubleValue ?? 0) : (clip["start"]?.doubleValue ?? 0),
+                sourceID: sourceID, pool: pool,
+                mirrored: clip["mirror"]?.boolValue == true || model.displayDraft?["mirror"]?.boolValue == true
+            )
+        }
+        guard var drag = trimDrag else { return }
+        let resolved = TrimMath.resolve(proposed: drag.original + Double(dx / pixelsPerSecond), edge: edge, limits: drag.limits)
+        if resolved.atNeighbor && !drag.atNeighbor { TrimHaptics.neighbor() }
+        if resolved.passed && !drag.passed { TrimHaptics.passed() }
+        if resolved.atSourceEdge && !drag.atSourceEdge { TrimHaptics.sourceEdge() }
+        drag.value = resolved.value
+        drag.atNeighbor = resolved.atNeighbor
+        drag.passed = resolved.passed
+        drag.atSourceEdge = resolved.atSourceEdge
+        trimDrag = drag
+        // The exact frame at the handle and "+0,4 s" on the video.
+        let added = edge == .end ? drag.value - drag.original : drag.original - drag.value
+        model.trimScrub = TrimScrub(sourceID: drag.sourceID,
+                                    sourceTime: edge == .end ? max(drag.otherEdge, drag.value - 1.0 / 30) : drag.value,
+                                    delta: added, mirrored: drag.mirrored)
+    }
+
+    private func trimEnded() {
+        guard let drag = trimDrag else { return }
+        model.trimScrub = nil
+        // One save when the finger lifts (the new size is on screen at once, ripple included).
+        if abs(drag.value - drag.original) >= 0.001 {
+            model.trimClip(clipID: drag.clipID, edge: drag.edge, to: drag.value)
+        }
+        trimDrag = nil
     }
 
     /// The spoken parts of a clip (source seconds), for its audio strip.
@@ -543,6 +647,59 @@ private struct ClipBlockV4: View {
         guard spoken else { return 2 }
         let seed = abs((number &* 131 &+ index &* 7919) % 7)
         return CGFloat(3 + seed)
+    }
+}
+
+/// State of one clip edge while it is dragged.
+struct TrimDragState {
+    let clipID: String
+    let edge: TrimEdge
+    /// The edge's place in the original before the drag (seconds).
+    let original: Double
+    var value: Double
+    let limits: TrimMath.Limits
+    /// The clip's other edge (unchanged by this drag).
+    let otherEdge: Double
+    let sourceID: String?
+    /// Every word heard in this original (for the caption and the audio strip while dragging).
+    let pool: [[String: JSONValue]]
+    let mirrored: Bool
+    var atNeighbor = false
+    var passed = false
+    var atSourceEdge = false
+
+    private var window: (Double, Double) { edge == .start ? (value, otherEdge) : (otherEdge, value) }
+    var caption: String { TrimMath.text(of: TrimMath.words(in: pool, start: window.0, end: window.1)) }
+    /// The speech of the new window, so the clip's audio strip grows with it.
+    var speech: [ClosedRange<Double>] {
+        TrimMath.words(in: pool, start: window.0, end: window.1).compactMap { word in
+            guard let s = word["start"]?.doubleValue, let e = word["end"]?.doubleValue, e > s else { return nil }
+            return s...e
+        }
+    }
+}
+
+/// White handle on a selected clip's edge (CapCut-like): outward brings back hidden material,
+/// inward shortens the clip.
+struct TrimHandleV4: View {
+    static let width: CGFloat = 14
+    /// How far it stands outside the clip, so it is easy to grab.
+    static let outside: CGFloat = 6
+    let edge: TrimEdge
+    let active: Bool
+    let blocked: Bool
+
+    var body: some View {
+        UnevenRoundedRectangle(
+            topLeadingRadius: edge == .start ? 6 : 1, bottomLeadingRadius: edge == .start ? 6 : 1,
+            bottomTrailingRadius: edge == .end ? 6 : 1, topTrailingRadius: edge == .end ? 6 : 1)
+            .fill(blocked ? Color(hex: 0xFFD60A) : Color.white)
+            .frame(width: Self.width, height: 50)
+            .overlay(Capsule().fill(Color(hex: 0x050814).opacity(0.7)).frame(width: 2.5, height: 16))
+            .shadow(color: .black.opacity(active ? 0.5 : 0.3), radius: active ? 4 : 2)
+            .scaleEffect(y: active ? 1.06 : 1)
+            // A bigger area to grab than what is drawn.
+            .contentShape(Rectangle().inset(by: -10))
     }
 }
 

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// Carries one result out of a queued edit.
@@ -128,6 +129,45 @@ final class DraftEditorViewModel: ObservableObject {
         guard !clips.isEmpty else { return 1 }
         if clips.allSatisfy({ $0["audio_muted"]?.boolValue == true }) { return 0 }
         return clips.compactMap { $0["audio_volume"]?.doubleValue }.max() ?? 1
+    }
+
+    // MARK: Trim by the edges
+
+    /// While a clip's handle is dragged: the original's frame to show on the video, and how much
+    /// material the drag adds. `nil` otherwise. (Not part of the preview's rebuild key.)
+    @Published var trimScrub: TrimScrub?
+    /// Length of each original the phone measured itself (when the server sent none).
+    @Published private(set) var knownSourceDurations: [String: Double] = [:]
+
+    /// Moves one edge of a clip to `value` (seconds of its original). Shown at once; ONE save
+    /// through the edit queue (quiet reload + retry on 409), so Undo / Redo work as usual.
+    @discardableResult
+    func trimClip(clipID: String, edge: TrimEdge, to value: Double) -> Task<Void, Never> {
+        let change: (inout [String: JSONValue]) -> Void = { object in
+            guard let clip = object["selected"]?.arrayValue?.compactMap(\.objectValue)
+                    .first(where: { $0["clip_id"]?.stringValue == clipID }) else { return }
+            let pool = TrimMath.wordPool(object, sourceID: clip["source_asset_id"]?.stringValue)
+            Self.mapClips(&object) { clips in clips.map { item in
+                guard item["clip_id"]?.stringValue == clipID else { return item }
+                let start = edge == .start ? value : (item["start"]?.doubleValue ?? 0)
+                let end = edge == .end ? value : (item["end"]?.doubleValue ?? start)
+                guard end - start >= TrimMath.minLength - 1e-6 else { return item }
+                return TrimMath.trimmed(item, start: start, end: end, edge: edge, pool: pool)
+            } }
+        }
+        // The new size is shown right here (before this returns); the save runs in the queue.
+        return perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }
+    }
+
+    /// Measures the originals whose length the server did not send (for the trim's end limit).
+    func measureSourceDurations() async {
+        for source in snapshot?.sources.compactMap(\.objectValue) ?? [] {
+            guard let id = source["source_asset_id"]?.stringValue, sourceDuration(forSource: id) == nil,
+                  let url = previewVideoURL(forSource: id),
+                  let time = try? await AVURLAsset(url: url).load(.duration) else { continue }
+            let seconds = CMTimeGetSeconds(time)
+            if seconds.isFinite, seconds > 0 { knownSourceDurations[id] = seconds }
+        }
     }
 
     /// Volume of the voice-over track in the preview (kept on this iPhone; 0...1).
@@ -416,6 +456,7 @@ final class DraftEditorViewModel: ObservableObject {
         await compositionRequest
         // Voice-overs saved earlier that did not finish uploading: show them and try again.
         resumePendingVoiceOvers()
+        await measureSourceDurations()
     }
 
     /// D-282A Stage 6: "refresh the snapshot and library after a confirmed
@@ -956,6 +997,8 @@ final class DraftEditorViewModel: ObservableObject {
         let before = words.filter { ($0["end"]?.doubleValue ?? 0) <= time }
         let after = words.filter { ($0["end"]?.doubleValue ?? 0) > time }
         first["end"] = .number(time)
+        // An end dragged by hand stays with the right piece (the left one now ends at the split).
+        first.removeValue(forKey: "manual_end")
         second["start"] = .number(time)
         second["clip_id"] = .string((clip["clip_id"]?.stringValue ?? "clip") + "-b")
         first["words"] = .array(before.map(JSONValue.object))
