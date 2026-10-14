@@ -412,6 +412,10 @@ class DraftTimeline:
     # editor's toggle can bring them back without a new cut).
     auto_zoom_enabled: bool = False
     zoom_keyframes: Tuple["ZoomKeyframe", ...] = ()
+    # Editor v4: sources of full-screen B-roll videos the creator added from the phone (the draft's
+    # `broll_sources`). Media placed by hand is the creator's choice, never an engine mistake: the
+    # export's post-render QC does not trim it for being silent or still.
+    user_media_source_ids: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

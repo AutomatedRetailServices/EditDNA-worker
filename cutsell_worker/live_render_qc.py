@@ -209,6 +209,28 @@ def frozen_visual_pause_windows(draft, segments, output_windows):
     return tuple(merged)
 
 
+def user_placed_windows(draft, segments, output_windows):
+    """Editor v4: output windows the creator filled by hand -- a full-screen B-roll video from the
+    phone (its whole window) and the tail of a clip whose end was dragged out by hand (after its
+    last spoken word). Never anything the cut engine chose."""
+    user_sources = set(getattr(draft, "user_media_source_ids", ()) or ())
+    manual = {clip.clip_id: clip for clip in draft.selected if getattr(clip, "manual_end", False)}
+    windows = []
+    for seg, (out_start, out_end) in zip(segments, output_windows):
+        if seg.source_asset_id in user_sources:
+            windows.append((out_start, out_end))
+            continue
+        clip = manual.get(seg.clip_id)
+        if clip is None:
+            continue
+        spoken_end = max((float(w.end) for w in clip.words if seg.start <= float(w.end) <= seg.end + 1e-6),
+                         default=float(seg.start))
+        tail_start = out_start + max(0.0, spoken_end - float(seg.start))
+        if out_end - tail_start > 0.05:
+            windows.append((tail_start, out_end))
+    return tuple(windows)
+
+
 def render_with_post_render_qc(
     draft,
     segments: Sequence[RenderSegment],
@@ -283,6 +305,7 @@ def render_with_post_render_qc(
             output_path,
             boundary_timestamps=boundary_timestamps,
             protected_pause_windows=(*protected_pause_windows, *merged_visual_windows),
+            user_placed_windows=user_placed_windows(draft, current_segments, output_windows),
         )
         reconciliation = reconcile_silence_findings(draft, current_segments, media.findings, output_windows)
 

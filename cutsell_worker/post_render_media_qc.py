@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import replace, dataclass
 from typing import Callable, Iterable, Sequence
 
 from .post_render_watch_listen_qc import (
@@ -346,11 +346,30 @@ def check_audio_discontinuity_at_boundaries(
     return PostRenderQCResult(status=status, findings=tuple(findings))
 
 
+def _outside_windows(findings, windows: Sequence[tuple[float, float]], *, tolerance: float = 0.05,
+                     min_remaining_sec: float = 0.3):
+    """`findings` with the parts inside `windows` removed (a finding left shorter than
+    `min_remaining_sec` is dropped)."""
+    if not windows:
+        return tuple(findings)
+    kept = []
+    for finding in findings:
+        parts = [(float(finding.start), float(finding.end))]
+        for low, high in sorted(windows):
+            low, high = low - tolerance, high + tolerance
+            parts = [piece for a, b in parts for piece in ((a, min(b, low)), (max(a, high), b)) if piece[1] > piece[0]]
+        for a, b in parts:
+            if b - a >= min_remaining_sec:
+                kept.append(replace(finding, start=a, end=b))
+    return tuple(kept)
+
+
 def run_post_render_media_qc(
     media_path: str,
     *,
     boundary_timestamps: Sequence[float] = (),
     protected_pause_windows: Sequence[tuple[float, float]] = (),
+    user_placed_windows: Sequence[tuple[float, float]] = (),
     max_allowed_silence_sec: float = 1.2,
     min_freeze_sec: float = 0.5,
     min_black_sec: float = 0.3,
@@ -363,14 +382,21 @@ def run_post_render_media_qc(
     if integrity.status == "FAIL":
         return integrity
 
+    # Editor v4: output time the creator filled by hand (a B-roll video from the phone, a clip end
+    # dragged out on purpose) is never judged as accidental silence, a frozen or a black picture.
     results = [
         check_accidental_silence(
-            media_path, protected_pause_windows=protected_pause_windows,
+            media_path, protected_pause_windows=(*protected_pause_windows, *user_placed_windows),
             max_allowed_silence_sec=max_allowed_silence_sec,
         ),
         check_frozen_frames(media_path, min_freeze_sec=min_freeze_sec),
         check_dead_black_frames(media_path, min_black_sec=min_black_sec),
     ]
+    if user_placed_windows:
+        results[1] = replace(results[1], findings=_outside_windows(results[1].findings, user_placed_windows,
+                                                                    min_remaining_sec=min_freeze_sec))
+        results[2] = replace(results[2], findings=_outside_windows(results[2].findings, user_placed_windows,
+                                                                    min_remaining_sec=min_black_sec))
     if boundary_timestamps:
         results.append(check_audio_discontinuity_at_boundaries(media_path, boundary_timestamps))
 

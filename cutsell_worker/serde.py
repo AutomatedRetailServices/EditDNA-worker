@@ -277,6 +277,10 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         audio_overlap_enabled=bool(payload.get("audio_overlap_enabled", False)),
         auto_zoom_enabled=bool(payload.get("auto_zoom_enabled", False)),
         zoom_keyframes=tuple(_zoom_keyframe_from_dict(dict(item)) for item in payload.get("zoom_keyframes") or ()),
+        user_media_source_ids=tuple(
+            str(item.get("source_asset_id")) for item in payload.get("broll_sources") or ()
+            if isinstance(item, dict) and item.get("source_asset_id")
+        ),
     )
 
 
@@ -298,7 +302,8 @@ def _json_safe(value: Any) -> Any:
         # drafts stay exactly as before for every draft that does not use them.
         data = {item.name: getattr(value, item.name) for item in fields(value)}
         if isinstance(value, DraftTimeline):
-            for key in ("mirror", "rotation", "audio_overlap_enabled", "auto_zoom_enabled", "zoom_keyframes"):
+            for key in ("mirror", "rotation", "audio_overlap_enabled", "auto_zoom_enabled", "zoom_keyframes",
+                        "user_media_source_ids"):
                 if not data.get(key):
                     data.pop(key, None)
         elif isinstance(value, DraftClip):
