@@ -1,0 +1,130 @@
+name: CutSell export timing
+
+# Measures each stage of Export on the live server with two real cuts made from synthetic spoken
+# test videos (macOS "say" over a test pattern; no real video or personal data): 13 s and 60 s.
+# For each cut: one export right away (cold) and one more just after (warm). Stages, timed from
+# outside exactly as the iPhone sees them: submit, waiting in the queue, each progress step,
+# finished, and downloading the MP4 to "the phone" (this machine). When the server reports its
+# own stage timings (result.timings), they are printed too.
+# Runs only when pushed to probe/export-timing (manual). The videos stay on this test machine;
+# only the numbers (JSON text) go to the perf-results branch.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/export-timing]
+
+concurrency:
+  group: cutsell-export-timing
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  timing:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Make 13 s and 60 s synthetic test videos
+        run: |
+          brew install ffmpeg >/dev/null
+          say -v Samantha -o "$RUNNER_TEMP/s13.aiff" "Hi everyone. This water bottle keeps drinks cold all day. It fits in any cup holder. The link is in my bio."
+          say -v Samantha -o "$RUNNER_TEMP/s60.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. It fits in any car cup holder. The lid does not leak, even in my bag. I use it at the gym, at work and on long drives. It comes in six colors and the black one is my favorite. Right now it is on sale in my shop. The price is lower than ever this week. If you want one, the link is in my bio. Grab yours today before they sell out. Thank you for watching and see you in the next video."
+          for n in 13 60; do
+            ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=$n" -i "$RUNNER_TEMP/s$n.aiff" \
+              -t $n -c:v libx264 -b:v 8M -pix_fmt yuv420p -c:a aac -ar 48000 -af apad "$RUNNER_TEMP/v$n.mp4"
+          done
+          ls -la "$RUNNER_TEMP"/v*.mp4
+
+      - name: Cut and export on the live server, timing every stage
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, concurrent.futures
+          API = "https://cutsell-api.onrender.com"; T = None
+          tmp = os.environ["RUNNER_TEMP"]
+          def call(m, p, b=None):
+              r = urllib.request.Request(API + p, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=300) as x: return json.load(x)
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          rows = []
+          def note(title, text):
+              print(f"::notice title={title}::{text}")
+          def make_cut(n):
+              data = open(f"{tmp}/v{n}.mp4", "rb").read()
+              p = call("POST", "/v1/projects", {"user_id": u, "title": f"Export timing {n}s"}); pid = p["project_id"]
+              st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": f"v{n}.mp4",
+                        "content_type": "video/mp4", "size_bytes": len(data)})
+              def part(k):
+                  sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{k}/presign", {"project_id": pid, "user_id": u})
+                  req = urllib.request.Request(sg["upload_url"], data=data[(k-1)*st["part_size"]: k*st["part_size"]], method="PUT")
+                  req.add_header("Content-Type", "")
+                  with urllib.request.urlopen(req, timeout=600) as r: return {"part_number": k, "etag": r.headers["ETag"]}
+              with concurrent.futures.ThreadPoolExecutor(3) as pool: parts = list(pool.map(part, range(1, st["part_count"] + 1)))
+              done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+              job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": True,
+                         "dialogue_overlap_enabled": True, "auto_zoom_enabled": True, "language_hint": None,
+                         "sources": [{"original_name": f"v{n}.mp4", "uri": done["source_uri"], "source_order": 0, "duration_sec": float(n)}]})
+              t0 = time.time()
+              while True:
+                  j = call("GET", f"/v1/jobs/{job['job_id']}")
+                  if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 900: break
+                  time.sleep(3)
+              note(f"cut_{n}s", f"{j['state']} in {int(time.time()-t0)} s")
+              snap = call("GET", f"/v1/projects/{pid}/draft?user_id={u}")
+              return pid, snap
+          def export(n, label, pid, snap):
+              sources = [{"source_asset_id": x["source_asset_id"], "original_name": x.get("original_name") or "v.mp4", "uri": x["uri"]}
+                         for x in snap["sources"]]
+              draft = snap["draft"]
+              t0 = time.time()
+              r = call("POST", "/v1/exports/jobs", {"project_id": pid, "user_id": u, "draft": draft, "sources": sources})
+              marks = [("submitted", round(time.time() - t0, 2))]
+              last = None
+              while True:
+                  j = call("GET", f"/v1/jobs/{r['job_id']}")
+                  key = f"{j['state']}@{j.get('progress')}"
+                  if key != last:
+                      marks.append((key, round(time.time() - t0, 2))); last = key
+                  if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 1200: break
+                  time.sleep(0.5)
+              total = round(time.time() - t0, 2)
+              result = j.get("result") or {}
+              dl = None; size = None
+              if result.get("download_url"):
+                  d0 = time.time()
+                  with urllib.request.urlopen(result["download_url"], timeout=600) as x: body = x.read()
+                  dl = round(time.time() - d0, 2); size = len(body)
+              row = {"cut": f"{n}s", "export": label, "state": j["state"], "total_s": total, "download_to_phone_s": dl,
+                     "mp4_bytes": size, "render_attempts": result.get("render_attempt_count"),
+                     "server_timings": result.get("timings"), "marks": marks}
+              rows.append(row)
+              note(f"export_{n}s_{label}", f"{j['state']} total={total}s download={dl}s size={size} attempts={result.get('render_attempt_count')}")
+              note(f"export_{n}s_{label}_stages", " ".join(f"{k}={v}" for k, v in marks))
+              if result.get("timings"):
+                  note(f"export_{n}s_{label}_server", " ".join(f"{k}={v}" for k, v in result["timings"].items()))
+          for n in (13, 60):
+              pid, snap = make_cut(n)
+              export(n, "cold", pid, snap)
+              export(n, "warm", pid, snap)
+          json.dump(rows, open(f"{tmp}/export_timing.json", "w"), indent=1)
+          PY
+
+      - name: Save the numbers to perf-results
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          if git ls-remote --exit-code --heads "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" perf-results >/dev/null; then
+            git clone --quiet --depth 1 --branch perf-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          else
+            mkdir -p "$dir" && cd "$dir" && git init -q && git checkout -q --orphan perf-results && cd -
+            git -C "$dir" remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          fi
+          mkdir -p "$dir/export"
+          cp "$RUNNER_TEMP/export_timing.json" "$dir/export/$(date -u +%Y%m%dT%H%M%SZ).json"
+          cd "$dir"
+          git add -A export
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "export timing for ${{ github.sha }}"
+          git push --quiet origin HEAD:perf-results

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import UIKit
 import UserNotifications
@@ -28,6 +29,26 @@ final class ExportTracker: ObservableObject {
     private var timings: [String: Timing] = [:]
     private var loops: [String: Task<Void, Never>] = [:]
 
+    /// The last finished export of each cut and what it was made from. Exporting again with
+    /// nothing changed gives that video back at once instead of rendering it again (its link
+    /// lasts an hour; after 50 minutes it is rendered again).
+    private var finished: [String: (key: String, status: JobStatus, at: Date)] = [:]
+    private var jobKeys: [String: (projectID: String, key: String)] = [:]
+
+    static func contentKey(draft: JSONValue, sources: [JSONValue]) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = (try? encoder.encode(JSONValue.object(["draft": draft, "sources": .array(sources)]))) ?? Data()
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func reusable(projectID: String, key: String) -> JobStatus? {
+        guard let last = finished[projectID], last.key == key, Date().timeIntervalSince(last.at) < 50 * 60 else { return nil }
+        return last.status
+    }
+
+    func remember(jobID: String, projectID: String, key: String) { jobKeys[jobID] = (projectID, key) }
+
     func follow(jobID: String, projectID: String, title: String, preparedSeconds: Double, submittedSeconds: Double) {
         guard loops[jobID] == nil else { return }
         var timing = Timing(projectID: projectID, title: title, started: Date().addingTimeInterval(-submittedSeconds))
@@ -51,7 +72,10 @@ final class ExportTracker: ObservableObject {
                 jobs[jobID] = status
                 record(jobID: jobID, status: status)
                 if ["finished", "failed", "canceled"].contains(status.state) {
-                    if status.state == "finished" { announce(jobID: jobID) }
+                    if status.state == "finished" {
+                        if let known = jobKeys[jobID] { finished[known.projectID] = (known.key, status, Date()) }
+                        announce(jobID: jobID)
+                    }
                     break
                 }
             } catch {

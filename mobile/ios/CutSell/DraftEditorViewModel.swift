@@ -1661,6 +1661,14 @@ final class DraftEditorViewModel: ObservableObject {
                 return .object(["source_asset_id": sourceID,
                                 "original_name": object["original_name"] ?? .string("video.mp4"), "uri": uri])
             }
+            // Nothing changed since the last export of this cut: that video, at once.
+            let key = ExportTracker.contentKey(draft: snapshot.draft, sources: sources)
+            if let done = ExportTracker.shared.reusable(projectID: project.projectID, key: key) {
+                exportPreparing = nil
+                exportJob = done
+                NSLog("CUTSELLEXPORT reused %.1f", Date().timeIntervalSince(started))
+                return
+            }
             let response: ExportSubmitResponse = try await api.request(
                 "/v1/exports/jobs",
                 method: "POST",
@@ -1672,6 +1680,7 @@ final class DraftEditorViewModel: ObservableObject {
                 ])
             )
             exportPreparing = nil
+            ExportTracker.shared.remember(jobID: response.jobID, projectID: project.projectID, key: key)
             ExportTracker.shared.follow(jobID: response.jobID, projectID: project.projectID,
                                         title: project.title, preparedSeconds: preparedSeconds,
                                         submittedSeconds: Date().timeIntervalSince(started))
