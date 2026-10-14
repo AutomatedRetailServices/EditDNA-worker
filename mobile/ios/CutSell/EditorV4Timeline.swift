@@ -503,7 +503,9 @@ struct TimelineV4: View {
             let width = VoiceLabelV4.width(title: input.title, status: input.status)
             let x = max(input.left + 7, previousEnd + 6)
             previousEnd = x + width
-            let inside = x + width <= input.left + input.width - 4
+            // Inside its block only at its usual place; a label moved over sits on its own tab so it
+            // stays readable over the next voice's waveform.
+            let inside = x <= input.left + 7.5 && x + width <= input.left + input.width - 4
             return VoiceLabelPlacement(key: input.key, title: input.title, x: x, width: width,
                                        status: input.status, inside: inside)
         }

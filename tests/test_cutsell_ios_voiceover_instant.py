@@ -118,7 +118,7 @@ def label_positions(blocks):
         label_width = len(title) * 6.2 + 12
         x = max(left + 7, previous_end + 6)
         previous_end = x + label_width
-        out.append((x, label_width, x + label_width <= left + width - 4))
+        out.append((x, label_width, x <= left + 7.5 and x + label_width <= left + width - 4))
     return out
 
 
@@ -134,6 +134,7 @@ def test_voiceover_label_is_never_cut():
     first, second = label_positions([(100, 45, "Voiceover 1"), (150, 180, "Voiceover 2")])
     assert first[2] is False                                   # on its own tab past the short block
     assert second[0] >= first[0] + first[1] + 6                # starts after the first label
+    assert second[2] is False                                  # moved over: on its own tab, readable
 
 
 
