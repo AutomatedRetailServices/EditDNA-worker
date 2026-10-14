@@ -1,0 +1,158 @@
+[
+ {
+  "cut": "13s",
+  "export": "cold",
+  "state": "finished",
+  "total_s": 21.66,
+  "download_to_phone_s": 0.78,
+  "mp4_bytes": 6616030,
+  "render_attempts": 1,
+  "server_timings": null,
+  "marks": [
+   [
+    "submitted",
+    2.24
+   ],
+   [
+    "uploaded@None",
+    3.93
+   ],
+   [
+    "analyzing@None",
+    6.28
+   ],
+   [
+    "analyzing@2",
+    8.39
+   ],
+   [
+    "analyzing@35",
+    10.57
+   ],
+   [
+    "analyzing@85",
+    14.74
+   ],
+   [
+    "analyzing@100",
+    19.41
+   ],
+   [
+    "finished@100",
+    21.66
+   ]
+  ]
+ },
+ {
+  "cut": "13s",
+  "export": "warm",
+  "state": "finished",
+  "total_s": 19.96,
+  "download_to_phone_s": 0.89,
+  "mp4_bytes": 6616030,
+  "render_attempts": 1,
+  "server_timings": null,
+  "marks": [
+   [
+    "submitted",
+    2.23
+   ],
+   [
+    "uploaded@None",
+    3.9
+   ],
+   [
+    "analyzing@None",
+    8.06
+   ],
+   [
+    "analyzing@35",
+    10.38
+   ],
+   [
+    "analyzing@85",
+    14.87
+   ],
+   [
+    "finished@100",
+    19.96
+   ]
+  ]
+ },
+ {
+  "cut": "60s",
+  "export": "cold",
+  "state": "finished",
+  "total_s": 28.09,
+  "download_to_phone_s": 1.27,
+  "mp4_bytes": 28778942,
+  "render_attempts": 1,
+  "server_timings": null,
+  "marks": [
+   [
+    "submitted",
+    2.15
+   ],
+   [
+    "uploaded@None",
+    3.73
+   ],
+   [
+    "analyzing@None",
+    8.03
+   ],
+   [
+    "analyzing@25",
+    10.52
+   ],
+   [
+    "analyzing@35",
+    12.86
+   ],
+   [
+    "analyzing@85",
+    21.36
+   ],
+   [
+    "finished@100",
+    28.09
+   ]
+  ]
+ },
+ {
+  "cut": "60s",
+  "export": "warm",
+  "state": "finished",
+  "total_s": 27.22,
+  "download_to_phone_s": 1.43,
+  "mp4_bytes": 28778942,
+  "render_attempts": 1,
+  "server_timings": null,
+  "marks": [
+   [
+    "submitted",
+    2.19
+   ],
+   [
+    "uploaded@None",
+    3.77
+   ],
+   [
+    "analyzing@2",
+    8.39
+   ],
+   [
+    "analyzing@35",
+    10.93
+   ],
+   [
+    "analyzing@85",
+    22.1
+   ],
+   [
+    "finished@100",
+    27.22
+   ]
+  ]
+ }
+]
