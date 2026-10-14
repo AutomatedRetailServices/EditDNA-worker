@@ -1,0 +1,55 @@
+name: CutSell Modal worker logs
+
+# Reads the last 2 hours of the Modal worker's logs (read only: no deploy, no run, no paid compute)
+# and keeps the lines that explain a failed job: errors, tracebacks, QC and export lines.
+# Signed links and anything that looks like a key are removed before the text is saved to the
+# perf-results branch (logs/). Runs only when pushed to probe/modal-logs (manual).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/modal-logs]
+
+permissions:
+  contents: write
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch and filter the worker logs
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install -q modal
+          modal app logs cutsell-worker --since 2h --tail 5000 --timestamps > "$RUNNER_TEMP/raw.txt" 2>&1 || true
+          wc -l "$RUNNER_TEMP/raw.txt"
+          python3 - <<'PY'
+          import os, re
+          tmp = os.environ["RUNNER_TEMP"]
+          lines = open(f"{tmp}/raw.txt", errors="replace").read().splitlines()
+          keep = re.compile(r"error|exception|traceback|failed|fail|qc|export|render|review|repair|File \"|raise|^\s+\w*Error", re.I)
+          out = []
+          for i, line in enumerate(lines):
+              if keep.search(line):
+                  line = re.sub(r"https?://\S+", "<link>", line)
+                  line = re.sub(r"(?i)(token|secret|password|key|signature|credential)\S*\s*[=:]\s*\S+", r"\1=<hidden>", line)
+                  line = re.sub(r"\b[A-Za-z0-9+/_-]{40,}\b", "<long>", line)
+                  out.append(line[:600])
+          open(f"{tmp}/filtered.txt", "w").write("\n".join(out[-1500:]) + "\n")
+          print(len(out), "lines kept")
+          PY
+
+      - name: Save the filtered lines to perf-results
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --depth 1 --branch perf-results "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          mkdir -p "$dir/logs"
+          cp "$RUNNER_TEMP/filtered.txt" "$dir/logs/modal_$(date -u +%Y%m%dT%H%M%SZ).txt"
+          cd "$dir"
+          git add -A logs
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "modal worker log lines"
+          git push --quiet origin HEAD:perf-results
