@@ -1,5 +1,5 @@
 CUTSELLTRIM before rev=16 clips=2 first=0.000-4.080 manual_end=no caption="Edited on the phone" total=12.20
-CUTSELLTRIM limits lower=0.100 upper=13.400 neighbor=4.080 target=5.080
+CUTSELLTRIM limits lower=0.100 upper=13.667 neighbor=4.080 target=5.080
 CUTSELLTRIM stretched_end rev=17 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
 CUTSELLTRIM saves_for_one_drag=1
 CUTSELLTRIM shortened_start rev=18 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
@@ -8,7 +8,7 @@ CUTSELLTRIM redo rev=20 clips=2 first=0.300-5.080 manual_end=yes caption="Edited
 CUTSELLTRIM done error=none
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
 CUTSELLTRIM before rev=16 clips=2 first=0.000-4.080 manual_end=no caption="Edited on the phone" total=12.20
-CUTSELLTRIM limits lower=0.100 upper=13.400 neighbor=4.080 target=5.080
+CUTSELLTRIM limits lower=0.100 upper=13.667 neighbor=4.080 target=5.080
 CUTSELLTRIM stretched_end rev=17 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
 CUTSELLTRIM saves_for_one_drag=1
 CUTSELLTRIM shortened_start rev=18 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
@@ -16,32 +16,35 @@ CUTSELLTRIM undo rev=19 clips=2 first=0.000-5.080 manual_end=yes caption="Edited
 CUTSELLTRIM redo rev=20 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
 CUTSELLTRIM done error=none
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
-CUTSELLVO shown=0.018 outcome=placed blocks=1->2
+CUTSELLVO shown=0.014 outcome=placed blocks=1->2
 CUTSELLVO uploaded=yes after=15s placements=2
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
-CUTSELLMEDIA photo_overlay shown_after=0.51 pending=1
+CUTSELLMEDIA test_media video=probe-phone-video-0FF923.mp4
+CUTSELLMEDIA photo_overlay shown_after=0.37 pending=1
 CUTSELLMEDIA done"'
-CUTSELLMEDIA photo_overlay uploaded_after=4.2 overlays=2
-CUTSELLMEDIA video_overlay uploaded_after=3.6 overlays=3
+CUTSELLMEDIA photo_overlay uploaded_after=3.5 overlays=2
+CUTSELLMEDIA video_overlay uploaded_after=4.1 overlays=3
+CUTSELLMEDIA done"'
 CUTSELLMEDIA photo_overlay moved x=0.3 y=0.25 width=0.5 saved=true
-CUTSELLMEDIA done"'
 CUTSELLMEDIA video_overlay moved_to=3.00
-CUTSELLMEDIA broll clips=2->4 after=5.2 order=se-000-0001~a-e06ac701aad40e3f,broll_8c2bbb11,se-000-0001~a-e06ac701aad40e3f-bb11,se-000-0001~b-3ffd12d5dad35663
+CUTSELLMEDIA done"'
+CUTSELLMEDIA broll clips=2->4 after=4.7 order=se-000-0001~a-e06ac701aad40e3f,broll_aeb76baa,se-000-0001~a-e06ac701aad40e3f-6baa,se-000-0001~b-3ffd12d5dad35663
 CUTSELLMEDIA clip_moved first=se-000-0001~b-3ffd12d5dad35663 saves=1
 CUTSELLMEDIA done"'
 CUTSELLMEDIA clip_undo first=se-000-0001~a-e06ac701aad40e3f
+CUTSELLMEDIA done"'
 CUTSELLMEDIA clip_redo first=se-000-0001~b-3ffd12d5dad35663
+CUTSELLMEDIA done"'
 CUTSELLMEDIA voice_moved 1.00->8.54
 CUTSELLMEDIA done"'
 CUTSELLMEDIA voice_undo 1.00
+CUTSELLMEDIA done"'
 CUTSELLMEDIA voice_redo 8.54
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 1e7cd3af-0e06-455a-a4ce-20e76e55883d uploaded@0 6.4
+CUTSELLEXPORT 72905d77-cb41-4e66-9a03-227a9f88d418 uploaded@0 5.3
+CUTSELLEXPORT 72905d77-cb41-4e66-9a03-227a9f88d418 analyzing@0 8.0
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 1e7cd3af-0e06-455a-a4ce-20e76e55883d analyzing@0 8.9
-CUTSELLEXPORT 1e7cd3af-0e06-455a-a4ce-20e76e55883d analyzing@25 11.5
-CUTSELLEXPORT 1e7cd3af-0e06-455a-a4ce-20e76e55883d analyzing@35 14.2
-CUTSELLMEDIA done"'
+CUTSELLEXPORT 72905d77-cb41-4e66-9a03-227a9f88d418 analyzing@35 10.6
 CUTSELLMEDIA done"'
 CUTSELLMEDIA done"'
 CUTSELLMEDIA done"'
@@ -49,10 +52,12 @@ CUTSELLMEDIA done"'
 CUTSELLMEDIA done"'
 CUTSELLMEDIA done"'
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 1e7cd3af-0e06-455a-a4ce-20e76e55883d failed@35 69.8
-CUTSELLEXPORT summary prepare=0.0 submitted=4.8 uploaded@0=6.4 analyzing@0=8.9 analyzing@25=11.5 analyzing@35=14.2 failed@35=69.8
-CUTSELLMEDIA export state=failed total=70.1
+CUTSELLMEDIA done"'
+CUTSELLMEDIA done"'
+CUTSELLEXPORT 72905d77-cb41-4e66-9a03-227a9f88d418 failed@35 83.6
+CUTSELLEXPORT summary prepare=0.0 submitted=3.7 uploaded@0=5.3 analyzing@0=8.0 analyzing@35=10.6 failed@35=83.6
+CUTSELLMEDIA done"'
+CUTSELLMEDIA export state=failed total=83.8
 CUTSELLMEDIA export error=processing_failed
 CUTSELLMEDIA done error=none
-CUTSELLMEDIA done"'
 CUTSELLMEDIA" OR eventMessage CONTAINS "CUTSELLEXPORT"'
