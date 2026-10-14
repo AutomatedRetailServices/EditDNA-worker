@@ -24,7 +24,7 @@ struct DraftEditorView: View {
         case "overlay_selected": return EditorPreviewState(selection: .overlay("first_media", isText: false), probe: name)
         case "mic": return EditorPreviewState(panel: .micPermission, probe: name)
         case "style": return EditorPreviewState(panel: .style, probe: name)
-        case "stress": return EditorPreviewState(probe: name)
+        case "stress", "flow": return EditorPreviewState(probe: name)
         default: return EditorPreviewState(probe: name)
         }
         #else

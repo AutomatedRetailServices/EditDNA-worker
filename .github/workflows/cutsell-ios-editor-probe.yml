@@ -187,6 +187,17 @@ jobs:
           xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/real_stress.png" >/dev/null 2>&1
           line="$(xcrun simctl spawn "$udid" log show --last 3m --style compact --predicate 'eventMessage CONTAINS "CUTSELL_STRESS"' 2>/dev/null | grep CUTSELL_STRESS | tail -1 | sed 's/.*CUTSELL_STRESS/CUTSELL_STRESS/')"
           echo "::notice title=stress::${line:-no stress line found}"
+          # Screen recording of the same flow as the report: play to the end, then quick edits.
+          xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+          SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+          SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+          SIMCTL_CHILD_CUTSELL_PROBE_STATE="flow" \
+            xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+          xcrun simctl io "$udid" recordVideo --codec=h264 --force "$RUNNER_TEMP/probe/flow.mp4" > /dev/null 2>&1 &
+          rec=$!
+          sleep 45
+          kill -INT $rec; sleep 3
+          ls -la "$RUNNER_TEMP/probe/flow.mp4" || true
           echo "::notice title=probe::screenshots taken"
 
       - name: Push the screenshots to design-screenshots/probe
@@ -195,7 +206,7 @@ jobs:
           dir="$RUNNER_TEMP/out"
           git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
           cd "$dir"
-          mkdir -p probe && cp "$RUNNER_TEMP"/probe/*.png probe/
+          mkdir -p probe && cp "$RUNNER_TEMP"/probe/*.png probe/ && (cp "$RUNNER_TEMP"/probe/*.mp4 probe/ 2>/dev/null || true)
           echo "source commit: ${{ github.sha }}" > probe/SOURCE.txt
           git add probe
           git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "editor probe for ${{ github.sha }}"

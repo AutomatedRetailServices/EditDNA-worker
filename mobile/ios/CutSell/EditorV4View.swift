@@ -159,6 +159,10 @@ struct EditorV4View: View {
             Task { await runStressProbe() }
             return
         }
+        if previewState.probe == "flow" {
+            Task { await runFlowProbe() }
+            return
+        }
         if let probe = previewState.probe {
             switch probe {
             case "cap_highlight": model.applyCaptionSettings(enabled: true, preset: "highlight_green", font: "montserrat")
@@ -269,6 +273,33 @@ struct EditorV4View: View {
         toast = .message(String(format: "10 edits in %.1f s · %d quiet retries · %@", seconds, model.saveConflicts,
                                 error == nil ? "no errors" : "ERROR: \(error!)"))
         NSLog("CUTSELL_STRESS edits=10 seconds=\(seconds) retries=\(model.saveConflicts) error=\(error ?? "none")")
+    }
+
+    /// Editor probe "flow" (screen recording): play the whole cut (it must stop at its end and the
+    /// timeline with it), then split, caption, mirror and undo, each shown at once.
+    private func runFlowProbe() async {
+        func wait(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        await wait(4)
+        playback.seek(to: 0)
+        playback.togglePlayback()
+        await wait(max(2, playback.duration) + 2.5)
+        show(.message(playback.isPlaying ? "Still playing" : "Stopped at the end of the cut (\(EditorTime.short(playback.currentTime)))"))
+        await wait(2.5)
+        playback.seek(to: max(0.5, playback.duration / 3))
+        await wait(1)
+        await split()
+        await wait(2)
+        if let id = EditorTracks.clipWindows(model).first?.clipID {
+            Task { await model.editCaption(clipID: id, text: "Edited on the phone") }
+            show(.message("Caption changed"))
+        }
+        await wait(2)
+        toolTapped(.mirror)
+        await wait(2.5)
+        Task { _ = await model.undo() }
+        show(.message("Undo"))
+        await wait(2.5)
+        show(.message(model.errorMessage == nil ? "Done · no errors" : "Error: \(model.errorMessage!)"))
     }
 
     static func sampleLevels() -> [Float] {
