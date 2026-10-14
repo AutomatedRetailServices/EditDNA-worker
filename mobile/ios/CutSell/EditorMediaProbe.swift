@@ -17,9 +17,18 @@ enum EditorMediaProbe {
         await wait(4)
         // Test media made here (a photo and a 4 s video), as if picked in the gallery: the
         // Simulator's Photos permission prompt would cover the screen.
-        guard let photo = makePhoto(), let video = await makeVideo(seconds: 4) else {
+        guard let photo = makePhoto(), let stillVideo = await makeVideo(seconds: 4) else {
             log("could not make test media"); return
         }
+        // A video with sound and movement, like one from a phone: a copy of this cut's own test video.
+        var video = stillVideo
+        if let link = model.playbackURL(forSource: nil),
+           let pair = try? await URLSession.shared.download(from: link) {
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent("probe-phone-video-\(UUID().uuidString.prefix(6)).mp4")
+            try? FileManager.default.moveItem(at: pair.0, to: copy)
+            video = copy
+        }
+        log("test_media video=\(video.lastPathComponent)")
         // 1. Photo overlay.
         var started = Date()
         let photoBefore = model.mediaOverlays.count
