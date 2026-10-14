@@ -151,3 +151,78 @@ def test_real_export_mirrors_only_that_clip(tmp_path, half_red_clip):
     assert b > 150 and r < 100, (r, b)       # first clip flipped: blue on the left
     r, b = left_at(0.75)
     assert r > 150 and b < 100, (r, b)       # second clip as recorded
+
+
+# --- Trim by the edges (Editor v4): a clip is a window on its original ---------------------------
+# The iPhone saves the same `source_asset_id` + `start`/`end` (never renamed) and, when the end was
+# dragged by hand, `manual_end: true`. The export cuts the high-quality original at exactly those
+# times and never tightens away the silence the creator placed by hand.
+
+def _duration(path: str) -> float:
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                         check=True, capture_output=True, text=True).stdout
+    return float(out.strip())
+
+
+@pytest.fixture(scope="module")
+def tone_then_silence(tmp_path_factory):
+    """4 s original: tone for 1.5 s, then 2.5 s of silence (a stretched clip's tail)."""
+    path = tmp_path_factory.mktemp("trim") / "orig.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=green:s=180x320:d=4:r=30",
+        "-f", "lavfi", "-i", "sine=frequency=330:duration=1.5",
+        "-filter_complex", "[1:a]apad=whole_dur=4[a]",
+        "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-t", "4", str(path),
+    ], check=True, capture_output=True)
+    return str(path)
+
+
+def _trim_draft(**clip):
+    base = {"clip_id": "c1", "source_asset_id": "orig", "start": 0.0, "end": 3.5, "text": "hello there"}
+    base.update(clip)
+    return {"project_id": "prj_test", "captions_enabled": False, "selected": [base]}
+
+
+def test_manual_end_parses_serializes_and_defaults_off():
+    plain = draft_from_dict(_trim_draft())
+    assert plain.selected[0].manual_end is False
+    assert "manual_end" not in result_to_dict(plain)["selected"][0]          # stored drafts unchanged
+    held = draft_from_dict(_trim_draft(manual_end=True))
+    assert held.selected[0].manual_end is True
+    assert result_to_dict(held)["selected"][0]["manual_end"] is True
+    # The field names stay the same: a clip is still source_asset_id + start/end.
+    data = result_to_dict(held)["selected"][0]
+    assert (data["source_asset_id"], data["start"], data["end"]) == ("orig", 0.0, 3.5)
+
+
+def test_plan_holds_a_hand_dragged_end():
+    held = build_render_plan(draft_from_dict(_trim_draft(manual_end=True)), {"orig": "/o.mp4"})[0]
+    assert held.trailing_trim_floor == 3.5 and held.end == 3.5 and held.source_asset_id == "orig"
+    free = build_render_plan(draft_from_dict(_trim_draft()), {"orig": "/o.mp4"})[0]
+    assert free.trailing_trim_floor is None
+
+
+def test_tighten_keeps_the_silence_of_a_hand_dragged_end(tone_then_silence):
+    free = build_render_plan(draft_from_dict(_trim_draft()), {"orig": tone_then_silence})[0]
+    held = build_render_plan(draft_from_dict(_trim_draft(manual_end=True)), {"orig": tone_then_silence})[0]
+    assert render.tighten_trailing_silence(free).end < 3.0                     # engine clip: tail tightened
+    assert render.tighten_trailing_silence(held).end == pytest.approx(3.5)     # by hand: kept as placed
+
+
+def test_real_export_cuts_the_original_at_the_dragged_window(tmp_path, tone_then_silence):
+    # Stretched outward over material the cut had hidden: 0.5 s -> 3.8 s of the 4 s original.
+    draft = draft_from_dict(_trim_draft(start=0.5, end=3.8, manual_end=True))
+    output = tmp_path / "out.mp4"
+    render.render_preview(build_render_plan(draft, {"orig": tone_then_silence}), str(output), width=180, height=320)
+    assert _duration(str(output)) == pytest.approx(3.3, abs=0.12)
+
+
+def test_split_keeps_the_hand_dragged_end_on_the_right_piece():
+    from cutsell_worker.draft_edits import split_clip
+    payload = _trim_draft(manual_end=True, words=[
+        {"text": "hello", "start": 0.1, "end": 0.6}, {"text": "there", "start": 0.9, "end": 1.4}])
+    payload["alternates"] = []
+    payload["discarded"] = []
+    left, right = split_clip(payload, "c1", split_time=0.75, min_duration_sec=0.05)["selected"][:2]
+    assert "manual_end" not in left and right["manual_end"] is True

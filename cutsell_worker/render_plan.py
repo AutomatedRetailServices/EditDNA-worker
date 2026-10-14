@@ -271,6 +271,10 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
         # window. Silence trimming must not silently erase its last frames.
         if clip.audio_muted and not clip.words and not clip.text.strip():
             visual_floors.append(float(clip.end))
+        # Editor v4: an end the creator dragged by hand is kept as placed, silence included
+        # (the export cuts the original at exactly `start`/`end`).
+        if getattr(clip, "manual_end", False):
+            visual_floors.append(float(clip.end))
         word_groups = (
             timed_caption_word_groups(clip)
             if draft.captions_enabled and (draft.diagnostics or {}).get("engine") == "simple"

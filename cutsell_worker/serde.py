@@ -145,6 +145,7 @@ def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
         audio_pre_roll=_roll(item.get("audio_pre_roll")),
         audio_post_roll=_roll(item.get("audio_post_roll")),
         mirror=bool(item.get("mirror", False)),
+        manual_end=bool(item.get("manual_end", False)),
     )
 
 
@@ -301,7 +302,7 @@ def _json_safe(value: Any) -> Any:
                 if not data.get(key):
                     data.pop(key, None)
         elif isinstance(value, DraftClip):
-            for key in ("audio_pre_roll", "audio_post_roll", "mirror"):
+            for key in ("audio_pre_roll", "audio_post_roll", "mirror", "manual_end"):
                 if not data.get(key):
                     data.pop(key, None)
         return _json_safe(data)

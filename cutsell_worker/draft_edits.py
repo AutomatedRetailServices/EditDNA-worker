@@ -256,6 +256,8 @@ def split_clip(
         "split_from_take_group_id": parent_group,
         "selected": True,
     })
+    # An end dragged by hand belongs to the right piece; the left one now ends at the split.
+    left.pop("manual_end", None)
     selected[position:position + 1] = [left, right]
     out["selected"] = selected
     return out

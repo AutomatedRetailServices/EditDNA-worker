@@ -211,6 +211,10 @@ class DraftClip:
     # Editor v4 Mirror on this clip only (left-right flip of its picture in the export; captions,
     # overlays and logo are never flipped). The cut engine never sets or reads it.
     mirror: bool = False
+    # Editor v4 trim by the edges: the creator dragged this clip's end by hand (the clip is a
+    # window on its original, `source_asset_id` + `start`/`end`). The export keeps that end
+    # exactly: the trailing-silence tightening never cuts back material placed by hand.
+    manual_end: bool = False
     # Local face/pose/motion evidence carried through from the CandidateTake
     # this clip was built from (see local_performance.py). Optional and
     # defaulted to None so every existing construction site (serde.py's
