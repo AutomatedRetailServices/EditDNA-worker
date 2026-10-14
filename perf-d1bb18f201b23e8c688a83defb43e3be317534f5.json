@@ -1,0 +1,102 @@
+[
+ {
+  "step": "upload_one_by_one",
+  "ms": "14299",
+  "mb": "79.2",
+  "mb_per_s": "5.54",
+  "parts": "5"
+ },
+ {
+  "step": "upload_3_at_a_time",
+  "ms": "10776",
+  "mb": "79.2",
+  "mb_per_s": "7.35",
+  "parts": "5"
+ },
+ {
+  "step": "server_cut",
+  "ms": "54136",
+  "state": "finished"
+ },
+ {
+  "ms": "640",
+  "step": "server_ping"
+ },
+ {
+  "ms": "101",
+  "step": "server_ping_2"
+ },
+ {
+  "ms": "1215",
+  "step": "edits_list_server"
+ },
+ {
+  "ms": "1224",
+  "step": "edits_list_shown"
+ },
+ {
+  "first_frame_ms": "5246",
+  "player_ready": "true",
+  "step": "editor_first_open",
+  "ui_ms": "3093"
+ },
+ {
+  "ms": "2637",
+  "step": "play_first_open"
+ },
+ {
+  "cut_s": "29.27",
+  "overrun_s": "0.00",
+  "player_s_after_3s_past_end": "29.27",
+  "step": "end_of_cut",
+  "still_playing": "false",
+  "timeline_s": "29.27"
+ },
+ {
+  "first_frame_ms": "3717",
+  "player_ready": "true",
+  "step": "editor_reopen",
+  "ui_ms": "2943"
+ },
+ {
+  "ms": "804",
+  "step": "play_reopen"
+ },
+ {
+  "saved_ms": "2176",
+  "step": "action_split",
+  "visible_ms": "7"
+ },
+ {
+  "saved_ms": "2009",
+  "step": "action_caption_text",
+  "visible_ms": "5"
+ },
+ {
+  "saved_ms": "1408",
+  "step": "action_mirror",
+  "visible_ms": "6"
+ },
+ {
+  "saved_ms": "2153",
+  "step": "action_caption_style",
+  "visible_ms": "6"
+ },
+ {
+  "saved_ms": "2222",
+  "step": "action_delete",
+  "visible_ms": "6"
+ },
+ {
+  "saved_ms": "1460",
+  "step": "action_undo",
+  "visible_ms": "5"
+ },
+ {
+  "message": "none",
+  "step": "errors"
+ },
+ {
+  "step": "done"
+ }
+]
