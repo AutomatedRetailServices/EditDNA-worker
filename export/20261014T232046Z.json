@@ -1,0 +1,214 @@
+[
+ {
+  "cut": "13s",
+  "export": "cold",
+  "state": "finished",
+  "total_s": 20.93,
+  "download_to_phone_s": 0.47,
+  "mp4_bytes": 6573209,
+  "render_attempts": 1,
+  "server_timings": {
+   "download_sources": 2.875,
+   "download_overlays": 0.0,
+   "plan": 0.105,
+   "render_and_qc": 4.718,
+   "upload_and_verify": 1.921,
+   "finalize": 2.183
+  },
+  "marks": [
+   [
+    "submitted",
+    1.22
+   ],
+   [
+    "uploaded@None",
+    2.82
+   ],
+   [
+    "analyzing@None",
+    7.21
+   ],
+   [
+    "analyzing@2",
+    9.59
+   ],
+   [
+    "analyzing@39",
+    11.88
+   ],
+   [
+    "analyzing@48",
+    14.05
+   ],
+   [
+    "analyzing@85",
+    16.17
+   ],
+   [
+    "finished@100",
+    20.93
+   ]
+  ]
+ },
+ {
+  "cut": "13s",
+  "export": "warm",
+  "state": "finished",
+  "total_s": 20.84,
+  "download_to_phone_s": 0.52,
+  "mp4_bytes": 6573209,
+  "render_attempts": 1,
+  "server_timings": {
+   "download_sources": 2.711,
+   "download_overlays": 0.0,
+   "plan": 0.102,
+   "render_and_qc": 4.614,
+   "upload_and_verify": 1.84,
+   "finalize": 2.179
+  },
+  "marks": [
+   [
+    "submitted",
+    1.4
+   ],
+   [
+    "uploaded@None",
+    3.22
+   ],
+   [
+    "analyzing@None",
+    7.64
+   ],
+   [
+    "analyzing@35",
+    10.71
+   ],
+   [
+    "analyzing@48",
+    13.36
+   ],
+   [
+    "analyzing@85",
+    16.01
+   ],
+   [
+    "finished@100",
+    20.84
+   ]
+  ]
+ },
+ {
+  "cut": "60s",
+  "export": "cold",
+  "state": "finished",
+  "total_s": 25.95,
+  "download_to_phone_s": 0.93,
+  "mp4_bytes": 28616295,
+  "render_attempts": 1,
+  "server_timings": {
+   "download_sources": 3.243,
+   "download_overlays": 0.0,
+   "plan": 0.112,
+   "render_and_qc": 6.883,
+   "upload_and_verify": 3.172,
+   "finalize": 2.523
+  },
+  "marks": [
+   [
+    "submitted",
+    1.54
+   ],
+   [
+    "uploaded@None",
+    3.1
+   ],
+   [
+    "analyzing@2",
+    9.59
+   ],
+   [
+    "analyzing@36",
+    11.89
+   ],
+   [
+    "analyzing@39",
+    14.22
+   ],
+   [
+    "analyzing@43",
+    16.48
+   ],
+   [
+    "analyzing@85",
+    18.82
+   ],
+   [
+    "analyzing@100",
+    23.52
+   ],
+   [
+    "finished@100",
+    25.95
+   ]
+  ]
+ },
+ {
+  "cut": "60s",
+  "export": "warm",
+  "state": "finished",
+  "total_s": 26.05,
+  "download_to_phone_s": 0.75,
+  "mp4_bytes": 28614537,
+  "render_attempts": 1,
+  "server_timings": {
+   "download_sources": 3.251,
+   "download_overlays": 0.0,
+   "plan": 0.103,
+   "render_and_qc": 9.915,
+   "upload_and_verify": 2.999,
+   "finalize": 2.212
+  },
+  "marks": [
+   [
+    "submitted",
+    1.38
+   ],
+   [
+    "uploaded@None",
+    3.1
+   ],
+   [
+    "analyzing@None",
+    7.84
+   ],
+   [
+    "analyzing@2",
+    10.13
+   ],
+   [
+    "analyzing@38",
+    12.55
+   ],
+   [
+    "analyzing@41",
+    14.79
+   ],
+   [
+    "analyzing@44",
+    17.09
+   ],
+   [
+    "analyzing@47",
+    19.41
+   ],
+   [
+    "analyzing@85",
+    21.54
+   ],
+   [
+    "finished@100",
+    26.05
+   ]
+  ]
+ }
+]
