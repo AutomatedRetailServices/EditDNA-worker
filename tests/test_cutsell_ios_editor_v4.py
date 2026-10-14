@@ -47,7 +47,8 @@ def test_toolbar_v4_order_and_icons():
 def test_timeline_starts_at_the_left_with_fixed_cursor_and_zoom():
     tl = read("EditorV4Timeline.swift")
     assert "static let cursorX: CGFloat = 54" in tl
-    assert "Self.cursorX + CGFloat(seconds - now) * pps" in tl  # tracks slide under a fixed cursor
+    assert "Self.cursorX + CGFloat(seconds - scroll) * pps" in tl  # tracks slide under a fixed cursor
+    assert "min(now, max(0, duration - visible))" in tl  # ...and stop at the end of the cut
     for icon in ("Ed4RowSpeaker", "Ed4RowMic", "Ed4RowLayers"):
         assert f'"{icon}"' in tl, icon
     assert "onToggleVideoSound" in tl  # speaker = mute the video's sound

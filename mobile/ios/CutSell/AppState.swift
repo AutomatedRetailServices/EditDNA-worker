@@ -49,6 +49,11 @@ final class AppState: ObservableObject {
     private func start(with current: CutSellSession) async throws {
         session = current
         await api.setSession(current)
+        // The Edits list from last time, shown at once; the server's list replaces it right after.
+        if let cached = ProjectListCache.load(userID: current.userID), !cached.isEmpty {
+            projects = cached
+            isBootstrapping = false
+        }
         try await refreshProjects()
     }
 
@@ -103,6 +108,7 @@ final class AppState: ObservableObject {
             query: [URLQueryItem(name: "user_id", value: session.userID)]
         )
         projects = response.projects
+        ProjectListCache.save(response.projects, userID: session.userID)
     }
 
     func createProject(title: String?) async throws -> Project {

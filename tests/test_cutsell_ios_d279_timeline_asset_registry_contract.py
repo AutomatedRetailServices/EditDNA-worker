@@ -40,9 +40,10 @@ def test_ios_filters_only_ready_assets_into_editable_role_catalogs():
 
 def test_draft_load_fetches_d279_registry_with_existing_draft():
     source = VIEW_MODEL.read_text()
-    assert "async let draftRequest" in source
     assert "async let assetRequest = TimelineAssetRegistryClient.list" in source
-    assert source.index("snapshot = loadedDraft") < source.index("let loadedAssets = try await assetRequest")
+    # The draft (kept on the phone, then the server's) is set before the registry is awaited.
+    assert source.index("if fresh.revision >= (snapshot?.revision ?? 0) { snapshot = fresh }") < source.index(
+        "if let loadedAssets = try? await assetRequest")
     assert "timelineAssetLibrary = loadedAssets" in source
 
 

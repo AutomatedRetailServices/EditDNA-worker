@@ -39,7 +39,7 @@ struct EditorV4View: View {
     private var previewKey: String {
         let placements = (model.timelineComposition?.voiceOverPlacements ?? [])
             .map { "\($0.placementID)@\($0.timelineStartSec)" }.joined(separator: ",")
-        return "\(model.displayDraft?.hashValue ?? 0)|\(placements)|\(model.voiceOverVolume)"
+        return "\(model.displayDraft?.hashValue ?? 0)|\(placements)|\(model.voiceOverVolume)|\(model.loadGeneration)"
     }
 
     var body: some View {
@@ -358,6 +358,12 @@ struct EditorV4View: View {
     private func videoStack(size: CGSize) -> some View {
         ZStack {
             Color(hex: 0x070B16)
+            // The cut's first frame (kept on this phone) at once, until the player is ready.
+            if !playback.isReady, let still = ThumbnailStore.shared.image(for: project.projectID) {
+                Image(uiImage: still).resizable().scaledToFill()
+                    .frame(width: size.width, height: size.height).clipped()
+                    .accessibilityIdentifier("editorFirstFrame")
+            }
             videoLayer
             overlaysOnVideo(frame: size)
             if model.captionsEnabled {

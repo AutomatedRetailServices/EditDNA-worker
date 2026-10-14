@@ -5,13 +5,18 @@ import Foundation
 /// ring/silent switch, so with the switch on silent the video played with no sound until a voice-over
 /// recording changed the session (TestFlight build 10). The editor now asks for normal playback sound.
 enum EditorAudio {
+    private static var active = false
+
     static func preparePlayback() {
         let session = AVAudioSession.sharedInstance()
+        // Already set up (the usual case when tapping play): nothing to wait for.
+        if active, session.category == .playback { return }
         do {
             if session.category != .playback {
                 try session.setCategory(.playback, mode: .moviePlayback, options: [])
             }
             try session.setActive(true)
+            active = true
         } catch {
             CutSellDiagnostics.log("audio_session_failed", ["reason": String(describing: type(of: error))])
         }

@@ -40,7 +40,11 @@ struct TimelineV4: View {
             let width = proxy.size.width
             let now = playback.currentTime
             let pps = pixelsPerSecond
-            let x: (Double) -> CGFloat = { seconds in Self.cursorX + CGFloat(seconds - now) * pps }
+            // The tracks slide under the fixed cursor until the end of the cut reaches the right side;
+            // from there the cut stays in view and the cursor walks to its end (never an empty timeline).
+            let scroll = Self.scrollTime(now: now, duration: duration, width: width, pixelsPerSecond: pps)
+            let cursorAt = Self.cursorX + CGFloat(now - scroll) * pps
+            let x: (Double) -> CGFloat = { seconds in Self.cursorX + CGFloat(seconds - scroll) * pps }
             ZStack(alignment: .topLeading) {
                 Color(hex: 0x081226)
                 timeLabel(now).offset(x: 16, y: 6)
@@ -70,7 +74,7 @@ struct TimelineV4: View {
                 // The fixed cursor: from the top of the video track down to the overlay row.
                 RoundedRectangle(cornerRadius: 1).fill(Color.white)
                     .frame(width: 2, height: 119)
-                    .offset(x: Self.cursorX - 1, y: Self.videoBandY + 1)
+                    .offset(x: cursorAt - 1, y: Self.videoBandY + 1)
                     .allowsHitTesting(false)
             }
             .frame(width: width, height: Self.height, alignment: .topLeading)
@@ -82,6 +86,13 @@ struct TimelineV4: View {
         .frame(height: Self.height)
         .overlay(alignment: .top) { Rectangle().fill(CS.borderDefault).frame(height: 1).offset(y: -1) }
         .accessibilityIdentifier("timelineV4")
+    }
+
+    /// Time shown at the cursor's resting place: the playhead, but never so far that the cut's end
+    /// leaves the right part of the timeline (the room before the video "+").
+    static func scrollTime(now: Double, duration: Double, width: CGFloat, pixelsPerSecond: CGFloat) -> Double {
+        let visible = Double(max(40, width - cursorX - 40) / pixelsPerSecond)
+        return min(now, max(0, duration - visible))
     }
 
     private func band(width: CGFloat, y: CGFloat, height: CGFloat) -> some View {
@@ -173,7 +184,7 @@ struct TimelineV4: View {
 
     private func ruler(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let step = Self.labelStep(pixelsPerSecond)
-        let now = playback.currentTime
+        let now = Self.scrollTime(now: playback.currentTime, duration: duration, width: width, pixelsPerSecond: pixelsPerSecond)
         let first = max(0, Int((now - Double(Self.cursorX / pixelsPerSecond)) / step) - 1)
         let last = Int((now + Double(width / pixelsPerSecond)) / step) + 1
         return ZStack(alignment: .topLeading) {

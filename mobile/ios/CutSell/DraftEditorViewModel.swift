@@ -8,7 +8,16 @@ final class ResultBox {
 
 @MainActor
 final class DraftEditorViewModel: ObservableObject {
-    @Published var snapshot: DraftSnapshot?
+    @Published var snapshot: DraftSnapshot? {
+        didSet {
+            // Kept on the phone so the editor opens at once next time.
+            if let snapshot, snapshot.revision != oldValue?.revision || oldValue == nil {
+                Task.detached(priority: .utility) { DraftSnapshotCache.save(snapshot) }
+            }
+        }
+    }
+    /// Bumped when the server's draft arrives after a cached one was shown (fresh video links).
+    @Published private(set) var loadGeneration = 0
     @Published var isLoading = false
     /// The one playhead of the editor: the video player's current time (the timeline follows it).
     @Published var playheadTime: Double = 0
@@ -374,27 +383,35 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func load() async {
-        isLoading = true
+        // Open at once with the draft kept on this phone; the server's copy replaces it right after.
+        let showedCached: Bool
+        if snapshot == nil, let cached = DraftSnapshotCache.load(projectID: project.projectID) {
+            snapshot = cached
+            showedCached = true
+        } else {
+            showedCached = false
+            isLoading = snapshot == nil
+        }
         defer { isLoading = false }
+        async let assetRequest = TimelineAssetRegistryClient.list(
+            projectID: project.projectID,
+            userID: session.userID,
+            api: api
+        )
+        async let compositionRequest: Void = refreshTimelineComposition()
         do {
-            async let draftRequest: DraftSnapshot = api.request(
+            let fresh: DraftSnapshot = try await api.request(
                 "/v1/projects/\(project.projectID)/draft",
                 query: [URLQueryItem(name: "user_id", value: session.userID)]
             )
-            async let assetRequest = TimelineAssetRegistryClient.list(
-                projectID: project.projectID,
-                userID: session.userID,
-                api: api
-            )
-            async let compositionRequest: Void = refreshTimelineComposition()
-            let loadedDraft = try await draftRequest
-            snapshot = loadedDraft
-            let loadedAssets = try await assetRequest
-            timelineAssetLibrary = loadedAssets
-            await compositionRequest
+            // Never step back behind a save made meanwhile.
+            if fresh.revision >= (snapshot?.revision ?? 0) { snapshot = fresh }
+            if showedCached { loadGeneration += 1 }
         } catch {
-            errorMessage = error.localizedDescription
+            if !showedCached { errorMessage = error.localizedDescription }
         }
+        if let loadedAssets = try? await assetRequest { timelineAssetLibrary = loadedAssets }
+        await compositionRequest
     }
 
     /// D-282A Stage 6: "refresh the snapshot and library after a confirmed

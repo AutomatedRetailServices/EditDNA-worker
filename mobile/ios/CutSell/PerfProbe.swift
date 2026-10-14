@@ -143,48 +143,108 @@ final class PerfProbe: ObservableObject {
 
             }
 
-            let model = DraftEditorViewModel(project: project, session: session)
-            await time("editor_load") { await model.load() }
-            record("editor_info", ["clips": String(model.selectedClips.count), "duration_s": String(format: "%.1f", model.timelineDuration)])
-            let playback = DraftPlaybackController()
-            await time("preview_build") { await playback.rebuild(from: model) }
-            record("preview_state", ["ready": String(playback.isReady), "duration_s": String(format: "%.1f", playback.duration),
-                                     "message": playback.message ?? "none"])
+            // 1) Open the app -> Edits list. Before: the list waits for the server. After: the list
+            //    kept on the phone shows at once, the server's copy replaces it.
+            await time("edits_list_server") { try? await appState.refreshProjects() }
+            await time("edits_list_shown") {
+                appState.projects = []
+                if let cached = ProjectListCache.load(userID: user) { appState.projects = cached } // AFTER-ONLY
+                if appState.projects.isEmpty { try? await appState.refreshProjects() }
+            }
 
-            // Actions, each timed until visible and until saved.
-            if let clip = model.selectedClips.first, let id = clip["clip_id"]?.stringValue {
-                let start = clip["start"]?.doubleValue ?? 0
-                let end = clip["end"]?.doubleValue ?? start
-                if let at = model.safeSplitTime(clipID: id, near: (start + end) / 2) {
-                    let before = model.selectedClips.count
-                    await timeAction("action_split", visible: { model.selectedClips.count > before }) {
-                        await model.split(clipID: id, at: at)
+            // 2) Tap a cut -> editor ready (UI on screen) and first frame of the video.
+            for pass in ["first_open", "reopen"] {
+                let model = DraftEditorViewModel(project: project, session: session)
+                let playback = DraftPlaybackController()
+                let clock = ContinuousClock()
+                let tapped = clock.now
+                let loading = Task { @MainActor in await model.load() }
+                var uiAt: ContinuousClock.Instant?
+                while uiAt == nil, clock.now - tapped < .seconds(60) {
+                    if model.snapshot != nil && !model.isLoading { uiAt = clock.now; break }
+                    try? await Task.sleep(for: .milliseconds(5))
+                }
+                await playback.rebuild(from: model)
+                let frameAt = clock.now
+                await loading.value
+                if !playback.isReady { await playback.rebuild(from: model) }   // fresh links arrived
+                record("editor_\(pass)", [
+                    "ui_ms": uiAt.map { Self.ms($0 - tapped) } ?? "never",
+                    "first_frame_ms": Self.ms(frameAt - tapped),
+                    "player_ready": String(playback.isReady),
+                    "local_video": String(playback.sourcesAreLocal(model.snapshot)), // AFTER-ONLY
+                ])
+
+                // 3) Tap play -> sound starts (the player is really playing and time moves).
+                playback.seek(to: 0)
+                let playTap = clock.now
+                playback.togglePlayback()
+                var playingAt: ContinuousClock.Instant?
+                while playingAt == nil, clock.now - playTap < .seconds(30) {
+                    if playback.player.timeControlStatus == .playing, playback.player.currentTime().seconds > 0.03 { playingAt = clock.now }
+                    try? await Task.sleep(for: .milliseconds(5))
+                }
+                record("play_\(pass)", ["ms": playingAt.map { Self.ms($0 - playTap) } ?? "never"])
+                playback.pause()
+
+                // 4) End of the cut: the player must stop there (build 11 kept playing the original).
+                if pass == "first_open", playback.duration > 2 {
+                    playback.seek(to: playback.duration - 1.0)
+                    playback.togglePlayback()
+                    try? await Task.sleep(for: .seconds(4))
+                    let position = playback.player.currentTime().seconds
+                    record("end_of_cut", [
+                        "cut_s": String(format: "%.2f", playback.duration),
+                        "player_s_after_3s_past_end": String(format: "%.2f", position),
+                        "overrun_s": String(format: "%.2f", max(0, position - playback.duration)),
+                        "still_playing": String(playback.player.rate != 0),
+                        "timeline_s": String(format: "%.2f", playback.currentTime),
+                    ])
+                    playback.pause()
+                }
+
+                if pass == "reopen" {
+                    // 5) Each edit: on screen (visible_ms) and confirmed by the server (saved_ms).
+                    if let clip = model.selectedClips.first, let id = clip["clip_id"]?.stringValue {
+                        let start = clip["start"]?.doubleValue ?? 0
+                        let end = clip["end"]?.doubleValue ?? start
+                        if let at = model.safeSplitTime(clipID: id, near: (start + end) / 2) {
+                            let before = model.selectedClips.count
+                            await timeAction("action_split", visible: { model.selectedClips.count > before }) {
+                                await model.split(clipID: id, at: at)
+                            }
+                        }
                     }
-                    await time("preview_rebuild_after_split") { await playback.rebuild(from: model) }
-                    record("preview_state_after_split", ["ready": String(playback.isReady)])
+                    if let id = model.selectedClips.first?["clip_id"]?.stringValue {
+                        await timeAction("action_caption_text", visible: {
+                            model.selectedClips.first?["caption_text"]?.stringValue == "Perf probe caption"
+                        }) { await model.editCaption(clipID: id, text: "Perf probe caption") }
+                    }
+                    if let id = model.selectedClips.first?["clip_id"]?.stringValue {
+                        let was = model.clipIsMirrored(id)
+                        await timeAction("action_mirror", visible: { model.clipIsMirrored(id) != was }) {
+                            _ = await model.toggleMirror(clipID: id)
+                        }
+                    }
+                    await timeAction("action_caption_style", visible: { model.captionPreset == "box" }) {
+                        await model.setCaptionSettings(preset: "box")
+                    }
+                    if model.selectedClips.count > 1, let id = model.selectedClips.last?["clip_id"]?.stringValue {
+                        let before = model.selectedClips.count
+                        await timeAction("action_delete", visible: { model.selectedClips.count < before }) {
+                            await model.remove(clipID: id)
+                        }
+                        let afterDelete = model.selectedClips.count
+                        await timeAction("action_undo", visible: { model.selectedClips.count > afterDelete }) {
+                            _ = await model.undo()
+                        }
+                    }
+                    record("errors", ["message": model.errorMessage ?? "none"])
                 }
-            }
-            if let id = model.selectedClips.first?["clip_id"]?.stringValue {
-                await timeAction("action_caption_text", visible: {
-                    model.selectedClips.first?["caption_text"]?.stringValue == "Perf probe caption"
-                }) { await model.editCaption(clipID: id, text: "Perf probe caption") }
-            }
-            await timeAction("action_caption_style", visible: { model.captionPreset == "box" }) {
-                await model.setCaptionSettings(preset: "box")
-            }
-            if let id = model.selectedClips.first?["clip_id"]?.stringValue {
-                await timeAction("action_volume", visible: {
-                    (model.selectedClips.first?["audio_volume"]?.doubleValue ?? 1) < 0.6
-                }) { await model.setAudio(clipID: id, volume: 0.5) }
-            }
-            if model.selectedClips.count > 1, let id = model.selectedClips.last?["clip_id"]?.stringValue {
-                let before = model.selectedClips.count
-                await timeAction("action_delete", visible: { model.selectedClips.count < before }) {
-                    await model.remove(clipID: id)
-                }
-                let afterDelete = model.selectedClips.count
-                await timeAction("action_undo", visible: { model.selectedClips.count > afterDelete }) {
-                    _ = await model.undo()
+                // Give the background download a moment before reopening (it is what a second open uses).
+                if pass == "first_open" {
+                    try? await Task.sleep(for: .seconds(8))
+                    for _ in 0..<60 where !playback.sourcesAreLocal(model.snapshot) { try? await Task.sleep(for: .milliseconds(500)) } // AFTER-ONLY
                 }
             }
             record("done", [:])

@@ -56,3 +56,31 @@ def test_file_names_are_not_shown_as_the_cut_title():
     for prefix in ('"copy_"', '"img_"', '"media-"'):
         assert prefix in block
     assert '"[0-9a-f]{8,}"' in block
+
+
+# --- Editor speed + preview = the cut (build 11.1) ---
+
+PLAYBACK = (APP / "DraftPlaybackView.swift").read_text()
+
+
+def test_preview_is_the_cut_and_stops_at_its_end():
+    assert "item.forwardPlaybackEndTime = cutEnd" in PLAYBACK
+    assert "composition.removeTimeRange(CMTimeRange(start: cutEnd, end: composition.duration))" in PLAYBACK
+    assert "AVPlayerItem.didPlayToEndTimeNotification" in PLAYBACK and "self.stopAtEnd()" in PLAYBACK
+    assert "min(seconds, self.duration)" in PLAYBACK  # the time (and timeline) never passes the end
+
+
+def test_source_video_kept_on_the_phone():
+    caches = (APP / "LocalCaches.swift").read_text()
+    assert "actor SourceVideoCache" in caches and "static let maxBytes" in caches
+    assert "SourceVideoCache.localURL(forURI: uri)" in PLAYBACK and "SourceVideoCache.shared.prefetch" in PLAYBACK
+    assert "SourceVideoCache.shared.store(fileURL: video.url, uri: result.sourceURI)" in (APP / "CutSubmission.swift").read_text()
+
+
+def test_editor_and_edits_list_open_from_what_the_phone_kept():
+    load = _func("    func load() async {")
+    assert "DraftSnapshotCache.load(projectID: project.projectID)" in load
+    app = (APP / "AppState.swift").read_text()
+    assert "ProjectListCache.load(userID: current.userID)" in app and "ProjectListCache.save(" in app
+    v4 = (APP / "EditorV4View.swift").read_text()
+    assert "ThumbnailStore.shared.image(for: project.projectID)" in v4 and "model.loadGeneration" in v4

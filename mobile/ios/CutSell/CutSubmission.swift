@@ -127,6 +127,8 @@ final class CutSubmitter: ObservableObject {
                     let lower = progressRange.lowerBound
                     Task { @MainActor in self?.progress = lower + span * min(1, max(0, overall)) }
                 }
+                // Keep this file on the phone for the editor's preview (no download later).
+                await SourceVideoCache.shared.store(fileURL: video.url, uri: result.sourceURI)
                 CutSellDiagnostics.log("upload_completed", [
                     "source_order": String(index),
                     "elapsed_s": String(format: "%.2f", Date().timeIntervalSince(uploadStartedAt)),

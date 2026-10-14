@@ -132,9 +132,19 @@ final class DraftPlaybackController: ObservableObject {
     /// How long the video links of the current composition can be trusted.
     private var compositionReuseSec = 0.0
 
+    private var endObserver: NSObjectProtocol?
+
     init() {
         CaptionFontLoader.registerIfNeeded()
         installTimeObserver()
+        endObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let self, (note.object as? AVPlayerItem) === self.player.currentItem else { return }
+                self.stopAtEnd()
+            }
+        }
     }
 
     func captionCue(at time: Double) -> CaptionPreviewCue? {
@@ -204,7 +214,14 @@ final class DraftPlaybackController: ObservableObject {
         var result: [String: LoadedSource] = [:]
         var missing: [String: URL] = [:]
         for id in needed {
-            if let hit = sourceCache[id], Date().timeIntervalSince(hit.openedAt) < validFor { result[id] = hit }
+            let wanted = urls[id]
+            let reusable: Bool = {
+                guard let hit = sourceCache[id] else { return false }
+                if hit.asset.url.isFileURL { return hit.asset.url == wanted }        // local copy: never expires
+                if wanted?.isFileURL == true { return false }                       // a local copy is ready now
+                return Date().timeIntervalSince(hit.openedAt) < validFor            // signed link still valid
+            }()
+            if reusable, let hit = sourceCache[id] { result[id] = hit }
             else if let url = urls[id] { missing[id] = url }
         }
         await withTaskGroup(of: (String, LoadedSource?).self) { group in
@@ -336,7 +353,14 @@ final class DraftPlaybackController: ObservableObject {
                 mixInputs.append(parameters)
             }
 
+            // The preview is the CUT: nothing past its last clip (a source track can run longer than
+            // the ranges taken from it; the build-11 preview kept playing ~19 s of the original).
+            let cutEnd = cursor
+            if composition.duration > cutEnd {
+                composition.removeTimeRange(CMTimeRange(start: cutEnd, end: composition.duration))
+            }
             let item = AVPlayerItem(asset: composition)
+            item.forwardPlaybackEndTime = cutEnd
             let mix = AVMutableAudioMix()
             mix.inputParameters = mixInputs
             item.audioMix = mix
@@ -346,7 +370,7 @@ final class DraftPlaybackController: ObservableObject {
             clipWindows = windows
             compositionSignature = signature
             compositionBuiltAt = Date()
-            compositionReuseSec = Self.reuseWindow(for: model.snapshot)
+            compositionReuseSec = sourceURLs.values.allSatisfy(\.isFileURL) ? .greatestFiniteMagnitude : Self.reuseWindow(for: model.snapshot)
             refreshCaptionCues(from: model)
             // Stay where the creator was (an edit no longer jumps back to the start).
             seek(to: min(resumeAt, max(0, duration - 0.05)))
@@ -379,6 +403,13 @@ final class DraftPlaybackController: ObservableObject {
         isPlaying = false
     }
 
+    /// End of the cut: stop the player (not just the button) and stay on the last frame.
+    private func stopAtEnd() {
+        player.pause()
+        isPlaying = false
+        currentTime = duration
+    }
+
     func seek(to seconds: Double) {
         guard isReady else { return }
         let target = max(0, min(duration, seconds))
@@ -395,24 +426,39 @@ final class DraftPlaybackController: ObservableObject {
         ) { [weak self] time in
             guard let self else { return }
             Task { @MainActor in
-                self.currentTime = max(0, CMTimeGetSeconds(time))
-                if self.duration > 0, self.currentTime >= self.duration - 0.05 {
-                    self.isPlaying = false
+                let seconds = max(0, CMTimeGetSeconds(time))
+                // Never past the end of the cut (the timeline stops there too).
+                self.currentTime = self.duration > 0 ? min(seconds, self.duration) : seconds
+                if self.isPlaying, self.duration > 0, seconds >= self.duration - 0.03 {
+                    self.stopAtEnd()
                 }
             }
         }
     }
 
+    /// The video of each source: the copy on this iPhone when there is one (no download, no expiry),
+    /// else the signed link -- and that one is downloaded in the background for next time.
     private func sourceURLCatalog(from snapshot: DraftSnapshot?) -> [String: URL] {
         var output: [String: URL] = [:]
         for source in snapshot?.sources ?? [] {
             guard let object = source.objectValue,
-                  let sourceID = object["source_asset_id"]?.stringValue,
-                  let rawURL = object["playback_url"]?.stringValue,
-                  let url = URL(string: rawURL) else { continue }
+                  let sourceID = object["source_asset_id"]?.stringValue else { continue }
+            let uri = object["uri"]?.stringValue
+            if let uri, let local = SourceVideoCache.localURL(forURI: uri) {
+                output[sourceID] = local
+                continue
+            }
+            guard let rawURL = object["playback_url"]?.stringValue, let url = URL(string: rawURL) else { continue }
             output[sourceID] = url
+            if let uri { Task.detached(priority: .utility) { await SourceVideoCache.shared.prefetch(uri: uri, remote: url) } }
         }
         return output
+    }
+
+    /// Where the preview's video comes from (for the probe and diagnostics).
+    func sourcesAreLocal(_ snapshot: DraftSnapshot?) -> Bool {
+        let urls = sourceURLCatalog(from: snapshot)
+        return !urls.isEmpty && urls.values.allSatisfy(\.isFileURL)
     }
 }
 
