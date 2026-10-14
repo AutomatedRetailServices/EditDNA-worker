@@ -48,6 +48,8 @@ final class DraftEditorViewModel: ObservableObject {
     /// every tap reacts immediately). `nil` when nothing is waiting; on a server error the screen
     /// falls back to what the server really has.
     @Published private(set) var optimisticDraft: JSONValue?
+    /// Saves that met a 409 and were retried quietly (shown by the editor probe).
+    @Published private(set) var saveConflicts = 0
     /// What the editor shows: the predicted draft while an edit is on its way, else the server's.
     var displayDraft: JSONValue? { optimisticDraft ?? snapshot?.draft }
 
@@ -104,11 +106,7 @@ final class DraftEditorViewModel: ObservableObject {
                 return clip
             } }
         }
-        await perform(predict: change) { [weak self] in
-            guard let self, var object = self.snapshot?.draft.objectValue else { return }
-            change(&object)
-            await self.autosave(.object(object))
-        }.value
+        await perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }.value
         return turnOn
     }
     var rotationDegrees: Int { Int(displayDraft?["rotation"]?.doubleValue ?? 0) % 360 }
@@ -170,21 +168,13 @@ final class DraftEditorViewModel: ObservableObject {
                 return clip
             } }
         }
-        await perform(predict: change) { [weak self] in
-            guard let self, var object = self.snapshot?.draft.objectValue else { return }
-            change(&object)
-            await self.autosave(.object(object))
-        }.value
+        await perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }.value
     }
 
     /// Mirror / rotation are whole-video settings saved on the draft (the export reads them).
     func setDraftValue(_ key: String, _ value: JSONValue) async {
         let change: (inout [String: JSONValue]) -> Void = { $0[key] = value }
-        await perform(predict: change) { [weak self] in
-            guard let self, var object = self.snapshot?.draft.objectValue else { return }
-            change(&object)
-            await self.autosave(.object(object))
-        }.value
+        await perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }.value
     }
 
     // MARK: Auto Zoom AI keyframes (◇ on the timeline)
@@ -252,11 +242,7 @@ final class DraftEditorViewModel: ObservableObject {
             object["zoom_keyframes"] = .array(items.map(JSONValue.object))
             if let enable { object["auto_zoom_enabled"] = .bool(enable) }
         }
-        await perform(predict: change) { [weak self] in
-            guard let self, var object = self.snapshot?.draft.objectValue else { return }
-            change(&object)
-            await self.autosave(.object(object))
-        }.value
+        await perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }.value
     }
 
     /// The ◇ control: a zoom keyframe at the cursor (turns Auto Zoom AI on so it shows in the export).
@@ -293,6 +279,21 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     #if DEBUG
+    /// Editor probe only: saves the draft on the server WITHOUT taking the answer, so this screen's
+    /// revision is one behind -- the same state as a save whose answer was lost (the 409 report).
+    func probeMakeLocalRevisionStale() async {
+        guard let base = snapshot else { return }
+        let _: DraftSnapshot? = try? await api.request(
+            "/v1/projects/\(project.projectID)/draft",
+            method: "PUT",
+            body: JSONValue.object([
+                "user_id": .string(session.userID),
+                "expected_revision": .number(Double(base.revision)),
+                "draft": base.draft
+            ])
+        )
+    }
+
     /// Editor probe only: shows two sample zoom keyframes on a real cut (the live server keeps
     /// keyframes once the new engine is deployed); nothing is saved.
     func probeShowZoomKeyframes(at times: [Double]) {
@@ -520,9 +521,7 @@ final class DraftEditorViewModel: ObservableObject {
         x: Double = 0.5, y: Double = 0.5, width: Double = 0.4,
         sourceStart: Double = 0.0, sourceEnd: Double? = nil, muteAudio: Bool = true
     ) async {
-        guard let snapshot else { return }
         var body: [String: JSONValue] = [
-            "draft": snapshot.draft,
             "project_id": .string(project.projectID),
             "user_id": .string(session.userID),
             "kind": .string(kind),
@@ -536,17 +535,15 @@ final class DraftEditorViewModel: ObservableObject {
             "mute_audio": .bool(muteAudio),
         ]
         if let sourceEnd { body["source_end"] = .number(sourceEnd) }
-        let edited = await edit(path: "/v1/overlays/add", body: .object(body))
-        if let edited { await autosave(edited) }
+        let fields = body
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/overlays/add", fields) }.value
     }
 
     func updateMediaOverlay(
         overlayID: String, start: Double? = nil, end: Double? = nil,
         x: Double? = nil, y: Double? = nil, width: Double? = nil, muteAudio: Bool? = nil
     ) async {
-        guard let snapshot else { return }
         var body: [String: JSONValue] = [
-            "draft": snapshot.draft,
             "overlay_id": .string(overlayID),
         ]
         if let start { body["start"] = .number(start) }
@@ -555,17 +552,14 @@ final class DraftEditorViewModel: ObservableObject {
         if let y { body["y"] = .number(y) }
         if let width { body["width"] = .number(width) }
         if let muteAudio { body["mute_audio"] = .bool(muteAudio) }
-        let edited = await edit(path: "/v1/overlays/update", body: .object(body))
-        if let edited { await autosave(edited) }
+        let fields = body
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/overlays/update", fields) }.value
     }
 
     func removeMediaOverlay(overlayID: String) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/overlays/remove", body: .object([
-            "draft": snapshot.draft,
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/overlays/remove", [
             "overlay_id": .string(overlayID),
-        ]))
-        if let edited { await autosave(edited) }
+        ]) }.value
     }
 
     /// Imports an already-existing local photo/video file via the real,
@@ -772,13 +766,10 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func swap(selectedClipID: String, replacementClipID: String) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/draft-edits/swap", body: .object([
-            "draft": snapshot.draft,
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/swap", [
             "selected_clip_id": .string(selectedClipID),
             "replacement_clip_id": .string(replacementClipID)
-        ]))
-        if let edited { await autosave(edited) }
+        ]) }.value
     }
 
     func remove(clipID: String) async {
@@ -788,32 +779,23 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func removeNow(clipID: String) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/draft-edits/remove", body: .object([
-            "draft": snapshot.draft,
+        await editAndSave("/v1/draft-edits/remove", [
             "clip_id": .string(clipID)
-        ]))
-        if let edited { await autosave(edited) }
+        ])
     }
 
     func reorder(clipIDs: [String]) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/draft-edits/reorder", body: .object([
-            "draft": snapshot.draft,
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/reorder", [
             "ordered_clip_ids": .array(clipIDs.map(JSONValue.string))
-        ]))
-        if let edited { await autosave(edited) }
+        ]) }.value
     }
 
     func trim(clipID: String, start: Double, end: Double) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/draft-edits/trim", body: .object([
-            "draft": snapshot.draft,
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/trim", [
             "clip_id": .string(clipID),
             "start": .number(start),
             "end": .number(end)
-        ]))
-        if let edited { await autosave(edited) }
+        ]) }.value
     }
 
     /// The closest place to `sourceTime` (source seconds) where a selected
@@ -871,13 +853,10 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func splitNow(clipID: String, at sourceTime: Double) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/draft-edits/split", body: .object([
-            "draft": snapshot.draft,
+        await editAndSave("/v1/draft-edits/split", [
             "clip_id": .string(clipID),
             "split_time": .number(sourceTime)
-        ]))
-        if let edited { await autosave(edited) }
+        ])
     }
 
     func editCaption(clipID: String, text: String) async {
@@ -893,15 +872,12 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func sendCaptionText(clipID: String, text: String) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/draft-edits/captions", body: .object([
-            "draft": snapshot.draft,
+        await editAndSave("/v1/draft-edits/captions", [
             "edits": .array([.object([
                 "clip_id": .string(clipID),
                 "text": .string(text)
             ])])
-        ]))
-        if let edited { await autosave(edited) }
+        ])
     }
 
     /// Whole-video caption settings through the real
@@ -938,6 +914,12 @@ final class DraftEditorViewModel: ObservableObject {
         if let x { changes["caption_x"] = .number(x) }
         if let y { changes["caption_y"] = .number(y) }
         if let scale { changes["caption_scale"] = .number(scale) }
+        // Tapping what is already chosen (or lifting a finger without moving) saves nothing.
+        changes = changes.filter { key, value in
+            guard let current = captionValue(key) else { return true }
+            if case .number(let a) = current, case .number(let b) = value { return abs(a - b) > 0.0005 }
+            return current != value
+        }
         guard !changes.isEmpty else { return nil }
 
         captionOverrideCounter += 1
@@ -948,9 +930,14 @@ final class DraftEditorViewModel: ObservableObject {
         }
 
         let changedKeys = Array(changes.keys)
+        let changed = changes
         return perform(predict: nil) { [weak self] in
             guard let self else { return }
-            await self.sendCaptionSettings(enabled: enabled, preset: preset, font: font, x: x, y: y, scale: scale)
+            await self.sendCaptionSettings(
+                enabled: changed["captions_enabled"]?.boolValue, preset: changed["caption_preset"]?.stringValue,
+                font: changed["caption_font"]?.stringValue, x: changed["caption_x"]?.doubleValue,
+                y: changed["caption_y"]?.doubleValue, scale: changed["caption_scale"]?.doubleValue
+            )
             for key in changedKeys where self.captionOverrideTokens[key] == token {
                 self.captionOverrides[key] = nil
                 self.captionOverrideTokens[key] = nil
@@ -961,16 +948,14 @@ final class DraftEditorViewModel: ObservableObject {
     private func sendCaptionSettings(
         enabled: Bool?, preset: String?, font: String?, x: Double?, y: Double?, scale: Double?
     ) async {
-        guard let snapshot else { return }
-        var object: [String: JSONValue] = ["draft": snapshot.draft]
+        var object: [String: JSONValue] = [:]
         object["enabled"] = enabled.map(JSONValue.bool) ?? .null
         object["preset"] = preset.map(JSONValue.string) ?? .null
         object["font"] = font.map(JSONValue.string) ?? .null
         object["x"] = x.map(JSONValue.number) ?? .null
         object["y"] = y.map(JSONValue.number) ?? .null
         object["scale"] = scale.map(JSONValue.number) ?? .null
-        let edited = await edit(path: "/v1/draft-edits/caption-settings", body: .object(object))
-        if let edited { await autosave(edited) }
+        await editAndSave("/v1/draft-edits/caption-settings", object)
     }
 
     func setAudio(clipID: String, muted: Bool? = nil, volume: Double? = nil) async {
@@ -986,38 +971,32 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func setAudioNow(clipID: String, muted: Bool?, volume: Double?) async {
-        guard let snapshot else { return }
-        var object: [String: JSONValue] = ["draft": snapshot.draft, "clip_id": .string(clipID)]
+        var object: [String: JSONValue] = ["clip_id": .string(clipID)]
         object["muted"] = muted.map(JSONValue.bool) ?? .null
         object["volume"] = volume.map(JSONValue.number) ?? .null
-        let edited = await edit(path: "/v1/draft-edits/audio", body: .object(object))
-        if let edited { await autosave(edited) }
+        await editAndSave("/v1/draft-edits/audio", object)
     }
 
     func addTextOverlay(text: String, start: Double = 0, end: Double? = nil) async {
-        guard let snapshot else { return }
         let resolvedEnd = max(start + 0.15, min(end ?? max(1, timelineDuration), max(1, timelineDuration)))
-        let edited = await edit(path: "/v1/draft-edits/text/add", body: .object([
-            "draft": snapshot.draft,
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/text/add", [
             "text": .string(text),
             "start": .number(start),
             "end": .number(resolvedEnd),
             "x": .number(0.5),
             "y": .number(0.2),
             "scale": .number(1.0)
-        ]))
-        if let edited { await autosave(edited) }
+        ]) }.value
     }
 
     func updateTextOverlay(id: String, text: String? = nil, x: Double? = nil, y: Double? = nil, scale: Double? = nil) async {
-        guard let snapshot else { return }
-        var body: [String: JSONValue] = ["draft": snapshot.draft, "overlay_id": .string(id)]
+        var body: [String: JSONValue] = ["overlay_id": .string(id)]
         body["text"] = text.map(JSONValue.string) ?? .null
         body["x"] = x.map(JSONValue.number) ?? .null
         body["y"] = y.map(JSONValue.number) ?? .null
         body["scale"] = scale.map(JSONValue.number) ?? .null
-        let edited = await edit(path: "/v1/draft-edits/text/update", body: .object(body))
-        if let edited { await autosave(edited) }
+        let fields = body
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/text/update", fields) }.value
     }
 
     func removeTextOverlay(id: String) async {
@@ -1028,16 +1007,12 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func removeTextOverlayNow(id: String) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/draft-edits/text/remove", body: .object([
-            "draft": snapshot.draft,
+        await editAndSave("/v1/draft-edits/text/remove", [
             "overlay_id": .string(id)
-        ]))
-        if let edited { await autosave(edited) }
+        ])
     }
 
     func addMediaOverlay(fileURL: URL, start: Double = 0, end: Double? = nil) async {
-        guard let snapshot else { return }
         do {
             let uploaded = try await OverlayUploadManager.shared.upload(
                 fileURL: fileURL,
@@ -1045,40 +1020,20 @@ final class DraftEditorViewModel: ObservableObject {
                 session: session
             )
             let resolvedEnd = max(start + 0.15, min(end ?? max(1, timelineDuration), max(1, timelineDuration)))
-            let edited: JSONValue = try await api.request(
-                "/v1/overlays/add",
-                method: "POST",
-                body: JSONValue.object([
-                    "project_id": .string(project.projectID),
-                    "user_id": .string(session.userID),
-                    "draft": snapshot.draft,
-                    "kind": .string(uploaded.kind),
-                    "uri": .string(uploaded.uri),
-                    "start": .number(start),
-                    "end": .number(resolvedEnd),
-                    "x": .number(0.5),
-                    "y": .number(0.5),
-                    "width": .number(0.4),
-                    "source_start": .number(0),
-                    "source_end": .null,
-                    "mute_audio": .bool(true)
-                ])
-            )
-            await autosave(edited)
+            await addMediaOverlay(kind: uploaded.kind, uri: uploaded.uri, start: start, end: resolvedEnd)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = Self.friendly(error)
         }
     }
 
     func updateMediaOverlay(id: String, x: Double? = nil, y: Double? = nil, width: Double? = nil, muted: Bool? = nil) async {
-        guard let snapshot else { return }
-        var body: [String: JSONValue] = ["draft": snapshot.draft, "overlay_id": .string(id)]
+        var body: [String: JSONValue] = ["overlay_id": .string(id)]
         body["x"] = x.map(JSONValue.number) ?? .null
         body["y"] = y.map(JSONValue.number) ?? .null
         body["width"] = width.map(JSONValue.number) ?? .null
         body["mute_audio"] = muted.map(JSONValue.bool) ?? .null
-        let edited = await edit(path: "/v1/overlays/update", body: .object(body))
-        if let edited { await autosave(edited) }
+        let fields = body
+        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/overlays/update", fields) }.value
     }
 
     func removeMediaOverlay(id: String) async {
@@ -1089,12 +1044,9 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func removeMediaOverlayNow(id: String) async {
-        guard let snapshot else { return }
-        let edited = await edit(path: "/v1/overlays/remove", body: .object([
-            "draft": snapshot.draft,
+        await editAndSave("/v1/overlays/remove", [
             "overlay_id": .string(id)
-        ]))
-        if let edited { await autosave(edited) }
+        ])
     }
 
     /// Returns whether the real `/draft/undo` call actually succeeded --
@@ -1111,22 +1063,9 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func undoNow() async -> Bool {
-        guard let snapshot else { return false }
-        do {
-            if !confirmedHistory.isEmpty { confirmedHistory.removeLast() }
-            self.snapshot = try await api.request(
-                "/v1/projects/\(project.projectID)/draft/undo",
-                method: "POST",
-                body: JSONValue.object([
-                    "user_id": .string(session.userID),
-                    "expected_revision": .number(Double(snapshot.revision))
-                ])
-            )
-            return true
-        } catch {
-            errorMessage = error.localizedDescription
-            return false
-        }
+        let done = await history("undo")
+        if done, !confirmedHistory.isEmpty { confirmedHistory.removeLast() }
+        return done
     }
 
     /// Same honest success/failure contract as `undo()` -- see above.
@@ -1138,21 +1077,7 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     private func redoNow() async -> Bool {
-        guard let snapshot else { return false }
-        do {
-            self.snapshot = try await api.request(
-                "/v1/projects/\(project.projectID)/draft/redo",
-                method: "POST",
-                body: JSONValue.object([
-                    "user_id": .string(session.userID),
-                    "expected_revision": .number(Double(snapshot.revision))
-                ])
-            )
-            return true
-        } catch {
-            errorMessage = error.localizedDescription
-            return false
-        }
+        await history("redo")
     }
 
     func export() async {
@@ -1179,33 +1104,149 @@ final class DraftEditorViewModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private func edit(path: String, body: JSONValue) async -> JSONValue? {
+    // MARK: One save path for every draft change
+    //
+    // Every change builds its new draft from the server's latest draft, then saves it with ONE PUT
+    // carrying that draft's revision; the answer becomes the local draft (so the next change uses
+    // the new revision). Changes run one at a time (`perform`). If the server still says the
+    // draft moved on (409: an earlier save whose answer was lost, another device...), the draft is
+    // reloaded, the change is made again on top of it and saved once more -- with no alert. Only a
+    // second failure in a row is shown, in plain words.
+
+    private enum SaveOutcome { case saved, conflict, failed(Error) }
+
+    static func isConflict(_ error: Error) -> Bool {
+        if case APIError.http(409, _) = error { return true }
+        return false
+    }
+
+    /// Plain words instead of "draft revision conflict ... (409)".
+    static func friendly(_ error: Error) -> String {
+        if isConflict(error) {
+            return "This cut was changed somewhere else. We reloaded it — please try your change again."
+        }
+        if let api = error as? APIError, case .http(let code, _) = api, code >= 500 {
+            return "The server is busy. Please try again in a moment."
+        }
+        if (error as NSError).domain == NSURLErrorDomain {
+            return "No connection. Check your internet and try again."
+        }
+        return "Couldn’t save this change. Please try again."
+    }
+
+    private func reloadDraft() async -> Bool {
         do {
-            let edited: JSONValue = try await api.request(path, method: "POST", body: body)
-            return edited
+            snapshot = try await api.request(
+                "/v1/projects/\(project.projectID)/draft",
+                query: [URLQueryItem(name: "user_id", value: session.userID)]
+            )
+            return true
         } catch {
-            errorMessage = error.localizedDescription
-            return nil
+            return false
         }
     }
 
-    private func autosave(_ draft: JSONValue) async {
-        guard let snapshot else { return }
-        isSaving = true
-        defer { isSaving = false }
-        confirmedHistory.append(snapshot.draft)
-        if confirmedHistory.count > 20 { confirmedHistory.removeFirst() }
+    private func put(_ draft: JSONValue, over base: DraftSnapshot) async -> SaveOutcome {
         do {
-            self.snapshot = try await api.request(
+            let saved: DraftSnapshot = try await api.request(
                 "/v1/projects/\(project.projectID)/draft",
                 method: "PUT",
                 body: JSONValue.object([
                     "user_id": .string(session.userID),
-                    "expected_revision": .number(Double(snapshot.revision)),
+                    "expected_revision": .number(Double(base.revision)),
                     "draft": draft
                 ])
             )
-        } catch { errorMessage = error.localizedDescription }
+            snapshot = saved
+            return .saved
+        } catch {
+            return Self.isConflict(error) ? .conflict : .failed(error)
+        }
+    }
+
+    /// `build` makes the edited draft from `base` (a server edit route or a local change);
+    /// nil = nothing to save. Returns whether the change is saved.
+    @discardableResult
+    private func commit(_ build: @escaping (JSONValue) async throws -> JSONValue?) async -> Bool {
+        for attempt in 0..<2 {
+            guard let base = snapshot else { return false }
+            let edited: JSONValue?
+            do {
+                edited = try await build(base.draft)
+            } catch {
+                errorMessage = Self.friendly(error)
+                return false
+            }
+            guard let edited else { return false }
+            if edited == base.draft { return true }   // nothing changed: nothing to save
+            isSaving = true
+            let outcome = await put(edited, over: base)
+            isSaving = false
+            switch outcome {
+            case .saved:
+                confirmedHistory.append(base.draft)
+                if confirmedHistory.count > 20 { confirmedHistory.removeFirst() }
+                return true
+            case .conflict:
+                saveConflicts += 1
+                if attempt == 0, await reloadDraft() { continue }
+            case .failed(let error):
+                errorMessage = Self.friendly(error)
+                return false
+            }
+        }
+        _ = await reloadDraft()
+        errorMessage = Self.friendly(APIError.http(409, ""))
+        return false
+    }
+
+    /// A server edit route (`/v1/draft-edits/...`, `/v1/overlays/...`) applied to the latest draft, then saved.
+    @discardableResult
+    private func editAndSave(_ path: String, _ fields: [String: JSONValue]) async -> Bool {
+        await commit { [api] base in
+            var body = fields
+            body["draft"] = base
+            let edited: JSONValue = try await api.request(path, method: "POST", body: JSONValue.object(body))
+            return edited
+        }
+    }
+
+    /// A local change applied to the latest draft, then saved.
+    @discardableResult
+    private func saveChange(_ change: @escaping (inout [String: JSONValue]) -> Void) async -> Bool {
+        await commit { base in
+            guard var object = base.objectValue else { return nil }
+            change(&object)
+            return .object(object)
+        }
+    }
+
+    /// Undo / redo on the server, with the same quiet reload-and-retry after a 409.
+    private func history(_ action: String) async -> Bool {
+        for attempt in 0..<2 {
+            guard let base = snapshot else { return false }
+            do {
+                snapshot = try await api.request(
+                    "/v1/projects/\(project.projectID)/draft/\(action)",
+                    method: "POST",
+                    body: JSONValue.object([
+                        "user_id": .string(session.userID),
+                        "expected_revision": .number(Double(base.revision))
+                    ])
+                )
+                return true
+            } catch {
+                if Self.isConflict(error), attempt == 0, await reloadDraft() { saveConflicts += 1; continue }
+                if case APIError.http(let code, _) = error, code == 409 || code == 400 || code == 422 {
+                    // Nothing (left) to undo / redo on the server: not worth an alert.
+                    _ = await reloadDraft()
+                    return false
+                }
+                errorMessage = Self.friendly(error)
+                return false
+            }
+        }
+        return false
     }
 
     private func pollExport(jobID: String) async {

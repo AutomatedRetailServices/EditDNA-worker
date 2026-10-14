@@ -155,6 +155,10 @@ struct EditorV4View: View {
             captionText = captionTextFor(clipID)
         }
         #if DEBUG
+        if previewState.probe == "stress" {
+            Task { await runStressProbe() }
+            return
+        }
         if let probe = previewState.probe {
             switch probe {
             case "cap_highlight": model.applyCaptionSettings(enabled: true, preset: "highlight_green", font: "montserrat")
@@ -234,6 +238,39 @@ struct EditorV4View: View {
     }
 
     #if DEBUG
+    /// Editor probe "stress": 10 quick edits in a row (split, delete, caption, mirror, undo/redo...),
+    /// started without waiting for each other, right after the local draft was made one revision
+    /// stale on purpose. Expected: no alert, every edit saved, the stale revision healed quietly.
+    private func runStressProbe() async {
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        await model.probeMakeLocalRevisionStale()
+        let started = Date()
+        var tasks: [Task<Void, Never>] = []
+        func go(_ work: @escaping @MainActor () async -> Void) { tasks.append(Task { @MainActor in await work() }) }
+        let windows = EditorTracks.clipWindows(model)
+        if let first = windows.first {
+            let middle = first.sourceStart + (first.end - first.start) / 2
+            if let at = model.safeSplitTime(clipID: first.clipID, near: middle) { go { await model.split(clipID: first.clipID, at: at) } }
+        }
+        go { await model.editCaption(clipID: windows.first?.clipID ?? "", text: "Stress test caption") }
+        go { _ = await model.toggleMirror(clipID: nil) }
+        model.applyCaptionSettings(preset: "box")
+        model.applyCaptionSettings(preset: "box")          // same choice again: must save nothing
+        go { _ = await model.undo() }
+        go { _ = await model.redo() }
+        if windows.count > 1, let last = windows.last { go { await model.remove(clipID: last.clipID) } }
+        go { _ = await model.toggleMirror(clipID: nil) }
+        go { _ = await model.undo() }
+        model.applyCaptionSettings(preset: "highlight_green")
+        for task in tasks { await task.value }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        let seconds = Date().timeIntervalSince(started)
+        let error = model.errorMessage
+        toast = .message(String(format: "10 edits in %.1f s · %d quiet retries · %@", seconds, model.saveConflicts,
+                                error == nil ? "no errors" : "ERROR: \(error!)"))
+        NSLog("CUTSELL_STRESS edits=10 seconds=\(seconds) retries=\(model.saveConflicts) error=\(error ?? "none")")
+    }
+
     static func sampleLevels() -> [Float] {
         var levels: [Float] = []
         for i in 0..<80 {

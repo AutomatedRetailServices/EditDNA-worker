@@ -100,7 +100,8 @@ def test_settings_are_sent_to_the_real_route_with_every_field():
     for field in ("enabled", "preset", "font", "x", "y", "scale"):
         assert f'object["{field}"]' in body
     assert '"/v1/draft-edits/caption-settings"' in body
-    assert "await autosave(edited)" in body
+    # One save path for every edit (reload + quiet retry on a 409).
+    assert 'await editAndSave("/v1/draft-edits/caption-settings", object)' in body
     # Server side accepts exactly these fields.
     main_source = MAIN_APP.read_text()
     request = main_source[main_source.index("class DraftCaptionSettingsRequest"):]

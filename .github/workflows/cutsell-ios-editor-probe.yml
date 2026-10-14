@@ -61,7 +61,7 @@ jobs:
               with urllib.request.urlopen(r, timeout=120) as x: return json.load(x)
           s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
           print("::add-mask::" + T)
-          p = call("POST", "/v1/projects", {"user_id": u, "title": "Editor probe"}); pid = p["project_id"]
+          p = call("POST", "/v1/projects", {"user_id": u, "title": "copy_9E4975E5-7A1B"}); pid = p["project_id"]
           data = open(video, "rb").read()
           st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "probe.mp4",
                     "content_type": "video/mp4", "size_bytes": len(data)})
@@ -177,6 +177,16 @@ jobs:
             sleep 14
             xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/real_$state.png" >/dev/null 2>&1
           done
+          # 10 quick edits in a row on the real cut, starting from a stale local revision (the 409 report).
+          xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+          SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+          SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+          SIMCTL_CHILD_CUTSELL_PROBE_STATE="stress" \
+            xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+          sleep 50
+          xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/real_stress.png" >/dev/null 2>&1
+          line="$(xcrun simctl spawn "$udid" log show --last 3m --style compact --predicate 'eventMessage CONTAINS "CUTSELL_STRESS"' 2>/dev/null | grep CUTSELL_STRESS | tail -1 | sed 's/.*CUTSELL_STRESS/CUTSELL_STRESS/')"
+          echo "::notice title=stress::${line:-no stress line found}"
           echo "::notice title=probe::screenshots taken"
 
       - name: Push the screenshots to design-screenshots/probe

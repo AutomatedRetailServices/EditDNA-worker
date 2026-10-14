@@ -883,10 +883,21 @@ struct PlayerLayerView: UIViewRepresentable {
 /// Readable names for cuts: the project's own title, or "Cut 13 Oct" (date it was made) instead of
 /// "Untitled Cut" or an internal file name like "media-B3E69460-…".
 enum CutNaming {
+    /// Names a person did not choose: empty, placeholders, or file names made by the phone or the
+    /// app ("copy_9E4975E5…", "IMG_1234", "media-B3E6…", a UUID). Those show as "Cut 13 Oct".
     static func isInternal(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return name.isEmpty || lower == "untitled cut" || lower.hasPrefix("media-") || lower == "video 1"
-            || lower == "recorded clip" || lower.hasPrefix("prepared-")
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if trimmed.isEmpty || lower == "untitled cut" || lower == "video 1" || lower == "recorded clip" { return true }
+        let base = (lower as NSString).deletingPathExtension
+        for prefix in ["media-", "prepared-", "copy_", "copy-", "img_", "img-", "vid_", "vid-", "mov_", "trim.", "rpreplay", "fullsizerender", "video-"]
+        where base.hasPrefix(prefix) { return true }
+        // A long run of hex characters (UUIDs, asset ids).
+        if base.range(of: "[0-9a-f]{8,}", options: .regularExpression) != nil { return true }
+        // One word made of letters, digits and _ - . with a digit in it: a file name, not a title.
+        if !base.contains(" "), base.range(of: "^[a-z0-9_.-]+$", options: .regularExpression) != nil,
+           base.range(of: "[0-9]", options: .regularExpression) != nil { return true }
+        return false
     }
 
     static func dated(_ date: Date = Date()) -> String {

@@ -514,38 +514,38 @@ def test_undo_and_redo_expose_a_real_typed_success_result_not_void():
     assert "@discardableResult" in vm_source[max(0, redo_idx - 120):redo_idx]
 
 
+def _history_body(vm_source: str) -> str:
+    start = vm_source.index("private func history(_ action: String) async -> Bool")
+    return vm_source[start:vm_source.index("\n    }\n", start)]
+
+
 def test_undo_returns_true_only_on_confirmed_success_false_on_caught_error():
     vm_source = VIEW_MODEL.read_text()
     assert "result.value = await self?.undoNow() ?? false" in vm_source
-    undo_idx = vm_source.index("private func undoNow() async -> Bool")
-    redo_idx = vm_source.index("func redo() async -> Bool")
-    undo_body = vm_source[undo_idx:redo_idx]
+    undo_body = vm_source[vm_source.index("private func undoNow() async -> Bool"):]
+    assert 'await history("undo")' in undo_body[:300]
+    body = _history_body(vm_source)
     # Success path: the real snapshot assignment is followed by `return true`.
-    assign_idx = undo_body.index("self.snapshot = try await api.request(")
-    return_true_idx = undo_body.index("return true", assign_idx)
-    catch_idx = undo_body.index("} catch {")
+    assign_idx = body.index("snapshot = try await api.request(")
+    return_true_idx = body.index("return true", assign_idx)
+    catch_idx = body.index("} catch {")
     assert assign_idx < return_true_idx < catch_idx
-    # Failure path: the catch block sets errorMessage AND returns false --
-    # never silently swallowed as a bare `catch { errorMessage = ... }`.
-    catch_body = undo_body[catch_idx:]
-    assert "errorMessage = error.localizedDescription" in catch_body
+    # Failure path: a 409 reloads and retries once; otherwise the error is shown in plain words
+    # and false is returned -- never silently swallowed.
+    catch_body = body[catch_idx:]
+    assert "Self.isConflict(error), attempt == 0, await reloadDraft()" in catch_body
+    assert "errorMessage = Self.friendly(error)" in catch_body
     assert "return false" in catch_body
 
 
 def test_redo_returns_true_only_on_confirmed_success_false_on_caught_error():
     vm_source = VIEW_MODEL.read_text()
-    # Editor v4: undo()/redo() queue the real call behind earlier edits; the call itself and its
-    # honest true/false result live in redoNow().
     assert "result.value = await self?.redoNow() ?? false" in vm_source
-    redo_idx = vm_source.index("private func redoNow() async -> Bool")
-    redo_body = vm_source[redo_idx:redo_idx + 700]
-    assign_idx = redo_body.index("self.snapshot = try await api.request(")
-    return_true_idx = redo_body.index("return true", assign_idx)
-    catch_idx = redo_body.index("} catch {")
-    assert assign_idx < return_true_idx < catch_idx
-    catch_body = redo_body[catch_idx:]
-    assert "errorMessage = error.localizedDescription" in catch_body
-    assert "return false" in catch_body
+    redo_body = vm_source[vm_source.index("private func redoNow() async -> Bool"):]
+    assert 'await history("redo")' in redo_body[:200]
+    body = _history_body(vm_source)
+    assert body.index("snapshot = try await api.request(") < body.index("return true") < body.index("} catch {")
+    assert "errorMessage = Self.friendly(error)" in body and "return false" in body
 
 
 def test_successful_undo_enables_redo():
@@ -606,8 +606,7 @@ def test_failed_redo_preserves_honest_state_and_surfaces_the_real_error():
     editor_source = TIMELINE_EDITOR.read_text()
     assert "errorMessage" not in editor_source.split("private func performRedo() async")[1].split("\n}")[0]
     vm_source = VIEW_MODEL.read_text()
-    redo_fn_idx = vm_source.index("private func redoNow() async -> Bool")
-    assert "errorMessage = error.localizedDescription" in vm_source[redo_fn_idx:redo_fn_idx + 700]
+    assert "errorMessage = Self.friendly(error)" in _history_body(vm_source)
 
 
 def test_a_new_mutation_still_invalidates_redo_under_the_typed_result_contract():
