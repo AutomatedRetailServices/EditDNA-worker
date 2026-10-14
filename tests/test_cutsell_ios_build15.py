@@ -79,7 +79,7 @@ def test_picked_media_uploads_with_progress_and_retries_without_losing_it():
     vm = read("DraftEditorViewModel.swift")
     add = body(vm, "func addOverlay(fileURL: URL, at start: Double)")
     assert "OverlayMediaStore.keep(fileURL, id: id)" in add       # kept on the phone first
-    assert "pendingOverlays.append(item)" in add and "uploadPendingOverlay(id: id)" in add
+    assert "pendingOverlays.append(PendingOverlay(" in add and "uploadPendingOverlay(id: id)" in add
     upload = body(vm, "private func uploadPendingOverlay(id: String)")
     assert "for attempt in 0..<PendingVoiceOverStore.attemptsPerRound" in upload
     assert "pendingOverlays[index].failed = true" in upload
