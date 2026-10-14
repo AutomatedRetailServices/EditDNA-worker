@@ -119,3 +119,36 @@ def test_voiceover_label_is_never_cut():
     assert ".fixedSize()" in block and ".lineLimit(1)" in block
     label = block.split("private func label(inside: Bool)", 1)[1]
     assert "Capsule().fill(Color(hex: 0x1769FF))" in label
+
+
+def free_start(start, duration, taken):
+    at, moved = max(0.0, start), True
+    ranges = sorted(taken)
+    while moved:
+        moved = False
+        for r_start, r_end in ranges:
+            if at < r_end - 0.001 and at + duration > r_start + 0.001:
+                at, moved = round(r_end + 0.01, 3), True
+    return at
+
+
+def test_a_new_voice_never_overlaps_the_voices_on_the_row():
+    # The server refuses overlapping voice-overs (TIMELINE_INVALID 422): place it right after.
+    assert free_start(1.0, 6.0, [(1.0, 2.5)]) == 2.51
+    assert free_start(0.0, 1.0, [(1.0, 2.5)]) == 0.0           # fits before
+    assert free_start(0.5, 1.0, [(1.0, 2.5), (2.6, 4.0)]) == 4.01
+    store = read("PendingVoiceOvers.swift")
+    assert "static func freeStart(_ start: Double, duration: Double, taken:" in store
+    assert "at = ((range.end + 0.01) * 1000).rounded() / 1000" in store
+    vm = read("DraftEditorViewModel.swift")
+    add = body_of(vm, "func addRecordedVoiceOver(fileURL: URL, at start: Double)")
+    assert "PendingVoiceOverStore.freeStart(start, duration: duration, taken: takenVoiceRanges(except: nil))" in add
+    finish = vm.split("private func finishPendingVoiceOver(", 1)[1].split("\n    }\n", 1)[0]
+    assert "takenVoiceRanges(except: item.id)" in finish
+    # A background upload never pops an alert.
+    assert "errorMessage = shownError" in finish
+
+
+def test_plus_never_covers_the_voiceover_label():
+    timeline = read("EditorV4Timeline.swift")
+    assert "x(lastStart) + VoiceBlockV4.labelRoom + 16" in timeline

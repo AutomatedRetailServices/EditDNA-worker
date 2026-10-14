@@ -79,6 +79,22 @@ enum PendingVoiceOverStore {
         }
     }
 
+    /// First start at or after `start` where a voice of `duration` overlaps none of `taken`
+    /// (timeline seconds). Voice-overs never overlap on the mic row (the server refuses it).
+    static func freeStart(_ start: Double, duration: Double, taken: [(start: Double, end: Double)]) -> Double {
+        let ranges = taken.sorted { $0.start < $1.start }
+        var at = max(0, start)
+        var moved = true
+        while moved {
+            moved = false
+            for range in ranges where at < range.end - 0.001 && at + duration > range.start + 0.001 {
+                at = ((range.end + 0.01) * 1000).rounded() / 1000
+                moved = true
+            }
+        }
+        return at
+    }
+
     /// Tries in a row before the block is marked "tap to retry" (it is tried again on the next open).
     static let attemptsPerRound = 4
 }

@@ -553,7 +553,9 @@ final class DraftEditorViewModel: ObservableObject {
             errorMessage = "There isn't enough space on this iPhone to keep the recording."
             return .failed
         }
-        let item = PendingVoiceOver(id: id, projectID: project.projectID, start: max(0, start),
+        // At the cursor, or right after the voice already there (voices never overlap on the row).
+        let at = PendingVoiceOverStore.freeStart(start, duration: duration, taken: takenVoiceRanges(except: nil))
+        let item = PendingVoiceOver(id: id, projectID: project.projectID, start: at,
                                     duration: duration, fileName: fileName, createdAt: Date())
         pendingVoiceOvers.append(item)
         PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)
@@ -570,6 +572,13 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func retryPendingVoiceOver(id: String) { uploadPendingVoiceOver(id: id) }
+
+    /// Timeline ranges already used on the mic row (placed voices and other waiting ones).
+    private func takenVoiceRanges(except pendingID: String?) -> [(start: Double, end: Double)] {
+        let placed = currentVoiceOverPlacements.map { (start: $0.timelineStartSec, end: $0.timelineEndSec) }
+        let waiting = pendingVoiceOvers.filter { $0.id != pendingID }.map { (start: $0.start, end: $0.end) }
+        return placed + waiting
+    }
 
     func discardPendingVoiceOver(id: String) {
         guard let item = pendingVoiceOvers.first(where: { $0.id == id }) else { return }
@@ -621,18 +630,20 @@ final class DraftEditorViewModel: ObservableObject {
         await refreshTimelineAssetLibrary()
         if baseEditAssetID != nil {
             let length = asset.durationSec > 0 ? asset.durationSec : item.duration
-            var placed = await addVoiceOverPlacement(
-                assetID: asset.assetID, start: item.start, end: item.start + length, sourceIn: 0, sourceOut: length
-            )
-            if !placed {
-                // Another change moved the timeline on (409): read it again and place once more.
+            // A background upload never pops an alert: a failure shows on the block (tap to retry).
+            let shownError = errorMessage
+            var placed = false
+            for _ in 0..<2 where !placed {
+                // Read the timeline again (another change may have moved it on: 409) and keep
+                // the voice clear of the voices already on the row.
                 await refreshTimelineComposition()
+                let at = PendingVoiceOverStore.freeStart(item.start, duration: length, taken: takenVoiceRanges(except: item.id))
                 placed = await addVoiceOverPlacement(
-                    assetID: asset.assetID, start: item.start, end: item.start + length, sourceIn: 0, sourceOut: length
+                    assetID: asset.assetID, start: at, end: at + length, sourceIn: 0, sourceOut: length
                 )
             }
+            errorMessage = shownError
             if !placed { return false }
-            errorMessage = nil
         }
         pendingVoiceOvers.removeAll { $0.id == item.id }
         PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)

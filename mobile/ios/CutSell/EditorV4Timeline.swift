@@ -441,9 +441,11 @@ struct TimelineV4: View {
                     .accessibilityLabel(item.failed ? "Voice-over not uploaded. Tap to try again." : "Voice-over uploading")
                 }
             }
-            // "+" only when the row already has a voice: right after the last one.
+            // "+" only when the row already has a voice: right after the last one, and never on
+            // top of its "Voiceover N" label (a short voice's label runs past its end).
             if let lastEnd {
-                let px = max(Self.cursorX + 4, x(lastEnd) + 6)
+                let lastStart = (placements.map(\.timelineStartSec) + pending.map(\.start)).max() ?? lastEnd
+                let px = max(Self.cursorX + 4, x(lastEnd) + 6, x(lastStart) + VoiceBlockV4.labelRoom + 16)
                 if px < width - 24 {
                     plusButton(action: onAddVoice, label: "Add voice-over")
                         .offset(x: px, y: 3)

@@ -216,9 +216,9 @@ jobs:
               sleep 16; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/trim_4_after_undo_redo.png" >/dev/null 2>&1
             else
               sleep 5;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_1_saved_at_once.png" >/dev/null 2>&1
-              sleep 20; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_2_uploaded.png" >/dev/null 2>&1
-              sleep 4;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_3_video_sound.png" >/dev/null 2>&1
-              sleep 4;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_4_voice_panel.png" >/dev/null 2>&1
+              sleep 16; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_2_uploaded.png" >/dev/null 2>&1
+              sleep 6;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_3_video_sound.png" >/dev/null 2>&1
+              sleep 6;  xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/vo_4_voice_panel.png" >/dev/null 2>&1
             fi
             kill -INT $rec; sleep 3
             xcrun simctl spawn "$udid" log show --last 2m --style compact \

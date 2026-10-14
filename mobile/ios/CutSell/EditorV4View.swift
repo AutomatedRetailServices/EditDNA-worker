@@ -375,6 +375,7 @@ struct EditorV4View: View {
     /// uploads), then the speaker's "Video sound" panel and a voice clip's panel. Logs CUTSELLVO.
     private func runVoiceOverProbe() async {
         func wait(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+        let opened = Date()
         await wait(4)
         guard let take = Self.sampleVoiceM4A(seconds: 6) else { NSLog("CUTSELLVO no sample"); return }
         let started = Date()
@@ -386,14 +387,15 @@ struct EditorV4View: View {
         NSLog("CUTSELLVO shown=%.3f outcome=%@ blocks=%d->%d", shownAfter, "\(outcome)", before, after)
         // Wait for the background upload (or its retries) to finish.
         var waited = 0.0
-        while !model.pendingVoiceOvers.isEmpty, waited < 40 { await wait(1); waited += 1 }
+        while !model.pendingVoiceOvers.isEmpty, waited < 18 { await wait(1); waited += 1 }
         let uploaded = model.pendingVoiceOvers.isEmpty
         NSLog("CUTSELLVO uploaded=%@ after=%.0fs placements=%d", uploaded ? "yes" : "no", waited,
               model.timelineComposition?.voiceOverPlacements.count ?? 0)
         show(.message(uploaded ? "Uploaded in the background" : "Still uploading (kept on the phone)"))
-        await wait(2)
+        // Fixed moments for the screenshots: Video sound panel at ~24 s, a voice clip's panel at ~30 s.
+        await wait(max(1, 24 - Date().timeIntervalSince(opened)))
         toggleVideoSound()
-        await wait(3)
+        await wait(max(1, 30 - Date().timeIntervalSince(opened)))
         if let voice = model.timelineComposition?.voiceOverPlacements.last {
             selection = .voiceOver(voice.placementID)
         }

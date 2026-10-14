@@ -37,10 +37,10 @@ def test_use_uploads_by_the_import_path_and_places_at_the_cursor():
     model = read("DraftEditorViewModel.swift")
     body = model.split("func addRecordedVoiceOver(fileURL: URL, at start: Double)", 1)[1].split("\n    }\n", 1)[0]
     # Saved on the phone and shown at once; the upload (same import path) runs in the background.
-    assert "uploadPendingVoiceOver(id: id)" in body and "start: max(0, start)" in body
+    assert "uploadPendingVoiceOver(id: id)" in body and "freeStart(start, duration: duration" in body
     finish = model.split("private func finishPendingVoiceOver(", 1)[1].split("\n    }\n", 1)[0]
     assert "VoiceOverImportManager.shared.importAudio(" in finish
-    assert "addVoiceOverPlacement(" in finish and "start: item.start, end: item.start + length" in finish
+    assert "addVoiceOverPlacement(" in finish and "start: at, end: at + length" in finish
     assert "playheadTime: playheadTime" in read("TimelineEditorView.swift")
     assert "model.addRecordedVoiceOver(fileURL: url, at: playheadTime)" in read("VoiceOverView.swift")
 
