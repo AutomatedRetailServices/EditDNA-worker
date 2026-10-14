@@ -21,7 +21,7 @@ permissions:
 jobs:
   probe:
     runs-on: macos-latest
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
 
@@ -164,7 +164,7 @@ jobs:
           SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
           SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
             xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
-          mkdir -p "$RUNNER_TEMP/probe"
+          mkdir -p "$RUNNER_TEMP/probe" "$RUNNER_TEMP/rec"
           sleep 12; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/editor_12s.png" >/dev/null 2>&1
           sleep 18; xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/editor_30s.png" >/dev/null 2>&1
           # The same real cut opened in each Editor v4 state (Figma screens 1-11).
@@ -225,12 +225,47 @@ jobs:
               --predicate 'eventMessage CONTAINS "CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"' 2>/dev/null \
               | grep -oE 'CUTSELL(TRIM|VO).*' >> "$RUNNER_TEMP/probe/probe_log.txt" || true
           done
+          # Overlay (photo + video), full-screen B-roll by the video row's +, moving a clip / the voice /
+          # an overlay with Undo and Redo, and Export with everything -- on the same real cut. The
+          # photo and the video come from the Simulator's Photos (synthetic test media).
+          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1080:d=1" -frames:v 1 "$RUNNER_TEMP/overlay-photo.jpg"
+          xcrun simctl addmedia "$udid" "$RUNNER_TEMP/overlay-photo.jpg" "$RUNNER_TEMP/broll.mp4" || true
+          xcrun simctl privacy "$udid" grant photos "$BUNDLE" || true
+          xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+          SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+          SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+          SIMCTL_CHILD_CUTSELL_PROBE_STATE="media" \
+            xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+          xcrun simctl io "$udid" recordVideo --codec=h264 --force "$RUNNER_TEMP/rec/media.mp4" > /dev/null 2>&1 &
+          rec=$!
+          for i in $(seq 1 120); do
+            sleep 5
+            [ $((i % 6)) -eq 0 ] && xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/media_$(printf %03d $((i*5))).png" >/dev/null 2>&1
+            if xcrun simctl spawn "$udid" log show --last 1m --style compact --predicate 'eventMessage CONTAINS "CUTSELLMEDIA done"' 2>/dev/null | grep -q "CUTSELLMEDIA done"; then break; fi
+          done
+          xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/media_end.png" >/dev/null 2>&1
+          kill -INT $rec; sleep 3
+          xcrun simctl spawn "$udid" log show --last 15m --style compact \
+            --predicate 'eventMessage CONTAINS "CUTSELLMEDIA" OR eventMessage CONTAINS "CUTSELLEXPORT"' 2>/dev/null \
+            | grep -oE 'CUTSELL(MEDIA|EXPORT).*' >> "$RUNNER_TEMP/probe/probe_log.txt" || true
+          # Processing screen: the brand ring turning (5 s recording kept here; 2 frames go to the repo).
+          xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+          xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen processing >/dev/null
+          sleep 3
+          xcrun simctl io "$udid" recordVideo --codec=h264 --force "$RUNNER_TEMP/rec/processing_ring.mp4" > /dev/null 2>&1 &
+          rec=$!
+          sleep 5
+          kill -INT $rec; sleep 3
+          ffmpeg -loglevel error -y -ss 1.0 -i "$RUNNER_TEMP/rec/processing_ring.mp4" -frames:v 1 -vf "scale=390:-2" "$RUNNER_TEMP/probe/processing_ring_1.png" || true
+          ffmpeg -loglevel error -y -ss 2.25 -i "$RUNNER_TEMP/rec/processing_ring.mp4" -frames:v 1 -vf "scale=390:-2" "$RUNNER_TEMP/probe/processing_ring_2.png" || true
+          mv "$RUNNER_TEMP/rec/processing_ring.mp4" "$RUNNER_TEMP/processing_ring_kept_here.mp4" || true
           cat "$RUNNER_TEMP/probe/probe_log.txt" 2>/dev/null | while read -r l; do echo "::notice title=probe::$l"; done
           # Frames (PNG) from each recording: one every 2 s. The MP4s themselves stay here.
           for f in "$RUNNER_TEMP"/rec/*.mp4; do
             [ -s "$f" ] || continue
             name="$(basename "$f" .mp4)"
-            ffmpeg -loglevel error -i "$f" -vf "fps=1/2,scale=390:-2" "$RUNNER_TEMP/probe/${name}_frame_%02d.png" || true
+            every=2; [ "$name" = media ] && every=10
+            ffmpeg -loglevel error -i "$f" -vf "fps=1/$every,scale=390:-2" "$RUNNER_TEMP/probe/${name}_frame_%02d.png" || true
           done
           ls -la "$RUNNER_TEMP/rec" || true
           echo "::notice title=probe::screenshots taken"

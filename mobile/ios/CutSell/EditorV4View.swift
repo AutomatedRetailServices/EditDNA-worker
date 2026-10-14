@@ -171,6 +171,10 @@ struct EditorV4View: View {
             Task { await runFlowProbe() }
             return
         }
+        if previewState.probe == "media" {
+            Task { await EditorMediaProbe.run(model: model) { selection = $0 } }
+            return
+        }
         if previewState.probe == "trim" {
             Task { await runTrimProbe() }
             return
