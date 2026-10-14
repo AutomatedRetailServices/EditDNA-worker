@@ -161,6 +161,10 @@ jobs:
           APP="build/Build/Products/Debug-iphonesimulator/CutSell.app"
           BUNDLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
           xcrun simctl install "$udid" "$APP"
+          # Test media in Photos and every permission granted up front (no system prompt over the app).
+          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1080:d=1" -frames:v 1 "$RUNNER_TEMP/overlay-photo.jpg"
+          xcrun simctl addmedia "$udid" "$RUNNER_TEMP/overlay-photo.jpg" "$RUNNER_TEMP/broll.mp4" || true
+          xcrun simctl privacy "$udid" grant all "$BUNDLE" || true
           SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
           SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
             xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
@@ -228,9 +232,6 @@ jobs:
           # Overlay (photo + video), full-screen B-roll by the video row's +, moving a clip / the voice /
           # an overlay with Undo and Redo, and Export with everything -- on the same real cut. The
           # photo and the video come from the Simulator's Photos (synthetic test media).
-          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1080:d=1" -frames:v 1 "$RUNNER_TEMP/overlay-photo.jpg"
-          xcrun simctl addmedia "$udid" "$RUNNER_TEMP/overlay-photo.jpg" "$RUNNER_TEMP/broll.mp4" || true
-          xcrun simctl privacy "$udid" grant photos "$BUNDLE" || true
           xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
           SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
           SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
@@ -241,7 +242,7 @@ jobs:
           for i in $(seq 1 120); do
             sleep 5
             [ $((i % 6)) -eq 0 ] && xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/media_$(printf %03d $((i*5))).png" >/dev/null 2>&1
-            if xcrun simctl spawn "$udid" log show --last 1m --style compact --predicate 'eventMessage CONTAINS "CUTSELLMEDIA done"' 2>/dev/null | grep -q "CUTSELLMEDIA done"; then break; fi
+            if xcrun simctl spawn "$udid" log show --last 1m --style compact --predicate 'eventMessage CONTAINS "CUTSELLMEDIA done"' 2>/dev/null | grep -q "CUTSELLMEDIA done error"; then break; fi
           done
           xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/media_end.png" >/dev/null 2>&1
           kill -INT $rec; sleep 3
