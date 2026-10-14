@@ -27,7 +27,7 @@ def test_save_takes_the_server_answer_and_retries_a_conflict_once():
     assert '"expected_revision": .number(Double(base.revision))' in put and "snapshot = saved" in put
     commit = _func("private func commit(")
     assert "for attempt in 0..<2" in commit
-    assert "edited = try await build(base.draft)" in commit           # rebuilt on the reloaded draft
+    assert "built = try await build(base.draft)" in commit           # rebuilt on the reloaded draft
     assert "if attempt == 0, await reloadDraft() { continue }" in commit
     assert "if edited == base.draft { return true }" in commit         # nothing changed: no save
     assert "errorMessage = Self.friendly(APIError.http(409" in VM

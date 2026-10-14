@@ -267,13 +267,13 @@ struct EditorV2View: View {
             VoiceOverRecordSheet(model: model, start: playback.currentTime) { outcome in
                 switch outcome {
                 case .placed: show(.message("Voice-over added"))
-                case .savedNotPlaced: show(.message("Voice-over saved. It will be placed when this cut's main video is registered."))
+                case .savedNotPlaced: show(.message("Voice-over saved"))
                 case .failed: break
                 }
             }
         case .overlay:
             OverlayView(model: model)
-        case .broll:
+        case .broll, .brollGallery:
             BrollView(model: model, initialPlacementID: nil)
         case .export:
             ExportSheet(model: model)
@@ -837,7 +837,7 @@ struct EditorPreviewState {
 }
 
 enum EditorSheet: String, Identifiable {
-    case captions, voiceOver, overlay, broll, export
+    case captions, voiceOver, overlay, broll, brollGallery, export
     var id: String { rawValue }
 }
 

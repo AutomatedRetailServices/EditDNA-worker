@@ -300,32 +300,44 @@ struct VoiceOverRecordSheet: View {
     }
 }
 
-/// Export: the existing server export of the draft, in the editor's style.
+/// Export: started when Export is tapped. Shows what it is doing and the real % from the server,
+/// then Save / Share. Leaving the editor is fine: the creator is told when the video is ready.
 struct ExportSheet: View {
     @ObservedObject var model: DraftEditorViewModel
-    @State private var started = false
 
     var body: some View {
         VStack(spacing: 16) {
             Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 10)
             Text("Export").font(CS.inter(22, .bold)).foregroundStyle(.white)
-            if let job = model.exportJob {
-                Text(job.state == "finished" ? "Your video is ready." : job.state == "failed" ? "The export failed. Please try again." : "Exporting… \(job.progress ?? 0)%")
-                    .font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
-                if job.state != "finished" && job.state != "failed" {
-                    ProgressView(value: Double(job.progress ?? 0), total: 100).tint(CS.cyan)
+            if let preparing = model.exportPreparing {
+                Text(preparing).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                ProgressView(value: 0, total: 100).tint(CS.cyan)
+            } else if let job = model.exportJob {
+                if job.state == "finished" {
+                    Text("Your video is ready.").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                } else if job.state == "failed" || job.state == "canceled" {
+                    Text("The export didn't finish. Please try again.").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                } else {
+                    let percent = Self.shownPercent(job)
+                    HStack {
+                        Text(Self.stageText(job)).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                        Spacer()
+                        Text("\(percent)%").font(CS.inter(16, .bold)).monospacedDigit().foregroundStyle(CS.cyan)
+                            .accessibilityIdentifier("exportPercent")
+                    }
+                    ProgressView(value: Double(percent), total: 100).tint(CS.cyan)
+                    Text("You can leave this screen. We'll let you know when it's ready.")
+                        .font(CS.inter(12)).foregroundStyle(CS.textMutedF).multilineTextAlignment(.center)
                 }
                 if let urlString = job.result?["download_url"]?.stringValue, let url = URL(string: urlString) {
                     FinishedExportActionsView(remoteURL: url)
                 }
-            } else if started {
-                ProgressView().tint(CS.cyan)
             } else {
-                Text("Make the final video of this cut.").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                Text("Getting your video ready…").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                ProgressView().tint(CS.cyan)
             }
-            if model.exportJob == nil || model.exportJob?.state == "failed" {
-                PrimaryButton(title: "Export video", height: 54, cornerRadius: 18, fontSize: 17, isEnabled: !started || model.exportJob?.state == "failed") {
-                    started = true
+            if let job = model.exportJob, job.state == "failed" || job.state == "canceled" {
+                PrimaryButton(title: "Try again", height: 54, cornerRadius: 18, fontSize: 17) {
                     Task { await model.export() }
                 }
                 .accessibilityIdentifier("exportStart")
@@ -338,5 +350,19 @@ struct ExportSheet: View {
         .presentationDetents([.medium])
         .presentationBackground(Color(hex: 0x060B18))
         .preferredColorScheme(.dark)
+    }
+
+    /// The server's own % (never shown going backwards).
+    static func shownPercent(_ job: JobStatus) -> Int { max(1, min(99, job.progress ?? 1)) }
+
+    static func stageText(_ job: JobStatus) -> String {
+        let progress = job.progress ?? 0
+        switch job.state {
+        case "queued", "uploaded": return "Waiting for a free editor…"
+        default:
+            if progress < 25 { return "Getting your clips…" }
+            if progress < 85 { return "Making your video…" }
+            return "Finishing…"
+        }
     }
 }

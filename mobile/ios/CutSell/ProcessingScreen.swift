@@ -29,7 +29,9 @@ struct CutProgressView: View {
             } else {
                 ProcessingContent(
                     stage: stage,
-                    fileName: uploading ? fileName : (cut?.fileName ?? fileName),
+                    // The cut's name ("Cut 14 Oct"), never the phone's file name ("copy_9E49…"); nothing yet
+                    // while it has no name.
+                    fileName: CutName.display(cut?.title),
                     thumbnail: uploading ? thumbnail : (cut?.thumbnail ?? thumbnail),
                     failed: !uploading && cut?.isFailed == true,
                     uploading: uploading,
@@ -41,7 +43,6 @@ struct CutProgressView: View {
         .navigationDestination(isPresented: $openEditor) {
             if let cut, let project = readyProject(cut) {
                 DraftEditorView(project: project)
-                    .toolbar(.visible, for: .navigationBar)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -79,6 +80,24 @@ struct CutProgressView: View {
 
 // MARK: - Processing (670:409)
 
+/// The name shown for a cut: its title, unless that is a technical file name.
+enum CutName {
+    static func display(_ title: String?) -> String {
+        let name = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return isTechnical(name) ? "" : name
+    }
+
+    /// File names from the phone or the server ("copy_9E4975E5-…", "IMG_1234.MOV", "trim.ABC.mp4").
+    static func isTechnical(_ name: String) -> Bool {
+        if name.isEmpty { return true }
+        let lower = name.lowercased()
+        if lower.hasPrefix("copy_") || lower.hasPrefix("img_") || lower.hasPrefix("trim.") || lower.hasPrefix("rpreplay") { return true }
+        if [".mov", ".mp4", ".m4v", ".heic", ".jpg", ".png"].contains(where: { lower.hasSuffix($0) }) { return true }
+        // A long hexadecimal run (UUIDs and hashes).
+        return name.range(of: "[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}", options: .regularExpression) != nil
+    }
+}
+
 struct ProcessingContent: View {
     let stage: CutTracker.Stage
     let fileName: String
@@ -115,6 +134,7 @@ struct ProcessingContent: View {
             VStack(spacing: 14) {
                 VideoFirstFrame(image: thumbnail, width: 88, height: 156, cornerRadius: 16)
                 Text(fileName)
+                    .accessibilityIdentifier("processingCutName")
                     .font(CS.sf(14, .semibold))
                     .foregroundStyle(CS.textPrimaryF)
                     .lineLimit(1)
@@ -220,32 +240,62 @@ struct VideoFirstFrame: View {
     }
 }
 
-/// The rotating brand ring with the CutSell bag in the middle (Processing/BrandRingMotion).
+/// The brand ring around the CutSell bag (Processing/BrandRingMotion): one continuous circle
+/// (no gaps) filled with the logo's colours as an angular gradient that closes on itself, turning
+/// once every 2.5 s, linear and smooth, with a coloured glow behind it that turns with it.
+/// Reduce Motion: the ring stays still and the glow breathes softly. Used on every loading screen
+/// that shows the logo.
 struct BrandRing: View {
     var animating = true
-    @State private var spin = false
+    /// Ring diameter; the logo and the inner disc scale with it.
+    var size: CGFloat = 120
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static let colors: [Color] = [Color(hex: 0x19E6FF), Color(hex: 0x1769FF), Color(hex: 0x7C3AED),
+                                  Color(hex: 0xFF21D7), Color(hex: 0x19E6FF)]
+    static let secondsPerTurn = 2.5
+    static let lineWidth: CGFloat = 4.5
+
+    /// Ring angle (degrees) at `time`: one full linear turn every 2.5 s.
+    static func angle(at time: TimeInterval) -> Double {
+        (time.truncatingRemainder(dividingBy: secondsPerTurn) / secondsPerTurn) * 360
+    }
 
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(AngularGradient(colors: [CS.cyan, Color(hex: 0x1769FF), Color(hex: 0x7C3AED), CS.cyan], center: .center),
-                        style: StrokeStyle(lineWidth: 9, lineCap: .round, dash: [42, 20]))
-                .frame(width: 120, height: 120)
-                .shadow(color: CS.cyan.opacity(0.6), radius: 10)
-                .rotationEffect(.degrees(spin ? 360 : 0))
-                .animation(animating ? .linear(duration: 6).repeatForever(autoreverses: false) : .default, value: spin)
-            Circle()
-                .fill(Color(hex: 0x050813))
-                .overlay(Circle().stroke(CS.cyan.opacity(0.35), lineWidth: 1))
-                .frame(width: 94, height: 94)
-            Image("ProcessingLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 112, height: 112)
-                .blendMode(.screen)
+        let scale = size / 120
+        TimelineView(.animation(minimumInterval: nil, paused: !animating)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            let turning = animating && !reduceMotion
+            let angle = turning ? Self.angle(at: time) : 0
+            // Reduce Motion: a soft breathing glow instead of the turn.
+            let glowOpacity = (animating && reduceMotion) ? 0.4 + 0.25 * (1 + sin(time * 2 * .pi / 2.4)) / 2 : 0.6
+            ZStack {
+                // The glow: the same ring behind, blurred, turning with it (light, not a grey shadow).
+                ring
+                    .rotationEffect(.degrees(angle))
+                    .blur(radius: 14 * scale)
+                    .opacity(glowOpacity)
+                    .blendMode(.plusLighter)
+                ring
+                    .rotationEffect(.degrees(angle))
+                Circle()
+                    .fill(Color(hex: 0x050813))
+                    .frame(width: size - 26 * scale, height: size - 26 * scale)
+                Image("ProcessingLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 112 * scale, height: 112 * scale)
+                    .blendMode(.screen)
+            }
         }
-        .onAppear { spin = animating }
+        .frame(width: size + 30 * scale, height: size + 30 * scale)
         .accessibilityHidden(true)
+    }
+
+    private var ring: some View {
+        Circle()
+            .stroke(AngularGradient(colors: Self.colors, center: .center), lineWidth: Self.lineWidth)
+            .frame(width: size, height: size)
     }
 }
 
@@ -316,7 +366,7 @@ struct ReadyContent: View {
                     .font(CS.sf(28, .semibold))
                     .foregroundStyle(Color(hex: 0xFAFCFF))
                     .padding(.top, 18)
-                Text(cut.fileName)
+                Text(CutName.display(cut.title))
                     .font(CS.sf(13))
                     .foregroundStyle(Color(hex: 0x8594B2))
                     .lineLimit(1)

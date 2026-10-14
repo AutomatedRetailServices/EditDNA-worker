@@ -73,7 +73,7 @@ struct RootView: View {
                     ScreenBackground()
                     VStack(spacing: 18) {
                         BrandLogo()
-                        ProgressView().tint(CS.cyan)
+                        BrandRing(size: 72)
                     }
                 }
             } else if let error = appState.bootstrapError {

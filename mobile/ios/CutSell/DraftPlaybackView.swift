@@ -241,7 +241,7 @@ final class DraftPlaybackController: ObservableObject {
     }
 
     func rebuild(from model: DraftEditorViewModel) async {
-        let sourceURLs = sourceURLCatalog(from: model.snapshot)
+        let sourceURLs = sourceURLCatalog(sources: model.allSources)
         let signature = Self.signature(for: model, sourceURLs: sourceURLs)
         if isReady, signature == compositionSignature, let builtAt = compositionBuiltAt,
            Date().timeIntervalSince(builtAt) < compositionReuseSec {
@@ -438,10 +438,14 @@ final class DraftPlaybackController: ObservableObject {
     /// The video of each source: the copy on this iPhone when there is one (no download, no expiry),
     /// else the signed link -- and that one is downloaded in the background for next time.
     private func sourceURLCatalog(from snapshot: DraftSnapshot?) -> [String: URL] {
+        sourceURLCatalog(sources: snapshot?.sources.compactMap(\.objectValue) ?? [])
+    }
+
+    /// `sources`: the cut's originals plus full-screen B-roll videos added in the editor.
+    private func sourceURLCatalog(sources: [[String: JSONValue]]) -> [String: URL] {
         var output: [String: URL] = [:]
-        for source in snapshot?.sources ?? [] {
-            guard let object = source.objectValue,
-                  let sourceID = object["source_asset_id"]?.stringValue else { continue }
+        for object in sources {
+            guard let sourceID = object["source_asset_id"]?.stringValue else { continue }
             let uri = object["uri"]?.stringValue
             // The 720p copy of the whole original first (lighter, and a stretched clip has its
             // hidden material), then the original kept on this iPhone (the copy is made from it).

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DraftEditorView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     let project: Project
     @StateObject private var holder = Holder()
     @State private var showCaptionsPanel = false
@@ -40,7 +41,7 @@ struct DraftEditorView: View {
             } else if let model = holder.model, !model.isLoading, model.snapshot == nil, model.errorMessage != nil {
                 VStack(spacing: 14) {
                     Text("Couldn’t open this cut").font(CS.inter(18, .semibold)).foregroundStyle(.white)
-                    Text(model.errorMessage ?? "Please try again.").font(CS.inter(13)).foregroundStyle(CS.textSecondaryF)
+                    Text(model.errorMessage.map { DraftEditorViewModel.plainWords($0) } ?? "Please try again.").font(CS.inter(13)).foregroundStyle(CS.textSecondaryF)
                         .multilineTextAlignment(.center)
                     PrimaryButton(title: "Try again", height: 48, cornerRadius: 14, fontSize: 15) {
                         Task { await model.load() }
@@ -54,8 +55,8 @@ struct DraftEditorView: View {
                 ZStack {
                     Color(hex: 0x02040A).ignoresSafeArea()
                     VStack(spacing: 14) {
-                        BrandLogo()
-                        ProgressView("Opening your cut…").tint(CS.cyan).foregroundStyle(CS.textSecondaryF)
+                        BrandRing(size: 84)
+                        Text("Opening your cut…").font(CS.inter(14, .medium)).foregroundStyle(CS.textSecondaryF)
                     }
                 }
             }
@@ -69,8 +70,20 @@ struct DraftEditorView: View {
             holder.model = model
             await model.load()
         }
-        .navigationTitle(project.title)
-        .navigationBarTitleDisplayMode(.inline)
+        // The editor has its own header (back · name · 1080p HD · Export): never the system bar
+        // on top of it (build 14 showed a second, large "‹ Cut 14 Oct" bar).
+        .toolbar(.hidden, for: .navigationBar)
+        .overlay(alignment: .topLeading) {
+            // While it opens (or if it can't), a plain way back.
+            if !(holder.model.map { !$0.isLoading && $0.snapshot != nil } ?? false) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Back")
+                .padding(.leading, 8)
+            }
+        }
     }
 
     @ViewBuilder

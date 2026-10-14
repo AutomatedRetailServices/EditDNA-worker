@@ -277,8 +277,9 @@ extension DraftEditorViewModel {
     /// The video used on the phone for one source: the 720p copy, else the original kept on this
     /// iPhone (and the 720p copy is made from it), else the signed link.
     func previewVideoURL(forSource sourceID: String?) -> URL? {
-        let sources = snapshot?.sources.compactMap(\.objectValue) ?? []
-        let source = sources.first { $0["source_asset_id"]?.stringValue == sourceID } ?? sources.first
+        let sources = allSources
+        let source = sources.first { $0["source_asset_id"]?.stringValue == sourceID }
+            ?? (sourceID == nil ? sources.first : nil)
         if let uri = source?["uri"]?.stringValue {
             if let proxy = PreviewProxyCache.localURL(forURI: uri) { return proxy }
             if let local = SourceVideoCache.localURL(forURI: uri) {
@@ -291,8 +292,7 @@ extension DraftEditorViewModel {
 
     /// Length of a source's original (seconds), when the server or the phone knows it.
     func sourceDuration(forSource sourceID: String?) -> Double? {
-        let sources = snapshot?.sources.compactMap(\.objectValue) ?? []
-        let source = sources.first { $0["source_asset_id"]?.stringValue == sourceID }
+        let source = allSources.first { $0["source_asset_id"]?.stringValue == sourceID }
         if let seconds = source?["duration_sec"]?.doubleValue, seconds > 0 { return seconds }
         return knownSourceDurations[sourceID ?? ""]
     }

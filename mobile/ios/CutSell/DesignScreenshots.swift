@@ -50,7 +50,7 @@ struct DesignScreenshotRoot: View {
         case "processing":
             ProcessingContent(
                 stage: CutTracker.Stage(step: 6, title: "Structuring your cut", percent: 68),
-                fileName: "IMG_4821.MOV", thumbnail: nil, onClose: {}, onOpenEdits: {}
+                fileName: CutName.display("Cut 14 Oct"), thumbnail: nil, onClose: {}, onOpenEdits: {}
             )
             .background(CS.base.ignoresSafeArea())
         case "ready":

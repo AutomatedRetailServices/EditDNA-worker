@@ -25,9 +25,6 @@ struct EditorV4View: View {
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var displayTitle: String?
-    @State private var choosingOverlay = false
-    @State private var addingText = false
-    @State private var overlayText = ""
     @State private var pixelsPerSecond: CGFloat = 30
     @State private var captionText = ""
     @FocusState private var captionFocused: Bool
@@ -77,7 +74,7 @@ struct EditorV4View: View {
                     VoiceOverPanel(model: model, recorder: recorder, start: playback.currentTime, mode: $panel) { outcome in
                         switch outcome {
                         case .placed: show(.message("Voice-over added"))
-                        case .savedNotPlaced: show(.message("Voice-over saved. It will be placed when this cut's main video is registered."))
+                        case .savedNotPlaced: show(.message("Voice-over saved"))
                         case .failed: break
                         }
                     }
@@ -126,8 +123,16 @@ struct EditorV4View: View {
                 if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }
             }
             .onChange(of: selection) { _, newValue in selectionChanged(newValue) }
-            .onAppear { appeared() }
+            // A photo / video just picked for an overlay comes selected (move it, pinch it).
+            .onChange(of: model.lastAddedOverlayID) { _, id in
+                if let id { selection = .overlay(id, isText: false) }
+            }
+            .onAppear {
+                ExportTracker.shared.visibleProjectID = project.projectID
+                appeared()
+            }
             .onDisappear {
+                if ExportTracker.shared.visibleProjectID == project.projectID { ExportTracker.shared.visibleProjectID = nil }
                 playback.pause()
                 if recorder.state == .recording { recorder.stop() }
             }
@@ -206,23 +211,10 @@ struct EditorV4View: View {
                 Button("Save") { Task { await rename() } }
                 Button("Cancel", role: .cancel) {}
             }
-            .confirmationDialog("Add to the video", isPresented: $choosingOverlay, titleVisibility: .visible) {
-                Button("Text") { addingText = true }
-                Button("Photo or video") { sheet = .overlay }
-                Button("B-roll (full screen)") { sheet = .broll }
-                Button("Cancel", role: .cancel) {}
-            }
-            .alert("Add text", isPresented: $addingText) {
-                TextField("Text", text: $overlayText)
-                Button("Add") { addTextOverlay() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("It appears on the video at the cursor for 3 seconds.")
-            }
             .alert("CutSell", isPresented: errorShown) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(model.errorMessage ?? "")
+                Text(DraftEditorViewModel.plainWords(model.errorMessage))
             }
     }
 
@@ -244,13 +236,6 @@ struct EditorV4View: View {
         }
     }
 
-    private func addTextOverlay() {
-        let text = overlayText.trimmingCharacters(in: .whitespacesAndNewlines)
-        overlayText = ""
-        guard !text.isEmpty else { return }
-        let at = playback.currentTime
-        Task { await model.addTextOverlay(text: text, start: at, end: at + 3) }
-    }
 
     #if DEBUG
     /// Editor probe "stress": 10 quick edits in a row (split, delete, caption, mirror, undo/redo...),
@@ -455,7 +440,12 @@ struct EditorV4View: View {
             .accessibilityIdentifier("editorTitle")
             Spacer(minLength: 6)
             ExportQualityMenu()
-            Button { sheet = .export } label: {
+            // Export starts the moment it is tapped; the sheet shows its real progress.
+            Button {
+                playback.pause()
+                sheet = .export
+                if !model.isExporting { Task { await model.export() } }
+            } label: {
                 Text("Export")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
@@ -518,6 +508,9 @@ struct EditorV4View: View {
             if model.captionsEnabled {
                 captionLayer(frame: size)
             }
+            if let broll = model.pendingBroll {
+                brollPill(broll).frame(maxHeight: .infinity, alignment: .bottom).padding(.bottom, 14)
+            }
             // Dragging a clip's edge: the original's exact frame at the handle, and "+0,4 s".
             if let scrub = model.trimScrub {
                 TrimFrameOverlay(scrub: scrub, url: model.previewVideoURL(forSource: scrub.sourceID))
@@ -541,6 +534,25 @@ struct EditorV4View: View {
         } else if case .overlay(_, isText: false) = selection {
             hintPill("Drag to move · Pinch to resize").padding(.bottom, 14)
         }
+    }
+
+    /// "Adding video… 45%" while a full-screen B-roll uploads; "Try again" if it failed.
+    private func brollPill(_ broll: PendingBroll) -> some View {
+        HStack(spacing: 10) {
+            if broll.failed {
+                Text("The video wasn't added").font(CS.inter(13, .medium)).foregroundStyle(.white)
+                Button("Try again") { model.retryBroll() }.font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                Button { model.dismissFailedBroll() } label: { Image(systemName: "xmark").foregroundStyle(CS.textMutedF) }
+                    .accessibilityLabel("Dismiss")
+            } else {
+                ProgressView().controlSize(.small).tint(.white)
+                Text("Adding video… \(Int((broll.progress * 100).rounded()))%")
+                    .font(CS.inter(13, .medium)).monospacedDigit().foregroundStyle(.white)
+            }
+        }
+        .padding(.horizontal, 14).frame(height: 36)
+        .background(Color(hex: 0x040812, opacity: 0.9), in: Capsule())
+        .accessibilityIdentifier("brollUpload")
     }
 
     private func videoTapped() {
@@ -687,14 +699,19 @@ struct EditorV4View: View {
                                   y: frame.height * CGFloat(item["y"]?.doubleValue ?? 0.2))
                 }
             }
-            ForEach(Array(model.mediaOverlays.enumerated()), id: \.offset) { _, item in
+            ForEach(model.overlaysOnScreen) { overlay in
                 MediaOverlayOnVideo(
-                    item: item, frame: frame, time: playback.currentTime,
-                    isSelected: selection == .overlay(item["overlay_id"]?.stringValue ?? "", isText: false),
-                    onSelect: { selection = .overlay(item["overlay_id"]?.stringValue ?? "", isText: false) },
+                    overlay: overlay, frame: frame, time: playback.currentTime,
+                    isSelected: selection == .overlay(overlay.id, isText: false),
+                    onSelect: { selection = .overlay(overlay.id, isText: false) },
                     onChange: { x, y, width in
-                        Task { await model.updateMediaOverlay(id: item["overlay_id"]?.stringValue ?? "", x: x, y: y, width: width) }
-                    }
+                        if overlay.uploading != nil || overlay.failed {
+                            model.updatePendingOverlay(id: overlay.id, x: x, y: y, width: width)
+                        } else {
+                            model.setOverlayFrame(id: overlay.id, x: x, y: y, width: width)
+                        }
+                    },
+                    onRetry: { model.retryPendingOverlay(id: overlay.id) }
                 )
             }
         }
@@ -785,9 +802,9 @@ struct EditorV4View: View {
                     TimelineV4(
                         model: model, playback: playback, selection: $selection,
                         pixelsPerSecond: $pixelsPerSecond,
-                        onAddVideo: { sheet = .broll },
+                        onAddVideo: { playback.pause(); sheet = .brollGallery },
                         onAddVoice: { openVoiceOver() },
-                        onAddOverlay: { choosingOverlay = true },
+                        onAddOverlay: { openOverlayGallery() },
                         onToggleVideoSound: { toggleVideoSound() }
                     )
                     .padding(.top, 1)
@@ -898,16 +915,13 @@ struct EditorV4View: View {
         switch which {
         case .overlay:
             OverlayGallerySheet(onPick: { url in
-                let at = playback.currentTime
-                Task {
-                    await model.addMediaOverlay(fileURL: url, start: at, end: at + 4)
-                    if let added = model.mediaOverlays.last?["overlay_id"]?.stringValue {
-                        selection = .overlay(added, isText: false)
-                    }
-                }
+                model.addOverlay(fileURL: url, at: playback.currentTime)
             }, sampleTiles: previewState != nil)
-        case .broll:
-            BrollView(model: model, initialPlacementID: nil)
+        case .broll, .brollGallery:
+            // Full-screen B-roll: a video from the phone, as a clip of the main track at the cursor.
+            OverlayGallerySheet(onPick: { url in
+                model.addBrollClip(fileURL: url, at: playback.currentTime)
+            }, sampleTiles: previewState != nil, videosOnly: true, title: "Add a video")
         case .export:
             ExportSheet(model: model)
         case .captions:
@@ -934,7 +948,7 @@ struct EditorV4View: View {
             let next = (model.rotationDegrees + 90) % 360
             Task { await model.setDraftValue("rotation", .number(Double(next))) }
             show(.message("Rotated \(next)°"))
-        case .overlay: choosingOverlay = true
+        case .overlay: openOverlayGallery()
         case .voiceOver: openVoiceOver()
         case .captions:
             playback.pause()
@@ -942,6 +956,12 @@ struct EditorV4View: View {
         case .style:
             panel = panel == .style ? .none : .style
         }
+    }
+
+    /// Overlay opens the phone's photos and videos straight away (Figma 1026:7971).
+    private func openOverlayGallery() {
+        playback.pause()
+        sheet = .overlay
     }
 
     private func openVoiceOver() {
@@ -1390,62 +1410,98 @@ private struct ToastPillV4: View {
 
 /// A photo/video overlay on the video. Selected: white box with corner handles; drag to move,
 /// pinch to resize (saved when the fingers lift).
+/// One photo / video overlay on the video (Figma 1026:3400): its real picture at its real
+/// shape, moved with one finger and resized with two; white frame with corner dots when selected.
+/// While it uploads it shows its %; a failed upload shows "Tap to retry".
+struct OverlayOnScreen: Identifiable, Equatable {
+    let id: String
+    let kind: EditorMediaKind
+    let url: URL?
+    var x: Double
+    var y: Double
+    var width: Double
+    let start: Double
+    let end: Double
+    let sourceStart: Double
+    var uploading: Double?
+    var failed = false
+}
+
 private struct MediaOverlayOnVideo: View {
-    let item: [String: JSONValue]
+    let overlay: OverlayOnScreen
     let frame: CGSize
     let time: Double
     let isSelected: Bool
     let onSelect: () -> Void
     let onChange: (Double, Double, Double) -> Void
+    let onRetry: () -> Void
 
     @State private var drag: CGSize = .zero
     @State private var pinch: CGFloat = 1
+    @State private var aspect: Double?
 
-    private var start: Double { item["start"]?.doubleValue ?? 0 }
-    private var end: Double { item["end"]?.doubleValue ?? start }
-    private var x: Double { item["x"]?.doubleValue ?? 0.5 }
-    private var y: Double { item["y"]?.doubleValue ?? 0.5 }
-    private var width: Double { item["width"]?.doubleValue ?? 0.4 }
-    private var visible: Bool { isSelected || (time >= start && time < end) }
+    private var visible: Bool { isSelected || overlay.uploading != nil || (time >= overlay.start && time < overlay.end) }
 
     var body: some View {
         if visible {
-            thumb
-                .position(x: frame.width * CGFloat(x) + drag.width, y: frame.height * CGFloat(y) + drag.height)
-                .onTapGesture { onSelect() }
+            let w = frame.width * CGFloat(overlay.width) * pinch
+            let h = w / CGFloat(max(0.1, aspect ?? 1))
+            OverlayMediaPicture(url: overlay.url, kind: overlay.kind,
+                                seconds: overlay.sourceStart + max(0, time - overlay.start))
+                .frame(width: w, height: h)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay { if isSelected { SelectionHandles() } }
+                .overlay { uploadBadge }
+                .position(x: frame.width * CGFloat(overlay.x) + drag.width, y: frame.height * CGFloat(overlay.y) + drag.height)
+                .onTapGesture { overlay.failed ? onRetry() : onSelect() }
                 .gesture(moveGesture.simultaneously(with: resizeGesture))
+                .task(id: overlay.url?.path ?? overlay.id) {
+                    if let url = overlay.url { aspect = await EditorMediaInfo.aspect(of: url, kind: overlay.kind) }
+                }
                 .accessibilityIdentifier("mediaOverlayOnVideo")
         }
     }
 
-    private var thumb: some View {
-        let w = frame.width * CGFloat(width) * pinch
-        return OverlayMediaThumb(item: item)
-            .frame(width: w, height: w * 0.42)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay { if isSelected { SelectionHandles() } }
+    @ViewBuilder
+    private var uploadBadge: some View {
+        if overlay.failed {
+            Label("Tap to retry", systemImage: "arrow.clockwise")
+                .font(CS.inter(11, .semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(CS.error.opacity(0.85), in: Capsule())
+        } else if let progress = overlay.uploading {
+            Text("\(Int((progress * 100).rounded()))%")
+                .font(CS.inter(12, .bold)).monospacedDigit().foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.black.opacity(0.6), in: Capsule())
+                .accessibilityIdentifier("overlayUploadPercent")
+        }
     }
 
     private var moveGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in if isSelected { drag = value.translation } }
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                if !isSelected { onSelect() }
+                drag = value.translation
+            }
             .onEnded { value in
-                guard isSelected else { return }
-                let nx = max(0, min(1, x + Double(value.translation.width / frame.width)))
-                let ny = max(0, min(1, y + Double(value.translation.height / frame.height)))
+                let nx = max(0, min(1, overlay.x + Double(value.translation.width / frame.width)))
+                let ny = max(0, min(1, overlay.y + Double(value.translation.height / frame.height)))
                 drag = .zero
-                onChange(nx, ny, width)
+                onChange(nx, ny, overlay.width)
             }
     }
 
     private var resizeGesture: some Gesture {
         MagnificationGesture()
-            .onChanged { value in if isSelected { pinch = value } }
+            .onChanged { value in
+                if !isSelected { onSelect() }
+                pinch = value
+            }
             .onEnded { value in
-                guard isSelected else { return }
-                let nw = max(0.1, min(1, width * Double(value)))
+                let nw = max(0.1, min(1, overlay.width * Double(value)))
                 pinch = 1
-                onChange(x, y, nw)
+                onChange(overlay.x, overlay.y, nw)
             }
     }
 }
@@ -1466,19 +1522,3 @@ private struct SelectionHandles: View {
 }
 
 /// The overlay's picture: its preview link if the server sent one, else a labelled tile.
-private struct OverlayMediaThumb: View {
-    let item: [String: JSONValue]
-
-    var body: some View {
-        let link = item["preview_url"]?.stringValue ?? item["playback_url"]?.stringValue
-        ZStack {
-            LinearGradient(colors: [CS.cyan, Color(hex: 0x7C3AED)], startPoint: .leading, endPoint: .trailing)
-            if let link, let url = URL(string: link) {
-                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.clear }
-            } else {
-                Text((item["kind"]?.stringValue ?? "photo").capitalized)
-                    .font(CS.inter(14, .bold)).foregroundStyle(.white)
-            }
-        }
-    }
-}

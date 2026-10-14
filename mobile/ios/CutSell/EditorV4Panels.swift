@@ -626,6 +626,9 @@ struct OverlayGallerySheet: View {
     let onPick: (URL) -> Void
     /// Design screenshots only: show sample tiles instead of the photo library.
     var sampleTiles = false
+    /// Full-screen B-roll: only videos.
+    var videosOnly = false
+    var title = "Photos & Videos"
     @Environment(\.dismiss) private var dismiss
     @State private var assets: [PHAsset] = []
     @State private var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -637,7 +640,7 @@ struct OverlayGallerySheet: View {
         VStack(spacing: 0) {
             Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 8)
             ZStack {
-                Text("Photos & Videos").font(CS.inter(17, .bold)).foregroundStyle(.white)
+                Text(title).font(CS.inter(17, .bold)).foregroundStyle(.white)
                 HStack {
                     Button("Cancel") { dismiss() }.font(CS.inter(15)).foregroundStyle(CS.cyan)
                     Spacer()
@@ -702,7 +705,7 @@ struct OverlayGallerySheet: View {
         let result = PHAsset.fetchAssets(with: options)
         var list: [PHAsset] = []
         result.enumerateObjects { asset, _, _ in
-            if asset.mediaType == .image || asset.mediaType == .video { list.append(asset) }
+            if asset.mediaType == .video || (!videosOnly && asset.mediaType == .image) { list.append(asset) }
         }
         assets = list
     }

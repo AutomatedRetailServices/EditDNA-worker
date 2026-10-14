@@ -26,7 +26,9 @@ actor ClipFrameCache {
             generators[url.path] = generator
         }
         guard let cg = try? await generator.image(at: CMTime(seconds: max(0, seconds), preferredTimescale: 600)).image else {
-            generators[url.path] = nil  // the link may have expired: open it again next time
+            // A request cut short (the view went away) is not a broken video: keep the opened one.
+            // Otherwise the link may have expired: open it again next time.
+            if !Task.isCancelled { generators[url.path] = nil }
             return nil
         }
         let image = UIImage(cgImage: cg)
@@ -51,7 +53,17 @@ struct ClipFrameImage: View {
         .clipped()
         .task(id: "\(url?.path ?? "")|\(seconds)") {
             guard let url else { return }
-            image = await ClipFrameCache.shared.frame(url: url, at: seconds)
+            // Frames must always be there: keep the one shown while a new one loads, and try
+            // again a few times if the video could not give it (build 14: selecting a voice-over
+            // left the video row without frames).
+            for attempt in 0..<4 {
+                if Task.isCancelled { return }
+                if let frame = await ClipFrameCache.shared.frame(url: url, at: seconds) {
+                    image = frame
+                    return
+                }
+                try? await Task.sleep(nanoseconds: UInt64(400_000_000 * (attempt + 1)))
+            }
         }
     }
 }
@@ -59,8 +71,10 @@ struct ClipFrameImage: View {
 extension DraftEditorViewModel {
     /// The signed playback link of one source of this draft.
     func playbackURL(forSource sourceID: String?) -> URL? {
-        let sources = snapshot?.sources.compactMap(\.objectValue) ?? []
-        let source = sources.first { $0["source_asset_id"]?.stringValue == sourceID } ?? sources.first
+        let sources = allSources
+        // Never another video's link for a clip whose own source is not known here.
+        let source = sources.first { $0["source_asset_id"]?.stringValue == sourceID }
+            ?? (sourceID == nil ? sources.first : nil)
         return source?["playback_url"]?.stringValue.flatMap(URL.init(string:))
     }
 

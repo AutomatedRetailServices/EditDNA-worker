@@ -131,6 +131,341 @@ final class DraftEditorViewModel: ObservableObject {
         return clips.compactMap { $0["audio_volume"]?.doubleValue }.max() ?? 1
     }
 
+    // MARK: Overlays, full-screen B-roll, one undo history
+
+    /// Photos / videos picked for an overlay that are still uploading (shown at once).
+    @Published private(set) var pendingOverlays: [PendingOverlay] = []
+    private var overlayUploads: Set<String> = []
+    /// The overlay just added (the editor selects it).
+    @Published var lastAddedOverlayID: String?
+    /// A full-screen B-roll video going into the main track (upload %).
+    @Published private(set) var pendingBroll: PendingBroll?
+    /// What Export is doing before the server takes over ("Saving your changes…").
+    @Published var exportPreparing: String?
+
+    /// One Undo / Redo history across the draft (clips, captions, overlays...) and the voice row.
+    enum UndoStep { case draft; case voices(TimelineComposition) }
+    private var undoSteps: [UndoStep] = []
+    private var redoSteps: [UndoStep] = []
+
+    // MARK: Overlay: photo or video from the phone
+
+    /// A photo or video picked in the gallery goes over the video at `start`: on screen at once
+    /// (from the copy kept on this iPhone), uploaded in the background with its %, and placed on
+    /// the overlay row. A failed upload keeps the copy and tries again.
+    func addOverlay(fileURL: URL, at start: Double) {
+        let id = "pov_\(UUID().uuidString.prefix(10))"
+        guard let name = OverlayMediaStore.keep(fileURL, id: id) else {
+            errorMessage = "There isn't enough space on this iPhone for that file."
+            return
+        }
+        let kind = EditorMediaInfo.kind(of: fileURL)
+        Task { @MainActor in
+            let local = OverlayMediaStore.fileURL(name)
+            let length = kind == .video ? await EditorMediaInfo.duration(of: local) : 0
+            let total = max(1, timelineDuration)
+            let begin = min(max(0, start), max(0, total - 0.5))
+            let end = min(total, begin + (kind == .video ? max(0.5, length) : 4))
+            var item = PendingOverlay(id: id, fileName: name, kind: kind, start: begin, end: end,
+                                      sourceDuration: kind == .video ? length : nil)
+            let aspect = await EditorMediaInfo.aspect(of: local, kind: kind)
+            // Tall media a little narrower so it never covers the whole frame.
+            item.width = aspect < 0.8 ? 0.34 : 0.42
+            pendingOverlays.append(item)
+            lastAddedOverlayID = id
+            uploadPendingOverlay(id: id)
+        }
+    }
+
+    func retryPendingOverlay(id: String) { uploadPendingOverlay(id: id) }
+
+    func discardPendingOverlay(id: String) {
+        pendingOverlays.removeAll { $0.id == id }
+    }
+
+    /// Moves / resizes an overlay that is still uploading (kept for when it is placed).
+    func updatePendingOverlay(id: String, x: Double? = nil, y: Double? = nil, width: Double? = nil,
+                              start: Double? = nil, end: Double? = nil) {
+        guard let index = pendingOverlays.firstIndex(where: { $0.id == id }) else { return }
+        if let x { pendingOverlays[index].x = x }
+        if let y { pendingOverlays[index].y = y }
+        if let width { pendingOverlays[index].width = width }
+        if let start { pendingOverlays[index].start = start }
+        if let end { pendingOverlays[index].end = end }
+    }
+
+    private func uploadPendingOverlay(id: String) {
+        guard !overlayUploads.contains(id), pendingOverlays.contains(where: { $0.id == id }) else { return }
+        overlayUploads.insert(id)
+        if let index = pendingOverlays.firstIndex(where: { $0.id == id }) { pendingOverlays[index].failed = false }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.overlayUploads.remove(id) }
+            for attempt in 0..<PendingVoiceOverStore.attemptsPerRound {
+                let wait = PendingVoiceOverStore.retryDelay(afterAttempt: attempt)
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+                guard let item = self.pendingOverlays.first(where: { $0.id == id }) else { return }
+                if await self.finishPendingOverlay(item) { return }
+            }
+            if let index = self.pendingOverlays.firstIndex(where: { $0.id == id }) { self.pendingOverlays[index].failed = true }
+        }
+    }
+
+    private func setOverlayProgress(_ id: String, _ value: Double) {
+        guard let index = pendingOverlays.firstIndex(where: { $0.id == id }) else { return }
+        pendingOverlays[index].progress = max(pendingOverlays[index].progress, min(1, value))
+    }
+
+    private func finishPendingOverlay(_ item: PendingOverlay) async -> Bool {
+        let uploaded: OverlayPresignResponse
+        do {
+            uploaded = try await OverlayUploadManager.shared.upload(
+                fileURL: item.fileURL, projectID: project.projectID, session: session
+            ) { [weak self] value in Task { @MainActor in self?.setOverlayProgress(item.id, value) } }
+        } catch {
+            CutSellDiagnostics.log("overlay_upload_retry", ["attempt": "\(item.attempts)"])
+            return false
+        }
+        OverlayMediaStore.link(uri: uploaded.uri, fileName: item.fileName)
+        // Where it is now (the creator may have moved it while it uploaded).
+        let current = pendingOverlays.first { $0.id == item.id } ?? item
+        let total = max(1, timelineDuration)
+        var fields: [String: JSONValue] = [
+            "project_id": .string(project.projectID), "user_id": .string(session.userID),
+            "kind": .string(uploaded.kind), "uri": .string(uploaded.uri),
+            "start": .number(min(current.start, max(0, total - 0.2))), "end": .number(min(current.end, total)),
+            "x": .number(current.x), "y": .number(current.y), "width": .number(max(0.1, min(1, current.width))),
+            "source_start": .number(0), "mute_audio": .bool(true),
+        ]
+        if let length = current.sourceDuration, length > 0 { fields["source_end"] = .number(length) }
+        let shownError = errorMessage
+        let added = ResultBox()
+        let request = fields
+        await perform(predict: nil) { [weak self] in
+            added.value = await self?.editAndSave("/v1/overlays/add", request) ?? false
+        }.value
+        errorMessage = shownError
+        guard added.value,
+              let placed = mediaOverlays.last(where: { $0["uri"]?.stringValue == uploaded.uri })?["overlay_id"]?.stringValue
+        else { return false }
+        pendingOverlays.removeAll { $0.id == item.id }
+        if lastAddedOverlayID == item.id { lastAddedOverlayID = placed }
+        return true
+    }
+
+    /// Changes one overlay on the draft (shown at once, one save in the edit queue).
+    @discardableResult
+    private func changeOverlay(id: String, _ edit: @escaping (inout [String: JSONValue]) -> Void) -> Task<Void, Never> {
+        let change: (inout [String: JSONValue]) -> Void = { object in
+            let items = object["media_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
+            object["media_overlays"] = .array(items.map { item in
+                guard item["overlay_id"]?.stringValue == id else { return .object(item) }
+                var changed = item
+                edit(&changed)
+                return .object(changed)
+            })
+        }
+        return perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }
+    }
+
+    /// Where the overlay sits on the video (centre, 0...1) and how wide it is (share of the frame).
+    @discardableResult
+    func setOverlayFrame(id: String, x: Double, y: Double, width: Double) -> Task<Void, Never> {
+        changeOverlay(id: id) { item in
+            item["x"] = .number((min(1, max(0, x)) * 10_000).rounded() / 10_000)
+            item["y"] = .number((min(1, max(0, y)) * 10_000).rounded() / 10_000)
+            item["width"] = .number((min(1, max(0.1, width)) * 10_000).rounded() / 10_000)
+        }
+    }
+
+    /// When the overlay shows on the timeline (move or trim). A video overlay trimmed at its start
+    /// starts that much later in its own video.
+    @discardableResult
+    func setOverlayTime(id: String, start: Double, end: Double, sourceStart: Double? = nil) -> Task<Void, Never> {
+        changeOverlay(id: id) { item in
+            item["start"] = .number((max(0, start) * 1000).rounded() / 1000)
+            item["end"] = .number((max(start + 0.2, end) * 1000).rounded() / 1000)
+            if let sourceStart { item["source_start"] = .number((max(0, sourceStart) * 1000).rounded() / 1000) }
+        }
+    }
+
+    /// Overlays (photo, video and text) end by the end of the cut; any wholly past it go.
+    static func fitOverlaysToCut(_ draft: JSONValue) -> JSONValue {
+        guard var object = draft.objectValue else { return draft }
+        let clips = object["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        let total = clips.reduce(0.0) { $0 + max(0, ($1["end"]?.doubleValue ?? 0) - ($1["start"]?.doubleValue ?? 0)) }
+        guard total > 0 else { return draft }
+        for key in ["media_overlays", "text_overlays"] {
+            guard let items = object[key]?.arrayValue?.compactMap(\.objectValue), !items.isEmpty else { continue }
+            var changed = false
+            let fitted: [JSONValue] = items.compactMap { item in
+                let start = item["start"]?.doubleValue ?? 0
+                let end = item["end"]?.doubleValue ?? start
+                if start >= total - 0.05 { changed = true; return nil }
+                guard end > total else { return .object(item) }
+                var copy = item
+                copy["end"] = .number((total * 1000).rounded(.down) / 1000)
+                changed = true
+                return .object(copy)
+            }
+            if changed { object[key] = .array(fitted) }
+        }
+        return .object(object)
+    }
+
+    // MARK: Full-screen B-roll: a video from the phone as a clip of the main track
+
+    /// The picked video goes into the main track at the cursor (between clips, or splitting the
+    /// clip under the cursor), uploaded with its %; it plays at once from this iPhone.
+    func addBrollClip(fileURL: URL, at time: Double) {
+        let id = "broll_\(UUID().uuidString.prefix(8).lowercased())"
+        let folder = LocalCaches.folder("BrollPicks")
+        let local = folder.appendingPathComponent("\(id).\(fileURL.pathExtension.isEmpty ? "mp4" : fileURL.pathExtension.lowercased())")
+        try? FileManager.default.removeItem(at: local)
+        guard (try? FileManager.default.copyItem(at: fileURL, to: local)) != nil else {
+            errorMessage = "There isn't enough space on this iPhone for that video."
+            return
+        }
+        pendingBroll = PendingBroll(id: id, progress: 0)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let length = await EditorMediaInfo.duration(of: local)
+            guard length > 0.2 else {
+                self.pendingBroll = nil
+                self.errorMessage = "That video couldn't be read. Please pick another one."
+                return
+            }
+            var uri: String?
+            for attempt in 0..<PendingVoiceOverStore.attemptsPerRound where uri == nil {
+                let wait = PendingVoiceOverStore.retryDelay(afterAttempt: attempt)
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+                let progress: @Sendable (Double) -> Void = { [weak self] value in
+                    Task { @MainActor in
+                        if let current = self?.pendingBroll, current.id == id {
+                            self?.pendingBroll?.progress = max(current.progress, min(1, value))
+                        }
+                    }
+                }
+                let result = try? await MultipartUploadManager.shared.upload(
+                    fileURL: local, projectID: self.project.projectID, session: self.session,
+                    contentType: EditorMediaInfo.contentType(for: local), progress: progress
+                )
+                if let result { uri = result.sourceURI }
+            }
+            guard let uri else {
+                self.pendingBroll?.failed = true
+                self.brollRetry = (fileURL: local, time: time)
+                return
+            }
+            await SourceVideoCache.shared.store(fileURL: local, uri: uri)
+            let source: [String: JSONValue] = [
+                "source_asset_id": .string("src_\(id)"), "original_name": .string(local.lastPathComponent),
+                "uri": .string(uri), "duration_sec": .number((length * 1000).rounded() / 1000),
+            ]
+            let change: (inout [String: JSONValue]) -> Void = { object in
+                Self.insertBroll(&object, id: id, source: source, length: length, at: time)
+            }
+            self.pendingBroll = nil
+            self.brollRetry = nil
+            await self.perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }.value
+        }
+    }
+
+    /// The last B-roll whose upload failed (tap to try again).
+    private(set) var brollRetry: (fileURL: URL, time: Double)?
+
+    func retryBroll() {
+        guard let retry = brollRetry else { return }
+        pendingBroll = nil
+        addBrollClip(fileURL: retry.fileURL, at: retry.time)
+    }
+
+    func dismissFailedBroll() { pendingBroll = nil; brollRetry = nil }
+
+    /// Puts a B-roll clip into `selected` at timeline `time` (splitting the clip under it).
+    static func insertBroll(_ object: inout [String: JSONValue], id: String, source: [String: JSONValue],
+                            length: Double, at time: Double) {
+        var clips = object["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        var sources = object["broll_sources"]?.arrayValue?.compactMap(\.objectValue) ?? []
+        sources.append(source)
+        object["broll_sources"] = .array(sources.map(JSONValue.object))
+        let order = (clips.compactMap { $0["source_order"]?.doubleValue }.max() ?? 0) + 1
+        let clip: [String: JSONValue] = [
+            "clip_id": .string(id), "source_asset_id": source["source_asset_id"] ?? .string("src_\(id)"),
+            "source_order": .number(order), "start": .number(0), "end": .number((length * 1000).rounded() / 1000),
+            "text": .string(""), "caption_text": .string(""), "words": .array([]), "selected": .bool(true),
+            "audio_muted": .bool(false), "audio_volume": .number(1),
+        ]
+        var cursor = 0.0
+        var insertAt = clips.count
+        for (index, item) in clips.enumerated() {
+            let start = item["start"]?.doubleValue ?? 0
+            let end = item["end"]?.doubleValue ?? start
+            let clipLength = max(0, end - start)
+            if time <= cursor + 0.05 { insertAt = index; break }
+            if time < cursor + clipLength - 0.05 {
+                // Inside this clip: split it at the cursor, B-roll in between.
+                let at = start + (time - cursor)
+                var left = item, right = item
+                left["end"] = .number((at * 1000).rounded() / 1000)
+                left.removeValue(forKey: "manual_end")
+                right["start"] = .number((at * 1000).rounded() / 1000)
+                right["clip_id"] = .string((item["clip_id"]?.stringValue ?? "clip") + "-\(id.suffix(4))")
+                let words = item["words"]?.arrayValue?.compactMap(\.objectValue) ?? []
+                let before = words.filter { ($0["end"]?.doubleValue ?? 0) <= at }
+                let after = words.filter { ($0["end"]?.doubleValue ?? 0) > at }
+                left["words"] = .array(before.map(JSONValue.object))
+                right["words"] = .array(after.map(JSONValue.object))
+                if !TrimMath.captionEditedByHand(item) {
+                    left["text"] = .string(TrimMath.text(of: before)); left["caption_text"] = left["text"]
+                    right["text"] = .string(TrimMath.text(of: after)); right["caption_text"] = right["text"]
+                }
+                clips.replaceSubrange(index...index, with: [left, clip, right])
+                object["selected"] = .array(clips.map(JSONValue.object))
+                return
+            }
+            cursor += clipLength
+            insertAt = index + 1
+        }
+        clips.insert(clip, at: min(insertAt, clips.count))
+        object["selected"] = .array(clips.map(JSONValue.object))
+    }
+
+    // MARK: Voice row: move a voice in time
+
+    /// Moves a voice-over so it starts at `start` (its length kept); one save. A 409 (the row
+    /// changed elsewhere) reads the row again and tries once more. Undo puts it back.
+    func moveVoiceOver(id: String, to start: Double) async {
+        for attempt in 0..<2 {
+            guard let previous = timelineComposition,
+                  let index = previous.voiceOverPlacements.firstIndex(where: { $0.placementID == id }) else { return }
+            var placements = previous.voiceOverPlacements
+            let length = placements[index].timelineEndSec - placements[index].timelineStartSec
+            let begin = (max(0, start) * 1000).rounded() / 1000
+            placements[index].timelineStartSec = begin
+            placements[index].timelineEndSec = begin + length
+            let shownError = errorMessage
+            let saved = await saveTimelineComposition(
+                brollPlacements: previous.brollPlacements, voiceOverPlacements: placements,
+                timelineDurationSec: max(previous.timelineDurationSec, begin + length), capturePreviousForUndo: false
+            )
+            if saved {
+                undoSteps.append(.voices(previous))
+                redoSteps.removeAll()
+                return
+            }
+            if attempt == 0 { errorMessage = shownError; await refreshTimelineComposition() }
+        }
+    }
+
+    /// Puts the voice row back to `composition` (Undo / Redo of a voice change).
+    private func restoreVoices(_ composition: TimelineComposition) async -> Bool {
+        await saveTimelineComposition(
+            brollPlacements: composition.brollPlacements, voiceOverPlacements: composition.voiceOverPlacements,
+            timelineDurationSec: composition.timelineDurationSec, capturePreviousForUndo: false
+        )
+    }
+
     // MARK: Trim by the edges
 
     /// While a clip's handle is dragged: the original's frame to show on the video, and how much
@@ -762,7 +1097,7 @@ final class DraftEditorViewModel: ObservableObject {
         capturePreviousForUndo: Bool
     ) async -> Bool {
         guard let baseEditAssetID else {
-            errorMessage = "No primary source asset is registered for this project yet -- overlay and voice-over placement need one first."
+            errorMessage = "This cut isn't ready for that yet. Please try again in a moment."
             return false
         }
         isSavingTimeline = true
@@ -840,11 +1175,13 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func removeVoiceOverPlacement(id: String) async {
+        let previous = timelineComposition
         let placements = currentVoiceOverPlacements.filter { $0.placementID != id }
-        await saveTimelineComposition(
+        let saved = await saveTimelineComposition(
             brollPlacements: currentBrollPlacements, voiceOverPlacements: placements,
             timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true
         )
+        if saved, let previous { undoSteps.append(.voices(previous)); redoSteps.removeAll() }
     }
 
     /// Split affects ONLY the selected placement, at the playhead time --
@@ -911,10 +1248,12 @@ final class DraftEditorViewModel: ObservableObject {
             sourceInSec: sourceSplit, sourceOutSec: original.sourceOutSec, transcriptReference: nil
         )
         placements.replaceSubrange(index...index, with: [first, second])
-        await saveTimelineComposition(
+        let previous = timelineComposition
+        let saved = await saveTimelineComposition(
             brollPlacements: currentBrollPlacements, voiceOverPlacements: placements,
             timelineDurationSec: currentTimelineDuration, capturePreviousForUndo: true
         )
+        if saved, let previous { undoSteps.append(.voices(previous)); redoSteps.removeAll() }
     }
 
     /// Reverts to the composition captured just before the last
@@ -955,9 +1294,20 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func reorder(clipIDs: [String]) async {
-        await perform(predict: nil) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/reorder", [
-            "ordered_clip_ids": .array(clipIDs.map(JSONValue.string))
-        ]) }.value
+        await reorderNow(clipIDs: clipIDs).value
+    }
+
+    /// New clip order, shown at once (the others make room); one save in the edit queue.
+    @discardableResult
+    func reorderNow(clipIDs: [String]) -> Task<Void, Never> {
+        let predict: (inout [String: JSONValue]) -> Void = { object in
+            Self.mapClips(&object) { clips in
+                clipIDs.compactMap { id in clips.first { $0["clip_id"]?.stringValue == id } }
+                    + clips.filter { !clipIDs.contains($0["clip_id"]?.stringValue ?? "") }
+            }
+        }
+        let fields: [String: JSONValue] = ["ordered_clip_ids": .array(clipIDs.map(JSONValue.string))]
+        return perform(predict: predict) { [weak self] in _ = await self?.editAndSave("/v1/draft-edits/reorder", fields) }
     }
 
     func trim(clipID: String, start: Double, end: Double) async {
@@ -1227,6 +1577,19 @@ final class DraftEditorViewModel: ObservableObject {
     /// `snapshot` was left exactly as it was and this returns `false`.
     @discardableResult
     func undo() async -> Bool {
+        // The last change was on the voice row: put that row back as it was.
+        if case .voices(let previous)? = undoSteps.last {
+            undoSteps.removeLast()
+            let current = timelineComposition
+            if await restoreVoices(previous) {
+                if let current { redoSteps.append(.voices(current)) }
+                return true
+            }
+            undoSteps.append(.voices(previous))
+            return false
+        }
+        if case .draft? = undoSteps.last { undoSteps.removeLast() }
+        redoSteps.append(.draft)
         let result = ResultBox()
         var predict: ((inout [String: JSONValue]) -> Void)?
         if let restored = confirmedHistory.last?.objectValue { predict = { $0 = restored } }
@@ -1243,6 +1606,18 @@ final class DraftEditorViewModel: ObservableObject {
     /// Same honest success/failure contract as `undo()` -- see above.
     @discardableResult
     func redo() async -> Bool {
+        if case .voices(let next)? = redoSteps.last {
+            redoSteps.removeLast()
+            let current = timelineComposition
+            if await restoreVoices(next) {
+                if let current { undoSteps.append(.voices(current)) }
+                return true
+            }
+            redoSteps.append(.voices(next))
+            return false
+        }
+        if case .draft? = redoSteps.last { redoSteps.removeLast() }
+        undoSteps.append(.draft)
         let result = ResultBox()
         await perform(predict: nil) { [weak self] in result.value = await self?.redoNow() ?? false }.value
         return result.value
@@ -1252,15 +1627,39 @@ final class DraftEditorViewModel: ObservableObject {
         await history("redo")
     }
 
+    /// Every source the cut uses: the uploaded originals, plus full-screen B-roll videos added in
+    /// the editor (kept in the draft's `broll_sources`).
+    var allSources: [[String: JSONValue]] {
+        let base = snapshot?.sources.compactMap(\.objectValue) ?? []
+        let known = Set(base.compactMap { $0["source_asset_id"]?.stringValue })
+        let added = (displayDraft?["broll_sources"]?.arrayValue?.compactMap(\.objectValue) ?? [])
+            .filter { !known.contains($0["source_asset_id"]?.stringValue ?? "") }
+        return base + added
+    }
+
+    /// Export starts as soon as it is tapped: it first lets the last edits and uploads finish
+    /// (so the video has everything on screen), then the server renders it.
     func export() async {
-        guard let snapshot else { return }
+        let started = Date()
+        exportJob = nil
+        exportPreparing = "Saving your changes…"
+        _ = await actionChain?.value
+        var waited = 0.0
+        while (!pendingVoiceOvers.filter { !$0.failed }.isEmpty || !pendingOverlays.filter { !$0.failed }.isEmpty
+               || (pendingBroll.map { !$0.failed } ?? false)), waited < 90 {
+            exportPreparing = "Uploading your media…"
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            waited += 0.5
+        }
+        _ = await actionChain?.value
+        let preparedSeconds = Date().timeIntervalSince(started)
+        guard let snapshot else { exportPreparing = nil; return }
+        exportPreparing = "Starting the export…"
         do {
-            let filteredSources = snapshot.sources.compactMap { source -> JSONValue? in
-                guard let object = source.objectValue,
-                      let sourceID = object["source_asset_id"],
-                      let originalName = object["original_name"],
-                      let uri = object["uri"] else { return nil }
-                return .object(["source_asset_id": sourceID, "original_name": originalName, "uri": uri])
+            let sources = allSources.compactMap { object -> JSONValue? in
+                guard let sourceID = object["source_asset_id"], let uri = object["uri"] else { return nil }
+                return .object(["source_asset_id": sourceID,
+                                "original_name": object["original_name"] ?? .string("video.mp4"), "uri": uri])
             }
             let response: ExportSubmitResponse = try await api.request(
                 "/v1/exports/jobs",
@@ -1269,11 +1668,18 @@ final class DraftEditorViewModel: ObservableObject {
                     "project_id": .string(project.projectID),
                     "user_id": .string(session.userID),
                     "draft": snapshot.draft,
-                    "sources": .array(filteredSources)
+                    "sources": .array(sources)
                 ])
             )
+            exportPreparing = nil
+            ExportTracker.shared.follow(jobID: response.jobID, projectID: project.projectID,
+                                        title: project.title, preparedSeconds: preparedSeconds,
+                                        submittedSeconds: Date().timeIntervalSince(started))
             await pollExport(jobID: response.jobID)
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            exportPreparing = nil
+            errorMessage = Self.friendly(error)
+        }
     }
 
     // MARK: One save path for every draft change
@@ -1293,6 +1699,15 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     /// Plain words instead of "draft revision conflict ... (409)".
+    /// What the creator reads for any message: plain words, never a server body, code or field name.
+    static func plainWords(_ message: String?) -> String {
+        guard let message, !message.isEmpty else { return "" }
+        let technical = ["{", "}", "detail", "TIMELINE", "_id", "(4", "(5", "uri", "draft", "revision",
+                         "placement", "asset", "Error Domain", "422", "409", "500", "503"]
+        if technical.contains(where: { message.contains($0) }) { return "Something didn't save. Please try again." }
+        return message
+    }
+
     static func friendly(_ error: Error) -> String {
         if isConflict(error) {
             return "This cut was changed somewhere else. We reloaded it — please try your change again."
@@ -1342,9 +1757,9 @@ final class DraftEditorViewModel: ObservableObject {
     private func commit(_ build: @escaping (JSONValue) async throws -> JSONValue?) async -> Bool {
         for attempt in 0..<2 {
             guard let base = snapshot else { return false }
-            let edited: JSONValue?
+            let built: JSONValue?
             do {
-                edited = try await build(base.draft)
+                built = try await build(base.draft)
             } catch {
                 // The edit route refused this change on the latest draft (409/422: e.g. the clip it
                 // was for was just undone or deleted). Nothing is lost that is still in the cut, and
@@ -1356,7 +1771,9 @@ final class DraftEditorViewModel: ObservableObject {
                 errorMessage = Self.friendly(error)
                 return false
             }
-            guard let edited else { return false }
+            guard let built else { return false }
+            // Overlays never run past the end of the cut (the server refuses such a draft).
+            let edited = Self.fitOverlaysToCut(built)
             if edited == base.draft { return true }   // nothing changed: nothing to save
             isSaving = true
             let outcome = await put(edited, over: base)
@@ -1365,6 +1782,8 @@ final class DraftEditorViewModel: ObservableObject {
             case .saved:
                 confirmedHistory.append(base.draft)
                 if confirmedHistory.count > 20 { confirmedHistory.removeFirst() }
+                undoSteps.append(.draft)
+                redoSteps.removeAll()
                 return true
             case .conflict:
                 saveConflicts += 1
@@ -1428,17 +1847,15 @@ final class DraftEditorViewModel: ObservableObject {
         return false
     }
 
+    /// Shows the export's progress while this editor is open (the app-wide tracker keeps
+    /// following it, and tells the creator when it is ready, after the editor closes).
     private func pollExport(jobID: String) async {
         while !Task.isCancelled {
-            do {
-                let status: JobStatus = try await api.request("/v1/jobs/\(jobID)")
+            if let status = ExportTracker.shared.jobs[jobID] {
                 exportJob = status
                 if ["finished", "failed", "canceled"].contains(status.state) { break }
-            } catch {
-                errorMessage = error.localizedDescription
-                break
             }
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .milliseconds(500))
         }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Editor v4 timeline (Figma 1083:2559, approved 13 Oct 2026). Like CapCut, it starts at the left:
 /// a column of row icons (speaker = mute the video's sound · mic · layers) and right after it the
@@ -20,6 +21,12 @@ struct TimelineV4: View {
     @State private var keyframeDrag: (id: String, dx: CGFloat)?
     /// A clip edge being dragged (trim by the edges).
     @State private var trimDrag: TrimDragState?
+    /// A clip lifted with a long press and dragged to another place (reorder, CapCut-like).
+    @State private var liftDrag: LiftDragState?
+    /// A voice-over or an overlay held and dragged sideways (new start time).
+    @State private var moveDrag: MoveDragState?
+    /// An overlay edge being dragged (trim).
+    @State private var overlayTrim: OverlayTrimState?
 
     static let height: CGFloat = 162
     static let minZoom: CGFloat = 6
@@ -223,13 +230,16 @@ struct TimelineV4: View {
 
     private func videoTrack(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let clips = model.selectedClips
-        let windows = Self.windows(clips: clips, trim: trimDrag)
+        let windows = Self.windows(clips: Self.liftOrder(clips, lift: liftDrag), trim: trimDrag)
         return ZStack(alignment: .topLeading) {
             ForEach(Array(windows.enumerated()), id: \.element.clipID) { index, window in
                 // While the START edge is dragged its right side stays put and the left side
                 // follows the finger; the clips after it move when the finger lifts (ripple).
                 let shift = Self.startDragShift(window: window, trim: trimDrag)
-                let left = x(window.start) + CGFloat(shift) * pixelsPerSecond
+                let lifted = liftDrag?.clipID == window.clipID
+                // A lifted clip follows the finger; the others already stand in their new places.
+                let left = lifted ? x(liftDrag?.originalStart ?? window.start) + (liftDrag?.dx ?? 0)
+                                  : x(window.start) + CGFloat(shift) * pixelsPerSecond
                 let clipWidth = max(4, CGFloat(window.end - window.start) * pixelsPerSecond - 2)
                 if left + clipWidth > -40, left < width + 40 {
                     let clip = clips.first { $0["clip_id"]?.stringValue == window.clipID }
@@ -246,11 +256,15 @@ struct TimelineV4: View {
                         width: clipWidth,
                         isSelected: isSelected
                     )
-                    .offset(x: left)
+                    .scaleEffect(lifted ? 1.06 : 1)
+                    .shadow(color: .black.opacity(lifted ? 0.6 : 0), radius: lifted ? 8 : 0, y: lifted ? 4 : 0)
+                    .zIndex(lifted ? 2 : 0)
+                    .offset(x: left, y: lifted ? -4 : 0)
                     .onTapGesture {
                         selection = selection == .video(window.clipID) ? nil : .video(window.clipID)
                     }
-                    if isSelected {
+                    .gesture(liftGesture(clipID: window.clipID, windowStart: window.start))
+                    if isSelected && !lifted {
                         trimHandle(.start, clipID: window.clipID, index: index)
                             .offset(x: left - TrimHandleV4.outside)
                         trimHandle(.end, clipID: window.clipID, index: index)
@@ -261,6 +275,113 @@ struct TimelineV4: View {
         }
         .frame(width: width, height: 50, alignment: .topLeading)
         .accessibilityIdentifier("videoTrack")
+    }
+
+    // MARK: Lift a clip and drop it somewhere else (hold, then drag)
+
+    private func liftGesture(clipID: String, windowStart: Double) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.3)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if liftDrag == nil {
+                    playback.pause()
+                    SnapFeedback.lift()
+                    let ids = model.selectedClips.compactMap { $0["clip_id"]?.stringValue }
+                    liftDrag = LiftDragState(clipID: clipID, originalStart: windowStart, originalOrder: ids, order: ids)
+                }
+                guard var lift = liftDrag else { return }
+                lift.dx = drag?.translation.width ?? 0
+                let clips = model.selectedClips
+                let lengths = clips.map { max(0, ($0["end"]?.doubleValue ?? 0) - ($0["start"]?.doubleValue ?? 0)) }
+                if let from = clips.firstIndex(where: { $0["clip_id"]?.stringValue == clipID }) {
+                    let center = lift.originalStart + lengths[from] / 2 + Double(lift.dx / pixelsPerSecond)
+                    let order = ClipReorder.order(lengths: lengths, from: from, center: center)
+                        .compactMap { clips[$0]["clip_id"]?.stringValue }
+                    if order != lift.order { SnapFeedback.tick() }
+                    lift.order = order
+                }
+                liftDrag = lift
+            }
+            .onEnded { _ in
+                guard let lift = liftDrag else { return }
+                if lift.order != lift.originalOrder {
+                    // One save when the finger lifts (the new order is on screen at once).
+                    model.reorderNow(clipIDs: lift.order)
+                }
+                liftDrag = nil
+            }
+    }
+
+    /// The clips in the order the lifted clip makes (the original order when nothing is lifted).
+    static func liftOrder(_ clips: [[String: JSONValue]], lift: LiftDragState?) -> [[String: JSONValue]] {
+        guard let lift else { return clips }
+        return lift.order.compactMap { id in clips.first { $0["clip_id"]?.stringValue == id } }
+    }
+
+    // MARK: Move a voice-over or an overlay sideways (hold, then drag), with magnets
+
+    /// Where things stick: the cursor, the clip joins and the other items' edges.
+    private func magnets(excluding id: String) -> [Double] {
+        var points: [Double] = [playback.currentTime, 0]
+        for window in EditorTracks.clipWindows(model) { points.append(window.start); points.append(window.end) }
+        for placement in model.timelineComposition?.voiceOverPlacements ?? [] where placement.placementID != id {
+            points.append(placement.timelineStartSec); points.append(placement.timelineEndSec)
+        }
+        for item in model.overlaysOnScreen where item.id != id { points.append(item.start); points.append(item.end) }
+        return points
+    }
+
+    private func moveGesture(kind: MoveDragState.Kind, id: String, start: Double, length: Double) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.3)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if moveDrag == nil {
+                    playback.pause()
+                    SnapFeedback.lift()
+                    moveDrag = MoveDragState(kind: kind, id: id, originalStart: start, length: length, start: start)
+                    switch kind {
+                    case .voice: selection = .voiceOver(id)
+                    case .overlay: selection = .overlay(id, isText: false)
+                    }
+                }
+                guard var move = moveDrag else { return }
+                let proposed = max(0, move.originalStart + Double((drag?.translation.width ?? 0) / pixelsPerSecond))
+                let snapped = TimelineSnap.snapStart(proposed, length: length, magnets: magnets(excluding: id),
+                                                     pixelsPerSecond: pixelsPerSecond)
+                if snapped.snapped != nil && snapped.snapped != move.snappedTo { SnapFeedback.tick() }
+                move.snappedTo = snapped.snapped
+                move.start = max(0, snapped.start)
+                moveDrag = move
+            }
+            .onEnded { _ in
+                guard let move = moveDrag else { return }
+                moveDrag = nil
+                guard abs(move.start - move.originalStart) >= 0.01 else { return }
+                switch move.kind {
+                case .voice:
+                    // Voices never overlap: it goes to the first free place from where it was dropped.
+                    let others = (model.timelineComposition?.voiceOverPlacements ?? [])
+                        .filter { $0.placementID != move.id }
+                        .map { (start: $0.timelineStartSec, end: $0.timelineEndSec) }
+                    let at = PendingVoiceOverStore.freeStart(move.start, duration: move.length, taken: others)
+                    Task { await model.moveVoiceOver(id: move.id, to: at) }
+                case .overlay:
+                    let total = max(move.length, model.timelineDuration)
+                    let begin = min(move.start, max(0, total - move.length))
+                    if model.pendingOverlays.contains(where: { $0.id == move.id }) {
+                        model.updatePendingOverlay(id: move.id, start: begin, end: begin + move.length)
+                    } else {
+                        model.setOverlayTime(id: move.id, start: begin, end: begin + move.length)
+                    }
+                }
+            }
+    }
+
+    /// Start shown for an item while it is dragged (its saved start otherwise).
+    private func shownStart(_ id: String, _ start: Double) -> Double {
+        moveDrag?.id == id ? moveDrag?.start ?? start : start
     }
 
     /// The cut's clips one after the other (no gaps), with the clip being trimmed at its new size.
@@ -409,7 +530,7 @@ struct TimelineV4: View {
         let labels = Self.voiceLabels(
             placements.enumerated().map { index, placement in
                 VoiceLabelInput(key: placement.placementID, title: "Voiceover \(index + 1)",
-                                left: x(placement.timelineStartSec),
+                                left: x(shownStart(placement.placementID, placement.timelineStartSec)),
                                 width: max(8, CGFloat(placement.timelineEndSec - placement.timelineStartSec) * pixelsPerSecond),
                                 status: .saved)
             } + pending.enumerated().map { index, item in
@@ -420,8 +541,9 @@ struct TimelineV4: View {
         )
         return ZStack(alignment: .topLeading) {
             ForEach(Array(placements.enumerated()), id: \.element.id) { index, placement in
-                let left = x(placement.timelineStartSec)
-                let blockWidth = max(8, CGFloat(placement.timelineEndSec - placement.timelineStartSec) * pixelsPerSecond)
+                let length = placement.timelineEndSec - placement.timelineStartSec
+                let left = x(shownStart(placement.placementID, placement.timelineStartSec))
+                let blockWidth = max(8, CGFloat(length) * pixelsPerSecond)
                 if left + blockWidth > 0, left < width + 20 {
                     VoiceBlockV4(
                         title: "Voiceover \(index + 1)",
@@ -430,10 +552,13 @@ struct TimelineV4: View {
                         isSelected: selection == .voiceOver(placement.placementID),
                         showsLabel: false
                     )
-                    .offset(x: left)
+                    .scaleEffect(moveDrag?.id == placement.placementID ? 1.05 : 1)
+                    .offset(x: left, y: moveDrag?.id == placement.placementID ? -2 : 0)
                     .onTapGesture {
                         selection = selection == .voiceOver(placement.placementID) ? nil : .voiceOver(placement.placementID)
                     }
+                    .gesture(moveGesture(kind: .voice, id: placement.placementID,
+                                         start: placement.timelineStartSec, length: length))
                 }
             }
             // Saved a moment ago: on the row at once while it uploads (tap to retry if it failed).
@@ -511,100 +636,128 @@ struct TimelineV4: View {
         }
     }
 
-    // MARK: Overlay track (text, photo, B-roll); empty = no "+" (added from the toolbar)
-
-    private struct OverlayItem: Identifiable {
-        let id: String
-        let start: Double
-        let end: Double
-        let title: String
-        let kind: Kind
-        enum Kind { case text, media, broll }
-    }
-
-    private var overlayItems: [OverlayItem] {
-        var items: [OverlayItem] = []
-        for item in model.textOverlays {
-            let start = item["start"]?.doubleValue ?? 0
-            items.append(OverlayItem(id: item["overlay_id"]?.stringValue ?? UUID().uuidString, start: start,
-                                     end: item["end"]?.doubleValue ?? start + 1, title: item["text"]?.stringValue ?? "Text", kind: .text))
-        }
-        for item in model.mediaOverlays {
-            let start = item["start"]?.doubleValue ?? 0
-            items.append(OverlayItem(id: item["overlay_id"]?.stringValue ?? UUID().uuidString, start: start,
-                                     end: item["end"]?.doubleValue ?? start + 1,
-                                     title: (item["kind"]?.stringValue ?? "photo").capitalized, kind: .media))
-        }
-        for placement in model.timelineComposition?.brollPlacements ?? [] {
-            items.append(OverlayItem(id: placement.placementID, start: placement.timelineStartSec,
-                                     end: placement.timelineEndSec, title: "B-roll", kind: .broll))
-        }
-        return items
-    }
-
-    private func isSelected(_ item: OverlayItem) -> Bool {
-        switch item.kind {
-        case .text: return selection == .overlay(item.id, isText: true)
-        case .media: return selection == .overlay(item.id, isText: false)
-        case .broll: return selection == .broll(item.id)
-        }
-    }
-
-    private func select(_ item: OverlayItem) {
-        let target: EditorSelection
-        switch item.kind {
-        case .text: target = .overlay(item.id, isText: true)
-        case .media: target = .overlay(item.id, isText: false)
-        case .broll: target = .broll(item.id)
-        }
-        selection = selection == target ? nil : target
-    }
-
-    private static func fill(_ kind: OverlayItem.Kind) -> AnyShapeStyle {
-        switch kind {
-        case .media: return AnyShapeStyle(Color(hex: 0xF0F2F7))
-        case .broll:
-            return AnyShapeStyle(LinearGradient(colors: [Color(hex: 0xD61FFF, opacity: 0.7), Color(hex: 0x1A6BFF, opacity: 0.6)],
-                                                startPoint: .leading, endPoint: .trailing))
-        case .text:
-            return AnyShapeStyle(LinearGradient(colors: [Color(hex: 0x0A5CDB), Color(hex: 0x1A1F5C)], startPoint: .leading, endPoint: .trailing))
-        }
-    }
+    // MARK: Overlay track (photos and videos over the video); "+" opens the phone's gallery
 
     private func overlayTrack(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
-        let items = overlayItems
+        let items = model.overlaysOnScreen
+        let legacy = legacyOverlayItems
+        let ends = items.map(\.end) + legacy.map(\.end)
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 7).fill(CS.surfaceControl)
                 .frame(width: max(0, width - Self.cursorX), height: 30)
                 .offset(x: Self.cursorX)
-                .accessibilityIdentifier(items.isEmpty ? "overlayTrackEmpty" : "overlayTrack")
-            ForEach(items) { item in
+                .accessibilityIdentifier(items.isEmpty && legacy.isEmpty ? "overlayTrackEmpty" : "overlayTrack")
+            // Older text overlays and B-roll placements (made before this editor) stay visible.
+            ForEach(legacy) { item in
                 let left = x(item.start)
                 let itemWidth = max(10, CGFloat(item.end - item.start) * pixelsPerSecond - 2)
                 if left + itemWidth > 0, left < width + 20 {
                     Text(item.title)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(item.kind == .media ? Color(hex: 0xD10F1A) : .white)
-                        .lineLimit(1)
+                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                         .padding(.horizontal, 7)
                         .frame(width: itemWidth, height: 30, alignment: .leading)
-                        .background(Self.fill(item.kind), in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected(item) ? CS.cyan : .clear, lineWidth: 2))
+                        .background(Color(hex: 0x1A3A7A), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(selection == item.selection ? CS.cyan : .clear, lineWidth: 2))
                         .offset(x: left)
-                        .onTapGesture { select(item) }
-                        .accessibilityIdentifier(item.kind == .broll ? "brollBlock" : "overlayBlock")
+                        .onTapGesture { selection = selection == item.selection ? nil : item.selection }
+                }
+            }
+            ForEach(items) { item in
+                let start = overlayTrim?.id == item.id ? overlayTrim?.start ?? item.start : shownStart(item.id, item.start)
+                let end = overlayTrim?.id == item.id ? overlayTrim?.end ?? item.end : start + (item.end - item.start)
+                let left = x(start)
+                let itemWidth = max(10, CGFloat(end - start) * pixelsPerSecond - 2)
+                let isSelected = selection == .overlay(item.id, isText: false)
+                if left + itemWidth > -30, left < width + 30 {
+                    OverlayBlockV4(item: item, width: itemWidth, isSelected: isSelected)
+                        .scaleEffect(moveDrag?.id == item.id ? 1.05 : 1)
+                        .offset(x: left, y: moveDrag?.id == item.id ? -2 : 0)
+                        .onTapGesture {
+                            if item.failed { model.retryPendingOverlay(id: item.id); return }
+                            selection = isSelected ? nil : .overlay(item.id, isText: false)
+                        }
+                        .gesture(moveGesture(kind: .overlay, id: item.id, start: item.start, length: item.end - item.start))
+                    if isSelected && moveDrag == nil {
+                        overlayTrimHandle(.start, item: item)
+                            .offset(x: left - TrimHandleV4.outside)
+                        overlayTrimHandle(.end, item: item)
+                            .offset(x: left + itemWidth - TrimHandleV4.width + TrimHandleV4.outside)
+                    }
                 }
             }
             // "+" once the row has something: right after the last item (Figma 1026:3400).
-            if let lastEnd = items.map(\.end).max() {
+            if let lastEnd = ends.max() {
                 let px = max(Self.cursorX + 4, x(lastEnd) + 6)
                 if px < width - 24 {
-                    plusButton(action: onAddOverlay, label: "Add text, photo or B-roll")
+                    plusButton(action: onAddOverlay, label: "Add a photo or video")
                         .offset(x: px, y: 3)
                 }
             }
         }
         .frame(width: width, height: 30, alignment: .topLeading)
+    }
+
+    private struct LegacyOverlayItem: Identifiable {
+        let id: String
+        let start: Double
+        let end: Double
+        let title: String
+        let selection: EditorSelection
+    }
+
+    private var legacyOverlayItems: [LegacyOverlayItem] {
+        var items: [LegacyOverlayItem] = []
+        for item in model.textOverlays {
+            let id = item["overlay_id"]?.stringValue ?? UUID().uuidString
+            let start = item["start"]?.doubleValue ?? 0
+            items.append(LegacyOverlayItem(id: id, start: start, end: item["end"]?.doubleValue ?? start + 1,
+                                           title: item["text"]?.stringValue ?? "", selection: .overlay(id, isText: true)))
+        }
+        for placement in model.timelineComposition?.brollPlacements ?? [] {
+            items.append(LegacyOverlayItem(id: placement.placementID, start: placement.timelineStartSec,
+                                           end: placement.timelineEndSec, title: "Video", selection: .broll(placement.placementID)))
+        }
+        return items
+    }
+
+    /// White handles on a selected overlay's edges: shorter or longer on screen.
+    private func overlayTrimHandle(_ edge: TrimEdge, item: OverlayOnScreen) -> some View {
+        TrimHandleV4(edge: edge, active: overlayTrim?.id == item.id && overlayTrim?.edge == edge, blocked: false, height: 30)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if overlayTrim == nil {
+                            playback.pause()
+                            overlayTrim = OverlayTrimState(id: item.id, edge: edge, start: item.start, end: item.end,
+                                                           originalStart: item.start, originalEnd: item.end)
+                        }
+                        guard var trim = overlayTrim else { return }
+                        let delta = Double(value.translation.width / pixelsPerSecond)
+                        let total = max(item.end, model.timelineDuration)
+                        let points = magnets(excluding: item.id)
+                        if edge == .start {
+                            let proposed = TimelineSnap.snap(max(0, trim.originalStart + delta), to: points, pixelsPerSecond: pixelsPerSecond)
+                            // A video overlay cannot start before its own first frame.
+                            let earliest = item.kind == .video ? max(0, trim.originalStart - item.sourceStart) : 0
+                            trim.start = min(max(earliest, proposed.value), trim.end - 0.2)
+                        } else {
+                            let proposed = TimelineSnap.snap(trim.originalEnd + delta, to: points, pixelsPerSecond: pixelsPerSecond)
+                            trim.end = max(trim.start + 0.2, min(total, proposed.value))
+                        }
+                        overlayTrim = trim
+                    }
+                    .onEnded { _ in
+                        guard let trim = overlayTrim else { return }
+                        overlayTrim = nil
+                        let sourceStart = item.kind == .video ? item.sourceStart + (trim.start - trim.originalStart) : nil
+                        if model.pendingOverlays.contains(where: { $0.id == item.id }) {
+                            model.updatePendingOverlay(id: item.id, start: trim.start, end: trim.end)
+                        } else {
+                            model.setOverlayTime(id: item.id, start: trim.start, end: trim.end, sourceStart: sourceStart)
+                        }
+                    }
+            )
+            .accessibilityIdentifier(edge == .start ? "overlayTrimStart" : "overlayTrimEnd")
     }
 }
 
@@ -742,6 +895,82 @@ struct VoiceLabelV4: View {
     }
 }
 
+/// A clip held and dragged to another place in the cut.
+struct LiftDragState {
+    let clipID: String
+    /// Its place on the timeline when it was lifted (seconds).
+    let originalStart: Double
+    let originalOrder: [String]
+    var order: [String]
+    var dx: CGFloat = 0
+}
+
+/// A voice-over or an overlay held and dragged sideways.
+struct MoveDragState {
+    enum Kind { case voice, overlay }
+    let kind: Kind
+    let id: String
+    let originalStart: Double
+    let length: Double
+    var start: Double
+    var snappedTo: Double?
+}
+
+/// An overlay edge being dragged.
+struct OverlayTrimState {
+    let id: String
+    let edge: TrimEdge
+    var start: Double
+    var end: Double
+    let originalStart: Double
+    let originalEnd: Double
+}
+
+/// A light knock when something sticks to a magnet, a firmer one when a clip is lifted.
+enum SnapFeedback {
+    @MainActor static func tick() { UIImpactFeedbackGenerator(style: .light).impactOccurred(intensity: 0.7) }
+    @MainActor static func lift() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+}
+
+/// One photo / video overlay on the overlay row: its real picture(s), the % while it uploads,
+/// "retry" when the upload failed (Figma 1026:3400).
+struct OverlayBlockV4: View {
+    let item: OverlayOnScreen
+    let width: CGFloat
+    let isSelected: Bool
+
+    var body: some View {
+        let tiles = max(1, min(12, Int((width / 30).rounded(.up))))
+        ZStack(alignment: .leading) {
+            HStack(spacing: 0) {
+                ForEach(0..<tiles, id: \.self) { index in
+                    OverlayMediaPicture(url: item.url, kind: item.kind,
+                                        seconds: item.sourceStart + (item.end - item.start) * Double(index) / Double(tiles))
+                        .frame(width: 30, height: 30).clipped()
+                }
+            }
+            .frame(width: width, height: 30, alignment: .leading)
+            .clipped()
+            if let progress = item.uploading {
+                Color.black.opacity(0.45)
+                Text("\(Int((progress * 100).rounded()))%")
+                    .font(.system(size: 10, weight: .bold)).monospacedDigit().foregroundStyle(.white)
+                    .padding(.leading, 6)
+            } else if item.failed {
+                CS.error.opacity(0.55)
+                Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    .padding(.leading, 6)
+            }
+        }
+        .frame(width: width, height: 30)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? Color.white : CS.cyan.opacity(0.7), lineWidth: isSelected ? 2 : 1))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.kind == .video ? "Video overlay" : "Photo overlay")
+        .accessibilityIdentifier("overlayBlock")
+    }
+}
+
 /// State of one clip edge while it is dragged.
 struct TrimDragState {
     let clipID: String
@@ -780,14 +1009,15 @@ struct TrimHandleV4: View {
     let edge: TrimEdge
     let active: Bool
     let blocked: Bool
+    var height: CGFloat = 50
 
     var body: some View {
         UnevenRoundedRectangle(
             topLeadingRadius: edge == .start ? 6 : 1, bottomLeadingRadius: edge == .start ? 6 : 1,
             bottomTrailingRadius: edge == .end ? 6 : 1, topTrailingRadius: edge == .end ? 6 : 1)
             .fill(blocked ? Color(hex: 0xFFD60A) : Color.white)
-            .frame(width: Self.width, height: 50)
-            .overlay(Capsule().fill(Color(hex: 0x050814).opacity(0.7)).frame(width: 2.5, height: 16))
+            .frame(width: Self.width, height: height)
+            .overlay(Capsule().fill(Color(hex: 0x050814).opacity(0.7)).frame(width: 2.5, height: min(16, height * 0.45)))
             .shadow(color: .black.opacity(active ? 0.5 : 0.3), radius: active ? 4 : 2)
             .scaleEffect(y: active ? 1.06 : 1)
             // A bigger area to grab than what is drawn.

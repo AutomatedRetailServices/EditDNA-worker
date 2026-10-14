@@ -59,7 +59,7 @@ def test_timeline_starts_at_the_left_with_fixed_cursor_and_zoom():
     assert "captionLane" not in tl
     # voice-over track always visible; "+" only on rows that have something
     assert "VoiceBlockV4(" in tl and "if let lastEnd" in tl
-    assert '"Add video"' in tl and '"brollBlock"' in tl
+    assert '"Add video"' in tl and '"overlayBlock"' in tl
     assert '"+  Text · photo · B-roll"' not in tl
     # Auto Zoom keyframes on the video track: tap = select, drag = move
     assert "ZoomDiamond(" in tl and "model.moveZoomKeyframe(id: mark.id" in tl

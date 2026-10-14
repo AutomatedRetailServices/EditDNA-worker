@@ -157,7 +157,7 @@ def test_handles_are_white_on_the_selected_clip_and_drive_the_drag():
     tl = read("EditorV4Timeline.swift")
     assert "struct TrimHandleV4: View" in tl and ".fill(blocked ? Color(hex: 0xFFD60A) : Color.white)" in tl
     track = tl.split("private func videoTrack(", 1)[1].split("\n    }\n", 1)[0]
-    assert "if isSelected {" in track and "trimHandle(.start" in track and "trimHandle(.end" in track
+    assert "if isSelected && !lifted {" in track and "trimHandle(.start" in track and "trimHandle(.end" in track
     assert ".highPriorityGesture(" in tl                 # wins over the timeline scrub
     changed = block(tl, "private func trimChanged(")
     assert "TrimMath.resolve(proposed: drag.original + Double(dx / pixelsPerSecond)" in changed

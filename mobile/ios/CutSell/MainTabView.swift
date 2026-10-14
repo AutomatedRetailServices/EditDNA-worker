@@ -27,6 +27,7 @@ struct MainTabView: View {
     @State private var tab: MainTab
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var tracker = CutTracker.shared
+    @ObservedObject private var exports = ExportTracker.shared
     /// A ready cut opened from the "Your cut is ready" banner.
     @State private var openReady: ReadyRoute?
 
@@ -62,7 +63,21 @@ struct MainTabView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .overlay(alignment: .top) {
+            // An export finished while the creator was somewhere else in the app.
+            if tracker.readyBanner == nil, let text = exports.readyBanner {
+                ReadyBanner(title: text, subtitle: "Open the cut in Edits to save or share it") {
+                    exports.readyBanner = nil
+                    select(.edits)
+                } onDismiss: {
+                    exports.readyBanner = nil
+                }
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .animation(.easeOut(duration: 0.25), value: tracker.readyBanner)
+        .animation(.easeOut(duration: 0.25), value: exports.readyBanner)
         .fullScreenCover(item: $openReady) { route in
             NavigationStack {
                 CutProgressView(
@@ -84,6 +99,8 @@ struct MainTabView: View {
 
 /// "Your cut is ready" banner shown in any tab when a cut finishes in the background.
 struct ReadyBanner: View {
+    var title = "Your cut is ready"
+    var subtitle = "Tap to review it"
     let onOpen: () -> Void
     let onDismiss: () -> Void
 
@@ -91,8 +108,8 @@ struct ReadyBanner: View {
         HStack(spacing: 12) {
             Image("ProcessingLogo").resizable().frame(width: 34, height: 34).blendMode(.screen)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Your cut is ready").font(CS.inter(15, .semibold)).foregroundStyle(.white)
-                Text("Tap to review it").font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+                Text(title).font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text(subtitle).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
             }
             Spacer()
             Button(action: onDismiss) {
