@@ -1,5 +1,5 @@
 #if DEBUG
-import Photos
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -13,36 +13,12 @@ enum EditorMediaProbe {
 
     static func wait(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
 
-    static func newest(_ type: PHAssetMediaType) -> PHAsset? {
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.fetchLimit = 1
-        return PHAsset.fetchAssets(with: type, options: options).firstObject
-    }
-
-    static func photoFile(_ asset: PHAsset) async -> URL? {
-        let options = PHImageRequestOptions()
-        options.isNetworkAccessAllowed = true
-        options.deliveryMode = .highQualityFormat
-        let data: Data? = await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
-                continuation.resume(returning: data)
-            }
-        }
-        guard let data, let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else { return nil }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("probe-photo-\(UUID().uuidString.prefix(6)).jpg")
-        try? jpeg.write(to: url)
-        return url
-    }
-
     static func run(model: DraftEditorViewModel, select: @escaping (EditorSelection?) -> Void) async {
         await wait(4)
-        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        log("photos=\(status.rawValue)")
-        guard let photoAsset = newest(.image), let videoAsset = newest(.video),
-              let photo = await photoFile(photoAsset),
-              let video = try? await GalleryExport.export(videoAsset, name: nil).url else {
-            log("no media in Photos"); return
+        // Test media made here (a photo and a 4 s video), as if picked in the gallery: the
+        // Simulator's Photos permission prompt would cover the screen.
+        guard let photo = makePhoto(), let video = await makeVideo(seconds: 4) else {
+            log("could not make test media"); return
         }
         // 1. Photo overlay.
         var started = Date()
@@ -122,6 +98,62 @@ enum EditorMediaProbe {
             }
         }
         log("done error=\(model.errorMessage ?? "none")")
+    }
+
+    static func makePhoto() -> URL? {
+        let size = CGSize(width: 900, height: 600)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            let colors = [UIColor(red: 0.1, green: 0.9, blue: 1, alpha: 1).cgColor, UIColor(red: 1, green: 0.13, blue: 0.84, alpha: 1).cgColor]
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1]) {
+                context.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+            let text = "50% OFF" as NSString
+            text.draw(at: CGPoint(x: 220, y: 230), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 110), .foregroundColor: UIColor.white])
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("probe-photo-\(UUID().uuidString.prefix(6)).jpg")
+        guard let data = image.jpegData(compressionQuality: 0.9), (try? data.write(to: url)) != nil else { return nil }
+        return url
+    }
+
+    /// A short 360x640 H.264 video whose colour changes every half second.
+    static func makeVideo(seconds: Int) async -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("probe-video-\(UUID().uuidString.prefix(6)).mp4")
+        guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else { return nil }
+        let width = 360, height = 640, fps: Int32 = 30
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height,
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height,
+        ])
+        writer.add(input)
+        guard writer.startWriting() else { return nil }
+        writer.startSession(atSourceTime: .zero)
+        let palette: [(UInt8, UInt8, UInt8)] = [(255, 80, 40), (40, 200, 255), (120, 60, 240), (40, 220, 120)]
+        for frame in 0..<(Int(fps) * seconds) {
+            while !input.isReadyForMoreMediaData { try? await Task.sleep(nanoseconds: 5_000_000) }
+            guard let pool = adaptor.pixelBufferPool else { return nil }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+            guard let buffer else { return nil }
+            CVPixelBufferLockBaseAddress(buffer, [])
+            let color = palette[(frame / 15) % palette.count]
+            if let base = CVPixelBufferGetBaseAddress(buffer) {
+                // One row of the colour, copied to every row (fast even in a Debug build).
+                let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+                var row = [UInt8](repeating: 255, count: width * 4)
+                for x in 0..<width { row[x * 4] = color.2; row[x * 4 + 1] = color.1; row[x * 4 + 2] = color.0 }
+                row.withUnsafeBytes { source in
+                    for y in 0..<height { memcpy(base + y * rowBytes, source.baseAddress!, width * 4) }
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        return writer.status == .completed ? url : nil
     }
 
     static func until(_ seconds: Double, _ condition: () -> Bool) async {

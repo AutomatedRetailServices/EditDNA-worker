@@ -261,7 +261,7 @@ def test_export_starts_on_tap_waits_for_edits_and_is_followed_app_wide():
 
 def test_probes_cover_overlay_broll_moves_export_and_ring():
     probe = read("EditorMediaProbe.swift")
-    for step in ("photo_overlay", "video_overlay", "broll", "clip_moved", "voice_moved", "export state"):
+    for step in ("photo_overlay", "video_overlay", "broll", "clip_moved", "voice_moved", "export state", "makeVideo"):
         assert step in probe
     workflow = (ROOT / ".github" / "workflows" / "cutsell-ios-editor-probe.yml").read_text()
     assert 'SIMCTL_CHILD_CUTSELL_PROBE_STATE="media"' in workflow
