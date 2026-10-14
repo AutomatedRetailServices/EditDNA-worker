@@ -406,6 +406,18 @@ struct TimelineV4: View {
         let placements = model.timelineComposition?.voiceOverPlacements ?? []
         let pending = model.pendingVoiceOvers
         let lastEnd = (placements.map(\.timelineEndSec) + pending.map(\.end)).max()
+        let labels = Self.voiceLabels(
+            placements.enumerated().map { index, placement in
+                VoiceLabelInput(key: placement.placementID, title: "Voiceover \(index + 1)",
+                                left: x(placement.timelineStartSec),
+                                width: max(8, CGFloat(placement.timelineEndSec - placement.timelineStartSec) * pixelsPerSecond),
+                                status: .saved)
+            } + pending.enumerated().map { index, item in
+                VoiceLabelInput(key: "pending_\(item.id)", title: "Voiceover \(placements.count + index + 1)",
+                                left: x(item.start), width: max(8, CGFloat(item.duration) * pixelsPerSecond),
+                                status: item.failed ? .failed : .uploading)
+            }
+        )
         return ZStack(alignment: .topLeading) {
             ForEach(Array(placements.enumerated()), id: \.element.id) { index, placement in
                 let left = x(placement.timelineStartSec)
@@ -415,7 +427,8 @@ struct TimelineV4: View {
                         title: "Voiceover \(index + 1)",
                         assetID: placement.assetID,
                         width: blockWidth,
-                        isSelected: selection == .voiceOver(placement.placementID)
+                        isSelected: selection == .voiceOver(placement.placementID),
+                        showsLabel: false
                     )
                     .offset(x: left)
                     .onTapGesture {
@@ -434,18 +447,26 @@ struct TimelineV4: View {
                         width: blockWidth,
                         isSelected: false,
                         localURL: PendingVoiceOverStore.fileURL(item),
-                        status: item.failed ? .failed : .uploading
+                        status: item.failed ? .failed : .uploading,
+                        showsLabel: false
                     )
                     .offset(x: left)
                     .onTapGesture { if item.failed { model.retryPendingVoiceOver(id: item.id) } }
                     .accessibilityLabel(item.failed ? "Voice-over not uploaded. Tap to try again." : "Voice-over uploading")
                 }
             }
-            // "+" only when the row already has a voice: right after the last one, and never on
-            // top of its "Voiceover N" label (a short voice's label runs past its end).
+            // Labels on their own layer, above every block: a short voice's label runs past its
+            // end and the next voice's label moves over so no label is ever cut or covered.
+            ForEach(labels, id: \.key) { label in
+                if label.x + label.width > 0, label.x < width + 20 {
+                    VoiceLabelV4(title: label.title, status: label.status, onTab: !label.inside)
+                        .offset(x: label.x, y: 5)
+                }
+            }
+            // "+" only when the row already has a voice: right after the last one and its label.
             if let lastEnd {
-                let lastStart = (placements.map(\.timelineStartSec) + pending.map(\.start)).max() ?? lastEnd
-                let px = max(Self.cursorX + 4, x(lastEnd) + 6, x(lastStart) + VoiceBlockV4.labelRoom + 16)
+                let labelEnd = labels.map { $0.x + $0.width }.max() ?? 0
+                let px = max(Self.cursorX + 4, x(lastEnd) + 6, labelEnd + 8)
                 if px < width - 24 {
                     plusButton(action: onAddVoice, label: "Add voice-over")
                         .offset(x: px, y: 3)
@@ -454,6 +475,38 @@ struct TimelineV4: View {
         }
         .frame(width: width, height: 30, alignment: .topLeading)
         .accessibilityIdentifier("voiceTrack")
+    }
+
+    struct VoiceLabelInput {
+        let key: String
+        let title: String
+        let left: CGFloat
+        let width: CGFloat
+        let status: VoiceBlockV4.Status
+    }
+
+    struct VoiceLabelPlacement {
+        let key: String
+        let title: String
+        let x: CGFloat
+        let width: CGFloat
+        let status: VoiceBlockV4.Status
+        /// Fits inside its own block (otherwise it sits on its own blue tab).
+        let inside: Bool
+    }
+
+    /// Where each "Voiceover N" label goes: at its block's start, or just after the previous
+    /// label when that one ran long. Never on top of another label, never cut.
+    static func voiceLabels(_ inputs: [VoiceLabelInput]) -> [VoiceLabelPlacement] {
+        var previousEnd = -CGFloat.greatestFiniteMagnitude
+        return inputs.sorted { $0.left < $1.left }.map { input in
+            let width = VoiceLabelV4.width(title: input.title, status: input.status)
+            let x = max(input.left + 7, previousEnd + 6)
+            previousEnd = x + width
+            let inside = x + width <= input.left + input.width - 4
+            return VoiceLabelPlacement(key: input.key, title: input.title, x: x, width: width,
+                                       status: input.status, inside: inside)
+        }
     }
 
     // MARK: Overlay track (text, photo, B-roll); empty = no "+" (added from the toolbar)
@@ -652,6 +705,41 @@ private struct ClipBlockV4: View {
     }
 }
 
+/// "Voiceover N" on the mic row: inside its block, or on its own blue tab when the block is short.
+struct VoiceLabelV4: View {
+    let title: String
+    let status: VoiceBlockV4.Status
+    let onTab: Bool
+
+    /// Room the label takes (text at 10 pt semibold, plus the upload / retry mark and the tab).
+    static func width(title: String, status: VoiceBlockV4.Status) -> CGFloat {
+        CGFloat(title.count) * 6.2 + (status == .saved ? 0 : 13) + 12
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if status == .uploading {
+                ProgressView().controlSize(.mini).tint(.white)
+            } else if status == .failed {
+                Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+            }
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .padding(.horizontal, onTab ? 6 : 0)
+        .frame(height: 20)
+        .background {
+            if onTab { Capsule().fill(Color(hex: 0x1769FF)).overlay(Capsule().stroke(CS.cyan, lineWidth: 1)) }
+        }
+        .fixedSize()
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("voiceLabel")
+    }
+}
+
 /// State of one clip edge while it is dragged.
 struct TrimDragState {
     let clipID: String
@@ -717,6 +805,8 @@ struct VoiceBlockV4: View {
     let isSelected: Bool
     var localURL: URL? = nil
     var status: Status = .saved
+    /// The timeline draws the labels on their own layer (so they are never covered).
+    var showsLabel: Bool = true
     @State private var samples: [Float] = []
 
     /// Room the label needs inside the block (text + paddings).
@@ -743,7 +833,7 @@ struct VoiceBlockV4: View {
         .frame(width: width, height: 30)
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(borderColor, style: borderStyle))
-        .overlay(alignment: .leading) { label(inside: labelInside) }
+        .overlay(alignment: .leading) { if showsLabel { label(inside: labelInside) } }
         .task(id: assetID) {
             if let url = localURL ?? VoiceOverStore.url(for: assetID) { samples = await Waveform.samples(url: url, count: 90) }
         }

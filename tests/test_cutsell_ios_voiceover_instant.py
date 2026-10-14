@@ -111,14 +111,30 @@ def test_slider_math_round_trips():
         assert abs(slider_value(slider_center(value, width, 2), width, 2) - value) < 0.011
 
 
+def label_positions(blocks):
+    """Python mirror of TimelineV4.voiceLabels: (left, width, title) -> (x, label_width, inside)."""
+    out, previous_end = [], float("-inf")
+    for left, width, title in sorted(blocks):
+        label_width = len(title) * 6.2 + 12
+        x = max(left + 7, previous_end + 6)
+        previous_end = x + label_width
+        out.append((x, label_width, x + label_width <= left + width - 4))
+    return out
+
+
 def test_voiceover_label_is_never_cut():
     timeline = read("EditorV4Timeline.swift")
-    block = timeline.split("struct VoiceBlockV4: View {", 1)[1].split("\n}\n", 1)[0]
-    assert ".overlay(alignment: .leading) { label(inside: labelInside) }" in block
-    # The label sits outside the clipped block, never truncated.
-    assert ".fixedSize()" in block and ".lineLimit(1)" in block
-    label = block.split("private func label(inside: Bool)", 1)[1]
+    # Labels on their own layer above the blocks, laid out so none covers another.
+    assert "ForEach(labels, id: \\.key)" in timeline
+    assert "let x = max(input.left + 7, previousEnd + 6)" in timeline
+    label = timeline.split("struct VoiceLabelV4: View {", 1)[1].split("\n}\n", 1)[0]
+    assert ".fixedSize()" in label and ".lineLimit(1)" in label and "truncationMode" not in label
     assert "Capsule().fill(Color(hex: 0x1769FF))" in label
+    # A 1.5 s voice right before another (the probe's case): both labels whole, side by side.
+    first, second = label_positions([(100, 45, "Voiceover 1"), (150, 180, "Voiceover 2")])
+    assert first[2] is False                                   # on its own tab past the short block
+    assert second[0] >= first[0] + first[1] + 6                # starts after the first label
+
 
 
 def free_start(start, duration, taken):
@@ -151,4 +167,4 @@ def test_a_new_voice_never_overlaps_the_voices_on_the_row():
 
 def test_plus_never_covers_the_voiceover_label():
     timeline = read("EditorV4Timeline.swift")
-    assert "x(lastStart) + VoiceBlockV4.labelRoom + 16" in timeline
+    assert "let px = max(Self.cursorX + 4, x(lastEnd) + 6, labelEnd + 8)" in timeline
