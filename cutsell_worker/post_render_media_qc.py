@@ -128,7 +128,8 @@ def _detect_silence_intervals(
     media_path: str, *, noise_floor_db: float = -35.0, min_silence_sec: float = 0.3,
 ) -> list[tuple[float, float]]:
     _, output = _run([
-        _FFMPEG, "-hide_banner", "-i", media_path,
+        # Audio only (-vn): the silence check never needs the picture decoded (export speed).
+        _FFMPEG, "-hide_banner", "-i", media_path, "-vn",
         "-af", f"silencedetect=noise={noise_floor_db}dB:d={min_silence_sec}",
         "-f", "null", "-",
     ])

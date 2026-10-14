@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from typing import Callable
@@ -25,7 +26,31 @@ def _fps(value: str | None) -> float:
     return float(value)
 
 
+_PROBE_CACHE: dict = {}
+_PROBE_CACHE_MAX = 256
+
+
 def probe_media(path: str, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> MediaProbe:
+    """ffprobe facts about one file. The same unchanged file is probed once per process (the
+    export used to probe each source again for every segment and every QC attempt)."""
+    key = None
+    if runner is subprocess.run:
+        try:
+            stat = os.stat(path)
+            key = (str(path), stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            key = None
+        if key is not None and key in _PROBE_CACHE:
+            return _PROBE_CACHE[key]
+    result = _probe_media_uncached(path, runner)
+    if key is not None:
+        if len(_PROBE_CACHE) >= _PROBE_CACHE_MAX:
+            _PROBE_CACHE.clear()
+        _PROBE_CACHE[key] = result
+    return result
+
+
+def _probe_media_uncached(path: str, runner: Callable[..., subprocess.CompletedProcess]) -> MediaProbe:
     cmd = [
         "ffprobe", "-v", "error", "-show_entries",
         "format=duration:stream=codec_type,width,height,avg_frame_rate",

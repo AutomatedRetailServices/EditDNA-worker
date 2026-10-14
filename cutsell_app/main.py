@@ -46,6 +46,7 @@ from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
 from cutsell_worker.serde import draft_from_dict
 from cutsell_worker.source_identity import stable_source_id
 from cutsell_worker.timeline_asset_storage import sign_timeline_assets
+from cutsell_worker.overlay_uploads import create_presigned_overlay_download
 from cutsell_worker.uploads import (
     create_presigned_source_download,
     create_presigned_upload,
@@ -260,6 +261,37 @@ def _hydrate_snapshot_assets(snapshot: dict[str, Any]) -> dict[str, Any]:
                 item["playback_url_reason"] = exc.__class__.__name__
         hydrated_sources.append(item)
     out["sources"] = hydrated_sources
+    # Editor v4: links for what the editor added to the draft itself -- overlay photos/videos and
+    # full-screen B-roll videos -- so any phone shows the real media. Not stored (they expire).
+    draft = out.get("draft")
+    if isinstance(draft, dict) and project_id and user_id:
+        draft = deepcopy(draft)
+        overlays = []
+        for item in draft.get("media_overlays") or ():
+            entry = dict(item)
+            try:
+                signed = create_presigned_overlay_download(
+                    str(entry.get("uri") or ""), user_id=user_id, project_id=project_id)
+                entry["preview_url"] = signed["url"]
+            except Exception:
+                entry.pop("preview_url", None)
+            overlays.append(entry)
+        if overlays:
+            draft["media_overlays"] = overlays
+        broll = []
+        for item in draft.get("broll_sources") or ():
+            entry = dict(item)
+            try:
+                signed = create_presigned_source_download(
+                    str(entry.get("uri") or ""), project_id=project_id, user_id=user_id)
+                entry["playback_url"] = signed["url"]
+                entry["playback_expires_in"] = signed["expires_in"]
+            except Exception:
+                entry.pop("playback_url", None)
+            broll.append(entry)
+        if broll:
+            draft["broll_sources"] = broll
+        out["draft"] = draft
     return out
 
 
@@ -343,6 +375,18 @@ def recover_draft(project_id: str, user_id: str):
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
+def _strip_signed_links(draft: dict[str, Any]) -> dict[str, Any]:
+    """Signed links are added when a draft is read; they expire, so they are never stored."""
+    out = dict(draft)
+    for key, field in (("media_overlays", "preview_url"), ("broll_sources", "playback_url"),
+                       ("broll_sources", "playback_expires_in")):
+        items = out.get(key)
+        if isinstance(items, list):
+            out[key] = [{k: v for k, v in dict(item).items() if k != field} if isinstance(item, dict) else item
+                        for item in items]
+    return out
+
+
 @app.put("/v1/projects/{project_id}/draft")
 def autosave_draft(project_id: str, payload: DraftAutosaveRequest):
     try:
@@ -350,7 +394,7 @@ def autosave_draft(project_id: str, payload: DraftAutosaveRequest):
         return _hydrate_snapshot_assets(save_draft_snapshot(
             user_id=payload.user_id,
             project_id=project_id,
-            draft=payload.draft,
+            draft=_strip_signed_links(payload.draft),
             expected_revision=payload.expected_revision,
         ))
     except DraftConflictError as exc:

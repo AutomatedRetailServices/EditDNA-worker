@@ -93,3 +93,18 @@ def validate_overlay_uri(uri: str, *, user_id: str, project_id: str) -> tuple[st
     else:
         raise ValueError("overlay uri has unsupported extension")
     return bucket, key, kind
+
+
+def create_presigned_overlay_download(uri: str, *, user_id: str, project_id: str,
+                                      expires_in: int = 1800, client=None) -> dict:
+    """Short-lived GET link for an overlay owned by this user/project (the editor shows the real
+    photo/video on any phone, not only the one that picked it)."""
+    if not 60 <= int(expires_in) <= 3600:
+        raise ValueError("overlay download expiry must be between 60 and 3600 seconds")
+    bucket, key, _kind = validate_overlay_uri(uri, user_id=user_id, project_id=project_id)
+    if client is None:
+        import boto3
+        from .config import load_runtime_config
+        client = boto3.client("s3", region_name=load_runtime_config().aws_region or "us-east-1")
+    url = client.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=int(expires_in))
+    return {"url": url, "expires_in": int(expires_in)}

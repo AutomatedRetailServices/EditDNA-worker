@@ -1,6 +1,10 @@
 """RQ export job: edited Draft Timeline -> final MP4 -> scoped S3 URL."""
 from __future__ import annotations
 
+import time
+
+import threading
+
 from pathlib import Path
 import tempfile
 
@@ -606,6 +610,47 @@ def _safe_notify(
         return {"status": "degraded", "reason": exc.__class__.__name__}
 
 
+class _RenderProgressTicker:
+    """Publishes the export % from 35 to 84 while the render and its QC run. The pace is the
+    measured cost of this worker: about RENDER_SECONDS_PER_VIDEO_SECOND per second of video
+    (more with overlays, which need their own pass), never past 84 before the work ends."""
+
+    RENDER_SECONDS_PER_VIDEO_SECOND = 1.1
+    BASE_SECONDS = 6.0
+
+    def __init__(self, publish, *, seconds_of_video: float, media_overlays: int = 0):
+        self._publish = publish
+        factor = self.RENDER_SECONDS_PER_VIDEO_SECOND * (1.6 if media_overlays else 1.0)
+        self.expected = max(4.0, self.BASE_SECONDS + factor * max(0.0, float(seconds_of_video)))
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="export-progress", daemon=True)
+
+    @staticmethod
+    def percent(elapsed: float, expected: float) -> int:
+        # Linear to 80% of the expected time, then slower; capped at 84 until the work ends.
+        fraction = elapsed / max(0.1, expected)
+        if fraction <= 0.8:
+            value = 35 + 45 * (fraction / 0.8)
+        else:
+            value = 80 + 4 * (1 - 1 / (1 + (fraction - 0.8) * 3))
+        return int(min(84, max(35, value)))
+
+    def _run(self) -> None:
+        started = time.monotonic()
+        while not self._stop.wait(1.0):
+            try:
+                self._publish("rendering", self.percent(time.monotonic() - started, self.expected))
+            except Exception:
+                return
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2)
+
+
 def run_export_job(payload: dict) -> dict:
     # D-288 (finding 5): the real per-job init boundary for the
     # EditorialSlotResolution evidence ContextVar -- see universal_clean_
@@ -617,12 +662,33 @@ def run_export_job(payload: dict) -> dict:
 
     job = get_current_job()
 
+    published = {"percent": 0}
+    publish_lock = threading.Lock()
+
     def publish(stage: str, percent: int) -> None:
-        if job is None:
-            return
-        job.meta["stage"] = stage
-        job.meta["progress_percent"] = max(0, min(100, int(percent)))
-        job.save_meta()
+        # Never backwards (the render ticker and the stage marks both publish).
+        with publish_lock:
+            value = max(published["percent"], max(0, min(100, int(percent))))
+            published["percent"] = value
+            if job is None:
+                return
+            job.meta["stage"] = stage
+            job.meta["progress_percent"] = value
+            job.meta["timings"] = dict(timings)
+            try:
+                job.save_meta()
+            except Exception:
+                pass
+
+    # Seconds spent in each export stage (returned with the result and kept in job.meta, so the
+    # app and the export measurements can see where the time goes).
+    timings: dict[str, float] = {}
+    stage_clock = {"t": time.monotonic()}
+
+    def mark(stage: str) -> None:
+        now = time.monotonic()
+        timings[stage] = round(now - stage_clock["t"], 3)
+        stage_clock["t"] = now
 
     project_id = str(payload["project_id"])
     user_id = str(payload["user_id"])
@@ -660,6 +726,7 @@ def run_export_job(payload: dict) -> dict:
                 destination = str(Path(directory) / f"source-{index:03d}-{source_id}{suffix}")
                 local_paths[source_id] = download_source(uri, destination)
                 publish("rendering", min(25, 5 + int((index + 1) * 20 / len(sources))))
+            mark("download_sources")
 
             required_ids = {clip.source_asset_id for clip in draft.selected}
             missing = required_ids - set(local_paths)
@@ -680,9 +747,18 @@ def run_export_job(payload: dict) -> dict:
                 local_overlays.append(LocalMediaOverlay(overlay=overlay, path=destination))
                 publish("rendering", min(32, 26 + int((index + 1) * 6 / overlay_count)))
 
+            mark("download_overlays")
             plan = build_render_plan(draft, local_paths)
             output = str(Path(directory) / "cutsell-export.mp4")
             publish("rendering", 35)
+            mark("plan")
+            # The render + QC used to sit at 35% until it ended: move the % on from 35 to 84
+            # as the work goes, from how long renders of this length take on this machine.
+            ticker = _RenderProgressTicker(
+                publish, seconds_of_video=sum(max(0.0, seg.end - seg.start) for seg in plan),
+                media_overlays=len(local_overlays),
+            )
+            ticker.start()
             # D-030: live PostRenderWatchListenQC + bounded physical repair,
             # run against the ACTUAL local rendered file, before this job
             # ever calls store_export -- never a downloaded-back artifact.
@@ -691,13 +767,17 @@ def run_export_job(payload: dict) -> dict:
             # except-block already treats as a hard failure (state="failed",
             # render_failed notification) -- this candidate is never
             # delivered/uploaded.
-            qc_result = render_with_post_render_qc(
-                draft,
-                plan,
-                output,
-                text_overlays=draft.text_overlays,
-                media_overlays=tuple(local_overlays),
-            )
+            try:
+                qc_result = render_with_post_render_qc(
+                    draft,
+                    plan,
+                    output,
+                    text_overlays=draft.text_overlays,
+                    media_overlays=tuple(local_overlays),
+                )
+            finally:
+                ticker.stop()
+            mark("render_and_qc")
             if qc_result.status != "PASS":
                 raise PostRenderQCFailure(qc_result)
             publish("rendering", 85)
@@ -719,14 +799,17 @@ def run_export_job(payload: dict) -> dict:
                 project_id=project_id, user_id=user_id, job_id=job_id,
                 job_started_at=job_started_at,
             )
+            mark("upload_and_verify")
             finalized = _finalize_successful_delivery(
                 user_id=user_id, project_id=project_id, job_id=job_id, job_started_at=job_started_at,
                 delivery=delivery, selected_count=len(draft.selected),
                 text_overlay_count=len(draft.text_overlays), media_overlay_count=len(draft.media_overlays),
             )
+            mark("finalize")
             publish("finished", 100)
             return {
                 **finalized,
+                "timings": dict(timings),
                 "project_tracking_start": tracking_start,
                 # D-030: the delivered candidate's exact plan identity and
                 # post-render QC/repair history.
