@@ -45,7 +45,7 @@ jobs:
       - name: Make a short spoken test clip
         run: |
           say -v Samantha -o "$RUNNER_TEMP/speech.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. It fits in any car cup holder. And right now it is on sale in my shop. Grab yours today."
-          ffmpeg -loglevel error -f lavfi -i color=c=0x203060:s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" \
+          ffmpeg -loglevel error -f lavfi -i color=c=0x203060:s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" -vf "noise=alls=14:allf=t+u" \
             -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac "$RUNNER_TEMP/probe.mp4"
           ls -la "$RUNNER_TEMP/probe.mp4"
 
