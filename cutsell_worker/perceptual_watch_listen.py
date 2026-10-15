@@ -517,8 +517,12 @@ def review_rendered_candidate(
     """Run every v1 capability against the rendered candidate and return the
     routed review. Never raises: a capability that cannot run reports ERROR."""
     joins = [w[1] for w in output_windows[:-1]]
-    from .live_render_qc import frozen_visual_pause_windows
+    from .live_render_qc import frozen_visual_pause_windows, user_placed_windows
     protected_visual = frozen_visual_pause_windows(draft, segments, output_windows)
+    # Editor v4: media the creator placed by hand (a full-screen B-roll from the phone, the tail of
+    # a clip end dragged out by hand) may be silent on purpose; it is never judged as dead air.
+    # Engine-chosen material keeps the normal check.
+    protected_visual = tuple(protected_visual) + tuple(user_placed_windows(draft, segments, output_windows))
     capabilities = [
         _dead_air_on_mp4(media_path, protected_visual),
         _speech_energy_at_cuts(media_path, joins),

@@ -196,3 +196,44 @@ def test_outside_windows_keeps_only_unplaced_parts():
     assert _outside_windows((finding,), [(2.0, 8.0)]) == ()
     left = _outside_windows((finding,), [(4.0, 9.0)])
     assert len(left) == 1 and left[0].start == 2.0 and left[0].end == pytest.approx(3.95)
+
+
+def test_delivery_review_does_not_block_a_silent_broll_from_the_phone(tmp_path):
+    """Live failure after the QC fix: the export passed the technical QC, then the delivery review
+    measured the silent B-roll as 5 s of "dead air" and blocked the export. A silent stretch the
+    creator did not place (engine material) is still blocked."""
+    from cutsell_worker.live_boundary_repair import segment_output_windows
+    from cutsell_worker.perceptual_watch_listen import review_rendered_candidate
+    from cutsell_worker.render import render_preview
+    from cutsell_worker.render_plan import build_render_plan
+    from cutsell_worker.serde import draft_from_dict
+
+    main = tmp_path / "main.mp4"
+    broll = tmp_path / "broll.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=360x640:r=30:d=8",
+                    "-f", "lavfi", "-i", "sine=frequency=300:duration=8", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-shortest", str(main)], check=True)
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=360x640:r=30:d=4",
+                    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "4", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", str(broll)], check=True)
+    words = lambda a, b: [{"text": "w", "start": a + 0.1 * i, "end": a + 0.1 * i + 0.08} for i in range(int((b - a) * 10) - 1)]
+    selected = [
+        {"clip_id": "a", "source_asset_id": "s1", "start": 0.0, "end": 2.0, "text": "hi", "words": words(0.0, 2.0)},
+        {"clip_id": "broll_x", "source_asset_id": "src_broll_x", "source_order": 1, "start": 0.0, "end": 3.5,
+         "text": "", "caption_text": "", "words": []},
+        {"clip_id": "b", "source_asset_id": "s1", "start": 4.0, "end": 6.0, "text": "there", "words": words(4.0, 6.0)},
+    ]
+    paths = {"s1": str(main), "src_broll_x": str(broll)}
+
+    def review(payload, name):
+        draft = draft_from_dict(payload)
+        plan = build_render_plan(draft, paths)
+        out = tmp_path / name
+        render_preview(plan, str(out), width=360, height=640)
+        return review_rendered_candidate(str(out), draft, plan, segment_output_windows(plan))
+
+    placed = review({"project_id": "p1", "captions_enabled": False, "selected": selected,
+                     "broll_sources": [{"source_asset_id": "src_broll_x", "uri": "s3://b/k/broll.mp4"}]}, "placed.mp4")
+    assert not placed.has_confirmed_blocking_defect
+    engine = review({"project_id": "p1", "captions_enabled": False, "selected": selected}, "engine.mp4")
+    assert engine.has_confirmed_blocking_defect
