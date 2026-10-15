@@ -1,7 +1,7 @@
 name: CutSell sounds upload
 
 # Builds the official CutSell sounds from the two CC0 packs (OpenGameArt) with
-# tools/make_cutsell_sounds.py and puts them in the media bucket at assets/sfx/v1/ with
+# tools/make_cutsell_sounds.py and puts them in the Cloudflare R2 media bucket at assets/sfx/v1/ with
 # manifest.json. The audio never enters this repository. Runs only when pushed to
 # probe/sfx-upload (manual, after the Product Owner's approval).
 
@@ -29,20 +29,34 @@ jobs:
           unzip -q "$RUNNER_TEMP/u.zip" -d "$RUNNER_TEMP/u"
       - name: Build the sounds and manifest.json
         run: python3 tools/make_cutsell_sounds.py "$RUNNER_TEMP/k" "$RUNNER_TEMP/u" "$RUNNER_TEMP/sfx"
-      - name: Upload to assets/sfx/v1/ and check every file is there
+      - name: Check the six files before uploading (lengths and loudness written by the script)
+        run: |
+          python3 - "$RUNNER_TEMP/sfx/manifest.json" <<'PY'
+          import json, sys
+          expected = {"tap_select.m4a": 0.61, "good.m4a": 0.54, "wrong.m4a": 0.14, "glass.m4a": 0.69,
+                      "typing_3s.m4a": 3.00, "typing.m4a": 9.00}
+          rows = {row["file"]: row for row in json.load(open(sys.argv[1]))["sounds"]}
+          for name, seconds in expected.items():
+              got = rows[name]["duration_sec"]
+              print(f"::notice title=check::{name} {got:.2f} s (expected {seconds:.2f} s)")
+              assert abs(got - seconds) <= 0.02, (name, got)
+          PY
+      - name: Upload to Cloudflare R2 (assets/sfx/v1/) and check every file is there
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          # Cloudflare R2: the same repository secrets and bucket the R2 check (exp/r2-check) used.
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.R2_ENDPOINT }}
+          S3_BUCKET: cutsell-videos
+          AWS_DEFAULT_REGION: auto
+          AWS_REGION: auto
         run: |
           set -euo pipefail
-          # Only the bucket the live API and the Modal worker use (Amazon S3, checked 15 Oct 2026
-          # from a signed upload link of the live API). Anything else: stop, upload nothing.
-          if [ "$S3_BUCKET" != "script2clipshop-video-automatedretailservices" ]; then
-            echo "::error::S3_BUCKET is not the production media bucket; nothing uploaded."
-            exit 1
-          fi
+          # Only Cloudflare R2: never Amazon S3.
+          case "$AWS_ENDPOINT_URL_S3" in
+            https://*.r2.cloudflarestorage.com*) ;;
+            *) echo "::error::R2_ENDPOINT is not a Cloudflare R2 endpoint; nothing uploaded."; exit 1 ;;
+          esac
           cd "$RUNNER_TEMP/sfx"
           for f in tap_select.m4a good.m4a wrong.m4a glass.m4a typing_3s.m4a typing.m4a; do
             aws s3 cp "$f" "s3://$S3_BUCKET/assets/sfx/v1/$f" --content-type audio/mp4 --only-show-errors

@@ -1,6 +1,6 @@
 # CutSell sounds: licenses
 
-The official sounds of the Audio panel ("CutSell sounds"). The audio files are **not** in this repository (it is public and audio is never committed). They live in the media bucket at `assets/sfx/v1/`, next to `manifest.json`, and the app gets them through `GET /v1/sfx/manifest` (signed links).
+The official sounds of the Audio panel ("CutSell sounds"). The audio files are **not** in this repository (it is public and audio is never committed). They live in the Cloudflare R2 media bucket at `assets/sfx/v1/`, next to `manifest.json`, and the app gets them through `GET /v1/sfx/manifest` (signed links).
 
 | File | Menu name | Original | Pack | Author | License | Source |
 |---|---|---|---|---|---|---|
