@@ -108,7 +108,9 @@ def create_initial_draft(
     sources: list[dict[str, Any]],
     client=None,
 ) -> tuple[dict[str, Any], bool]:
-    """Persist the AI draft only when no recoverable draft exists yet."""
+    """Persist the AI draft. When the project already has a draft (it is being processed again),
+    the new cut is merged with the creator's edits (`draft_merge.merge_reprocessed_draft`) as a
+    new revision, the previous draft kept for Undo. Returns (snapshot, created)."""
     _validate_draft(draft, project_id=project_id)
     if not sources:
         raise ValueError("initial draft persistence requires source metadata")
@@ -124,7 +126,44 @@ def create_initial_draft(
     created = bool(target.set(key, json.dumps(record, ensure_ascii=False), nx=True))
     if created:
         return record, True
-    return _decode(target.get(key)), False
+    # Editor v5: the project was processed again. The creator's edits are merged into the new cut
+    # (draft_merge.merge_reprocessed_draft) instead of being wiped -- or, before v5, instead of the
+    # new cut being ignored. The previous draft stays recoverable through Undo.
+    return _merge_into_existing(
+        target=target, user_id=user_id, project_id=project_id, draft=draft, sources=list(sources),
+    ), False
+
+
+def _merge_into_existing(*, target, user_id: str, project_id: str, draft: dict[str, Any],
+                         sources: list[dict[str, Any]], attempts: int = 3) -> dict[str, Any]:
+    from .draft_merge import merge_reprocessed_draft
+    from .serde import draft_from_dict
+
+    key = draft_key(user_id=user_id, project_id=project_id)
+    for _attempt in range(max(1, attempts)):
+        current = _decode(target.get(key))
+        merged = merge_reprocessed_draft(current["draft"], draft)
+        try:
+            draft_from_dict(merged)
+        except (TypeError, ValueError, KeyError):
+            # A merge that would not render is never stored: the creator's draft stays as it was.
+            return current
+
+        def transition(existing, revision, merged=merged):
+            return _snapshot(
+                project_id=project_id, user_id=user_id, draft=merged, sources=sources,
+                revision=revision + 1,
+                undo=_bounded([*list(existing.get("undo") or ()), existing["draft"]]), redo=[],
+            )
+
+        try:
+            return _write_transition(
+                user_id=user_id, project_id=project_id, expected_revision=int(current.get("revision") or 1),
+                transition=transition, client=target,
+            )
+        except DraftConflictError:
+            continue  # an autosave landed in between: merge again with the newest draft
+    return _decode(target.get(key))
 
 
 def _write_transition(

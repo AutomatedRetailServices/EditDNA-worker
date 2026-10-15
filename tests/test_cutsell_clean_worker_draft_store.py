@@ -81,7 +81,10 @@ def _init(client):
     )
 
 
-def test_initial_ai_draft_is_create_only_and_does_not_overwrite_existing_draft():
+def test_initial_ai_draft_is_created_once_and_a_reprocess_merges_as_a_new_revision():
+    """Editor v5: a second processing of the same project no longer leaves the new cut unused, and
+    never wipes the creator's edits: the new cut is merged with them (draft_merge) as revision 2,
+    the previous draft kept for Undo."""
     client = FakeRedis()
     first, created = _init(client)
     assert created is True
@@ -89,16 +92,23 @@ def test_initial_ai_draft_is_create_only_and_does_not_overwrite_existing_draft()
     assert first["undo"] == []
     assert first["redo"] == []
 
-    existing, created_again = create_initial_draft(
+    edited = _draft("AI first")
+    edited["mirror"] = True
+    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=edited, expected_revision=1, client=client)
+
+    merged, created_again = create_initial_draft(
         user_id="user-1",
         project_id="project-1",
-        draft=_draft("AI retry must not overwrite"),
+        draft=_draft("AI second cut"),
         sources=[{"source_asset_id": "src-1", "uri": "s3://bucket/source.mov"}],
         client=client,
     )
     assert created_again is False
-    assert existing["revision"] == 1
-    assert existing["draft"]["selected"][0]["text"] == "AI first"
+    assert merged["revision"] == 3
+    assert merged["draft"]["selected"][0]["text"] == "AI second cut"   # the engine's new cut
+    assert merged["draft"]["mirror"] is True                           # the creator's edit
+    assert merged["undo"][-1]["selected"][0]["text"] == "AI first"     # recoverable
+    assert get_draft_snapshot(user_id="user-1", project_id="project-1", client=client)["revision"] == 3
 
 
 def test_autosave_increments_revision_preserves_sources_and_creates_undo_state():

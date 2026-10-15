@@ -638,12 +638,17 @@ def run_flow_b_job(payload: dict) -> dict:
                 }
                 for source in request.sources
             ]
-            create_initial_draft(
+            stored = create_initial_draft(
                 user_id=request.user_id,
                 project_id=request.project_id,
                 draft=dict(serialized["draft"]),
                 sources=source_records,
             )
+            # Editor v5: on a reprocess the stored draft is the new cut merged with the creator's
+            # edits; the job result hands back that same draft.
+            if isinstance(stored, tuple) and stored and isinstance(stored[0], dict) \
+                    and isinstance(stored[0].get("draft"), dict) and not stored[1]:
+                serialized["draft"] = stored[0]["draft"]
             serialized["timeline_assets"] = timeline_assets
             # The primary video is registered before the project reads draft_ready, so
             # the editor can place voice-over and B-roll as soon as it opens.
