@@ -1,60 +1,118 @@
-CUTSELLTRIM before rev=16 clips=2 first=0.000-4.080 manual_end=no caption="Edited on the phone" total=12.20
+CUTSELLTRIM before rev=17 clips=2 first=0.000-4.080 manual_end=no caption="Edited on the phone" total=12.20
 CUTSELLTRIM limits lower=0.100 upper=13.467 neighbor=4.080 target=5.080
-CUTSELLTRIM stretched_end rev=17 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
+CUTSELLTRIM stretched_end rev=18 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
 CUTSELLTRIM saves_for_one_drag=1
-CUTSELLTRIM shortened_start rev=18 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
-CUTSELLTRIM undo rev=19 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
-CUTSELLTRIM redo rev=20 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
+CUTSELLTRIM shortened_start rev=19 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
+CUTSELLTRIM undo rev=20 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
+CUTSELLTRIM redo rev=21 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
 CUTSELLTRIM done error=none
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
-CUTSELLTRIM before rev=16 clips=2 first=0.000-4.080 manual_end=no caption="Edited on the phone" total=12.20
-CUTSELLTRIM limits lower=0.100 upper=13.467 neighbor=4.080 target=5.080
-CUTSELLTRIM stretched_end rev=17 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
-CUTSELLTRIM saves_for_one_drag=1
-CUTSELLTRIM shortened_start rev=18 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
-CUTSELLTRIM undo rev=19 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
-CUTSELLTRIM redo rev=20 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
-CUTSELLTRIM done error=none
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
-CUTSELLVO shown=0.016 outcome=placed blocks=1->2
-CUTSELLVO uploaded=yes after=15s placements=2
+CUTSELLVO shown=0.021 outcome=placed blocks=1->2
+CUTSELLVO uploaded=yes after=9s placements=1
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
+CUTSELLMEDIA test_media video=probe-phone-video-05BC4A.mp4
+CUTSELLMEDIA photo_overlay shown_after=0.38 pending=1
 CUTSELLMEDIA done"'
-CUTSELLMEDIA test_media video=probe-phone-video-B331F8.mp4
-CUTSELLMEDIA photo_overlay shown_after=0.64 pending=1
-CUTSELLMEDIA photo_overlay uploaded_after=4.8 overlays=2
-CUTSELLMEDIA video_overlay uploaded_after=4.3 overlays=3
-CUTSELLMEDIA done"'
+CUTSELLMEDIA photo_overlay uploaded_after=4.3 overlays=2
+CUTSELLMEDIA video_overlay uploaded_after=3.6 overlays=3
 CUTSELLMEDIA photo_overlay moved x=0.3 y=0.25 width=0.5 saved=true
 CUTSELLMEDIA video_overlay moved_to=3.00
-CUTSELLMEDIA done"'
-CUTSELLMEDIA broll clips=2->4 after=5.8 order=se-000-0001~a-e06ac701aad40e3f,broll_3bf24237,se-000-0001~a-e06ac701aad40e3f-4237,se-000-0001~b-3ffd12d5dad35663
+CUTSELLMEDIA broll clips=2->4 after=5.9 order=se-000-0001~a-e06ac701aad40e3f,broll_45cc0c87,se-000-0001~a-e06ac701aad40e3f-0c87,se-000-0001~b-3ffd12d5dad35663
 CUTSELLMEDIA clip_moved first=se-000-0001~b-3ffd12d5dad35663 saves=1
+CUTSELLMEDIA done"'
 CUTSELLMEDIA clip_undo first=se-000-0001~a-e06ac701aad40e3f
-CUTSELLMEDIA done"'
 CUTSELLMEDIA clip_redo first=se-000-0001~b-3ffd12d5dad35663
-CUTSELLMEDIA done"'
 CUTSELLMEDIA voice_moved 1.00->8.54
 CUTSELLMEDIA done"'
 CUTSELLMEDIA voice_undo 1.00
-CUTSELLMEDIA done"'
 CUTSELLMEDIA voice_redo 8.54
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 uploaded@0 2.8
 CUTSELLMEDIA done"'
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@0 10.7
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@15 13.4
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 uploaded@0 3.4
 CUTSELLMEDIA done"'
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@35 16.0
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@37 18.5
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@40 21.2
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@42 23.8
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@2 14.4
 CUTSELLMEDIA done"'
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@46 26.4
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 analyzing@85 29.0
-CUTSELLEXPORT b40964dd-7c95-4375-b85c-c6d7b8e930b5 failed@85 31.5
-CUTSELLEXPORT summary prepare=0.0 submitted=1.2 uploaded@0=2.8 analyzing@0=10.7 analyzing@15=13.4 analyzing@35=16.0 analyzing@37=18.5 analyzing@40=21.2 analyzing@42=23.8 analyzing@46=26.4 analyzing@85=29.0 failed@85=31.5
-CUTSELLMEDIA export state=failed total=32.2
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@25 17.2
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@35 19.9
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@37 22.6
+CUTSELLMEDIA done"'
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@40 25.2
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@43 27.8
+CUTSELLMEDIA done"'
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@46 30.6
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@85 33.4
+CUTSELLMEDIA done"'
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 failed@85 38.8
+CUTSELLEXPORT summary prepare=0.0 submitted=1.5 uploaded@0=3.4 analyzing@2=14.4 analyzing@25=17.2 analyzing@35=19.9 analyzing@37=22.6 analyzing@40=25.2 analyzing@43=27.8 analyzing@46=30.6 analyzing@85=33.4 failed@85=38.8
+CUTSELLMEDIA export state=failed total=39.4
 CUTSELLMEDIA export error=processing_failed
 CUTSELLMEDIA done error=none
 CUTSELLMEDIA done"'
 CUTSELLMEDIA" OR eventMessage CONTAINS "CUTSELLEXPORT"'
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 uploaded@0 3.4
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@2 14.4
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@25 17.2
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@35 19.9
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@37 22.6
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@40 25.2
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@43 27.8
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@46 30.6
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 analyzing@85 33.4
+CUTSELLEXPORT 1c827caf-edaa-4c3e-9dbc-8ddc01528df8 failed@85 38.8
+CUTSELLEXPORT summary prepare=0.0 submitted=1.5 uploaded@0=3.4 analyzing@2=14.4 analyzing@25=17.2 analyzing@35=19.9 analyzing@37=22.6 analyzing@40=25.2 analyzing@43=27.8 analyzing@46=30.6 analyzing@85=33.4 failed@85=38.8
+CUTSELLEXPORT"'
+CUTSELLV5 start clips=4 duration=26.37
+CUTSELLV5 done"'
+CUTSELLV5 video_overlay_new_layer=true
+CUTSELLV5 done"'
+CUTSELLV5 overlays=5 layers=Photo 1:0,Photo 2:1,Video 1:2,Photo 3:3,Video 2:4 rows=6
+CUTSELLV5 done"'
+CUTSELLV5 done"'
+CUTSELLV5 video_overlay layout=stacked edge=soft muted=false layer=2
+CUTSELLV5 photo_overlay layout=float rotation=12.0
+CUTSELLV5 done"'
+CUTSELLV5 voice_saved outcome=placed shown_pending=1
+CUTSELLV5 done"'
+CUTSELLV5 done"'
+CUTSELLV5 voice_on_draft start=10.01 length=6.06 clean=yes
+CUTSELLV5 voice_moved start=11.01
+CUTSELLV5 done"'
+CUTSELLV5 voice_split pieces=4
+CUTSELLV5 voice_trimmed end=16.57
+CUTSELLV5 lower_video_sound=true
+CUTSELLV5 done"'
+CUTSELLV5 done"'
+CUTSELLV5 speed_2x clip=se-000-0001~b-3ffd12d5dad35663 duration 26.37 -> 22.31
+CUTSELLV5 sounds_ready= failed=true
+CUTSELLV5 done"'
+CUTSELLV5 done"'
+CUTSELLV5 sounds=tap@0.3+0.6,good@1.2+0.5,wrong@2.1+0.1,typing_long@2.6+4.5 tap_present=true
+CUTSELLV5 done"'
+CUTSELLV5 undo_redo audio_clips=8 typing_after_undo=typing typing_after_redo=typing_long
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 uploaded@0 2.9
+CUTSELLV5 done"'
+CUTSELLV5 done"'
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@0 10.7
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@2 13.3
+CUTSELLV5 done"'
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@28 16.2
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@35 18.7
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@38 21.4
+CUTSELLV5 done"'
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@40 24.0
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@44 26.7
+CUTSELLV5 done"'
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@46 29.4
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@49 32.2
+CUTSELLV5 done"'
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@52 34.9
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@55 37.7
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 analyzing@85 40.5
+CUTSELLV5 done"'
+CUTSELLEXPORT 67739a16-5ff6-4156-9758-497ae1782197 failed@85 43.2
+CUTSELLEXPORT summary prepare=0.0 submitted=1.3 uploaded@0=2.9 analyzing@0=10.7 analyzing@2=13.3 analyzing@28=16.2 analyzing@35=18.7 analyzing@38=21.4 analyzing@40=24.0 analyzing@44=26.7 analyzing@46=29.4 analyzing@49=32.2 analyzing@52=34.9 analyzing@55=37.7 analyzing@85=40.5 failed@85=43.2
+CUTSELLV5 export state=failed total=43.5
+CUTSELLV5 export error=processing_failed
+CUTSELLV5 done error=none
+CUTSELLV5 done"'
+CUTSELLV5" OR eventMessage CONTAINS "CUTSELLEXPORT"'
