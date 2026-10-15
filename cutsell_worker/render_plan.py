@@ -95,6 +95,9 @@ class RenderSegment:
     # Auto Zoom AI: (source_time, duration, scale) of the zooms on this segment's source; the
     # renderer draws the ones that fall inside the segment.
     zoom_keyframes: tuple = ()
+    # Editor v5 clip speed (contracts.DraftClip.speed). `start`/`end` stay the SOURCE window; the
+    # segment occupies (end - start) / speed on the output timeline. 1.0 renders exactly as before.
+    speed: float = 1.0
 
     @property
     def duration_sec(self) -> float:
@@ -157,6 +160,8 @@ def _can_coalesce(left: RenderSegment, right: RenderSegment, *, tolerance_sec: f
         return False
     if left.audio_muted != right.audio_muted or abs(left.audio_volume - right.audio_volume) > 1e-6:
         return False
+    if abs(float(getattr(left, "speed", 1.0)) - float(getattr(right, "speed", 1.0))) > 1e-9:
+        return False  # different speeds are two different playback treatments
     if getattr(left, "mirror", False) != getattr(right, "mirror", False):
         return False  # a mirrored clip next to a plain one keeps its own segment
     if (left.caption_preset, left.caption_font, left.caption_x, left.caption_y, left.caption_scale) != (
@@ -275,6 +280,9 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
         # (the export cuts the original at exactly `start`/`end`).
         if getattr(clip, "manual_end", False):
             visual_floors.append(float(clip.end))
+        speed = float(getattr(clip, "speed", 1.0) or 1.0)
+        # Overlap audio rolls cross a join in source time; a sped-up/slowed clip keeps hard joins.
+        rolls = overlap and speed == 1.0
         word_groups = (
             timed_caption_word_groups(clip)
             if draft.captions_enabled and (draft.diagnostics or {}).get("engine") == "simple"
@@ -305,12 +313,13 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             # Whole-video Mirror (draft) or this clip's own Mirror; either flips the picture once.
             mirror=bool(getattr(draft, "mirror", False)) or bool(getattr(clip, "mirror", False)),
             rotation=int(getattr(draft, "rotation", 0) or 0),
-            audio_pre_roll=float(getattr(clip, "audio_pre_roll", 0.0) or 0.0) if overlap else 0.0,
-            audio_post_roll=float(getattr(clip, "audio_post_roll", 0.0) or 0.0) if overlap else 0.0,
+            audio_pre_roll=float(getattr(clip, "audio_pre_roll", 0.0) or 0.0) if rolls else 0.0,
+            audio_post_roll=float(getattr(clip, "audio_post_roll", 0.0) or 0.0) if rolls else 0.0,
             zoom_keyframes=tuple(
                 (float(k.source_time), float(k.duration), float(k.scale))
                 for k in zooms if k.source_asset_id in ("", clip.source_asset_id)
             ),
+            speed=speed,
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

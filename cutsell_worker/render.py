@@ -625,6 +625,53 @@ def rendered_segment_duration_sec(duration_sec: float, *, fps: int = RENDER_FPS_
     return frames / fps
 
 
+def segment_speed(segment) -> float:
+    """Editor v5 clip speed of a render segment (1.0 when unset)."""
+    try:
+        speed = float(getattr(segment, "speed", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        return 1.0
+    return speed if speed > 0 else 1.0
+
+
+def segment_output_duration_sec(segment, *, fps: int = RENDER_FPS_DEFAULT) -> float:
+    """The exact length a (tightened) segment occupies on the output timeline: its source
+    duration divided by its speed, rounded up to whole output frames. For speed 1 this is
+    `rendered_segment_duration_sec(segment.duration_sec)` exactly."""
+    speed = segment_speed(segment)
+    if speed == 1.0:
+        return rendered_segment_duration_sec(segment.duration_sec, fps=fps)
+    return rendered_segment_duration_sec(segment.duration_sec / speed, fps=fps)
+
+
+def atempo_filters(speed: float) -> list[str]:
+    """Pitch-preserving tempo change as a chain of `atempo` stages, each inside 0.5..2.0
+    (3.0 -> atempo=2.0,atempo=1.5; 0.5 -> atempo=0.5). Empty for speed 1."""
+    remaining = float(speed)
+    if remaining <= 0 or abs(remaining - 1.0) < 1e-9:
+        return []
+    stages: list[str] = []
+    while remaining > 2.0 + 1e-9:
+        stages.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5 - 1e-9:
+        stages.append("atempo=0.5")
+        remaining /= 0.5
+    if abs(remaining - 1.0) > 1e-9:
+        stages.append(f"atempo={remaining:g}")
+    return stages
+
+
+def _speed_video_filters(segment, *, fps: int) -> list[str]:
+    """Editor v5: retime the segment's finished picture (after orientation, zoom and burned
+    captions, so captions stay on their words) and resample it to the output frame rate. Empty for
+    speed 1, which keeps every existing command byte for byte."""
+    speed = segment_speed(segment)
+    if speed == 1.0:
+        return []
+    return [f"setpts=(PTS-STARTPTS)/{speed:g}", f"fps={fps}"]
+
+
 def _concat_render_command(
     segments: tuple[RenderSegment, ...],
     output: Path,
@@ -642,7 +689,7 @@ def _concat_render_command(
     input_index = 0
     for index, segment in enumerate(segments):
         probe = probe_media(segment.source_path)
-        exact = rendered_segment_duration_sec(segment.duration_sec, fps=fps)
+        exact = segment_output_duration_sec(segment, fps=fps)
         command += ["-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}", "-i", segment.source_path]
         video_input = input_index
         input_index += 1
@@ -686,6 +733,7 @@ def _concat_render_command(
         caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
         if caption:
             video_chain.append(caption)
+        video_chain += _speed_video_filters(segment, fps=fps)
         video_chain += [f"trim=duration={exact:.6f}", "setpts=PTS-STARTPTS", f"format=yuv420p[v{index}]"]
         filters.append(",".join(video_chain))
         audio_format = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
@@ -694,6 +742,7 @@ def _concat_render_command(
             audio_chain = [
                 f"[{video_input}:a]volume={effective_volume:.3f}",
                 *_audio_join_fade_filters(segment.duration_sec),
+                *atempo_filters(segment_speed(segment)),
                 audio_format,
                 f"apad=whole_dur={exact:.6f}",
                 f"atrim=duration={exact:.6f}",
@@ -737,6 +786,8 @@ def _with_audio_rolls(segments: tuple[RenderSegment, ...]) -> tuple[RenderSegmen
     for index, seg in enumerate(segments):
         pre = float(seg.audio_pre_roll) if index > 0 else 0.0
         post = float(seg.audio_post_roll) if index < last else 0.0
+        if segment_speed(seg) != 1.0:
+            pre = post = 0.0  # Editor v5: a sped-up/slowed clip keeps hard audio joins
         if pre <= 0.001 and post <= 0.001:
             output.append(seg)
             continue
@@ -947,7 +998,7 @@ def _video_timeline_positions(segments: tuple[RenderSegment, ...], *, fps: int) 
     "multi-join isolation" requirement, satisfied structurally)."""
     positions = [0.0]
     for segment in segments[:-1]:
-        positions.append(positions[-1] + rendered_segment_duration_sec(segment.duration_sec, fps=fps))
+        positions.append(positions[-1] + segment_output_duration_sec(segment, fps=fps))
     return tuple(positions)
 
 
@@ -1019,7 +1070,7 @@ def _concat_render_command_with_audio_windows(
 
     for index, segment in enumerate(segments):
         probe = probe_media(segment.source_path)
-        exact_video = rendered_segment_duration_sec(segment.duration_sec, fps=fps)
+        exact_video = segment_output_duration_sec(segment, fps=fps)
 
         # --- video input + chain (identical shape to _concat_render_command) ---
         command += ["-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}", "-i", segment.source_path]
@@ -1036,13 +1087,17 @@ def _concat_render_command_with_audio_windows(
         caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
         if caption:
             video_chain.append(caption)
+        video_chain += _speed_video_filters(segment, fps=fps)
         video_chain += [f"trim=duration={exact_video:.6f}", "setpts=PTS-STARTPTS", f"format=yuv420p[v{index}]"]
         video_filters.append(",".join(video_chain))
 
         # --- audio input + chain (independent window, adelay-placed) ---
         audio_start = segment.effective_audio_start
         audio_end = segment.effective_audio_end
-        audio_duration = max(AUDIO_TIMELINE_EPSILON_SEC, audio_end - audio_start)
+        speed = segment_speed(segment)
+        source_audio_duration = max(AUDIO_TIMELINE_EPSILON_SEC, audio_end - audio_start)
+        # Editor v5: the audio window plays `speed` times faster, so it lasts source / speed.
+        audio_duration = source_audio_duration if speed == 1.0 else source_audio_duration / speed
         placement_ms = max(0, round(audio_placements[index] * 1000.0))
         effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
         audio_format = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
@@ -1055,11 +1110,12 @@ def _concat_render_command_with_audio_windows(
             audio_chain = [
                 f"[{audio_input}:a]volume={effective_volume:.3f}",
                 *_audio_join_fade_filters(
-                    audio_duration,
+                    source_audio_duration,
                     # Only Overlap audio rolls crossfade; J/L-cut windows keep the 12 ms anti-click.
                     fade_in=lead if getattr(segment, "audio_pre_roll", 0) > 0 else None,
                     fade_out=trail if getattr(segment, "audio_post_roll", 0) > 0 else None,
                 ),
+                *atempo_filters(speed),
                 audio_format,
                 f"atrim=duration={audio_duration:.6f}",
                 "asetpts=PTS-STARTPTS",
@@ -1190,7 +1246,7 @@ def dialogue_pacing_transition_execution_diagnostics(
         rejection_reason = None
     except ValueError as exc:
         video_positions = tuple(
-            sum(rendered_segment_duration_sec(s.duration_sec, fps=fps) for s in segment_tuple[:i])
+            sum(segment_output_duration_sec(s, fps=fps) for s in segment_tuple[:i])
             for i in range(len(segment_tuple))
         )
         placements = tuple(video_positions)

@@ -466,7 +466,7 @@ def _post_measure_segments(
     results = []
     cursor = 0.0
     for segment in rendered_segments:
-        duration = render_module.rendered_segment_duration_sec(segment.duration_sec, fps=fps)
+        duration = render_module.segment_output_duration_sec(segment, fps=fps)
         override = overrides.get(segment.clip_id)
         if override is not None:
             results.append(override)
