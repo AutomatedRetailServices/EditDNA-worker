@@ -144,3 +144,10 @@ def test_real_render_mixed_speeds_stay_in_sync(tmp_path, source):
     assert abs(audio - video) <= 0.05
     windows = live_boundary_repair.segment_output_windows(plan)
     assert windows[-1][1] == pytest.approx(4.0)
+
+
+def test_render_identity_includes_speed_only_when_set():
+    from cutsell_worker.render_delivery import compute_render_identity
+    plain = compute_render_identity((_seg(),), width=1080, height=1920, fps=30)
+    assert compute_render_identity((_seg(speed=1.0),), width=1080, height=1920, fps=30) == plain
+    assert compute_render_identity((_seg(speed=2.0),), width=1080, height=1920, fps=30) != plain

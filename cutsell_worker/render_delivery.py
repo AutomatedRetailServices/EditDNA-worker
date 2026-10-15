@@ -160,6 +160,11 @@ def _segment_identity_fields(segment: "RenderSegment") -> dict:
         value = getattr(segment, key, None)
         if value is not None and abs(float(value) - default) > 1e-9:
             fields[key] = round(float(value), 4)
+    # Editor v5: only a sped-up/slowed segment adds its speed, so every speed-1 export keeps the
+    # fingerprint it always had.
+    speed = float(getattr(segment, "speed", 1.0) or 1.0)
+    if speed != 1.0:
+        fields["speed"] = speed
     if segment.audio_start is not None:
         fields["audio_start"] = round(float(segment.audio_start), 3)
     if segment.audio_end is not None:
