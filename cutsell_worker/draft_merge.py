@@ -10,6 +10,9 @@ draft (`old`, possibly edited in the iPhone editor) with the draft a new cut jus
 - each new clip takes the per-clip edits (`CLIP_EDIT_FIELDS`, and a caption edited by hand) of the
   old clip from the same source whose window overlaps it most, when that overlap covers at least
   half of the new clip. No clip is ever invented or removed;
+- B-roll clips the creator placed (source listed in the old `broll_sources`) are put back,
+  unchanged, at their old timeline time: at a clip boundary, by splitting the clip they land in
+  (as the app's insertBroll does), or appended past the end;
 - zoom keyframes: every creator keyframe (origin other than "ai") is kept; old AI keyframes are
   replaced by the new cut's AI keyframes, minus any within 0.3 s (same source) of a `zoom_removed`
   tombstone;
@@ -140,6 +143,97 @@ def _fit_timed_items(items, duration: float, *, kind: str, end_key: str | None, 
     return kept
 
 
+BOUNDARY_TOLERANCE_SEC = 0.05
+
+
+def _speed(clip: Mapping[str, Any]) -> float:
+    try:
+        value = float(clip.get("speed", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        return 1.0
+    return value if value > 0 else 1.0
+
+
+def _timeline_length(clip: Mapping[str, Any]) -> float:
+    window = _window(clip)
+    return 0.0 if window is None else (window[1] - window[0]) / _speed(clip)
+
+
+def _text_from_words(words: list) -> str:
+    return " ".join(str(w.get("text") or "").strip() for w in words if str(w.get("text") or "").strip())
+
+
+def _split_for_broll(clip: dict[str, Any], source_split: float, broll_id: str) -> tuple[dict, dict]:
+    """Split one clip at a source time, the way the app's insertBroll does: words go to the side
+    their middle falls on, text/caption re-derived (a caption edited by hand is kept as is), the
+    right piece is `<id>-<last4 of the B-roll clip id>`, the left piece loses `manual_end`."""
+    hand_caption = _caption_edited(clip)
+    left, right = deepcopy(clip), deepcopy(clip)
+    left["end"] = round(source_split, 3)
+    right["start"] = round(source_split, 3)
+    words = [w for w in clip.get("words") or () if isinstance(w, dict)]
+    if "words" in clip:
+        left_words, right_words = [], []
+        for word in words:
+            try:
+                middle = (float(word["start"]) + float(word["end"])) / 2.0
+            except (KeyError, TypeError, ValueError):
+                continue
+            (left_words if middle < source_split else right_words).append(deepcopy(word))
+        left["words"], right["words"] = left_words, right_words
+        if words:
+            left["text"], right["text"] = _text_from_words(left_words), _text_from_words(right_words)
+            if not hand_caption:
+                left["caption_text"], right["caption_text"] = left["text"], right["text"]
+    right["clip_id"] = f"{clip.get('clip_id')}-{str(broll_id)[-4:]}"
+    left.pop("manual_end", None)
+    return left, right
+
+
+def _reinsert_broll(selected: list[dict[str, Any]], old: Mapping[str, Any], report: list) -> list[dict[str, Any]]:
+    """Put every B-roll clip the creator placed (its source is in the old `broll_sources`) back at
+    its old timeline time, unchanged: at a clip boundary it goes there, inside a clip that clip is
+    split, past the end it is appended."""
+    broll_ids = {str(item.get("source_asset_id")) for item in old.get("broll_sources") or ()
+                 if isinstance(item, dict) and item.get("source_asset_id")}
+    if not broll_ids:
+        return selected
+    placed = []
+    position = 0.0
+    for clip in old.get("selected") or ():
+        if not isinstance(clip, dict):
+            continue
+        if str(clip.get("source_asset_id")) in broll_ids:
+            placed.append((position, clip))
+        position += _timeline_length(clip)
+    out = list(selected)
+    present = {str(c.get("clip_id")) for c in out}
+    for time, broll in placed:  # in old timeline order, so earlier re-inserts are counted
+        if str(broll.get("clip_id")) in present:
+            continue
+        cursor, index, action = 0.0, len(out), "appended_after_end"
+        for i, clip in enumerate(out):
+            length = _timeline_length(clip)
+            if abs(time - cursor) <= BOUNDARY_TOLERANCE_SEC:
+                index, action = i, "inserted_at_boundary"
+                break
+            if cursor < time < cursor + length - BOUNDARY_TOLERANCE_SEC:
+                window = _window(clip)
+                source_split = window[0] + (time - cursor) * _speed(clip)
+                left, right = _split_for_broll(clip, source_split, str(broll.get("clip_id") or ""))
+                out[i:i + 1] = [left, right]
+                index, action = i + 1, "split_clip"
+                break
+            cursor += length
+        else:
+            if abs(time - cursor) <= BOUNDARY_TOLERANCE_SEC:
+                action = "inserted_at_boundary"
+        out.insert(index, deepcopy(broll))
+        present.add(str(broll.get("clip_id")))
+        report.append({"clip_id": broll.get("clip_id"), "timeline_sec": round(time, 3), "action": action})
+    return out
+
+
 def _merge_zooms(old: Mapping[str, Any], new: Mapping[str, Any]) -> list:
     tombstones = list(old.get("zoom_removed") or ())
     user = [deepcopy(k) for k in old.get("zoom_keyframes") or () if isinstance(k, dict)
@@ -180,6 +274,11 @@ def merge_reprocessed_draft(old: Mapping[str, Any] | None, new: Mapping[str, Any
         if list_key in merged:
             merged[list_key] = clips
 
+    # 2b. B-roll the creator placed by hand is never an engine suggestion: put it back
+    broll_rows: list = []
+    if "selected" in merged:
+        merged["selected"] = _reinsert_broll(list(merged["selected"]), old, broll_rows)
+
     # 3. zoom keyframes
     zooms = _merge_zooms(old, new)
     if zooms or "zoom_keyframes" in merged:
@@ -199,6 +298,7 @@ def merge_reprocessed_draft(old: Mapping[str, Any] | None, new: Mapping[str, Any
     diagnostics["reprocess_merge"] = {
         "merged_with_previous_draft": True,
         "clip_edits_carried": carried_rows,
+        "broll_reinserted": broll_rows,
         "timed_item_adjustments": adjustments,
     }
     merged["diagnostics"] = diagnostics

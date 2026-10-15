@@ -151,3 +151,101 @@ def test_store_keeps_the_old_draft_when_a_merge_would_not_render():
     broken = _engine([_clip("x", 0.0, 4.0, semantic_role="NOT_A_ROLE")])
     kept, created = draft_store.create_initial_draft(user_id="u", project_id="p1", draft=broken, sources=sources, client=client)
     assert created is False and kept["revision"] == 1 and kept["draft"] == old
+
+
+# --- B-roll the creator placed is kept --------------------------------------------------------------
+
+def _broll(clip_id="broll_abcd1234", start=0.0, end=2.0, **extra):
+    item = {"clip_id": clip_id, "source_asset_id": "src_broll_1", "source_order": 1, "start": start, "end": end,
+            "text": "", "caption_text": "", "words": [], "audio_volume": 0.5, "audio_muted": False, "selected": True}
+    item.update(extra)
+    return item
+
+
+def _words(*spans):
+    return [{"text": text, "start": a, "end": b} for text, a, b in spans]
+
+
+def _timeline_starts(selected):
+    out, cursor = {}, 0.0
+    for clip in selected:
+        out[clip["clip_id"]] = round(cursor, 3)
+        cursor += (clip["end"] - clip["start"]) / float(clip.get("speed", 1.0) or 1.0)
+    return out
+
+
+BROLL_SOURCES = [{"source_asset_id": "src_broll_1", "uri": "s3://b/cutsell/uploads/x/y/br.mp4"}]
+
+
+def test_broll_in_the_middle_of_a_new_clip_splits_it():
+    broll = _broll(speed=2.0)  # 1 s on the timeline
+    old = _engine([_clip("a", 0.0, 3.0), broll, _clip("b", 4.0, 6.0)], broll_sources=BROLL_SOURCES)
+    # The new cut has one long clip where the B-roll used to start (timeline 3.0 s).
+    new_clip = _clip("x", 0.0, 6.0, text="one two three four", caption_text="one two three four",
+                     words=_words(("one", 0.5, 1.0), ("two", 2.0, 2.5), ("three", 3.2, 3.8), ("four", 4.5, 5.0)),
+                     manual_end=True)
+    merged = merge_reprocessed_draft(old, _engine([new_clip]))
+    ids = [c["clip_id"] for c in merged["selected"]]
+    assert ids == ["x", "broll_abcd1234", "x-1234"]
+    left, placed, right = merged["selected"]
+    assert placed == broll                                              # unchanged
+    assert _timeline_starts(merged["selected"])["broll_abcd1234"] == 3.0  # same timeline time
+    assert (left["start"], left["end"], right["start"], right["end"]) == (0.0, 3.0, 3.0, 6.0)
+    assert left["text"] == left["caption_text"] == "one two" and right["text"] == right["caption_text"] == "three four"
+    assert [w["text"] for w in right["words"]] == ["three", "four"]
+    assert "manual_end" not in left and right["manual_end"] is True
+    assert merged["broll_sources"] == BROLL_SOURCES
+    parsed = draft_from_dict(merged)
+    assert parsed.user_media_source_ids == ("src_broll_1",)
+    assert merged["diagnostics"]["reprocess_merge"]["broll_reinserted"] == [
+        {"clip_id": "broll_abcd1234", "timeline_sec": 3.0, "action": "split_clip"}]
+
+
+def test_broll_split_keeps_a_hand_edited_caption():
+    old = _engine([_clip("a", 0.0, 2.0), _broll(), _clip("b", 2.0, 4.0)], broll_sources=BROLL_SOURCES)
+    new_clip = _clip("x", 0.0, 4.0, text="one two", caption_text="My caption",
+                     words=_words(("one", 0.5, 1.0), ("two", 3.0, 3.5)))
+    merged = merge_reprocessed_draft(old, _engine([new_clip]))
+    left, _placed, right = merged["selected"]
+    assert left["text"] == "one" and right["text"] == "two"
+    assert left["caption_text"] == right["caption_text"] == "My caption"
+    draft_from_dict(merged)
+
+
+def test_broll_at_a_clip_boundary_and_past_the_end():
+    first, last = _broll("broll_first_aaaa", 0.0, 1.0), _broll("broll_last_bbbb", 1.0, 2.5)
+    old = _engine([_clip("a", 0.0, 2.0), first, _clip("b", 3.0, 5.0), last], broll_sources=BROLL_SOURCES)
+    # old timeline: a 0-2, first 2-3, b 3-5, last 5-6.5. New cut: x (2 s) and y (1 s): 3 s long.
+    merged = merge_reprocessed_draft(old, _engine([_clip("x", 0.0, 2.0), _clip("y", 6.0, 7.0)]))
+    assert [c["clip_id"] for c in merged["selected"]] == ["x", "broll_first_aaaa", "y", "broll_last_bbbb"]
+    starts = _timeline_starts(merged["selected"])
+    assert starts["broll_first_aaaa"] == 2.0          # boundary: same time
+    assert merged["selected"][-1] == last              # past the end: appended, unchanged
+    actions = [r["action"] for r in merged["diagnostics"]["reprocess_merge"]["broll_reinserted"]]
+    assert actions == ["inserted_at_boundary", "appended_after_end"]
+    draft_from_dict(merged)
+
+
+def test_broll_at_the_exact_end_is_appended_and_no_broll_means_no_change():
+    old = _engine([_clip("a", 0.0, 2.0), _broll()], broll_sources=BROLL_SOURCES)
+    merged = merge_reprocessed_draft(old, _engine([_clip("x", 0.0, 2.0)]))
+    assert [c["clip_id"] for c in merged["selected"]] == ["x", "broll_abcd1234"]
+    plain = merge_reprocessed_draft(_engine([_clip("a", 0.0, 2.0)]), _engine([_clip("x", 0.0, 2.0)]))
+    assert [c["clip_id"] for c in plain["selected"]] == ["x"]
+    assert plain["diagnostics"]["reprocess_merge"]["broll_reinserted"] == []
+
+
+def test_store_reprocess_keeps_the_broll_clip():
+    from cutsell_worker import draft_store
+    from tests.test_cutsell_clean_worker_draft_store import FakeRedis
+
+    client = FakeRedis()
+    sources = [{"source_asset_id": "s1", "uri": "s3://b/s.mov"}]
+    draft_store.create_initial_draft(user_id="u", project_id="p1", draft=_engine([_clip("a", 0.0, 4.0)]),
+                                     sources=sources, client=client)
+    edited = _engine([_clip("a", 0.0, 2.0), _broll(), _clip("a2", 2.0, 4.0)], broll_sources=BROLL_SOURCES)
+    draft_store.save_draft_snapshot(user_id="u", project_id="p1", draft=edited, expected_revision=1, client=client)
+    stored, _ = draft_store.create_initial_draft(user_id="u", project_id="p1",
+                                                 draft=_engine([_clip("x", 0.0, 4.0)]), sources=sources, client=client)
+    assert [c["clip_id"] for c in stored["draft"]["selected"]] == ["x", "broll_abcd1234", "x-1234"]
+    assert stored["draft"]["broll_sources"] == BROLL_SOURCES
