@@ -129,3 +129,18 @@ def test_no_technical_text_on_screen():
         for line in texts:
             for word in ("backend", "authority", "contract", "gate", "registered", "simulated", "/v1/"):
                 assert word not in line, (name, line.strip())
+
+
+def test_ai_notice_and_policy_name_exactly_the_ai_services_in_use():
+    # Audit 15 Oct 2026: the live engine (Modal, CUTSELL_ENGINE=simple) calls Deepgram (audio) and
+    # Anthropic (transcript text) only; Gemini / OpenAI code paths are off in production.
+    consent = read("AIConsent.swift")
+    policy = (IOS / "Legal" / "privacy_policy.md").read_text()
+    for text in (consent, policy):
+        assert "Deepgram" in text and "Anthropic (Claude)" in text
+        for unused in ("OpenAI", "Gemini", "Google", "ChatGPT", "Whisper"):
+            assert unused not in text, unused
+    assert "Cloudflare" in consent and "Cloudflare (R2)" in policy
+    for doc in ("privacy_policy.md", "terms_of_use.md"):
+        body = (IOS / "Legal" / doc).read_text()
+        assert "arsgroup01@gmail.com" in body and "[contact email" not in body

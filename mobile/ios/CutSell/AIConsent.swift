@@ -43,13 +43,14 @@ struct AIConsentSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Before your first cut").font(CS.inter(22, .bold)).foregroundStyle(.white)
-            Text("To make your cut, CutSell sends your content to these AI services:")
+            Text("To make your cut, CutSell uses these two AI services:")
                 .font(CS.inter(15)).foregroundStyle(CS.textSecondaryF)
             VStack(alignment: .leading, spacing: 10) {
                 row("Deepgram", "turns the speech in your video's audio into text.")
-                row("Anthropic (Claude)", "reads that text to pick your best takes. It does not receive the video.")
-                row("Amazon Web Services and Modal", "store and process your videos to render the cut.")
+                row("Anthropic (Claude)", "reads that text to pick your best takes. It does not receive the video or the audio.")
             }
+            Text("No other AI service receives your content. Cloudflare and Amazon Web Services store your videos, and Modal renders your cut.")
+                .font(CS.inter(13)).foregroundStyle(CS.textSecondaryF).fixedSize(horizontal: false, vertical: true)
             Text("They receive it only so CutSell can make your cut. CutSell never sells your content. You can delete your cuts or your account at any time.")
                 .font(CS.inter(13)).foregroundStyle(CS.textSecondaryF).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 16) {

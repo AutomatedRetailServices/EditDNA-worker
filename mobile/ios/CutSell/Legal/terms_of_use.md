@@ -38,4 +38,4 @@ If we change these terms, we will update the date above and, for important chang
 
 ## Contact
 
-[contact email to be added]
+arsgroup01@gmail.com

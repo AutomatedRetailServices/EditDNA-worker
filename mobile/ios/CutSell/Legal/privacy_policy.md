@@ -25,11 +25,17 @@ We use your data only to run CutSell:
 
 ## Services that process your data for us
 
-To make a cut, CutSell sends your content to these providers:
+CutSell uses two AI services, and only these two:
 
 - **Deepgram:** speech to text. It receives the audio of your videos.
-- **Anthropic (Claude):** AI that helps choose the best takes. It receives the transcript of your videos, not the video itself.
-- **Amazon Web Services (Amazon S3):** stores your videos, media and finished exports.
+- **Anthropic (Claude):** AI that helps choose the best takes and places captions and zooms. It receives the transcript of your videos, not the video or the audio.
+
+No other AI service receives your content. No AI service receives your photos, the video picture or your voice-overs.
+
+These providers store and run CutSell:
+
+- **Cloudflare (R2):** stores your videos, media and finished exports.
+- **Amazon Web Services (Amazon S3):** stores media uploaded before October 2026, until it is deleted.
 - **Modal:** the computers that process and render your videos.
 - **Render:** hosts our servers.
 
@@ -39,7 +45,7 @@ You are asked to agree to this before your first cut is processed. Nothing is pr
 
 ## How long we keep it
 
-We keep your videos, edits and exports while your account exists, so you can come back to your cuts. You can delete a cut at any time. When you delete your account, we delete your cuts, the media you uploaded and your exports from our servers.
+We keep your videos, edits and exports while your account exists, so you can come back to your cuts. You can delete a cut at any time. When you delete your account, we delete your cuts, the media you uploaded and your exports from our servers, including any copies kept in our older storage.
 
 ## Delete your account
 
@@ -55,4 +61,4 @@ If we change this policy, we will update the date above and, for important chang
 
 ## Contact
 
-Questions or requests: [contact email to be added].
+Questions or requests: arsgroup01@gmail.com
