@@ -9,6 +9,11 @@ from pathlib import Path
 import tempfile
 
 from . import pending_watch_listen_review as pwl
+from . import sfx_library
+from . import timeline_asset_registry as timeline_registry
+from . import timeline_asset_registry_store as timeline_store
+from . import timeline_asset_s3
+from .audio_mix_render import AudioMix, LocalAudioClip
 from . import render_delivery as rd
 from . import tenant_safe_delivery as tsd
 from .draft_edits import DraftEditError
@@ -75,6 +80,70 @@ class PendingHumanWatchListenReview(RuntimeError):
     def __init__(self, record: "pwl.PendingWatchListenRecord"):
         super().__init__(f"pending_human_watch_listen_review:{record.record_id}")
         self.record = record
+
+
+class AudioClipUnavailable(RuntimeError):
+    """Editor v5: an audio-lane clip of the draft could not be resolved to a file this project may
+    use (missing, not owned, not ready, not audio, or the download failed). The export fails with
+    this clear code -- an audio clip is never silently dropped from the creator's video."""
+
+    error_code = "audio_clip_unavailable"
+
+    def __init__(self, audio_id: str, reason: str):
+        super().__init__(f"audio_clip_unavailable:{audio_id}:{reason}")
+        self.audio_id = audio_id
+        self.reason = reason
+
+
+def _resolve_voice_or_music(clip, *, user_id: str, project_id: str, directory: str) -> str:
+    """A voice/music clip's file, ONLY through the tenant-safe timeline asset registry (the
+    requesting user/project must own a READY audio asset); never a URI from the client."""
+    scratch = str(Path(directory) / "audio-assets")
+    try:
+        result = timeline_store.resolve_timeline_asset_live(
+            user_id=user_id, project_id=project_id, asset_id=str(clip.asset_id),
+            required_media_kind=timeline_registry.TimelineMediaKind.AUDIO,
+            materialize=timeline_asset_s3.s3_fetcher(user_id=user_id, project_id=project_id, scratch_dir=scratch),
+        )
+    except Exception as exc:  # registry/storage outage: still a clear, attributed failure
+        raise AudioClipUnavailable(clip.audio_id, exc.__class__.__name__) from exc
+    if result.outcome != timeline_registry.ASSET_RESOLVED or result.resolved is None:
+        raise AudioClipUnavailable(clip.audio_id, str(result.outcome))
+    return str(result.resolved.local_path)
+
+
+def _resolve_sound_effect(clip, *, directory: str, index: int) -> str:
+    """An official library sound (sfx_library), from the configured media bucket."""
+    try:
+        uri = sfx_library.sfx_uri(str(clip.sfx_id))
+        suffix = Path(sfx_library.sound_effect(str(clip.sfx_id)).file).suffix or ".m4a"
+        return download_source(uri, str(Path(directory) / f"sfx-{index:03d}{suffix}"))
+    except Exception as exc:
+        raise AudioClipUnavailable(clip.audio_id, exc.__class__.__name__) from exc
+
+
+def resolve_audio_mix(draft, *, user_id: str, project_id: str, directory: str) -> AudioMix | None:
+    """Editor v5: the draft's audio lane resolved to local files, plus the whole-video volume and
+    voice cleanup. None when the draft uses none of them (the render then skips the mix pass)."""
+    clips = tuple(getattr(draft, "audio_clips", ()) or ())
+    video_volume = float(getattr(draft, "video_volume", 1.0))
+    video_clean = bool(getattr(draft, "video_clean_voice", False))
+    if not clips and video_volume == 1.0 and not video_clean:
+        return None
+    local = []
+    sfx_files: dict[str, str] = {}
+    for index, clip in enumerate(clips):
+        if clip.kind == "sfx":
+            path = sfx_files.get(str(clip.sfx_id))
+            if path is None:
+                path = sfx_files[str(clip.sfx_id)] = _resolve_sound_effect(clip, directory=directory, index=index)
+        else:
+            path = _resolve_voice_or_music(clip, user_id=user_id, project_id=project_id, directory=directory)
+        local.append(LocalAudioClip(
+            path=path, start=float(clip.start), source_in=float(clip.source_in), source_out=float(clip.source_out),
+            volume=float(clip.volume), duck_video=bool(clip.duck_video), clean=bool(clip.clean),
+        ))
+    return AudioMix(video_volume=video_volume, video_clean=video_clean, clips=tuple(local))
 
 
 def _job_started_epoch(job) -> float | None:
@@ -748,6 +817,10 @@ def run_export_job(payload: dict) -> dict:
                 publish("rendering", min(32, 26 + int((index + 1) * 6 / overlay_count)))
 
             mark("download_overlays")
+            # Editor v5: voice/music through the tenant-safe registry, sounds from the official
+            # library; a clip that cannot be resolved fails the export (AudioClipUnavailable).
+            audio_mix = resolve_audio_mix(draft, user_id=user_id, project_id=project_id, directory=directory)
+            mark("download_audio")
             plan = build_render_plan(draft, local_paths)
             output = str(Path(directory) / "cutsell-export.mp4")
             publish("rendering", 35)
@@ -774,6 +847,7 @@ def run_export_job(payload: dict) -> dict:
                     output,
                     text_overlays=draft.text_overlays,
                     media_overlays=tuple(local_overlays),
+                    **({"audio_mix": audio_mix} if audio_mix is not None else {}),
                 )
             finally:
                 ticker.stop()
@@ -930,6 +1004,7 @@ def run_export_job(payload: dict) -> dict:
             user_id=user_id,
             project_id=project_id,
             kind="render_failed",
-            payload={"job_id": job_id, "error": exc.__class__.__name__},
+            payload={"job_id": job_id, "error": exc.__class__.__name__,
+                     **({"error_code": exc.error_code} if getattr(exc, "error_code", None) else {})},
         )
         raise
