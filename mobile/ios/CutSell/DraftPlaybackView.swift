@@ -177,12 +177,16 @@ final class DraftPlaybackController: ObservableObject {
             let muted: Bool = clip["audio_muted"]?.boolValue ?? false
             let volume: Double = clip["audio_volume"]?.doubleValue ?? 1
             let playable: Bool = sourceURLs[sourceID] != nil
-            parts.append("\(clipID)|\(sourceID)|\(start)|\(end)|\(muted)|\(volume)|\(playable)")
+            let speed: Double = ClipSpeed.of(clip)
+            parts.append("\(clipID)|\(sourceID)|\(start)|\(end)|\(muted)|\(volume)|\(playable)|\(speed)")
         }
         for voice in model.previewVoices {
-            parts.append("vo|\(voice.key)|\(voice.start)|\(voice.sourceIn)|\(voice.sourceOut)")
+            parts.append("vo|\(voice.key)|\(voice.start)|\(voice.sourceIn)|\(voice.sourceOut)|\(voice.volume)|\(voice.ducksVideo)")
         }
-        parts.append("vovol|\(model.voiceOverVolume)")
+        for overlay in model.overlaysOnScreen where overlay.kind == .video && !overlay.style.muted {
+            parts.append("ova|\(overlay.id)|\(overlay.start)|\(overlay.end)|\(overlay.sourceStart)|\(overlay.style.volume)")
+        }
+        parts.append("vovol|\(model.voiceOverVolume)|vv|\(model.videoVolume)")
         return parts.joined(separator: ";")
     }
 
@@ -286,6 +290,9 @@ final class DraftPlaybackController: ObservableObject {
             var insertedVideo = false
             var setVideoTransform = false
             var windows: [CaptionClipWindow] = []
+            /// The video's own sound per clip on the played timeline: (start, end, volume).
+            var baseVolumes: [(start: Double, end: Double, volume: Float)] = []
+            let videoGain = Float(max(0, min(1, model.videoVolume)))
 
             for (clipIndex, clip) in model.selectedClips.enumerated() {
                 guard let sourceID = clip["source_asset_id"]?.stringValue,
@@ -300,6 +307,9 @@ final class DraftPlaybackController: ObservableObject {
                 let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
                 let durationTime = CMTime(seconds: clipDuration, preferredTimescale: 600)
                 let range = CMTimeRange(start: start, duration: durationTime)
+                // Speed: the clip plays (end - start) / speed seconds, like the export.
+                let speed = ClipSpeed.of(clip)
+                let played = CMTime(seconds: clipDuration / speed, preferredTimescale: 600)
                 try videoCompositionTrack.insertTimeRange(range, of: source.video, at: cursor)
                 insertedVideo = true
 
@@ -307,7 +317,8 @@ final class DraftPlaybackController: ObservableObject {
                     clipIndex: clipIndex,
                     clipID: clip["clip_id"]?.stringValue ?? "",
                     timelineStart: CMTimeGetSeconds(cursor),
-                    duration: clipDuration
+                    duration: clipDuration / speed,
+                    speed: speed
                 ))
 
                 if !setVideoTransform {
@@ -317,11 +328,14 @@ final class DraftPlaybackController: ObservableObject {
 
                 if let audioCompositionTrack, let sourceAudio = source.audio {
                     try audioCompositionTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
-                    let muted = clip["audio_muted"]?.boolValue ?? false
-                    let volume = Float(max(0, min(1, clip["audio_volume"]?.doubleValue ?? 1)))
-                    audioParameters?.setVolume(muted ? 0 : volume, at: cursor)
                 }
-                cursor = CMTimeAdd(cursor, durationTime)
+                if speed != 1 {
+                    composition.scaleTimeRange(CMTimeRange(start: cursor, duration: durationTime), toDuration: played)
+                }
+                let muted = clip["audio_muted"]?.boolValue ?? false
+                let volume = Float(max(0, min(1, clip["audio_volume"]?.doubleValue ?? 1))) * videoGain
+                baseVolumes.append((CMTimeGetSeconds(cursor), CMTimeGetSeconds(cursor) + clipDuration / speed, muted ? 0 : volume))
+                cursor = CMTimeAdd(cursor, played)
             }
 
             guard insertedVideo, CMTimeGetSeconds(cursor) > 0 else {
@@ -331,7 +345,13 @@ final class DraftPlaybackController: ObservableObject {
                 CutSellDiagnostics.log("playback_failed", ["reason": "no_playable_clips"])
                 return
             }
-            if let audioParameters { mixInputs.append(audioParameters) }
+            // The video's own sound: each clip's volume, lowered (-12 dB, short ramps) while a
+            // voice-over with "Lower video sound" plays -- the same as the export.
+            if let audioParameters {
+                let ducks = model.previewVoices.filter(\.ducksVideo).map { ($0.start, $0.start + ($0.sourceOut - $0.sourceIn)) }
+                Self.applyBaseVolumes(audioParameters, clips: baseVolumes, ducks: ducks)
+                mixInputs.append(audioParameters)
+            }
 
             // Voice-over track(s): recordings kept on this iPhone (placed, or still uploading),
             // where the timeline says.
@@ -348,7 +368,25 @@ final class DraftPlaybackController: ObservableObject {
                     of: voice, at: CMTime(seconds: placement.start, preferredTimescale: 600)
                 )
                 let parameters = AVMutableAudioMixInputParameters(track: track)
-                parameters.setVolume(Float(max(0, min(1, model.voiceOverVolume))), at: .zero)
+                parameters.setVolume(Float(max(0, min(1, placement.volume))), at: .zero)
+                mixInputs.append(parameters)
+            }
+
+            // Video overlays with their sound on.
+            for overlay in model.overlaysOnScreen where overlay.kind == .video && !overlay.style.muted {
+                guard let url = overlay.url, url.isFileURL,
+                      let sound = try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio).first,
+                      let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                else { continue }
+                let length = min(overlay.end - overlay.start, max(0, CMTimeGetSeconds(cursor) - overlay.start))
+                guard length > 0.05 else { continue }
+                try? track.insertTimeRange(
+                    CMTimeRange(start: CMTime(seconds: overlay.sourceStart, preferredTimescale: 600),
+                                duration: CMTime(seconds: length, preferredTimescale: 600)),
+                    of: sound, at: CMTime(seconds: overlay.start, preferredTimescale: 600)
+                )
+                let parameters = AVMutableAudioMixInputParameters(track: track)
+                parameters.setVolume(Float(max(0, min(1, overlay.style.volume))), at: .zero)
                 mixInputs.append(parameters)
             }
 
@@ -359,6 +397,8 @@ final class DraftPlaybackController: ObservableObject {
                 composition.removeTimeRange(CMTimeRange(start: cutEnd, end: composition.duration))
             }
             let item = AVPlayerItem(asset: composition)
+            // Sped-up / slowed clips keep the voice's pitch (no chipmunk), like the export's atempo.
+            item.audioTimePitchAlgorithm = .spectral
             item.forwardPlaybackEndTime = cutEnd
             let mix = AVMutableAudioMix()
             mix.inputParameters = mixInputs
@@ -380,6 +420,30 @@ final class DraftPlaybackController: ObservableObject {
             isReady = false
             message = "Preview is temporarily unavailable. The draft is still safe."
             CutSellDiagnostics.log("playback_failed", ["reason": String(describing: type(of: error))])
+        }
+    }
+
+    /// Base sound volume over time: each clip's level, with a -12 dB dip (0.12 s ramps) under every
+    /// ducking voice.
+    static func applyBaseVolumes(_ parameters: AVMutableAudioMixInputParameters,
+                                 clips: [(start: Double, end: Double, volume: Float)],
+                                 ducks: [(Double, Double)]) {
+        func level(at time: Double) -> Float { clips.first { time >= $0.start && time < $0.end }?.volume ?? clips.last?.volume ?? 1 }
+        let dip: Float = 0.25   // -12 dB
+        let ramp = 0.12
+        func cm(_ seconds: Double) -> CMTime { CMTime(seconds: max(0, seconds), preferredTimescale: 600) }
+        func ducked(_ time: Double) -> Bool { ducks.contains { time >= $0.0 && time < $0.1 } }
+        for clip in clips {
+            parameters.setVolume(clip.volume * (ducked(clip.start) ? dip : 1), at: cm(clip.start))
+        }
+        for (start, end) in ducks where end - start > 0.05 {
+            let v = level(at: start)
+            parameters.setVolumeRamp(fromStartVolume: v, toEndVolume: v * dip,
+                                     timeRange: CMTimeRange(start: cm(start), duration: cm(min(ramp, (end - start) / 2))))
+            let back = max(start + min(ramp, (end - start) / 2), end - ramp)
+            let w = level(at: back)
+            parameters.setVolumeRamp(fromStartVolume: w * dip, toEndVolume: w,
+                                     timeRange: CMTimeRange(start: cm(back), duration: cm(end - back)))
         }
     }
 

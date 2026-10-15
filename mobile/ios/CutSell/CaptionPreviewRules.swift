@@ -47,7 +47,10 @@ struct CaptionClipWindow: Equatable {
     let clipIndex: Int
     let clipID: String
     let timelineStart: Double
+    /// Seconds the clip plays (its speed applied).
     let duration: Double
+    /// The clip's speed: word times of the original are divided by it (the export does the same).
+    var speed: Double = 1
 }
 
 enum CaptionPreviewRules {
@@ -200,7 +203,12 @@ enum CaptionPreviewRules {
     private static func timedCues(clip: [String: JSONValue], window: CaptionClipWindow) -> [CaptionPreviewCue] {
         var output: [CaptionPreviewCue] = []
         var previousEnd = 0.0
-        for (index, group) in timedGroups(clip: clip).enumerated() {
+        let rate = max(0.1, window.speed)
+        let groups = timedGroups(clip: clip).map { group in
+            TimedGroup(start: group.start / rate, end: group.end / rate,
+                       words: group.words.map { TimedWord(start: $0.start / rate, end: $0.end / rate, text: $0.text) })
+        }
+        for (index, group) in groups.enumerated() {
             let text = cleanText(group.words.map(\.text).joined(separator: " "))
             let start = max(group.start, previousEnd)
             let end = min(group.end, window.duration)

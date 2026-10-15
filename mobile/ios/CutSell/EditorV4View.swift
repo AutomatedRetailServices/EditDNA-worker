@@ -28,9 +28,16 @@ struct EditorV4View: View {
     @State private var pixelsPerSecond: CGFloat = 30
     @State private var captionText = ""
     @FocusState private var captionFocused: Bool
-    @State private var videoVolume: Double = 1
-    /// "Video sound" panel under the timeline: opened only by the speaker or by tapping a voice clip.
-    @State private var soundPanel: SoundPanelTarget?
+    /// Editor v5 panel above the toolbar (overlay, volume, speed, voice-over, sounds…).
+    @State private var card: EditorPanelKind?
+    /// 3 · 2 · 1 over the video before a voice-over records.
+    @State private var countdown: Int?
+    /// "Record again" on a voice-over: the take replaces that one.
+    @State private var recordAgainID: String?
+    @State private var galleryPhotos = false
+    @State private var musicPicker = false
+    @State private var musicNotice = false
+    @AppStorage("cutsell.musicRightsNoticeShown") private var musicNoticeShown = false
 
     private var duration: Double { max(0.1, playback.duration > 0 ? playback.duration : model.timelineDuration) }
 
@@ -68,15 +75,21 @@ struct EditorV4View: View {
             }
             .ignoresSafeArea(.container, edges: .bottom)
             if isVoicePanel {
-                // Figma 1084:2562: the voice-over sheet comes up over the video.
+                // Figma 1119:2316 / 1120:4: the voice-over sheet in two steps, over the timeline.
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    VoiceOverPanel(model: model, recorder: recorder, start: playback.currentTime, mode: $panel) { outcome in
-                        switch outcome {
-                        case .placed: show(.message("Voice-over added"))
-                        case .savedNotPlaced: show(.message("Voice-over saved"))
-                        case .failed: break
+                    VoiceOverSheetV5(model: model, recorder: recorder, start: playback.currentTime, replacing: recordAgainID,
+                                     countdown: $countdown) { outcome in
+                        panel = .none
+                        let replaced = recordAgainID != nil
+                        recordAgainID = nil
+                        if outcome != .failed {
+                            let number = model.voiceClips.count + model.pendingVoiceOvers.filter { !$0.isMusic }.count
+                            show(.message(replaced ? "Voiceover recorded again · tap ↶ to undo"
+                                                   : "Voiceover \(max(1, number)) added · tap ↶ to undo", undo: true))
                         }
+                    } onCancel: {
+                        cancelVoiceSheet()
                     }
                     .padding(.horizontal, 1)
                 }
@@ -101,8 +114,17 @@ struct EditorV4View: View {
         // Style (Figma 1054:2497): no controls; the panel sits where the controls and timeline were.
         case .style: return controls + 1 + TimelineV4.height + toolbar
         case .none, .micPermission, .voiceRecord, .voiceReview:
-            return controls + 1 + TimelineV4.height + toolbar + (soundPanel == nil ? 0 : SoundPanelV4.height)
+            // A tall panel makes the video smaller, so the timeline stays in view (Editor v5).
+            return controls + 1 + TimelineV4.height(for: model, compact: card != nil) + toolbar + cardHeight
         }
+    }
+
+    private var cardHeight: CGFloat {
+        guard let card else { return 0 }
+        if case .overlay(let id) = card {
+            return 8 + card.height(isVideoOverlay: model.overlaysOnScreen.first { $0.id == id }?.kind == .video) + 8
+        }
+        return 8 + card.height() + 8
     }
 
     private var showsControls: Bool {
@@ -125,7 +147,32 @@ struct EditorV4View: View {
             .onChange(of: selection) { _, newValue in selectionChanged(newValue) }
             // A photo / video just picked for an overlay comes selected (move it, pinch it).
             .onChange(of: model.lastAddedOverlayID) { _, id in
-                if let id { selection = .overlay(id, isText: false) }
+                guard let id else { return }
+                selection = .overlay(id, isText: false)
+                if model.pendingOverlays.contains(where: { $0.id == id }) {
+                    let name = model.overlayTitle(id)
+                    show(.message(model.lastAddedOverlayNewLayer ? "\(name) added on a new layer · tap ↶ to undo"
+                                                                  : "\(name) added", undo: true))
+                }
+            }
+            .fileImporter(isPresented: $musicPicker, allowedContentTypes: MusicImport.types) { result in
+                guard case .success(let url) = result else { return }
+                let at = playback.currentTime
+                Task {
+                    guard let song = await MusicImport.m4a(from: url) else {
+                        model.errorMessage = "That song couldn't be read. Please pick another file."
+                        return
+                    }
+                    if await model.addRecordedVoiceOver(fileURL: song, at: at, music: true) != .failed {
+                        show(.message("Music added · tap ↶ to undo", undo: true))
+                    }
+                }
+            }
+            .alert("Music from Files", isPresented: $musicNotice) {
+                Button("OK") { musicNoticeShown = true; musicPicker = true }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Use only music you own or have rights to.")
             }
             .onAppear {
                 ExportTracker.shared.visibleProjectID = project.projectID
@@ -140,7 +187,6 @@ struct EditorV4View: View {
 
     private func appeared() {
         EditorAudio.preparePlayback()
-        videoVolume = model.videoTrackVolume
         guard let previewState else { return }
         selection = previewState.selection
         toast = previewState.toast
@@ -181,6 +227,30 @@ struct EditorV4View: View {
         }
         if previewState.probe == "voiceover" {
             Task { await runVoiceOverProbe() }
+            return
+        }
+        if let probe = previewState.probe, probe.hasPrefix("v5_") {
+            // Editor v5 panels on the real cut (design screenshots).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                switch probe {
+                case "v5_overlay_add": openCard(.overlayAdd)
+                case "v5_volume": openCard(.volume)
+                case "v5_speed":
+                    if let first = model.selectedClips.first?["clip_id"]?.stringValue { selection = .video(first) }
+                    openCard(.speed)
+                case "v5_audio": openCard(.audio)
+                case "v5_countdown":
+                    panel = .voiceRecord
+                    countdown = 3
+                default: break
+                }
+            }
+            return
+        }
+        if previewState.probe == "v5" {
+            Task { await EditorV5Probe.run(model: model, playback: playback, select: { selection = $0 },
+                                           open: { openCard($0) }, toast: { show(.message($0)) },
+                                           countdown: { countdown = $0 }) }
             return
         }
         if let probe = previewState.probe {
@@ -253,7 +323,7 @@ struct EditorV4View: View {
         func go(_ work: @escaping @MainActor () async -> Void) { tasks.append(Task { @MainActor in await work() }) }
         let windows = EditorTracks.clipWindows(model)
         if let first = windows.first {
-            let middle = first.sourceStart + (first.end - first.start) / 2
+            let middle = first.source(at: (first.start + first.end) / 2)
             if let at = model.safeSplitTime(clipID: first.clipID, near: middle) { go { await model.split(clipID: first.clipID, at: at) } }
         }
         go { await model.editCaption(clipID: windows.first?.clipID ?? "", text: "Stress test caption") }
@@ -383,7 +453,7 @@ struct EditorV4View: View {
         show(.message(uploaded ? "Uploaded in the background" : "Still uploading (kept on the phone)"))
         // Fixed moments for the screenshots: Video sound panel at ~24 s, a voice clip's panel at ~30 s.
         await wait(max(1, 24 - Date().timeIntervalSince(opened)))
-        toggleVideoSound()
+        openCard(.volume)
         await wait(max(1, 30 - Date().timeIntervalSince(opened)))
         if let voice = model.timelineComposition?.voiceOverPlacements.last {
             selection = .voiceOver(voice.placementID)
@@ -507,7 +577,7 @@ struct EditorV4View: View {
                     .frame(width: size.width, height: size.height).clipped()
                     .accessibilityIdentifier("editorFirstFrame")
             }
-            videoLayer
+            splitAwareVideo(size: size)
             overlaysOnVideo(frame: size)
             if model.captionsEnabled {
                 captionLayer(frame: size)
@@ -519,6 +589,9 @@ struct EditorV4View: View {
             if let scrub = model.trimScrub {
                 TrimFrameOverlay(scrub: scrub, url: model.previewVideoURL(forSource: scrub.sourceID))
                     .frame(width: size.width, height: size.height)
+            }
+            if let countdown {
+                CountdownOverlayV5(value: countdown).frame(width: size.width, height: size.height)
             }
             if playback.isBuilding && !playback.isReady {
                 ProgressView().tint(CS.cyan)
@@ -535,8 +608,8 @@ struct EditorV4View: View {
             ToastPillV4(toast: toast) { Task { await undoFromToast() } }
                 .padding(.bottom, 12)
                 .transition(.opacity)
-        } else if case .overlay(_, isText: false) = selection {
-            hintPill("Drag to move · Pinch to resize").padding(.bottom, 14)
+        } else if case .overlay(let id, isText: false) = selection, model.overlayStyle(id).layout == .float {
+            hintPill("Drag to move · pinch to resize").padding(.bottom, 14)
         }
     }
 
@@ -569,16 +642,39 @@ struct EditorV4View: View {
         return CGSize(width: target.width * scale, height: target.height * scale)
     }
 
-    /// The video, mirrored and rotated as the export will make it.
-    private var videoLayer: some View {
-        let quarter = model.rotationDegrees % 180 != 0
-        return PlayerLayerView(player: playback.player)
+    /// The overlay on screen now whose layout also moves the video (Stacked / Side by side).
+    private var splitOverlay: OverlayOnScreen? {
+        let now = playback.currentTime
+        return model.overlaysOnScreen
+            .filter { now >= $0.start && now < $0.end && $0.style.layout.baseRegion != nil }
+            .max { $0.style.layer < $1.style.layer }
+    }
+
+    /// The video in the whole frame, or in its half while a Stacked / Side by side overlay shows
+    /// (filling that half, centred, like the export).
+    @ViewBuilder
+    private func splitAwareVideo(size: CGSize) -> some View {
+        if let region = splitOverlay?.style.layout.baseRegion {
+            videoLayer(fill: true)
+                .frame(width: size.width * region.width, height: size.height * region.height)
+                .clipped()
+                .frame(width: size.width, height: size.height, alignment: region.minX == 0 && region.width < 1 ? .leading : .top)
+        } else {
+            videoLayer(fill: false)
+        }
+    }
+
+    /// The video, mirrored and rotated as the export will make it (whole video + this clip).
+    private func videoLayer(fill: Bool) -> some View {
+        let degrees = model.rotation(at: playback.currentTime)
+        let quarter = degrees % 180 != 0
+        return PlayerLayerView(player: playback.player, fill: fill)
             .scaleEffect(zoomNow)
             .scaleEffect(x: model.isMirrored(at: playback.currentTime) ? -1 : 1, y: 1)
-            .rotationEffect(.degrees(Double(model.rotationDegrees)))
+            .rotationEffect(.degrees(Double(degrees)))
             .scaleEffect(quarter ? 266.0 / 472.0 : 1)
             .animation(.easeOut(duration: 0.2), value: model.isMirrored(at: playback.currentTime))
-            .animation(.easeOut(duration: 0.25), value: model.rotationDegrees)
+            .animation(.easeOut(duration: 0.25), value: degrees)
     }
 
     /// Auto Zoom AI in the preview: the same push-in as the export at this moment.
@@ -703,10 +799,12 @@ struct EditorV4View: View {
                                   y: frame.height * CGFloat(item["y"]?.doubleValue ?? 0.2))
                 }
             }
-            ForEach(model.overlaysOnScreen) { overlay in
+            // Higher layer on top (the export draws them in the same order).
+            ForEach(model.overlaysOnScreen.sorted { $0.style.layer < $1.style.layer }) { overlay in
                 MediaOverlayOnVideo(
                     overlay: overlay, frame: frame, time: playback.currentTime,
                     isSelected: selection == .overlay(overlay.id, isText: false),
+                    onRotate: { degrees in model.setOverlayStyle(id: overlay.id) { $0.rotation = degrees } },
                     onSelect: { selection = .overlay(overlay.id, isText: false) },
                     onChange: { x, y, width in
                         if overlay.uploading != nil || overlay.failed {
@@ -808,13 +906,15 @@ struct EditorV4View: View {
                         pixelsPerSecond: $pixelsPerSecond,
                         onAddVideo: { playback.pause(); sheet = .brollGallery },
                         onAddVoice: { openVoiceOver() },
-                        onAddOverlay: { openOverlayGallery() },
-                        onToggleVideoSound: { toggleVideoSound() }
+                        onAddOverlay: { openOverlayPanel() },
+                        onToggleVideoSound: { openCard(.volume) },
+                        compact: card != nil
                     )
                     .padding(.top, 1)
-                    // Under the timeline (never over its rows).
-                    if let soundPanel {
-                        soundPanelView(soundPanel)
+                    // Under the timeline, above the toolbar (never over the rows).
+                    if let card {
+                        cardView(card)
+                            .padding(.vertical, 8)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
@@ -824,40 +924,79 @@ struct EditorV4View: View {
         }
     }
 
-    /// The "Video sound" panel: the video's own sound (0–200%, 100% in the middle), or the
-    /// voice-over's level (0–100%, 100% at the end). The dot sits exactly at the % shown.
+    // MARK: Editor v5 panels
+
     @ViewBuilder
-    private func soundPanelView(_ target: SoundPanelTarget) -> some View {
-        switch target {
-        case .video:
-            SoundPanelV4(title: "Video sound", icon: "speaker.wave.2.fill", value: $videoVolume, maximum: 2,
-                         onClose: { closeSoundPanel() }) {
-                Task { await model.setVideoTrackVolume(videoVolume) }
-            }
-        case .voice:
-            SoundPanelV4(title: "Voice-over", icon: "mic.fill", value: $model.voiceOverVolume, maximum: 1,
-                         onClose: { closeSoundPanel() }) {}
+    private func cardView(_ kind: EditorPanelKind) -> some View {
+        switch kind {
+        case .overlayAdd:
+            OverlayAddPanelV5(onPhoto: { openGallery(photos: true) }, onVideo: { openGallery(photos: false) },
+                              onClose: { closeCard() })
+        case .overlay(let id):
+            OverlayPanelV5(model: model, overlayID: id, onClose: { closeCard() })
+        case .volume:
+            VolumePanelV5(model: model, clipID: selectedVideoClip, onClose: { closeCard() })
+        case .speed:
+            SpeedPanelV5(model: model, clipID: selectedVideoClip, onClose: { closeCard() })
+        case .voice(let id):
+            VoiceClipPanelV5(model: model, clipID: id, onRecordAgain: {
+                recordAgainID = id
+                closeCard(keepSelection: true)
+                openVoiceOver()
+            }, onDelete: {
+                closeCard()
+                model.removeAudioClip(id: id)
+                show(.message("Voice-over deleted", undo: true))
+            }, onClose: { closeCard() })
+        case .sound(let id):
+            SoundClipPanelV5(model: model, clipID: id, onDelete: {
+                closeCard()
+                model.removeAudioClip(id: id)
+                show(.message("Sound deleted", undo: true))
+            }, onClose: { closeCard() })
+        case .audio:
+            AudioPanelV5(model: model, playhead: { playback.currentTime }, onAdded: { name in
+                show(.message("\(name) added · tap ↶ to undo", undo: true))
+            }, onMusic: {
+                playback.pause()
+                if musicNoticeShown { musicPicker = true } else { musicNotice = true }
+            }, onClose: { closeCard() })
         }
     }
 
-    private func closeSoundPanel() {
-        withAnimation(.easeOut(duration: 0.2)) { soundPanel = nil }
-        if case .voiceOver = selection { selection = nil }
+    private var selectedVideoClip: String? {
+        if case .video(let id) = selection { return id }
+        return nil
     }
 
-    /// Speaker on the video row: opens (or closes) the "Video sound" panel.
-    private func toggleVideoSound() {
-        videoVolume = model.videoTrackVolume
-        withAnimation(.easeOut(duration: 0.2)) { soundPanel = soundPanel == .video ? nil : .video }
+    private func openCard(_ kind: EditorPanelKind) {
+        playback.pause()
+        if panel == .captions(nil) || panel == .style { panel = .none }
+        withAnimation(.easeOut(duration: 0.2)) { card = card == kind ? nil : kind }
     }
 
-    /// Tapping a voice clip opens its sound panel; selecting anything else closes a voice panel.
+    private func closeCard(keepSelection: Bool = false) {
+        let closing = card
+        withAnimation(.easeOut(duration: 0.2)) { card = nil }
+        guard !keepSelection else { return }
+        switch closing {
+        case .overlay, .voice, .sound: selection = nil
+        default: break
+        }
+    }
+
+    /// Selecting an overlay, a voice-over or a sound opens its panel; selecting something else closes it.
     private func selectionChanged(_ newValue: EditorSelection?) {
         withAnimation(.easeOut(duration: 0.2)) {
-            if case .voiceOver = newValue {
-                soundPanel = .voice
-            } else if soundPanel == .voice {
-                soundPanel = nil
+            switch newValue {
+            case .overlay(let id, isText: false): card = .overlay(id)
+            case .voiceOver(let id): card = .voice(id)
+            case .sound(let id): card = .sound(id)
+            default:
+                switch card {
+                case .overlay, .voice, .sound: card = nil
+                default: break
+                }
             }
         }
     }
@@ -868,8 +1007,14 @@ struct EditorV4View: View {
         case .style: return .style
         case .voiceRecord, .voiceReview, .micPermission: return .voiceOver
         case .none:
-            if case .overlay = selection { return .overlay }
-            return nil
+            switch card {
+            case .overlayAdd, .overlay: return .overlay
+            case .voice: return .voiceOver
+            case .audio, .sound: return .audio
+            case .volume: return .volume
+            case .speed: return .speed
+            case nil: return nil
+            }
         }
     }
 
@@ -919,8 +1064,10 @@ struct EditorV4View: View {
         switch which {
         case .overlay:
             OverlayGallerySheet(onPick: { url in
+                closeCard()
                 model.addOverlay(fileURL: url, at: playback.currentTime)
-            }, sampleTiles: previewState != nil)
+            }, sampleTiles: previewState != nil, videosOnly: !galleryPhotos, photosOnly: galleryPhotos,
+               title: galleryPhotos ? "Photos" : "Videos")
         case .broll, .brollGallery:
             // Full-screen B-roll: a video from the phone, as a clip of the main track at the cursor.
             OverlayGallerySheet(onPick: { url in
@@ -949,27 +1096,58 @@ struct EditorV4View: View {
                 show(.message(clipID == nil ? (on ? "Video mirrored" : "Mirror off") : (on ? "Clip mirrored" : "Clip mirror off")))
             }
         case .rotate:
-            let next = (model.rotationDegrees + 90) % 360
-            Task { await model.setDraftValue("rotation", .number(Double(next))) }
-            show(.message("Rotated \(next)°"))
-        case .overlay: openOverlayGallery()
+            // The selected clip turns on its own; with nothing selected, the whole video.
+            if let clipID = selectedVideoClip {
+                let next = (model.clipRotation(clipID) + 90) % 360
+                model.rotateClip(clipID: clipID)
+                show(.message("Clip rotated \(next)°", undo: true))
+            } else {
+                let next = (model.rotationDegrees + 90) % 360
+                Task { await model.setDraftValue("rotation", .number(Double(next))) }
+                show(.message("Rotated \(next)°", undo: true))
+            }
+        case .overlay: openOverlayPanel()
         case .voiceOver: openVoiceOver()
+        case .audio: openCard(.audio)
+        case .volume: openCard(.volume)
+        case .speed:
+            // The selected clip, or the one under the cursor (selected so its handles show).
+            if selectedVideoClip == nil, let clip = playback.clipID(at: playback.currentTime) ?? EditorTracks.clipWindows(model).first(where: { playback.currentTime >= $0.start && playback.currentTime < $0.end })?.clipID {
+                selection = .video(clip)
+            }
+            openCard(.speed)
         case .captions:
             playback.pause()
+            card = nil
             panel = panel == .captions(nil) ? .none : .captions(nil)
         case .style:
+            card = nil
             panel = panel == .style ? .none : .style
         }
     }
 
-    /// Overlay opens the phone's photos and videos straight away (Figma 1026:7971).
-    private func openOverlayGallery() {
+    /// Overlay: the "Add overlay · From your Photos" panel (Figma 1119:670) with Photo and Video.
+    private func openOverlayPanel() {
         playback.pause()
+        openCard(.overlayAdd)
+    }
+
+    private func openGallery(photos: Bool) {
+        galleryPhotos = photos
         sheet = .overlay
+    }
+
+    private func cancelVoiceSheet() {
+        countdown = nil
+        if recorder.state == .recording { recorder.stop() }
+        recorder.discardTake()
+        recordAgainID = nil
+        panel = .none
     }
 
     private func openVoiceOver() {
         playback.pause()
+        withAnimation(.easeOut(duration: 0.2)) { card = nil }
         switch AVAudioApplication.shared.recordPermission {
         case .granted: panel = .voiceRecord
         case .denied: show(.message("Allow the microphone in iOS Settings to record a voice-over."))
@@ -1000,9 +1178,18 @@ struct EditorV4View: View {
     private func split() async {
         let time = playback.currentTime
         switch selection {
-        case .voiceOver(let id):
-            await model.splitVoiceOverPlacement(id: id, at: time)
-            show(.message("Voice-over split at \(EditorTime.short(time))"))
+        case .voiceOver(let id), .sound(let id):
+            if model.splitAudioClip(id: id, at: time) {
+                show(.message("Split at \(EditorTime.short(time)) · tap ↶ to undo", undo: true))
+            } else {
+                show(.message("Move the cursor inside the clip to split it."))
+            }
+        case .overlay(let id, isText: false):
+            if model.splitOverlay(id: id, at: time) {
+                show(.message("Overlay split at \(EditorTime.short(time)) · tap ↶ to undo", undo: true))
+            } else {
+                show(.message("Move the cursor inside the overlay to split it."))
+            }
         case .broll(let id):
             await model.splitBrollPlacement(id: id, at: time)
             show(.message("B-roll split at \(EditorTime.short(time))"))
@@ -1011,7 +1198,7 @@ struct EditorV4View: View {
                 show(.message("Move the cursor inside a clip to split it."))
                 return
             }
-            let wanted = window.sourceStart + (time - window.start)
+            let wanted = window.source(at: time)
             guard let at = model.safeSplitTime(clipID: window.clipID, near: wanted) else {
                 show(.message("This clip can’t be split here. Move the cursor between two words."))
                 return
@@ -1029,14 +1216,23 @@ struct EditorV4View: View {
             show(.message("Clip deleted", undo: true))
             await model.remove(clipID: id)
         case .voiceOver(let id):
-            show(.message("Voice-over deleted"))
-            await model.removeVoiceOverPlacement(id: id)
+            show(.message("Voice-over deleted", undo: true))
+            await model.removeAudioClip(id: id).value
+        case .sound(let id):
+            show(.message("Sound deleted", undo: true))
+            await model.removeAudioClip(id: id).value
         case .broll(let id):
             show(.message("B-roll deleted"))
             await model.removeBrollPlacement(id: id)
         case .overlay(let id, let isText):
             show(.message("Overlay deleted", undo: true))
-            if isText { await model.removeTextOverlay(id: id) } else { await model.removeMediaOverlay(id: id) }
+            if isText {
+                await model.removeTextOverlay(id: id)
+            } else if model.pendingOverlays.contains(where: { $0.id == id }) {
+                model.discardPendingOverlay(id: id)
+            } else {
+                await model.removeMediaOverlay(id: id)
+            }
         case .caption(let clipID):
             show(.captionDeleted)
             await model.editCaption(clipID: clipID, text: "")
@@ -1157,7 +1353,7 @@ enum EditorPanel: Equatable {
 }
 
 enum EditorTool: String, CaseIterable {
-    case split, delete, mirror, rotate, overlay, voiceOver, captions, style
+    case split, delete, mirror, rotate, overlay, voiceOver, audio, volume, speed, captions, style
 
     var title: String {
         switch self {
@@ -1167,6 +1363,9 @@ enum EditorTool: String, CaseIterable {
         case .rotate: return "Rotate"
         case .overlay: return "Overlay"
         case .voiceOver: return "Voice Over"
+        case .audio: return "Audio"
+        case .volume: return "Volume"
+        case .speed: return "Speed"
         case .captions: return "Captions"
         case .style: return "Style"
         }
@@ -1180,6 +1379,9 @@ enum EditorTool: String, CaseIterable {
         case .rotate: return "Ed4Rotate"
         case .overlay: return "Ed4Overlay"
         case .voiceOver: return "Ed4Voice"
+        case .audio: return "Ed5Audio"
+        case .volume: return "Ed5Volume"
+        case .speed: return "Ed5Speed"
         case .captions: return "Ed4Captions"
         case .style: return "Ed4Style"
         }
@@ -1427,6 +1629,7 @@ struct OverlayOnScreen: Identifiable, Equatable {
     let start: Double
     let end: Double
     let sourceStart: Double
+    var style = OverlayStyle()
     var uploading: Double?
     var failed = false
 }
@@ -1436,34 +1639,88 @@ private struct MediaOverlayOnVideo: View {
     let frame: CGSize
     let time: Double
     let isSelected: Bool
+    let onRotate: (Double) -> Void
     let onSelect: () -> Void
     let onChange: (Double, Double, Double) -> Void
     let onRetry: () -> Void
 
     @State private var drag: CGSize = .zero
     @State private var pinch: CGFloat = 1
+    @State private var turning: Double?
     @State private var aspect: Double?
 
     private var visible: Bool { isSelected || overlay.uploading != nil || (time >= overlay.start && time < overlay.end) }
+    private var style: OverlayStyle { overlay.style }
+    /// Feather in points of this preview (the export's 12 px / 28 px of a 1080-wide frame).
+    private var feather: CGFloat { style.edge.featherOf1080 * frame.width / 1080 }
 
     var body: some View {
         if visible {
-            let w = frame.width * CGFloat(overlay.width) * pinch
-            let h = w / CGFloat(max(0.1, aspect ?? 1))
-            OverlayMediaPicture(url: overlay.url, kind: overlay.kind,
-                                seconds: overlay.sourceStart + max(0, time - overlay.start))
-                .frame(width: w, height: h)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay { if isSelected { SelectionHandles() } }
-                .overlay { uploadBadge }
-                .position(x: frame.width * CGFloat(overlay.x) + drag.width, y: frame.height * CGFloat(overlay.y) + drag.height)
-                .onTapGesture { overlay.failed ? onRetry() : onSelect() }
-                .gesture(moveGesture.simultaneously(with: resizeGesture))
-                .task(id: overlay.url?.path ?? overlay.id) {
-                    if let url = overlay.url { aspect = await EditorMediaInfo.aspect(of: url, kind: overlay.kind) }
-                }
-                .accessibilityIdentifier("mediaOverlayOnVideo")
+            if let region = style.layout.region {
+                regionBody(region)
+            } else {
+                floatBody
+            }
         }
+    }
+
+    private var picture: some View {
+        OverlayMediaPicture(url: overlay.url, kind: overlay.kind, seconds: overlay.sourceStart + max(0, time - overlay.start))
+    }
+
+    /// Soft edges: the picture fades out over `feather` points at its sides.
+    private func feathered<V: View>(_ view: V, size: CGSize) -> some View {
+        view.mask {
+            if feather > 0.5 {
+                RoundedRectangle(cornerRadius: feather)
+                    .padding(feather / 2)
+                    .blur(radius: feather / 2)
+            } else {
+                Rectangle()
+            }
+        }
+    }
+
+    // Float: its own place and size; one finger moves, two fingers resize, the ↻ button turns it.
+    private var floatBody: some View {
+        let w = frame.width * CGFloat(overlay.width) * pinch
+        let h = w / CGFloat(max(0.1, aspect ?? 1))
+        let angle = turning ?? style.rotation
+        return feathered(picture.frame(width: w, height: h).clipShape(RoundedRectangle(cornerRadius: style.edge == .sharp ? 4 : 0)),
+                         size: CGSize(width: w, height: h))
+            .overlay { if isSelected { TornasolSelection(onTurn: turnGesture(center: CGSize(width: w, height: h))) } }
+            .overlay { uploadBadge }
+            .rotationEffect(.degrees(angle))
+            .position(x: frame.width * CGFloat(overlay.x) + drag.width, y: frame.height * CGFloat(overlay.y) + drag.height)
+            .onTapGesture { overlay.failed ? onRetry() : onSelect() }
+            .gesture(moveGesture.simultaneously(with: resizeGesture))
+            .task(id: overlay.url?.path ?? overlay.id) {
+                if let url = overlay.url { aspect = await EditorMediaInfo.aspect(of: url, kind: overlay.kind) }
+            }
+            .accessibilityIdentifier("mediaOverlayOnVideo")
+    }
+
+    // Region layouts (Full, Top, Bottom, Left, Right, Stacked, Side by side): fill or fit their region.
+    private func regionBody(_ region: CGRect) -> some View {
+        let size = CGSize(width: frame.width * region.width, height: frame.height * region.height)
+        return ZStack {
+            if !style.fill && !style.layout.transparentPad { Color.black }
+            if style.fill {
+                picture.frame(width: size.width, height: size.height).clipped()
+            } else {
+                picture.aspectRatio(CGFloat(aspect ?? 1), contentMode: .fit).frame(width: size.width, height: size.height)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .modifier(FeatherModifier(feather: feather))
+        .overlay { if isSelected { Rectangle().strokeBorder(Tornasol.angular, lineWidth: 2) } }
+        .overlay { uploadBadge }
+        .position(x: frame.width * (region.midX), y: frame.height * (region.midY))
+        .onTapGesture { overlay.failed ? onRetry() : onSelect() }
+        .task(id: overlay.url?.path ?? overlay.id) {
+            if let url = overlay.url { aspect = await EditorMediaInfo.aspect(of: url, kind: overlay.kind) }
+        }
+        .accessibilityIdentifier("mediaOverlayOnVideo")
     }
 
     @ViewBuilder
@@ -1485,10 +1742,12 @@ private struct MediaOverlayOnVideo: View {
     private var moveGesture: some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
+                guard turning == nil else { return }
                 if !isSelected { onSelect() }
                 drag = value.translation
             }
             .onEnded { value in
+                guard turning == nil else { return }
                 let nx = max(0, min(1, overlay.x + Double(value.translation.width / frame.width)))
                 let ny = max(0, min(1, overlay.y + Double(value.translation.height / frame.height)))
                 drag = .zero
@@ -1507,6 +1766,63 @@ private struct MediaOverlayOnVideo: View {
                 pinch = 1
                 onChange(overlay.x, overlay.y, nw)
             }
+    }
+
+    /// Dragging the ↻ button turns the overlay around its centre (snaps to 0 / 90 / 180 / 270).
+    private func turnGesture(center: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("overlayBox"))
+            .onChanged { value in
+                let dx = value.location.x - center.width / 2
+                let dy = value.location.y - center.height / 2
+                // The button sits at the top-right corner: that direction is "no turn".
+                let turned = atan2(Double(dy), Double(dx)) - atan2(Double(-center.height / 2 - 18), Double(center.width / 2 + 6))
+                var degrees = turned * 180 / Double.pi + style.rotation
+                for snap in [0.0, 90, 180, 270, 360, -90, -180, -270] where abs(degrees - snap) < 4 { degrees = snap }
+                turning = degrees.truncatingRemainder(dividingBy: 360)
+            }
+            .onEnded { _ in
+                if let turning { onRotate(turning) }
+                turning = nil
+            }
+    }
+}
+
+/// Soft edges for a region layout.
+private struct FeatherModifier: ViewModifier {
+    let feather: CGFloat
+    func body(content: Content) -> some View {
+        if feather > 0.5 {
+            content.mask { Rectangle().padding(feather / 2).blur(radius: feather / 2) }
+        } else {
+            content
+        }
+    }
+}
+
+/// A selected overlay on the video (Figma 1124:1191): tornasol border, white corner squares and the
+/// ↻ button at the top-right corner.
+private struct TornasolSelection<Turn: Gesture>: View {
+    let onTurn: Turn
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 3).strokeBorder(Tornasol.angular, lineWidth: 2)
+                ForEach(0..<4, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 10, height: 10)
+                        .position(x: index % 2 == 0 ? 0 : proxy.size.width, y: index < 2 ? 0 : proxy.size.height)
+                }
+                Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(Tornasol.angular, in: Circle())
+                    .contentShape(Circle().inset(by: -10))
+                    .position(x: proxy.size.width - 2, y: -18)
+                    .gesture(onTurn)
+                    .accessibilityLabel("Turn")
+                    .accessibilityIdentifier("overlayRotate")
+            }
+            .coordinateSpace(name: "overlayBox")
+        }
     }
 }
 

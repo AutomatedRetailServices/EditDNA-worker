@@ -35,11 +35,16 @@ def test_header_quality_menu_and_controls_with_keyframe():
 
 def test_toolbar_v4_order_and_icons():
     v4 = read("EditorV4View.swift")
-    assert "case split, delete, mirror, rotate, overlay, voiceOver, captions, style" in v4
-    for title in ('"Split"', '"Delete"', '"Mirror"', '"Rotate"', '"Overlay"', '"Voice Over"', '"Captions"', '"Style"'):
+    # Editor v5 (Figma 1087:2573): Split · Delete · Mirror · Rotate | Overlay · Voice Over · Audio ·
+    # Volume · Speed · Captions · Style.
+    assert "case split, delete, mirror, rotate, overlay, voiceOver, audio, volume, speed, captions, style" in v4
+    for title in ('"Split"', '"Delete"', '"Mirror"', '"Rotate"', '"Overlay"', '"Voice Over"', '"Audio"', '"Volume"',
+                  '"Speed"', '"Captions"', '"Style"'):
         assert title in v4, title
     for icon in ("Split", "Delete", "Mirror", "Rotate", "Overlay", "Voice", "Captions", "Style"):
         assert (APP / "Assets.xcassets" / "Figma" / f"Ed4{icon}.imageset" / f"Ed4{icon}@3x.png").exists(), icon
+    for icon in ("Audio", "Volume", "Speed"):
+        assert (APP / "Assets.xcassets" / "Figma" / f"Ed5{icon}.imageset" / f"Ed5{icon}@3x.png").exists(), icon
     assert "ScrollView(.horizontal" in v4  # slides sideways
     assert "active == tool ? CS.cyan" in v4  # active tool in cyan
 
@@ -94,8 +99,8 @@ def test_preview_has_sound_and_separate_volumes():
     playback = read("DraftPlaybackView.swift")
     assert "EditorAudio.preparePlayback()" in playback
     assert "for placement in model.previewVoices" in playback
-    assert "VoiceOverStore.url(for: placement.assetID)" in read("DraftEditorViewModel.swift")
-    assert "model.voiceOverVolume" in playback
+    assert "clip.assetID.flatMap { VoiceOverStore.url(for: $0) }" in read("DraftEditorViewModel.swift")
+    assert "parameters.setVolume(Float(max(0, min(1, placement.volume))), at: .zero)" in playback
     vm = read("DraftEditorViewModel.swift")
     assert "func setVideoTrackVolume(_ volume: Double) async" in vm
     assert "VoiceOverStore.save(file, assetID: asset.assetID)" in vm

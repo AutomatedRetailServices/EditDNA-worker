@@ -42,6 +42,8 @@ final class CutSubmitter: ObservableObject {
         label: String = ""
     ) async throws -> String {
         guard let session = appState.session else { throw APIError.invalidResponse }
+        // Nothing is uploaded or processed before the AI notice is agreed to (once).
+        guard await AIConsentCenter.shared.ensure() else { throw AIConsentError.declined }
         isSubmitting = true
         defer { isSubmitting = false }
         let span = progressRange.upperBound - progressRange.lowerBound

@@ -81,17 +81,17 @@ enum EditorMediaProbe {
         }
         await wait(2)
         // 5. Move the voice-over 1.5 s later, Undo, Redo.
-        if let voice = model.timelineComposition?.voiceOverPlacements.first {
-            await model.moveVoiceOver(id: voice.placementID, to: voice.timelineStartSec + 1.5)
-            let after = model.timelineComposition?.voiceOverPlacements.first { $0.placementID == voice.placementID }?.timelineStartSec ?? -1
-            log(String(format: "voice_moved %.2f->%.2f", voice.timelineStartSec, after))
+        if let voice = model.voiceClips.first {
+            await model.moveAudioClip(id: voice.id, to: voice.start + 1.5)?.value
+            let after = model.voiceClips.first { $0.id == voice.id }?.start ?? -1
+            log(String(format: "voice_moved %.2f->%.2f", voice.start, after))
             await wait(1.5)
             _ = await model.undo()
-            let undone = model.timelineComposition?.voiceOverPlacements.first { $0.placementID == voice.placementID }?.timelineStartSec ?? -1
+            let undone = model.voiceClips.first { $0.id == voice.id }?.start ?? -1
             log(String(format: "voice_undo %.2f", undone))
             await wait(1.5)
             _ = await model.redo()
-            let redone = model.timelineComposition?.voiceOverPlacements.first { $0.placementID == voice.placementID }?.timelineStartSec ?? -1
+            let redone = model.voiceClips.first { $0.id == voice.id }?.start ?? -1
             log(String(format: "voice_redo %.2f", redone))
         }
         await wait(2)

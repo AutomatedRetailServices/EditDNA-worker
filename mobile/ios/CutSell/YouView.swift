@@ -9,6 +9,7 @@ struct YouView: View {
     @State private var showingNotifications = false
     @State private var showingLogout = false
     @State private var showingDeleteAccount = false
+    @State private var legal: LegalDocument?
     @State private var errorMessage: String?
 
     private var isApple: Bool { appState.session?.isAppleAccount == true }
@@ -73,12 +74,29 @@ struct YouView: View {
                     .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
                     .padding(.top, 28)
+
+                    // Privacy Policy and Terms of Use, inside the app.
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Legal").font(CS.inter(13, .semibold)).foregroundStyle(CS.textMuted)
+                        Button("Privacy Policy") { legal = .privacy }
+                            .font(CS.inter(15, .medium)).foregroundStyle(CS.cyan)
+                            .accessibilityIdentifier("privacyPolicyLink")
+                        Button("Terms of Use") { legal = .terms }
+                            .font(CS.inter(15, .medium)).foregroundStyle(CS.cyan)
+                            .accessibilityIdentifier("termsLink")
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
+                    .padding(.top, 14)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
             }
         }
         .safeAreaInset(edge: .bottom) { CSTabBar(current: .you, select: selectTab) }
+        .sheet(item: $legal) { LegalView(document: $0) }
         .sheet(isPresented: $showingNotifications) {
             NotificationInboxView()
                 .environmentObject(notificationCenter)

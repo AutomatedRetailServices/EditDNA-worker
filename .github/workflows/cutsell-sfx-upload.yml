@@ -37,6 +37,12 @@ jobs:
           S3_BUCKET: ${{ secrets.S3_BUCKET }}
         run: |
           set -euo pipefail
+          # Only the bucket the live API and the Modal worker use (Amazon S3, checked 15 Oct 2026
+          # from a signed upload link of the live API). Anything else: stop, upload nothing.
+          if [ "$S3_BUCKET" != "script2clipshop-video-automatedretailservices" ]; then
+            echo "::error::S3_BUCKET is not the production media bucket; nothing uploaded."
+            exit 1
+          fi
           cd "$RUNNER_TEMP/sfx"
           for f in tap_select.m4a good.m4a wrong.m4a glass.m4a typing_3s.m4a typing.m4a; do
             aws s3 cp "$f" "s3://$S3_BUCKET/assets/sfx/v1/$f" --content-type audio/mp4 --only-show-errors

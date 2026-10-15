@@ -113,7 +113,7 @@ struct VoiceOverView: View {
                             .disabled(model.baseEditAssetID == nil)
                         }
                         if model.baseEditAssetID == nil {
-                            Text("Placing voice-over on the timeline needs this project's primary source registered first.")
+                            Text("This cut is still getting ready. Try again in a moment.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -199,7 +199,7 @@ struct VoiceOverView: View {
                         Spacer()
                         Slider(value: .constant(0.0), in: -1...1).disabled(true)
                     }
-                    Text("The current backend contract carries no volume, fade, or pan field for voice-over placements -- these controls are shown disabled rather than simulated.")
+                    Text("Change a voice-over's volume from its panel in the editor.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("voiceover.audioControlsUnsupported")

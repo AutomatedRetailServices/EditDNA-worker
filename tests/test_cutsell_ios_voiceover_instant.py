@@ -16,7 +16,7 @@ def body_of(source: str, signature: str) -> str:
 
 def test_save_shows_the_voice_at_once_and_uploads_in_the_background():
     vm = read("DraftEditorViewModel.swift")
-    add = body_of(vm, "func addRecordedVoiceOver(fileURL: URL, at start: Double)")
+    add = body_of(vm, "func addRecordedVoiceOver(fileURL: URL, at start: Double")
     # No network call before the voice is on the row: only reading its length and keeping the file.
     assert "importAudio" not in add and "await self" not in add
     assert "PendingVoiceOverStore.duration(of: fileURL)" in add
@@ -64,27 +64,23 @@ def test_retry_delays_grow():
     assert "case 1: return 2" in store and "case 2: return 6" in store and "default: return 15" in store
 
 
-def test_video_sound_panel_opens_only_from_the_speaker_or_a_voice_clip():
+def test_volume_panel_opens_from_the_speaker_and_a_voice_clip_opens_its_panel():
+    # Editor v5 (Figma 1119:990 / 1119:1634): the speaker on the video row opens the Volume panel;
+    # tapping a voice clip opens its own panel; both sit above the toolbar, under the timeline.
     v4 = read("EditorV4View.swift")
-    # Not drawn over the timeline any more.
-    assert ".overlay(alignment: .bottom) { volumeStrip }" not in v4
-    assert "soundPanelView(soundPanel)" in v4
-    toggle = body_of(v4, "private func toggleVideoSound()")
-    assert "soundPanel = soundPanel == .video ? nil : .video" in toggle
+    assert "onToggleVideoSound: { openCard(.volume) }" in v4
     changed = body_of(v4, "private func selectionChanged(_ newValue: EditorSelection?)")
-    assert "if case .voiceOver = newValue" in changed and "soundPanel = .voice" in changed
-    assert "case .video" not in changed
-    # The space under the video makes room for it, so no row is covered.
-    assert "(soundPanel == nil ? 0 : SoundPanelV4.height)" in v4
+    assert "case .voiceOver(let id): card = .voice(id)" in changed
+    assert "TimelineV4.height(for: model, compact: card != nil) + toolbar + cardHeight" in v4
 
 
 def test_slider_dot_matches_the_percentage():
+    panels = read("EditorV5Panels.swift")
+    assert "GradientSliderV5(value: $value, maximum: 2, onCommit: commit)" in panels
+    assert "let center = Self.knob / 2 + usable * CGFloat(min(max(0, value / maximum), 1))" in panels
+    assert '"\\(Int((value * 100).rounded()))%"' in panels
     v4 = read("EditorV4View.swift")
-    assert 'SoundPanelV4(title: "Video sound", icon: "speaker.wave.2.fill", value: $videoVolume, maximum: 2' in v4
-    assert 'value: $model.voiceOverVolume, maximum: 1' in v4
     assert "static func knobCenter(value: Double, width: CGFloat, maximum: Double) -> CGFloat" in v4
-    assert "knob / 2 + usable * CGFloat(min(max(0, value / maximum), 1))" in v4
-    assert '"\\(Int((value * 100).rounded()))%"' in v4
 
 
 def slider_center(value, width, maximum, knob=18.0):
@@ -158,10 +154,11 @@ def test_a_new_voice_never_overlaps_the_voices_on_the_row():
     assert "static func freeStart(_ start: Double, duration: Double, taken:" in store
     assert "at = ((range.end + 0.01) * 1000).rounded() / 1000" in store
     vm = read("DraftEditorViewModel.swift")
-    add = body_of(vm, "func addRecordedVoiceOver(fileURL: URL, at start: Double)")
-    assert "PendingVoiceOverStore.freeStart(start, duration: duration, taken: takenVoiceRanges(except: nil))" in add
+    add = body_of(vm, "func addRecordedVoiceOver(fileURL: URL, at start: Double")
+    assert "PendingVoiceOverStore.freeStart(start, duration: duration, taken: taken)" in add
+    assert "var taken = takenVoiceRanges(except: nil)" in add
     finish = vm.split("private func finishPendingVoiceOver(", 1)[1].split("\n    }\n", 1)[0]
-    assert "takenVoiceRanges(except: item.id)" in finish
+    assert "PendingVoiceOverStore.freeStart(item.start, duration: length, taken: others)" in finish
     # A background upload never pops an alert.
     assert "errorMessage = shownError" in finish
 

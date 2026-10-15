@@ -106,6 +106,8 @@ struct PendingOverlay: Identifiable, Equatable {
     var progress: Double = 0
     var failed = false
     var attempts = 0
+    /// Layer, layout, edge… chosen while it uploads (saved with it).
+    var style = OverlayStyle()
 
     var fileURL: URL { OverlayMediaStore.fileURL(fileName) }
 }
@@ -274,13 +276,14 @@ extension DraftEditorViewModel {
                 x: item["x"]?.doubleValue ?? 0.5, y: item["y"]?.doubleValue ?? 0.5,
                 width: item["width"]?.doubleValue ?? 0.4,
                 start: start, end: item["end"]?.doubleValue ?? start + 1,
-                sourceStart: item["source_start"]?.doubleValue ?? 0
+                sourceStart: item["source_start"]?.doubleValue ?? 0,
+                style: OverlayStyle(item)
             )
         }
         for item in pendingOverlays {
             out.append(OverlayOnScreen(id: item.id, kind: item.kind, url: item.fileURL, x: item.x, y: item.y,
                                        width: item.width, start: item.start, end: item.end, sourceStart: 0,
-                                       uploading: item.failed ? nil : item.progress, failed: item.failed))
+                                       style: item.style, uploading: item.failed ? nil : item.progress, failed: item.failed))
         }
         return out
     }

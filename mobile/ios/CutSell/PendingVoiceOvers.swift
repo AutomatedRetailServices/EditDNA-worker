@@ -14,8 +14,15 @@ struct PendingVoiceOver: Codable, Identifiable, Equatable {
     var attempts: Int = 0
     var failed: Bool = false
     let createdAt: Date
+    /// "voice" (recorded) or "music" (a file from Files); nil = voice (lists saved before v5).
+    var kind: String? = nil
+    /// Recorded with Enhance voice on (the export also cleans it).
+    var enhanced: Bool? = nil
+    /// The voice-over it replaces ("Record again"): it takes that one's place.
+    var replaces: String? = nil
 
     var end: Double { start + duration }
+    var isMusic: Bool { kind == "music" }
 }
 
 /// Recordings waiting to upload, kept in Application Support (not a temporary folder) so they
@@ -106,4 +113,8 @@ struct PreviewVoice: Equatable {
     let start: Double
     let sourceIn: Double
     let sourceOut: Double
+    /// 0...2 (the preview plays up to 1).
+    var volume: Double = 1
+    /// "Lower video sound" while it plays.
+    var ducksVideo = false
 }

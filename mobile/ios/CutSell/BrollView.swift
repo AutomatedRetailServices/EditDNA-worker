@@ -108,7 +108,7 @@ struct BrollView: View {
                     }
                     .accessibilityIdentifier("broll.importButton")
 
-                    Text("Only video is supported -- there is no real backend authority for a still-image B-roll clip on this track.")
+                    Text("Only videos can go on this track.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -125,7 +125,7 @@ struct BrollView: View {
                             .disabled(model.baseEditAssetID == nil)
                         }
                         if model.baseEditAssetID == nil {
-                            Text("Placing B-roll on the timeline needs this project's primary source registered first.")
+                            Text("This cut is still getting ready. Try again in a moment.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

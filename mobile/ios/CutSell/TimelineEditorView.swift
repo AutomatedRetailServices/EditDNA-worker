@@ -188,7 +188,7 @@ struct TimelineEditorView: View {
             header
             timelineTracks
             if !canAddBrollOrVoiceOver {
-                Text("B-roll and Voice-over placement need this project's primary source registered first.")
+                Text("This cut is still getting ready. Try again in a moment.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("timeline.noBaseEditAsset")
@@ -404,7 +404,7 @@ struct TimelineEditorView: View {
             Menu {
                 Button("Keyframe at playhead") {}
                     .disabled(true)
-                Text("Full keyframe editing is not part of this base gate.")
+                Text("Drag a keyframe on the timeline to move it.")
             } label: {
                 Label("Keyframe", systemImage: "diamond")
             }

@@ -124,12 +124,7 @@ final class DraftEditorViewModel: ObservableObject {
     var rotationDegrees: Int { Int(displayDraft?["rotation"]?.doubleValue ?? 0) % 360 }
 
     /// Volume of the video's own sound (0...2, the server's `audio_volume`), the same on every clip.
-    var videoTrackVolume: Double {
-        let clips = selectedClips
-        guard !clips.isEmpty else { return 1 }
-        if clips.allSatisfy({ $0["audio_muted"]?.boolValue == true }) { return 0 }
-        return clips.compactMap { $0["audio_volume"]?.doubleValue }.max() ?? 1
-    }
+    var videoTrackVolume: Double { videoVolume }
 
     // MARK: Overlays, full-screen B-roll, one undo history
 
@@ -163,8 +158,14 @@ final class DraftEditorViewModel: ObservableObject {
         let total = max(1, timelineDuration)
         let begin = min(max(0, start), max(0, total - 0.5))
         // On the video and the overlay row at once; its real length and shape follow a moment later.
-        pendingOverlays.append(PendingOverlay(id: id, fileName: name, kind: kind, start: begin,
-                                              end: min(total, begin + 4), sourceDuration: nil))
+        // Meets another overlay in time: on a new row (layer) above it.
+        let existing = overlaysOnScreen.map { (layer: $0.style.layer, start: $0.start, end: $0.end) }
+        let placement = OverlayLayers.layer(for: begin, end: min(total, begin + 4), existing: existing)
+        var pending = PendingOverlay(id: id, fileName: name, kind: kind, start: begin,
+                                     end: min(total, begin + 4), sourceDuration: nil)
+        pending.style.layer = placement.layer
+        pendingOverlays.append(pending)
+        lastAddedOverlayNewLayer = placement.isNew
         lastAddedOverlayID = id
         Task { @MainActor in
             let local = OverlayMediaStore.fileURL(name)
@@ -236,24 +237,30 @@ final class DraftEditorViewModel: ObservableObject {
         // Where it is now (the creator may have moved it while it uploaded).
         let current = pendingOverlays.first { $0.id == item.id } ?? item
         let total = max(1, timelineDuration)
-        var fields: [String: JSONValue] = [
-            "project_id": .string(project.projectID), "user_id": .string(session.userID),
-            "kind": .string(uploaded.kind), "uri": .string(uploaded.uri),
-            "start": .number(min(current.start, max(0, total - 0.2))), "end": .number(min(current.end, total)),
+        let placed = "ov_" + item.id.replacingOccurrences(of: "pov_", with: "")
+        // One save carrying everything (place, size, layer, layout, edge…), so one Undo removes it.
+        var overlay: [String: JSONValue] = [
+            "overlay_id": .string(placed), "kind": .string(uploaded.kind), "uri": .string(uploaded.uri),
+            "start": .number((min(current.start, max(0, total - 0.2)) * 1000).rounded() / 1000),
+            "end": .number((min(current.end, total) * 1000).rounded() / 1000),
             "x": .number(current.x), "y": .number(current.y), "width": .number(max(0.1, min(1, current.width))),
-            "source_start": .number(0), "mute_audio": .bool(true),
+            "source_start": .number(0),
         ]
-        if let length = current.sourceDuration, length > 0 { fields["source_end"] = .number(length) }
+        if let length = current.sourceDuration, length > 0, uploaded.kind == "video" {
+            overlay["source_end"] = .number((length * 1000).rounded() / 1000)
+        }
+        current.style.write(into: &overlay)
         let shownError = errorMessage
         let added = ResultBox()
-        let request = fields
+        let entry = overlay
         await perform(predict: nil) { [weak self] in
-            added.value = await self?.editAndSave("/v1/overlays/add", request) ?? false
+            added.value = await self?.saveChange { object in
+                let items = object["media_overlays"]?.arrayValue ?? []
+                object["media_overlays"] = .array(items + [.object(entry)])
+            } ?? false
         }.value
         errorMessage = shownError
-        guard added.value,
-              let placed = mediaOverlays.last(where: { $0["uri"]?.stringValue == uploaded.uri })?["overlay_id"]?.stringValue
-        else { return false }
+        guard added.value else { return false }
         pendingOverlays.removeAll { $0.id == item.id }
         if lastAddedOverlayID == item.id { lastAddedOverlayID = placed }
         return true
@@ -261,7 +268,7 @@ final class DraftEditorViewModel: ObservableObject {
 
     /// Changes one overlay on the draft (shown at once, one save in the edit queue).
     @discardableResult
-    private func changeOverlay(id: String, _ edit: @escaping (inout [String: JSONValue]) -> Void) -> Task<Void, Never> {
+    func changeOverlay(id: String, _ edit: @escaping (inout [String: JSONValue]) -> Void) -> Task<Void, Never> {
         let change: (inout [String: JSONValue]) -> Void = { object in
             let items = object["media_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
             object["media_overlays"] = .array(items.map { item in
@@ -299,8 +306,13 @@ final class DraftEditorViewModel: ObservableObject {
     static func fitOverlaysToCut(_ draft: JSONValue) -> JSONValue {
         guard var object = draft.objectValue else { return draft }
         let clips = object["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
-        let total = clips.reduce(0.0) { $0 + max(0, ($1["end"]?.doubleValue ?? 0) - ($1["start"]?.doubleValue ?? 0)) }
+        let total = cutLength(clips)
         guard total > 0 else { return draft }
+        // Sounds and voices that start after the end go (one that runs past it is cut by the export).
+        if let audio = object["audio_clips"]?.arrayValue, !audio.isEmpty {
+            let kept = audio.filter { ($0["start"]?.doubleValue ?? 0) < total - 0.02 }
+            if kept.count != audio.count { object["audio_clips"] = .array(kept) }
+        }
         for key in ["media_overlays", "text_overlays"] {
             guard let items = object[key]?.arrayValue?.compactMap(\.objectValue), !items.isEmpty else { continue }
             var changed = false
@@ -525,6 +537,24 @@ final class DraftEditorViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(voiceOverVolume, forKey: "cutsell.voVolume.\(project.projectID)") }
     }
 
+    // MARK: Editor v5 helpers (used by EditorV5Model.swift)
+
+    /// Length of audio files measured on this iPhone (asset id -> seconds).
+    @Published var audioFileDurations: [String: Double] = [:]
+    /// The overlay just added went on a new row (the editor says so in its toast).
+    @Published var lastAddedOverlayNewLayer = false
+
+    /// One draft change: shown at once, then saved in the edit queue (Undo / Redo as usual).
+    @discardableResult
+    func applyDraftChange(_ change: @escaping (inout [String: JSONValue]) -> Void) -> Task<Void, Never> {
+        perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }
+    }
+
+    func updatePendingOverlayStyle(id: String, _ edit: (inout OverlayStyle) -> Void) {
+        guard let index = pendingOverlays.firstIndex(where: { $0.id == id }) else { return }
+        edit(&pendingOverlays[index].style)
+    }
+
     // MARK: One queue for every draft edit
 
     private var actionChain: Task<Void, Never>?
@@ -560,16 +590,7 @@ final class DraftEditorViewModel: ObservableObject {
 
     /// Sets the video's own volume on every clip (0 mutes) with one save.
     func setVideoTrackVolume(_ volume: Double) async {
-        let value = max(0, min(2, volume))
-        let change: (inout [String: JSONValue]) -> Void = { object in
-            Self.mapClips(&object) { clips in clips.map { clip in
-                var clip = clip
-                clip["audio_volume"] = .number((value * 1000).rounded() / 1000)
-                clip["audio_muted"] = .bool(value <= 0.001)
-                return clip
-            } }
-        }
-        await perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }.value
+        await setVideoVolume(volume).value
     }
 
     /// Mirror / rotation are whole-video settings saved on the draft (the export reads them).
@@ -607,9 +628,9 @@ final class DraftEditorViewModel: ObservableObject {
             guard let window = windows.first(where: { window in
                 (source.isEmpty || window.sourceID == source)
                     && sourceTime >= window.sourceStart
-                    && sourceTime < window.sourceStart + (window.end - window.start)
+                    && sourceTime < window.sourceStart + window.sourceLength
             }) else { return nil }
-            return ZoomMark(id: id, time: window.start + (sourceTime - window.sourceStart),
+            return ZoomMark(id: id, time: window.time(ofSource: sourceTime),
                             duration: item["duration"]?.doubleValue ?? 1.2,
                             scale: item["scale"]?.doubleValue ?? 1.08,
                             kind: item["kind"]?.stringValue ?? "key")
@@ -635,7 +656,7 @@ final class DraftEditorViewModel: ObservableObject {
         let windows = EditorTracks.clipWindows(self)
         guard let window = windows.first(where: { time >= $0.start && time < $0.end }) ?? windows.last(where: { time >= $0.end - 0.01 }) else { return nil }
         let into = min(max(0, time - window.start), max(0, window.end - window.start - 0.05))
-        return (window.sourceID ?? "", window.sourceStart + into)
+        return (window.sourceID ?? "", window.source(at: window.start + into))
     }
 
     private func saveZoomKeyframes(_ items: [[String: JSONValue]], enable: Bool? = nil) async {
@@ -668,6 +689,7 @@ final class DraftEditorViewModel: ObservableObject {
         let items = zoomKeyframes.map { item -> [String: JSONValue] in
             guard item["keyframe_id"]?.stringValue == id else { return item }
             var moved = item
+            moved["origin"] = .string("user")
             moved["source_asset_id"] = .string(point.source)
             moved["source_time"] = .number((point.seconds * 1000).rounded() / 1000)
             return moved
@@ -676,7 +698,7 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func removeZoomKeyframe(id: String) async {
-        await saveZoomKeyframes(zoomKeyframes.filter { $0["keyframe_id"]?.stringValue != id })
+        await deleteZoomKeyframe(id: id)
     }
 
     #if DEBUG
@@ -719,9 +741,12 @@ final class DraftEditorViewModel: ObservableObject {
         await setDraftValue("auto_zoom_enabled", .bool(enabled))
     }
 
-    var timelineDuration: Double {
-        selectedClips.reduce(0) { total, clip in
-            total + max(0, (clip["end"]?.doubleValue ?? 0) - (clip["start"]?.doubleValue ?? 0))
+    /// Length of the cut as it plays (each clip at its own speed).
+    var timelineDuration: Double { Self.cutLength(selectedClips) }
+
+    static func cutLength(_ clips: [[String: JSONValue]]) -> Double {
+        clips.reduce(0) { total, clip in
+            total + max(0, (clip["end"]?.doubleValue ?? 0) - (clip["start"]?.doubleValue ?? 0)) / ClipSpeed.of(clip)
         }
     }
 
@@ -804,6 +829,8 @@ final class DraftEditorViewModel: ObservableObject {
         }
         if let loadedAssets = try? await assetRequest { timelineAssetLibrary = loadedAssets }
         await compositionRequest
+        // Voice-overs placed before Editor v5 join the draft once.
+        adoptLegacyVoiceOvers()
         // Voice-overs saved earlier that did not finish uploading: show them and try again.
         resumePendingVoiceOvers()
         await measureSourceDurations()
@@ -876,10 +903,15 @@ final class DraftEditorViewModel: ObservableObject {
     /// the ones still uploading (from their own file).
     var previewVoices: [PreviewVoice] {
         var voices: [PreviewVoice] = []
-        for placement in timelineComposition?.voiceOverPlacements ?? [] {
-            guard let url = VoiceOverStore.url(for: placement.assetID) else { continue }
-            voices.append(PreviewVoice(key: placement.placementID, url: url, start: placement.timelineStartSec,
-                                       sourceIn: placement.sourceInSec, sourceOut: placement.sourceOutSec))
+        for clip in audioClips {
+            let url: URL?
+            switch clip.kind {
+            case .voice, .music: url = clip.assetID.flatMap { VoiceOverStore.url(for: $0) }
+            case .sfx: url = clip.sfxID.flatMap { SfxLibrary.localURL($0) }
+            }
+            guard let url else { continue }
+            voices.append(PreviewVoice(key: clip.id, url: url, start: clip.start, sourceIn: clip.sourceIn,
+                                       sourceOut: clip.sourceOut, volume: clip.volume, ducksVideo: clip.duckVideo))
         }
         for item in pendingVoiceOvers {
             voices.append(PreviewVoice(key: "pending_\(item.id)", url: PendingVoiceOverStore.fileURL(item),
@@ -892,7 +924,8 @@ final class DraftEditorViewModel: ObservableObject {
     /// then uploads by the SAME path as an imported file (`/timeline-uploads` +
     /// `/timeline-assets`) and is placed on the voice-over track at `start` for its full length.
     /// `.failed` only when the recording itself can't be read or kept.
-    func addRecordedVoiceOver(fileURL: URL, at start: Double) async -> RecordedVoiceOverOutcome {
+    func addRecordedVoiceOver(fileURL: URL, at start: Double, enhanced: Bool = false, music: Bool = false,
+                              replacing: String? = nil) async -> RecordedVoiceOverOutcome {
         let duration = await PendingVoiceOverStore.duration(of: fileURL)
         guard duration > 0.05 else {
             errorMessage = "The recording couldn't be used. Please record again."
@@ -903,10 +936,16 @@ final class DraftEditorViewModel: ObservableObject {
             errorMessage = "There isn't enough space on this iPhone to keep the recording."
             return .failed
         }
-        // At the cursor, or right after the voice already there (voices never overlap on the row).
-        let at = PendingVoiceOverStore.freeStart(start, duration: duration, taken: takenVoiceRanges(except: nil))
-        let item = PendingVoiceOver(id: id, projectID: project.projectID, start: at,
+        // At the cursor, or right after the voice already there (voices never overlap on the row);
+        // "Record again" takes the old one's place; music goes on the sounds row.
+        var taken = takenVoiceRanges(except: nil)
+        if let replacing { taken = voiceClips.filter { $0.id != replacing }.map { (start: $0.start, end: $0.end) } }
+        let at = music ? max(0, start) : PendingVoiceOverStore.freeStart(start, duration: duration, taken: taken)
+        var item = PendingVoiceOver(id: id, projectID: project.projectID, start: at,
                                     duration: duration, fileName: fileName, createdAt: Date())
+        item.kind = music ? "music" : "voice"
+        item.enhanced = enhanced
+        item.replaces = replacing
         pendingVoiceOvers.append(item)
         PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)
         uploadPendingVoiceOver(id: id)
@@ -925,8 +964,8 @@ final class DraftEditorViewModel: ObservableObject {
 
     /// Timeline ranges already used on the mic row (placed voices and other waiting ones).
     private func takenVoiceRanges(except pendingID: String?) -> [(start: Double, end: Double)] {
-        let placed = currentVoiceOverPlacements.map { (start: $0.timelineStartSec, end: $0.timelineEndSec) }
-        let waiting = pendingVoiceOvers.filter { $0.id != pendingID }.map { (start: $0.start, end: $0.end) }
+        let placed = voiceClips.map { (start: $0.start, end: $0.end) }
+        let waiting = pendingVoiceOvers.filter { $0.id != pendingID && !$0.isMusic }.map { (start: $0.start, end: $0.end) }
         return placed + waiting
     }
 
@@ -978,23 +1017,36 @@ final class DraftEditorViewModel: ObservableObject {
         // Kept on this iPhone so the preview plays it on its own track.
         VoiceOverStore.save(file, assetID: asset.assetID)
         await refreshTimelineAssetLibrary()
-        if baseEditAssetID != nil {
-            let length = asset.durationSec > 0 ? asset.durationSec : item.duration
-            // A background upload never pops an alert: a failure shows on the block (tap to retry).
-            let shownError = errorMessage
-            var placed = false
-            for _ in 0..<2 where !placed {
-                // Read the timeline again (another change may have moved it on: 409) and keep
-                // the voice clear of the voices already on the row.
-                await refreshTimelineComposition()
-                let at = PendingVoiceOverStore.freeStart(item.start, duration: length, taken: takenVoiceRanges(except: item.id))
-                placed = await addVoiceOverPlacement(
-                    assetID: asset.assetID, start: at, end: at + length, sourceIn: 0, sourceOut: length
-                )
-            }
-            errorMessage = shownError
-            if !placed { return false }
-        }
+        let length = asset.durationSec > 0 ? asset.durationSec : item.duration
+        audioFileDurations[asset.assetID] = length
+        // On the draft like every clip: one save (Undo removes it), the export mixes it in.
+        // A background upload never pops an alert: a failure shows on the block (tap to retry).
+        let shownError = errorMessage
+        let clip = AudioClipItem(
+            id: "ac_\(item.id.replacingOccurrences(of: "pvo_", with: "").prefix(10).lowercased())",
+            kind: item.isMusic ? .music : .voice, assetID: asset.assetID, start: item.start,
+            sourceIn: 0, sourceOut: length, clean: item.enhanced ?? false, enhancedAtRecord: item.enhanced ?? false
+        )
+        let replaced = item.replaces
+        let placed = ResultBox()
+        await perform(predict: nil) { [weak self] in
+            placed.value = await self?.saveChange { object in
+                var items = object["audio_clips"]?.arrayValue?.compactMap(\.objectValue).compactMap(AudioClipItem.init) ?? []
+                var adding = clip
+                if let replaced, let old = items.first(where: { $0.id == replaced }) {
+                    adding.start = old.start
+                    adding.volume = old.volume
+                    adding.duckVideo = old.duckVideo
+                    items.removeAll { $0.id == replaced }
+                } else if !item.isMusic {
+                    let others = items.filter { $0.kind == .voice }.map { (start: $0.start, end: $0.end) }
+                    adding.start = PendingVoiceOverStore.freeStart(item.start, duration: length, taken: others)
+                }
+                DraftEditorViewModel.setAudioClips(&object, items + [adding])
+            } ?? false
+        }.value
+        errorMessage = shownError
+        if !placed.value { return false }
         pendingVoiceOvers.removeAll { $0.id == item.id }
         PendingVoiceOverStore.save(pendingVoiceOvers, projectID: project.projectID)
         PendingVoiceOverStore.discardFile(item)

@@ -69,23 +69,27 @@ def test_processing_shows_the_cut_name_not_the_file_name():
 
 def test_overlay_opens_the_gallery_straight_away_and_has_no_text():
     v4 = read("EditorV4View.swift")
-    assert "case .overlay: openOverlayGallery()" in v4
+    # Editor v5 (Figma 1119:670): Overlay opens "Add overlay · From your Photos" with Photo and
+    # Video, each opening the phone's gallery filtered; no old "Add to the video" menu, no text.
+    assert "case .overlay: openOverlayPanel()" in v4
     assert '"Add to the video"' not in v4 and "confirmationDialog" not in v4
     assert "addTextOverlay" not in v4 and '"Add text"' not in v4
-    assert "onAddOverlay: { openOverlayGallery() }" in v4
+    assert "onAddOverlay: { openOverlayPanel() }" in v4
+    assert "videosOnly: !galleryPhotos, photosOnly: galleryPhotos" in v4
 
 
 def test_picked_media_uploads_with_progress_and_retries_without_losing_it():
     vm = read("DraftEditorViewModel.swift")
     add = body(vm, "func addOverlay(fileURL: URL, at start: Double)")
     assert "OverlayMediaStore.keep(fileURL, id: id)" in add       # kept on the phone first
-    assert "pendingOverlays.append(PendingOverlay(" in add and "uploadPendingOverlay(id: id)" in add
+    assert "pendingOverlays.append(pending)" in add and "uploadPendingOverlay(id: id)" in add
     upload = body(vm, "private func uploadPendingOverlay(id: String)")
     assert "for attempt in 0..<PendingVoiceOverStore.attemptsPerRound" in upload
     assert "pendingOverlays[index].failed = true" in upload
     finish = vm.split("private func finishPendingOverlay(", 1)[1].split("\n    }\n", 1)[0]
     assert "setOverlayProgress(item.id, value)" in finish
-    assert 'editAndSave("/v1/overlays/add", request)' in finish
+    # One save carrying the overlay with its layer, layout and edge (one Undo removes it).
+    assert "current.style.write(into: &overlay)" in finish and 'object["media_overlays"] = .array(items + [.object(entry)])' in finish
     assert "OverlayMediaStore.link(uri: uploaded.uri, fileName: item.fileName)" in finish
     media = read("EditorMedia.swift")
     assert "didSendBodyData" in media and "applicationSupportDirectory" in media
@@ -215,7 +219,7 @@ def test_soft_magnets_to_cursor_and_edges():
     tl = read("EditorV4Timeline.swift")
     magnets = tl.split("private func magnets(excluding id: String)", 1)[1].split("\n    }\n", 1)[0]
     assert "playback.currentTime" in magnets and "clipWindows(model)" in magnets
-    assert "voiceOverPlacements" in magnets and "overlaysOnScreen" in magnets
+    assert "model.audioClips" in magnets and "overlaysOnScreen" in magnets
     assert "SnapFeedback.tick()" in tl and "SnapFeedback.lift()" in tl
     assert "LongPressGesture(minimumDuration: 0.3)" in tl
 
@@ -225,13 +229,14 @@ def test_one_save_on_release_and_undo_redo_cover_moves():
     lift = tl.split("private func liftGesture(", 1)[1].split("\n    }\n", 1)[0]
     assert lift.count("model.reorderNow(") == 1 and ".onEnded" in lift
     move = tl.split("private func moveGesture(", 1)[1].split("\n    }\n", 1)[0]
-    assert "model.moveVoiceOver(id: move.id, to: at)" in move and "model.setOverlayTime(" in move
+    # Voice-overs and sounds are draft clips (Editor v5): one save, the draft's own Undo / Redo.
+    assert "model.moveAudioClip(id: move.id, to: move.start)" in move and "model.setOverlayTime(" in move
+    v5 = read("EditorV5Model.swift")
+    move_audio = v5.split("func moveAudioClip(id: String, to start: Double)", 1)[1].split("\n    }\n", 1)[0]
+    assert "PendingVoiceOverStore.freeStart(begin, duration: item.length, taken: others)" in move_audio
+    assert "return updateAudioClip(id: id)" in move_audio
     vm = read("DraftEditorViewModel.swift")
-    assert "enum UndoStep { case draft; case voices(TimelineComposition) }" in vm
-    move_voice = body(vm, "func moveVoiceOver(id: String, to start: Double) async")
-    assert "undoSteps.append(.voices(previous))" in move_voice and "for attempt in 0..<2" in move_voice
-    undo = body(vm, "func undo() async -> Bool")
-    assert "if case .voices(let previous)? = undoSteps.last" in undo
+    assert "perform(predict: change) { [weak self] in _ = await self?.saveChange(change) }" in vm
     assert "return perform(predict: predict)" in body(vm, "func reorderNow(clipIDs: [String]) -> Task<Void, Never>")
 
 

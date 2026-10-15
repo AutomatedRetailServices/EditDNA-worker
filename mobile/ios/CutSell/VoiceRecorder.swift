@@ -28,7 +28,9 @@ final class VoiceRecorder: ObservableObject {
     }
 
     /// Asks for the microphone the first time, then starts a new take (any previous take is discarded).
-    func start() async {
+    /// `enhance`: the iPhone's own voice processing while recording (less room noise); the export
+    /// also cleans the take.
+    func start(enhance: Bool = false) async {
         guard await Self.requestPermission() else {
             state = .permissionDenied
             return
@@ -36,7 +38,8 @@ final class VoiceRecorder: ObservableObject {
         discardTake()
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setCategory(.playAndRecord, mode: enhance ? .voiceChat : .spokenAudio,
+                                    options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("voiceover-\(UUID().uuidString).m4a")

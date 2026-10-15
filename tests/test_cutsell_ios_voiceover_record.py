@@ -35,16 +35,18 @@ def test_screen_has_record_stop_again_use_and_no_unavailable_label():
 
 def test_use_uploads_by_the_import_path_and_places_at_the_cursor():
     model = read("DraftEditorViewModel.swift")
-    body = model.split("func addRecordedVoiceOver(fileURL: URL, at start: Double)", 1)[1].split("\n    }\n", 1)[0]
+    body = model.split("func addRecordedVoiceOver(fileURL: URL, at start: Double", 1)[1].split("\n    }\n", 1)[0]
     # Saved on the phone and shown at once; the upload (same import path) runs in the background.
     assert "uploadPendingVoiceOver(id: id)" in body and "freeStart(start, duration: duration" in body
     finish = model.split("private func finishPendingVoiceOver(", 1)[1].split("\n    }\n", 1)[0]
     assert "VoiceOverImportManager.shared.importAudio(" in finish
-    assert "addVoiceOverPlacement(" in finish and "start: at, end: at + length" in finish
+    # Editor v5: the voice goes on the draft (audio_clips), one save, clear of the other voices.
+    assert "DraftEditorViewModel.setAudioClips(&object, items + [adding])" in finish
+    assert "PendingVoiceOverStore.freeStart(item.start, duration: length, taken: others)" in finish
     assert "playheadTime: playheadTime" in read("TimelineEditorView.swift")
     assert "model.addRecordedVoiceOver(fileURL: url, at: playheadTime)" in read("VoiceOverView.swift")
 
 
 def test_microphone_usage_text_is_set():
-    assert "INFOPLIST_KEY_NSMicrophoneUsageDescription: CutSell uses the microphone to record your voice-over" in (
+    assert "INFOPLIST_KEY_NSMicrophoneUsageDescription: CutSell uses the microphone to record the sound of your videos and your voice-overs." in (
         ROOT / "mobile" / "ios" / "project.yml").read_text()

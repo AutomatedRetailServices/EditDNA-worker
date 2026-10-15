@@ -316,7 +316,7 @@ struct EditorV2View: View {
                 show(.message("Move the playhead inside a clip to split it."))
                 return
             }
-            let wanted = window.sourceStart + (time - window.start)
+            let wanted = window.source(at: time)
             guard let at = model.safeSplitTime(clipID: window.clipID, near: wanted) else {
                 show(.message("This clip can’t be split here. Move the playhead between two words."))
                 return
@@ -347,6 +347,9 @@ struct EditorV2View: View {
         case .zoom(let id):
             await model.removeZoomKeyframe(id: id)
             show(.message("Zoom deleted", undo: true))
+        case .sound(let id):
+            await model.removeAudioClip(id: id).value
+            show(.message("Sound deleted", undo: true))
         case nil:
             show(.message("Select a clip, voice-over, overlay or caption first."))
         }
@@ -396,6 +399,8 @@ enum EditorSelection: Equatable {
     case caption(String)
     /// An Auto Zoom AI keyframe (◇) on the video track.
     case zoom(String)
+    /// A CutSell sound or a music clip (sounds row).
+    case sound(String)
 
     var pillTitle: String {
         switch self {
@@ -405,6 +410,7 @@ enum EditorSelection: Equatable {
         case .voiceOver: return "Voice-over selected"
         case .overlay: return "Overlay selected"
         case .caption: return "Caption selected"
+        case .sound: return "Sound selected"
         }
     }
 }
@@ -417,19 +423,36 @@ struct EditorTracks: View {
     let onAdd: (EditorTrack) -> Void
     let onToggleMute: () -> Void
 
-    struct ClipWindow { let clipID: String; let start: Double; let end: Double; let sourceStart: Double; let sourceID: String? }
+    /// One clip on the edited timeline: [start, end) as it plays (its speed applied), from
+    /// `sourceStart` of its original.
+    struct ClipWindow {
+        let clipID: String
+        let start: Double
+        let end: Double
+        let sourceStart: Double
+        let sourceID: String?
+        var speed: Double = 1
 
-    /// Clips back to back on the edited timeline.
+        /// Seconds of the original this clip covers.
+        var sourceLength: Double { (end - start) * speed }
+        /// The original's second shown at timeline `time`.
+        func source(at time: Double) -> Double { sourceStart + (time - start) * speed }
+        /// Timeline time of the original's second `source`.
+        func time(ofSource source: Double) -> Double { start + (source - sourceStart) / speed }
+    }
+
+    /// Clips back to back on the edited timeline (each at its own speed).
     static func clipWindows(_ model: DraftEditorViewModel) -> [ClipWindow] {
         var cursor = 0.0
         return model.selectedClips.compactMap { clip in
             let start = clip["start"]?.doubleValue ?? 0
             let end = clip["end"]?.doubleValue ?? start
-            let length = max(0, end - start)
+            let speed = ClipSpeed.of(clip)
+            let length = max(0, end - start) / speed
             defer { cursor += length }
             guard let id = clip["clip_id"]?.stringValue, length > 0 else { return nil }
             return ClipWindow(clipID: id, start: cursor, end: cursor + length, sourceStart: start,
-                              sourceID: clip["source_asset_id"]?.stringValue)
+                              sourceID: clip["source_asset_id"]?.stringValue, speed: speed)
         }
     }
 
@@ -842,6 +865,12 @@ enum EditorSheet: String, Identifiable {
 }
 
 enum EditorTime {
+    /// "0:04"
+    static func minutes(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
     /// "00:06"
     static func clock(_ seconds: Double) -> String {
         let total = max(0, Int(seconds.rounded(.down)))
@@ -862,16 +891,20 @@ enum EditorTime {
 /// Plays the editor preview without the system controls (Figma: clean video with brand border).
 struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
+    /// Fill its frame (centre crop) instead of fitting: the video's half in Stacked / Side by side.
+    var fill = false
 
     func makeUIView(context: Context) -> PlayerUIView {
         let view = PlayerUIView()
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.videoGravity = fill ? .resizeAspectFill : .resizeAspect
         return view
     }
 
     func updateUIView(_ view: PlayerUIView, context: Context) {
         if view.playerLayer.player !== player { view.playerLayer.player = player }
+        let gravity: AVLayerVideoGravity = fill ? .resizeAspectFill : .resizeAspect
+        if view.playerLayer.videoGravity != gravity { view.playerLayer.videoGravity = gravity }
     }
 
     final class PlayerUIView: UIView {

@@ -87,7 +87,7 @@ struct OverlayView: View {
                     }
                     .accessibilityIdentifier("overlay.importButton")
 
-                    Text("Uploads the file and places it on the timeline in one real step -- /v1/overlays/add has no separate registration phase.")
+                    Text("Pick a photo or video to place over your video.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -137,7 +137,7 @@ struct OverlayView: View {
                             Button("Add keyframe") {}
                                 .disabled(true)
                         }
-                        Text("The real overlay contract (MediaOverlay) has no rotation, opacity, or keyframe field -- these controls are shown disabled rather than simulated.")
+                        Text("Move and resize the overlay on the video.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("overlay.rotationOpacityKeyframeUnsupported")

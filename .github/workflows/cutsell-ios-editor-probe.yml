@@ -245,6 +245,34 @@ jobs:
           xcrun simctl spawn "$udid" log show --last 15m --style compact \
             --predicate 'eventMessage CONTAINS "CUTSELLMEDIA" OR eventMessage CONTAINS "CUTSELLEXPORT"' 2>/dev/null \
             | grep -oE 'CUTSELL(MEDIA|EXPORT).*' >> "$RUNNER_TEMP/probe/probe_log.txt" || true
+          # Editor v5 panels on the real cut (one screenshot each), then every v5 option end to end:
+          # layered overlays, voice-over with the countdown, speed, CutSell sounds, Export (CUTSELLV5 lines).
+          for state in v5_overlay_add v5_volume v5_speed v5_audio v5_countdown; do
+            xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+            SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+            SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+            SIMCTL_CHILD_CUTSELL_PROBE_STATE="$state" \
+              xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+            sleep 13
+            xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/$state.png" >/dev/null 2>&1
+          done
+          xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
+          SIMCTL_CHILD_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" SIMCTL_CHILD_CUTSELL_PROBE_USER="$PROBE_USER" \
+          SIMCTL_CHILD_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" SIMCTL_CHILD_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+          SIMCTL_CHILD_CUTSELL_PROBE_STATE="v5" \
+            xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen editor_probe >/dev/null
+          xcrun simctl io "$udid" recordVideo --codec=h264 --force "$RUNNER_TEMP/rec/v5.mp4" > /dev/null 2>&1 &
+          rec=$!
+          for i in $(seq 1 150); do
+            sleep 4
+            [ $((i % 2)) -eq 0 ] && xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/v5_$(printf %03d $((i*4))).png" >/dev/null 2>&1
+            if xcrun simctl spawn "$udid" log show --last 1m --style compact --predicate 'eventMessage CONTAINS "CUTSELLV5 done"' 2>/dev/null | grep -q "CUTSELLV5 done error"; then break; fi
+          done
+          xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/probe/v5_end.png" >/dev/null 2>&1
+          kill -INT $rec; sleep 3
+          xcrun simctl spawn "$udid" log show --last 15m --style compact \
+            --predicate 'eventMessage CONTAINS "CUTSELLV5" OR eventMessage CONTAINS "CUTSELLEXPORT"' 2>/dev/null \
+            | grep -oE 'CUTSELL(V5|EXPORT).*' >> "$RUNNER_TEMP/probe/probe_log.txt" || true
           # Processing screen: the brand ring turning (5 s recording kept here; 2 frames go to the repo).
           xcrun simctl terminate "$udid" "$BUNDLE" >/dev/null 2>&1 || true
           xcrun simctl launch "$udid" "$BUNDLE" -CutSellScreen processing >/dev/null
@@ -261,7 +289,7 @@ jobs:
           for f in "$RUNNER_TEMP"/rec/*.mp4; do
             [ -s "$f" ] || continue
             name="$(basename "$f" .mp4)"
-            every=2; [ "$name" = media ] && every=10
+            every=2; [ "$name" = media ] && every=10; [ "$name" = v5 ] && every=6
             ffmpeg -loglevel error -i "$f" -vf "fps=1/$every,scale=390:-2" "$RUNNER_TEMP/probe/${name}_frame_%02d.png" || true
           done
           ls -la "$RUNNER_TEMP/rec" || true

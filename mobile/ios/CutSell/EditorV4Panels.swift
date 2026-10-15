@@ -626,8 +626,10 @@ struct OverlayGallerySheet: View {
     let onPick: (URL) -> Void
     /// Design screenshots only: show sample tiles instead of the photo library.
     var sampleTiles = false
-    /// Full-screen B-roll: only videos.
+    /// Full-screen B-roll and the Overlay panel's Video button: only videos.
     var videosOnly = false
+    /// The Overlay panel's Photo button: only photos.
+    var photosOnly = false
     var title = "Photos & Videos"
     @Environment(\.dismiss) private var dismiss
     @State private var assets: [PHAsset] = []
@@ -705,7 +707,7 @@ struct OverlayGallerySheet: View {
         let result = PHAsset.fetchAssets(with: options)
         var list: [PHAsset] = []
         result.enumerateObjects { asset, _, _ in
-            if asset.mediaType == .video || (!videosOnly && asset.mediaType == .image) { list.append(asset) }
+            if (asset.mediaType == .video && !photosOnly) || (!videosOnly && asset.mediaType == .image) { list.append(asset) }
         }
         assets = list
     }
