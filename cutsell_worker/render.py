@@ -14,6 +14,7 @@ import time
 from typing import Iterable
 import uuid
 
+from .audio_mix_render import AudioMix, build_audio_mix_command
 from .caption_render import FONTS_DIR, build_caption_ass
 from .contracts import TextOverlay
 from .media_overlay_render import (
@@ -812,8 +813,13 @@ def render_preview(
     media_overlays: Iterable[LocalMediaOverlay] = (),
     trim_report: list[dict] | None = None,
     execution_diagnostics: list[dict] | None = None,
+    audio_mix: AudioMix | None = None,
 ) -> str:
     """Render clips, captions, text and photo/video overlay lanes.
+
+    ``audio_mix`` (Editor v5, optional): voice/music/sound-effect clips, whole-video volume and
+    voice cleanup, mixed in ONE last pass on the composed file (video stream copied). None or a
+    no-op mix skips that pass entirely, so every other render is unchanged.
 
     ``trim_report`` (D-097.E, optional, mutated): one row per segment whose
     trailing edge `tighten_trailing_silence` actually moved -- the renderer's
@@ -869,12 +875,16 @@ def render_preview(
                 if segment.end <= segment.start:
                     raise ValueError(f"invalid render segment {segment.clip_id}")
             has_final_overlays = bool(text_tuple or media_tuple)
+            has_audio_mix = audio_mix is not None and not audio_mix.is_noop
+            # Editor v5: with an audio mix, the composed picture goes to a scratch file and the mix
+            # pass writes the job-local temp output; without one, nothing below changes.
+            composed = temp_output if not has_audio_mix else Path(directory) / "composed.mp4"
             # D-266: `joined` is the concat step's own output -- the FINAL
             # job-local temp file when there are no overlays (one encode,
             # same as before D-266), or an intermediate file inside the
             # already-existing scratch `directory` when an overlay pass
             # still has to run on top of it (also unchanged from before).
-            joined = temp_output if not has_final_overlays else Path(directory) / "joined.mp4"
+            joined = composed if not has_final_overlays else Path(directory) / "joined.mp4"
             # D-097.2: one pass, exact frame-aligned per-segment durations, gapless
             # concat filter -- see the module comment above render_preview.
             # Overlap audio joins need independent audio windows; with none (every draft without
@@ -895,13 +905,21 @@ def render_preview(
                     ass_path = str(ass)
                 _run(
                     build_final_overlay_command(
-                        str(joined), str(temp_output),
+                        str(joined), str(composed),
                         media_overlays=media_tuple,
                         text_overlays=text_tuple,
                         width=width,
                         height=height,
                         ass_path=ass_path,
                     ),
+                    output_path=composed, source_identity=source_identity,
+                    diagnostics=execution_diagnostics,
+                )
+
+            if has_audio_mix:
+                _run(
+                    build_audio_mix_command(str(composed), str(temp_output), audio_mix,
+                                            duration_sec=probe_media(str(composed)).duration_sec),
                     output_path=temp_output, source_identity=source_identity,
                     diagnostics=execution_diagnostics,
                 )

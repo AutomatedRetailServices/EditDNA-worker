@@ -212,12 +212,27 @@ def frozen_visual_pause_windows(draft, segments, output_windows):
 def user_placed_windows(draft, segments, output_windows):
     """Editor v4: output windows the creator filled by hand -- a full-screen B-roll video from the
     phone (its whole window) and the tail of a clip whose end was dragged out by hand (after its
-    last spoken word). Never anything the cut engine chose."""
+    last spoken word). Editor v5 adds: a clip the creator sped up or slowed down (its whole
+    window), a spoken clip the creator muted (its whole window), and the whole timeline when the
+    creator turned the video's own volume to 0. Never anything the cut engine chose: engine
+    material at speed 1 and normal volume is judged exactly as before."""
+    video_volume = getattr(draft, "video_volume", 1.0)
+    if output_windows and video_volume is not None and float(video_volume) == 0.0:
+        return ((float(output_windows[0][0]), float(output_windows[-1][1])),)
     user_sources = set(getattr(draft, "user_media_source_ids", ()) or ())
     manual = {clip.clip_id: clip for clip in draft.selected if getattr(clip, "manual_end", False)}
+    muted_spoken = {clip.clip_id for clip in draft.selected
+                    if getattr(clip, "audio_muted", False) and (clip.words or str(clip.text or "").strip())}
     windows = []
     for seg, (out_start, out_end) in zip(segments, output_windows):
         if seg.source_asset_id in user_sources:
+            windows.append((out_start, out_end))
+            continue
+        if float(getattr(seg, "speed", 1.0) or 1.0) != 1.0:
+            windows.append((out_start, out_end))
+            continue
+        if seg.audio_muted and (seg.clip_id in muted_spoken
+                                or getattr(seg, "parent_semantic_clip_id", None) in muted_spoken):
             windows.append((out_start, out_end))
             continue
         clip = manual.get(seg.clip_id)
@@ -240,6 +255,7 @@ def render_with_post_render_qc(
     media_overlays=(),
     max_attempts: int = DEFAULT_MAX_RENDER_ATTEMPTS,
     protected_pause_windows: Sequence[tuple[float, float]] = (),
+    audio_mix=None,
 ) -> LiveRenderQCResult:
     """Render `segments` to `output_path` and run the full live
     PostRenderWatchListenQC + bounded physical repair loop against that
@@ -258,7 +274,7 @@ def render_with_post_render_qc(
         trailing_trims: list[dict] = []
         render_preview(
             current_segments, output_path, text_overlays=text_overlays, media_overlays=media_overlays,
-            trim_report=trailing_trims,
+            trim_report=trailing_trims, **({"audio_mix": audio_mix} if audio_mix is not None else {}),
         )
         trims = tuple(trailing_trims)
 
