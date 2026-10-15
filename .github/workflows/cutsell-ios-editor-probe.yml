@@ -308,7 +308,12 @@ jobs:
           note("qc media", f"overlays={len(draft.media_overlays)} downloaded={len(ov)} text_overlays={len(draft.text_overlays)} user_media={sorted(getattr(draft, 'user_media_source_ids', ()) or ())}")
           plan = build_render_plan(draft, paths)
           note("qc plan", " | ".join(f"{seg.start:.2f}-{seg.end:.2f}" for seg in plan))
-          res = render_with_post_render_qc(draft, plan, os.path.join(d, "out.mp4"), text_overlays=draft.text_overlays, media_overlays=tuple(ov))
+          import traceback
+          try:
+              res = render_with_post_render_qc(draft, plan, os.path.join(d, "out.mp4"), text_overlays=draft.text_overlays, media_overlays=tuple(ov))
+          except Exception:
+              for line in traceback.format_exc().strip().splitlines()[-9:]: print(f"::error title=qc crash::{line[:900]}")
+              raise
           note("qc status", res.status)
           for n, a in enumerate(res.attempts):
               note(f"qc attempt {n}", f"{a.status} {a.findings}")
