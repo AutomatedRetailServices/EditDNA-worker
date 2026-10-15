@@ -206,8 +206,11 @@ def test_no_rotation_opacity_keyframe_field_exists_in_the_real_contract():
     class_idx = py_source.index("class MediaOverlay")
     class_end = py_source.index("\n\n", class_idx)
     class_body = py_source[class_idx:class_end]
-    for forbidden in ("rotation", "opacity", "keyframe"):
+    # Editor v5 made overlay rotation a real draft field (MediaOverlay.rotation, degrees, rendered
+    # by media_overlay_render); opacity and keyframes are still not part of the contract.
+    for forbidden in ("opacity", "keyframe"):
         assert forbidden not in class_body.lower()
+    assert "rotation: float = 0.0" in class_body
     # Position and scale, by contrast, ARE real.
     assert "x: float" in class_body
     assert "y: float" in class_body
