@@ -62,6 +62,43 @@ ALLOWED_VOICE_OVER_CONTENT_TYPES = {
 }
 
 
+def direct_upload_method() -> str:
+    """POST form upload on Amazon S3 (unchanged); single signed PUT when a custom
+    S3-compatible endpoint is configured (Cloudflare R2 does not implement the
+    POST form upload and answers 501). The app follows the `method` it is given."""
+    return "PUT" if os.getenv("AWS_ENDPOINT_URL_S3", "").strip() else "POST"
+
+
+def sign_direct_upload(client, *, bucket: str, key: str, content_type: str, size_bytes: int,
+                       expires_in: int) -> dict:
+    """Signs one direct upload and returns `method`, `upload_url`, `fields`, `headers`.
+
+    POST keeps the existing 1..size_bytes content-length-range condition. PUT signs
+    the exact Content-Type and Content-Length, so the storage rejects any other
+    type or size -- the same protection as the POST size cap, just exact."""
+    if direct_upload_method() == "PUT":
+        url = client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": bucket, "Key": key, "ContentType": content_type,
+                    "ContentLength": int(size_bytes)},
+            ExpiresIn=int(expires_in),
+        )
+        return {"method": "PUT", "upload_url": url, "fields": {},
+                "headers": {"Content-Type": content_type}}
+    post = client.generate_presigned_post(
+        Bucket=bucket,
+        Key=key,
+        Fields={"Content-Type": content_type},
+        Conditions=[
+            {"Content-Type": content_type},
+            ["content-length-range", 1, int(size_bytes)],
+        ],
+        ExpiresIn=int(expires_in),
+    )
+    return {"method": "POST", "upload_url": post["url"], "fields": post.get("fields", {}),
+            "headers": {}}
+
+
 def upload_prefix() -> str:
     prefix = os.getenv("CUTSELL_UPLOAD_PREFIX", DEFAULT_UPLOAD_PREFIX)
     if not prefix or prefix.startswith("/") or ".." in prefix.split("/") or not prefix.endswith("/"):
@@ -141,20 +178,12 @@ def create_presigned_upload(
     if client is None:
         import boto3
         client = boto3.client("s3", region_name=target["region"])
-    post = client.generate_presigned_post(
-        Bucket=target["bucket"],
-        Key=target["object_key"],
-        Fields={"Content-Type": target["content_type"]},
-        Conditions=[
-            {"Content-Type": target["content_type"]},
-            ["content-length-range", 1, target["size_bytes"]],
-        ],
-        ExpiresIn=int(expires_in),
+    signed = sign_direct_upload(
+        client, bucket=target["bucket"], key=target["object_key"],
+        content_type=target["content_type"], size_bytes=target["size_bytes"], expires_in=expires_in,
     )
     return {
-        "method": "POST",
-        "upload_url": post["url"],
-        "fields": post.get("fields", {}),
+        **signed,
         "source_uri": target["source_uri"],
         "object_key": target["object_key"],
         "content_type": target["content_type"],
@@ -290,20 +319,12 @@ def create_presigned_voice_over_upload(
     if client is None:
         import boto3
         client = boto3.client("s3", region_name=target["region"])
-    post = client.generate_presigned_post(
-        Bucket=target["bucket"],
-        Key=target["object_key"],
-        Fields={"Content-Type": target["content_type"]},
-        Conditions=[
-            {"Content-Type": target["content_type"]},
-            ["content-length-range", 1, target["size_bytes"]],
-        ],
-        ExpiresIn=int(expires_in),
+    signed = sign_direct_upload(
+        client, bucket=target["bucket"], key=target["object_key"],
+        content_type=target["content_type"], size_bytes=target["size_bytes"], expires_in=expires_in,
     )
     return {
-        "method": "POST",
-        "upload_url": post["url"],
-        "fields": post.get("fields", {}),
+        **signed,
         "source_uri": target["source_uri"],
         "object_key": target["object_key"],
         "content_type": target["content_type"],

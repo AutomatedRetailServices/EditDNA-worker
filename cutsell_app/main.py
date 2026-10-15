@@ -82,6 +82,7 @@ class UploadPresignResponse(BaseModel):
     method: str
     upload_url: str
     fields: dict[str, str]
+    headers: dict[str, str] = {}
     source_uri: str
     object_key: str
     content_type: str

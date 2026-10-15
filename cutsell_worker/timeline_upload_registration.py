@@ -161,6 +161,7 @@ def register_timeline_upload(
         "method": presign.get("method", "POST"),
         "upload_url": presign["upload_url"],
         "fields": presign.get("fields", {}),
+        "headers": presign.get("headers", {}),
         "content_type": presign.get("content_type"),
         "max_bytes": presign.get("max_bytes"),
         "expires_in": presign.get("expires_in", expires_in),
