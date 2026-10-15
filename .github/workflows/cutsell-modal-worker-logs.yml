@@ -30,7 +30,7 @@ jobs:
           import os, re
           tmp = os.environ["RUNNER_TEMP"]
           lines = open(f"{tmp}/raw.txt", errors="replace").read().splitlines()
-          keep = re.compile(r"error|exception|traceback|failed|fail|qc|export|render|review|repair|File \"|raise|^\s+\w*Error", re.I)
+          keep = re.compile(r"error|exception|traceback|failed|fail|qc|export|render|review|repair|deliver|verify|File \"|raise|^\s+\S*Error|^\S+: ", re.I)
           out = []
           for i, line in enumerate(lines):
               if keep.search(line):
