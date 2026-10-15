@@ -29,6 +29,25 @@ Measured by `.github/workflows/cutsell-export-timing.yml`. Seconds from tapping 
 | 60 s cold | 2.2 | 5.9 | 4.8 | 8.5 | 6.7 | 28.1 | 1.3 (28.8 MB) |
 | 60 s warm | 2.2 | 6.2 | 2.5 | 11.2 | 5.1 | 27.2 | 1.4 |
 
+## Export timings (live server, after deploy of 6d5efb9)
+
+| Cut | Before | After | Server stages (after) | MP4 to phone |
+|---|---|---|---|---|
+| 13 s cold | 21.7 | 20.9 | sources 2.9, render+QC 4.7, upload+verify 1.9, finalize 2.2 | 0.5 |
+| 13 s warm | 20.0 | 20.8 | sources 2.7, render+QC 4.6, upload+verify 1.8, finalize 2.2 | 0.5 |
+| 60 s cold | 28.1 | 26.0 | sources 3.2, render+QC 6.9, upload+verify 3.2, finalize 2.5 | 0.9 |
+| 60 s warm | 27.2 | 26.1 | sources 3.3, render+QC 9.9, upload+verify 3.0, finalize 2.2 | 0.8 |
+
+Submit went from 2.2 to 1.2–1.5 s. The rest of the time is waiting for the worker (about 4–6 s), downloading sources, and delivery (about 4–5 s), not the render. Going faster needs a warm worker or more CPU, which costs money: Product Owner decision.
+
+## Deploy state
+
+- 2026-10-14: Modal engine and Render `cutsell-api` deployed at 6d5efb9 (Render dep-db80pa8u01pc738flu30, live). Rollback: Render dep-db75vorbc2fs73fd5aq0 (c89d338); Modal: rerun the deploy workflow from c89d338.
+- Auto Zoom AI is live: a new cut gets `auto_zoom_enabled` and AI `zoom_keyframes` (hook and price) in the draft. Overlap audio is live: `audio_overlap_enabled` and clip `audio_post_roll`.
+- Export with B-roll and overlays on the live server, two more causes found:
+  1. The probe's test video was a perfectly still picture, which the QC rightly flags as frozen. A real phone video always moves. The probe clip now has light film grain.
+  2. After the technical QC passed, the delivery review measured a silent phone B-roll as "dead air" and blocked delivery. Fixed in 9a9e704 on `feat/editor-v4-mirror-export` (same rule as the QC fix: media the creator placed is not judged as an engine mistake). Waiting for deploy approval (Modal worker only).
+
 ## Server changes waiting for deploy
 
 All on `feat/editor-v4-mirror-export`:
