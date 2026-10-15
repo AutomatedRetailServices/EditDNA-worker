@@ -1,0 +1,47 @@
+name: CutSell sounds upload
+
+# Builds the official CutSell sounds from the two CC0 packs (OpenGameArt) with
+# tools/make_cutsell_sounds.py and puts them in the media bucket at assets/sfx/v1/ with
+# manifest.json. The audio never enters this repository. Runs only when pushed to
+# probe/sfx-upload (manual, after the Product Owner's approval).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/sfx-upload]
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the two CC0 packs and check their licenses
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg unzip >/dev/null
+          mkdir -p "$RUNNER_TEMP/k" "$RUNNER_TEMP/u"
+          curl -fsSL -o "$RUNNER_TEMP/k.zip" https://opengameart.org/sites/default/files/kenney_interfaceSounds.zip
+          curl -fsSL -o "$RUNNER_TEMP/u.zip" https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip
+          unzip -q "$RUNNER_TEMP/k.zip" -d "$RUNNER_TEMP/k"
+          unzip -q "$RUNNER_TEMP/u.zip" -d "$RUNNER_TEMP/u"
+      - name: Build the sounds and manifest.json
+        run: python3 tools/make_cutsell_sounds.py "$RUNNER_TEMP/k" "$RUNNER_TEMP/u" "$RUNNER_TEMP/sfx"
+      - name: Upload to assets/sfx/v1/ and check every file is there
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/sfx"
+          for f in tap_select.m4a good.m4a wrong.m4a glass.m4a typing_3s.m4a typing.m4a; do
+            aws s3 cp "$f" "s3://$S3_BUCKET/assets/sfx/v1/$f" --content-type audio/mp4 --only-show-errors
+          done
+          aws s3 cp manifest.json "s3://$S3_BUCKET/assets/sfx/v1/manifest.json" --content-type application/json --only-show-errors
+          aws s3 ls "s3://$S3_BUCKET/assets/sfx/v1/" | awk '{print $3, $4}' | while read -r size name; do
+            echo "::notice title=uploaded::$name $size bytes"
+          done
