@@ -3,7 +3,10 @@
 `merge_reprocessed_draft(old, new)` is the ONE pure function that combines the project's stored
 draft (`old`, possibly edited in the iPhone editor) with the draft a new cut just produced (`new`):
 
-- the engine's new suggestions win for the cut itself: `selected`, `alternates`, `discarded`,
+- when the creator has already edited the stored draft (`creator_edited`), their cut is NEVER
+  replaced: only the AI zoom keyframes and `diagnostics` are refreshed (`keep_creator_cut`) --
+  a re-run of the same job after a worker restart must not undo deletions, splits or reorders;
+- on an untouched draft, the engine's new suggestions win for the cut itself: `selected`, `alternates`, `discarded`,
   `diagnostics` (and every other engine field);
 - the creator's editor settings are kept exactly as they were (`EDITOR_FIELDS` and every
   `caption_*` key) -- a key the old draft did not have stays at its default;
@@ -243,10 +246,42 @@ def _merge_zooms(old: Mapping[str, Any], new: Mapping[str, Any]) -> list:
     return user + ai
 
 
-def merge_reprocessed_draft(old: Mapping[str, Any] | None, new: Mapping[str, Any]) -> dict[str, Any]:
-    """See the module docstring. `old` None/empty (first processing) returns `new` unchanged."""
+def keep_creator_cut(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, Any]:
+    """The creator has edited this draft: their cut (`selected`, `alternates`, `discarded`) and
+    every editor setting stay exactly as they are; only what belongs to the AI is refreshed --
+    the AI zoom keyframes (user ones kept, deleted ones never back) and `diagnostics`."""
+    merged: dict[str, Any] = deepcopy(dict(old))
+    zooms = _merge_zooms(old, new)
+    if zooms or "zoom_keyframes" in merged:
+        merged["zoom_keyframes"] = zooms
+    diagnostics = deepcopy(dict(new.get("diagnostics") or {}))
+    diagnostics["reprocess_merge"] = {"merged_with_previous_draft": True, "kept_creator_cut": True}
+    merged["diagnostics"] = diagnostics
+    return merged
+
+
+def _without_merge_note(draft: Mapping[str, Any]) -> dict[str, Any]:
+    out = dict(draft)
+    diagnostics = dict(out.get("diagnostics") or {})
+    diagnostics.pop("reprocess_merge", None)
+    out["diagnostics"] = diagnostics
+    return out
+
+
+def changes_anything(old: Mapping[str, Any], merged: Mapping[str, Any]) -> bool:
+    """False when the merge only re-adds its own bookkeeping note (nothing to save)."""
+    return _without_merge_note(old) != _without_merge_note(merged)
+
+
+def merge_reprocessed_draft(old: Mapping[str, Any] | None, new: Mapping[str, Any], *,
+                            creator_edited: bool = False) -> dict[str, Any]:
+    """See the module docstring. `old` None/empty (first processing) returns `new` unchanged.
+    `creator_edited` (the stored draft has revisions/undo from the editor -- e.g. the same job
+    running again after a worker restart): the creator's cut is kept untouched (`keep_creator_cut`)."""
     if not old or not isinstance(old, Mapping):
         return deepcopy(dict(new))
+    if creator_edited:
+        return keep_creator_cut(old, new)
     merged: dict[str, Any] = deepcopy(dict(new))
     # 1. creator-owned draft settings, exactly as they were
     for key in set(merged) | set(old):

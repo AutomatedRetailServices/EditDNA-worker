@@ -81,10 +81,11 @@ def _init(client):
     )
 
 
-def test_initial_ai_draft_is_created_once_and_a_reprocess_merges_as_a_new_revision():
-    """Editor v5: a second processing of the same project no longer leaves the new cut unused, and
-    never wipes the creator's edits: the new cut is merged with them (draft_merge) as revision 2,
-    the previous draft kept for Undo."""
+def test_initial_ai_draft_is_created_once_and_a_reprocess_never_replaces_an_edited_cut():
+    """Editor v5: a second processing of an UNTOUCHED draft (revision 1, no history) takes the new
+    cut; once the creator has edited it, a re-run (e.g. the same job after a worker restart)
+    keeps their cut and only refreshes the AI's own parts -- and writes nothing if those did
+    not change."""
     client = FakeRedis()
     first, created = _init(client)
     assert created is True
@@ -92,23 +93,25 @@ def test_initial_ai_draft_is_created_once_and_a_reprocess_merges_as_a_new_revisi
     assert first["undo"] == []
     assert first["redo"] == []
 
-    edited = _draft("AI first")
-    edited["mirror"] = True
-    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=edited, expected_revision=1, client=client)
-
-    merged, created_again = create_initial_draft(
-        user_id="user-1",
-        project_id="project-1",
-        draft=_draft("AI second cut"),
-        sources=[{"source_asset_id": "src-1", "uri": "s3://bucket/source.mov"}],
-        client=client,
+    untouched, created_again = create_initial_draft(
+        user_id="user-1", project_id="project-1", draft=_draft("AI second cut"),
+        sources=[{"source_asset_id": "src-1", "uri": "s3://bucket/source.mov"}], client=client,
     )
     assert created_again is False
-    assert merged["revision"] == 3
-    assert merged["draft"]["selected"][0]["text"] == "AI second cut"   # the engine's new cut
-    assert merged["draft"]["mirror"] is True                           # the creator's edit
-    assert merged["undo"][-1]["selected"][0]["text"] == "AI first"     # recoverable
-    assert get_draft_snapshot(user_id="user-1", project_id="project-1", client=client)["revision"] == 3
+    assert untouched["revision"] == 2
+    assert untouched["draft"]["selected"][0]["text"] == "AI second cut"   # untouched: the new cut
+    assert untouched["undo"][-1]["selected"][0]["text"] == "AI first"     # recoverable
+
+    edited = _draft("human edit")
+    edited["mirror"] = True
+    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=edited, expected_revision=2, client=client)
+    kept, _ = create_initial_draft(
+        user_id="user-1", project_id="project-1", draft=_draft("AI third cut"),
+        sources=[{"source_asset_id": "src-1", "uri": "s3://bucket/source.mov"}], client=client,
+    )
+    assert kept["draft"]["selected"][0]["text"] == "human edit"            # the creator's cut
+    assert kept["draft"]["mirror"] is True
+    assert get_draft_snapshot(user_id="user-1", project_id="project-1", client=client)["revision"] == kept["revision"]
 
 
 def test_autosave_increments_revision_preserves_sources_and_creates_undo_state():

@@ -136,22 +136,28 @@ def create_initial_draft(
 
 def _merge_into_existing(*, target, user_id: str, project_id: str, draft: dict[str, Any],
                          sources: list[dict[str, Any]], attempts: int = 3) -> dict[str, Any]:
-    from .draft_merge import merge_reprocessed_draft
+    from .draft_merge import changes_anything, merge_reprocessed_draft
     from .serde import draft_from_dict
 
     key = draft_key(user_id=user_id, project_id=project_id)
     for _attempt in range(max(1, attempts)):
         current = _decode(target.get(key))
-        merged = merge_reprocessed_draft(current["draft"], draft)
+        # Edited by the creator (any autosave/undo history): their cut is kept, only the AI's own
+        # parts are refreshed. Untouched (revision 1, no history): the new cut is taken.
+        edited = int(current.get("revision") or 1) > 1 or bool(current.get("undo"))
+        merged = merge_reprocessed_draft(current["draft"], draft, creator_edited=edited)
+        if edited and not changes_anything(current["draft"], merged):
+            return current  # nothing of the AI's changed: no new revision
         try:
             draft_from_dict(merged)
         except (TypeError, ValueError, KeyError):
             # A merge that would not render is never stored: the creator's draft stays as it was.
             return current
+        keep_sources = list(current.get("sources") or ()) if edited else sources
 
-        def transition(existing, revision, merged=merged):
+        def transition(existing, revision, merged=merged, keep_sources=keep_sources):
             return _snapshot(
-                project_id=project_id, user_id=user_id, draft=merged, sources=sources,
+                project_id=project_id, user_id=user_id, draft=merged, sources=keep_sources,
                 revision=revision + 1,
                 undo=_bounded([*list(existing.get("undo") or ()), existing["draft"]]), redo=[],
             )

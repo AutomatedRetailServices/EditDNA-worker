@@ -235,7 +235,7 @@ def test_broll_at_the_exact_end_is_appended_and_no_broll_means_no_change():
     assert plain["diagnostics"]["reprocess_merge"]["broll_reinserted"] == []
 
 
-def test_store_reprocess_keeps_the_broll_clip():
+def test_store_reprocess_of_an_edited_draft_keeps_the_broll_clip_where_it_is():
     from cutsell_worker import draft_store
     from tests.test_cutsell_clean_worker_draft_store import FakeRedis
 
@@ -247,5 +247,89 @@ def test_store_reprocess_keeps_the_broll_clip():
     draft_store.save_draft_snapshot(user_id="u", project_id="p1", draft=edited, expected_revision=1, client=client)
     stored, _ = draft_store.create_initial_draft(user_id="u", project_id="p1",
                                                  draft=_engine([_clip("x", 0.0, 4.0)]), sources=sources, client=client)
-    assert [c["clip_id"] for c in stored["draft"]["selected"]] == ["x", "broll_abcd1234", "x-1234"]
+    assert [c["clip_id"] for c in stored["draft"]["selected"]] == ["a", "broll_abcd1234", "a2"]
     assert stored["draft"]["broll_sources"] == BROLL_SOURCES
+
+
+# --- the same job running again on a draft the creator edited -------------------------------------
+
+def _store():
+    from cutsell_worker import draft_store
+    from tests.test_cutsell_clean_worker_draft_store import FakeRedis
+    return draft_store, FakeRedis()
+
+
+SOURCES = [{"source_asset_id": "s1", "uri": "s3://b/s.mov"}]
+AI_ZOOM = {"keyframe_id": "z_ai", "source_asset_id": "s1", "source_time": 1.0, "duration": 1.0, "scale": 1.1, "origin": "ai"}
+
+
+def _engine_cut(**extra):
+    return _engine([_clip("a", 0.0, 3.0, text="one two", words=_words(("one", 0.5, 1.0), ("two", 2.0, 2.5))),
+                    _clip("b", 4.0, 6.0), _clip("c", 7.0, 9.0)],
+                   zoom_keyframes=[AI_ZOOM], auto_zoom_enabled=True, **extra)
+
+
+def test_job_retry_keeps_deleted_split_and_reordered_clips():
+    draft_store, client = _store()
+    engine = _engine_cut()
+    draft_store.create_initial_draft(user_id="u", project_id="p1", draft=engine, sources=SOURCES, client=client)
+    # The creator deletes "b", splits "a" at 1.5 s and moves "c" first.
+    a_left = _clip("a", 0.0, 1.5, text="one", words=_words(("one", 0.5, 1.0)))
+    a_right = _clip("a-r", 1.5, 3.0, text="two", words=_words(("two", 2.0, 2.5)))
+    creator = copy.deepcopy(engine)
+    creator["selected"] = [_clip("c", 7.0, 9.0), a_left, a_right]
+    creator["discarded"] = [_clip("b", 4.0, 6.0)]
+    saved = draft_store.save_draft_snapshot(user_id="u", project_id="p1", draft=creator, expected_revision=1,
+                                            client=client)
+    # The same flow-b job runs again (worker restart) and produces the same engine draft.
+    stored, created = draft_store.create_initial_draft(user_id="u", project_id="p1", draft=_engine_cut(),
+                                                       sources=SOURCES, client=client)
+    assert created is False
+    assert stored["draft"]["selected"] == creator["selected"]
+    assert stored["draft"]["discarded"] == creator["discarded"]
+    assert stored["draft"]["alternates"] == creator["alternates"]
+    # nothing of the AI's changed: no new revision was written
+    assert stored["revision"] == saved["revision"] == 2
+
+
+def test_job_retry_refreshes_only_the_ai_zooms_and_diagnostics():
+    draft_store, client = _store()
+    engine = _engine_cut()
+    draft_store.create_initial_draft(user_id="u", project_id="p1", draft=engine, sources=SOURCES, client=client)
+    creator = copy.deepcopy(engine)
+    creator["selected"] = list(reversed(creator["selected"]))
+    creator["zoom_keyframes"] = [AI_ZOOM, {"keyframe_id": "mine", "source_asset_id": "s1", "source_time": 7.5,
+                                           "duration": 1.0, "scale": 1.2, "origin": "user"},
+                                 {"keyframe_id": "z_ai2", "source_asset_id": "s1", "source_time": 4.5,
+                                  "duration": 1.0, "scale": 1.1, "origin": "ai"}]
+    creator["zoom_removed"] = [{"source_asset_id": "s1", "source_time": 2.5}]
+    draft_store.save_draft_snapshot(user_id="u", project_id="p1", draft=creator, expected_revision=1, client=client)
+    rerun = _engine_cut(diagnostics={"engine": "simple", "run": 2})
+    rerun["zoom_keyframes"] = [
+        {"keyframe_id": "n1", "source_asset_id": "s1", "source_time": 5.0, "duration": 1.0, "scale": 1.1, "origin": "ai"},
+        {"keyframe_id": "n2", "source_asset_id": "s1", "source_time": 2.6, "duration": 1.0, "scale": 1.1, "origin": "ai"},
+    ]
+    stored, _ = draft_store.create_initial_draft(user_id="u", project_id="p1", draft=rerun, sources=SOURCES, client=client)
+    draft = stored["draft"]
+    assert stored["revision"] == 3 and stored["undo"][-1] == creator
+    assert draft["selected"] == creator["selected"]
+    assert [k["keyframe_id"] for k in draft["zoom_keyframes"]] == ["mine", "n1"]  # n2 is tombstoned
+    assert draft["diagnostics"]["run"] == 2
+    assert draft["diagnostics"]["reprocess_merge"]["kept_creator_cut"] is True
+    for key in ("zoom_removed", "auto_zoom_enabled", "caption_preset", "captions_enabled"):
+        assert draft[key] == creator[key]
+    draft_from_dict(draft)
+
+
+def test_untouched_and_first_run_paths_are_unchanged():
+    draft_store, client = _store()
+    first, created = draft_store.create_initial_draft(user_id="u", project_id="p1", draft=_engine_cut(),
+                                                      sources=SOURCES, client=client)
+    assert created and first["draft"] == _engine_cut()                 # first run: stored as is
+    new = _engine([_clip("x", 0.0, 2.0)], zoom_keyframes=[AI_ZOOM])
+    untouched, _ = draft_store.create_initial_draft(user_id="u", project_id="p1", draft=new, sources=SOURCES,
+                                                    client=client)
+    assert untouched["revision"] == 2
+    assert untouched["draft"] == merge_reprocessed_draft(first["draft"], new)   # untouched: new cut
+    assert [c["clip_id"] for c in untouched["draft"]["selected"]] == ["x"]
+    assert "kept_creator_cut" not in untouched["draft"]["diagnostics"]["reprocess_merge"]
