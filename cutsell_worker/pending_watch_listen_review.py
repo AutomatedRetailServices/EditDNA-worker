@@ -519,9 +519,8 @@ def get_pending_review_media_access(
     if s3_client is None:
         import boto3
         s3_client = boto3.client("s3")
-    url = s3_client.generate_presigned_url(
-        "get_object", Params={"Bucket": parsed_bucket, "Key": parsed_key}, ExpiresIn=int(expires_in),
-    )
+    from .storage_routing import presigned_get
+    url = presigned_get(parsed_bucket, parsed_key, expires_in=int(expires_in), client=s3_client)
     return {
         "record_id": record.record_id,
         "render_identity": record.render_identity,

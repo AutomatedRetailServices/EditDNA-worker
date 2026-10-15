@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from .config import load_runtime_config
 from .storage import parse_s3_uri
+from .storage_routing import is_readable_bucket, presigned_get
 from .uploads import sign_direct_upload
 
 OVERLAY_PREFIX = "cutsell/overlay-assets/"
@@ -76,8 +77,10 @@ def create_overlay_presigned_upload(
 
 def validate_overlay_uri(uri: str, *, user_id: str, project_id: str) -> tuple[str, str, str]:
     bucket, key = parse_s3_uri(uri)
+    # Reads may name the old Amazon bucket (storage_routing); new uploads are minted in the
+    # current bucket by create_overlay_presigned_upload.
     config = load_runtime_config()
-    if not config.s3_bucket or bucket != config.s3_bucket:
+    if not is_readable_bucket(bucket, config.s3_bucket or ""):
         raise ValueError("overlay uri bucket is not allowed")
     prefix = overlay_prefix(user_id=user_id, project_id=project_id)
     if not key.startswith(prefix):
@@ -103,5 +106,5 @@ def create_presigned_overlay_download(uri: str, *, user_id: str, project_id: str
         import boto3
         from .config import load_runtime_config
         client = boto3.client("s3", region_name=load_runtime_config().aws_region or "us-east-1")
-    url = client.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=int(expires_in))
+    url = presigned_get(bucket, key, expires_in=int(expires_in), client=client)
     return {"url": url, "expires_in": int(expires_in)}

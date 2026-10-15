@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .config import load_runtime_config
+from .storage_routing import is_readable_bucket, presigned_get
 
 ASSET_PREFIX = "cutsell/timeline-assets/"
 
@@ -85,7 +86,7 @@ def _parse_allowed_asset_uri(uri: str) -> tuple[str, str]:
     if parsed.scheme != "s3" or not parsed.netloc or not parsed.path.lstrip("/"):
         raise ValueError("invalid timeline asset uri")
     key = parsed.path.lstrip("/")
-    if not config.s3_bucket or parsed.netloc != config.s3_bucket or not key.startswith(ASSET_PREFIX):
+    if not is_readable_bucket(parsed.netloc, config.s3_bucket or "") or not key.startswith(ASSET_PREFIX):
         raise ValueError("timeline asset uri is outside allowed scope")
     return parsed.netloc, key
 
@@ -107,21 +108,13 @@ def sign_timeline_assets(metadata: dict, *, expires_in: int = 3600, client=None)
         bucket, key = _parse_allowed_asset_uri(str(item["uri"]))
         signed_frames.append({
             **dict(item),
-            "download_url": client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": bucket, "Key": key},
-                ExpiresIn=int(expires_in),
-            ),
+            "download_url": presigned_get(bucket, key, expires_in=int(expires_in), client=client),
         })
     waveform_uri = str(assets.get("waveform_uri") or "")
     waveform_url = None
     if waveform_uri:
         bucket, key = _parse_allowed_asset_uri(waveform_uri)
-        waveform_url = client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket, "Key": key},
-            ExpiresIn=int(expires_in),
-        )
+        waveform_url = presigned_get(bucket, key, expires_in=int(expires_in), client=client)
     return {
         **assets,
         "filmstrip": signed_frames,

@@ -14,6 +14,7 @@ import json
 from dataclasses import dataclass, replace
 
 from .config import load_runtime_config
+from .storage_routing import presigned_get
 
 SFX_LIBRARY_VERSION = "v1"
 SFX_S3_PREFIX = f"assets/sfx/{SFX_LIBRARY_VERSION}/"
@@ -73,11 +74,26 @@ def sfx_uri(sfx_id: str) -> str:
     return f"s3://{_bucket()}/{sfx_object_key(sfx_id)}"
 
 
+def _read_manifest(client=None) -> bytes:
+    """The stored manifest from the current storage; while the move from Amazon is in progress a
+    missing one is read from the old bucket (storage_routing)."""
+    from .storage_routing import fallback_client_factory, fallback_storage, is_not_found
+
+    bucket = _bucket()
+    try:
+        return _client(client).get_object(Bucket=bucket, Key=SFX_MANIFEST_KEY)["Body"].read()
+    except Exception as exc:
+        fallback = fallback_storage()
+        if fallback is None or not is_not_found(exc):
+            raise
+        return fallback_client_factory(fallback).get_object(Bucket=fallback.bucket, Key=SFX_MANIFEST_KEY)["Body"].read()
+
+
 def load_library(*, client=None) -> tuple[SoundEffect, ...]:
     """The library with durations from the stored `manifest.json` when present and readable.
     Any problem reading it keeps the built-in list (durations `None`)."""
     try:
-        body = _client(client).get_object(Bucket=_bucket(), Key=SFX_MANIFEST_KEY)["Body"].read()
+        body = _read_manifest(client)
         stored = json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
         rows = stored.get("sounds") if isinstance(stored, dict) else stored
         durations = {}
@@ -102,10 +118,8 @@ def signed_manifest(expires_in: int = 3600, *, client=None) -> dict:
     s3 = _client(client)
     sounds = []
     for item in load_library(client=s3):
-        url = s3.generate_presigned_url(
-            "get_object", Params={"Bucket": bucket, "Key": f"{SFX_S3_PREFIX}{item.file}"},
-            ExpiresIn=int(expires_in),
-        )
+        # Routed: a sound not yet on the current storage is signed from the old bucket.
+        url = presigned_get(bucket, f"{SFX_S3_PREFIX}{item.file}", expires_in=int(expires_in), client=s3)
         sounds.append({
             "id": item.sfx_id, "name": item.name, "file": item.file, "duration_sec": item.duration_sec,
             "license": item.license, "url": url, "expires_in": int(expires_in),

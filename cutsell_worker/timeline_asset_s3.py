@@ -36,6 +36,7 @@ from . import timeline_asset_registry as reg
 from . import timeline_asset_registry_store as store
 from .config import load_runtime_config
 from .storage import parse_s3_uri
+from .storage_routing import download, is_fallback_bucket
 from .uploads import scoped_upload_prefix, scoped_voice_over_upload_prefix
 
 TIMELINE_MEDIA_FOLDER = "timeline/"
@@ -74,9 +75,11 @@ def _allowed_prefixes(*, user_id: str, project_id: str) -> tuple[str, ...]:
     )
 
 
-def _checked_key(uri: str, *, user_id: str, project_id: str) -> tuple[str, str]:
+def _checked_key(uri: str, *, user_id: str, project_id: str, for_read: bool = False) -> tuple[str, str]:
+    """`for_read`: the URI is only read or referenced, never written -- it may then name the old
+    Amazon bucket (storage_routing). The project/prefix scope check is the same either way."""
     bucket, key = parse_s3_uri(uri)
-    if bucket != _bucket():
+    if bucket != _bucket() and not (for_read and is_fallback_bucket(bucket)):
         raise RuntimeError("timeline media is outside the CutSell bucket")
     if ".." in key.split("/") or not any(key.startswith(p) for p in _allowed_prefixes(user_id=user_id, project_id=project_id)):
         raise RuntimeError("timeline media is outside this project's storage scope")
@@ -104,7 +107,7 @@ def s3_persister(
             raise ValueError("asset media is missing or empty")
         reused = reuse.get(str(local_path))
         if reused:
-            _checked_key(reused, user_id=user_id, project_id=project_id)
+            _checked_key(reused, user_id=user_id, project_id=project_id, for_read=True)  # a reference
             return reused
         name = Path(storage_key).name
         if not name or name in (".", "..") or "/" in name:
@@ -131,12 +134,11 @@ def s3_fetcher(
     def _fetch(reference: str) -> str:
         if reference.startswith("local://"):
             return reference[len("local://"):]
-        bucket, key = _checked_key(reference, user_id=user_id, project_id=project_id)
+        bucket, key = _checked_key(reference, user_id=user_id, project_id=project_id, for_read=True)
         suffix = Path(key).suffix.lower()[:8]
         destination = Path(scratch_dir) / f"{uuid4().hex}{suffix}"
         destination.parent.mkdir(parents=True, exist_ok=True)
-        _client(client).download_file(bucket, key, str(destination))
-        return str(destination)
+        return download(bucket, key, str(destination), client=_client(client))
 
     return _fetch
 

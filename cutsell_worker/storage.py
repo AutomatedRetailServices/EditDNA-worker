@@ -13,11 +13,12 @@ def parse_s3_uri(uri: str) -> tuple[str, str]:
 
 
 def download_source(uri: str, destination: str, *, client=None) -> str:
+    """Download one stored object. Routed through `storage_routing` (R2 move): an old-bucket URI
+    is read from the Amazon fallback, a current-bucket miss is retried there. Without FALLBACK_*
+    settings this is the same single `download_file` call as before."""
+    from .storage_routing import download
+
     bucket, key = parse_s3_uri(uri)
-    if client is None:
-        import boto3
-        client = boto3.client("s3")
     path = Path(destination)
     path.parent.mkdir(parents=True, exist_ok=True)
-    client.download_file(bucket, key, str(path))
-    return str(path)
+    return download(bucket, key, str(path), client=client)

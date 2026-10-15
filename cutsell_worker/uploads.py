@@ -33,6 +33,7 @@ from uuid import uuid4
 
 from .config import load_runtime_config
 from .storage import parse_s3_uri
+from .storage_routing import is_readable_bucket, presigned_get
 
 DEFAULT_UPLOAD_PREFIX = "cutsell/uploads/"
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
@@ -200,7 +201,8 @@ def validate_product_source_uri(
 ) -> tuple[str, str]:
     bucket, key = parse_s3_uri(uri)
     config = load_runtime_config()
-    if not config.s3_bucket or bucket != config.s3_bucket:
+    # Reads may name the old Amazon bucket (storage_routing); writes never do.
+    if not is_readable_bucket(bucket, config.s3_bucket or ""):
         raise ValueError("source uri bucket is not allowed")
     required_prefix = upload_prefix()
     if project_id is not None or user_id is not None:
@@ -234,11 +236,7 @@ def create_presigned_source_download(
     if client is None:
         import boto3
         client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
-    url = client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=int(expires_in),
-    )
+    url = presigned_get(bucket, key, expires_in=int(expires_in), client=client)
     return {"url": url, "expires_in": int(expires_in)}
 
 
@@ -344,7 +342,8 @@ def validate_voice_over_source_uri(
     video-uploaded object can never pass this check, and vice versa."""
     bucket, key = parse_s3_uri(uri)
     config = load_runtime_config()
-    if not config.s3_bucket or bucket != config.s3_bucket:
+    # Reads may name the old Amazon bucket (storage_routing); writes never do.
+    if not is_readable_bucket(bucket, config.s3_bucket or ""):
         raise ValueError("source uri bucket is not allowed")
     required_prefix = scoped_voice_over_upload_prefix(user_id=user_id, project_id=project_id)
     if not key.startswith(required_prefix):

@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from .config import load_runtime_config
+from .storage_routing import is_fallback_bucket, presigned_get
 from .redis_atomic_list import append_if_absent
 
 MAX_RENDER_VERSIONS = 20
@@ -110,18 +111,15 @@ def sign_export_uri(export_uri: str, *, expires_in: int = 3600, client=None) -> 
     if not bucket or not sep or not key:
         raise ValueError("render version export URI is invalid")
     config = load_runtime_config()
-    if config.s3_bucket and bucket != config.s3_bucket:
+    # Old exports may live in the old Amazon bucket (storage_routing, reads only).
+    if config.s3_bucket and bucket != config.s3_bucket and not is_fallback_bucket(bucket):
         raise ValueError("render version bucket is not allowed")
     if not key.startswith("cutsell/exports/"):
         raise ValueError("render version key is outside CutSell exports")
     if client is None:
         import boto3
         client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
-    return client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=int(expires_in),
-    )
+    return presigned_get(bucket, key, expires_in=int(expires_in), client=client)
 
 
 def hydrated_render_versions(*, user_id: str, project_id: str, client=None, s3_client=None) -> list[dict[str, Any]]:

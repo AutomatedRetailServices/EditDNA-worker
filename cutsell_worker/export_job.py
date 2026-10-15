@@ -115,6 +115,8 @@ def _resolve_voice_or_music(clip, *, user_id: str, project_id: str, directory: s
 def _resolve_sound_effect(clip, *, directory: str, index: int) -> str:
     """An official library sound (sfx_library), from the configured media bucket."""
     try:
+        # download_source is routed (storage_routing): the configured storage (R2 after the move),
+        # falling back to the old Amazon bucket while a sound is not there yet.
         uri = sfx_library.sfx_uri(str(clip.sfx_id))
         suffix = Path(sfx_library.sound_effect(str(clip.sfx_id)).file).suffix or ".m4a"
         return download_source(uri, str(Path(directory) / f"sfx-{index:03d}{suffix}"))
@@ -502,7 +504,8 @@ def resume_delivery_after_approval(
         if s3_client is None:
             import boto3
             s3_client = boto3.client("s3")
-        s3_client.download_file(parsed_bucket, parsed_key, local_path)
+        from .storage_routing import download as routed_download
+        routed_download(parsed_bucket, parsed_key, local_path, client=s3_client)
 
         local_delivery = rd.build_render_delivery_record(
             render_identity=record.render_identity,
