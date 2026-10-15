@@ -1,5 +1,5 @@
 CUTSELLTRIM before rev=16 clips=2 first=0.000-4.080 manual_end=no caption="Edited on the phone" total=12.20
-CUTSELLTRIM limits lower=0.100 upper=13.467 neighbor=4.080 target=5.080
+CUTSELLTRIM limits lower=0.100 upper=13.667 neighbor=4.080 target=5.080
 CUTSELLTRIM stretched_end rev=17 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
 CUTSELLTRIM saves_for_one_drag=1
 CUTSELLTRIM shortened_start rev=18 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
@@ -7,28 +7,22 @@ CUTSELLTRIM undo rev=19 clips=2 first=0.000-5.080 manual_end=yes caption="Edited
 CUTSELLTRIM redo rev=20 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
 CUTSELLTRIM done error=none
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
-CUTSELLTRIM before rev=16 clips=2 first=0.000-4.080 manual_end=no caption="Edited on the phone" total=12.20
-CUTSELLTRIM limits lower=0.100 upper=13.467 neighbor=4.080 target=5.080
-CUTSELLTRIM stretched_end rev=17 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
-CUTSELLTRIM saves_for_one_drag=1
-CUTSELLTRIM shortened_start rev=18 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
-CUTSELLTRIM undo rev=19 clips=2 first=0.000-5.080 manual_end=yes caption="Edited on the phone" total=13.20
 CUTSELLTRIM redo rev=20 clips=2 first=0.300-5.080 manual_end=yes caption="Edited on the phone" total=12.90
 CUTSELLTRIM done error=none
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
-CUTSELLVO shown=0.014 outcome=placed blocks=1->2
+CUTSELLVO shown=0.015 outcome=placed blocks=1->2
 CUTSELLVO uploaded=yes after=15s placements=2
 CUTSELLTRIM" OR eventMessage CONTAINS "CUTSELLVO"'
+CUTSELLMEDIA test_media video=probe-phone-video-B86F9B.mp4
+CUTSELLMEDIA photo_overlay shown_after=0.45 pending=1
 CUTSELLMEDIA done"'
-CUTSELLMEDIA test_media video=probe-phone-video-64FE3A.mp4
-CUTSELLMEDIA photo_overlay shown_after=0.44 pending=1
-CUTSELLMEDIA photo_overlay uploaded_after=4.2 overlays=2
-CUTSELLMEDIA video_overlay uploaded_after=3.7 overlays=3
+CUTSELLMEDIA photo_overlay uploaded_after=4.1 overlays=2
+CUTSELLMEDIA video_overlay uploaded_after=3.6 overlays=3
 CUTSELLMEDIA done"'
 CUTSELLMEDIA photo_overlay moved x=0.3 y=0.25 width=0.5 saved=true
 CUTSELLMEDIA video_overlay moved_to=3.00
 CUTSELLMEDIA done"'
-CUTSELLMEDIA broll clips=2->4 after=4.7 order=se-000-0001~a-e06ac701aad40e3f,broll_652cc25d,se-000-0001~a-e06ac701aad40e3f-c25d,se-000-0001~b-3ffd12d5dad35663
+CUTSELLMEDIA broll clips=2->4 after=5.2 order=se-000-0001~a-e06ac701aad40e3f,broll_f4219af0,se-000-0001~a-e06ac701aad40e3f-9af0,se-000-0001~b-3ffd12d5dad35663
 CUTSELLMEDIA done"'
 CUTSELLMEDIA clip_moved first=se-000-0001~b-3ffd12d5dad35663 saves=1
 CUTSELLMEDIA clip_undo first=se-000-0001~a-e06ac701aad40e3f
@@ -41,44 +35,38 @@ CUTSELLMEDIA voice_undo 1.00
 CUTSELLMEDIA done"'
 CUTSELLMEDIA voice_redo 8.54
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 uploaded@0 3.1
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 uploaded@0 3.0
 CUTSELLMEDIA done"'
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@25 11.2
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@0 16.6
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@2 19.3
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@37 13.9
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@40 16.5
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@42 19.0
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@15 22.2
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@28 24.8
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@35 27.4
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@45 21.7
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@47 24.3
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@51 27.0
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@37 30.0
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@41 32.7
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@54 29.6
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@56 32.2
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@43 35.4
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@46 38.1
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@48 40.9
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@59 34.8
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@61 37.4
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@64 40.0
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@52 43.7
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@55 46.3
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@57 49.0
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@67 42.5
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@70 45.4
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@60 51.4
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@62 54.0
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@73 48.1
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@76 50.7
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@78 53.4
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@66 56.8
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@69 59.4
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@71 62.0
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@80 56.0
 CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@74 64.6
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@77 67.2
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@80 70.1
-CUTSELLMEDIA done"'
-CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 analyzing@81 78.1
-CUTSELLMEDIA done"'
-CUTSELLEXPORT 198dce41-e7a6-45e2-abd9-eefebdccf7a9 failed@81 91.2
-CUTSELLEXPORT summary prepare=0.0 submitted=1.2 uploaded@0=3.1 analyzing@0=16.6 analyzing@2=19.3 analyzing@15=22.2 analyzing@28=24.8 analyzing@35=27.4 analyzing@37=30.0 analyzing@41=32.7 analyzing@43=35.4 analyzing@46=38.1 analyzing@48=40.9 analyzing@52=43.7 analyzing@55=46.3 analyzing@57=49.0 analyzing@60=51.4 analyzing@62=54.0 analyzing@66=56.8 analyzing@69=59.4 analyzing@71=62.0 analyzing@74=64.6 analyzing@77=67.2 analyzing@80=70.1 analyzing@81=78.1 failed@81=91.2
-CUTSELLMEDIA export state=failed total=91.7
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 analyzing@81 61.5
+CUTSELLEXPORT d1e19186-b4f7-43bd-8477-29f23d1f7a05 failed@81 66.7
+CUTSELLEXPORT summary prepare=0.0 submitted=1.4 uploaded@0=3.0 analyzing@25=11.2 analyzing@37=13.9 analyzing@40=16.5 analyzing@42=19.0 analyzing@45=21.7 analyzing@47=24.3 analyzing@51=27.0 analyzing@54=29.6 analyzing@56=32.2 analyzing@59=34.8 analyzing@61=37.4 analyzing@64=40.0 analyzing@67=42.5 analyzing@70=45.4 analyzing@73=48.1 analyzing@76=50.7 analyzing@78=53.4 analyzing@80=56.0 analyzing@81=61.5 failed@81=66.7
+CUTSELLMEDIA export state=failed total=67.0
 CUTSELLMEDIA export error=processing_failed
 CUTSELLMEDIA done error=none
 CUTSELLMEDIA done"'
