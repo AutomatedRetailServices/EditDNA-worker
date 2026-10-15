@@ -215,6 +215,9 @@ class DraftClip:
     # window on its original, `source_asset_id` + `start`/`end`). The export keeps that end
     # exactly: the trailing-silence tightening never cuts back material placed by hand.
     manual_end: bool = False
+    # Editor v5 clip speed (0.5, 1, 1.5, 2 or 3): the clip plays this many times faster in the
+    # export, pitch preserved. 1.0 (the default) renders exactly as before.
+    speed: float = 1.0
     # Local face/pose/motion evidence carried through from the CandidateTake
     # this clip was built from (see local_performance.py). Optional and
     # defaulted to None so every existing construction site (serde.py's
@@ -363,6 +366,45 @@ class MediaOverlay:
     source_start: float = 0.0
     source_end: Optional[float] = None
     mute_audio: bool = True
+    # Editor v5 (all optional; the defaults draw the overlay exactly as before):
+    #   layer    -- drawing order, 0..50; a higher layer is drawn on top (ties keep draft order).
+    #   layout   -- "float" (x/y/width, as before) or a screen region: "full", "top", "bottom",
+    #               "left", "right", "stacked" (overlay bottom half, the video itself top half) or
+    #               "side_by_side" (overlay right half, the video itself left half).
+    #   edge     -- "sharp", "soft" or "extra_soft" (feathered edges).
+    #   fill     -- in a region layout: cover the region (crop) instead of fitting inside it.
+    #   rotation -- float layout only: degrees clockwise, -360..360.
+    layer: int = 0
+    layout: str = "float"
+    edge: str = "sharp"
+    fill: bool = False
+    rotation: float = 0.0
+
+
+@dataclass(frozen=True)
+class AudioClip:
+    """Editor v5 audio lane item: a voice-over, a music bed or an official sound effect placed at
+    `start` on the final (speed-applied) timeline, playing `source_in`..`source_out` of its file.
+    Voice and music name a tenant-owned timeline asset (`asset_id`); a sound effect names one of
+    `sfx_library.SFX_IDS`. The client never supplies a URI."""
+    audio_id: str
+    kind: str
+    start: float
+    source_in: float
+    source_out: float
+    asset_id: Optional[str] = None
+    sfx_id: Optional[str] = None
+    volume: float = 1.0
+    duck_video: bool = False
+    clean: bool = False
+
+    @property
+    def duration_sec(self) -> float:
+        return max(0.0, self.source_out - self.source_in)
+
+    @property
+    def end(self) -> float:
+        return self.start + self.duration_sec
 
 
 @dataclass(frozen=True)
@@ -416,6 +458,11 @@ class DraftTimeline:
     # `broll_sources`). Media placed by hand is the creator's choice, never an engine mistake: the
     # export's post-render QC does not trim it for being silent or still.
     user_media_source_ids: Tuple[str, ...] = ()
+    # Editor v5 audio: voice/music/sound-effect lane, whole-video gain on top of each clip's own
+    # audio_volume (0..2) and voice cleanup on the video's own sound. Defaults change nothing.
+    audio_clips: Tuple[AudioClip, ...] = ()
+    video_volume: float = 1.0
+    video_clean_voice: bool = False
 
 
 @dataclass(frozen=True)

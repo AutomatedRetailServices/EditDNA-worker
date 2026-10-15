@@ -10,7 +10,9 @@ def _duration(draft: Mapping[str, Any]) -> float:
     selected = draft.get("selected")
     if not isinstance(selected, list) or not selected:
         raise ValueError("draft requires selected clips")
-    return sum(max(0.0, float(item["end"]) - float(item["start"])) for item in selected)
+    # Editor v5: a clip at speed S lasts (end - start) / S on the final timeline.
+    return sum(max(0.0, float(item["end"]) - float(item["start"])) / float(item.get("speed", 1.0) or 1.0)
+               for item in selected)
 
 
 def _validate(
