@@ -83,7 +83,8 @@ def test_voice_clip_is_heard_where_it_is_placed_and_ducks_the_video(tmp_path, me
     # The voice (1 kHz) is audible inside its window and absent before it.
     assert _band_level(flat, 1.15, 0.7, 1000) > _band_level(flat, 0.1, 0.7, 1000) + 25
     # The video's own sound (440 Hz) is lower under a ducking clip, unchanged when not ducking.
-    assert _band_level(ducked, 1.15, 0.7, 440) < _band_level(flat, 1.15, 0.7, 440) - 6
+    # About -12 dB ("Lower video sound").
+    assert _band_level(ducked, 1.2, 0.6, 440) == pytest.approx(_band_level(flat, 1.2, 0.6, 440) - 12.0, abs=1.5)
     assert _band_level(ducked, 0.1, 0.7, 440) == pytest.approx(_band_level(flat, 0.1, 0.7, 440), abs=1.0)
     # Picture stream copied, same length; audio ends with the video.
     streams = _durations(ducked)
@@ -126,7 +127,7 @@ def test_mix_command_shape():
     assert "apad" not in graph  # no length given: no pad/trim
     timed = build_audio_mix_command("/in.mp4", "/out.mp4", mix, duration_sec=3.0)
     assert "apad=whole_dur=3.000000,atrim=duration=3.000000[mixout]" in timed[timed.index("-filter_complex") + 1]
-    assert duck_volume_filter(mix.clips) == ("volume='1-0.684*min(1,clip(min((t-0.920)/0.080,(2.830-t)/0.080),0,1))'"
+    assert duck_volume_filter(mix.clips) == ("volume='1-0.749*min(1,clip(min((t-0.880)/0.120,(2.870-t)/0.120),0,1))'"
                                              ":eval=frame")
     assert duck_volume_filter((LocalAudioClip("/a", 0, 0, 1),)) is None
 

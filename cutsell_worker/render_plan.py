@@ -164,6 +164,8 @@ def _can_coalesce(left: RenderSegment, right: RenderSegment, *, tolerance_sec: f
         return False  # different speeds are two different playback treatments
     if getattr(left, "mirror", False) != getattr(right, "mirror", False):
         return False  # a mirrored clip next to a plain one keeps its own segment
+    if int(getattr(left, "rotation", 0) or 0) != int(getattr(right, "rotation", 0) or 0):
+        return False  # Editor v5: a clip turned on its own keeps its own segment
     if (left.caption_preset, left.caption_font, left.caption_x, left.caption_y, left.caption_scale) != (
             right.caption_preset, right.caption_font, right.caption_x, right.caption_y, right.caption_scale):
         return False
@@ -249,11 +251,42 @@ def timed_caption_cues(clip) -> Tuple[Tuple[float, float, str], ...]:
     )
 
 
+ZOOM_TOMBSTONE_TOLERANCE_SEC = 0.3
+
+
+def is_tombstoned_zoom(keyframe, tombstones) -> bool:
+    """True for an AI zoom keyframe within 0.3 s (same source) of a deleted-zoom tombstone.
+    Works on contracts objects or plain dicts."""
+    get = (lambda obj, key, default=None: obj.get(key, default)) if isinstance(keyframe, dict) else \
+        (lambda obj, key, default=None: getattr(obj, key, default))
+    if str(get(keyframe, "origin", "ai") or "ai") != "ai":
+        return False
+    try:
+        time = float(get(keyframe, "source_time"))
+    except (TypeError, ValueError):
+        return False
+    source = str(get(keyframe, "source_asset_id", "") or "")
+    for tomb in tombstones:
+        t_get = (lambda key: tomb.get(key)) if isinstance(tomb, dict) else (lambda key: getattr(tomb, key, None))
+        try:
+            tomb_time = float(t_get("source_time"))
+        except (TypeError, ValueError):
+            continue
+        if str(t_get("source_asset_id") or "") == source and abs(tomb_time - time) <= ZOOM_TOMBSTONE_TOLERANCE_SEC + 1e-9:
+            return True
+    return False
+
+
 def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> Tuple[RenderSegment, ...]:
     """Translate selected draft clips to concrete source-safe media segments."""
     output = []
     overlap = bool(getattr(draft, "audio_overlap_enabled", False))
     zooms = tuple(getattr(draft, "zoom_keyframes", ()) or ()) if getattr(draft, "auto_zoom_enabled", False) else ()
+    # Editor v5: an AI zoom the creator deleted (a `zoom_removed` tombstone) is never drawn, even
+    # if a later cut suggested it again. Creator-placed zooms are always kept.
+    tombstones = tuple(getattr(draft, "zoom_removed", ()) or ())
+    if tombstones and zooms:
+        zooms = tuple(k for k in zooms if not is_tombstoned_zoom(k, tombstones))
     for clip in draft.selected:
         path = local_paths.get(clip.source_asset_id)
         if not path:
@@ -312,7 +345,8 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             caption_scale=getattr(draft, "caption_scale", None),
             # Whole-video Mirror (draft) or this clip's own Mirror; either flips the picture once.
             mirror=bool(getattr(draft, "mirror", False)) or bool(getattr(clip, "mirror", False)),
-            rotation=int(getattr(draft, "rotation", 0) or 0),
+            # Whole-video turn plus this clip's own quarter turn (Editor v5).
+            rotation=(int(getattr(draft, "rotation", 0) or 0) + int(getattr(clip, "rotation", 0) or 0)) % 360,
             audio_pre_roll=float(getattr(clip, "audio_pre_roll", 0.0) or 0.0) if rolls else 0.0,
             audio_post_roll=float(getattr(clip, "audio_post_roll", 0.0) or 0.0) if rolls else 0.0,
             zoom_keyframes=tuple(

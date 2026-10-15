@@ -183,3 +183,95 @@ def test_video_volume_zero_is_kept():
     draft = draft_from_dict(_draft(video_volume=0))
     assert draft.video_volume == 0.0
     assert result_to_dict(draft)["video_volume"] == 0.0
+
+
+# --- second wave: clip rotation, overlay volume, enhanced_at_record, zoom_removed ---------------
+
+def test_second_wave_fields_default_and_are_omitted():
+    draft = draft_from_dict(_draft(media_overlays=[_overlay()], audio_clips=[_audio()]))
+    assert all(clip.rotation == 0 for clip in draft.selected)
+    assert draft.media_overlays[0].volume == 1.0
+    assert draft.audio_clips[0].enhanced_at_record is False
+    assert draft.zoom_removed == ()
+    data = result_to_dict(draft)
+    assert "zoom_removed" not in data and all("rotation" not in clip for clip in data["selected"])
+    assert "volume" not in data["media_overlays"][0] and "enhanced_at_record" not in data["audio_clips"][0]
+
+
+def test_second_wave_fields_round_trip():
+    draft = draft_from_dict(_draft(
+        selected=[{"clip_id": "c1", "source_asset_id": "s1", "start": 0.0, "end": 4.0, "rotation": 270}],
+        media_overlays=[_overlay(kind="video", uri="s3://b/k.mp4", volume=1.5, mute_audio=False)],
+        audio_clips=[_audio(enhanced_at_record=True)],
+        zoom_removed=[{"source_asset_id": "s1", "source_time": 1.25}]))
+    assert draft.selected[0].rotation == 270 and draft.media_overlays[0].volume == 1.5
+    assert draft.audio_clips[0].enhanced_at_record is True
+    assert draft.zoom_removed[0].source_asset_id == "s1" and draft.zoom_removed[0].source_time == 1.25
+    data = json.loads(json.dumps(result_to_dict(draft)))
+    assert data["selected"][0]["rotation"] == 270 and data["media_overlays"][0]["volume"] == 1.5
+    assert data["audio_clips"][0]["enhanced_at_record"] is True
+    assert data["zoom_removed"] == [{"source_asset_id": "s1", "source_time": 1.25}]
+    assert result_to_dict(draft_from_dict(data)) == result_to_dict(draft)
+
+
+@pytest.mark.parametrize("bad", [
+    {"selected": [{"clip_id": "c1", "source_asset_id": "s1", "start": 0.0, "end": 1.0, "rotation": 45}]},
+    {"selected": [{"clip_id": "c1", "source_asset_id": "s1", "start": 0.0, "end": 1.0, "rotation": "up"}]},
+    {"media_overlays": [_overlay(volume=2.5)]},
+    {"media_overlays": [_overlay(volume=-1)]},
+    {"zoom_removed": [{"source_asset_id": "s1"}]},
+    {"zoom_removed": [{"source_asset_id": "s1", "source_time": -1}]},
+    {"zoom_removed": {"source_time": 1}},
+])
+def test_second_wave_bad_values_rejected(bad):
+    with pytest.raises(ValueError):
+        draft_from_dict(_draft(**bad))
+
+
+def test_clip_rotation_adds_to_the_draft_rotation_and_splits_segments():
+    from cutsell_worker.render_plan import build_render_plan
+    draft = draft_from_dict(_draft(rotation=90, selected=[
+        {"clip_id": "c1", "source_asset_id": "s1", "start": 0.0, "end": 2.0, "rotation": 270},
+        {"clip_id": "c2", "source_asset_id": "s1", "start": 2.0, "end": 4.0},
+        {"clip_id": "c3", "source_asset_id": "s1", "start": 4.0, "end": 6.0, "rotation": 90}]))
+    plan = build_render_plan(draft, {"s1": "/a.mp4"})
+    assert [(seg.clip_id, seg.rotation) for seg in plan] == [("c1", 0), ("c2", 90), ("c3", 180)]
+
+
+def test_tombstoned_ai_zoom_is_not_drawn_but_user_zoom_is():
+    from cutsell_worker.render_plan import build_render_plan
+    draft = draft_from_dict(_draft(auto_zoom_enabled=True, zoom_keyframes=[
+        {"keyframe_id": "z1", "source_asset_id": "s1", "source_time": 1.0, "duration": 1.0, "scale": 1.1},
+        {"keyframe_id": "z2", "source_asset_id": "s1", "source_time": 2.0, "duration": 1.0, "scale": 1.1, "origin": "user"},
+        {"keyframe_id": "z3", "source_asset_id": "s1", "source_time": 3.0, "duration": 1.0, "scale": 1.1},
+    ], zoom_removed=[{"source_asset_id": "s1", "source_time": 1.2}, {"source_asset_id": "s1", "source_time": 2.0},
+                     {"source_asset_id": "other", "source_time": 3.0}]))
+    plan = build_render_plan(draft, {"s1": "/a.mp4"})
+    assert [k[0] for k in plan[0].zoom_keyframes] == [2.0, 3.0]
+
+
+def test_overlay_volume_only_changes_the_command_when_set(monkeypatch):
+    from cutsell_worker import media_overlay_render
+    from cutsell_worker.contracts import MediaOverlay
+    from cutsell_worker.media_probe import MediaProbe
+    monkeypatch.setattr(media_overlay_render, "probe_media",
+                        lambda path: MediaProbe(duration_sec=5, width=640, height=360, fps=30, has_audio=True))
+    overlay = MediaOverlay(overlay_id="v", kind="video", uri="s3://b/v.mp4", start=1.0, end=2.0, mute_audio=False)
+
+    def graph(o):
+        command = media_overlay_render.build_final_overlay_command(
+            "/j.mp4", "/o.mp4", media_overlays=(media_overlay_render.LocalMediaOverlay(o, "/v.mp4"),))
+        return command[command.index("-filter_complex") + 1]
+
+    from dataclasses import replace
+    assert "volume=" not in graph(overlay)
+    assert "asetpts=PTS-STARTPTS,volume=1.500,adelay=1000|1000[ova1]" in graph(replace(overlay, volume=1.5))
+
+
+def test_edge_feather_is_pixels_at_1080_scaled_to_the_output():
+    from cutsell_worker.media_overlay_render import edge_feather_px
+    assert edge_feather_px("soft", 1080, 1920) == 12.0
+    assert edge_feather_px("extra_soft", 1080, 1920) == 28.0
+    assert edge_feather_px("sharp", 1080, 1920) == 0.0
+    assert edge_feather_px("soft", 360, 640) == pytest.approx(4.0)
+    assert edge_feather_px("extra_soft", 2160, 3840) == pytest.approx(56.0)

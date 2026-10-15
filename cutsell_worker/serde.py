@@ -17,6 +17,7 @@ from .contracts import (
     TextOverlay,
     Word,
     ZoomKeyframe,
+    ZoomTombstone,
 )
 
 from .sfx_library import SFX_IDS  # noqa: E402
@@ -149,7 +150,20 @@ def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
         mirror=bool(item.get("mirror", False)),
         manual_end=bool(item.get("manual_end", False)),
         speed=_clip_speed(item.get("speed", 1.0)),
+        rotation=_quarter_turn(item.get("rotation"), "clip rotation"),
     )
+
+
+def _quarter_turn(value, name: str) -> int:
+    try:
+        turn = int(float(value or 0)) % 360
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be 0, 90, 180 or 270") from None
+    if isinstance(value, float) and not float(value).is_integer():
+        raise ValueError(f"{name} must be 0, 90, 180 or 270")
+    if turn not in VIDEO_ROTATIONS:
+        raise ValueError(f"{name} must be 0, 90, 180 or 270")
+    return turn
 
 
 #: Editor v5 clip speeds the export supports (pitch-preserving atempo, frame-exact setpts).
@@ -265,6 +279,7 @@ def _media_overlay_from_dict(item: dict) -> MediaOverlay:
         x=x, y=y, width=width, source_start=source_start, source_end=source_end,
         mute_audio=bool(item.get("mute_audio", True)),
         layer=layer, layout=layout, edge=edge, fill=bool(item.get("fill", False)), rotation=rotation,
+        volume=_gain(item.get("volume"), "media overlay volume"),
     )
 
 
@@ -311,7 +326,26 @@ def _audio_clip_from_dict(item: dict) -> AudioClip:
         audio_id=audio_id, kind=kind, start=start, source_in=source_in, source_out=source_out,
         asset_id=asset_id, sfx_id=sfx_id, volume=volume,
         duck_video=bool(item.get("duck_video", False)), clean=bool(item.get("clean", False)),
+        enhanced_at_record=bool(item.get("enhanced_at_record", False)),
     )
+
+
+MAX_ZOOM_TOMBSTONES = 500
+
+
+def _zoom_tombstone_from_dict(item) -> ZoomTombstone:
+    if not isinstance(item, dict):
+        raise ValueError("zoom_removed items must be objects")
+    source = str(item.get("source_asset_id") or "")
+    if len(source) > 200:
+        raise ValueError("zoom_removed source_asset_id is too long")
+    try:
+        source_time = float(item["source_time"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("zoom_removed items need a numeric source_time") from None
+    if source_time < 0:
+        raise ValueError("zoom_removed source_time must not be negative")
+    return ZoomTombstone(source_asset_id=source, source_time=source_time)
 
 
 def draft_from_dict(payload: dict) -> DraftTimeline:
@@ -385,7 +419,18 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         audio_clips=audio_clips,
         video_volume=video_volume,
         video_clean_voice=bool(payload.get("video_clean_voice", False)),
+        zoom_removed=_zoom_removed(payload.get("zoom_removed")),
     )
+
+
+def _zoom_removed(raw) -> tuple:
+    if raw is None:
+        return ()
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("zoom_removed must be a list")
+    if len(raw) > MAX_ZOOM_TOMBSTONES:
+        raise ValueError(f"at most {MAX_ZOOM_TOMBSTONES} zoom_removed entries are allowed")
+    return tuple(_zoom_tombstone_from_dict(item) for item in raw)
 
 
 def _gain(value, name: str) -> float:
@@ -419,7 +464,7 @@ def _json_safe(value: Any) -> Any:
         data = {item.name: getattr(value, item.name) for item in fields(value)}
         if isinstance(value, DraftTimeline):
             for key in ("mirror", "rotation", "audio_overlap_enabled", "auto_zoom_enabled", "zoom_keyframes",
-                        "user_media_source_ids", "audio_clips", "video_clean_voice"):
+                        "user_media_source_ids", "audio_clips", "video_clean_voice", "zoom_removed"):
                 if not data.get(key):
                     data.pop(key, None)
             if data.get("video_volume") == 1.0:
@@ -430,15 +475,19 @@ def _json_safe(value: Any) -> Any:
                     data.pop(key, None)
             if data.get("speed") == 1.0:
                 data.pop("speed", None)
+            if not data.get("rotation"):
+                data.pop("rotation", None)
         elif isinstance(value, MediaOverlay):
             for key, default in (("layer", 0), ("layout", "float"), ("edge", "sharp"), ("fill", False),
-                                 ("rotation", 0.0)):
+                                 ("rotation", 0.0), ("volume", 1.0)):
                 if data.get(key) == default:
                     data.pop(key, None)
         elif isinstance(value, AudioClip):
             for key in ("asset_id", "sfx_id"):
                 if data.get(key) is None:
                     data.pop(key, None)
+            if not data.get("enhanced_at_record"):
+                data.pop("enhanced_at_record", None)
         return _json_safe(data)
     return value
 

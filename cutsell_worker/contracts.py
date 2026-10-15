@@ -218,6 +218,9 @@ class DraftClip:
     # Editor v5 clip speed (0.5, 1, 1.5, 2 or 3): the clip plays this many times faster in the
     # export, pitch preserved. 1.0 (the default) renders exactly as before.
     speed: float = 1.0
+    # Editor v5 quarter turn of this clip's picture only (0/90/180/270), added to the draft-level
+    # `rotation`: the clip renders at (draft.rotation + rotation) % 360. Captions/overlays upright.
+    rotation: int = 0
     # Local face/pose/motion evidence carried through from the CandidateTake
     # this clip was built from (see local_performance.py). Optional and
     # defaulted to None so every existing construction site (serde.py's
@@ -379,6 +382,8 @@ class MediaOverlay:
     edge: str = "sharp"
     fill: bool = False
     rotation: float = 0.0
+    #   volume   -- the overlay video's own audio gain (0..2) when `mute_audio` is False.
+    volume: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -397,6 +402,8 @@ class AudioClip:
     volume: float = 1.0
     duck_video: bool = False
     clean: bool = False
+    # Informational: the app already enhanced this recording when it was made. Round-trips only.
+    enhanced_at_record: bool = False
 
     @property
     def duration_sec(self) -> float:
@@ -463,6 +470,15 @@ class DraftTimeline:
     audio_clips: Tuple[AudioClip, ...] = ()
     video_volume: float = 1.0
     video_clean_voice: bool = False
+    # Editor v5: AI zoom keyframes the creator deleted, so a reprocessed cut does not bring them
+    # back (draft_merge.merge_reprocessed_draft). Never drawn; tombstones only.
+    zoom_removed: Tuple["ZoomTombstone", ...] = ()
+
+
+@dataclass(frozen=True)
+class ZoomTombstone:
+    source_asset_id: str
+    source_time: float
 
 
 @dataclass(frozen=True)

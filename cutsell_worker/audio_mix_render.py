@@ -21,9 +21,11 @@ CLEANUP_FILTERS: tuple[str, ...] = (
     "loudnorm=I=-16:TP=-1.5:LRA=11",
     "aresample=48000",
 )
-#: Video sound level under a ducking clip (about -10 dB) and the fade into / out of it.
-DUCK_GAIN = 0.316
-DUCK_FADE_SEC = 0.08
+#: Video sound level under a ducking clip ("Lower video sound", -12 dB) and the smooth ramp into /
+#: out of it.
+DUCK_DB = -12.0
+DUCK_GAIN = round(10 ** (DUCK_DB / 20.0), 3)  # 0.251
+DUCK_FADE_SEC = 0.12
 LIMITER = "alimiter=limit=0.95:level=disabled:latency=1"
 _AUDIO_FORMAT = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
 

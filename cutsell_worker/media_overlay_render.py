@@ -131,9 +131,12 @@ def build_final_overlay_command(
         probe = probes[position]
         if overlay.kind == "video" and not overlay.mute_audio and probe is not None and probe.has_audio:
             delay_ms = max(0, round(overlay.start * 1000))
+            # Editor v5: the overlay's own audio gain; 1.0 adds no filter (pre-v5 command).
+            gain = float(getattr(overlay, "volume", 1.0))
+            gain_filter = f"volume={gain:.3f}," if gain != 1.0 else ""
             filters.append(
                 f"[{index}:a]atrim=duration={display_duration:.3f},asetpts=PTS-STARTPTS,"
-                f"adelay={delay_ms}|{delay_ms}[ova{index}]"
+                f"{gain_filter}adelay={delay_ms}|{delay_ms}[ova{index}]"
             )
             audio_labels.append(f"[ova{index}]")
 
@@ -173,8 +176,15 @@ def build_final_overlay_command(
 REGION_LAYOUTS = ("full", "top", "bottom", "left", "right", "stacked", "side_by_side")
 #: Layouts whose unused part of the region shows the video below (fit leaves a transparent pad).
 _TRANSPARENT_PAD_LAYOUTS = ("left", "right", "top", "bottom")
-#: Feather width as a fraction of the region's (or float overlay's) short side.
-EDGE_FEATHER_FRACTION = {"sharp": 0.0, "soft": 0.04, "extra_soft": 0.10}
+#: Feather width in pixels at the 1080x1920 output; scaled with the output size.
+EDGE_FEATHER_PX_1080 = {"sharp": 0.0, "soft": 12.0, "extra_soft": 28.0}
+
+
+def edge_feather_px(edge: str, width: int, height: int) -> float:
+    """Feather ramp width for `edge` on a width x height output (12 px soft / 28 px extra soft
+    at 1080x1920, proportionally smaller or larger on other sizes)."""
+    scale = min(float(width) / 1080.0, float(height) / 1920.0)
+    return EDGE_FEATHER_PX_1080.get(str(edge), 0.0) * scale
 
 
 def _is_default_overlay(overlay) -> bool:
@@ -257,7 +267,7 @@ def _append_styled_overlay(filters: list[str], local: LocalMediaOverlay, *, inde
     overlay = local.overlay
     layout = str(getattr(overlay, "layout", "float") or "float")
     edge = str(getattr(overlay, "edge", "sharp") or "sharp")
-    feather = EDGE_FEATHER_FRACTION.get(edge, 0.0)
+    feather = edge_feather_px(edge, width, height)
     start, end = float(overlay.start), float(overlay.end)
     enable = f"enable='between(t,{start:.3f},{end:.3f})'"
     head = f"[{index}:v]trim=duration={display_duration:.3f},setpts=PTS-STARTPTS"
@@ -270,8 +280,7 @@ def _append_styled_overlay(filters: list[str], local: LocalMediaOverlay, *, inde
             pixel_height = _even(pixel_width * size[1] / size[0])
             filters.append(f"{head},scale={pixel_width}:{pixel_height},setsar=1,format=rgba[{shaped}]")
             soft = _feather_filters(shaped, f"ovfeather{index}", index=index, size=(pixel_width, pixel_height),
-                                    rect=(0, 0, pixel_width, pixel_height),
-                                    ramp=feather * min(pixel_width, pixel_height))
+                                    rect=(0, 0, pixel_width, pixel_height), ramp=feather)
             if soft:
                 filters.extend(soft)
                 shaped = f"ovfeather{index}"
@@ -312,7 +321,7 @@ def _append_styled_overlay(filters: list[str], local: LocalMediaOverlay, *, inde
         # opaque (black) region is feathered as a whole.
         rect = content if transparent else (0, 0, rw, rh)
         soft = _feather_filters(shaped, f"ovfeather{index}", index=index, size=(rw, rh), rect=rect,
-                                ramp=feather * min(rw, rh))
+                                ramp=feather)
         if soft:
             filters.extend(soft)
             shaped = f"ovfeather{index}"
