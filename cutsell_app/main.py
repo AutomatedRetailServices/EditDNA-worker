@@ -47,6 +47,7 @@ from cutsell_worker.serde import draft_from_dict
 from cutsell_worker.source_identity import stable_source_id
 from cutsell_worker.timeline_asset_storage import sign_timeline_assets
 from cutsell_worker.overlay_uploads import create_presigned_overlay_download
+from cutsell_worker.sfx_library import signed_manifest as signed_sfx_manifest
 from cutsell_worker.uploads import (
     create_presigned_source_download,
     create_presigned_upload,
@@ -306,6 +307,16 @@ def healthz():
         "storage_ready": config.storage_ready,
         "semantic_ready": config.semantic_ready,
     }
+
+
+@app.get("/v1/sfx/manifest")
+def sfx_manifest():
+    """Editor v5 official sound library with short-lived download links. Behind the same bearer
+    session as every other non-public route (AuthScopeMiddleware); nothing user-scoped is read."""
+    try:
+        return signed_sfx_manifest()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 @app.post("/v1/uploads/presign", response_model=UploadPresignResponse)
