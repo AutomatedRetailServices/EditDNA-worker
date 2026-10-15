@@ -77,8 +77,14 @@ def _delete_s3_prefix(client, *, bucket: str, prefix: str) -> int:
     return deleted
 
 
-def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_client=None) -> dict[str, Any]:
-    """Delete one owned project and all known project-scoped media/artifacts."""
+def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_client=None,
+                        include_old_storage: bool = False, old_storage_client=None) -> dict[str, Any]:
+    """Delete one owned project and all known project-scoped media/artifacts.
+
+    `include_old_storage` is set ONLY by account deletion (Product Owner, 15 Oct 2026): after the
+    move to Cloudflare R2 the user's files from before the move are also deleted from the old
+    Amazon bucket (FALLBACK_*), and only under this user's own prefixes. Nothing else ever writes
+    to or deletes from the old bucket."""
     get_project(user_id=user_id, project_id=project_id, client=redis_client)
     config = load_runtime_config()
 
@@ -95,6 +101,16 @@ def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_
             s3_client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
         for prefix in _project_prefixes(user_id=user_id, project_id=project_id):
             deleted_objects += _delete_s3_prefix(s3_client, bucket=config.s3_bucket, prefix=prefix)
+
+    old_storage_deleted = 0
+    if include_old_storage:
+        from . import storage_routing
+
+        fallback = storage_routing.fallback_storage()
+        if fallback is not None and fallback.bucket != config.s3_bucket:
+            old_client = old_storage_client or storage_routing.fallback_client_factory(fallback)
+            for prefix in _project_prefixes(user_id=user_id, project_id=project_id):
+                old_storage_deleted += _delete_s3_prefix(old_client, bucket=fallback.bucket, prefix=prefix)
 
     pipe = redis_client.pipeline()
     pipe.delete(project_key(user_id=user_id, project_id=project_id))
@@ -121,12 +137,14 @@ def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_
         "status": "deleted",
         "project_id": project_id,
         "s3_objects_deleted": deleted_objects,
+        "old_storage_objects_deleted": old_storage_deleted,
         "timeline_assets_deleted": timeline_cleanup["timeline_assets_deleted"],
         "durable": durable,
     }
 
 
-def delete_account_data(*, user_id: str, redis_client=None, s3_client=None) -> dict[str, Any]:
+def delete_account_data(*, user_id: str, redis_client=None, s3_client=None,
+                        old_storage_client=None) -> dict[str, Any]:
     """Delete known CutSell account data and revoke indexed sessions."""
     config = load_runtime_config()
     if redis_client is None:
@@ -138,6 +156,7 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None) -> d
     projects = list_projects(user_id=user_id, client=redis_client, limit=100)
     deleted_projects = []
     deleted_objects = 0
+    old_deleted = 0
     for project in projects:
         project_id = str(project.get("project_id") or "")
         if not project_id:
@@ -147,9 +166,12 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None) -> d
             project_id=project_id,
             redis_client=redis_client,
             s3_client=s3_client,
+            include_old_storage=True,
+            old_storage_client=old_storage_client,
         )
         deleted_projects.append(project_id)
         deleted_objects += int(result.get("s3_objects_deleted") or 0)
+        old_deleted += int(result.get("old_storage_objects_deleted") or 0)
 
     sessions = revoke_all_sessions(user_id=user_id, client=redis_client)
     apple_binding_removed = delete_apple_binding(user_id=user_id, client=redis_client)
@@ -174,6 +196,7 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None) -> d
         "user_id": user_id,
         "projects_deleted": deleted_projects,
         "s3_objects_deleted": deleted_objects,
+        "old_storage_objects_deleted": old_deleted,
         "sessions": sessions,
         "apple_binding_removed": apple_binding_removed,
         "durable": durable,
