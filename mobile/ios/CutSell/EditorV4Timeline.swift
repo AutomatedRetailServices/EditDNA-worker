@@ -348,10 +348,13 @@ struct TimelineV4: View {
                         number: index + 1,
                         caption: caption,
                         speech: trimDrag?.clipID == window.clipID ? trimDrag?.speech ?? [] : Self.speech(of: clip),
-                        muted: clip?["audio_muted"]?.boolValue == true,
+                        muted: model.clipIsSilent(window.clipID),
                         width: clipWidth,
                         isSelected: isSelected
                     )
+                    .overlay(alignment: .topTrailing) {
+                        if model.clipIsSilent(window.clipID) { MuteBadge().padding(.top, 17).padding(.trailing, 4) }
+                    }
                     .scaleEffect(lifted ? 1.06 : 1)
                     .shadow(color: .black.opacity(lifted ? 0.6 : 0), radius: lifted ? 8 : 0, y: lifted ? 4 : 0)
                     .zIndex(lifted ? 2 : 0)
@@ -594,35 +597,43 @@ struct TimelineV4: View {
     // MARK: Auto Zoom ◇ keyframes (tap = select · drag = move · Delete removes)
 
     private func keyframes(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
-        let marks = model.zoomMarks
+        let marks = model.videoKeyframeMarks
         let on = model.autoZoomEnabled
         return ZStack(alignment: .topLeading) {
             ForEach(marks) { mark in
-                let dx = keyframeDrag?.id == mark.id ? keyframeDrag?.dx ?? 0 : 0
-                let px = x(mark.time) + dx
-                if px > Self.cursorX - 8, px < width + 8 {
-                    ZoomDiamond(isSelected: selection == .zoom(mark.id), dimmed: !on)
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                        .position(x: px, y: 25)
-                        .onTapGesture { selection = selection == .zoom(mark.id) ? nil : .zoom(mark.id) }
-                        .gesture(DragGesture(minimumDistance: 4)
-                            .onChanged { value in
-                                playback.pause()
-                                selection = .zoom(mark.id)
-                                keyframeDrag = (mark.id, value.translation.width)
-                            }
-                            .onEnded { value in
-                                keyframeDrag = nil
-                                let target = mark.time + Double(value.translation.width / pixelsPerSecond)
-                                Task { await model.moveZoomKeyframe(id: mark.id, to: max(0, min(duration - 0.1, target))) }
-                            })
-                        .accessibilityLabel("Zoom at \(EditorTime.tenths(mark.time))")
-                        .accessibilityIdentifier("zoomKeyframe")
-                }
+                diamond(mark, dimmed: mark.isAI && !on, x: x, width: width, y: 25)
             }
         }
         .frame(width: width, height: 50, alignment: .topLeading)
+    }
+
+    /// One ◇ (tap = select, the toolbar's Delete removes it; drag = move it in its clip / overlay).
+    @ViewBuilder
+    private func diamond(_ mark: KeyframeMark, dimmed: Bool, x: @escaping (Double) -> CGFloat, width: CGFloat,
+                         y: CGFloat) -> some View {
+        let dx = keyframeDrag?.id == mark.id ? keyframeDrag?.dx ?? 0 : 0
+        let px = x(mark.time) + dx
+        if px > Self.cursorX - 8, px < width + 8 {
+            ZoomDiamond(isSelected: selection == .zoom(mark.id), dimmed: dimmed)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+                .position(x: px, y: y)
+                .onTapGesture { selection = selection == .zoom(mark.id) ? nil : .zoom(mark.id) }
+                .gesture(DragGesture(minimumDistance: 4)
+                    .onChanged { value in
+                        playback.pause()
+                        selection = .zoom(mark.id)
+                        keyframeDrag = (mark.id, value.translation.width)
+                    }
+                    .onEnded { value in
+                        keyframeDrag = nil
+                        let target = mark.time + Double(value.translation.width / pixelsPerSecond)
+                        model.moveKeyframe(id: mark.id, to: max(0, min(duration - 0.01, target)))
+                    })
+                .accessibilityLabel("Keyframe at \(EditorTime.tenths(mark.time))")
+                .accessibilityValue(String(format: "%.2f", mark.time))
+                .accessibilityIdentifier(mark.isAI ? "zoomKeyframe" : "userKeyframe")
+        }
     }
 
     // MARK: Voice-over track (draft voice clips, plus recordings still uploading)
@@ -662,6 +673,9 @@ struct TimelineV4: View {
                         isSelected: isSelected,
                         showsLabel: false
                     )
+                    .overlay(alignment: .trailing) {
+                        if clip.muted || clip.volume <= 0.001 { MuteBadge().padding(.trailing, 3) }
+                    }
                     .scaleEffect(moveDrag?.id == clip.id ? 1.05 : 1)
                     .offset(x: left, y: moveDrag?.id == clip.id ? -2 : 0)
                     .onTapGesture { selection = isSelected ? nil : .voiceOver(clip.id) }
@@ -725,7 +739,8 @@ struct TimelineV4: View {
                 let blockWidth = max(10, CGFloat(range.end - range.start) * pixelsPerSecond)
                 let isSelected = selection == .sound(clip.id)
                 if left + blockWidth > -20, left < width + 20 {
-                    SoundBlockV5(title: model.title(of: clip), isMusic: clip.kind == .music, width: blockWidth, isSelected: isSelected)
+                    SoundBlockV5(title: model.title(of: clip), isMusic: clip.kind == .music, width: blockWidth, isSelected: isSelected,
+                                 muted: clip.muted || clip.volume <= 0.001, start: range.start)
                         .scaleEffect(moveDrag?.id == clip.id ? 1.05 : 1)
                         .offset(x: left, y: moveDrag?.id == clip.id ? -2 : 0)
                         .onTapGesture { selection = isSelected ? nil : .sound(clip.id) }
@@ -863,6 +878,19 @@ struct TimelineV4: View {
                         overlayTrimHandle(.end, item: item)
                             .offset(x: left + itemWidth - TrimHandleV4.width + TrimHandleV4.outside)
                     }
+                }
+            }
+            // Keyframe ◇ of the overlays on this row, over their blocks.
+            ForEach(items) { item in
+                ForEach(model.overlayKeyframeMarks(overlayID: item.id)) { mark in
+                    diamond(mark, dimmed: false, x: x, width: width, y: 15)
+                }
+            }
+            // A video overlay whose sound is off shows the mute icon.
+            ForEach(items.filter { $0.kind == .video && $0.style.muted }) { item in
+                let left = x(shownStart(item.id, item.start))
+                if left > Self.cursorX - 20, left < width {
+                    MuteBadge().offset(x: left + 4, y: 17).allowsHitTesting(false)
                 }
             }
             // "+" on the top row once there is something: the next overlay can go on a new layer.
@@ -1126,10 +1154,14 @@ struct SoundBlockV5: View {
     let isMusic: Bool
     let width: CGFloat
     let isSelected: Bool
+    var muted = false
+    /// Where it starts on the timeline (read by the UI tests).
+    var start: Double = 0
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: isMusic ? "music.note" : "waveform").font(.system(size: 9, weight: .bold))
+            Image(systemName: muted ? "speaker.slash.fill" : (isMusic ? "music.note" : "waveform"))
+                .font(.system(size: 9, weight: .bold))
             Text(title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
         }
         .foregroundStyle(.white)
@@ -1140,9 +1172,24 @@ struct SoundBlockV5: View {
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(isSelected ? Color.white : Color(hex: 0xFF21D7, opacity: 0.6),
                                                           lineWidth: isSelected ? 2 : 1))
+        // A short sound (Tap is 0.6 s) is still easy to touch: the touch area is at least 32 wide.
+        .frame(width: max(width, 32), alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        .accessibilityLabel(muted ? "\(title), muted" : title)
+        .accessibilityValue(String(format: "%.2f-%.2f", start, Double(width)))
         .accessibilityIdentifier("soundBlock")
+    }
+}
+
+/// The small mute icon on a silent clip of the timeline.
+struct MuteBadge: View {
+    var body: some View {
+        Image(systemName: "speaker.slash.fill")
+            .font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
+            .frame(width: 15, height: 15)
+            .background(CS.error.opacity(0.9), in: Circle())
+            .accessibilityIdentifier("muteBadge")
     }
 }
 

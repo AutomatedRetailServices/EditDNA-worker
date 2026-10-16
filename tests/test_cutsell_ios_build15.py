@@ -137,7 +137,7 @@ def test_export_server_draws_overlays_where_the_phone_shows_them():
     v4 = read("EditorV4View.swift")
     # Centre x/y and width as a share of the frame: the same numbers the export uses
     # (overlay=x=W*x-w/2:y=H*y-h/2, scale=width*1080:-1).
-    assert "frame.width * CGFloat(overlay.x)" in v4 and "frame.height * CGFloat(overlay.y)" in v4
+    assert "frame.width * CGFloat(overlay.x + key.x)" in v4 and "frame.height * CGFloat(overlay.y + key.y)" in v4
     assert "frame.width * CGFloat(overlay.width)" in v4
 
 

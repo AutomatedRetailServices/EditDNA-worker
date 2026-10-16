@@ -68,7 +68,7 @@ def test_volume_panel_opens_from_the_speaker_and_a_voice_clip_opens_its_panel():
     # Editor v5 (Figma 1119:990 / 1119:1634): the speaker on the video row opens the Volume panel;
     # tapping a voice clip opens its own panel; both sit above the toolbar, under the timeline.
     v4 = read("EditorV4View.swift")
-    assert "onToggleVideoSound: { openCard(.volume) }" in v4
+    assert "onToggleVideoSound: { toggleVideoSound() }" in v4
     changed = body_of(v4, "private func selectionChanged(_ newValue: EditorSelection?)")
     assert "case .voiceOver(let id): card = .voice(id)" in changed
     assert "TimelineV4.height(for: model, compact: card != nil) + toolbar + cardHeight" in v4
@@ -76,7 +76,7 @@ def test_volume_panel_opens_from_the_speaker_and_a_voice_clip_opens_its_panel():
 
 def test_slider_dot_matches_the_percentage():
     panels = read("EditorV5Panels.swift")
-    assert "GradientSliderV5(value: $value, maximum: 2, onCommit: commit)" in panels
+    assert "GradientSliderV5(value: $value, maximum: 2) { model.setVolume(target, value) }" in panels
     assert "let center = Self.knob / 2 + usable * CGFloat(min(max(0, value / maximum), 1))" in panels
     assert '"\\(Int((value * 100).rounded()))%"' in panels
     v4 = read("EditorV4View.swift")

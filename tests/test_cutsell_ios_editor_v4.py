@@ -29,7 +29,7 @@ def test_header_quality_menu_and_controls_with_keyframe():
     for image in ("Ed4CtlExpand", "Ed4CtlPlay", "Ed4CtlKeyframe", "Ed4CtlUndo", "Ed4CtlRedo"):
         assert f'"{image}"' in controls, image
         assert (APP / "Assets.xcassets" / "Figma" / f"{image}.imageset" / f"{image}@3x.png").exists(), image
-    assert "model.addZoomKeyframe(at: at)" in controls  # ◇ adds a zoom keyframe at the cursor
+    assert "addKeyframe()" in controls and "model.addKeyframe(target: target, at: at, value: value)" in v4  # ◇ adds a keyframe at the cursor
     assert "CGSize(width: 266, height: 472)" in v4  # bigger video (Figma 266 x 472)
 
 
@@ -67,7 +67,7 @@ def test_timeline_starts_at_the_left_with_fixed_cursor_and_zoom():
     assert '"Add video"' in tl and '"overlayBlock"' in tl
     assert '"+  Text · photo · B-roll"' not in tl
     # Auto Zoom keyframes on the video track: tap = select, drag = move
-    assert "ZoomDiamond(" in tl and "model.moveZoomKeyframe(id: mark.id" in tl
+    assert "ZoomDiamond(" in tl and "model.moveKeyframe(id: mark.id" in tl
 
 
 def test_caption_written_on_the_video_with_menu_2b():
@@ -100,7 +100,7 @@ def test_preview_has_sound_and_separate_volumes():
     assert "EditorAudio.preparePlayback()" in playback
     assert "for placement in model.previewVoices" in playback
     assert "clip.assetID.flatMap { VoiceOverStore.url(for: $0) }" in read("DraftEditorViewModel.swift")
-    assert "parameters.setVolume(Float(max(0, min(1, placement.volume))), at: .zero)" in playback
+    assert "AudioGainTap.apply(max(0, min(2, placement.volume)) * master, to: parameters)" in playback
     vm = read("DraftEditorViewModel.swift")
     assert "func setVideoTrackVolume(_ volume: Double) async" in vm
     assert "VoiceOverStore.save(file, assetID: asset.assetID)" in vm
@@ -171,7 +171,7 @@ def test_zoom_keyframes_in_the_draft_and_preview():
     # same easing as the export (smoothstep, 0.35 s ramp)
     assert "min(0.35, mark.duration / 3)" in vm and "v * v * (3 - 2 * v)" in vm
     v4 = read("EditorV4View.swift")
-    assert ".scaleEffect(zoomNow)" in v4 and '"◇ Zoom \\(percent)%"' in v4
+    assert ".scaleEffect(key.scale)" in v4 and '"◇ Zoom \\(percent)%"' in v4
     assert "await model.removeZoomKeyframe(id: id)" in v4
 
 

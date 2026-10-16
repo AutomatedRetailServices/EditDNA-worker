@@ -32,9 +32,9 @@ enum EditorPanelKind: Equatable {
         switch self {
         case .overlayAdd: return 112
         case .overlay: return isVideoOverlay ? 226 : 214
-        case .volume: return 150
+        case .volume: return 176
         case .speed: return 112
-        case .voice: return 176
+        case .voice: return 226
         case .sound: return 124
         case .audio: return 230
         }
@@ -366,47 +366,80 @@ struct LayoutMiniPhone: View {
 
 struct VolumePanelV5: View {
     @ObservedObject var model: DraftEditorViewModel
-    /// A selected video clip gets its own volume; nil = the whole video.
-    let clipID: String?
+    /// The selected clip (video, voice, sound or video overlay), or the whole video.
+    let target: VolumeTarget
     let onClose: () -> Void
     @State private var value: Double = 1
-    @State private var beforeMute: Double = 1
 
     var body: some View {
-        PanelCardV5(title: "Volume", subtitle: clipID == nil ? "Whole video" : "Selected clip", onClose: onClose, accessory: {
-            PillButtonV5(title: value <= 0.001 ? "Unmute" : "Mute",
-                         systemImage: value <= 0.001 ? "speaker.slash.fill" : "speaker.wave.2", isOn: value <= 0.001) {
-                if value > 0.001 { beforeMute = value; value = 0 } else { value = max(0.05, beforeMute) }
-                commit()
+        let muted = model.isMuted(target)
+        PanelCardV5(title: "Volume", subtitle: target == .whole ? "Whole video" : "Selected clip", onClose: onClose, accessory: {
+            PillButtonV5(title: muted ? "Unmute" : "Mute", systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2",
+                         isOn: muted) {
+                model.setMuted(target, !muted)
             }
             .accessibilityIdentifier("volumeMute")
         }) {
             HStack(spacing: 12) {
-                GradientSliderV5(value: $value, maximum: 2, onCommit: commit)
-                Text("\(Int((value * 100).rounded()))%")
+                GradientSliderV5(value: $value, maximum: 2) { model.setVolume(target, value) }
+                    .opacity(muted ? 0.45 : 1)
+                Text(muted ? "Muted" : "\(Int((value * 100).rounded()))%")
                     .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
-                    .frame(width: 52, alignment: .trailing)
+                    .frame(width: 58, alignment: .trailing)
                     .accessibilityIdentifier("volumePercent")
             }
             .padding(.top, 8)
-            HStack(spacing: 12) {
-                PillButtonV5(title: "Clean up voice", systemImage: "mic", isOn: model.videoCleanVoice) {
-                    model.setVideoCleanVoice(!model.videoCleanVoice)
-                }
-                .accessibilityIdentifier("cleanUpVoice")
-                Text("Removes room noise and evens the volume. Applies on export.")
-                    .font(.system(size: 12)).foregroundStyle(CS.textSecondaryF).lineLimit(2)
+            if !model.cleanKeys(for: target).isEmpty {
+                CleanUpRowV5(model: model, target: target).padding(.top, 8)
             }
-            .padding(.top, 10)
         }
         .frame(height: EditorPanelKind.volume.height())
-        .onAppear { value = clipID.map { model.clipVolume($0) } ?? model.videoVolume; beforeMute = max(0.05, value) }
-        .onChange(of: clipID) { _, id in value = id.map { model.clipVolume($0) } ?? model.videoVolume }
+        .onAppear { value = model.volume(of: target) }
+        .onChange(of: target) { _, new in value = model.volume(of: new) }
         .accessibilityIdentifier("volumePanel")
     }
+}
 
-    private func commit() {
-        if let clipID { model.setClipVolume(clipID: clipID, volume: value) } else { model.setVideoVolume(value) }
+/// Clean up voice: a clear On / Off with what it does, and "Cleaning… 40%" while the server makes
+/// the clean copy (the preview plays it as soon as it is ready; Off plays the original).
+struct CleanUpRowV5: View {
+    @ObservedObject var model: DraftEditorViewModel
+    let target: VolumeTarget
+    @ObservedObject private var center = CleanAudioCenter.shared
+
+    var body: some View {
+        let on = model.cleanUpOn(target)
+        let keys = model.cleanKeys(for: target)
+        let progress = on ? center.progress(keys, project: model.project) : nil
+        let failed = on && center.failed(keys, project: model.project)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Toggle(isOn: Binding(get: { on }, set: { model.setCleanUp(target, $0) })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Clean up voice").font(.system(size: 15, weight: .medium)).foregroundStyle(.white)
+                        Text("Removes background noise from the voice")
+                            .font(.system(size: 12)).foregroundStyle(CS.textSecondaryF).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                }
+                .toggleStyle(SwitchToggleStyle(tint: Color(hex: 0x1769FF)))
+                .accessibilityIdentifier("cleanUpToggle")
+            }
+            if let progress {
+                HStack(spacing: 8) {
+                    ProgressView(value: Double(progress), total: 100).tint(CS.cyan).frame(maxWidth: 140)
+                    Text("Cleaning… \(progress)%").font(.system(size: 12, weight: .medium)).monospacedDigit()
+                        .foregroundStyle(CS.textSecondaryF)
+                        .accessibilityIdentifier("cleanUpProgress")
+                }
+            } else if failed {
+                Button("Couldn't clean the voice. Tap to try again.") { center.retry(keys, project: model.project) }
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(CS.cyan)
+                    .accessibilityIdentifier("cleanUpRetry")
+            } else if on {
+                Text("Playing the clean voice").font(.system(size: 12)).foregroundStyle(CS.textMutedF)
+                    .accessibilityIdentifier("cleanUpReady")
+            }
+        }
     }
 }
 
@@ -468,12 +501,14 @@ struct VoiceClipPanelV5: View {
                     model.updateAudioClip(id: clipID) { $0.duckVideo.toggle() }
                 }
                 .accessibilityIdentifier("lowerVideoSound")
-                PillButtonV5(title: "Clean up voice", systemImage: "mic", isOn: clip?.clean ?? false) {
-                    model.updateAudioClip(id: clipID) { $0.clean.toggle() }
+                PillButtonV5(title: "Mute", systemImage: (clip?.muted ?? false) ? "speaker.slash.fill" : "speaker.wave.2",
+                             isOn: clip?.muted ?? false) {
+                    model.setMuted(.audio(clipID), !(clip?.muted ?? false))
                 }
-                .accessibilityIdentifier("voiceCleanUp")
+                .accessibilityIdentifier("voiceMute")
             }
             .padding(.top, 8)
+            CleanUpRowV5(model: model, target: .audio(clipID)).padding(.top, 6)
             HStack(spacing: 8) {
                 PillButtonV5(title: "Record again", systemImage: "arrow.counterclockwise", action: onRecordAgain)
                     .accessibilityIdentifier("recordAgain")
@@ -520,6 +555,12 @@ struct SoundClipPanelV5: View {
                         model.updateAudioClip(id: clipID) { $0.duckVideo.toggle() }
                     }
                 }
+                PillButtonV5(title: (clip?.muted ?? false) ? "Unmute" : "Mute",
+                             systemImage: (clip?.muted ?? false) ? "speaker.slash.fill" : "speaker.wave.2",
+                             isOn: clip?.muted ?? false) {
+                    model.setMuted(.audio(clipID), !(clip?.muted ?? false))
+                }
+                .accessibilityIdentifier("soundMute")
                 PillButtonV5(title: "Delete", systemImage: "trash", destructive: true, action: onDelete)
                     .accessibilityIdentifier("soundDelete")
             }
@@ -542,7 +583,8 @@ struct AudioPanelV5: View {
     @ObservedObject var model: DraftEditorViewModel
     @ObservedObject var library = SfxLibrary.shared
     let playhead: () -> Double
-    let onAdded: (String) -> Void
+    /// (name, clip id) of the sound just added (the editor selects it).
+    let onAdded: (String, String) -> Void
     let onMusic: () -> Void
     let onClose: () -> Void
     @State private var chosen: String?
@@ -562,8 +604,10 @@ struct AudioPanelV5: View {
                             .background(Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 14))
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(chosen == sound.id ? CS.cyan : .clear, lineWidth: 1.5))
                             .overlay(alignment: .topTrailing) {
-                                if library.loading && !library.ready.contains(sound.id) {
+                                // Still downloading: a spinner, and the sound can't be added yet.
+                                if !library.ready.contains(sound.id) {
                                     ProgressView().controlSize(.mini).tint(.white).padding(6)
+                                        .accessibilityIdentifier("soundDownloading")
                                 }
                             }
                     }
@@ -573,19 +617,27 @@ struct AudioPanelV5: View {
             }
             .padding(.top, 6)
             HStack(spacing: 10) {
+                let wanted = chosen ?? "tap"
+                let ready = library.ready.contains(wanted)
                 Button {
-                    let id = chosen ?? "tap"
-                    model.addSound(sfxID: id, at: playhead())
-                    onAdded(SfxLibrary.name(of: id))
+                    // Never a silent clip: added only once its file is on this iPhone.
+                    if let clipID = model.addSound(sfxID: wanted, at: playhead()) {
+                        onAdded(SfxLibrary.name(of: wanted), clipID)
+                    }
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "plus").font(.system(size: 15, weight: .bold))
-                        Text("Add at playhead").font(.system(size: 15, weight: .medium))
+                        if ready {
+                            Image(systemName: "plus").font(.system(size: 15, weight: .bold))
+                        } else {
+                            ProgressView().controlSize(.small).tint(.white)
+                        }
+                        Text(ready ? "Add at playhead" : "Getting sound…").font(.system(size: 15, weight: .medium))
                     }
                     .foregroundStyle(.white).padding(.horizontal, 14).frame(height: 36)
-                    .background(Color(hex: 0x1769FF), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color(hex: 0x1769FF).opacity(ready ? 1 : 0.55), in: RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
+                .disabled(!ready)
                 .accessibilityIdentifier("addSoundAtPlayhead")
                 Button(action: onMusic) {
                     HStack(spacing: 8) {
@@ -599,13 +651,15 @@ struct AudioPanelV5: View {
                 .accessibilityIdentifier("musicFromFiles")
             }
             .padding(.top, 12)
-            if library.failed {
-                Text("Sounds couldn't download. Check your connection.").font(.system(size: 11)).foregroundStyle(CS.textMutedF)
+            if library.failed && !library.loading {
+                Button("Sounds couldn't download. Tap to try again.") { Task { await library.ensure() } }
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(CS.cyan)
                     .padding(.top, 4)
+                    .accessibilityIdentifier("soundsRetry")
             }
         }
         .frame(height: EditorPanelKind.audio.height())
-        .task { await library.prepare() }
+        .task { await library.ensure() }
         .accessibilityIdentifier("audioPanel")
     }
 }

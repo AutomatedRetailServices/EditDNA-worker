@@ -108,10 +108,10 @@ enum EditorV5Probe {
         await SfxLibrary.shared.prepare()
         log("sounds_ready=\(SfxLibrary.shared.ready.sorted().joined(separator: ",")) failed=\(SfxLibrary.shared.failed)")
         await wait(2)
-        let tap = model.addSound(sfxID: "tap", at: 0.3)
+        let tap = model.addSound(sfxID: "tap", at: 0.3) ?? "none"
         _ = model.addSound(sfxID: "good", at: 1.2)
         _ = model.addSound(sfxID: "wrong", at: 2.1)
-        let typing = model.addSound(sfxID: "typing", at: 2.6)
+        let typing = model.addSound(sfxID: "typing", at: 2.6) ?? "none"
         await wait(2)
         if let item = model.audioClips.first(where: { $0.id == typing }) {
             await model.trimAudioClip(id: typing, edge: .end, to: item.start + 4.5)?.value

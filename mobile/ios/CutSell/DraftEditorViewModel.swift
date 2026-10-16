@@ -698,6 +698,10 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func removeZoomKeyframe(id: String) async {
+        if keyframesSet {
+            deleteKeyframe(id: id)
+            return
+        }
         await deleteZoomKeyframe(id: id)
     }
 
@@ -831,6 +835,11 @@ final class DraftEditorViewModel: ObservableObject {
         await compositionRequest
         // Voice-overs placed before Editor v5 join the draft once.
         adoptLegacyVoiceOvers()
+        // Build 17: Auto Zoom AI push-ins become normal keyframes once; cleaned copies the draft
+        // already uses are fetched for the preview; CutSell sounds download for the preview.
+        adoptLegacyZoomKeyframes()
+        resumeCleanAudio()
+        Task { await SfxLibrary.shared.ensure() }
         // Voice-overs saved earlier that did not finish uploading: show them and try again.
         resumePendingVoiceOvers()
         await measureSourceDurations()
@@ -904,14 +913,20 @@ final class DraftEditorViewModel: ObservableObject {
     var previewVoices: [PreviewVoice] {
         var voices: [PreviewVoice] = []
         for clip in audioClips {
-            let url: URL?
+            var url: URL?
             switch clip.kind {
-            case .voice, .music: url = clip.assetID.flatMap { VoiceOverStore.url(for: $0) }
+            case .voice, .music:
+                // Clean up voice: the cleaned copy once it is on this iPhone (the export plays the same).
+                if clip.clean, let asset = clip.assetID {
+                    url = CleanAudioCenter.shared.localURL(.asset(asset), project: project)
+                }
+                url = url ?? clip.assetID.flatMap { VoiceOverStore.url(for: $0) }
             case .sfx: url = clip.sfxID.flatMap { SfxLibrary.localURL($0) }
             }
             guard let url else { continue }
             voices.append(PreviewVoice(key: clip.id, url: url, start: clip.start, sourceIn: clip.sourceIn,
-                                       sourceOut: clip.sourceOut, volume: clip.volume, ducksVideo: clip.duckVideo))
+                                       sourceOut: clip.sourceOut, volume: clip.muted ? 0 : clip.volume,
+                                       ducksVideo: clip.duckVideo && !clip.muted))
         }
         for item in pendingVoiceOvers {
             voices.append(PreviewVoice(key: "pending_\(item.id)", url: PendingVoiceOverStore.fileURL(item),

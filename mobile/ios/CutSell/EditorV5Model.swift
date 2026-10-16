@@ -26,6 +26,8 @@ struct AudioClipItem: Identifiable, Equatable {
     var duckVideo = false
     var clean = false
     var enhancedAtRecord = false
+    /// Build 17: this clip alone is silent (its volume is kept for when it is unmuted).
+    var muted = false
 
     var length: Double { max(0, sourceOut - sourceIn) }
     var end: Double { start + length }
@@ -54,6 +56,7 @@ struct AudioClipItem: Identifiable, Equatable {
         duckVideo = object["duck_video"]?.boolValue ?? false
         clean = object["clean"]?.boolValue ?? false
         enhancedAtRecord = object["enhanced_at_record"]?.boolValue ?? false
+        muted = object["muted"]?.boolValue ?? false
     }
 
     var json: [String: JSONValue] {
@@ -68,6 +71,7 @@ struct AudioClipItem: Identifiable, Equatable {
         if duckVideo { object["duck_video"] = .bool(true) }
         if clean { object["clean"] = .bool(true) }
         if enhancedAtRecord { object["enhanced_at_record"] = .bool(true) }
+        if muted { object["muted"] = .bool(true) }
         return object
     }
 }
@@ -347,6 +351,7 @@ extension DraftEditorViewModel {
                               sfxID: item.sfxID, start: time, sourceIn: cut, sourceOut: item.sourceOut,
                               volume: item.volume, duckVideo: item.duckVideo, clean: item.clean,
                               enhancedAtRecord: item.enhancedAtRecord)
+        right.muted = item.muted
         applyDraftChange { object in
             Self.mapAudioClips(&object) { items in items.flatMap { $0.id == id ? [left, right] : [$0] } }
         }
@@ -418,9 +423,11 @@ extension DraftEditorViewModel {
         }
     }
 
-    /// A CutSell sound at the cursor (Audio panel "Add at playhead").
+    /// A CutSell sound at the cursor (Audio panel "Add at playhead"). Only once its file is on this
+    /// iPhone (never a silent clip); nil while it is still downloading.
     @discardableResult
-    func addSound(sfxID: String, at time: Double) -> String {
+    func addSound(sfxID: String, at time: Double) -> String? {
+        guard SfxLibrary.localURL(sfxID) != nil else { return nil }
         let id = "ac_\(UUID().uuidString.prefix(8).lowercased())"
         let length = SfxLibrary.duration(of: sfxID) ?? (sfxID == "typing" ? 3 : 0.6)
         addAudioClip(AudioClipItem(id: id, kind: .sfx, sfxID: sfxID, start: max(0, min(time, max(0, timelineDuration - 0.1))),
@@ -581,6 +588,20 @@ final class SfxLibrary: ObservableObject {
             .appendingPathComponent("CutSell/Sounds/v1/\(id).m4a")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
+
+    /// Downloads the sounds that are not on this iPhone yet, trying again a few times (3 s, 10 s,
+    /// 30 s) when the network fails. Called when the editor opens and when the Audio panel opens.
+    func ensure() async {
+        for delay in [0.0, 3, 10, 30] {
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+            await prepare()
+            if allReady { return }
+        }
+    }
+
+    var allReady: Bool { (Self.buttons.map(\.id) + ["typing_long"]).allSatisfy { ready.contains($0) } }
 
     /// Downloads every sound the first time the Audio panel opens; later opens use the copies.
     func prepare() async {

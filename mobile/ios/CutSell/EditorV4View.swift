@@ -38,13 +38,24 @@ struct EditorV4View: View {
     @State private var musicPicker = false
     @State private var musicNotice = false
     @AppStorage("cutsell.musicRightsNoticeShown") private var musicNoticeShown = false
+    /// Build 17: the preview rebuilds when a sound finishes downloading or a clean copy is ready.
+    @ObservedObject private var sounds = SfxLibrary.shared
+    @ObservedObject private var cleaning = CleanAudioCenter.shared
+    /// A framing made with the fingers at the cursor, not kept yet (◇ keeps it as a keyframe).
+    @State private var keyPending: TransformValue?
+    @State private var keyPendingTarget: KeyframeTarget?
+    @State private var keyPendingTime: Double = 0
+    @State private var keyGestureBase: TransformValue?
+    /// The video's level before the row's speaker silenced it.
+    @State private var videoLevelBeforeMute: Double = 1
 
     private var duration: Double { max(0.1, playback.duration > 0 ? playback.duration : model.timelineDuration) }
 
     /// Rebuild the preview when what it plays changes (the predicted draft included, so it follows at once).
     private var previewKey: String {
         let placements = model.previewVoices.map { "\($0.key)@\($0.start)" }.joined(separator: ",")
-        return "\(model.displayDraft?.hashValue ?? 0)|\(placements)|\(model.voiceOverVolume)|\(model.loadGeneration)"
+        let cleanReady = cleaning.states.values.filter { if case .ready = $0 { return true } else { return false } }.count
+        return "\(model.displayDraft?.hashValue ?? 0)|\(placements)|\(model.voiceOverVolume)|\(model.loadGeneration)|\(sounds.ready.count)|\(cleanReady)"
     }
 
     var body: some View {
@@ -144,7 +155,14 @@ struct EditorV4View: View {
             .onChange(of: playback.currentTime) { _, time in
                 if abs(model.playheadTime - time) >= 0.1 || time == 0 { model.playheadTime = time }
             }
-            .onChange(of: selection) { _, newValue in selectionChanged(newValue) }
+            .onChange(of: selection) { _, newValue in
+                selectionChanged(newValue)
+                clearKeyPending()
+            }
+            .onChange(of: playback.currentTime) { _, time in
+                // A framing not kept with ◇ belongs to its moment: moving the cursor drops it.
+                if keyPending != nil, keyGestureBase == nil, abs(time - keyPendingTime) > 0.03 { clearKeyPending() }
+            }
             // A photo / video just picked for an overlay comes selected (move it, pinch it).
             .onChange(of: model.lastAddedOverlayID) { _, id in
                 guard let id else { return }
@@ -560,6 +578,7 @@ struct EditorV4View: View {
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Self.borderGradient, lineWidth: 2))
             .contentShape(Rectangle())
             .onTapGesture { videoTapped() }
+            .gesture(videoFramingGesture(size: size), including: framingEnabled ? .all : .subviews)
             .overlay(alignment: .topLeading) { zoomBadge }
             .overlay(alignment: .bottom) { videoBottomPill }
     }
@@ -668,17 +687,25 @@ struct EditorV4View: View {
     private func videoLayer(fill: Bool) -> some View {
         let degrees = model.rotation(at: playback.currentTime)
         let quarter = degrees % 180 != 0
-        return PlayerLayerView(player: playback.player, fill: fill)
-            .scaleEffect(zoomNow)
-            .scaleEffect(x: model.isMirrored(at: playback.currentTime) ? -1 : 1, y: 1)
-            .rotationEffect(.degrees(Double(degrees)))
-            .scaleEffect(quarter ? 266.0 / 472.0 : 1)
+        let key = shownVideoTransform
+        return GeometryReader { box in
+            PlayerLayerView(player: playback.player, fill: fill)
+                .scaleEffect(x: model.isMirrored(at: playback.currentTime) ? -1 : 1, y: 1)
+                .rotationEffect(.degrees(Double(degrees)))
+                .scaleEffect(quarter ? 266.0 / 472.0 : 1)
+                // Keyframes / Auto Zoom AI, as the export draws them: zoom about the centre, turn
+                // clockwise, then move by a fraction of the frame.
+                .scaleEffect(key.scale)
+                .rotationEffect(.degrees(key.rotation))
+                .offset(x: box.size.width * key.x, y: box.size.height * key.y)
+                .frame(width: box.size.width, height: box.size.height)
+        }
             .animation(.easeOut(duration: 0.2), value: model.isMirrored(at: playback.currentTime))
             .animation(.easeOut(duration: 0.25), value: degrees)
     }
 
     /// Auto Zoom AI in the preview: the same push-in as the export at this moment.
-    private var zoomNow: CGFloat { CGFloat(model.zoomScale(at: playback.currentTime)) }
+    private var zoomNow: CGFloat { CGFloat(shownVideoTransform.scale) }
 
     /// "◇ Zoom 4%" while a zoom is on screen (Figma 1054:2497).
     @ViewBuilder
@@ -804,6 +831,9 @@ struct EditorV4View: View {
                 MediaOverlayOnVideo(
                     overlay: overlay, frame: frame, time: playback.currentTime,
                     isSelected: selection == .overlay(overlay.id, isText: false),
+                    keyTransform: shownOverlayTransform(overlay.id),
+                    keyMode: !model.overlayKeyframes(overlayID: overlay.id).isEmpty,
+                    onKeyChange: { value in keyFramingEnded(.overlay(overlay.id), value.clampedForOverlay) },
                     onRotate: { degrees in model.setOverlayStyle(id: overlay.id) { $0.rotation = degrees } },
                     onSelect: { selection = .overlay(overlay.id, isText: false) },
                     onChange: { x, y, width in
@@ -848,7 +878,7 @@ struct EditorV4View: View {
             .accessibilityIdentifier("editorPlay")
             HStack(spacing: 0) {
                 Spacer()
-                control("Ed4CtlKeyframe", "Add zoom keyframe") { addKeyframe() }
+                keyframeControl
                     .accessibilityIdentifier("editorKeyframe")
                 control("Ed4CtlUndo", "Undo") { Task { await model.undo() } }
                     .accessibilityIdentifier("editorUndo")
@@ -859,6 +889,26 @@ struct EditorV4View: View {
             .padding(.trailing, 10)
         }
         .frame(height: 24)
+    }
+
+    /// ◇: outline = add a keyframe here; filled = the cursor is on one (tap deletes it).
+    private var keyframeControl: some View {
+        let onKey = keyframeUnderCursor != nil
+        return Button { addKeyframe() } label: {
+            Group {
+                if onKey {
+                    ZoomDiamond(isSelected: true).scaleEffect(1.5)
+                } else {
+                    Image("Ed4CtlKeyframe").resizable().frame(width: 24, height: 24)
+                }
+            }
+            .frame(width: 36, height: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 36, height: 24)
+        .accessibilityLabel(onKey ? "Delete keyframe" : "Add keyframe")
+        .accessibilityValue(onKey ? "filled" : "empty")
     }
 
     private func control(_ image: String, _ label: String, action: @escaping () -> Void) -> some View {
@@ -872,17 +922,139 @@ struct EditorV4View: View {
         .accessibilityLabel(label)
     }
 
+    /// The video row's speaker: silences all of the video's own sound, and brings it back.
+    private func toggleVideoSound() {
+        if model.videoVolume > 0.001 {
+            videoLevelBeforeMute = model.videoVolume
+            model.setVideoVolume(0)
+            show(.message("Video sound off · tap ↶ to undo", undo: true))
+        } else {
+            model.setVideoVolume(max(0.05, videoLevelBeforeMute))
+            show(.message("Video sound on"))
+        }
+    }
+
+    // MARK: Keyframes (◇): framing with the fingers, kept at the cursor
+
+    /// What ◇ works on: the selected overlay (Float) or video clip, the clip of a selected ◇, or
+    /// the clip under the cursor.
+    private var keyTarget: KeyframeTarget? {
+        switch selection {
+        case .overlay(let id, isText: false):
+            return model.overlayStyle(id).layout == .float ? .overlay(id) : nil
+        case .video(let id): return .video(id)
+        case .zoom(let id):
+            if let mark = model.videoKeyframeMarks.first(where: { $0.id == id }) { return mark.target }
+            for overlay in model.overlaysOnScreen where model.overlayKeyframeMarks(overlayID: overlay.id).contains(where: { $0.id == id }) {
+                return .overlay(overlay.id)
+            }
+            return nil
+        default:
+            return model.clipWindow(at: playback.currentTime).map { .video($0.clipID) }
+        }
+    }
+
+    private func clearKeyPending() {
+        keyPending = nil
+        keyPendingTarget = nil
+        keyGestureBase = nil
+    }
+
+    /// The video's framing shown now (a framing being made with the fingers, else the keyframes').
+    private var shownVideoTransform: TransformValue {
+        if let keyPending, case .video = keyPendingTarget { return keyPending.clampedForVideo }
+        return model.videoTransform(at: playback.currentTime)
+    }
+
+    private func shownOverlayTransform(_ id: String) -> TransformValue {
+        if let keyPending, keyPendingTarget == .overlay(id) { return keyPending.clampedForOverlay }
+        return model.overlayTransform(id: id, at: playback.currentTime)
+    }
+
+    /// The cursor is on a ◇ of the target (the button is filled; tapping it deletes that ◇).
+    private var keyframeUnderCursor: KeyframeMark? {
+        guard let target = keyTarget else { return nil }
+        return model.keyframe(at: playback.currentTime, target: target)
+    }
+
+    /// A framing finished with the fingers: on a ◇ it changes that keyframe at once; elsewhere it
+    /// waits for ◇ (moving the cursor drops it).
+    private func keyFramingEnded(_ target: KeyframeTarget, _ value: TransformValue) {
+        let at = playback.currentTime
+        if let mark = model.keyframe(at: at, target: target) {
+            model.updateKeyframe(id: mark.id, value: value)
+            clearKeyPending()
+            return
+        }
+        keyPending = value
+        keyPendingTarget = target
+        keyPendingTime = at
+        show(.message("Tap ◇ to keep this framing"))
+    }
+
     private func addKeyframe() {
         playback.pause()
         let at = playback.currentTime
-        Task {
-            if let id = await model.addZoomKeyframe(at: at) {
-                selection = .zoom(id)
-                show(.message("Zoom added at \(EditorTime.short(at))", undo: true))
-            } else {
-                show(.message("Move the cursor onto a clip to add a zoom."))
+        guard let target = keyTarget else {
+            show(.message("Select a clip or an overlay, then tap ◇."))
+            return
+        }
+        if let mark = model.keyframe(at: at, target: target) {
+            model.deleteKeyframe(id: mark.id)
+            if selection == .zoom(mark.id) { selection = nil }
+            clearKeyPending()
+            show(.message("Keyframe deleted · tap ↶ to undo", undo: true))
+            return
+        }
+        let value = (keyPendingTarget == target ? keyPending : nil) ?? model.transform(of: target, at: at)
+        if model.addKeyframe(target: target, at: at, value: value) != nil {
+            clearKeyPending()
+            show(.message("Keyframe added at \(EditorTime.short(at)) · tap ↶ to undo", undo: true))
+        } else {
+            show(.message("Move the cursor onto the clip to add a keyframe."))
+        }
+    }
+
+    /// Pinch to zoom, drag to move, twist to turn the selected video clip (at the cursor).
+    private func videoFramingGesture(size: CGSize) -> some Gesture {
+        SimultaneousGesture(SimultaneousGesture(MagnificationGesture(), RotationGesture()), DragGesture(minimumDistance: 3))
+            .onChanged { value in
+                guard case .video(let clipID) = keyTarget else { return }
+                if keyGestureBase == nil {
+                    playback.pause()
+                    keyGestureBase = keyPendingTarget == .video(clipID) ? (keyPending ?? shownVideoTransform) : shownVideoTransform
+                    keyPendingTarget = .video(clipID)
+                    keyPendingTime = playback.currentTime
+                }
+                guard let base = keyGestureBase else { return }
+                var next = base
+                if let magnification = value.first?.first { next.scale = base.scale * Double(magnification) }
+                if let turn = value.first?.second { next.rotation = base.rotation + turn.degrees }
+                if let drag = value.second {
+                    next.x = base.x + Double(drag.translation.width / max(1, size.width))
+                    next.y = base.y + Double(drag.translation.height / max(1, size.height))
+                }
+                keyPending = next.clampedForVideo
+            }
+            .onEnded { _ in
+                guard keyGestureBase != nil, case .video(let clipID) = keyTarget, let value = keyPending else {
+                    keyGestureBase = nil
+                    return
+                }
+                keyGestureBase = nil
+                keyFramingEnded(.video(clipID), value)
+            }
+    }
+
+    /// The video's framing gesture works while a video clip (or one of its ◇) is selected.
+    private var framingEnabled: Bool {
+        if case .video = keyTarget, panel == .none {
+            switch selection {
+            case .video, .zoom: return true
+            default: return false
             }
         }
+        return false
     }
 
     // MARK: Bottom: timeline, menus, toolbar
@@ -907,7 +1079,7 @@ struct EditorV4View: View {
                         onAddVideo: { playback.pause(); sheet = .brollGallery },
                         onAddVoice: { openVoiceOver() },
                         onAddOverlay: { openOverlayPanel() },
-                        onToggleVideoSound: { openCard(.volume) },
+                        onToggleVideoSound: { toggleVideoSound() },
                         compact: card != nil
                     )
                     .padding(.top, 1)
@@ -935,7 +1107,7 @@ struct EditorV4View: View {
         case .overlay(let id):
             OverlayPanelV5(model: model, overlayID: id, onClose: { closeCard() })
         case .volume:
-            VolumePanelV5(model: model, clipID: selectedVideoClip, onClose: { closeCard() })
+            VolumePanelV5(model: model, target: model.volumeTarget(for: selection), onClose: { closeCard() })
         case .speed:
             SpeedPanelV5(model: model, clipID: selectedVideoClip, onClose: { closeCard() })
         case .voice(let id):
@@ -955,7 +1127,9 @@ struct EditorV4View: View {
                 show(.message("Sound deleted", undo: true))
             }, onClose: { closeCard() })
         case .audio:
-            AudioPanelV5(model: model, playhead: { playback.currentTime }, onAdded: { name in
+            AudioPanelV5(model: model, playhead: { playback.currentTime }, onAdded: { name, clipID in
+                // The new sound comes selected (handles to trim, hold to move, Split, Delete).
+                selection = .sound(clipID)
                 show(.message("\(name) added · tap ↶ to undo", undo: true))
             }, onMusic: {
                 playback.pause()
@@ -986,7 +1160,9 @@ struct EditorV4View: View {
     }
 
     /// Selecting an overlay, a voice-over or a sound opens its panel; selecting something else closes it.
+    /// With Volume open, the panel stays and follows the selection ("Selected clip" / "Whole video").
     private func selectionChanged(_ newValue: EditorSelection?) {
+        if card == .volume { return }
         withAnimation(.easeOut(duration: 0.2)) {
             switch newValue {
             case .overlay(let id, isText: false): card = .overlay(id)
@@ -1639,6 +1815,11 @@ private struct MediaOverlayOnVideo: View {
     let frame: CGSize
     let time: Double
     let isSelected: Bool
+    /// Build 17 keyframes: the overlay's framing now (on top of its own place, size and turn).
+    let keyTransform: TransformValue
+    /// The overlay has keyframes: the fingers change the framing at the cursor, not its own place.
+    let keyMode: Bool
+    let onKeyChange: (TransformValue) -> Void
     let onRotate: (Double) -> Void
     let onSelect: () -> Void
     let onChange: (Double, Double, Double) -> Void
@@ -1683,15 +1864,17 @@ private struct MediaOverlayOnVideo: View {
 
     // Float: its own place and size; one finger moves, two fingers resize, the ↻ button turns it.
     private var floatBody: some View {
-        let w = frame.width * CGFloat(overlay.width) * pinch
+        let key = keyTransform
+        let w = frame.width * CGFloat(overlay.width) * pinch * CGFloat(key.scale)
         let h = w / CGFloat(max(0.1, aspect ?? 1))
-        let angle = turning ?? style.rotation
+        let angle = (turning ?? style.rotation) + key.rotation
         return feathered(picture.frame(width: w, height: h).clipShape(RoundedRectangle(cornerRadius: style.edge == .sharp ? 4 : 0)),
                          size: CGSize(width: w, height: h))
             .overlay { if isSelected { TornasolSelection(onTurn: turnGesture(center: CGSize(width: w, height: h))) } }
             .overlay { uploadBadge }
             .rotationEffect(.degrees(angle))
-            .position(x: frame.width * CGFloat(overlay.x) + drag.width, y: frame.height * CGFloat(overlay.y) + drag.height)
+            .position(x: frame.width * CGFloat(overlay.x + key.x) + drag.width,
+                      y: frame.height * CGFloat(overlay.y + key.y) + drag.height)
             .onTapGesture { overlay.failed ? onRetry() : onSelect() }
             .gesture(moveGesture.simultaneously(with: resizeGesture))
             .task(id: overlay.url?.path ?? overlay.id) {
@@ -1748,6 +1931,14 @@ private struct MediaOverlayOnVideo: View {
             }
             .onEnded { value in
                 guard turning == nil else { return }
+                if keyMode {
+                    var next = keyTransform
+                    next.x += Double(value.translation.width / frame.width)
+                    next.y += Double(value.translation.height / frame.height)
+                    drag = .zero
+                    onKeyChange(next)
+                    return
+                }
                 let nx = max(0, min(1, overlay.x + Double(value.translation.width / frame.width)))
                 let ny = max(0, min(1, overlay.y + Double(value.translation.height / frame.height)))
                 drag = .zero
@@ -1762,6 +1953,13 @@ private struct MediaOverlayOnVideo: View {
                 pinch = value
             }
             .onEnded { value in
+                if keyMode {
+                    var next = keyTransform
+                    next.scale *= Double(value)
+                    pinch = 1
+                    onKeyChange(next)
+                    return
+                }
                 let nw = max(0.1, min(1, overlay.width * Double(value)))
                 pinch = 1
                 onChange(overlay.x, overlay.y, nw)
@@ -1781,7 +1979,15 @@ private struct MediaOverlayOnVideo: View {
                 turning = degrees.truncatingRemainder(dividingBy: 360)
             }
             .onEnded { _ in
-                if let turning { onRotate(turning) }
+                if let turning {
+                    if keyMode {
+                        var next = keyTransform
+                        next.rotation = keyTransform.rotation + (turning - style.rotation)
+                        onKeyChange(next)
+                    } else {
+                        onRotate(turning)
+                    }
+                }
                 turning = nil
             }
     }

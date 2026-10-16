@@ -181,8 +181,15 @@ final class DraftPlaybackController: ObservableObject {
             parts.append("\(clipID)|\(sourceID)|\(start)|\(end)|\(muted)|\(volume)|\(playable)|\(speed)")
         }
         for voice in model.previewVoices {
-            parts.append("vo|\(voice.key)|\(voice.start)|\(voice.sourceIn)|\(voice.sourceOut)|\(voice.volume)|\(voice.ducksVideo)")
+            parts.append("vo|\(voice.key)|\(voice.start)|\(voice.sourceIn)|\(voice.sourceOut)|\(voice.volume)|\(voice.ducksVideo)|\(voice.url.lastPathComponent)")
         }
+        // Build 17: Clean up (which clips play a cleaned copy that is ready) and the whole video's volume.
+        for clip in model.selectedClips where model.clipPlaysCleaned(clip) {
+            let source = clip["source_asset_id"]?.stringValue ?? ""
+            let ready = CleanAudioCenter.shared.localURL(.source(source), project: model.project) != nil
+            parts.append("clean|\(clip["clip_id"]?.stringValue ?? "")|\(ready)")
+        }
+        parts.append("master|\(model.masterVolume)|\(model.masterMuted)")
         for overlay in model.overlaysOnScreen where overlay.kind == .video && !overlay.style.muted {
             parts.append("ova|\(overlay.id)|\(overlay.start)|\(overlay.end)|\(overlay.sourceStart)|\(overlay.style.volume)")
         }
@@ -212,6 +219,8 @@ final class DraftPlaybackController: ObservableObject {
         let openedAt: Date
     }
     private var sourceCache: [String: LoadedSource] = [:]
+    /// Cleaned copies used by the current composition (kept alive with it).
+    private var retainedCleanAssets: [AVURLAsset] = []
 
     private func loadSources(_ urls: [String: URL], needed: Set<String>, validFor: Double) async -> [String: LoadedSource] {
         var result: [String: LoadedSource] = [:]
@@ -291,8 +300,12 @@ final class DraftPlaybackController: ObservableObject {
             var setVideoTransform = false
             var windows: [CaptionClipWindow] = []
             /// The video's own sound per clip on the played timeline: (start, end, volume).
-            var baseVolumes: [(start: Double, end: Double, volume: Float)] = []
-            let videoGain = Float(max(0, min(1, model.videoVolume)))
+            var baseLevels: [(start: Double, end: Double, level: Double)] = []
+            let master = model.masterMuted ? 0 : model.masterVolume
+            let videoGain = max(0, min(2, model.videoVolume)) * master
+            /// Cleaned copies of the sources (Clean up voice), opened once per rebuild.
+            var cleanTracks: [String: AVAssetTrack] = [:]
+            retainedCleanAssets = []
 
             for (clipIndex, clip) in model.selectedClips.enumerated() {
                 guard let sourceID = clip["source_asset_id"]?.stringValue,
@@ -326,15 +339,25 @@ final class DraftPlaybackController: ObservableObject {
                     setVideoTransform = true
                 }
 
-                if let audioCompositionTrack, let sourceAudio = source.audio {
-                    try audioCompositionTrack.insertTimeRange(range, of: sourceAudio, at: cursor)
+                if let audioCompositionTrack {
+                    var sound = source.audio
+                    if model.clipPlaysCleaned(clip),
+                       let cleanURL = CleanAudioCenter.shared.localURL(.source(sourceID), project: model.project) {
+                        if cleanTracks[sourceID] == nil {
+                            let asset = AVURLAsset(url: cleanURL)
+                            retainedCleanAssets.append(asset)   // a track whose asset is gone can't be inserted
+                            cleanTracks[sourceID] = try? await asset.loadTracks(withMediaType: .audio).first
+                        }
+                        sound = cleanTracks[sourceID] ?? sound
+                    }
+                    if let sound { try audioCompositionTrack.insertTimeRange(range, of: sound, at: cursor) }
                 }
                 if speed != 1 {
                     composition.scaleTimeRange(CMTimeRange(start: cursor, duration: durationTime), toDuration: played)
                 }
                 let muted = clip["audio_muted"]?.boolValue ?? false
-                let volume = Float(max(0, min(1, clip["audio_volume"]?.doubleValue ?? 1))) * videoGain
-                baseVolumes.append((CMTimeGetSeconds(cursor), CMTimeGetSeconds(cursor) + clipDuration / speed, muted ? 0 : volume))
+                let level = max(0, min(2, clip["audio_volume"]?.doubleValue ?? 1)) * videoGain
+                baseLevels.append((CMTimeGetSeconds(cursor), CMTimeGetSeconds(cursor) + clipDuration / speed, muted ? 0 : level))
                 cursor = CMTimeAdd(cursor, played)
             }
 
@@ -349,7 +372,12 @@ final class DraftPlaybackController: ObservableObject {
             // voice-over with "Lower video sound" plays -- the same as the export.
             if let audioParameters {
                 let ducks = model.previewVoices.filter(\.ducksVideo).map { ($0.start, $0.start + ($0.sourceOut - $0.sourceIn)) }
-                Self.applyBaseVolumes(audioParameters, clips: baseVolumes, ducks: ducks)
+                // Above 100 % (up to 200 %, like the export) the extra gain comes from a tap on the track.
+                let peak = baseLevels.map(\.level).max() ?? 1
+                let tapGain = max(1, peak)
+                if tapGain > 1.001, let tap = AudioGainTap.make(gain: tapGain) { audioParameters.audioTapProcessor = tap }
+                let clips = baseLevels.map { (start: $0.start, end: $0.end, volume: Float($0.level / tapGain)) }
+                Self.applyBaseVolumes(audioParameters, clips: clips, ducks: ducks)
                 mixInputs.append(audioParameters)
             }
 
@@ -368,7 +396,7 @@ final class DraftPlaybackController: ObservableObject {
                     of: voice, at: CMTime(seconds: placement.start, preferredTimescale: 600)
                 )
                 let parameters = AVMutableAudioMixInputParameters(track: track)
-                parameters.setVolume(Float(max(0, min(1, placement.volume))), at: .zero)
+                AudioGainTap.apply(max(0, min(2, placement.volume)) * master, to: parameters)
                 mixInputs.append(parameters)
             }
 
@@ -386,7 +414,7 @@ final class DraftPlaybackController: ObservableObject {
                     of: sound, at: CMTime(seconds: overlay.start, preferredTimescale: 600)
                 )
                 let parameters = AVMutableAudioMixInputParameters(track: track)
-                parameters.setVolume(Float(max(0, min(1, overlay.style.volume))), at: .zero)
+                AudioGainTap.apply(max(0, min(2, overlay.style.volume)) * master, to: parameters)
                 mixInputs.append(parameters)
             }
 
