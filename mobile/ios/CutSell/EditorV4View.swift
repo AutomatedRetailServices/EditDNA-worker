@@ -117,6 +117,18 @@ struct EditorV4View: View {
                     .allowsHitTesting(false)
                     .accessibilityLabel(b17State)
                     .accessibilityIdentifier("b17State")
+                // Moves the cursor exactly 1 s on (a play / pause tap overshoots: the UI test waits
+                // for the app to go idle while the video plays).
+                VStack {
+                    HStack {
+                        Button { playback.seek(to: playback.currentTime + 1) } label: {
+                            Color.white.opacity(0.05).frame(width: 30, height: 30)
+                        }
+                        .accessibilityIdentifier("b17Step")
+                        Spacer()
+                    }
+                    Spacer()
+                }
             }
             #endif
         }

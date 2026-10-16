@@ -84,10 +84,9 @@ final class Build17UITests: XCTestCase {
 
     /// Slide the tracks under the cursor: `seconds` forward (at the default 30 points a second).
     private func scrub(seconds: Double) {
-        // Play for about that long, then pause (the cursor moves on like for the creator).
+        // The probe's step button moves the cursor exactly 1 s per tap (play / pause overshoots).
         let before = state()
-        tap("editorPlay")
-        tap("editorPlay")
+        for _ in 0..<max(1, Int(seconds.rounded())) { tap("b17Step") }
         pause(0.6)
         log("cursor moved: [\(before)] -> [\(state())]")
     }
