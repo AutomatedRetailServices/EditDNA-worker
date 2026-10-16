@@ -221,6 +221,9 @@ class DraftClip:
     # Editor v5 quarter turn of this clip's picture only (0/90/180/270), added to the draft-level
     # `rotation`: the clip renders at (draft.rotation + rotation) % 360. Captions/overlays upright.
     rotation: int = 0
+    # Editor v5 (build 17): play the cleaned version of this clip's own sound (noise reduction +
+    # even loudness, made once by audio_clean_job; the iPhone preview plays the same file).
+    clean_voice: bool = False
     # Local face/pose/motion evidence carried through from the CandidateTake
     # this clip was built from (see local_performance.py). Optional and
     # defaulted to None so every existing construction site (serde.py's
@@ -402,6 +405,8 @@ class AudioClip:
     volume: float = 1.0
     duck_video: bool = False
     clean: bool = False
+    # Editor v5 (build 17): this clip alone is silent (its volume is kept for when it is unmuted).
+    muted: bool = False
     # Informational: the app already enhanced this recording when it was made. Round-trips only.
     enhanced_at_record: bool = False
 
@@ -473,6 +478,14 @@ class DraftTimeline:
     # Editor v5: AI zoom keyframes the creator deleted, so a reprocessed cut does not bring them
     # back (draft_merge.merge_reprocessed_draft). Never drawn; tombstones only.
     zoom_removed: Tuple["ZoomTombstone", ...] = ()
+    # Editor v5 (build 17): transform keyframes (keyframes.py). `keyframes_set` is True when the
+    # draft carries the `keyframes` list -- it then replaces the legacy `zoom_keyframes`.
+    keyframes: Tuple[object, ...] = ()
+    keyframes_set: bool = False
+    # Editor v5 (build 17): Volume panel "Whole video": a gain on the whole final sound (video,
+    # voice-overs, music, sounds and overlays), and Mute for all of it.
+    master_volume: float = 1.0
+    master_muted: bool = False
 
 
 @dataclass(frozen=True)

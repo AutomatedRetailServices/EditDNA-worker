@@ -38,6 +38,9 @@ TAP2 = dict(TAP, audio_id="a4", start=3.0)
 @pytest.fixture
 def registry(monkeypatch):
     calls = []
+    # Build 17: a cleaned voice plays its stored cleaned copy (made from the registry's file).
+    monkeypatch.setattr(export_job.audio_clean, "ensure_clean_audio",
+                        lambda *, ident, local_input=None, **_: f"/job/clean-{ident}.m4a")
 
     def fake_resolve(*, user_id, project_id, asset_id, required_media_kind, materialize=None, **kwargs):
         calls.append((user_id, project_id, asset_id, required_media_kind))
@@ -80,8 +83,11 @@ def test_audio_lane_resolves_through_registry_and_library(registry, sfx_download
     # The same sound used twice is downloaded once, from the official library key.
     assert [uri for uri, _ in sfx_downloads] == ["s3://cutsell-media-test/assets/sfx/v1/tap_select.m4a"]
     assert sfx_downloads[0][1].startswith(str(tmp_path))
-    assert mix.video_volume == 0.6 and mix.video_clean is True
-    assert mix.clips[0] == LocalAudioClip("/job/asset-voice.m4a", 0.5, 0.2, 1.7, volume=1.2, duck_video=True, clean=True)
+    # Build 17: the video's own cleaned sound is played by the render plan (audio_clean copy), so
+    # the mix never re-filters it; a cleaned voice plays its cleaned copy, unfiltered.
+    assert mix.video_volume == 0.6 and mix.video_clean is False
+    assert mix.clips[0] == LocalAudioClip("/job/clean-asset-voice.m4a", 0.5, 0.2, 1.7, volume=1.2, duck_video=True,
+                                          clean=False)
     assert mix.clips[1] == LocalAudioClip("/job/asset-music.m4a", 0.0, 0.0, 30.0, volume=0.4)
     assert mix.clips[2].path == mix.clips[3].path == sfx_downloads[0][1]
     assert (mix.clips[3].start, mix.clips[3].source_out) == (3.0, 0.3)

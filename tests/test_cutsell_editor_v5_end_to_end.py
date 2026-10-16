@@ -22,6 +22,7 @@ from cutsell_worker.live_render_qc import render_with_post_render_qc
 from cutsell_worker.media_overlay_render import LocalMediaOverlay
 from cutsell_worker.render_plan import build_render_plan
 from cutsell_worker.serde import draft_from_dict
+from cutsell_worker.keyframes import overlay_track
 from cutsell_worker.timeline_composition_executor import ResolvedTimelineAsset
 
 W, H = 1080, 1920
@@ -92,16 +93,52 @@ def export_files(monkeypatch, media):
     monkeypatch.setenv("S3_BUCKET", "cutsell-media-test")
     monkeypatch.setattr(export_job.timeline_store, "resolve_timeline_asset_live", resolve)
     monkeypatch.setattr(export_job, "download_source", download)
+    # Build 17 Clean up: the cleaned copies live in a local stand-in for the bucket.
+    store: dict[str, str] = {}
+    root = Path(media["root"]) / "clean-store"
+    root.mkdir(exist_ok=True)
+
+    class Missing(Exception):
+        response = {"Error": {"Code": "404"}}
+
+    def head(bucket, key, **_):
+        if key not in store:
+            raise Missing(key)
+        return {}
+
+    def fetch(uri, destination, **_):
+        key = uri.split("/", 3)[3]
+        shutil.copyfile(store[key], destination)
+        return destination
+
+    class Uploader:
+        def upload_file(self, local, bucket, key, ExtraArgs=None):
+            target = root / f"{len(store):04d}.m4a"
+            shutil.copyfile(local, target)
+            store[key] = str(target)
+
+    import cutsell_worker.storage as storage_module
+    from cutsell_worker import audio_clean, storage_routing
+    monkeypatch.setattr(storage_routing, "head", head)
+    monkeypatch.setattr(storage_routing, "default_client", lambda **_: Uploader())
+    monkeypatch.setattr(storage_module, "download_source", fetch)
+    monkeypatch.setattr(audio_clean, "fetch_input", lambda *, ident, **_: assets[ident])
+    return store
 
 
 def _export(tmp_path, payload: dict, sources: dict[str, str], overlay_files: dict[str, str] | None = None,
             name: str = "out.mp4") -> str:
     """The export pipeline for one app-written draft; returns the delivered MP4."""
     draft = draft_from_dict(json.loads(json.dumps(payload)))
-    plan = build_render_plan(draft, sources)
-    overlays = tuple(LocalMediaOverlay(overlay=o, path=(overlay_files or {})[o.overlay_id]) for o in draft.media_overlays)
     work = tmp_path / name.replace(".mp4", "")
     work.mkdir()
+    clean_paths = export_job.export_clean_audio_paths(draft, dict(sources), user_id="u1", project_id="p1",
+                                                      directory=str(work))
+    plan = build_render_plan(draft, sources, clean_paths)
+    overlays = tuple(LocalMediaOverlay(
+        overlay=o, path=(overlay_files or {})[o.overlay_id],
+        keyframes=overlay_track(draft.keyframes, overlay_id=o.overlay_id) if o.layout == "float" else (),
+    ) for o in draft.media_overlays)
     mix = export_job.resolve_audio_mix(draft, user_id="u1", project_id="p1", directory=str(work))
     result = render_with_post_render_qc(
         draft, plan, str(tmp_path / name), text_overlays=draft.text_overlays, media_overlays=overlays,

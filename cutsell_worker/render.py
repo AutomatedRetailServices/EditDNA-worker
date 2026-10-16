@@ -552,13 +552,80 @@ def _zoom_filters(segment: RenderSegment, *, width: int, height: int) -> list[st
     ]
 
 
+#: Black border around the frame while it is transformed, so a turned picture shows black corners
+#: (the preview's background) instead of stretched edge pixels.
+_TRANSFORM_BORDER_PX = 64
+
+
+def _transform_points(segment: RenderSegment) -> tuple:
+    """The segment's transform keyframes; a legacy Auto Zoom push-in becomes its four keyframes
+    (keyframes.zoom_to_keyframes: the same smoothstep curve)."""
+    from .keyframes import video_track, zoom_to_keyframes
+
+    points = tuple(getattr(segment, "transform_keyframes", ()) or ())
+    if points:
+        return points
+    legacy = tuple(getattr(segment, "zoom_keyframes", ()) or ())[: MAX_ZOOMS_PER_SEGMENT * 4]
+    if not legacy:
+        return ()
+    keys = tuple(k for t, d, sc in legacy for k in zoom_to_keyframes(
+        {"source_time": float(t), "duration": float(d), "scale": float(sc), "keyframe_id": f"z{int(float(t) * 1000)}"}))
+    return video_track(keys, source_asset_id=segment.source_asset_id, start=float(segment.start) - 10.0,
+                       end=float(segment.end) + 10.0)
+
+
+def _transform_filters(segment: RenderSegment, *, width: int, height: int, fps: int = 30) -> list[str]:
+    """Editor v5 transform keyframes (and Auto Zoom AI) on the fitted frame, as ONE perspective
+    warp per frame: the picture is scaled by S about the centre, moved by (X, Y) of the frame, and
+    turned R degrees clockwise -- the iPhone preview's scaleEffect / offset / rotationEffect.
+    Values are smoothstep-interpolated between keyframes (keyframes.py). Time = in / fps + start
+    (the source second; `in` counts the segment's frames after `fps=`).
+
+    Build 17 fix: the old scale-then-crop zoom kept the crop at the top-left corner (crop does not
+    see the per-frame size), so every Auto Zoom pushed in towards the top-left of the picture."""
+    from .keyframes import expression, is_constant
+
+    points = _transform_points(segment)
+    if not points:
+        return []
+    if (is_constant(points, 1, 1.0) and is_constant(points, 2, 0.0) and is_constant(points, 3, 0.0)
+            and is_constant(points, 4, 0.0)):
+        return []
+    clock = f"(in/{int(fps)})"
+    offset = float(segment.start)
+    s = f"({expression(points, 1, offset=offset, var=clock)})"
+    x = f"({expression(points, 2, offset=offset, var=clock)})"
+    y = f"({expression(points, 3, offset=offset, var=clock)})"
+    angle = f"(({expression(points, 4, offset=offset, var=clock)})*PI/180)"
+    border = _TRANSFORM_BORDER_PX
+    cx, cy = width / 2.0, height / 2.0
+
+    def source(out_x: float, out_y: float) -> tuple[str, str]:
+        # src = centre + Rot(-R) * ((out - centre - pan) / S), in the bordered picture.
+        dx = f"(({out_x - cx:.1f}-{x}*{width})/{s})"
+        dy = f"(({out_y - cy:.1f}-{y}*{height})/{s})"
+        return (f"{cx + border:.1f}+{dx}*cos({angle})+{dy}*sin({angle})",
+                f"{cy + border:.1f}-{dx}*sin({angle})+{dy}*cos({angle})")
+
+    corners = (source(-border, -border), source(width + border, -border),
+               source(-border, height + border), source(width + border, height + border))
+    warp = ":".join(f"x{i}='{sx}':y{i}='{sy}'" for i, (sx, sy) in enumerate(corners))
+    return [
+        f"pad={width + 2 * border}:{height + 2 * border}:{border}:{border}:black",
+        f"perspective={warp}:sense=source:eval=frame:interpolation=linear",
+        f"crop={width}:{height}:{border}:{border}",
+    ]
+
+
 def _insert_zoom(video_chain: list[str], segment: RenderSegment, *, width: int, height: int) -> list[str]:
-    zoom = _zoom_filters(segment, width=width, height=height)
-    if not zoom:
-        return video_chain
     for index, item in enumerate(video_chain):
         if item.startswith("fps="):
-            return video_chain[: index + 1] + zoom + video_chain[index + 1:]
+            try:
+                fps = int(float(item.split("=", 1)[1].split(",")[0]))
+            except ValueError:
+                fps = RENDER_FPS_DEFAULT
+            zoom = _transform_filters(segment, width=width, height=height, fps=fps)
+            return video_chain[: index + 1] + zoom + video_chain[index + 1:] if zoom else video_chain
     return video_chain
 
 
@@ -740,8 +807,15 @@ def _concat_render_command(
         audio_format = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
         if probe.has_audio:
             effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
+            sound_input = video_input
+            clean_path = getattr(segment, "clean_audio_path", None)
+            if clean_path:
+                # Editor v5: the cleaned sound of this source (same timeline), same window.
+                command += ["-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}", "-i", str(clean_path)]
+                sound_input = input_index
+                input_index += 1
             audio_chain = [
-                f"[{video_input}:a]volume={effective_volume:.3f}",
+                f"[{sound_input}:a]volume={effective_volume:.3f}",
                 *_audio_join_fade_filters(segment.duration_sec),
                 *atempo_filters(segment_speed(segment)),
                 audio_format,
@@ -1120,7 +1194,8 @@ def _concat_render_command_with_audio_windows(
         effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
         audio_format = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
         if probe.has_audio:
-            command += ["-ss", f"{audio_start:.3f}", "-to", f"{audio_end:.3f}", "-i", segment.source_path]
+            sound_path = getattr(segment, "clean_audio_path", None) or segment.source_path
+            command += ["-ss", f"{audio_start:.3f}", "-to", f"{audio_end:.3f}", "-i", str(sound_path)]
             audio_input = input_index
             input_index += 1
             lead = max(0.0, segment.start - audio_start)

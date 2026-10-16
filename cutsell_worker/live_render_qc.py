@@ -217,7 +217,9 @@ def user_placed_windows(draft, segments, output_windows):
     creator turned the video's own volume to 0. Never anything the cut engine chose: engine
     material at speed 1 and normal volume is judged exactly as before."""
     video_volume = getattr(draft, "video_volume", 1.0)
-    if output_windows and video_volume is not None and float(video_volume) == 0.0:
+    # Build 17: the Volume panel's "Whole video" Mute / 0 % silences everything on purpose.
+    master_silent = bool(getattr(draft, "master_muted", False)) or float(getattr(draft, "master_volume", 1.0)) == 0.0
+    if output_windows and (master_silent or (video_volume is not None and float(video_volume) == 0.0)):
         return ((float(output_windows[0][0]), float(output_windows[-1][1])),)
     user_sources = set(getattr(draft, "user_media_source_ids", ()) or ())
     manual = {clip.clip_id: clip for clip in draft.selected if getattr(clip, "manual_end", False)}

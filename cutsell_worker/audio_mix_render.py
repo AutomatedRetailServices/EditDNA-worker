@@ -51,10 +51,13 @@ class AudioMix:
     video_volume: float = 1.0
     video_clean: bool = False
     clips: tuple[LocalAudioClip, ...] = ()
+    # Build 17: the Volume panel's "Whole video" gain on the finished sound (0 = Mute).
+    master_volume: float = 1.0
 
     @property
     def is_noop(self) -> bool:
-        return not self.clips and not self.video_clean and float(self.video_volume) == 1.0
+        return (not self.clips and not self.video_clean and float(self.video_volume) == 1.0
+                and float(self.master_volume) == 1.0)
 
 
 def _duck_intervals(clips: tuple[LocalAudioClip, ...]) -> list[tuple[float, float]]:
@@ -118,6 +121,8 @@ def build_audio_mix_command(composed_path: str, output_path: str, mix: AudioMix,
         labels.append(f"[mixclip{index}]")
 
     finish = LIMITER
+    if float(mix.master_volume) != 1.0:
+        finish = f"volume={float(mix.master_volume):.3f}," + finish
     if duration_sec is not None and float(duration_sec) > 0:
         finish += f",apad=whole_dur={float(duration_sec):.6f},atrim=duration={float(duration_sec):.6f}"
     if len(labels) > 1:

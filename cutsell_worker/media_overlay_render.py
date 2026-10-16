@@ -35,6 +35,9 @@ CANONICAL_OUTPUT_COLOR_METADATA_FLAGS: tuple[str, ...] = (
 class LocalMediaOverlay:
     overlay: MediaOverlay
     path: str
+    # Editor v5 (build 17): this overlay's transform keyframes as (time after its start, scale,
+    # x, y, rotation) points (keyframes.overlay_track). Drawn for the Float layout.
+    keyframes: tuple = ()
 
 
 def _ass_timestamp(seconds: float) -> str:
@@ -108,7 +111,7 @@ def build_final_overlay_command(
         local = media[position]
         overlay = local.overlay
         display_duration = max(0.001, overlay.end - overlay.start)
-        if _is_default_overlay(overlay):
+        if _is_default_overlay(overlay) and not local.keyframes:
             pixel_width = max(2, round(float(overlay.width) * width))
             x_expr = f"W*{float(overlay.x):.6f}-w/2"
             y_expr = f"H*{float(overlay.y):.6f}-h/2"
@@ -286,8 +289,12 @@ def _append_styled_overlay(filters: list[str], local: LocalMediaOverlay, *, inde
                 shaped = f"ovfeather{index}"
         else:
             filters.append(f"{head},scale={pixel_width}:-2,setsar=1,format=rgba[{shaped}]")
-        tail = []
         rotation = float(getattr(overlay, "rotation", 0.0) or 0.0)
+        if local.keyframes:
+            return _append_keyframed_float(filters, local, shaped=shaped, index=index, current_video=current_video,
+                                           width=width, height=height, size=(pixel_width, None), enable=enable,
+                                           rotation=rotation)
+        tail = []
         if rotation:
             radians = math.radians(rotation)
             tail.append(f"rotate=a={radians:.6f}:ow=rotw({radians:.6f}):oh=roth({radians:.6f}):c=none")
@@ -336,4 +343,39 @@ def _append_styled_overlay(filters: list[str], local: LocalMediaOverlay, *, inde
         filters.append(f"[ovunder{index}][ovhalf{index}]overlay=x={bx}:y={by}:{enable}[ovwith{index}]")
         base = f"ovwith{index}"
     filters.append(f"[{base}][ov{index}]overlay=x={rx}:y={ry}:{enable}:eof_action=pass[v{index}]")
+    return f"v{index}"
+
+
+def _append_keyframed_float(filters: list[str], local: LocalMediaOverlay, *, shaped: str, index: int,
+                            current_video: str, width: int, height: int, size, enable: str,
+                            rotation: float) -> str:
+    """Build 17: a Float overlay animated by its keyframes (keyframes.py: smoothstep between
+    keyframes, held outside). Scale is drawn with zoompan on a fixed transparent canvas (an
+    overlay input must keep one size), rotation with rotate on the same canvas, position with
+    the overlay filter's per-frame x / y. Local time = seconds after the overlay's start."""
+    from .keyframes import expression
+
+    overlay = local.overlay
+    points = tuple(local.keyframes)
+    start = float(overlay.start)
+    scales = [p[1] for p in points] or [1.0]
+    s_min, s_max = min(1.0, min(scales)), max(1.0, max(scales))
+    media = _media_size(local, None) or (16, 9)
+    pixel_width = _even(float(overlay.width) * width)
+    pixel_height = _even(pixel_width * media[1] / media[0])
+    base_w, base_h = _even(pixel_width * s_min), _even(pixel_height * s_min)
+    canvas = _even(math.hypot(pixel_width, pixel_height) * s_max + 8)
+    zoom = f"({expression(points, 1, var='(in/30)')})/{s_min:.5f}"
+    angle = f"(({expression(points, 4, var='t')})+{rotation:.4f})*PI/180"
+    filters.append(
+        f"[{shaped}]scale={base_w}:{base_h},fps=30,pad={canvas}:{canvas}:(ow-iw)/2:(oh-ih)/2:color=black@0,"
+        f"zoompan=z='{zoom}':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s={canvas}x{canvas}:fps=30,"
+        f"rotate=a='{angle}':ow={canvas}:oh={canvas}:c=none,"
+        f"setpts=PTS-STARTPTS+{start:.3f}/TB[ov{index}]"
+    )
+    local_t = f"(t-{start:.3f})"
+    x_expr = f"W*({float(overlay.x):.6f}+({expression(points, 2, var=local_t)}))-{canvas // 2}"
+    y_expr = f"H*({float(overlay.y):.6f}+({expression(points, 3, var=local_t)}))-{canvas // 2}"
+    filters.append(f"[{current_video}][ov{index}]overlay=x='{x_expr}':y='{y_expr}':eval=frame:{enable}:"
+                   f"eof_action=pass[v{index}]")
     return f"v{index}"

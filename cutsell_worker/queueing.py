@@ -116,3 +116,18 @@ def enqueue_unseen_clean_cut_benchmark(
         },
     )
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+
+
+def enqueue_clean_audio(payload: dict, *, queue=None, timeout: int = 1800) -> QueueSubmission:
+    """Editor v5 Clean up voice: make the cleaned copy of one sound on the worker (audio_clean)."""
+    target = queue or get_queue()
+    job = target.enqueue(
+        "cutsell_worker.audio_clean.run_clean_audio_job",
+        payload,
+        job_timeout=timeout,
+        result_ttl=86400,
+        failure_ttl=86400,
+        meta={"user_id": str(payload.get("user_id") or ""), "project_id": str(payload.get("project_id") or "")},
+    )
+    threading.Thread(target=wake_worker, name="wake-worker", daemon=True).start()
+    return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))

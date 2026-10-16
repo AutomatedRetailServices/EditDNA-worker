@@ -36,10 +36,11 @@ from .render_plan import is_tombstoned_zoom
 EDITOR_FIELDS: tuple[str, ...] = (
     "media_overlays", "text_overlays", "audio_clips", "broll_sources", "captions_enabled", "mirror",
     "rotation", "video_volume", "video_clean_voice", "auto_zoom_enabled", "audio_overlap_enabled",
-    "zoom_removed",
+    "zoom_removed", "keyframes", "master_volume", "master_muted",
 )
 #: Per-clip edits carried to the matching new clip.
-CLIP_EDIT_FIELDS: tuple[str, ...] = ("speed", "audio_volume", "audio_muted", "mirror", "rotation", "manual_end")
+CLIP_EDIT_FIELDS: tuple[str, ...] = ("speed", "audio_volume", "audio_muted", "mirror", "rotation", "manual_end",
+                                     "clean_voice")
 MIN_OVERLAP_SHARE = 0.5
 _EPS = 1e-6
 

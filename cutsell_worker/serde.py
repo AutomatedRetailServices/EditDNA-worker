@@ -21,6 +21,7 @@ from .contracts import (
 )
 
 from .sfx_library import SFX_IDS  # noqa: E402
+from .keyframes import keyframe_to_dict, keyframes_from_dict  # noqa: E402
 from .caption_render import CAPTION_FONTS, CAPTION_PRESETS, DEFAULT_CAPTION_FONT, caption_layout  # noqa: E402,F401
 
 
@@ -151,6 +152,7 @@ def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
         manual_end=bool(item.get("manual_end", False)),
         speed=_clip_speed(item.get("speed", 1.0)),
         rotation=_quarter_turn(item.get("rotation"), "clip rotation"),
+        clean_voice=bool(item.get("clean_voice", False)),
     )
 
 
@@ -326,6 +328,7 @@ def _audio_clip_from_dict(item: dict) -> AudioClip:
         audio_id=audio_id, kind=kind, start=start, source_in=source_in, source_out=source_out,
         asset_id=asset_id, sfx_id=sfx_id, volume=volume,
         duck_video=bool(item.get("duck_video", False)), clean=bool(item.get("clean", False)),
+        muted=bool(item.get("muted", False)),
         enhanced_at_record=bool(item.get("enhanced_at_record", False)),
     )
 
@@ -420,6 +423,10 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         video_volume=video_volume,
         video_clean_voice=bool(payload.get("video_clean_voice", False)),
         zoom_removed=_zoom_removed(payload.get("zoom_removed")),
+        keyframes=keyframes_from_dict(payload.get("keyframes")),
+        keyframes_set=payload.get("keyframes") is not None,
+        master_volume=_gain(payload.get("master_volume"), "master_volume"),
+        master_muted=bool(payload.get("master_muted", False)),
     )
 
 
@@ -464,13 +471,20 @@ def _json_safe(value: Any) -> Any:
         data = {item.name: getattr(value, item.name) for item in fields(value)}
         if isinstance(value, DraftTimeline):
             for key in ("mirror", "rotation", "audio_overlap_enabled", "auto_zoom_enabled", "zoom_keyframes",
-                        "user_media_source_ids", "audio_clips", "video_clean_voice", "zoom_removed"):
+                        "user_media_source_ids", "audio_clips", "video_clean_voice", "zoom_removed",
+                        "master_muted"):
                 if not data.get(key):
                     data.pop(key, None)
             if data.get("video_volume") == 1.0:
                 data.pop("video_volume", None)
+            if data.get("master_volume") == 1.0:
+                data.pop("master_volume", None)
+            if data.pop("keyframes_set", False):
+                data["keyframes"] = [keyframe_to_dict(k) for k in data.get("keyframes") or ()]
+            else:
+                data.pop("keyframes", None)
         elif isinstance(value, DraftClip):
-            for key in ("audio_pre_roll", "audio_post_roll", "mirror", "manual_end"):
+            for key in ("audio_pre_roll", "audio_post_roll", "mirror", "manual_end", "clean_voice"):
                 if not data.get(key):
                     data.pop(key, None)
             if data.get("speed") == 1.0:
@@ -488,6 +502,8 @@ def _json_safe(value: Any) -> Any:
                     data.pop(key, None)
             if not data.get("enhanced_at_record"):
                 data.pop("enhanced_at_record", None)
+            if not data.get("muted"):
+                data.pop("muted", None)
         return _json_safe(data)
     return value
 

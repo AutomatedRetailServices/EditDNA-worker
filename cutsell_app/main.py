@@ -44,6 +44,7 @@ from cutsell_worker.draft_store import (
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
 from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
 from cutsell_worker.serde import draft_from_dict
+from .clean_audio_routes import router as clean_audio_router
 from cutsell_worker.source_identity import stable_source_id
 from cutsell_worker.timeline_asset_storage import sign_timeline_assets
 from cutsell_worker.overlay_uploads import create_presigned_overlay_download
@@ -68,6 +69,7 @@ app.include_router(feedback_router)
 app.include_router(batch_router)
 app.include_router(notification_router)
 app.include_router(pending_review_router)
+app.include_router(clean_audio_router)
 
 
 class UploadPresignRequest(BaseModel):

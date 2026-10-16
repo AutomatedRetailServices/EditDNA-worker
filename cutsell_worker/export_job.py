@@ -9,6 +9,8 @@ from pathlib import Path
 import tempfile
 
 from . import pending_watch_listen_review as pwl
+from . import audio_clean
+from . import keyframes as keyframes_lib
 from . import sfx_library
 from . import timeline_asset_registry as timeline_registry
 from . import timeline_asset_registry_store as timeline_store
@@ -126,26 +128,59 @@ def _resolve_sound_effect(clip, *, directory: str, index: int) -> str:
 
 def resolve_audio_mix(draft, *, user_id: str, project_id: str, directory: str) -> AudioMix | None:
     """Editor v5: the draft's audio lane resolved to local files, plus the whole-video volume and
-    voice cleanup. None when the draft uses none of them (the render then skips the mix pass)."""
+    the whole sound's volume / mute. None when the draft uses none of them (the render then skips
+    the mix pass).
+
+    Build 17: Clean up voice plays the stored cleaned copy (audio_clean) -- of a voice / music
+    recording here, of the video's own sound in the render plan (export_clean_audio_paths) -- the
+    same file the iPhone preview played; the mix never re-filters it. A muted clip is silent."""
     clips = tuple(getattr(draft, "audio_clips", ()) or ())
     video_volume = float(getattr(draft, "video_volume", 1.0))
-    video_clean = bool(getattr(draft, "video_clean_voice", False))
-    if not clips and video_volume == 1.0 and not video_clean:
+    master = 0.0 if bool(getattr(draft, "master_muted", False)) else float(getattr(draft, "master_volume", 1.0))
+    if not clips and video_volume == 1.0 and master == 1.0:
         return None
     local = []
     sfx_files: dict[str, str] = {}
     for index, clip in enumerate(clips):
+        if bool(getattr(clip, "muted", False)) or float(clip.volume) <= 0.0:
+            continue  # silent: nothing to mix (and nothing to download)
         if clip.kind == "sfx":
             path = sfx_files.get(str(clip.sfx_id))
             if path is None:
                 path = sfx_files[str(clip.sfx_id)] = _resolve_sound_effect(clip, directory=directory, index=index)
         else:
+            # Tenant-safe registry first (clear codes for a missing / foreign recording) ...
             path = _resolve_voice_or_music(clip, user_id=user_id, project_id=project_id, directory=directory)
+            if bool(clip.clean):
+                # ... then its stored cleaned copy (made from that file if it is not stored yet).
+                try:
+                    path = audio_clean.ensure_clean_audio(
+                        user_id=user_id, project_id=project_id, target="asset", ident=str(clip.asset_id),
+                        directory=str(Path(directory) / "clean"), local_input=path,
+                    )
+                except Exception as exc:
+                    raise AudioClipUnavailable(clip.audio_id, f"clean:{exc.__class__.__name__}") from exc
         local.append(LocalAudioClip(
             path=path, start=float(clip.start), source_in=float(clip.source_in), source_out=float(clip.source_out),
-            volume=float(clip.volume), duck_video=bool(clip.duck_video), clean=bool(clip.clean),
+            volume=float(clip.volume), duck_video=bool(clip.duck_video), clean=False,
         ))
-    return AudioMix(video_volume=video_volume, video_clean=video_clean, clips=tuple(local))
+    return AudioMix(video_volume=video_volume, video_clean=False, clips=tuple(local), master_volume=master)
+
+
+def export_clean_audio_paths(draft, local_paths: dict, *, user_id: str, project_id: str,
+                             directory: str) -> dict:
+    """Build 17: source_asset_id -> the cleaned copy of that source's sound, for every source with
+    a clip that plays it cleaned (the whole video's Clean up, or a clip's own). Made now (and
+    stored) when the creator exported before the preview's copy was ready."""
+    whole = bool(getattr(draft, "video_clean_voice", False))
+    wanted = {clip.source_asset_id for clip in draft.selected if whole or bool(getattr(clip, "clean_voice", False))}
+    paths = {}
+    for source_id in sorted(wanted):
+        paths[source_id] = audio_clean.ensure_clean_audio(
+            user_id=user_id, project_id=project_id, target="source", ident=source_id,
+            directory=str(Path(directory) / "clean"), local_input=local_paths.get(source_id),
+        )
+    return paths
 
 
 def _job_started_epoch(job) -> float | None:
@@ -816,7 +851,12 @@ def run_export_job(payload: dict) -> dict:
                 suffix = Path(overlay.uri).suffix or (".jpg" if overlay.kind == "photo" else ".mp4")
                 destination = str(Path(directory) / f"overlay-{index:03d}{suffix}")
                 download_source(overlay.uri, destination)
-                local_overlays.append(LocalMediaOverlay(overlay=overlay, path=destination))
+                local_overlays.append(LocalMediaOverlay(
+                    overlay=overlay, path=destination,
+                    keyframes=keyframes_lib.overlay_track(getattr(draft, "keyframes", ()) or (),
+                                                          overlay_id=str(overlay.overlay_id))
+                    if str(getattr(overlay, "layout", "float") or "float") == "float" else (),
+                ))
                 publish("rendering", min(32, 26 + int((index + 1) * 6 / overlay_count)))
 
             mark("download_overlays")
@@ -824,7 +864,10 @@ def run_export_job(payload: dict) -> dict:
             # library; a clip that cannot be resolved fails the export (AudioClipUnavailable).
             audio_mix = resolve_audio_mix(draft, user_id=user_id, project_id=project_id, directory=directory)
             mark("download_audio")
-            plan = build_render_plan(draft, local_paths)
+            clean_paths = export_clean_audio_paths(draft, local_paths, user_id=user_id, project_id=project_id,
+                                                   directory=directory)
+            mark("clean_audio")
+            plan = build_render_plan(draft, local_paths, clean_paths) if clean_paths else build_render_plan(draft, local_paths)
             output = str(Path(directory) / "cutsell-export.mp4")
             publish("rendering", 35)
             mark("plan")

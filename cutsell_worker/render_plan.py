@@ -98,6 +98,12 @@ class RenderSegment:
     # Editor v5 clip speed (contracts.DraftClip.speed). `start`/`end` stay the SOURCE window; the
     # segment occupies (end - start) / speed on the output timeline. 1.0 renders exactly as before.
     speed: float = 1.0
+    # Editor v5 (build 17): transform keyframes of this clip, (source_time, scale, x, y, rotation)
+    # in SOURCE seconds (keyframes.py). When set they replace `zoom_keyframes`.
+    transform_keyframes: tuple = ()
+    # Editor v5 (build 17): the cleaned version of this source's sound (same timeline as the
+    # source), played instead of the source's own audio. None = the source's own audio.
+    clean_audio_path: str | None = None
 
     @property
     def duration_sec(self) -> float:
@@ -166,6 +172,10 @@ def _can_coalesce(left: RenderSegment, right: RenderSegment, *, tolerance_sec: f
         return False  # a mirrored clip next to a plain one keeps its own segment
     if int(getattr(left, "rotation", 0) or 0) != int(getattr(right, "rotation", 0) or 0):
         return False  # Editor v5: a clip turned on its own keeps its own segment
+    if getattr(left, "transform_keyframes", ()) or getattr(right, "transform_keyframes", ()):
+        return False  # keyframes belong to their own clip (held at its edges)
+    if getattr(left, "clean_audio_path", None) != getattr(right, "clean_audio_path", None):
+        return False
     if (left.caption_preset, left.caption_font, left.caption_x, left.caption_y, left.caption_scale) != (
             right.caption_preset, right.caption_font, right.caption_x, right.caption_y, right.caption_scale):
         return False
@@ -277,9 +287,31 @@ def is_tombstoned_zoom(keyframe, tombstones) -> bool:
     return False
 
 
-def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> Tuple[RenderSegment, ...]:
-    """Translate selected draft clips to concrete source-safe media segments."""
+def _clean_path(clip, draft, clean_audio_paths: Mapping[str, str] | None) -> str | None:
+    if clean_audio_paths is None:
+        return None  # a plan for review / validation only: the source's own sound
+    if not (bool(getattr(clip, "clean_voice", False)) or bool(getattr(draft, "video_clean_voice", False))):
+        return None
+    path = clean_audio_paths.get(clip.source_asset_id)
+    if not path:
+        raise ValueError(f"clean_audio_missing for source {clip.source_asset_id}")
+    return path
+
+
+def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
+                      clean_audio_paths: Mapping[str, str] | None = None) -> Tuple[RenderSegment, ...]:
+    """Translate selected draft clips to concrete source-safe media segments.
+
+    `clean_audio_paths` (Editor v5, build 17): source_asset_id -> the cleaned version of that
+    source's sound, used for every clip with Clean up voice (the clip's own, or the whole video's).
+    A clip that asks for it while it is missing raises (only when the mapping is given): the export never silently plays the
+    uncleaned sound."""
+    from .keyframes import active as active_keyframes, clamp_offset, video_track
     output = []
+    keyframes_set = bool(getattr(draft, "keyframes_set", False))
+    transform = (active_keyframes(tuple(getattr(draft, "keyframes", ()) or ()),
+                                  auto_zoom_enabled=bool(getattr(draft, "auto_zoom_enabled", False)))
+                 if keyframes_set else ())
     overlap = bool(getattr(draft, "audio_overlap_enabled", False))
     zooms = tuple(getattr(draft, "zoom_keyframes", ()) or ()) if getattr(draft, "auto_zoom_enabled", False) else ()
     # Editor v5: an AI zoom the creator deleted (a `zoom_removed` tombstone) is never drawn, even
@@ -349,11 +381,17 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             rotation=(int(getattr(draft, "rotation", 0) or 0) + int(getattr(clip, "rotation", 0) or 0)) % 360,
             audio_pre_roll=float(getattr(clip, "audio_pre_roll", 0.0) or 0.0) if rolls else 0.0,
             audio_post_roll=float(getattr(clip, "audio_post_roll", 0.0) or 0.0) if rolls else 0.0,
-            zoom_keyframes=tuple(
+            zoom_keyframes=() if keyframes_set else tuple(
                 (float(k.source_time), float(k.duration), float(k.scale))
                 for k in zooms if k.source_asset_id in ("", clip.source_asset_id)
             ),
             speed=speed,
+            transform_keyframes=tuple(
+                (t, s, clamp_offset(s, x), clamp_offset(s, y), r)
+                for t, s, x, y, r in video_track(transform, source_asset_id=clip.source_asset_id,
+                                                 start=float(clip.start), end=float(clip.end))
+            ),
+            clean_audio_path=_clean_path(clip, draft, clean_audio_paths),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")
