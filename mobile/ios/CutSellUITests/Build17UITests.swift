@@ -84,11 +84,13 @@ final class Build17UITests: XCTestCase {
 
     /// Slide the tracks under the cursor: `seconds` forward (at the default 30 points a second).
     private func scrub(seconds: Double) {
-        for _ in 0..<max(1, Int(seconds.rounded())) {
-            let seek = element("b17SeekForward")
-            if seek.exists { seek.tap() } else { log("missing b17SeekForward") }
-            pause(0.6)
-        }
+        // Play for about that long, then pause (the cursor moves on like for the creator).
+        let before = state()
+        tap("editorPlay")
+        pause(seconds)
+        tap("editorPlay")
+        pause(0.6)
+        log("cursor moved: [\(before)] -> [\(state())]")
     }
 
     /// The video clip under the cursor (tap toggles its selection).
