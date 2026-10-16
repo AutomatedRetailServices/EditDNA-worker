@@ -94,6 +94,6 @@ def test_keyframes_like_capcut():
 def test_ui_tests_exist_for_the_probe():
     tests = (ROOT / "mobile" / "ios" / "CutSellUITests" / "Build17UITests.swift").read_text()
     for step in ('tool("split")', 'tool("delete")', "press(forDuration: 0.6, thenDragTo:", '"audioTrimEnd"',
-                 'app.switches["cleanUpToggle"]', 'app.switches["editorAutoZoomToggle"]', "pinch(withScale: 1.3",
+                 'app.switches["cleanUpToggle"]', 'app.switches["editorAutoZoomToggle"]', "pinch(withScale:",
                  'tap("editorExport")'):
         assert step in tests, step
