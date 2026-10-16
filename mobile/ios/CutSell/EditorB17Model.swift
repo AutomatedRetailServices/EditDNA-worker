@@ -205,6 +205,10 @@ extension DraftEditorViewModel {
         }
         let keys = live.flatMap(KeyframeMath.keyframes(fromZoom:))
         applyDraftChange { object in object["keyframes"] = .array(keys.map { .object($0.json) }) }
+        #if DEBUG
+        NSLog("CUTSELLB17 adopt_ai_zooms zooms=%d keyframes=%d marks=%d auto_zoom=%@", zooms.count, keys.count,
+              videoKeyframeMarks.count, autoZoomEnabled ? "on" : "off")
+        #endif
     }
 
     private static func setKeyframes(_ object: inout [String: JSONValue], _ transform: ([TransformKeyframe]) -> [TransformKeyframe]) {

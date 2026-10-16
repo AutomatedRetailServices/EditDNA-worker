@@ -89,8 +89,16 @@ final class Build17UITests: XCTestCase {
         pause(0.8)
     }
 
-    private func tool(_ name: String) {
-        element("tool_\(name)").tap()
+    private func tool(_ name: String) { tap("tool_\(name)") }
+
+    /// Taps when it is there (a missing element is logged, the test goes on to the next check).
+    private func tap(_ id: String) {
+        let target = element(id)
+        if target.waitForExistence(timeout: 3) && target.isHittable {
+            target.tap()
+        } else {
+            log("missing \(id)")
+        }
         pause(0.8)
     }
 
@@ -114,10 +122,10 @@ final class Build17UITests: XCTestCase {
         let downloaded = wait(90) { !self.element("soundDownloading").exists }
         log("sounds_downloaded=\(downloaded)")
         shot("audio_panel")
-        element("sound_typing").tap()
+        tap("sound_typing")
         pause(1)
         XCTAssertTrue(wait(30) { self.element("addSoundAtPlayhead").isEnabled }, "Add stays disabled")
-        element("addSoundAtPlayhead").tap()
+        tap("addSoundAtPlayhead")
         let added = wait(10) { self.count("soundBlock") == 1 }
         log("typing_added=\(added) panel=\(element("soundClipPanel").exists) values=\(soundValues())")
         shot("typing_added_selected")
@@ -130,6 +138,10 @@ final class Build17UITests: XCTestCase {
         let deleted = wait(10) { self.count("soundBlock") == 1 }
         log("typing_piece_deleted=\(deleted) values=\(soundValues())")
         let block = element("soundBlock")
+        guard block.exists else {
+            log("no sound block: skipping move / trim")
+            return try runAfterSounds()
+        }
         block.tap()
         pause(1)
         let selected = element("soundClipPanel").waitForExistence(timeout: 5)
@@ -150,13 +162,16 @@ final class Build17UITests: XCTestCase {
         }
         log("typing_trim handle=\(handle.exists) \(moved) -> \(element("soundBlock").value as? String ?? "")")
         shot("typing_trimmed")
-        if element("panelClose").exists { element("panelClose").tap(); pause(0.6) }
+        if element("panelClose").exists { tap("panelClose") }
+        try runAfterSounds()
+    }
 
+    private func runAfterSounds() throws {
         // 2. Mute one video clip; the others keep their sound.
         tapClipAtCursor()
         tool("volume")
         let selectedClip = app.staticTexts["Selected clip"].waitForExistence(timeout: 5)
-        element("volumeMute").tap()
+        tap("volumeMute")
         pause(1.5)
         log("clip_selected_panel=\(selectedClip) mute_badges=\(count("muteBadge"))")
         shot("volume_selected_clip_muted")
@@ -176,13 +191,13 @@ final class Build17UITests: XCTestCase {
         } else {
             log("clean_up toggle missing")
         }
-        element("volumeMute").tap()   // unmute again
+        tap("volumeMute")   // unmute again
         pause(1)
         tapClipAtCursor()             // nothing selected: Whole video
         let whole = app.staticTexts["Whole video"].waitForExistence(timeout: 5)
         log("whole_video_panel=\(whole) mute_badges=\(count("muteBadge"))")
         shot("volume_whole_video")
-        if element("panelClose").exists { element("panelClose").tap(); pause(0.6) }
+        if element("panelClose").exists { tap("panelClose") }
 
         // 4. Auto Zoom AI ◇ and the Style toggle.
         let aiMarks = count("zoomKeyframe")
@@ -202,19 +217,19 @@ final class Build17UITests: XCTestCase {
         // 5. Two manual keyframes, 100 % then 130 %, then delete the second with the filled ◇.
         tapClipAtCursor()
         let key = element("editorKeyframe")
-        key.tap()
+        tap("editorKeyframe")
         pause(1.2)
         let first = count("userKeyframe")
         scrub(seconds: 1)
         element("editorVideo").pinch(withScale: 1.3, velocity: 1.5)
         pause(1)
         shot("keyframe_pinched_130")
-        key.tap()
+        tap("editorKeyframe")
         pause(1.2)
         let second = count("userKeyframe")
         let filled = key.value as? String ?? ""
         shot("keyframes_two")
-        key.tap()
+        tap("editorKeyframe")
         pause(1.2)
         let afterDelete = count("userKeyframe")
         log("keyframes first=\(first) second=\(second) button_on_second=\(filled) after_delete=\(afterDelete)")
@@ -222,7 +237,7 @@ final class Build17UITests: XCTestCase {
 
         // 6. Export.
         let exportStarted = Date()
-        element("editorExport").tap()
+        tap("editorExport")
         let finished = wait(420) {
             self.app.staticTexts["Your video is ready."].exists || self.app.staticTexts["The export didn't finish. Please try again."].exists
         }

@@ -630,6 +630,7 @@ struct TimelineV4: View {
                         let target = mark.time + Double(value.translation.width / pixelsPerSecond)
                         model.moveKeyframe(id: mark.id, to: max(0, min(duration - 0.01, target)))
                     })
+                .accessibilityElement()
                 .accessibilityLabel("Keyframe at \(EditorTime.tenths(mark.time))")
                 .accessibilityValue(String(format: "%.2f", mark.time))
                 .accessibilityIdentifier(mark.isAI ? "zoomKeyframe" : "userKeyframe")

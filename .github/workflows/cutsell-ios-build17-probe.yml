@@ -190,16 +190,16 @@ jobs:
       - name: Frames and logs to design-screenshots (b17/), never the recording
         if: always()
         run: |
-          set -e
-          git config user.name "cutsell-probe"; git config user.email "probe@cutsell.invalid"
-          git fetch -q origin design-screenshots || true
-          git worktree add -q "$RUNNER_TEMP/shots" origin/design-screenshots 2>/dev/null || git worktree add -q --orphan -b design-screenshots "$RUNNER_TEMP/shots"
-          cd "$RUNNER_TEMP/shots"
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
           rm -rf b17 && mkdir -p b17
           cp "$RUNNER_TEMP"/b17/*.png b17/ 2>/dev/null || true
           cp "$RUNNER_TEMP"/b17/*.txt b17/ 2>/dev/null || true
+          find b17 -type f \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4a' -o -iname '*.caf' -o -iname '*.wav' \) -delete
           sed -i '' -E 's/(Bearer|token)[^ ]*/\1 <hidden>/g' b17/*.txt 2>/dev/null || true
-          git add b17
-          git commit -q -m "Build 17 probe frames and logs (no video)" || true
-          git push -q origin HEAD:design-screenshots || true
-          echo "TEST_STATUS=$TEST_STATUS"
+          echo "source commit: ${{ github.sha }} test status: ${TEST_STATUS:-?}" > b17/SOURCE.txt
+          git add -A b17
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "build 17 probe for ${{ github.sha }}" || true
+          git push --quiet origin design-screenshots
