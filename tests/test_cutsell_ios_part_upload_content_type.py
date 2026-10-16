@@ -19,7 +19,7 @@ def test_part_upload_sends_no_content_type():
     body = uploader.split("func upload(fileURL: URL, to signedURL: URL", 1)[1]
     assert body.index("Self.partContentType") < body.index("for (key, value) in headers")
     manager = (APP / "MultipartUploadManager.swift").read_text()
-    assert "backgroundUploader.upload(fileURL: partFile, to: signedURL)" in manager
+    assert "backgroundUploader.upload(fileURL: partFile, to: signedURL, onBytes: onBytes)" in manager
 
 
 def test_server_part_links_sign_the_content_type():

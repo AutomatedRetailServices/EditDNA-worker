@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Before the first cut is processed, CutSell says which AI services receive the video and asks
 /// for "Agree". Without it nothing is uploaded or processed (App Review 5.1.2).
@@ -8,25 +9,61 @@ final class AIConsentCenter: ObservableObject {
     static let key = "cutsell.aiConsent.v1"
 
     @Published var asking = false
-    private var waiting: CheckedContinuation<Bool, Never>?
+    private var waiting: [CheckedContinuation<Bool, Never>] = []
+    private weak var presented: UIViewController?
 
     var agreed: Bool { UserDefaults.standard.bool(forKey: Self.key) }
 
     /// true when the creator agreed (now or before); false if they closed the notice.
+    ///
+    /// Build 19: the notice is presented by UIKit on top of WHATEVER is on screen. It used to be a
+    /// SwiftUI `.sheet` on the app's root, and the upload screen (a full-screen cover) hid it: the
+    /// first cut waited for an "Agree" that never appeared, at "Uploading 0 %", without ever
+    /// calling the server (builds 16-18 on a real iPhone).
     func ensure() async -> Bool {
         if agreed { return true }
-        if let waiting { waiting.resume(returning: false) }
+        CutSellDiagnostics.log("ai_consent_asked", [:])
         return await withCheckedContinuation { continuation in
-            waiting = continuation
+            waiting.append(continuation)
+            guard !asking else { return }
             asking = true
+            present()
         }
+    }
+
+    private func present() {
+        guard let top = Self.topViewController() else {
+            // No window yet: try again in a moment (never answer for the creator).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                if self?.asking == true { self?.present() }
+            }
+            return
+        }
+        let host = UIHostingController(rootView: AIConsentSheet())
+        host.modalPresentationStyle = .pageSheet
+        host.isModalInPresentation = true
+        presented = host
+        top.present(host, animated: true)
     }
 
     func answer(_ agree: Bool) {
         if agree { UserDefaults.standard.set(true, forKey: Self.key) }
+        CutSellDiagnostics.log("ai_consent_answered", ["agreed": String(agree)])
         asking = false
-        waiting?.resume(returning: agree)
-        waiting = nil
+        presented?.dismiss(animated: true)
+        presented = nil
+        let all = waiting
+        waiting = []
+        for continuation in all { continuation.resume(returning: agree) }
+    }
+
+    /// The view controller on top of everything (sheets and full-screen covers included).
+    static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.first?.windows.first
+        var top = window?.rootViewController
+        while let next = top?.presentedViewController, !next.isBeingDismissed { top = next }
+        return top
     }
 }
 

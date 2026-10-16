@@ -12,7 +12,10 @@ actor VideoPreparation {
 
     private let maxUploadBytesWithoutPreparation: Int64 = 500 * 1024 * 1024
 
-    func prepare(fileURL: URL, contentType: String) async throws -> PreparedVideo {
+    /// `progress` (0...1) while a 4K / very large video is converted to 1080p (it can take minutes:
+    /// build 19 shows it instead of a frozen 0 %).
+    func prepare(fileURL: URL, contentType: String,
+                 progress: @Sendable @escaping (Double) -> Void = { _ in }) async throws -> PreparedVideo {
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         guard size > 0 else { throw VideoPreparationError.emptyFile }
@@ -41,6 +44,15 @@ actor VideoPreparation {
         exporter.outputFileType = .mp4
         exporter.shouldOptimizeForNetworkUse = true
 
+        CutSellDiagnostics.log("prepare_started", ["width": String(Int(width)), "height": String(Int(height)),
+                                                   "mb": String(size / 1_048_576)])
+        let watcher = Task {
+            while !Task.isCancelled {
+                progress(Double(exporter.progress))
+                try? await Task.sleep(nanoseconds: 400_000_000)
+            }
+        }
+        defer { watcher.cancel() }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             exporter.exportAsynchronously {
                 switch exporter.status {
@@ -59,6 +71,8 @@ actor VideoPreparation {
         let preparedAttributes = try FileManager.default.attributesOfItem(atPath: destination.path)
         let preparedSize = (preparedAttributes[.size] as? NSNumber)?.int64Value ?? 0
         guard preparedSize > 0 else { throw VideoPreparationError.exportFailed }
+        progress(1)
+        CutSellDiagnostics.log("prepare_finished", ["mb": String(preparedSize / 1_048_576)])
         return PreparedVideo(url: destination, contentType: "video/mp4", wasTranscoded: true)
     }
 

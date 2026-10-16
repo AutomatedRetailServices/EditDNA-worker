@@ -31,11 +31,11 @@ struct CreateFlowView: View {
     enum AfterCamera { case gallery, job(CreateJob) }
 
     enum SubmitFailure: Identifiable {
-        /// The upload record is saved on the phone: Edits shows "Resume upload".
-        case savedForResume
+        /// The upload record is saved on the phone: "Try again" resumes it (Edits too).
+        case savedForResume(projectID: String?, detail: String)
         /// Nothing was saved yet (e.g. no connection): the same videos can be sent again.
-        case notSaved
-        var id: Int { self == .savedForResume ? 1 : 2 }
+        case notSaved(detail: String)
+        var id: Int { if case .savedForResume = self { return 1 } else { return 2 } }
     }
 
     var body: some View {
@@ -124,19 +124,24 @@ struct CreateFlowView: View {
             }
             .fullScreenCover(item: $failure) { shown in
                 switch shown {
-                case .savedForResume:
+                case .savedForResume(let projectID, let detail):
                     ProblemScreen(
                         screenTitle: "Upload paused",
-                        heading: "Something went wrong",
-                        message: "Your video is saved on this iPhone. Open Edits to resume the upload.",
-                        primaryTitle: "Go to Edits",
-                        primaryAction: { failure = nil; job = nil; selectTab(.edits) }
+                        heading: "The upload stopped",
+                        message: "\(detail)\n\nYour video is saved on this iPhone. Try again to continue where it stopped.",
+                        primaryTitle: "Try again",
+                        primaryAction: {
+                            failure = nil
+                            Task { await resume(projectID: projectID, current: current) }
+                        },
+                        secondaryTitle: "Go to Edits",
+                        secondaryAction: { failure = nil; job = nil; selectTab(.edits) }
                     )
-                case .notSaved:
+                case .notSaved(let detail):
                     ProblemScreen(
                         screenTitle: "Couldn’t start the cut",
-                        heading: "Something went wrong",
-                        message: "Check your connection and try again. Your video is still here.",
+                        heading: "The upload didn’t start",
+                        message: "\(detail)\n\nCheck your connection and try again. Your video is still here.",
                         primaryTitle: "Try again",
                         primaryAction: {
                             failure = nil
@@ -156,7 +161,17 @@ struct CreateFlowView: View {
 
     private func launch(_ newJob: CreateJob) {
         // One cut at a time from this screen: the upload screen cannot be left until it is done.
-        guard !submitter.isSubmitting else { return }
+        guard !submitter.isSubmitting, job == nil else { return }
+        // Build 19: the AI notice is answered BEFORE the upload screen covers everything (it used to
+        // be asked under it, invisible, and the cut waited at 0 % forever).
+        Task { @MainActor in
+            guard await AIConsentCenter.shared.ensure() else { return }
+            start(newJob)
+        }
+    }
+
+    private func start(_ newJob: CreateJob) {
+        guard !submitter.isSubmitting, job == nil else { return }
         submitter.reset()
         problem = nil
         failure = nil
@@ -202,8 +217,74 @@ struct CreateFlowView: View {
         return image
     }
 
+    /// "Try again" after a paused upload: the same project, from the parts already sent.
+    @MainActor
+    private func resume(projectID: String?, current: CreateJob) async {
+        guard let projectID, let record = await PendingCutStore.shared.record(projectID: projectID) else {
+            await run(current)
+            return
+        }
+        submitter.reset()
+        do {
+            try await StallWatch.run(submitter) {
+                let videos = record.videos.map { LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType) }
+                let id = try await submitter.submit(
+                    videos: videos, title: record.title, mode: record.mode, audioOverlap: record.audioOverlap,
+                    autoZoom: record.autoZoom ?? true, resumeProjectID: projectID, appState: appState
+                )
+                startTracking(projectID: id, videos: videos, thumbnail: processingThumbnail)
+            }
+        } catch {
+            show(error)
+        }
+    }
+
+    /// The real error, in plain words, on the "Upload paused" / "Couldn't start" screen.
+    @MainActor
+    private func show(_ error: Error) {
+        if let submitError = error as? CutSubmitError {
+            let detail = Self.plain(submitError.underlying)
+            failure = submitError.savedForResume ? .savedForResume(projectID: submitError.projectID, detail: detail) : .notSaved(detail: detail)
+        } else if let stalled = error as? StallWatch.Stalled {
+            failure = processingProjectID != nil || submitter.stageTitle.hasPrefix("Uploading")
+                ? .savedForResume(projectID: lastProjectID, detail: stalled.localizedDescription)
+                : .notSaved(detail: stalled.localizedDescription)
+        } else {
+            failure = .notSaved(detail: Self.plain(error))
+        }
+    }
+
+    static func plain(_ error: Error) -> String {
+        if let stalled = error as? StallWatch.Stalled { return stalled.localizedDescription }
+        if error is AIConsentError { return AIConsentError.declined.localizedDescription }
+        return "Error: \(Retry.short(error))."
+    }
+
+    /// The project the last submit created (a stall leaves it saved for resuming).
+    @MainActor
+    private var lastProjectID: String? { submitter.currentProjectID }
+
     @MainActor
     private func run(_ current: CreateJob) async {
+        do {
+            try await StallWatch.run(submitter) { try await work(current) }
+        } catch let exportFailure as GalleryExport.Failure {
+            switch exportFailure {
+            case .unsupported: problem = .unsupportedMedia
+            case .tooLarge(let bytes):
+                problem = .tooLarge(
+                    detail: "\(CreateLimits.sizeText(bytes)) / 1 GB limit",
+                    sizeText: CreateLimits.sizeText(bytes)
+                )
+            case .unavailable: problem = .couldNotAdd
+            }
+        } catch {
+            show(error)
+        }
+    }
+
+    @MainActor
+    private func work(_ current: CreateJob) async throws {
         do {
             switch current.source {
             case .recorded(let video):
@@ -244,20 +325,6 @@ struct CreateFlowView: View {
                 }
             }
             // The Processing screen stays open and now follows the cut on the server.
-        } catch let exportFailure as GalleryExport.Failure {
-            switch exportFailure {
-            case .unsupported: problem = .unsupportedMedia
-            case .tooLarge(let bytes):
-                problem = .tooLarge(
-                    detail: "\(CreateLimits.sizeText(bytes)) / 1 GB limit",
-                    sizeText: CreateLimits.sizeText(bytes)
-                )
-            case .unavailable: problem = .couldNotAdd
-            }
-        } catch let submitError as CutSubmitError {
-            failure = submitError.savedForResume ? .savedForResume : .notSaved
-        } catch {
-            failure = .notSaved
         }
     }
 
@@ -272,7 +339,14 @@ struct CreateFlowView: View {
 
     private func export(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {
         submitter.announce(count > 1 ? "Getting video \(index + 1) of \(count) from Photos…" : "Getting your video from Photos…")
-        return try await GalleryExport.export(asset, name: nil)
+        let title = count > 1 ? "Downloading video \(index + 1) of \(count) from iCloud" : "Downloading from iCloud"
+        let started = Date()
+        let video = try await GalleryExport.export(asset, name: nil) { fraction in
+            // Only called while the video comes down from iCloud (not when it is on the iPhone).
+            Task { @MainActor in submitter.stage(title, fraction) }
+        }
+        CutSellDiagnostics.log("photos_copied", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started))])
+        return video
     }
 }
 

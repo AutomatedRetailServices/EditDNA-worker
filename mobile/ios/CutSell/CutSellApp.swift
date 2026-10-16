@@ -21,7 +21,6 @@ struct CutSellApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appState = AppState()
     @StateObject private var notificationCenter = NotificationCenterModel()
-    @ObservedObject private var consent = AIConsentCenter.shared
 
     var body: some Scene {
         WindowGroup {
@@ -38,8 +37,8 @@ struct CutSellApp: App {
     }
 
     private var mainRoot: some View {
+        // The AI notice is presented by AIConsentCenter itself (on top of any cover or sheet).
         RootView()
-                .sheet(isPresented: $consent.asking) { AIConsentSheet() }
                 .environmentObject(appState)
                 .environmentObject(notificationCenter)
                 .task {

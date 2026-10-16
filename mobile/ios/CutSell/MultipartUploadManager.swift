@@ -89,8 +89,11 @@ actor MultipartUploadManager {
         /// Short uploads made while the editor is open (a B-roll video): sent directly, not
         /// through the background session that keeps a long cut upload going when CutSell closes.
         foreground: Bool = false,
+        /// Build 19: each retry (what failed, in plain words), so the screen and Diagnostics show it.
+        onRetry: (@Sendable (String) -> Void)? = nil,
         progress: @Sendable @escaping (Double) -> Void
     ) async throws -> MultipartCompleteResponse {
+        let retried: @Sendable (Int, Error) -> Void = { _, error in onRetry?(Retry.short(error)) }
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         guard size > 0 else { throw UploadError.emptyFile }
@@ -110,13 +113,16 @@ actor MultipartUploadManager {
            saved.start.userID == session.userID,
            saved.start.sizeBytes == size {
             do {
-                let status: MultipartStatusResponse = try await api.request(
-                    "/v1/uploads/multipart/\(saved.start.uploadID)",
-                    query: [
-                        URLQueryItem(name: "project_id", value: projectID),
-                        URLQueryItem(name: "user_id", value: session.userID)
-                    ]
-                )
+                let status: MultipartStatusResponse = try await Retry.run("status", onRetry: retried) {
+                    try await api.request(
+                        "/v1/uploads/multipart/\(saved.start.uploadID)",
+                        query: [
+                            URLQueryItem(name: "project_id", value: projectID),
+                            URLQueryItem(name: "user_id", value: session.userID)
+                        ],
+                        timeout: 25
+                    )
+                }
                 guard status.partCount == saved.start.partCount else {
                     throw UploadError.resumeMetadataMismatch
                 }
@@ -130,26 +136,27 @@ actor MultipartUploadManager {
                 ])
             } catch APIError.http(let code, _) where code == 404 {
                 await resumeStore.remove(uploadID: saved.start.uploadID)
-                start = try await createStart(
-                    fileURL: fileURL,
-                    projectID: projectID,
-                    session: session,
-                    contentType: contentType,
-                    size: size
-                )
+                start = try await Retry.run("start", onRetry: retried) {
+                    try await createStart(fileURL: fileURL, projectID: projectID, session: session,
+                                          contentType: contentType, size: size)
+                }
             }
         } else {
-            start = try await createStart(
-                fileURL: fileURL,
-                projectID: projectID,
-                session: session,
-                contentType: contentType,
-                size: size
-            )
+            start = try await Retry.run("start", onRetry: retried) {
+                try await createStart(fileURL: fileURL, projectID: projectID, session: session,
+                                      contentType: contentType, size: size)
+            }
         }
+        CutSellDiagnostics.log("upload_parts", ["parts": String(start.partCount), "part_mb": String(start.partSize / 1_048_576),
+                                                "mb": String(size / 1_048_576), "done": String(completedParts.count)])
 
         await resumeStore.save(start: start, fileURL: fileURL, projectID: projectID, size: size)
-        progress(Double(completedParts.count) / Double(max(1, start.partCount)))
+        // The real %: bytes of finished parts + bytes the parts in flight have sent.
+        let already = completedParts.keys.reduce(Int64(0)) { sum, number in
+            sum + Int64(min(start.partSize, max(0, Int(size) - (number - 1) * start.partSize)))
+        }
+        let tally = ByteTally(total: size, alreadyUploaded: already, report: progress)
+        progress(Double(already) / Double(max(1, size)))
 
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
@@ -171,25 +178,33 @@ actor MultipartUploadManager {
                 let userID = session.userID
                 group.addTask {
                     struct OwnerBody: Encodable { let project_id: String; let user_id: String }
-                    let signed: MultipartPartSignResponse = try await self.api.request(
-                        "/v1/uploads/multipart/\(uploadID)/parts/\(partNumber)/presign",
-                        method: "POST",
-                        body: OwnerBody(project_id: projectID, user_id: userID)
-                    )
-                    let response = try await self.uploadPart(
-                        data, uploadID: uploadID, partNumber: partNumber, signedURL: signed.uploadURL,
-                        foreground: foreground
-                    )
-                    guard let etagValue = response.value(forHTTPHeaderField: "ETag"), !etagValue.isEmpty else {
-                        throw UploadError.missingETag(partNumber)
+                    // A fresh link and the PUT, tried 3 times (a link can expire while a part waits).
+                    let etagValue: String = try await Retry.run("part \(partNumber)", onRetry: { attempt, error in
+                        tally.reset(part: partNumber)
+                        retried(attempt, error)
+                    }) {
+                        let signed: MultipartPartSignResponse = try await self.api.request(
+                            "/v1/uploads/multipart/\(uploadID)/parts/\(partNumber)/presign",
+                            method: "POST",
+                            body: OwnerBody(project_id: projectID, user_id: userID),
+                            timeout: 25
+                        )
+                        let response = try await self.uploadPart(
+                            data, uploadID: uploadID, partNumber: partNumber, signedURL: signed.uploadURL,
+                            foreground: foreground, onBytes: { tally.sent(part: partNumber, bytes: $0) }
+                        )
+                        guard let etag = response.value(forHTTPHeaderField: "ETag"), !etag.isEmpty else {
+                            throw UploadError.missingETag(partNumber)
+                        }
+                        return etag
                     }
+                    tally.done(part: partNumber, size: Int64(data.count))
                     return (partNumber, etagValue)
                 }
             }
             while next < missing.count && next < maxInFlight { try launch(missing[next]); next += 1 }
             while let (partNumber, etag) = try await group.next() {
                 completedParts[partNumber] = etag
-                progress(Double(completedParts.count) / Double(start.partCount))
                 if next < missing.count { try launch(missing[next]); next += 1 }
             }
         }
@@ -204,11 +219,14 @@ actor MultipartUploadManager {
             .sorted { $0.partNumber < $1.partNumber }
         guard parts.count == start.partCount else { throw UploadError.incompleteUpload }
 
-        let result: MultipartCompleteResponse = try await api.request(
-            "/v1/uploads/multipart/\(start.uploadID)/complete",
-            method: "POST",
-            body: CompleteBody(project_id: projectID, user_id: session.userID, parts: parts)
-        )
+        let result: MultipartCompleteResponse = try await Retry.run("complete", onRetry: retried) {
+            try await api.request(
+                "/v1/uploads/multipart/\(start.uploadID)/complete",
+                method: "POST",
+                body: CompleteBody(project_id: projectID, user_id: session.userID, parts: parts),
+                timeout: 60
+            )
+        }
         await resumeStore.remove(fileURL: fileURL, projectID: projectID, size: size)
         progress(1)
         return result
@@ -237,7 +255,8 @@ actor MultipartUploadManager {
                 original_name: fileURL.lastPathComponent,
                 content_type: contentType,
                 size_bytes: size
-            )
+            ),
+            timeout: 25
         )
     }
 
@@ -246,7 +265,8 @@ actor MultipartUploadManager {
         uploadID: String,
         partNumber: Int,
         signedURL: URL,
-        foreground: Bool = false
+        foreground: Bool = false,
+        onBytes: (@Sendable (Int64) -> Void)? = nil
     ) async throws -> HTTPURLResponse {
         if foreground {
             var request = URLRequest(url: signedURL)
@@ -255,13 +275,14 @@ actor MultipartUploadManager {
             request.setValue(BackgroundPartUploader.partContentType, forHTTPHeaderField: "Content-Type")
             let (_, response) = try await URLSession.shared.upload(for: request, from: data)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                throw UploadError.missingETag(partNumber)
+                throw BackgroundUploadError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
             }
+            onBytes?(Int64(data.count))
             return http
         }
         let partFile = try writePartFile(data, uploadID: uploadID, partNumber: partNumber)
         defer { try? FileManager.default.removeItem(at: partFile) }
-        return try await backgroundUploader.upload(fileURL: partFile, to: signedURL)
+        return try await backgroundUploader.upload(fileURL: partFile, to: signedURL, onBytes: onBytes)
     }
 
     private func writePartFile(_ data: Data, uploadID: String, partNumber: Int) throws -> URL {
@@ -287,7 +308,7 @@ enum UploadError: LocalizedError {
         switch self {
         case .emptyFile: return "The selected video is empty."
         case .missingPart(let part): return "Couldn’t read upload part \(part)."
-        case .missingETag(let part): return "S3 did not confirm upload part \(part)."
+        case .missingETag(let part): return "The storage did not confirm upload part \(part)."
         case .resumeMetadataMismatch: return "The saved upload does not match the server session."
         case .incompleteUpload: return "The upload is missing one or more parts."
         }

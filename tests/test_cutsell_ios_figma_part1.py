@@ -123,9 +123,10 @@ def test_no_secrets_or_qa_media_in_new_files():
 
 def test_failed_start_offers_retry_unless_saved_for_resume():
     submitter = read("CutSubmission.swift")
-    assert "throw CutSubmitError(underlying: error, savedForResume: pendingSaved)" in submitter
+    assert "throw CutSubmitError(underlying: error, savedForResume: pendingSaved, projectID:" in submitter
     flow = read("CreateFlowView.swift")
-    assert "failure = submitError.savedForResume ? .savedForResume : .notSaved" in flow
+    # Build 19: the real error is shown, and "Try again" resumes a saved upload.
+    assert "failure = submitError.savedForResume ? .savedForResume(projectID: submitError.projectID, detail: detail) : .notSaved(detail: detail)" in flow
     assert 'primaryTitle: "Try again"' in flow
     # The upload screen opens only after the gallery finished closing (no timer race).
     assert "fullScreenCover(isPresented: $showingGallery, onDismiss:" in flow

@@ -117,7 +117,8 @@ final class AppState: ObservableObject {
         let project: Project = try await api.request(
             "/v1/projects",
             method: "POST",
-            body: Body(user_id: session.userID, title: title)
+            body: Body(user_id: session.userID, title: title),
+            timeout: 25
         )
         projects.insert(project, at: 0)
         return project

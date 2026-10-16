@@ -95,7 +95,9 @@ enum GalleryExport {
     }
 
     /// `name` nil = the video's own file name from Photos (shown on the Processing screen).
-    static func export(_ asset: PHAsset, name: String?) async throws -> LocalVideo {
+    /// `progress` (0...1) while the video downloads from iCloud (only called when it is not on the
+    /// iPhone); `activity` on every step, so the upload screen knows the copy is alive.
+    static func export(_ asset: PHAsset, name: String?, progress: (@Sendable (Double) -> Void)? = nil) async throws -> LocalVideo {
         let resources = PHAssetResource.assetResources(for: asset)
         guard let resource = resources.first(where: { $0.type == .fullSizeVideo })
             ?? resources.first(where: { $0.type == .video }) else {
@@ -106,10 +108,15 @@ enum GalleryExport {
         let destination = try persistentMediaURL(extension: ext)
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
+        if let progress {
+            options.progressHandler = { value in progress(value) }
+        }
         do {
             try await PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options)
         } catch {
             try? FileManager.default.removeItem(at: destination)
+            CutSellDiagnostics.log("photos_copy_failed", ["domain": (error as NSError).domain,
+                                                          "code": String((error as NSError).code)])
             throw Failure.unavailable
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
@@ -270,6 +277,7 @@ struct GalleryPickerView: View {
                                 badge: badge(for: asset)
                             )
                             .onTapGesture { toggle(asset) }
+                            .accessibilityIdentifier("galleryTile")
                         }
                     }
                     .padding(.horizontal, 4)

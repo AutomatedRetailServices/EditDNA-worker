@@ -57,10 +57,12 @@ struct CutProgressView: View {
 
     private var stage: CutTracker.Stage {
         if uploading, let submitter {
-            let base = CutTracker.uploadStage(progress: submitter.progress, status: submitter.statusText)
+            // Build 19: the real step and ITS real % ("Downloading from iCloud 40%", "Preparing your
+            // video 12%", "Uploading your video 37%"); "…" for a step without a %.
             let label = submitter.statusText.components(separatedBy: " · ").first ?? ""
             let bulkLabel = label.hasPrefix("Cut ") ? label + " · " : ""
-            return CutTracker.Stage(step: base.step, title: bulkLabel + base.title, percent: base.percent)
+            let step = submitter.stageTitle == "Starting your cut" ? 2 : 1
+            return CutTracker.Stage(step: step, title: bulkLabel + submitter.stageTitle, percent: submitter.stagePercent ?? -1)
         }
         if let cut { return CutTracker.serverStage(cut) }
         return CutTracker.Stage(step: 1, title: "Uploading your video", percent: 0)
@@ -159,9 +161,10 @@ struct ProcessingContent: View {
 
             VStack(spacing: 6) {
                 Text(stage.title)
+                    .accessibilityIdentifier("processingStage")
                     .font(CS.sf(16, .semibold))
                     .foregroundStyle(Color(hex: 0xF2F7FF))
-                Text("\(stage.percent)%")
+                Text(stage.percent >= 0 ? "\(stage.percent)%" : "…")
                     .font(CS.sf(24, .semibold))
                     .foregroundStyle(CS.cyan)
                     .contentTransition(.numericText())

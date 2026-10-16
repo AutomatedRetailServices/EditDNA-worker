@@ -36,7 +36,8 @@ def test_upload_is_step_one_with_its_real_percent():
     assert 'Stage(step: 1, title: "Uploading your video", percent: Int((min(1, max(0, progress)) * 19).rounded()))' in tracker
     assert "20 + Int(Double(job ?? fallback) * 0.8)" in tracker
     screen = read("ProcessingScreen.swift")
-    assert "CutTracker.uploadStage(progress: submitter.progress" in screen
+    # Build 19: the real step and its own real % (iCloud, preparing, uploading).
+    assert "percent: submitter.stagePercent ?? -1" in screen
     assert "CutTracker.serverStage(cut)" in screen
 
 
@@ -84,7 +85,7 @@ def test_no_leaving_during_upload_and_one_cut_at_a_time():
     assert '"Keep CutSell open while your video uploads."' in screen
     assert screen.count(".disabled(uploading)") >= 3
     flow = read("CreateFlowView.swift")
-    assert "guard !submitter.isSubmitting else { return }" in flow and "submitter.reset()" in flow
+    assert "guard !submitter.isSubmitting, job == nil else { return }" in flow and "submitter.reset()" in flow
 
 
 def test_polling_stops_on_cancel_or_missing_project():

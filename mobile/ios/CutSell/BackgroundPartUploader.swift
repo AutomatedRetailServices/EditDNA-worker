@@ -14,6 +14,8 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
     private struct Pending {
         let continuation: CheckedContinuation<HTTPURLResponse, Error>
         var response: HTTPURLResponse?
+        /// Build 19: bytes sent so far (the upload screen shows the real %, not 0 % until a whole part ends).
+        var onBytes: (@Sendable (Int64) -> Void)?
     }
 
     private let lock = NSLock()
@@ -31,7 +33,8 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
 
-    func upload(fileURL: URL, to signedURL: URL, headers: [String: String] = [:]) async throws -> HTTPURLResponse {
+    func upload(fileURL: URL, to signedURL: URL, headers: [String: String] = [:],
+                onBytes: (@Sendable (Int64) -> Void)? = nil) async throws -> HTTPURLResponse {
         var request = URLRequest(url: signedURL)
         request.httpMethod = "PUT"
         // The server signs each part link with an EMPTY Content-Type. Left alone, URLSession adds
@@ -44,10 +47,18 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
         return try await withCheckedThrowingContinuation { continuation in
             let task = session.uploadTask(with: request, fromFile: fileURL)
             lock.lock()
-            pending[task.taskIdentifier] = Pending(continuation: continuation, response: nil)
+            pending[task.taskIdentifier] = Pending(continuation: continuation, response: nil, onBytes: onBytes)
             lock.unlock()
             task.resume()
         }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        lock.lock()
+        let callback = pending[task.taskIdentifier]?.onBytes
+        lock.unlock()
+        callback?(totalBytesSent)
     }
 
     func acceptBackgroundEventsCompletion(_ completion: @escaping () -> Void) {

@@ -59,6 +59,8 @@ struct DesignScreenshotRoot: View {
                 project: Self.sampleProjects[0], onBack: {}, onReview: {}
             )
             .background(CS.base.ignoresSafeArea())
+        case "create_probe":
+            CreateProbe()
         case "editor_probe":
             EditorProbe()
         case "perf_probe":
@@ -140,6 +142,33 @@ struct DesignScreenshotRoot: View {
             sourceCount: 1,
             updatedAt: nil
         )
+    }
+}
+
+/// Build 19 probe (Debug): the real Create flow (gallery → style → AI notice → upload → processing
+/// → editor) signed in with the probe's throwaway session, against the live server.
+private struct CreateProbe: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var ready = false
+
+    var body: some View {
+        Group {
+            if ready {
+                CreateFlowView(selectTab: { _ in })
+            } else {
+                ProgressView("Probe…")
+            }
+        }
+        .task {
+            let env = ProcessInfo.processInfo.environment
+            guard let token = env["CUTSELL_PROBE_TOKEN"], let user = env["CUTSELL_PROBE_USER"],
+                  let api = env["CUTSELL_PROBE_API"] else { return }
+            UserDefaults.standard.set(api, forKey: "cutsell.api.baseURL")
+            let session = CutSellSession(userID: user, accessToken: token)
+            await APIClient.shared.setSession(session)
+            appState.session = session
+            ready = true
+        }
     }
 }
 

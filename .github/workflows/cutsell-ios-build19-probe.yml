@@ -1,0 +1,188 @@
+name: CutSell iOS build 19 probe
+
+# Build 19: a NEW cut made the way the creator makes one (Create → gallery → style → AI notice →
+# upload → processing → editor), on the live server and Cloudflare R2, with the app compiled
+# OPTIMIZED like TestFlight. Builds 16-18 stayed at "Uploading 0 %" on a real iPhone; no earlier
+# probe went through this path (they made their cuts through the API).
+# Videos (made here, synthetic, never committed): a 4K one over 200 MB and longer than a minute,
+# and a short 1080p one; the 4K one is ALSO sent straight through the API (many 16 MiB parts to R2).
+# Only PNG frames and text logs go to the design-screenshots branch (b19/). Manual: push to
+# probe/build19.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/build19]
+
+concurrency:
+  group: cutsell-ios-build19-probe
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+
+      - name: Add the UI test target (probe only) and build for testing
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen ffmpeg >/dev/null
+          cat >> project.yml <<'YML'
+            CutSellUITests:
+              type: bundle.ui-testing
+              platform: iOS
+              sources:
+                - CutSellUITests
+              dependencies:
+                - target: CutSell
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app.uitests
+                  GENERATE_INFOPLIST_FILE: YES
+                  TEST_TARGET_NAME: CutSell
+          schemes:
+            CutSellUITests:
+              build:
+                targets:
+                  CutSell: all
+                  CutSellUITests: [test]
+              test:
+                config: Debug
+                targets:
+                  - CutSellUITests
+          YML
+          xcodegen generate
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          print(c[-1][2])')"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          set +e
+          xcodebuild build-for-testing -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -8 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          exit $status
+
+      - name: Make the test videos (4K over 200 MB and longer than a minute; short 1080p)
+        run: |
+          cd "$RUNNER_TEMP"
+          text="Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. And right now it is on sale in my shop. Grab yours today."
+          say -v Samantha -o s.aiff "$text $text $text $text $text"
+          ffmpeg -loglevel error -y -i s.aiff -ar 48000 -ac 1 speech_long.wav
+          ffmpeg -loglevel error -y -i speech_long.wav -t 12 speech_short.wav
+          # 4K, 75 s, busy picture (noise) so the file is big like a real iPhone 4K video.
+          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=3840x2160:r=30:d=75" -i speech_long.wav \
+            -vf "noise=alls=30:allf=t" -map 0:v -map 1:a -shortest -t 75 \
+            -c:v libx264 -preset ultrafast -crf 14 -pix_fmt yuv420p -c:a aac -b:a 128k big4k.mp4
+          ffmpeg -loglevel error -y -f lavfi -i "color=c=0x203060:s=1080x1920:r=30:d=12" -i speech_short.wav \
+            -vf "drawbox=x=440:y=860:w=200:h=200:color=0xE0E0E0:t=fill" -shortest \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac short.mp4
+          for f in big4k.mp4 short.mp4; do
+            echo "::notice title=video::$f $(du -m $f | cut -f1) MB, $(ffprobe -v error -show_entries format=duration -of csv=p=0 $f) s, $(ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0 $f)"
+          done
+
+      - name: The 4K video straight through the API (many parts to R2), processed, draft read
+        continue-on-error: true
+        run: |
+          python3 - <<'PYX'
+          import json, os, time, urllib.request
+          API = "https://cutsell-api.onrender.com"; T = None
+          video = os.path.join(os.environ["RUNNER_TEMP"], "big4k.mp4")
+          def call(m, p, b=None, q="", timeout=120):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=timeout) as x: return json.load(x)
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          with open(os.environ["GITHUB_ENV"], "a") as f: f.write(f"PROBE_TOKEN={T}\nPROBE_USER={u}\n")
+          t0 = time.time()
+          p = call("POST", "/v1/projects", {"user_id": u, "title": "copy_B19_BIG"}); pid = p["project_id"]
+          data = open(video, "rb").read()
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "big4k.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(data)})
+          print(f"::notice title=big upload::{len(data)/1048576:.0f} MB in {st['part_count']} parts of {st['part_size']/1048576:.0f} MiB")
+          parts = []; sizes = set()
+          for n in range(1, st["part_count"] + 1):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{n}/presign", {"project_id": pid, "user_id": u})
+              chunk = data[(n-1)*st["part_size"]: n*st["part_size"]]
+              if n < st["part_count"]: sizes.add(len(chunk))
+              req = urllib.request.Request(sg["upload_url"], data=chunk, method="PUT"); req.add_header("Content-Type", "")
+              with urllib.request.urlopen(req, timeout=600) as r: parts.append({"part_number": n, "etag": r.headers["ETag"]})
+          done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts}, timeout=300)
+          up = time.time() - t0
+          host = sg["upload_url"].split("/")[2].split(".", 1)[-1]
+          print(f"::notice title=big upload::uploaded in {up:.0f} s, all parts but the last {sizes} bytes, links on {host}, every part returned its ETag")
+          job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": False, "language_hint": None,
+                     "sources": [{"original_name": "big4k.mp4", "uri": done["source_uri"], "source_order": 0, "duration_sec": 75.0}]})
+          t1 = time.time()
+          while True:
+              j = call("GET", f"/v1/jobs/{job['job_id']}")
+              if j["state"] in ("finished", "failed", "canceled") or time.time() - t1 > 1800: break
+              time.sleep(5)
+          snap = call("GET", f"/v1/projects/{pid}/draft", q=f"?user_id={u}")
+          clips = len(snap["draft"].get("selected") or [])
+          level = "notice" if j["state"] == "finished" and clips else "error"
+          print(f"::{level} title=big processing::job {j['state']} in {time.time()-t1:.0f} s, draft with {clips} clips")
+          PYX
+
+      - name: The Create flow in the Simulator (XCUITest, optimized build), recording kept here
+        working-directory: mobile/ios
+        run: |
+          mkdir -p "$RUNNER_TEMP/b19" "$RUNNER_TEMP/rec"
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl ui "$SIM_UDID" appearance dark || true
+          xcrun simctl privacy "$SIM_UDID" grant photos ai.cutsell.app || true
+          # Newest first in the gallery: the 4K one, then the short one (index 0 = short).
+          xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/big4k.mp4"; sleep 3
+          xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/short.mp4"; sleep 3
+          xcrun simctl io "$SIM_UDID" recordVideo --codec=h264 --force "$RUNNER_TEMP/rec/b19.mp4" > /dev/null 2>&1 &
+          rec=$!
+          set +e
+          TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
+          TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B19_OUT="$RUNNER_TEMP/b19" \
+            xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+              -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build19UITests \
+              CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
+          status=$?
+          kill -INT $rec; sleep 3
+          grep -E "B19UI|error:|failed|passed" "$RUNNER_TEMP/test.log" | grep -v "Bearer" | tail -60
+          grep -E "error:|Assertion Failure|Test Case .* (failed|passed)|Executed [0-9]+ test|TEST (SUCCEEDED|FAILED)|crash" "$RUNNER_TEMP/test.log" \
+            | grep -v "Bearer" | sed 's#.*/mobile/ios/##' | cut -c1-280 | tail -15 | while IFS= read -r l; do echo "::warning title=xctest::$l"; done
+          tail -c 4000 "$RUNNER_TEMP/test.log" | grep -v "Bearer" > "$RUNNER_TEMP/b19/xctest_tail.txt" || true
+          xcrun simctl spawn "$SIM_UDID" log show --last 60m --style compact \
+            --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(ai_consent|photos_|prepare_|project_created|upload_|cut_submit|job_submitted|audio_session).*' \
+            | cut -c1-300 > "$RUNNER_TEMP/b19/app_events.txt" || true
+          tail -40 "$RUNNER_TEMP/b19/app_events.txt"
+          while IFS= read -r line; do echo "::notice title=b19::$line"; done < <(sed 's/^B19UI *//' "$RUNNER_TEMP/b19/b19_ui_log.txt" 2>/dev/null | grep -E "PASS|FAIL|AI notice|FAILURES|steps" | cut -c1-900)
+          echo "TEST_STATUS=$status" >> "$GITHUB_ENV"
+
+      - name: Frames and logs to design-screenshots (b19/), never a video
+        if: always()
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
+          rm -rf b19 && mkdir -p b19
+          cp "$RUNNER_TEMP"/b19/*.png b19/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/b19/*.txt b19/ 2>/dev/null || true
+          find b19 -type f \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4a' -o -iname '*.caf' -o -iname '*.wav' -o -iname '*.aiff' \) -delete
+          sed -i '' -E 's/(Bearer|token)[^ ]*/\1 <hidden>/g' b19/*.txt 2>/dev/null || true
+          echo "source commit: ${{ github.sha }} test status: ${TEST_STATUS:-?}" > b19/SOURCE.txt
+          git add -A b19
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "build 19 probe for ${{ github.sha }}" || true
+          git push --quiet origin design-screenshots

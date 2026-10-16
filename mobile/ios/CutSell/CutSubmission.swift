@@ -10,17 +10,51 @@ final class CutSubmitter: ObservableObject {
     @Published private(set) var isSubmitting = false
     /// The server job of the last cut started (for the Processing screen).
     @Published private(set) var lastJobID: String?
+    /// Build 19: the step shown on the Processing screen with ITS real % ("Downloading from iCloud",
+    /// "Preparing your video", "Uploading your video"…); nil percent = no % for that step.
+    @Published private(set) var stageTitle = "Getting your video ready"
+    @Published private(set) var stagePercent: Int?
+    /// Last time anything moved (a step, a %, a retry): the 60 s stall watch reads it.
+    private(set) var lastActivity = Date()
+    /// The last error a retry saw, in plain words (shown if the upload stalls).
+    private(set) var lastError: String?
+    /// The project of the cut being sent (a stalled upload is resumed into it).
+    private(set) var currentProjectID: String?
 
     /// Clears the previous cut's progress before a new one starts.
     func reset() {
         progress = 0
         statusText = ""
         lastJobID = nil
+        stageTitle = "Getting your video ready"
+        stagePercent = nil
+        lastError = nil
+        currentProjectID = nil
+        touch()
+    }
+
+    func touch() { lastActivity = Date() }
+
+    /// One step and its real % (0...1), shown as it is.
+    func stage(_ title: String, _ fraction: Double? = nil) {
+        let percent = fraction.map { Int((min(1, max(0, $0)) * 100).rounded(.down)) }
+        if title != stageTitle || percent != stagePercent {
+            stageTitle = title
+            stagePercent = percent
+            touch()
+        }
+    }
+
+    /// A retry happened (the work is alive; the screen keeps the step).
+    func retried(_ error: String) {
+        lastError = error
+        touch()
     }
 
     /// Shows a step that happens before uploading (e.g. copying from Photos).
     func announce(_ text: String) {
         statusText = text
+        stage(text.replacingOccurrences(of: "…", with: ""))
     }
 
     /// Mode names stored in resumable uploads (`PendingCutRecord.mode`); unchanged.
@@ -52,6 +86,7 @@ final class CutSubmitter: ObservableObject {
         report(0)
         var transientPreparedFiles: [URL] = []
         var pendingSaved = resumeProjectID != nil
+        var createdProjectID = resumeProjectID
 
         do {
             let uploadVideos: [LocalVideo]
@@ -62,10 +97,14 @@ final class CutSubmitter: ObservableObject {
                 var preparedVideos: [LocalVideo] = []
                 for (index, video) in selected.enumerated() {
                     say("Preparing \(index + 1) of \(selected.count)…")
+                    let title = selected.count > 1 ? "Preparing video \(index + 1) of \(selected.count)" : "Preparing your video"
+                    stage(title)
                     let prepared = try await VideoPreparation.shared.prepare(
                         fileURL: video.url,
                         contentType: video.contentType
-                    )
+                    ) { [weak self] fraction in
+                        Task { @MainActor in self?.stage(title, fraction) }
+                    }
                     if prepared.wasTranscoded { transientPreparedFiles.append(prepared.url) }
                     preparedVideos.append(LocalVideo(
                         url: prepared.url,
@@ -82,10 +121,16 @@ final class CutSubmitter: ObservableObject {
                 projectID = resumeProjectID
             } else {
                 say("Creating project…")
+                stage("Creating your project")
                 let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let project = try await appState.createProject(
-                    title: (cleanTitle?.isEmpty ?? true) ? nil : cleanTitle
-                )
+                let project = try await Retry.run("project", onRetry: { [weak self] _, error in
+                    self?.retried(Retry.short(error))
+                }) {
+                    try await appState.createProject(title: (cleanTitle?.isEmpty ?? true) ? nil : cleanTitle)
+                }
+                CutSellDiagnostics.log("project_created", [:])
+                createdProjectID = project.projectID
+                currentProjectID = project.projectID
                 projectID = project.projectID
                 let pending = PendingCutRecord(
                     projectID: projectID,
@@ -108,9 +153,12 @@ final class CutSubmitter: ObservableObject {
                 transientPreparedFiles.removeAll()
             }
 
+            currentProjectID = projectID
             var sources: [SourceInput] = []
             for (index, video) in uploadVideos.enumerated() {
                 say("Uploading \(index + 1) of \(uploadVideos.count)…")
+                let uploadTitle = uploadVideos.count > 1 ? "Uploading video \(index + 1) of \(uploadVideos.count)" : "Uploading your video"
+                stage(uploadTitle, 0)
                 let base = Double(index) / Double(uploadVideos.count)
                 // D-133: bounded, diagnostics-only upload-timing log around
                 // the EXISTING multipart upload call -- no networking change.
@@ -123,11 +171,15 @@ final class CutSubmitter: ObservableObject {
                     fileURL: video.url,
                     projectID: projectID,
                     session: session,
-                    contentType: video.contentType
+                    contentType: video.contentType,
+                    onRetry: { [weak self] error in Task { @MainActor in self?.retried(error) } }
                 ) { [weak self] partProgress in
                     let overall = base + partProgress / Double(uploadVideos.count)
                     let lower = progressRange.lowerBound
-                    Task { @MainActor in self?.progress = lower + span * min(1, max(0, overall)) }
+                    Task { @MainActor in
+                        self?.progress = lower + span * min(1, max(0, overall))
+                        self?.stage(uploadTitle, partProgress)
+                    }
                 }
                 // Keep this file on the phone for the editor's preview (no download later).
                 await SourceVideoCache.shared.store(fileURL: video.url, uri: result.sourceURI)
@@ -144,6 +196,7 @@ final class CutSubmitter: ObservableObject {
             }
 
             say("Starting AI edit…")
+            stage("Starting your cut")
             struct Body: Encodable {
                 let project_id: String
                 let user_id: String
@@ -154,7 +207,9 @@ final class CutSubmitter: ObservableObject {
                 let dialogue_overlap_enabled: Bool
                 let auto_zoom_enabled: Bool
             }
-            let submitResponse: FlowBSubmitResponse = try await APIClient.shared.request(
+            let submitResponse: FlowBSubmitResponse = try await Retry.run("start cut", onRetry: { [weak self] _, error in
+                self?.retried(Retry.short(error))
+            }) { try await APIClient.shared.request(
                 "/v1/flow-b/jobs",
                 method: "POST",
                 body: Body(
@@ -165,8 +220,9 @@ final class CutSubmitter: ObservableObject {
                     audio_overlap: audioOverlap,
                     dialogue_overlap_enabled: audioOverlap,
                     auto_zoom_enabled: autoZoom
-                )
-            )
+                ),
+                timeout: 30
+            ) }
             // D-133: bounded diagnostics only -- logs the backend job id.
             CutSellDiagnostics.log("job_submitted", ["job_id": submitResponse.jobID])
             lastJobID = submitResponse.jobID
@@ -175,11 +231,12 @@ final class CutSubmitter: ObservableObject {
             try? await appState.refreshProjects()
             return projectID
         } catch {
-            CutSellDiagnostics.log("cut_submit_failed", ["reason": String(describing: type(of: error))])
+            CutSellDiagnostics.log("cut_submit_failed", ["reason": String(describing: type(of: error)), "error": Retry.short(error),
+                                                         "step": stageTitle])
             if !pendingSaved {
                 for url in transientPreparedFiles { try? FileManager.default.removeItem(at: url) }
             }
-            throw CutSubmitError(underlying: error, savedForResume: pendingSaved)
+            throw CutSubmitError(underlying: error, savedForResume: pendingSaved, projectID: pendingSaved ? createdProjectID : nil)
         }
     }
 }
@@ -189,6 +246,8 @@ final class CutSubmitter: ObservableObject {
 struct CutSubmitError: LocalizedError {
     let underlying: Error
     let savedForResume: Bool
+    /// The project created before the failure (its upload can be resumed with "Try again").
+    var projectID: String? = nil
 
     var errorDescription: String? { underlying.localizedDescription }
 }

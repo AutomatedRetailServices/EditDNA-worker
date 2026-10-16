@@ -72,12 +72,15 @@ actor APIClient {
         _ path: String,
         method: String = "GET",
         body: (any Encodable)? = nil,
-        query: [URLQueryItem] = []
+        query: [URLQueryItem] = [],
+        /// Build 19: the upload path answers fast; a request hanging longer is retried.
+        timeout: TimeInterval? = nil
     ) async throws -> T {
         var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
+        if let timeout { request.timeoutInterval = timeout }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token = session?.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
