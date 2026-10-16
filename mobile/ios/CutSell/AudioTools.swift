@@ -7,18 +7,27 @@ import Foundation
 enum EditorAudio {
     private static var active = false
 
+    /// Playback category, movie mode: sounds, voices and the video play with the ring/silent switch
+    /// on silent too (build 18: checked at every play, since a voice-over recording changes it).
     static func preparePlayback() {
         let session = AVAudioSession.sharedInstance()
         // Already set up (the usual case when tapping play): nothing to wait for.
-        if active, session.category == .playback { return }
+        if active, session.category == .playback, session.mode == .moviePlayback { return }
         do {
-            if session.category != .playback {
+            if session.category != .playback || session.mode != .moviePlayback {
                 try session.setCategory(.playback, mode: .moviePlayback, options: [])
             }
             try session.setActive(true)
             active = true
+            CutSellDiagnostics.log("audio_session_ready", [
+                "category": session.category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: ""),
+                "mode": session.mode.rawValue.replacingOccurrences(of: "AVAudioSessionMode", with: ""),
+                "output": session.currentRoute.outputs.map(\.portType.rawValue).joined(separator: "+"),
+            ])
         } catch {
-            CutSellDiagnostics.log("audio_session_failed", ["reason": String(describing: type(of: error))])
+            active = false
+            CutSellDiagnostics.log("audio_session_failed", ["reason": String(describing: type(of: error)),
+                                                            "code": String((error as NSError).code)])
         }
     }
 }

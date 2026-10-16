@@ -28,6 +28,7 @@ enum CutSellDiagnostics {
     static func log(_ event: String, _ fields: [String: String] = [:]) {
         let pairs = fields.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
         logger.log("\(event, privacy: .public) \(pairs, privacy: .public)")
+        DiagnosticsEventLog.shared.add(event, fields)
     }
 
     /// Real hardware identifier (e.g. "iPhone15,2"), not the generic

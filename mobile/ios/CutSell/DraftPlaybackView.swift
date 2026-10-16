@@ -133,6 +133,8 @@ final class DraftPlaybackController: ObservableObject {
     private var compositionReuseSec = 0.0
 
     private var endObserver: NSObjectProtocol?
+    /// Playing when a rebuild started (a rebuild replaced by a newer one hands this on).
+    private var resumeAfterBuild = false
 
     init() {
         CaptionFontLoader.registerIfNeeded()
@@ -253,21 +255,96 @@ final class DraftPlaybackController: ObservableObject {
         return result
     }
 
+    /// Each rebuild's number: a newer one makes an older one (still waiting on a file or the
+    /// network) stop before it replaces the player -- otherwise the older mix could win and play
+    /// without the sound just added, or with the video's sound back on (build 17 on a real iPhone).
+    private var buildGeneration = 0
+    /// Audio files (voices, sounds, overlay videos) used by the current composition. They must stay
+    /// alive: a track whose asset is gone is not inserted (try? hid it), and an optimized build frees
+    /// a temporary asset at once -- the sounds were silent on the iPhone while the Debug Simulator
+    /// build still played them.
+    private var audioAssetCache: [String: AVURLAsset] = [:]
+
+    /// The same opened file for the same file version (a voice recorded again at the same place is
+    /// a new version: its modification date changes).
+    private func audioAsset(for url: URL, used: inout Set<String>) -> AVURLAsset {
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        let key = "\(url.path)|\(modified)"
+        #if DEBUG
+        // Build 18 probe only: build 17's way (a temporary asset nobody keeps), to show the difference
+        // in an optimized build.
+        if ProcessInfo.processInfo.environment["CUTSELL_PROBE_TEMP_ASSET"] == "1" { return AVURLAsset(url: url) }
+        #endif
+        used.insert(key)
+        if let hit = audioAssetCache[key] { return hit }
+        let asset = AVURLAsset(url: url)
+        audioAssetCache[key] = asset
+        return asset
+    }
+
+    /// One sound / voice / overlay sound put on its own track, where the timeline says, cut to what
+    /// its file really holds (an AAC file can be a few ms shorter than the length the draft gives).
+    private func insertAudio(_ url: URL, from sourceIn: Double, to sourceOut: Double, at start: Double, cutEnd: Double,
+                             composition: AVMutableComposition, entry: inout EditorMixEntry,
+                             used: inout Set<String>) async -> AVMutableCompositionTrack? {
+        let asset = audioAsset(for: url, used: &used)
+        guard let source = try? await asset.loadTracks(withMediaType: .audio).first else {
+            entry.problem = "no sound in the file"
+            return nil
+        }
+        let range = (try? await source.load(.timeRange)) ?? CMTimeRange(start: .zero, duration: .zero)
+        entry.fileSeconds = CMTimeGetSeconds(range.duration)
+        let fileStart = max(0, CMTimeGetSeconds(range.start))
+        let fileEnd = CMTimeGetSeconds(range.end)
+        let from = max(sourceIn, fileStart)
+        let to = min(sourceOut, fileEnd)
+        let at = start + (from - sourceIn)
+        let length = min(to - from, cutEnd - at)
+        guard length > 0.02 else {
+            entry.problem = at >= cutEnd ? "after the end of the cut" : "empty range"
+            return nil
+        }
+        guard let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            entry.problem = "no track"
+            return nil
+        }
+        do {
+            try track.insertTimeRange(CMTimeRange(start: CMTime(seconds: from, preferredTimescale: 44_100),
+                                                  duration: CMTime(seconds: length, preferredTimescale: 44_100)),
+                                      of: source, at: CMTime(seconds: at, preferredTimescale: 44_100))
+        } catch {
+            entry.problem = "insert failed (\((error as NSError).code))"
+            composition.removeTrack(track)
+            CutSellDiagnostics.log("preview_audio_insert_failed", ["kind": entry.kind.rawValue, "code": String((error as NSError).code)])
+            return nil
+        }
+        // What the composition really holds (not what was asked).
+        entry.insertedSeconds = track.segments.filter { !$0.isEmpty }.reduce(0) { $0 + CMTimeGetSeconds($1.timeMapping.target.duration) }
+        return track
+    }
+
     func rebuild(from model: DraftEditorViewModel) async {
+        EditorDiagnostics.shared.keyframeCount = model.transformKeyframes.count
+        EditorDiagnostics.shared.aiKeyframeCount = model.transformKeyframes.filter(\.isAI).count
         let sourceURLs = sourceURLCatalog(sources: model.allSources)
         let signature = Self.signature(for: model, sourceURLs: sourceURLs)
-        if isReady, signature == compositionSignature, let builtAt = compositionBuiltAt,
+        if isReady, !isBuilding, signature == compositionSignature, let builtAt = compositionBuiltAt,
            Date().timeIntervalSince(builtAt) < compositionReuseSec {
             refreshCaptionCues(from: model)
             return
         }
+        buildGeneration += 1
+        let generation = buildGeneration
+        func superseded() -> Bool { generation != buildGeneration }
         let resumeAt = currentTime
-        let wasPlaying = isPlaying
+        let wasPlaying = isPlaying || resumeAfterBuild
+        resumeAfterBuild = wasPlaying
         compositionSignature = nil
         pause()
         isBuilding = true
         message = nil
-        defer { isBuilding = false }
+        defer { if !superseded() { isBuilding = false; resumeAfterBuild = false } }
 
         guard !model.selectedClips.isEmpty else {
             player.replaceCurrentItem(with: nil)
@@ -294,6 +371,7 @@ final class DraftPlaybackController: ObservableObject {
 
             let needed = Set(model.selectedClips.compactMap { $0["source_asset_id"]?.stringValue })
             let sources = await loadSources(sourceURLs, needed: needed, validFor: Self.reuseWindow(for: model.snapshot))
+            if superseded() { return }
 
             var cursor = CMTime.zero
             var insertedVideo = false
@@ -305,7 +383,7 @@ final class DraftPlaybackController: ObservableObject {
             let videoGain = max(0, min(2, model.videoVolume)) * master
             /// Cleaned copies of the sources (Clean up voice), opened once per rebuild.
             var cleanTracks: [String: AVAssetTrack] = [:]
-            retainedCleanAssets = []
+            var cleanAssets: [AVURLAsset] = []
 
             for (clipIndex, clip) in model.selectedClips.enumerated() {
                 guard let sourceID = clip["source_asset_id"]?.stringValue,
@@ -345,8 +423,9 @@ final class DraftPlaybackController: ObservableObject {
                        let cleanURL = CleanAudioCenter.shared.localURL(.source(sourceID), project: model.project) {
                         if cleanTracks[sourceID] == nil {
                             let asset = AVURLAsset(url: cleanURL)
-                            retainedCleanAssets.append(asset)   // a track whose asset is gone can't be inserted
+                            cleanAssets.append(asset)   // a track whose asset is gone can't be inserted
                             cleanTracks[sourceID] = try? await asset.loadTracks(withMediaType: .audio).first
+                            if superseded() { return }
                         }
                         sound = cleanTracks[sourceID] ?? sound
                     }
@@ -368,6 +447,7 @@ final class DraftPlaybackController: ObservableObject {
                 CutSellDiagnostics.log("playback_failed", ["reason": "no_playable_clips"])
                 return
             }
+            let cutSeconds = CMTimeGetSeconds(cursor)
             // The video's own sound: each clip's volume, lowered (-12 dB, short ramps) while a
             // voice-over with "Lower video sound" plays -- the same as the export.
             if let audioParameters {
@@ -381,41 +461,53 @@ final class DraftPlaybackController: ObservableObject {
                 mixInputs.append(audioParameters)
             }
 
-            // Voice-over track(s): recordings kept on this iPhone (placed, or still uploading),
-            // where the timeline says.
+            // Voices, music and CutSell sounds: each on its own track, where the timeline says. A
+            // sound's file must be on this iPhone (SfxLibrary); when it arrives the preview rebuilds.
+            var usedAudio: Set<String> = []
+            var report = EditorMixReport()
+            var measured: [(index: Int, track: AVMutableCompositionTrack, start: Double, length: Double, volume: Double)] = []
             for placement in model.previewVoices {
-                guard let voice = try? await AVURLAsset(url: placement.url).loadTracks(withMediaType: .audio).first,
-                      let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-                else { continue }
-                let length = min(placement.sourceOut - placement.sourceIn,
-                                 max(0, CMTimeGetSeconds(cursor) - placement.start))
-                guard length > 0.05 else { continue }
-                try? track.insertTimeRange(
-                    CMTimeRange(start: CMTime(seconds: placement.sourceIn, preferredTimescale: 600),
-                                duration: CMTime(seconds: length, preferredTimescale: 600)),
-                    of: voice, at: CMTime(seconds: placement.start, preferredTimescale: 600)
-                )
-                let parameters = AVMutableAudioMixInputParameters(track: track)
-                AudioGainTap.apply(max(0, min(2, placement.volume)) * master, to: parameters)
-                mixInputs.append(parameters)
+                let effective = max(0, min(2, placement.volume)) * master
+                var entry = EditorMixEntry(id: placement.key, kind: EditorMixEntry.Kind(rawValue: placement.kind) ?? .voice,
+                                           label: placement.label, start: placement.start,
+                                           length: max(0, placement.sourceOut - placement.sourceIn),
+                                           fileOnPhone: FileManager.default.fileExists(atPath: placement.url.path),
+                                           fileSeconds: nil, insertedSeconds: 0, volume: effective)
+                let track = await insertAudio(placement.url, from: placement.sourceIn, to: placement.sourceOut, at: placement.start,
+                                              cutEnd: cutSeconds, composition: composition, entry: &entry, used: &usedAudio)
+                if superseded() { return }
+                if let track {
+                    let parameters = AVMutableAudioMixInputParameters(track: track)
+                    AudioGainTap.apply(effective, to: parameters)
+                    mixInputs.append(parameters)
+                    measured.append((report.entries.count, track, entry.start, entry.insertedSeconds, effective))
+                }
+                report.entries.append(entry)
+            }
+            // Sounds on the timeline whose file is not on this iPhone yet (shown in Diagnostics).
+            for clip in model.soundClips where clip.sfxID.flatMap({ SfxLibrary.localURL($0) }) == nil {
+                report.entries.append(EditorMixEntry(id: clip.id, kind: .sound, label: SfxLibrary.name(of: clip.sfxID ?? ""),
+                                                     start: clip.start, length: clip.length, fileOnPhone: false, fileSeconds: nil,
+                                                     insertedSeconds: 0, volume: clip.muted ? 0 : clip.volume,
+                                                     problem: "waiting for the download"))
             }
 
             // Video overlays with their sound on.
             for overlay in model.overlaysOnScreen where overlay.kind == .video && !overlay.style.muted {
-                guard let url = overlay.url, url.isFileURL,
-                      let sound = try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio).first,
-                      let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-                else { continue }
-                let length = min(overlay.end - overlay.start, max(0, CMTimeGetSeconds(cursor) - overlay.start))
-                guard length > 0.05 else { continue }
-                try? track.insertTimeRange(
-                    CMTimeRange(start: CMTime(seconds: overlay.sourceStart, preferredTimescale: 600),
-                                duration: CMTime(seconds: length, preferredTimescale: 600)),
-                    of: sound, at: CMTime(seconds: overlay.start, preferredTimescale: 600)
-                )
-                let parameters = AVMutableAudioMixInputParameters(track: track)
-                AudioGainTap.apply(max(0, min(2, overlay.style.volume)) * master, to: parameters)
-                mixInputs.append(parameters)
+                guard let url = overlay.url, url.isFileURL else { continue }
+                let effective = max(0, min(2, overlay.style.volume)) * master
+                var entry = EditorMixEntry(id: overlay.id, kind: .overlay, label: "Video overlay", start: overlay.start,
+                                           length: overlay.end - overlay.start, fileOnPhone: true, fileSeconds: nil,
+                                           insertedSeconds: 0, volume: effective)
+                let track = await insertAudio(url, from: overlay.sourceStart, to: overlay.sourceStart + (overlay.end - overlay.start),
+                                              at: overlay.start, cutEnd: cutSeconds, composition: composition, entry: &entry,
+                                              used: &usedAudio)
+                if superseded() { return }
+                if let track {
+                    let parameters = AVMutableAudioMixInputParameters(track: track)
+                    AudioGainTap.apply(effective, to: parameters)
+                    mixInputs.append(parameters)
+                }
             }
 
             // The preview is the CUT: nothing past its last clip (a source track can run longer than
@@ -432,7 +524,9 @@ final class DraftPlaybackController: ObservableObject {
             mix.inputParameters = mixInputs
             item.audioMix = mix
             player.replaceCurrentItem(with: item)
-            duration = max(0, CMTimeGetSeconds(cursor))
+            retainedCleanAssets = cleanAssets
+            audioAssetCache = audioAssetCache.filter { usedAudio.contains($0.key) }   // files the new mix no longer uses
+            duration = max(0, cutSeconds)
             isReady = true
             clipWindows = windows
             compositionSignature = signature
@@ -442,15 +536,42 @@ final class DraftPlaybackController: ObservableObject {
             // Stay where the creator was (an edit no longer jumps back to the start).
             seek(to: min(resumeAt, max(0, duration - 0.05)))
             if wasPlaying { togglePlayback() }
-            CutSellDiagnostics.log("playback_ready", ["duration_s": String(format: "%.2f", duration)])
-            #if DEBUG
-            // Build 17 probe: what the preview really mixes (clip levels, voices / sounds, clean copies).
-            let base = baseLevels.map { String(format: "%.1f-%.1f:%.2f", $0.start, $0.end, $0.level) }.joined(separator: ",")
-            let voices = model.previewVoices.map { String(format: "%@@%.1f:%.2f", $0.url.lastPathComponent, $0.start, $0.volume * master) }
-                .joined(separator: ",")
-            NSLog("CUTSELLB17 mix base=[%@] voices=[%@] clean_tracks=%d master=%.2f", base, voices, cleanTracks.count, master)
-            #endif
+
+            report.videoLevels = baseLevels
+            report.videoVolume = model.videoVolume
+            report.duration = duration
+            EditorDiagnostics.shared.mix = report
+            let inMix = report.entries.filter(\.inMix).count
+            CutSellDiagnostics.log("playback_ready", ["duration_s": String(format: "%.2f", duration),
+                                                     "sounds": String(report.entries.count), "in_mix": String(inMix),
+                                                     "missing": String(report.entries.filter { !$0.fileOnPhone }.count),
+                                                     "video_volume": String(format: "%.2f", model.videoVolume)])
+            for entry in report.entries where !entry.inMix && entry.volume > 0.001 {
+                CutSellDiagnostics.log("preview_sound_not_in_mix", ["kind": entry.kind.rawValue, "problem": entry.problem ?? "unknown"])
+            }
+            // Measure what each sound's track really carries in its window (Diagnostics, probe).
+            let frozen = composition.copy() as? AVComposition ?? composition
+            let frozenTracks = measured.map { item in frozen.track(withTrackID: item.track.trackID) }
+            let jobs = measured
+            Task { [weak self] in
+                var levels: [Int: Double] = [:]
+                for (job, track) in zip(jobs, frozenTracks) {
+                    guard let track else { continue }
+                    let window = min(job.length, 2.0)
+                    if let db = await EditorDiagnostics.measure(asset: frozen, tracks: [track], start: job.start, end: job.start + window) {
+                        levels[job.index] = job.volume > 0.0001 ? db + 20 * log10(job.volume) : -120
+                    }
+                }
+                guard let self, generation == self.buildGeneration else { return }
+                var updated = EditorDiagnostics.shared.mix
+                for (index, db) in levels where index < updated.entries.count { updated.entries[index].measuredDB = db }
+                EditorDiagnostics.shared.mix = updated
+                #if DEBUG
+                NSLog("CUTSELLB18 %@", updated.summary)
+                #endif
+            }
         } catch {
+            if superseded() { return }
             player.replaceCurrentItem(with: nil)
             isReady = false
             message = "Preview is temporarily unavailable. The draft is still safe."

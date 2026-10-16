@@ -336,7 +336,8 @@ extension DraftEditorViewModel {
 
     @discardableResult
     func removeAudioClip(id: String) -> Task<Void, Never> {
-        applyDraftChange { object in Self.mapAudioClips(&object) { $0.filter { $0.id != id } } }
+        CutSellDiagnostics.log("audio_deleted", ["kind": audioClips.first { $0.id == id }?.kind.rawValue ?? "?"])
+        return applyDraftChange { object in Self.mapAudioClips(&object) { $0.filter { $0.id != id } } }
     }
 
     /// Cuts the clip at timeline `time` (both pieces keep the same recording, nothing is lost).
@@ -352,6 +353,7 @@ extension DraftEditorViewModel {
                               volume: item.volume, duckVideo: item.duckVideo, clean: item.clean,
                               enhancedAtRecord: item.enhancedAtRecord)
         right.muted = item.muted
+        CutSellDiagnostics.log("audio_split", ["kind": item.kind.rawValue, "at": String(format: "%.2f", time)])
         applyDraftChange { object in
             Self.mapAudioClips(&object) { items in items.flatMap { $0.id == id ? [left, right] : [$0] } }
         }
@@ -408,6 +410,8 @@ extension DraftEditorViewModel {
             }
         }
         let result = changed
+        CutSellDiagnostics.log("audio_trimmed", ["kind": item.kind.rawValue, "edge": edge == .start ? "start" : "end",
+                                                 "length": String(format: "%.2f", result.length)])
         return updateAudioClip(id: id) { $0 = result }
     }
 
@@ -429,9 +433,10 @@ extension DraftEditorViewModel {
     func addSound(sfxID: String, at time: Double) -> String? {
         guard SfxLibrary.localURL(sfxID) != nil else { return nil }
         let id = "ac_\(UUID().uuidString.prefix(8).lowercased())"
-        let length = SfxLibrary.duration(of: sfxID) ?? (sfxID == "typing" ? 3 : 0.6)
-        addAudioClip(AudioClipItem(id: id, kind: .sfx, sfxID: sfxID, start: max(0, min(time, max(0, timelineDuration - 0.1))),
-                                   sourceIn: 0, sourceOut: length))
+        let length = SfxLibrary.shared.length(of: sfxID)
+        let at = max(0, min(time, max(0, timelineDuration - 0.1)))
+        addAudioClip(AudioClipItem(id: id, kind: .sfx, sfxID: sfxID, start: at, sourceIn: 0, sourceOut: length))
+        CutSellDiagnostics.log("sound_added", ["sfx": sfxID, "at": String(format: "%.2f", at), "length": String(format: "%.3f", length)])
         return id
     }
 
@@ -482,6 +487,7 @@ extension DraftEditorViewModel {
         left["end"] = .number((time * 1000).rounded() / 1000)
         right["start"] = .number((time * 1000).rounded() / 1000)
         right["overlay_id"] = .string("ov_\(UUID().uuidString.prefix(10).lowercased())")
+        CutSellDiagnostics.log("overlay_split", ["kind": item["kind"]?.stringValue ?? "photo", "at": String(format: "%.2f", time)])
         if item["kind"]?.stringValue == "video" {
             let sourceStart = item["source_start"]?.doubleValue ?? 0
             right["source_start"] = .number(((sourceStart + time - start) * 1000).rounded() / 1000)
@@ -603,30 +609,87 @@ final class SfxLibrary: ObservableObject {
 
     var allReady: Bool { (Self.buttons.map(\.id) + ["typing_long"]).allSatisfy { ready.contains($0) } }
 
+    /// Seconds of sound each file really holds (read from the file once it is here).
+    @Published private(set) var measured: [String: Double] = [:]
+    /// Files checked this session (a file that can't be played is downloaded again).
+    private var checked: Set<String> = []
+
+    /// Length to give a new sound: the file's own length when known (an AAC file can be a few ms
+    /// shorter than its nominal length), else the known one.
+    func length(of id: String) -> Double {
+        let nominal = Self.duration(of: id) ?? (id == "typing" ? 3 : 0.6)
+        guard let real = measured[id], real > 0.05 else { return nominal }
+        return min(nominal, (real * 1000).rounded(.down) / 1000)
+    }
+
+    /// Seconds of sound in the file (nil: not a playable sound file).
+    nonisolated static func playableSeconds(_ url: URL) async -> Double? {
+        let asset = AVURLAsset(url: url)
+        guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+              let range = try? await track.load(.timeRange) else { return nil }
+        let seconds = CMTimeGetSeconds(range.duration)
+        return seconds > 0.05 ? seconds : nil
+    }
+
     /// Downloads every sound the first time the Audio panel opens; later opens use the copies.
+    /// A file is "ready" only once it is on this iPhone AND plays (checked with AVFoundation).
     func prepare() async {
         let ids = Self.buttons.map(\.id) + ["typing_long"]
-        ready = Set(ids.filter { Self.localURL($0) != nil })
+        for id in ids where !checked.contains(id) {
+            guard let url = Self.localURL(id) else { continue }
+            if let seconds = await Self.playableSeconds(url) {
+                measured[id] = seconds
+                checked.insert(id)
+            } else {
+                try? FileManager.default.removeItem(at: url)
+                CutSellDiagnostics.log("sfx_file_unplayable", ["sfx": id])
+            }
+        }
+        ready = Set(ids.filter { Self.localURL($0) != nil && checked.contains($0) })
         guard ready.count < ids.count, !loading else { return }
         loading = true
         failed = false
         defer { loading = false }
+        var missing = 0
         do {
             let manifest: SfxManifest = try await APIClient.shared.request("/v1/sfx/manifest")
             for sound in manifest.sounds {
                 if let seconds = sound.duration_sec { durations[sound.id] = seconds }
                 guard Self.localURL(sound.id) == nil, let raw = sound.url, let url = URL(string: raw) else { continue }
+                let started = Date()
                 let (file, response) = try await URLSession.shared.download(from: url)
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else { continue }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard status == 200 else {
+                    missing += 1
+                    CutSellDiagnostics.log("sfx_download_failed", ["sfx": sound.id, "status": String(status)])
+                    continue
+                }
                 let target = Self.folder.appendingPathComponent("\(sound.id).m4a")
                 try? FileManager.default.removeItem(at: target)
                 try FileManager.default.moveItem(at: file, to: target)
+                guard let seconds = await Self.playableSeconds(target) else {
+                    try? FileManager.default.removeItem(at: target)
+                    missing += 1
+                    CutSellDiagnostics.log("sfx_file_unplayable", ["sfx": sound.id])
+                    continue
+                }
+                measured[sound.id] = seconds
+                checked.insert(sound.id)
                 ready.insert(sound.id)
+                CutSellDiagnostics.log("sfx_downloaded", ["sfx": sound.id, "seconds": String(format: "%.3f", seconds),
+                                                          "took_s": String(format: "%.1f", Date().timeIntervalSince(started))])
             }
+            if missing > 0 { failed = true }
         } catch {
             failed = true
             CutSellDiagnostics.log("sfx_manifest_failed", ["reason": String(describing: type(of: error))])
         }
+    }
+
+    /// "Try again" after a failed download.
+    func retry() {
+        failed = false
+        Task { await ensure() }
     }
 
     private var player: AVAudioPlayer?

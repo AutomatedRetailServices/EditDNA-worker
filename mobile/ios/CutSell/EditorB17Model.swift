@@ -155,6 +155,9 @@ enum KeyframeMath {
 enum KeyframeTarget: Equatable {
     case video(String)
     case overlay(String)
+
+    /// For Diagnostics (no ids).
+    var logName: String { if case .video = self { return "video_clip" } else { return "overlay" } }
 }
 
 /// A ◇ on the timeline.
@@ -172,6 +175,16 @@ enum VolumeTarget: Equatable {
     case video(String)
     case audio(String)
     case overlay(String)
+
+    /// For Diagnostics (no ids).
+    var logName: String {
+        switch self {
+        case .whole: return "whole_video"
+        case .video: return "video_clip"
+        case .audio: return "audio_clip"
+        case .overlay: return "video_overlay"
+        }
+    }
 }
 
 extension DraftEditorViewModel {
@@ -318,6 +331,9 @@ extension DraftEditorViewModel {
         }
         let made = key
         applyDraftChange { object in Self.setKeyframes(&object) { $0 + [made] } }
+        CutSellDiagnostics.log("keyframe_added", ["target": target.logName, "at": String(format: "%.2f", time),
+                                                  "scale": String(format: "%.3f", made.value.scale),
+                                                  "rotation": String(format: "%.1f", made.value.rotation)])
         #if DEBUG
         NSLog("CUTSELLB17 keyframe_add target=%@ at=%.2f scale=%.3f x=%.3f y=%.3f rotation=%.1f",
               made.target.rawValue, time, made.value.scale, made.value.x, made.value.y, made.value.rotation)
@@ -326,6 +342,8 @@ extension DraftEditorViewModel {
     }
 
     func updateKeyframe(id: String, value: TransformValue) {
+        CutSellDiagnostics.log("keyframe_changed", ["scale": String(format: "%.3f", value.scale),
+                                                    "rotation": String(format: "%.1f", value.rotation)])
         applyDraftChange { object in
             Self.setKeyframes(&object) { keys in keys.map { key in
                 guard key.id == id else { return key }
@@ -351,10 +369,12 @@ extension DraftEditorViewModel {
             moved.time = min(max(0, time - overlay.start), overlay.end - overlay.start)
         }
         let result = moved
+        CutSellDiagnostics.log("keyframe_moved", ["to": String(format: "%.2f", time)])
         applyDraftChange { object in Self.setKeyframes(&object) { $0.map { $0.id == id ? result : $0 } } }
     }
 
     func deleteKeyframe(id: String) {
+        CutSellDiagnostics.log("keyframe_deleted", ["ai": String(transformKeyframes.first { $0.id == id }?.isAI ?? false)])
         applyDraftChange { object in Self.setKeyframes(&object) { $0.filter { $0.id != id } } }
     }
 
@@ -362,6 +382,35 @@ extension DraftEditorViewModel {
 
     var masterVolume: Double { displayDraft?["master_volume"]?.doubleValue ?? 1 }
     var masterMuted: Bool { displayDraft?["master_muted"]?.boolValue ?? false }
+
+    /// The video's level before it was silenced (per cut, for this session).
+    private static var videoLevelBeforeMute: [String: Double] = [:]
+
+    /// Build 18: "Whole video" and the video row's speaker are ONE thing: the video's own sound
+    /// (every clip). Sounds, voices and music are never silenced by it. A draft from build 17 that
+    /// silenced or turned down the whole mix (`master_*`) becomes the same setting on the video's
+    /// own sound, once, when the editor opens.
+    func adoptLegacyMasterVolume() {
+        guard let draft = displayDraft, draft["master_muted"] != nil || draft["master_volume"] != nil else { return }
+        let muted = masterMuted
+        let level = masterVolume
+        let video = videoVolume
+        applyDraftChange { object in
+            object["master_muted"] = nil
+            object["master_volume"] = nil
+            let value = muted ? 0 : (min(2, max(0, video * level)) * 100).rounded() / 100
+            object["video_volume"] = abs(value - 1) < 0.005 ? nil : .number(value)
+        }
+        if muted { Self.videoLevelBeforeMute[project.projectID] = video }
+        CutSellDiagnostics.log("legacy_master_volume_adopted", ["muted": String(muted), "level": String(format: "%.2f", level)])
+    }
+
+    /// The video row's speaker: silences every clip's own sound, or brings all of it back.
+    func toggleVideoSound() -> Bool {
+        let mute = !isMuted(.whole)
+        setMuted(.whole, mute)
+        return mute
+    }
 
     func volumeTarget(for selection: EditorSelection?) -> VolumeTarget {
         switch selection {
@@ -375,7 +424,7 @@ extension DraftEditorViewModel {
 
     func volume(of target: VolumeTarget) -> Double {
         switch target {
-        case .whole: return masterVolume
+        case .whole: return videoVolume
         case .video(let id): return clip(id)?["audio_volume"]?.doubleValue ?? 1
         case .audio(let id): return audioClips.first { $0.id == id }?.volume ?? 1
         case .overlay(let id): return overlayStyle(id).volume
@@ -384,7 +433,7 @@ extension DraftEditorViewModel {
 
     func isMuted(_ target: VolumeTarget) -> Bool {
         switch target {
-        case .whole: return masterMuted
+        case .whole: return videoVolume <= 0.001
         case .video(let id):
             guard let clip = clip(id) else { return false }
             return clip["audio_muted"]?.boolValue == true || (clip["audio_volume"]?.doubleValue ?? 1) <= 0.001
@@ -398,7 +447,7 @@ extension DraftEditorViewModel {
         let value = (min(2, max(0, volume)) * 100).rounded() / 100
         switch target {
         case .whole:
-            applyDraftChange { $0["master_volume"] = abs(value - 1) < 0.005 ? nil : .number(value) }
+            setVideoVolume(value)
         case .video(let id):
             applyDraftChange { object in
                 Self.mapClips(&object) { clips in clips.map { clip in
@@ -417,9 +466,26 @@ extension DraftEditorViewModel {
     }
 
     func setMuted(_ target: VolumeTarget, _ muted: Bool) {
+        CutSellDiagnostics.log(muted ? "mute_on" : "mute_off", ["target": target.logName])
         switch target {
         case .whole:
-            applyDraftChange { $0["master_muted"] = muted ? .bool(true) : nil }
+            if muted {
+                if videoVolume > 0.001 { Self.videoLevelBeforeMute[project.projectID] = videoVolume }
+                setVideoVolume(0)
+            } else {
+                // Everything the video says comes back: its level, and every clip silenced on its own.
+                let level = max(0.05, Self.videoLevelBeforeMute[project.projectID] ?? 1)
+                applyDraftChange { object in
+                    object["video_volume"] = abs(level - 1) < 0.005 ? nil : .number((level * 100).rounded() / 100)
+                    object["master_muted"] = nil
+                    Self.mapClips(&object) { clips in clips.map { clip in
+                        var clip = clip
+                        if clip["audio_muted"]?.boolValue == true { clip["audio_muted"] = .bool(false) }
+                        if (clip["audio_volume"]?.doubleValue ?? 1) <= 0.001 { clip["audio_volume"] = .number(1) }
+                        return clip
+                    } }
+                }
+            }
         case .video(let id):
             applyDraftChange { object in
                 Self.mapClips(&object) { clips in clips.map { clip in

@@ -11,6 +11,9 @@ struct YouView: View {
     @State private var showingDeleteAccount = false
     @State private var legal: LegalDocument?
     @State private var errorMessage: String?
+    /// Five quick taps on the version number open Diagnostics (hidden, for real-iPhone reports).
+    @State private var versionTaps: [Date] = []
+    @State private var showingDiagnostics = false
 
     private var isApple: Bool { appState.session?.isAppleAccount == true }
 
@@ -90,6 +93,15 @@ struct YouView: View {
                     .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
                     .padding(.top, 14)
+
+                    Text("CutSell \(DiagnosticsFacts.appVersion)")
+                        .font(CS.inter(12))
+                        .foregroundStyle(CS.textMuted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .contentShape(Rectangle())
+                        .onTapGesture { versionTapped() }
+                        .accessibilityIdentifier("appVersion")
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
@@ -97,6 +109,7 @@ struct YouView: View {
         }
         .safeAreaInset(edge: .bottom) { CSTabBar(current: .you, select: selectTab) }
         .sheet(item: $legal) { LegalView(document: $0) }
+        .sheet(isPresented: $showingDiagnostics) { DiagnosticsView() }
         .sheet(isPresented: $showingNotifications) {
             NotificationInboxView()
                 .environmentObject(notificationCenter)
@@ -121,6 +134,15 @@ struct YouView: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+    }
+
+    private func versionTapped() {
+        let now = Date()
+        versionTaps = versionTaps.filter { now.timeIntervalSince($0) < 3 } + [now]
+        if versionTaps.count >= 5 {
+            versionTaps = []
+            showingDiagnostics = true
+        }
     }
 }
 

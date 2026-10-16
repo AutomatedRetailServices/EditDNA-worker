@@ -110,7 +110,7 @@ def test_overlay_row_has_real_thumbnails_trim_move_delete():
     tl = read("EditorV4Timeline.swift")
     assert "struct OverlayBlockV4: View" in tl and "OverlayMediaPicture(url: item.url" in tl
     assert "overlayTrimHandle(.start, item: item)" in tl and "overlayTrimHandle(.end, item: item)" in tl
-    assert "moveGesture(kind: .overlay" in tl
+    assert "itemMove(kind: .overlay" in tl
     assert "model.setOverlayTime(id: item.id, start: trim.start, end: trim.end, sourceStart: sourceStart)" in tl
     assert "await model.removeMediaOverlay(id: id)" in read("EditorV4View.swift")
 
@@ -228,7 +228,7 @@ def test_one_save_on_release_and_undo_redo_cover_moves():
     tl = read("EditorV4Timeline.swift")
     lift = tl.split("private func liftGesture(", 1)[1].split("\n    }\n", 1)[0]
     assert lift.count("model.reorderNow(") == 1 and ".onEnded" in lift
-    move = tl.split("private func moveGesture(", 1)[1].split("\n    }\n", 1)[0]
+    move = tl.split("private func moveEnded(", 1)[1].split("\n    }\n", 1)[0]
     # Voice-overs and sounds are draft clips (Editor v5): one save, the draft's own Undo / Redo.
     assert "model.moveAudioClip(id: move.id, to: move.start)" in move and "model.setOverlayTime(" in move
     v5 = read("EditorV5Model.swift")

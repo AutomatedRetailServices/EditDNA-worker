@@ -215,6 +215,7 @@ final class DraftEditorViewModel: ObservableObject {
                 if await self.finishPendingOverlay(item) { return }
             }
             if let index = self.pendingOverlays.firstIndex(where: { $0.id == id }) { self.pendingOverlays[index].failed = true }
+            CutSellDiagnostics.log("overlay_upload_failed", [:])
         }
     }
 
@@ -234,6 +235,7 @@ final class DraftEditorViewModel: ObservableObject {
             return false
         }
         OverlayMediaStore.link(uri: uploaded.uri, fileName: item.fileName)
+        CutSellDiagnostics.log("overlay_uploaded", ["kind": uploaded.kind])
         // Where it is now (the creator may have moved it while it uploaded).
         let current = pendingOverlays.first { $0.id == item.id } ?? item
         let total = max(1, timelineDuration)
@@ -295,7 +297,8 @@ final class DraftEditorViewModel: ObservableObject {
     /// starts that much later in its own video.
     @discardableResult
     func setOverlayTime(id: String, start: Double, end: Double, sourceStart: Double? = nil) -> Task<Void, Never> {
-        changeOverlay(id: id) { item in
+        CutSellDiagnostics.log("overlay_timed", ["start": String(format: "%.2f", start), "end": String(format: "%.2f", end)])
+        return changeOverlay(id: id) { item in
             item["start"] = .number((max(0, start) * 1000).rounded() / 1000)
             item["end"] = .number((max(start + 0.2, end) * 1000).rounded() / 1000)
             if let sourceStart { item["source_start"] = .number((max(0, sourceStart) * 1000).rounded() / 1000) }
@@ -838,6 +841,8 @@ final class DraftEditorViewModel: ObservableObject {
         // Build 17: Auto Zoom AI push-ins become normal keyframes once; cleaned copies the draft
         // already uses are fetched for the preview; CutSell sounds download for the preview.
         adoptLegacyZoomKeyframes()
+        // Build 18: "Whole video" is the video's own sound (sounds and voices keep playing).
+        adoptLegacyMasterVolume()
         resumeCleanAudio()
         Task { await SfxLibrary.shared.ensure() }
         // Voice-overs saved earlier that did not finish uploading: show them and try again.
@@ -912,7 +917,14 @@ final class DraftEditorViewModel: ObservableObject {
     /// the ones still uploading (from their own file).
     var previewVoices: [PreviewVoice] {
         var voices: [PreviewVoice] = []
+        var voiceNumber = 0, musicNumber = 0
         for clip in audioClips {
+            let label: String
+            switch clip.kind {
+            case .voice: voiceNumber += 1; label = "Voice-over \(voiceNumber)"
+            case .music: musicNumber += 1; label = "Music \(musicNumber)"
+            case .sfx: label = SfxLibrary.name(of: clip.sfxID ?? "")
+            }
             var url: URL?
             switch clip.kind {
             case .voice, .music:
@@ -926,11 +938,13 @@ final class DraftEditorViewModel: ObservableObject {
             guard let url else { continue }
             voices.append(PreviewVoice(key: clip.id, url: url, start: clip.start, sourceIn: clip.sourceIn,
                                        sourceOut: clip.sourceOut, volume: clip.muted ? 0 : clip.volume,
-                                       ducksVideo: clip.duckVideo && !clip.muted))
+                                       ducksVideo: clip.duckVideo && !clip.muted,
+                                       kind: clip.kind == .sfx ? "sound" : clip.kind.rawValue, label: label))
         }
         for item in pendingVoiceOvers {
             voices.append(PreviewVoice(key: "pending_\(item.id)", url: PendingVoiceOverStore.fileURL(item),
-                                       start: item.start, sourceIn: 0, sourceOut: item.duration))
+                                       start: item.start, sourceIn: 0, sourceOut: item.duration,
+                                       kind: item.isMusic ? "music" : "voice", label: item.isMusic ? "Music (uploading)" : "Voice-over (uploading)"))
         }
         return voices
     }
@@ -1031,6 +1045,7 @@ final class DraftEditorViewModel: ObservableObject {
         }
         // Kept on this iPhone so the preview plays it on its own track.
         VoiceOverStore.save(file, assetID: asset.assetID)
+        CutSellDiagnostics.log("voice_over_uploaded", ["seconds": String(format: "%.2f", asset.durationSec)])
         await refreshTimelineAssetLibrary()
         let length = asset.durationSec > 0 ? asset.durationSec : item.duration
         audioFileDurations[asset.assetID] = length
@@ -1641,6 +1656,7 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func removeMediaOverlay(id: String) async {
+        CutSellDiagnostics.log("overlay_deleted", [:])
         await perform(predict: { object in
             let items = object["media_overlays"]?.arrayValue?.compactMap(\.objectValue) ?? []
             object["media_overlays"] = .array(items.filter { $0["overlay_id"]?.stringValue != id }.map(JSONValue.object))

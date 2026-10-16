@@ -203,6 +203,7 @@ struct TimelineV4: View {
                 }
                 .offset(x: 12, y: 49)
                 .accessibilityIdentifier("rowVideoSound")
+                .accessibilityValue(muted ? "off" : "on")
             ZStack(alignment: .topLeading) {
                 ForEach(Array(rows.enumerated()), id: \.element) { index, row in
                     Group {
@@ -444,48 +445,71 @@ struct TimelineV4: View {
         return points
     }
 
+    /// Hold, then drag (an item that is not selected: a plain swipe still slides the timeline).
     private func moveGesture(kind: MoveDragState.Kind, id: String, start: Double, length: Double) -> some Gesture {
         LongPressGesture(minimumDuration: 0.3)
-            .sequenced(before: DragGesture(minimumDistance: 0))
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
             .onChanged { value in
                 guard case .second(true, let drag) = value else { return }
-                if moveDrag == nil {
-                    playback.pause()
-                    SnapFeedback.lift()
-                    moveDrag = MoveDragState(kind: kind, id: id, originalStart: start, length: length, start: start)
-                    switch kind {
-                    case .voice: selection = .voiceOver(id)
-                    case .sound: selection = .sound(id)
-                    case .overlay: selection = .overlay(id, isText: false)
-                    }
-                }
-                guard var move = moveDrag else { return }
-                let proposed = max(0, move.originalStart + Double((drag?.translation.width ?? 0) / pixelsPerSecond))
-                let snapped = TimelineSnap.snapStart(proposed, length: length, magnets: magnets(excluding: id),
-                                                     pixelsPerSecond: pixelsPerSecond)
-                if snapped.snapped != nil && snapped.snapped != move.snappedTo { SnapFeedback.tick() }
-                move.snappedTo = snapped.snapped
-                move.start = max(0, snapped.start)
-                moveDrag = move
+                moveChanged(kind: kind, id: id, start: start, length: length, dx: drag?.translation.width ?? 0)
             }
-            .onEnded { _ in
-                guard let move = moveDrag else { return }
-                moveDrag = nil
-                guard abs(move.start - move.originalStart) >= 0.01 else { return }
-                switch move.kind {
-                case .voice, .sound:
-                    // One save when the finger lifts (voices go to the first free place).
-                    model.moveAudioClip(id: move.id, to: move.start)
-                case .overlay:
-                    let total = max(move.length, model.timelineDuration)
-                    let begin = min(move.start, max(0, total - move.length))
-                    if model.pendingOverlays.contains(where: { $0.id == move.id }) {
-                        model.updatePendingOverlay(id: move.id, start: begin, end: begin + move.length)
-                    } else {
-                        model.setOverlayTime(id: move.id, start: begin, end: begin + move.length)
-                    }
-                }
+            .onEnded { _ in moveEnded() }
+    }
+
+    /// Build 18: a SELECTED overlay, sound or voice moves with a plain drag (like CapCut); no hold.
+    private func directMoveGesture(kind: MoveDragState.Kind, id: String, start: Double, length: Double) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .global)
+            .onChanged { drag in moveChanged(kind: kind, id: id, start: start, length: length, dx: drag.translation.width) }
+            .onEnded { _ in moveEnded() }
+    }
+
+    /// Move for an item on the timeline: plain drag when selected, hold-and-drag otherwise.
+    private func itemMove(kind: MoveDragState.Kind, id: String, start: Double, length: Double, selected: Bool) -> AnyGesture<Void> {
+        selected
+            ? AnyGesture(directMoveGesture(kind: kind, id: id, start: start, length: length).map { _ in () })
+            : AnyGesture(moveGesture(kind: kind, id: id, start: start, length: length).map { _ in () })
+    }
+
+    private func moveChanged(kind: MoveDragState.Kind, id: String, start: Double, length: Double, dx: CGFloat) {
+        if moveDrag == nil {
+            playback.pause()
+            SnapFeedback.lift()
+            moveDrag = MoveDragState(kind: kind, id: id, originalStart: start, length: length, start: start)
+            switch kind {
+            case .voice: selection = .voiceOver(id)
+            case .sound: selection = .sound(id)
+            case .overlay: selection = .overlay(id, isText: false)
             }
+        }
+        guard var move = moveDrag else { return }
+        let proposed = max(0, move.originalStart + Double(dx / pixelsPerSecond))
+        let snapped = TimelineSnap.snapStart(proposed, length: length, magnets: magnets(excluding: id),
+                                             pixelsPerSecond: pixelsPerSecond)
+        if snapped.snapped != nil && snapped.snapped != move.snappedTo { SnapFeedback.tick() }
+        move.snappedTo = snapped.snapped
+        move.start = max(0, snapped.start)
+        moveDrag = move
+    }
+
+    private func moveEnded() {
+        guard let move = moveDrag else { return }
+        moveDrag = nil
+        guard abs(move.start - move.originalStart) >= 0.01 else { return }
+        CutSellDiagnostics.log("timeline_item_moved", ["kind": "\(move.kind)", "from": String(format: "%.2f", move.originalStart),
+                                                       "to": String(format: "%.2f", move.start)])
+        switch move.kind {
+        case .voice, .sound:
+            // One save when the finger lifts (voices go to the first free place).
+            model.moveAudioClip(id: move.id, to: move.start)
+        case .overlay:
+            let total = max(move.length, model.timelineDuration)
+            let begin = min(move.start, max(0, total - move.length))
+            if model.pendingOverlays.contains(where: { $0.id == move.id }) {
+                model.updatePendingOverlay(id: move.id, start: begin, end: begin + move.length)
+            } else {
+                model.setOverlayTime(id: move.id, start: begin, end: begin + move.length)
+            }
+        }
     }
 
     /// Start shown for an item while it is dragged (its saved start otherwise).
@@ -685,7 +709,7 @@ struct TimelineV4: View {
                     .scaleEffect(moveDrag?.id == clip.id ? 1.05 : 1)
                     .offset(x: left, y: moveDrag?.id == clip.id ? -2 : 0)
                     .onTapGesture { selection = isSelected ? nil : .voiceOver(clip.id) }
-                    .gesture(moveGesture(kind: .voice, id: clip.id, start: clip.start, length: clip.length))
+                    .gesture(itemMove(kind: .voice, id: clip.id, start: clip.start, length: clip.length, selected: isSelected))
                     if isSelected && moveDrag == nil {
                         audioTrimHandle(.start, clip: clip).offset(x: left - TrimHandleV4.outside)
                         audioTrimHandle(.end, clip: clip).offset(x: left + blockWidth - TrimHandleV4.width + TrimHandleV4.outside)
@@ -751,7 +775,7 @@ struct TimelineV4: View {
                         .scaleEffect(moveDrag?.id == clip.id ? 1.05 : 1)
                         .offset(x: left, y: moveDrag?.id == clip.id ? -2 : 0)
                         .onTapGesture { selection = isSelected ? nil : .sound(clip.id) }
-                        .gesture(moveGesture(kind: .sound, id: clip.id, start: clip.start, length: clip.length))
+                        .gesture(itemMove(kind: .sound, id: clip.id, start: clip.start, length: clip.length, selected: isSelected))
                     if isSelected && moveDrag == nil {
                         audioTrimHandle(.start, clip: clip).offset(x: left - TrimHandleV4.outside)
                         audioTrimHandle(.end, clip: clip).offset(x: left + blockWidth - TrimHandleV4.width + TrimHandleV4.outside)
@@ -879,7 +903,7 @@ struct TimelineV4: View {
                             if item.failed { model.retryPendingOverlay(id: item.id); return }
                             selection = isSelected ? nil : .overlay(item.id, isText: false)
                         }
-                        .gesture(moveGesture(kind: .overlay, id: item.id, start: item.start, length: item.end - item.start))
+                        .gesture(itemMove(kind: .overlay, id: item.id, start: item.start, length: item.end - item.start, selected: isSelected))
                     if isSelected && moveDrag == nil {
                         overlayTrimHandle(.start, item: item)
                             .offset(x: left - TrimHandleV4.outside)
@@ -1261,6 +1285,7 @@ struct OverlayBlockV4: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.kind == .video ? "Video overlay" : "Photo overlay")
         .accessibilityIdentifier("overlayBlock")
+        .accessibilityValue(String(format: "%@ %.2f-%.2f", item.kind == .video ? "video" : "photo", item.start, item.end))
     }
 }
 

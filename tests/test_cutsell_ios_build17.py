@@ -28,7 +28,7 @@ def test_sounds_are_never_added_silent_and_the_preview_follows_their_download():
 
 def test_sound_blocks_move_split_trim_and_are_easy_to_touch():
     timeline = read("EditorV4Timeline.swift")
-    assert ".gesture(moveGesture(kind: .sound, id: clip.id" in timeline
+    assert ".gesture(itemMove(kind: .sound, id: clip.id" in timeline
     assert "audioTrimHandle(.end, clip: clip)" in timeline
     assert ".frame(width: max(width, 32), alignment: .leading)" in timeline
     v4 = read("EditorV4View.swift")
@@ -42,12 +42,13 @@ def test_volume_panel_selected_clip_or_whole_video_with_mute():
     b17 = read("EditorB17Model.swift")
     for case in ("case .video(let id): return .video(id)", "case .voiceOver(let id), .sound(let id): return .audio(id)"):
         assert case in b17
-    assert 'applyDraftChange { $0["master_muted"] = muted ? .bool(true) : nil }' in b17
+    # Build 18: "Whole video" is the video's own sound (sounds and voices keep playing).
+    assert "case .whole: return videoVolume <= 0.001" in b17 and "setVideoVolume(0)" in b17
     assert 'object["muted"] = .bool(true)' in read("EditorV5Model.swift")
     timeline = read("EditorV4Timeline.swift")
     assert "struct MuteBadge" in timeline and timeline.count("MuteBadge()") >= 3
     v4 = read("EditorV4View.swift")
-    assert "onToggleVideoSound: { toggleVideoSound() }" in v4 and "model.setVideoVolume(0)" in v4
+    assert "onToggleVideoSound: { toggleVideoSound() }" in v4 and "model.toggleVideoSound()" in v4
     assert "if card == .volume { return }" in v4      # the panel follows the selection
 
 
@@ -82,7 +83,8 @@ def test_keyframes_like_capcut():
     assert "func adoptLegacyZoomKeyframes()" in b17 and "adoptLegacyZoomKeyframes()" in read("DraftEditorViewModel.swift")
     assert "return transformKeyframes.filter { !$0.isAI || auto }" in b17
     v4 = read("EditorV4View.swift")
-    assert "SimultaneousGesture(SimultaneousGesture(MagnificationGesture(), RotationGesture()), DragGesture(minimumDistance: 3))" in v4
+    # Build 18: UIKit pinch / rotation / pan (FramingGestureLayer) instead of SwiftUI gestures.
+    assert "FramingGestureLayer(" in v4 and "UIRotationGestureRecognizer" in read("FramingGestureLayer.swift")
     assert "ZoomDiamond(isSelected: true).scaleEffect(1.5)" in v4          # filled ◇ on a keyframe
     assert "model.deleteKeyframe(id: mark.id)" in v4
     # Preview order = export order: zoom, turn clockwise, then move.

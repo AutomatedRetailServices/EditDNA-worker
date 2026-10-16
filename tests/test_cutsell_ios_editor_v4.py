@@ -100,7 +100,8 @@ def test_preview_has_sound_and_separate_volumes():
     assert "EditorAudio.preparePlayback()" in playback
     assert "for placement in model.previewVoices" in playback
     assert "clip.assetID.flatMap { VoiceOverStore.url(for: $0) }" in read("DraftEditorViewModel.swift")
-    assert "AudioGainTap.apply(max(0, min(2, placement.volume)) * master, to: parameters)" in playback
+    assert "let effective = max(0, min(2, placement.volume)) * master" in playback
+    assert "AudioGainTap.apply(effective, to: parameters)" in playback
     vm = read("DraftEditorViewModel.swift")
     assert "func setVideoTrackVolume(_ volume: Double) async" in vm
     assert "VoiceOverStore.save(file, assetID: asset.assetID)" in vm

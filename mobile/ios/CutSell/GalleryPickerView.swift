@@ -240,6 +240,8 @@ struct GalleryPickerView: View {
             .padding(.horizontal, 10)
             .frame(height: 56)
             Rectangle().fill(CS.divider).frame(height: 1)
+            // Build 18: with "Limited" access only the videos picked before show; say so, every time.
+            if preview == nil, library.status == .limited { limitedBanner }
 
             if let preview {
                 ScrollView {
@@ -277,6 +279,39 @@ struct GalleryPickerView: View {
             }
 
             bottomPanel
+        }
+    }
+
+    /// "Select more photos" and "Change permission" while the access is Limited.
+    private var limitedBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("CutSell sees only the videos you picked.")
+                .font(CS.inter(13, .medium)).foregroundStyle(.white)
+            HStack(spacing: 18) {
+                Button("Select more photos") { presentLimitedPicker() }
+                    .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                    .accessibilityIdentifier("gallerySelectMore")
+                Button("Change permission") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                .accessibilityIdentifier("galleryChangePermission")
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: 0x0A1A36), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 8).padding(.top, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("galleryLimitedBanner")
+    }
+
+    private func presentLimitedPicker() {
+        if let root = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow?.rootViewController }).first {
+            var top = root
+            while let presented = top.presentedViewController { top = presented }
+            PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: top)
         }
     }
 

@@ -41,13 +41,14 @@ struct EditorV4View: View {
     /// Build 17: the preview rebuilds when a sound finishes downloading or a clean copy is ready.
     @ObservedObject private var sounds = SfxLibrary.shared
     @ObservedObject private var cleaning = CleanAudioCenter.shared
+    /// Build 18: what the preview mixes (probe label; Diagnostics reads the same).
+    @ObservedObject private var diagnostics = EditorDiagnostics.shared
     /// A framing made with the fingers at the cursor, not kept yet (◇ keeps it as a keyframe).
     @State private var keyPending: TransformValue?
     @State private var keyPendingTarget: KeyframeTarget?
     @State private var keyPendingTime: Double = 0
     @State private var keyGestureBase: TransformValue?
-    /// The video's level before the row's speaker silenced it.
-    @State private var videoLevelBeforeMute: Double = 1
+    @State private var lastVideoTap = Date.distantPast
 
     private var duration: Double { max(0.1, playback.duration > 0 ? playback.duration : model.timelineDuration) }
 
@@ -111,20 +112,35 @@ struct EditorV4View: View {
                 micPermissionCard
             }
             #if DEBUG
-            if previewState?.probe == "b17_ui" {
-                // Build 17 probe only: the editor's state as text, read by the UI test.
+            if let probe = previewState?.probe, probe == "b17_ui" || probe.hasPrefix("b18") {
+                // Build 17 / 18 probes only: the editor's state as text, read by the UI test.
                 Text(b17State).font(.system(size: 1)).opacity(0.02).frame(width: 2, height: 2)
                     .allowsHitTesting(false)
                     .accessibilityLabel(b17State)
                     .accessibilityIdentifier("b17State")
-                // Moves the cursor exactly 1 s on (a play / pause tap overshoots: the UI test waits
-                // for the app to go idle while the video plays).
-                VStack {
-                    HStack {
-                        Button { playback.seek(to: playback.currentTime + 1) } label: {
-                            Color.white.opacity(0.05).frame(width: 30, height: 30)
+                Text(diagnostics.mix.summary).font(.system(size: 1)).opacity(0.02).frame(width: 2, height: 2)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(diagnostics.mix.summary)
+                    .accessibilityIdentifier("b18Mix")
+                // Probe buttons on the left margin, beside the video (nothing else lives there).
+                HStack {
+                    VStack(spacing: 4) {
+                        Spacer()
+                        // Moves the cursor exactly 1 s on (a play / pause tap overshoots: the UI test
+                        // waits for the app to go idle while the video plays).
+                        probeButton("b17Step") { playback.seek(to: playback.currentTime + 1) }
+                        probeButton("b18Back") { playback.seek(to: max(0, playback.currentTime - 1)) }
+                        probeButton("b18Start") { playback.seek(to: 0) }
+                        probeButton("b18AIPeak") {
+                            if let peak = ProbeMedia.firstAIPlateau(model.videoKeyframeMarks) { playback.seek(to: peak) }
                         }
-                        .accessibilityIdentifier("b17Step")
+                        probeButton("b18Reload") { Task { await model.load() } }
+                        probeButton("b18AddPhoto") {
+                            if let url = ProbeMedia.makePhoto() { model.addOverlay(fileURL: url, at: playback.currentTime) }
+                        }
+                        probeButton("b18AddVideo") {
+                            Task { if let url = await ProbeMedia.makeVideo(seconds: 3) { model.addOverlay(fileURL: url, at: playback.currentTime) } }
+                        }
                         Spacer()
                     }
                     Spacer()
@@ -139,10 +155,35 @@ struct EditorV4View: View {
         let marks = model.videoKeyframeMarks
         let sounds = model.soundClips.map { String(format: "%@@%.2f+%.2f%@", $0.sfxID ?? $0.kind.rawValue, $0.start, $0.length, $0.muted ? "m" : "") }
         let keys = model.transformKeyframes.filter { !$0.isAI }.map { String(format: "%.2f", $0.value.scale) }
+        let rotations = model.transformKeyframes.filter { !$0.isAI }.map { String(format: "%.0f", $0.value.rotation) }
         let mutedClips = model.selectedClips.filter { $0["audio_muted"]?.boolValue == true }.count
+        let shown = shownVideoTransform
+        let overlays = model.overlaysOnScreen.map { String(format: "%@:%.2f-%.2f:w%.2f:r%.0f%@", $0.kind == .video ? "video" : "photo",
+                                                          $0.start, $0.end, $0.width, $0.style.rotation, $0.uploading != nil ? "u" : "") }
+        let pending = keyPending.map { String(format: "%.3f/%.1f", $0.scale, $0.rotation) } ?? "none"
         return "ai=\(marks.filter(\.isAI).count) user=\(marks.filter { !$0.isAI }.count) sounds=\(sounds.joined(separator: ",")) "
-            + "muted_clips=\(mutedClips) user_scales=\(keys.joined(separator: ",")) auto_zoom=\(model.autoZoomEnabled) "
-            + String(format: "t=%.2f zoom=%.3f", playback.currentTime, shownVideoTransform.scale)
+            + "muted_clips=\(mutedClips) user_scales=\(keys.joined(separator: ",")) user_rot=\(rotations.joined(separator: ",")) "
+            + "auto_zoom=\(model.autoZoomEnabled) overlays=\(overlays.joined(separator: ",")) sel=\(selectionName) pending=\(pending) "
+            + String(format: "vv=%.2f t=%.2f zoom=%.3f rot=%.1f ", model.videoVolume, playback.currentTime, shown.scale, shown.rotation)
+            + "session=\(AVAudioSession.sharedInstance().category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: ""))/"
+            + AVAudioSession.sharedInstance().mode.rawValue.replacingOccurrences(of: "AVAudioSessionMode", with: "")
+    }
+
+    private var selectionName: String {
+        switch selection {
+        case .video?: return "video"
+        case .sound?: return "sound"
+        case .voiceOver?: return "voice"
+        case .overlay?: return "overlay"
+        case .zoom?: return "keyframe"
+        case nil: return "none"
+        default: return "other"
+        }
+    }
+
+    private func probeButton(_ id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Color.white.opacity(0.05).frame(width: 28, height: 28) }
+            .accessibilityIdentifier(id)
     }
     #endif
 
@@ -611,7 +652,6 @@ struct EditorV4View: View {
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Self.borderGradient, lineWidth: 2))
             .contentShape(Rectangle())
             .onTapGesture { videoTapped() }
-            .gesture(videoFramingGesture(size: size), including: framingEnabled ? .all : .subviews)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("editorVideo")
             .overlay(alignment: .topLeading) { zoomBadge }
@@ -632,7 +672,12 @@ struct EditorV4View: View {
                     .accessibilityIdentifier("editorFirstFrame")
             }
             splitAwareVideo(size: size)
+            // Build 18: pinch / twist / drag with UIKit's recognizers. Under the overlays while a
+            // video clip is framed (an overlay can still be touched); over them while a Float overlay
+            // is framed (the fingers anywhere on the video move, size and turn it).
+            if framingEnabled, !framingOverlay { framingLayer(size: size) }
             overlaysOnVideo(frame: size)
+            if framingEnabled, framingOverlay { framingLayer(size: size) }
             if model.captionsEnabled {
                 captionLayer(frame: size)
             }
@@ -662,9 +707,35 @@ struct EditorV4View: View {
             ToastPillV4(toast: toast) { Task { await undoFromToast() } }
                 .padding(.bottom, 12)
                 .transition(.opacity)
+        } else if soundsMissing {
+            soundDownloadPill.padding(.bottom, 12)
         } else if case .overlay(let id, isText: false) = selection, model.overlayStyle(id).layout == .float {
-            hintPill("Drag to move · pinch to resize").padding(.bottom, 14)
+            hintPill("Drag · pinch · turn with two fingers").padding(.bottom, 14)
         }
+    }
+
+    /// A sound on the timeline whose file is not on this iPhone yet.
+    private var soundsMissing: Bool {
+        model.soundClips.contains { $0.kind == .sfx && $0.sfxID.flatMap { SfxLibrary.localURL($0) } == nil }
+    }
+
+    /// "Getting sounds…" while they download; "Sound not downloaded · Try again" when it failed.
+    private var soundDownloadPill: some View {
+        HStack(spacing: 10) {
+            if sounds.failed && !sounds.loading {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(hex: 0xFFD60A))
+                Text("A sound didn't download").font(CS.inter(13, .medium)).foregroundStyle(.white)
+                Button("Try again") { sounds.retry() }
+                    .font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                    .accessibilityIdentifier("soundRetry")
+            } else {
+                ProgressView().controlSize(.small).tint(.white)
+                Text("Getting sounds…").font(CS.inter(13, .medium)).foregroundStyle(.white)
+            }
+        }
+        .padding(.horizontal, 14).frame(height: 36)
+        .background(Color(hex: 0x040812, opacity: 0.9), in: Capsule())
+        .accessibilityIdentifier("soundDownloadPill")
     }
 
     /// "Adding video… 45%" while a full-screen B-roll uploads; "Try again" if it failed.
@@ -687,6 +758,9 @@ struct EditorV4View: View {
     }
 
     private func videoTapped() {
+        // SwiftUI's tap and the framing layer's tap can both see one touch: one toggle only.
+        guard Date().timeIntervalSince(lastVideoTap) > 0.35 else { return }
+        lastVideoTap = Date()
         if captionFocused { finishCaptionEditing(); return }
         playback.togglePlayback()
     }
@@ -959,16 +1033,11 @@ struct EditorV4View: View {
         .accessibilityLabel(label)
     }
 
-    /// The video row's speaker: silences all of the video's own sound, and brings it back.
+    /// The video row's speaker: silences all of the video's own sound, and brings all of it back
+    /// (the same setting as Volume → Whole video; sounds and voices keep playing).
     private func toggleVideoSound() {
-        if model.videoVolume > 0.001 {
-            videoLevelBeforeMute = model.videoVolume
-            model.setVideoVolume(0)
-            show(.message("Video sound off · tap ↶ to undo", undo: true))
-        } else {
-            model.setVideoVolume(max(0.05, videoLevelBeforeMute))
-            show(.message("Video sound on"))
-        }
+        let muted = model.toggleVideoSound()
+        show(.message(muted ? "Video sound off · tap ↶ to undo" : "Video sound on", undo: muted))
     }
 
     // MARK: Keyframes (◇): framing with the fingers, kept at the cursor
@@ -1064,53 +1133,84 @@ struct EditorV4View: View {
         }
     }
 
-    /// Pinch to zoom, drag to move, twist to turn the selected video clip (at the cursor).
-    private func videoFramingGesture(size: CGSize) -> some Gesture {
-        SimultaneousGesture(SimultaneousGesture(MagnificationGesture(), RotationGesture()), DragGesture(minimumDistance: 3))
-            .onChanged { value in
-                guard case .video(let clipID) = keyTarget else { return }
-                if keyGestureBase == nil {
-                    playback.pause()
-                    keyGestureBase = keyPendingTarget == .video(clipID) ? (keyPending ?? shownVideoTransform) : shownVideoTransform
-                    keyPendingTarget = .video(clipID)
-                    keyPendingTime = playback.currentTime
-                }
-                guard let base = keyGestureBase else { return }
-                var next = base
-                if let magnification = value.first?.first { next.scale = base.scale * Double(magnification) }
-                if let turn = value.first?.second {
-                    // A pinch always twists a little: turning starts past 10°, and snaps to straight.
-                    let degrees = turn.degrees
-                    if abs(degrees) > 10 {
-                        var turned = base.rotation + degrees - (degrees > 0 ? 10 : -10)
-                        for snap in stride(from: -360.0, through: 360.0, by: 90) where abs(turned - snap) < 5 { turned = snap }
-                        next.rotation = turned
-                    }
-                }
-                if let drag = value.second {
-                    next.x = base.x + Double(drag.translation.width / max(1, size.width))
-                    next.y = base.y + Double(drag.translation.height / max(1, size.height))
-                }
-                keyPending = next.clampedForVideo
-            }
-            .onEnded { _ in
-                guard keyGestureBase != nil, case .video(let clipID) = keyTarget, let value = keyPending else {
-                    keyGestureBase = nil
-                    return
-                }
-                keyGestureBase = nil
-                keyFramingEnded(.video(clipID), value)
-            }
+    /// The UIKit pinch / twist / drag layer on the video.
+    private func framingLayer(size: CGSize) -> some View {
+        FramingGestureLayer(
+            onBegin: { framingBegan() },
+            onChange: { framingChanged($0, size: size) },
+            onEnd: { framingEnded($0) },
+            onTap: { videoTapped() }
+        )
+        .frame(width: size.width, height: size.height)
+        .accessibilityElement()
+        .accessibilityIdentifier("videoFramingLayer")
+        .accessibilityValue(keyPending.map { String(format: "scale=%.3f rot=%.1f x=%.3f y=%.3f", $0.scale, $0.rotation, $0.x, $0.y) } ?? "none")
     }
 
-    /// The video's framing gesture works while a video clip (or one of its ◇) is selected.
-    private var framingEnabled: Bool {
-        if case .video = keyTarget, panel == .none {
-            switch selection {
-            case .video, .zoom: return true
-            default: return false
-            }
+    private func framingBegan() {
+        guard let target = keyTarget else { return }
+        playback.pause()
+        let shown: TransformValue
+        switch target {
+        case .video: shown = shownVideoTransform
+        case .overlay(let id): shown = shownOverlayTransform(id)
         }
+        keyGestureBase = keyPendingTarget == target ? (keyPending ?? shown) : shown
+        keyPendingTarget = target
+        keyPendingTime = playback.currentTime
+        CutSellDiagnostics.log("framing_began", ["target": target.logName, "at": String(format: "%.2f", playback.currentTime)])
+    }
+
+    private func framingChanged(_ change: FramingGestureLayer.Change, size: CGSize) {
+        guard let base = keyGestureBase, let target = keyPendingTarget else { return }
+        let next = FramingMath.apply(change, to: base, frame: size)
+        if case .video = target { keyPending = next.clampedForVideo } else { keyPending = next.clampedForOverlay }
+    }
+
+    private func framingEnded(_ change: FramingGestureLayer.Change) {
+        guard keyGestureBase != nil, let target = keyPendingTarget, let value = keyPending else {
+            keyGestureBase = nil
+            return
+        }
+        keyGestureBase = nil
+        CutSellDiagnostics.log("framing_ended", ["target": target.logName, "touches": String(change.touches),
+                                                 "scale": String(format: "%.3f", value.scale),
+                                                 "rotation": String(format: "%.1f", value.rotation)])
+        if case .overlay(let id) = target, model.overlayKeyframes(overlayID: id).isEmpty,
+           let overlay = model.overlaysOnScreen.first(where: { $0.id == id }) {
+            // An overlay without keyframes: the fingers change its own place, size and turn.
+            let current = model.overlayTransform(id: id, at: playback.currentTime)
+            let x = max(0, min(1, overlay.x + (value.x - current.x)))
+            let y = max(0, min(1, overlay.y + (value.y - current.y)))
+            let width = max(0.1, min(1, overlay.width * value.scale / max(0.01, current.scale)))
+            let turn = value.rotation - current.rotation
+            if overlay.uploading != nil || overlay.failed {
+                model.updatePendingOverlay(id: id, x: x, y: y, width: width)
+            } else {
+                model.setOverlayFrame(id: id, x: x, y: y, width: width)
+            }
+            if abs(turn) > 0.01 {
+                let rotation = (overlay.style.rotation + turn).truncatingRemainder(dividingBy: 360)
+                model.setOverlayStyle(id: id) { $0.rotation = rotation }
+            }
+            clearKeyPending()
+            return
+        }
+        keyFramingEnded(target, value)
+    }
+
+    /// The fingers frame the target at the cursor: a video clip (selected, under the cursor, or
+    /// the clip of a selected ◇) or a selected Float overlay.
+    private var framingEnabled: Bool {
+        guard keyTarget != nil, panel == .none, editingCaptionClip == nil, countdown == nil else { return false }
+        switch selection {
+        case nil, .video, .zoom, .overlay(_, isText: false): return true
+        default: return false
+        }
+    }
+
+    private var framingOverlay: Bool {
+        if case .overlay = keyTarget { return true }
         return false
     }
 
@@ -1292,6 +1392,9 @@ struct EditorV4View: View {
 
     // MARK: Sheets
 
+    /// Design screenshots show sample tiles; the build 18 probe opens the real system picker.
+    private var usesSampleGallery: Bool { previewState != nil && previewState?.probe?.hasPrefix("b18") != true }
+
     @ViewBuilder
     private func sheetView(_ which: EditorSheet) -> some View {
         switch which {
@@ -1299,13 +1402,13 @@ struct EditorV4View: View {
             OverlayGallerySheet(onPick: { url in
                 closeCard()
                 model.addOverlay(fileURL: url, at: playback.currentTime)
-            }, sampleTiles: previewState != nil, videosOnly: !galleryPhotos, photosOnly: galleryPhotos,
+            }, sampleTiles: usesSampleGallery, videosOnly: !galleryPhotos, photosOnly: galleryPhotos,
                title: galleryPhotos ? "Photos" : "Videos")
         case .broll, .brollGallery:
             // Full-screen B-roll: a video from the phone, as a clip of the main track at the cursor.
             OverlayGallerySheet(onPick: { url in
                 model.addBrollClip(fileURL: url, at: playback.currentTime)
-            }, sampleTiles: previewState != nil, videosOnly: true, title: "Add a video")
+            }, sampleTiles: usesSampleGallery, videosOnly: true, title: "Add a video")
         case .export:
             ExportSheet(model: model)
         case .captions:
@@ -1418,7 +1521,9 @@ struct EditorV4View: View {
                 show(.message("Move the cursor inside the clip to split it."))
             }
         case .overlay(let id, isText: false):
-            if model.splitOverlay(id: id, at: time) {
+            if model.pendingOverlays.contains(where: { $0.id == id }) {
+                show(.message("Wait until it finishes uploading, then split it."))
+            } else if model.splitOverlay(id: id, at: time) {
                 show(.message("Overlay split at \(EditorTime.short(time)) · tap ↶ to undo", undo: true))
             } else {
                 show(.message("Move the cursor inside the overlay to split it."))

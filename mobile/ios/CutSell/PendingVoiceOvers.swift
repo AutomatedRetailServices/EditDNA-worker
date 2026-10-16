@@ -117,4 +117,7 @@ struct PreviewVoice: Equatable {
     var volume: Double = 1
     /// "Lower video sound" while it plays.
     var ducksVideo = false
+    /// Build 18 diagnostics: what it is ("sound", "voice", "music") and CutSell's name for it.
+    var kind = "voice"
+    var label = "Voice-over"
 }

@@ -1,5 +1,7 @@
 import AVFoundation
 import Photos
+import PhotosUI
+import UniformTypeIdentifiers
 import SwiftUI
 
 // MARK: - Captions menu 2b (Figma 1083:5746 / 1049:2492 / 1049:2638 / 1049:2785)
@@ -622,6 +624,11 @@ final class TakePlayer: ObservableObject {
 // MARK: - Overlay gallery (Figma 1026:7971)
 
 /// "Photos & Videos": pick one photo or video to place over the video.
+///
+/// Build 18: the system picker (PHPickerViewController). It shows the WHOLE library (every photo
+/// and video, newest at hand, albums and search) without asking for full photo access; build 17's
+/// own grid read at most 300 items and, with "Limited" access, only the photos picked earlier.
+/// What is not on this iPhone downloads from iCloud with its progress shown.
 struct OverlayGallerySheet: View {
     let onPick: (URL) -> Void
     /// Design screenshots only: show sample tiles instead of the photo library.
@@ -632,24 +639,24 @@ struct OverlayGallerySheet: View {
     var photosOnly = false
     var title = "Photos & Videos"
     @Environment(\.dismiss) private var dismiss
-    @State private var assets: [PHAsset] = []
-    @State private var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-    @State private var picking: String?
+    /// 0...1 while the picked item is copied (downloaded from iCloud when needed).
+    @State private var loading: Double?
+    @State private var problem: String?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 8)
-            ZStack {
-                Text(title).font(CS.inter(17, .bold)).foregroundStyle(.white)
-                HStack {
-                    Button("Cancel") { dismiss() }.font(CS.inter(15)).foregroundStyle(CS.cyan)
-                    Spacer()
-                }
-            }
-            .padding(.horizontal, 20).padding(.vertical, 14)
             if sampleTiles {
+                Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 8)
+                ZStack {
+                    Text(title).font(CS.inter(17, .bold)).foregroundStyle(.white)
+                    HStack {
+                        Button("Cancel") { dismiss() }.font(CS.inter(15)).foregroundStyle(CS.cyan)
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, 20).padding(.vertical, 14)
                 LazyVGrid(columns: columns, spacing: 6) {
                     ForEach(0..<9, id: \.self) { index in
                         RoundedRectangle(cornerRadius: 10)
@@ -665,103 +672,143 @@ struct OverlayGallerySheet: View {
                 }
                 .padding(.horizontal, 20)
                 Spacer()
-            } else             if status == .authorized || status == .limited {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 6) {
-                        ForEach(assets, id: \.localIdentifier) { asset in
-                            Button { Task { await pick(asset) } } label: {
-                                OverlayAssetTile(asset: asset, busy: picking == asset.localIdentifier)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                }
             } else {
-                VStack(spacing: 12) {
-                    Text("Allow access to your photos to add one over the video.")
-                        .font(CS.inter(14)).foregroundStyle(CS.textSecondaryF).multilineTextAlignment(.center)
-                    PrimaryButton(title: "Allow photos", height: 48, cornerRadius: 14, fontSize: 15) {
-                        Task {
-                            status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-                            load()
-                        }
-                    }
+                ZStack {
+                    SystemMediaPicker(filter: filter, onPicked: { provider in Task { await load(provider) } },
+                                      onCancel: { dismiss() })
+                        .ignoresSafeArea()
+                        .disabled(loading != nil)
+                    if let loading { progressCard(loading) }
+                    if let problem { problemCard(problem) }
                 }
-                .padding(24)
-                Spacer()
             }
         }
         .background(Color(hex: 0x0A1326).ignoresSafeArea())
-        .presentationDetents([.fraction(0.55), .large])
+        .presentationDetents(sampleTiles ? [.fraction(0.55), .large] : [.large])
         .presentationBackground(Color(hex: 0x0A1326))
         .preferredColorScheme(.dark)
-        .onAppear { load() }
+        .accessibilityIdentifier("overlayGallery")
     }
 
-    private func load() {
-        guard status == .authorized || status == .limited else { return }
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.fetchLimit = 300
-        let result = PHAsset.fetchAssets(with: options)
-        var list: [PHAsset] = []
-        result.enumerateObjects { asset, _, _ in
-            if (asset.mediaType == .video && !photosOnly) || (!videosOnly && asset.mediaType == .image) { list.append(asset) }
-        }
-        assets = list
+    private var filter: PHPickerFilter {
+        if videosOnly { return .videos }
+        if photosOnly { return .images }
+        return .any(of: [.images, .videos])
     }
 
-    private func pick(_ asset: PHAsset) async {
-        picking = asset.localIdentifier
-        defer { picking = nil }
-        if asset.mediaType == .video {
-            if let video = try? await GalleryExport.export(asset, name: nil) {
-                onPick(video.url); dismiss()
-            }
-            return
+    private func progressCard(_ value: Double) -> some View {
+        VStack(spacing: 10) {
+            ProgressView(value: value).tint(CS.cyan).frame(width: 180)
+            Text(value < 0.02 ? "Getting it ready…" : "Getting it from iCloud… \(Int((value * 100).rounded()))%")
+                .font(CS.inter(14, .medium)).monospacedDigit().foregroundStyle(.white)
+                .accessibilityIdentifier("galleryProgress")
         }
-        let options = PHImageRequestOptions()
-        options.isNetworkAccessAllowed = true
-        options.deliveryMode = .highQualityFormat
-        let data: Data? = await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
-                continuation.resume(returning: data)
+        .padding(22)
+        .background(Color(hex: 0x040812, opacity: 0.95), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func problemCard(_ text: String) -> some View {
+        VStack(spacing: 12) {
+            Text(text).font(CS.inter(14)).foregroundStyle(.white).multilineTextAlignment(.center)
+            Button("OK") { problem = nil }.font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
+        }
+        .padding(22)
+        .frame(maxWidth: 280)
+        .background(Color(hex: 0x040812, opacity: 0.95), in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityIdentifier("galleryProblem")
+    }
+
+    /// Copies the picked photo / video into the app (the picker's file only lives during its callback).
+    private func load(_ provider: NSItemProvider) async {
+        loading = 0
+        defer { loading = nil }
+        let isVideo = provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
+        let type = isVideo ? UTType.movie : UTType.image
+        let started = Date()
+        let result: Result<URL, Error> = await withCheckedContinuation { continuation in
+            let progress = provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { url, error in
+                guard let url else {
+                    continuation.resume(returning: .failure(error ?? CocoaError(.fileReadUnknown)))
+                    return
+                }
+                do {
+                    if isVideo {
+                        var ext = url.pathExtension.lowercased()
+                        if ext.isEmpty { ext = "mov" }
+                        let destination = try persistentMediaURL(extension: ext)
+                        try? FileManager.default.removeItem(at: destination)
+                        try FileManager.default.copyItem(at: url, to: destination)
+                        continuation.resume(returning: .success(destination))
+                    } else {
+                        let data = try Data(contentsOf: url)
+                        guard let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else {
+                            throw CocoaError(.fileReadCorruptFile)
+                        }
+                        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("overlay-\(UUID().uuidString).jpg")
+                        try jpeg.write(to: destination)
+                        continuation.resume(returning: .success(destination))
+                    }
+                } catch {
+                    continuation.resume(returning: .failure(error))
+                }
+            }
+            Task { @MainActor in
+                while !progress.isFinished && !progress.isCancelled {
+                    loading = max(loading ?? 0, progress.fractionCompleted)
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                }
             }
         }
-        guard let data, let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else { return }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("overlay-\(UUID().uuidString).jpg")
-        try? jpeg.write(to: url)
-        onPick(url)
-        dismiss()
+        switch result {
+        case .success(let url):
+            if isVideo, !CreateLimits.supportedExtensions.contains(url.pathExtension.lowercased()) {
+                problem = "This video's format isn't supported. Please pick another one."
+                CutSellDiagnostics.log("gallery_pick_unsupported", ["ext": url.pathExtension.lowercased()])
+                return
+            }
+            CutSellDiagnostics.log("gallery_picked", ["kind": isVideo ? "video" : "photo",
+                                                      "took_s": String(format: "%.1f", Date().timeIntervalSince(started))])
+            onPick(url)
+            dismiss()
+        case .failure(let error):
+            problem = "It couldn't be copied from your library. Check your connection (iCloud) and try again."
+            CutSellDiagnostics.log("gallery_pick_failed", ["kind": isVideo ? "video" : "photo",
+                                                           "code": String((error as NSError).code)])
+        }
     }
 }
 
-private struct OverlayAssetTile: View {
-    let asset: PHAsset
-    let busy: Bool
-    @State private var image: UIImage?
+/// The system photo picker (no full-library permission needed).
+struct SystemMediaPicker: UIViewControllerRepresentable {
+    let filter: PHPickerFilter
+    let onPicked: (NSItemProvider) -> Void
+    let onCancel: () -> Void
 
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Rectangle().fill(Color(hex: 0x1C2E52))
-            if let image { Image(uiImage: image).resizable().scaledToFill() }
-            if asset.mediaType == .video {
-                Text(VoiceRecorder.formatted(asset.duration))
-                    .font(CS.inter(10, .semibold)).foregroundStyle(.white).padding(5)
-            }
-            if busy { ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity) }
-        }
-        .aspectRatio(1, contentMode: .fill)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .task {
-            let options = PHImageRequestOptions()
-            options.isNetworkAccessAllowed = true
-            options.deliveryMode = .opportunistic
-            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 240, height: 240),
-                                                  contentMode: .aspectFill, options: options) { result, _ in
-                if let result { image = result }
-            }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration()
+        configuration.filter = filter
+        configuration.selectionLimit = 1
+        // The original as it is (no waiting for a conversion).
+        configuration.preferredAssetRepresentationMode = .current
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        var parent: SystemMediaPicker
+        init(_ parent: SystemMediaPicker) { self.parent = parent }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            if let first = results.first { parent.onPicked(first.itemProvider) } else { parent.onCancel() }
         }
     }
 }
+
+
