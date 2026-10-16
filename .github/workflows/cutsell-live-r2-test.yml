@@ -1,0 +1,152 @@
+name: CutSell live test after the R2 move
+
+# Full live test on the production API, with times: upload -> process -> edit (voice-over, photo
+# overlay, CutSell sounds) -> export -> download, plus every official sound downloaded from its
+# signed link. Synthetic media only (macOS-free: ffmpeg + espeak-ng). The session token is a throwaway
+# anonymous one and is masked. Prints only hosts / sizes / durations / times -- never a link or key.
+# Runs on push to probe/live-r2.
+
+on:
+  push:
+    branches: [probe/live-r2]
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Make test media
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng >/dev/null
+          cd "$RUNNER_TEMP"
+          espeak-ng -s 150 -w speech.wav "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. It fits in any car cup holder. And right now it is on sale in my shop. Grab yours today."
+          dur="$(ffprobe -v error -show_entries format=duration -of csv=p=0 speech.wav)"
+          ffmpeg -loglevel error -y -f lavfi -i "color=c=0x203060:s=720x1280:r=30:d=$dur" -i speech.wav \
+            -vf "noise=alls=14:allf=t+u,drawbox=x=260:y=540:w=200:h=200:color=0xE0E0E0:t=fill" \
+            -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac probe.mp4
+          espeak-ng -s 150 -w vo.wav "This is a voice over."
+          ffmpeg -loglevel error -y -i vo.wav -c:a aac -ar 48000 vo.m4a
+          ffmpeg -loglevel error -y -f lavfi -i color=c=0x19E6FF:s=600x250 -frames:v 1 overlay.png
+          ls -la probe.mp4 vo.m4a overlay.png
+
+      - name: Live test (times, hosts, results)
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, time, urllib.request
+          from urllib.parse import urlparse
+          API = "https://cutsell-api.onrender.com"; T = None; tmp = os.environ["RUNNER_TEMP"]
+          def note(title, msg): print(f"::notice title={title}::{msg}")
+          def call(m, p, b=None, q="", timeout=180):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              try:
+                  with urllib.request.urlopen(r, timeout=timeout) as x: return json.load(x)
+              except urllib.error.HTTPError as e:
+                  print(f"::error title={m} {p.split('/')[-1]}::HTTP {e.code} {e.read()[:300]!r}"); raise
+          def put(url, data, headers):
+              req = urllib.request.Request(url, data=data, method="PUT")
+              for k, v in (headers or {}).items(): req.add_header(k, v)
+              with urllib.request.urlopen(req, timeout=300) as r: return r
+          host = lambda u: (urlparse(u).hostname or "").split(".", 1)[-1]
+
+          t0 = time.time()
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          pid = call("POST", "/v1/projects", {"user_id": u, "title": "copy_LIVE_R2"})["project_id"]
+          data = open(f"{tmp}/probe.mp4", "rb").read()
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "probe.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(data)})
+          parts, hosts = [], set()
+          for n in range(1, st["part_count"] + 1):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{n}/presign", {"project_id": pid, "user_id": u})
+              hosts.add(host(sg["upload_url"]))
+              r = put(sg["upload_url"], data[(n-1)*st["part_size"]: n*st["part_size"]], {"Content-Type": ""})
+              parts.append({"part_number": n, "etag": r.headers["ETag"]})
+          done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+          t_up = time.time() - t0
+          note("1 upload", f"{len(data)/1e6:.1f} MB in {t_up:.1f} s to {', '.join(hosts)} (bucket {done['source_uri'].split('/')[2]})")
+
+          t1 = time.time()
+          job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": False, "language_hint": None,
+                     "sources": [{"original_name": "probe.mp4", "uri": done["source_uri"], "source_order": 0, "duration_sec": 14.0}]})
+          while True:
+              j = call("GET", f"/v1/jobs/{job['job_id']}")
+              if j["state"] in ("finished", "failed", "canceled") or time.time() - t1 > 900: break
+              time.sleep(2)
+          t_proc = time.time() - t1
+          snap = call("GET", f"/v1/projects/{pid}/draft", q=f"?user_id={u}")
+          draft = snap["draft"]; dur = sum(max(0, c["end"] - c["start"]) for c in draft["selected"])
+          note("2 process", f"job {j['state']} in {t_proc:.1f} s; {len(draft['selected'])} clips, {dur:.1f} s; AI zooms {len(draft.get('zoom_keyframes') or [])}")
+          if j["state"] != "finished": raise SystemExit(1)
+
+          # 3. Edit: voice-over (timeline asset), photo overlay, CutSell sounds -- as the app does.
+          t2 = time.time()
+          size = os.path.getsize(f"{tmp}/vo.m4a")
+          auth = call("POST", f"/v1/projects/{pid}/timeline-uploads", {"user_id": u, "media_class": "voice_over",
+                      "original_name": "voice-over.m4a", "content_type": "audio/mp4", "size_bytes": size})
+          put(auth["upload_url"], open(f"{tmp}/vo.m4a", "rb").read(), auth.get("headers"))
+          vo = call("POST", f"/v1/projects/{pid}/timeline-assets", {"user_id": u, "role": "VOICE_OVER", "media_kind": "AUDIO",
+                    "upload_id": auth["upload_id"]})
+          png = open(f"{tmp}/overlay.png", "rb").read()
+          pre = call("POST", "/v1/overlays/uploads/presign", {"project_id": pid, "user_id": u, "original_name": "overlay.png",
+                     "content_type": "image/png", "size_bytes": len(png)})
+          put(pre["upload_url"], png, pre.get("headers"))
+          edit_hosts = {host(auth["upload_url"]), host(pre["upload_url"])}
+          snap = call("GET", f"/v1/projects/{pid}/draft", q=f"?user_id={u}")
+          d = snap["draft"]
+          d["audio_clips"] = [
+              {"audio_id": "vo1", "kind": "voice", "asset_id": vo["asset_id"], "start": 0.5, "source_in": 0.0,
+               "source_out": min(vo["duration_sec"], dur - 0.6), "volume": 1.0, "duck_video": True},
+              {"audio_id": "s1", "kind": "sfx", "sfx_id": "good", "start": 1.0, "source_in": 0.0, "source_out": 0.5},
+              {"audio_id": "s2", "kind": "sfx", "sfx_id": "typing", "start": 3.0, "source_in": 0.0, "source_out": 3.0},
+          ]
+          d["media_overlays"] = (d.get("media_overlays") or []) + [{
+              "overlay_id": "ov1", "kind": pre["kind"], "uri": pre["uri"], "start": 0.0, "end": min(4.0, dur),
+              "x": 0.5, "y": 0.25, "width": 0.5, "source_start": 0.0, "source_end": None, "mute_audio": True}]
+          saved = call("PUT", f"/v1/projects/{pid}/draft", {"user_id": u, "expected_revision": snap["revision"], "draft": d})
+          t_edit = time.time() - t2
+          note("3 edit", f"voice-over ({vo['qualification_status']}, {vo['duration_sec']:.1f} s), photo overlay, Good + Typing saved in {t_edit:.1f} s (revision {saved.get('revision')}); uploads to {', '.join(edit_hosts)}")
+
+          # 4. Export.
+          t3 = time.time()
+          ex = call("POST", "/v1/exports/jobs", {"project_id": pid, "user_id": u, "draft": saved["draft"],
+                    "sources": [{"source_asset_id": s0["source_asset_id"], "uri": s0["uri"], "original_name": "probe.mp4"}
+                                for s0 in snap["sources"]]})
+          while True:
+              e = call("GET", f"/v1/jobs/{ex['job_id']}")
+              if e["state"] in ("finished", "failed", "canceled") or time.time() - t3 > 900: break
+              time.sleep(2)
+          t_exp = time.time() - t3
+          if e["state"] != "finished":
+              print(f"::error title=4 export::{e['state']} after {t_exp:.1f} s: {str(e.get('error'))[:400]}"); raise SystemExit(1)
+          link = (e.get("result") or {}).get("download_url")
+          note("4 export", f"finished in {t_exp:.1f} s; link host {host(link)}")
+
+          # 5. Download and check.
+          t4 = time.time()
+          urllib.request.urlretrieve(link, f"{tmp}/export.mp4")
+          t_dl = time.time() - t4
+          info = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height:format=duration",
+                                            "-of", "json", f"{tmp}/export.mp4"], capture_output=True, text=True).stdout)
+          kinds = sorted({s0["codec_type"] for s0 in info["streams"]})
+          video = next(s0 for s0 in info["streams"] if s0["codec_type"] == "video")
+          vol = subprocess.run(["ffmpeg", "-ss", "1.0", "-t", "0.4", "-i", f"{tmp}/export.mp4", "-af", "volumedetect", "-f", "null", "-"],
+                               capture_output=True, text=True).stderr
+          level = [l for l in vol.splitlines() if "mean_volume" in l]
+          note("5 download", f"{os.path.getsize(f'{tmp}/export.mp4')/1e6:.1f} MB in {t_dl:.1f} s; {video['width']}x{video['height']}, "
+               f"{float(info['format']['duration']):.1f} s, streams {kinds}; sound at 1.0 s (Good + voice): {level[0].split(':')[-1].strip() if level else '?'}")
+
+          # 6. Every official sound from its signed link (what the app downloads).
+          m = call("GET", "/v1/sfx/manifest"); okc = 0; rows = []
+          for snd in m["sounds"]:
+              p = f"{tmp}/sfx-{snd['id']}.m4a"
+              urllib.request.urlretrieve(snd["url"], p)
+              d0 = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", p],
+                                        capture_output=True, text=True).stdout.strip() or 0)
+              okc += d0 > 0.1; rows.append(f"{snd['id']} {d0:.2f}s")
+          note("6 sounds", f"{okc} of {len(m['sounds'])} downloaded from {', '.join({host(x['url']) for x in m['sounds']})}: {'; '.join(rows)}")
+          note("total", f"upload {t_up:.1f} s · process {t_proc:.1f} s · edit {t_edit:.1f} s · export {t_exp:.1f} s · download {t_dl:.1f} s")
+          PY
