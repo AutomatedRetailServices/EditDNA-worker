@@ -55,6 +55,12 @@ A track whose asset is gone cannot be inserted. The video tracks already documen
 
 ## 4. Overlays on the timeline (photos and videos)
 
+The probe found three causes, and each one would also break the iPhone:
+- **Hidden row.** Selecting an overlay opens its panel, and the timeline then shows only two rows, so the overlay's own row was hidden below. The selected item's row now scrolls into view by itself.
+- **Selection lost after upload.** A new overlay is selected under its upload id (`pov_…`), and the upload gives it a new id (`ov_…`). The selection now follows the new id (`placedOverlayRename`).
+- **Drag read as a tap.** On a selected block the drag now has priority over the tap (`highPriorityGesture` for selected items), so a moving finger never deselects it.
+
+
 - **Select, move, trim, delete:**
   - Tap selects.
   - A selected block moves with a plain drag. An unselected one still needs hold-and-drag, so a plain swipe keeps scrolling the timeline. The same applies to sounds and voices.
@@ -65,6 +71,8 @@ A track whose asset is gone cannot be inserted. The video tracks already documen
   - One still uploading answers "Wait until it finishes uploading, then split it." (it used to say the cursor was outside).
 
 ## 5. Gallery
+
+- **Photo opened videos.** The Overlay panel's Photo / Video choice was a separate `@State`, read stale by the sheet on its first presentation, so Photo could open a videos-only gallery. The choice now travels with the sheet (`EditorSheet.overlayPhoto`).
 
 - **Editor overlay and B-roll gallery:** now the system picker (`PHPickerViewController`). It shows the whole library (photos and videos, albums, search) without full photo access.
   - Build 17's own grid read at most 300 items (`fetchLimit = 300`), and with "Limited" access only the photos picked earlier.
@@ -85,6 +93,35 @@ A track whose asset is gone cannot be inserted. The video tracks already documen
 - **No personal data:** field names with user, token, email, url, path, name, title, text, caption, project, account, session or key are dropped, and so are values with a link, a path or "@".
 
 ## 7. Tests
+
+**Honest note about the sounds.**
+- **Optimized Simulator:** the old way (temporary asset) and the new way both put Typing in the mix (in = 3.00 s, -17.4 dB). The Simulator therefore did NOT reproduce the iPhone's silence, so the device cause is not proven.
+- **Mix measured:** what the player really plays is measured too (tap): -16.6 dB heard.
+- **On the iPhone:** if a sound is still silent there, Diagnostics shows whether its file is on the phone, whether it is in the mix, and how loud it really played.
+
+**Last probe run** (b64031c, run 38962745793, optimized build, live server, real cut): every check PASS.
+- **Sounds:**
+  - Typing at 0:02 is in the mix and heard while playing.
+  - The audio session is Playback / MoviePlayback.
+  - Move (plain drag), Split, trim and Delete all rebuild the mix.
+- **Volume:**
+  - Selected clip mute silences that clip only, and it survives a reload.
+  - The speaker worked 6 / 6 times, and the sounds keep playing.
+- **Keyframes:**
+  - Pinch zooms 1.65× (the white square goes from 0.278 to 0.470 of the width on screen).
+  - A two-finger twist turns 30°; ◇ keeps both framings.
+  - Between them the framing is smooth (1.65/13° → 1.23/3° → 1.02/0° → 1.00/13° → 1.00/30°).
+  - A drag on the video never starts playback.
+  - Auto Zoom AI alone (previous run): 1.04 zoom on screen.
+- **Overlays, photo and video:**
+  - Plain drag, both trim handles, two fingers (size and turn), Split and Delete.
+  - A video overlay's start can only be shortened: it can't start before its own first frame.
+- **System picker:** a photo picked becomes an overlay.
+- **Export:** OK in 62 s.
+- **Diagnostics:** opens with five taps, lists the editor's events, and Send report opens the share sheet.
+
+**TestFlight:** build 18 VALID (run 38966527399, commit 04cfff4).
+
 
 - **Static:** `tests/test_cutsell_ios_build18.py`; older iOS static tests updated (309 pass).
 - **Simulator probe:** `.github/workflows/cutsell-ios-build18-probe.yml`, XCUITest `mobile/ios/CutSellUITests/Build18UITests.swift`. Optimized build, live server, real cut. Frames and logs go to `design-screenshots/b18/`; the screen recording stays on the test machine.
