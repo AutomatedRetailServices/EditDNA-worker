@@ -103,9 +103,9 @@ final class Build17UITests: XCTestCase {
         let button = element("tool_\(name)")
         guard button.waitForExistence(timeout: 3) else { log("missing tool_\(name)"); return }
         let screen = app.windows.firstMatch.frame
-        if button.frame.maxX > screen.maxX - 4 { element("tool_overlay").swipeLeft(); pause(0.8) }
-        if button.frame.minX < screen.minX + 4 { element("tool_overlay").swipeRight(); pause(0.8) }
-        tap("tool_\(name)")
+        if !screen.isEmpty, button.frame.maxX > screen.maxX - 4 { element("tool_overlay").swipeLeft(); pause(0.8) }
+        button.tap()
+        pause(1.0)
     }
 
     /// Taps when it is there (a missing element is logged, the test goes on to the next check).
