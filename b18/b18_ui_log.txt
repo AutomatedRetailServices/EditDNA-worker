@@ -1,56 +1,56 @@
-B18UI    21.4 opened (old way) ai=8 user=0 sounds= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B18UI    87.2 PASS typing added at 0:02 · downloaded=true ai=8 user=0 sounds=typing@2.00+3.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=sound pending=none vv=1.00 t=2.00 zoom=1.080 rot=0.0 playing=false session=Playback/MoviePlayback
-B18UI    88.0 OLD WAY (temporary asset) mix: Typing@2.00+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=?
-B18UI   117.1 NEW WAY mix: Typing@2.00+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=?
-B18UI   117.1 PASS typing in the mix at 2 s with sound · in=3.00 s level=-17.4 dB
-B18UI   145.3 PASS audio session playback · Playback/MoviePlayback
-B18UI   150.8 PASS typing heard while the preview played · -16.6 dB
-B18UI   160.9 PASS selected sound moves with a plain drag (no hold) · Typing@2.00+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=-16.5 -> Typing@3.50+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=?
-B18UI   180.9 PASS split sound: two pieces, both in the mix · mix sounds=[Typing@3.50+0.50 file=yes dur=3.00 in=0.50 vol=1.00 db=-17.0 heard=?;Typing@4.00+2.50 file=yes dur=3.00 in=2.50 vol=1.00 db=-18.3 heard=?] video=[0.0-4.6:1.00,4.6-7.9:1.00,7.9-11.8:1.00] video_volume=1.00
-B18UI   187.1 after trim: ["Typing@3.50+0.10 file=yes dur=3.00 in=0.10 vol=1.00 db=-22.3 heard=?", "Typing@4.00+2.50 file=yes dur=3.00 in=2.50 vol=1.00 db=-18.3 heard=?"]
-B18UI   192.4 PASS deleted one piece: one sound left in the mix · mix sounds=[Typing@4.00+2.50 file=yes dur=3.00 in=2.50 vol=1.00 db=-18.3 heard=?] video=[0.0-4.6:1.00,4.6-7.9:1.00,7.9-11.8:1.00] video_volume=1.00
-B18UI   215.0 PASS Selected clip mute: that clip 0, the others play · levels=[0.0, 1.0, 1.0]
-B18UI   215.2 PASS the sound keeps its volume (no video mute inherited)
-B18UI   227.8 PASS clip mute kept after reloading the draft · ai=8 user=0 sounds=typing@4.00+2.50 muted_clips=1 user_scales= user_rot= auto_zoom=true overlays= sel=video pending=none vv=1.00 t=0.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B18UI   234.2 PASS speaker tap 1 -> off · icon=off levels=[0.0, 0.0, 0.0]
-B18UI   242.2 PASS speaker tap 2 -> on · icon=on levels=[1.0, 1.0, 1.0]
-B18UI   246.1 PASS speaker tap 3 -> off · icon=off levels=[0.0, 0.0, 0.0]
-B18UI   251.9 PASS speaker tap 4 -> on · icon=on levels=[1.0, 1.0, 1.0]
-B18UI   255.3 PASS speaker tap 5 -> off · icon=off levels=[0.0, 0.0, 0.0]
-B18UI   260.0 PASS speaker tap 6 -> on · icon=on levels=[1.0, 1.0, 1.0]
-B18UI   276.0 PASS pinch zooms the video · pending=none
-B18UI   289.8 FAIL ◇ keeps the pinch as a keyframe · ai=7 user=0 sounds=typing@4.00+2.50 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=video pending=none vv=1.00 t=1.00 zoom=1.080 rot=0.0 playing=false session=Playback/MoviePlayback
-B18UI   290.4 FAIL zoom visible on screen · white 0.278 -> 0.301
-B18UI   303.7 PASS two-finger twist turns the video · rot=30.4
-B18UI   306.3 PASS a drag on the video never starts playback · ai=7 user=0 sounds=typing@4.00+2.50 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=video pending=1.000/30.4 vv=1.00 t=3.00 zoom=1.000 rot=30.4 playing=false session=Playback/MoviePlayback
-B18UI   320.2 FAIL second ◇ with the turn · user_rot=30
-B18UI   337.9 FAIL framing changes smoothly between the ◇ · 1.00:1.080/0.0 1.50:1.080/0.0 2.00:1.080/0.0 2.50:1.078/0.0 3.00:1.000/30.4
-B18UI   352.3 playing 1 s -> t=6.62 zoom 1.080 -> 1.000 rot=0.0
-B18UI   357.4 at the AI zoom: ai=7 user=1 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.00 user_rot=30 auto_zoom=true overlays= sel=video pending=none vv=1.00 t=2.65 zoom=1.040 rot=0.0 playing=false session=Playback/MoviePlayback
-B18UI   357.9 PASS Auto Zoom AI zooms the preview · zoom=1.040 white 0.278 -> 0.288
-B18UI   371.7 PASS photo overlay added and uploaded · photo:1.00-5.00:w0.42:r0
-B18UI   372.4 photo block hittable=true frame=(56.33333206176758, 571.0, 121.0, 32.0) state=[ai=7 user=1 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.00 user_rot=30 auto_zoom=true overlays=photo:1.00-5.00:w0.42:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.080 rot=0.0 playing=false session=Playback/MoviePlayback]
-B18UI   374.9 after the drag: [ai=7 user=1 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.00 user_rot=30 auto_zoom=true overlays=photo:3.00-7.00:w0.42:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.080 rot=0.0 playing=false session=Playback/MoviePlayback]
-B18UI   375.2 PASS photo overlay moves with a plain drag when selected · photo 1.00-5.00 -> photo 3.00-7.00
-B18UI   379.3 PASS photo overlay end trimmed (longer) · photo 3.00-7.00 -> photo 3.00-7.89
-B18UI   384.0 PASS photo overlay start trimmed (longer to the left) · photo 3.00-7.89 -> photo 2.76-7.89
-B18UI   389.9 PASS photo overlay sized / turned with two fingers on the video · photo:2.76-7.89:w0.42:r0 -> photo:2.76-7.89:w0.29:r38
-B18UI   417.0 PASS photo overlay split in two · photo:2.76-5.00:w0.29:r38,photo:5.00-7.89:w0.29:r38
-B18UI   424.9 PASS photo overlay piece deleted · photo:5.00-7.89:w0.29:r38
-B18UI   440.0 PASS video overlay added and uploaded · photo:5.00-7.89:w0.29:r38,video:1.00-4.00:w0.34:r0
-B18UI   441.3 video block hittable=true frame=(56.33333206176758, 548.3333129882812, 91.00001525878906, 53.33331298828125) state=[ai=7 user=1 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.00 user_rot=30 auto_zoom=true overlays=photo:5.00-7.89:w0.29:r38,video:1.00-4.00:w0.34:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.080 rot=0.0 playing=false session=Playback/MoviePlayback]
-B18UI   444.0 after the drag: [ai=7 user=1 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.00 user_rot=30 auto_zoom=true overlays=photo:5.00-7.89:w0.29:r38,video:3.00-6.00:w0.34:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.080 rot=0.0 playing=false session=Playback/MoviePlayback]
-B18UI   444.2 PASS video overlay moves with a plain drag when selected · video 1.00-4.00 -> video 3.00-6.00
-B18UI   447.4 PASS video overlay end trimmed (longer) · video 3.00-6.00 -> video 3.00-6.50
-B18UI   467.2 FAIL video overlay start trimmed (longer to the left) · video 3.00-6.50 -> video 3.00-6.50
-B18UI   472.9 PASS video overlay sized / turned with two fingers on the video · photo:5.00-7.89:w0.29:r38,video:3.00-6.50:w0.34:r0 -> photo:5.00-7.89:w0.29:r38,video:3.00-6.50:w0.24:r26
-B18UI   491.8 PASS video overlay split in two · photo:5.00-7.89:w0.29:r38,video:3.00-4.00:w0.24:r26,video:4.00-6.50:w0.24:r26
-B18UI   497.6 PASS video overlay piece deleted · photo:5.00-7.89:w0.29:r38,video:4.00-6.50:w0.24:r26
-B18UI   911.7 picker images=37 cells=0 chosen=none
-B18UI   912.3 PASS system photo picker opens · photo picked=false
-B18UI  1399.9 FAIL export · 485.0 s
-B18UI  1400.2 FAILURES: ◇ keeps the pinch as a keyframe | zoom visible on screen | second ◇ with the turn | framing changes smoothly between the ◇ | video overlay start trimmed (longer to the left) | export
-B18UI  1449.8 PASS Diagnostics opens with five taps on the version · build=Build, 1 photos=Permission, Not asked yet
-B18UI  1449.8 PASS Diagnostics lists the editor's events · 10-16 20:07:51 keyframe_added at=3.00 rotation=30.4 scale=1.000 target=video_clip | 10-16 20:07:21 keyframe_deleted ai=true
-B18UI  1459.5 PASS Send report opens the share sheet
-B18UI  1459.5 FAILURES (diagnostics): none
+B18UI    28.5 opened (old way) ai=8 user=0 sounds= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B18UI    67.2 PASS typing added at 0:02 · downloaded=true ai=8 user=0 sounds=typing@2.00+3.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=sound pending=none vv=1.00 t=2.00 zoom=1.016 rot=0.0 playing=false session=Playback/MoviePlayback
+B18UI    68.7 OLD WAY (temporary asset) mix: Typing@2.00+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=?
+B18UI    94.3 NEW WAY mix: Typing@2.00+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=?
+B18UI    94.3 PASS typing in the mix at 2 s with sound · in=3.00 s level=-17.4 dB
+B18UI   128.2 PASS audio session playback · Playback/MoviePlayback
+B18UI   131.2 PASS typing heard while the preview played · -16.0 dB
+B18UI   143.6 PASS selected sound moves with a plain drag (no hold) · Typing@2.00+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=-16.0 -> Typing@3.50+3.00 file=yes dur=3.00 in=3.00 vol=1.00 db=-17.4 heard=?
+B18UI   167.1 PASS split sound: two pieces, both in the mix · mix sounds=[Typing@3.50+0.50 file=yes dur=3.00 in=0.50 vol=1.00 db=-17.0 heard=?;Typing@4.00+2.50 file=yes dur=3.00 in=2.50 vol=1.00 db=-18.3 heard=?] video=[0.0-4.6:1.00,4.6-7.9:1.00,7.9-11.8:1.00] video_volume=1.00
+B18UI   175.6 after trim: ["Typing@3.50+0.10 file=yes dur=3.00 in=0.10 vol=1.00 db=-22.3 heard=?", "Typing@4.00+2.50 file=yes dur=3.00 in=2.50 vol=1.00 db=-18.3 heard=?"]
+B18UI   180.4 PASS deleted one piece: one sound left in the mix · mix sounds=[Typing@4.00+2.50 file=yes dur=3.00 in=2.50 vol=1.00 db=-18.3 heard=?] video=[0.0-4.6:1.00,4.6-7.9:1.00,7.9-11.8:1.00] video_volume=1.00
+B18UI   199.8 PASS Selected clip mute: that clip 0, the others play · levels=[0.0, 1.0, 1.0]
+B18UI   200.0 PASS the sound keeps its volume (no video mute inherited)
+B18UI   214.1 PASS clip mute kept after reloading the draft · ai=8 user=0 sounds=typing@4.00+2.50 muted_clips=1 user_scales= user_rot= auto_zoom=true overlays= sel=video pending=none vv=1.00 t=0.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B18UI   218.3 PASS speaker tap 1 -> off · icon=off levels=[0.0, 0.0, 0.0]
+B18UI   222.6 PASS speaker tap 2 -> on · icon=on levels=[1.0, 1.0, 1.0]
+B18UI   226.6 PASS speaker tap 3 -> off · icon=off levels=[0.0, 0.0, 0.0]
+B18UI   230.8 PASS speaker tap 4 -> on · icon=on levels=[1.0, 1.0, 1.0]
+B18UI   234.9 PASS speaker tap 5 -> off · icon=off levels=[0.0, 0.0, 0.0]
+B18UI   239.6 PASS speaker tap 6 -> on · icon=on levels=[1.0, 1.0, 1.0]
+B18UI   253.5 PASS pinch zooms the video · pending=1.652/13.0
+B18UI   256.9 PASS ◇ keeps the pinch as a keyframe · ai=8 user=1 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.65 user_rot=13 auto_zoom=true overlays= sel=video pending=none vv=1.00 t=1.00 zoom=1.652 rot=13.0 playing=false session=Playback/MoviePlayback
+B18UI   257.3 PASS zoom visible on screen · white 0.278 -> 0.470
+B18UI   269.7 PASS two-finger twist turns the video · rot=30.4
+B18UI   272.3 PASS a drag on the video never starts playback · ai=8 user=1 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.65 user_rot=13 auto_zoom=true overlays= sel=video pending=1.000/30.4 vv=1.00 t=3.00 zoom=1.000 rot=30.4 playing=false session=Playback/MoviePlayback
+B18UI   275.1 PASS second ◇ with the turn · user_rot=13,30
+B18UI   291.5 PASS framing changes smoothly between the ◇ · 1.00:1.652/13.0 1.50:1.228/3.4 2.00:1.016/0.0 2.50:1.000/12.7 3.00:1.000/30.4
+B18UI   303.8 playing 1 s -> t=5.28 zoom 1.652 -> 1.000 rot=0.0
+B18UI   308.1 at the AI zoom: ai=8 user=2 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.65,1.00 user_rot=13,30 auto_zoom=true overlays= sel=video pending=none vv=1.00 t=1.20 zoom=1.552 rot=10.7 playing=false session=Playback/MoviePlayback
+B18UI   308.7 PASS Auto Zoom AI zooms the preview · zoom=1.552 white 0.278 -> 0.438
+B18UI   321.1 PASS photo overlay added and uploaded · photo:1.00-5.00:w0.42:r0
+B18UI   321.8 photo block hittable=true frame=(56.33333206176758, 571.0, 121.0, 32.0) state=[ai=8 user=2 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.65,1.00 user_rot=13,30 auto_zoom=true overlays=photo:1.00-5.00:w0.42:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.652 rot=13.0 playing=false session=Playback/MoviePlayback]
+B18UI   323.8 after the drag: [ai=8 user=2 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.65,1.00 user_rot=13,30 auto_zoom=true overlays=photo:3.00-7.00:w0.42:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.652 rot=13.0 playing=false session=Playback/MoviePlayback]
+B18UI   324.0 PASS photo overlay moves with a plain drag when selected · photo 1.00-5.00 -> photo 3.00-7.00
+B18UI   326.8 PASS photo overlay end trimmed · photo 3.00-7.00 -> photo 3.00-7.89
+B18UI   329.3 PASS photo overlay start trimmed · photo 3.00-7.89 -> photo 2.69-7.89
+B18UI   334.5 PASS photo overlay sized / turned with two fingers on the video · photo:2.69-7.89:w0.42:r0 -> photo:2.69-7.89:w0.29:r26
+B18UI   357.4 PASS photo overlay split in two · photo:2.69-5.00:w0.29:r26,photo:5.00-7.89:w0.29:r26
+B18UI   365.8 PASS photo overlay piece deleted · photo:5.00-7.89:w0.29:r26
+B18UI   378.5 PASS video overlay added and uploaded · photo:5.00-7.89:w0.29:r26,video:1.00-4.00:w0.34:r0
+B18UI   379.6 video block hittable=true frame=(56.33333206176758, 548.3333129882812, 91.00001525878906, 53.33331298828125) state=[ai=8 user=2 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.65,1.00 user_rot=13,30 auto_zoom=true overlays=photo:5.00-7.89:w0.29:r26,video:1.00-4.00:w0.34:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.652 rot=13.0 playing=false session=Playback/MoviePlayback]
+B18UI   384.1 after the drag: [ai=8 user=2 sounds=typing@4.00+2.50 muted_clips=0 user_scales=1.65,1.00 user_rot=13,30 auto_zoom=true overlays=photo:5.00-7.89:w0.29:r26,video:3.00-6.00:w0.34:r0 sel=overlay pending=none vv=1.00 t=1.00 zoom=1.652 rot=13.0 playing=false session=Playback/MoviePlayback]
+B18UI   385.0 PASS video overlay moves with a plain drag when selected · video 1.00-4.00 -> video 3.00-6.00
+B18UI   394.5 PASS video overlay end trimmed · video 3.00-6.00 -> video 3.00-6.50
+B18UI   400.4 PASS video overlay start trimmed · video 3.00-6.50 -> video 3.37-6.50
+B18UI   406.3 PASS video overlay sized / turned with two fingers on the video · photo:5.00-7.89:w0.29:r26,video:3.37-6.50:w0.34:r0 -> photo:5.00-7.89:w0.29:r26,video:3.37-6.50:w0.24:r38
+B18UI   425.5 PASS video overlay split in two · photo:5.00-7.89:w0.29:r26,video:3.37-4.00:w0.24:r38,video:4.00-6.50:w0.24:r38
+B18UI   433.7 PASS video overlay piece deleted · photo:5.00-7.89:w0.29:r26,video:4.00-6.50:w0.24:r38
+B18UI  1028.5 picker images=43 cells=0 chosen=none
+B18UI  1035.2 PASS system photo picker: a photo picked becomes an overlay · photo:5.00-7.89:w0.29:r26,video:4.00-6.50:w0.24:r38,photo:4.00-8.00:w0.42:r0u
+B18UI  1097.3 PASS export · 62.1 s
+B18UI  1097.6 FAILURES: none
+B18UI  1131.0 PASS Diagnostics opens with five taps on the version · build=Build, 1 photos=Permission, Not asked yet
+B18UI  1131.0 PASS Diagnostics lists the editor's events · 10-16 20:46:03 keyframe_added at=3.00 rotation=30.4 scale=1.000 target=video_clip | 10-16 20:45:45 keyframe_added at=1.00 rotation=13.0 scale=1.652 target=video_clip
+B18UI  1137.7 PASS Send report opens the share sheet
+B18UI  1137.7 FAILURES (diagnostics): none
