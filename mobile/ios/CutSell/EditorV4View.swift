@@ -117,6 +117,11 @@ struct EditorV4View: View {
                     .allowsHitTesting(false)
                     .accessibilityLabel(b17State)
                     .accessibilityIdentifier("b17State")
+                // The UI test moves the cursor 1 s on with this (a finger scrub can land on a clip).
+                Button("b17 +1 s") { playback.seek(to: playback.currentTime + 1) }
+                    .opacity(0.02).frame(width: 44, height: 44)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .accessibilityIdentifier("b17SeekForward")
             }
             #endif
         }

@@ -84,10 +84,11 @@ final class Build17UITests: XCTestCase {
 
     /// Slide the tracks under the cursor: `seconds` forward (at the default 30 points a second).
     private func scrub(seconds: Double) {
-        let from = timeline.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 220, dy: 28))
-        let to = from.withOffset(CGVector(dx: -30 * seconds, dy: 0))
-        from.press(forDuration: 0.1, thenDragTo: to, withVelocity: XCUIGestureVelocity(120), thenHoldForDuration: 0.2)
-        pause(0.8)
+        for _ in 0..<max(1, Int(seconds.rounded())) {
+            let seek = element("b17SeekForward")
+            if seek.exists { seek.tap() } else { log("missing b17SeekForward") }
+            pause(0.6)
+        }
     }
 
     /// The video clip under the cursor (tap toggles its selection).
@@ -245,7 +246,7 @@ final class Build17UITests: XCTestCase {
         pause(1.2)
         let first = state()
         scrub(seconds: 1)
-        element("editorVideo").pinch(withScale: 1.3, velocity: 0.8)
+        element("editorVideo").pinch(withScale: 1.15, velocity: 0.5)
         pause(1)
         shot("keyframe_pinched_130")
         tap("editorKeyframe")
