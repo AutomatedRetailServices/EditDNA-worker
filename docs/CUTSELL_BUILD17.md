@@ -56,4 +56,5 @@ An AI push-in (`zoom_keyframes`: t, d, s) is exactly four keyframes: 1 at t, s a
   - The full suite has the same 63 failures as the live code before build 17 (environment), and none are new.
 - **App:**
   - `tests/test_cutsell_ios_build17.py`.
+  - Live result, 2026-10-16, server db3f61d, run 38942885541: every step passed. Split, delete, move, trim, clip mute, Clean up ready, two keyframes with the second deleted, and export in 40 s. See `docs/estado/CutSell_estado_2026-10-16.md`.
   - The Simulator probe with real touches: `.github/workflows/cutsell-ios-build17-probe.yml` (XCUITest `mobile/ios/CutSellUITests/Build17UITests.swift`). Frames and logs go to `design-screenshots/b17/`; the screen recording stays on the test machine.
