@@ -270,6 +270,9 @@ struct TimelineV4: View {
                 playback.seek(to: max(0, min(duration, target)))
             }
             .onEnded { _ in
+                #if DEBUG
+                NSLog("CUTSELLB17 scrub_end t=%.2f vertical=%@", playback.currentTime, dragAxisVertical == true ? "yes" : "no")
+                #endif
                 dragStartTime = nil
                 rowScrollStart = nil
                 dragAxisVertical = nil

@@ -1004,6 +1004,11 @@ struct EditorV4View: View {
     /// waits for ◇ (moving the cursor drops it).
     private func keyFramingEnded(_ target: KeyframeTarget, _ value: TransformValue) {
         let at = playback.currentTime
+        #if DEBUG
+        NSLog("CUTSELLB17 framing_end target=%@ at=%.3f scale=%.3f rot=%.1f marks=%@ windows=%@", "\(target)", at, value.scale,
+              value.rotation, model.videoKeyframeMarks.map { "\($0.target):\(String(format: "%.3f", $0.time))" }.joined(separator: ","),
+              EditorTracks.clipWindows(model).map { "\($0.clipID):\(String(format: "%.2f-%.2f", $0.start, $0.end))" }.joined(separator: ","))
+        #endif
         if let mark = model.keyframe(at: at, target: target) {
             model.updateKeyframe(id: mark.id, value: value)
             clearKeyPending()
@@ -1022,6 +1027,10 @@ struct EditorV4View: View {
             show(.message("Select a clip or an overlay, then tap ◇."))
             return
         }
+        #if DEBUG
+        NSLog("CUTSELLB17 diamond_tap target=%@ at=%.3f selection=%@ pending=%@", "\(target)", at, "\(String(describing: selection))",
+              keyPending.map { String(format: "%.3f", $0.scale) } ?? "none")
+        #endif
         if let mark = model.keyframe(at: at, target: target) {
             model.deleteKeyframe(id: mark.id)
             if selection == .zoom(mark.id) { selection = nil }
@@ -1052,7 +1061,15 @@ struct EditorV4View: View {
                 guard let base = keyGestureBase else { return }
                 var next = base
                 if let magnification = value.first?.first { next.scale = base.scale * Double(magnification) }
-                if let turn = value.first?.second { next.rotation = base.rotation + turn.degrees }
+                if let turn = value.first?.second {
+                    // A pinch always twists a little: turning starts past 10°, and snaps to straight.
+                    let degrees = turn.degrees
+                    if abs(degrees) > 10 {
+                        var turned = base.rotation + degrees - (degrees > 0 ? 10 : -10)
+                        for snap in stride(from: -360.0, through: 360.0, by: 90) where abs(turned - snap) < 5 { turned = snap }
+                        next.rotation = turned
+                    }
+                }
                 if let drag = value.second {
                     next.x = base.x + Double(drag.translation.width / max(1, size.width))
                     next.y = base.y + Double(drag.translation.height / max(1, size.height))

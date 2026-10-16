@@ -86,7 +86,7 @@ final class Build17UITests: XCTestCase {
     private func scrub(seconds: Double) {
         let from = timeline.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 220, dy: 28))
         let to = from.withOffset(CGVector(dx: -30 * seconds, dy: 0))
-        from.press(forDuration: 0.05, thenDragTo: to)
+        from.press(forDuration: 0.1, thenDragTo: to, withVelocity: XCUIGestureVelocity(120), thenHoldForDuration: 0.2)
         pause(0.8)
     }
 
@@ -201,13 +201,14 @@ final class Build17UITests: XCTestCase {
         // 3. Clean up voice on that clip: Cleaning… % -> playing the clean voice -> Off.
         let toggle = app.switches["cleanUpToggle"]
         if toggle.waitForExistence(timeout: 5) {
-            toggle.tap()
+            // The switch itself is at the right end (tapping the label does not flip a Toggle).
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
             let progressShown = wait(20) { self.element("cleanUpProgress").exists || self.element("cleanUpReady").exists }
             shot("clean_up_cleaning")
             let ready = wait(240) { self.element("cleanUpReady").exists }
             log("clean_up progress_shown=\(progressShown) ready=\(ready) failed=\(element("cleanUpRetry").exists)")
             shot("clean_up_ready")
-            toggle.tap()
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
             pause(1)
             log("clean_up_off ready_text=\(element("cleanUpReady").exists)")
         } else {
@@ -244,7 +245,7 @@ final class Build17UITests: XCTestCase {
         pause(1.2)
         let first = state()
         scrub(seconds: 1)
-        element("editorVideo").pinch(withScale: 1.3, velocity: 1.5)
+        element("editorVideo").pinch(withScale: 1.3, velocity: 0.8)
         pause(1)
         shot("keyframe_pinched_130")
         tap("editorKeyframe")
