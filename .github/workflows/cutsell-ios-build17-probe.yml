@@ -151,6 +151,10 @@ jobs:
           status=$?
           kill -INT $rec; sleep 3
           grep -E "B17UI|error:|failed|passed" "$RUNNER_TEMP/test.log" | grep -v "Bearer" | tail -60
+          # XCTest problems as annotations (the raw log can't be downloaded through the proxy).
+          grep -E "error:|Assertion Failure|Failed to|Test Case .* (failed|passed)|Executed [0-9]+ test|TEST (SUCCEEDED|FAILED)|Restarting|timed out|crash" "$RUNNER_TEMP/test.log" \
+            | grep -v "Bearer" | sed 's#.*/mobile/ios/##' | cut -c1-280 | tail -25 | while IFS= read -r l; do echo "::warning title=xctest::$l"; done
+          tail -c 4000 "$RUNNER_TEMP/test.log" | grep -v "Bearer" > "$RUNNER_TEMP/b17/xctest_tail.txt" || true
           xcrun simctl spawn "$SIM_UDID" log show --last 30m --style compact \
             --predicate 'eventMessage CONTAINS "CUTSELLB17"' 2>/dev/null | grep -oE 'CUTSELLB17.*' | cut -c1-400 > "$RUNNER_TEMP/b17/app_log.txt" || true
           echo "--- app log (last 40) ---"; tail -40 "$RUNNER_TEMP/b17/app_log.txt"
