@@ -36,7 +36,12 @@ jobs:
 
       - name: Live test (times, hosts, results)
         run: |
-          python3 - <<'PY'
+          python3 - <<'PY' || true
+          import sys, traceback
+          def hook(t, v, tb):
+              for line in traceback.format_exception(t, v, tb)[-6:]:
+                  print("::error title=traceback::" + line.strip().replace("\n", " | ")[:400])
+          sys.excepthook = hook
           import json, os, subprocess, time, urllib.request
           from urllib.parse import urlparse
           API = "https://cutsell-api.onrender.com"; T = None; tmp = os.environ["RUNNER_TEMP"]
