@@ -1,51 +1,51 @@
-ry again." StaticText`
-    t =   595.06s Checking existence of `"Your video is ready." StaticText`
-    t =   595.14s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   595.60s Checking existence of `"Your video is ready." StaticText`
-    t =   595.69s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   596.18s Checking existence of `"Your video is ready." StaticText`
-    t =   596.30s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   596.77s Checking existence of `"Your video is ready." StaticText`
-    t =   596.87s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   597.36s Checking existence of `"Your video is ready." StaticText`
-    t =   597.47s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   598.00s Checking existence of `"Your video is ready." StaticText`
-    t =   598.09s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   598.56s Checking existence of `"Your video is ready." StaticText`
-    t =   598.72s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   599.21s Checking existence of `"Your video is ready." StaticText`
-    t =   599.30s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   599.77s Checking existence of `"Your video is ready." StaticText`
-    t =   599.88s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   600.35s Checking existence of `"Your video is ready." StaticText`
-    t =   600.53s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   601.03s Checking existence of `"Your video is ready." StaticText`
-    t =   601.12s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   601.59s Checking existence of `"Your video is ready." StaticText`
-    t =   601.76s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   602.21s Checking existence of `"Your video is ready." StaticText`
-    t =   602.26s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   602.75s Checking existence of `"Your video is ready." StaticText`
-    t =   602.81s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   603.28s Checking existence of `"Your video is ready." StaticText`
-    t =   603.34s Checking existence of `"The export didn't finish. Please try again." StaticText`
-    t =   603.80s Checking existence of `"Your video is ready." StaticText`
-    t =   604.08s Checking existence of `"Your video is ready." StaticText`
-B17UI   604.4 export finished=yes ok=yes seconds=33.0
-    t =   604.69s Tear Down
-Test Case '-[CutSellUITests.Build17UITests testBuild17OnARealCut]' passed (605.860 seconds).
-Test Suite 'Build17UITests' passed at 2026-10-16 13:48:55.297.
-	 Executed 1 test, with 0 failures (0 unexpected) in 605.860 (605.869) seconds
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-16 13:48:55.298.
-	 Executed 1 test, with 0 failures (0 unexpected) in 605.860 (605.871) seconds
-Test Suite 'Selected tests' passed at 2026-10-16 13:48:55.299.
-	 Executed 1 test, with 0 failures (0 unexpected) in 605.860 (605.874) seconds
-2026-10-16 13:48:58.715 xcodebuild[10813:37101] [MT] IDETestOperationsObserverDebug: 706.637 elapsed -- Testing started completed.
-2026-10-16 13:48:58.721 xcodebuild[10813:37101] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
-2026-10-16 13:48:58.721 xcodebuild[10813:37101] [MT] IDETestOperationsObserverDebug: 706.637 sec, +706.637 sec -- end
+e try again." StaticText`
+    t =   539.65s Checking existence of `"Your video is ready." StaticText`
+    t =   539.74s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   540.21s Checking existence of `"Your video is ready." StaticText`
+    t =   540.30s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   540.78s Checking existence of `"Your video is ready." StaticText`
+    t =   540.91s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   541.44s Checking existence of `"Your video is ready." StaticText`
+    t =   541.53s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   542.04s Checking existence of `"Your video is ready." StaticText`
+    t =   542.16s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   542.65s Checking existence of `"Your video is ready." StaticText`
+    t =   542.76s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   543.27s Checking existence of `"Your video is ready." StaticText`
+    t =   543.40s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   543.92s Checking existence of `"Your video is ready." StaticText`
+    t =   543.99s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   544.46s Checking existence of `"Your video is ready." StaticText`
+    t =   544.53s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   545.01s Checking existence of `"Your video is ready." StaticText`
+    t =   545.10s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   545.60s Checking existence of `"Your video is ready." StaticText`
+    t =   545.71s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   546.19s Checking existence of `"Your video is ready." StaticText`
+    t =   546.25s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   546.77s Checking existence of `"Your video is ready." StaticText`
+    t =   546.88s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   547.36s Checking existence of `"Your video is ready." StaticText`
+    t =   547.48s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   547.99s Checking existence of `"Your video is ready." StaticText`
+    t =   548.09s Checking existence of `"The export didn't finish. Please try again." StaticText`
+    t =   548.63s Checking existence of `"Your video is ready." StaticText`
+    t =   548.81s Checking existence of `"Your video is ready." StaticText`
+B17UI   549.1 export finished=yes ok=yes seconds=25.9
+    t =   549.82s Tear Down
+Test Case '-[CutSellUITests.Build17UITests testBuild17OnARealCut]' passed (550.627 seconds).
+Test Suite 'Build17UITests' passed at 2026-10-16 14:26:43.881.
+	 Executed 1 test, with 0 failures (0 unexpected) in 550.627 (550.630) seconds
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-16 14:26:43.883.
+	 Executed 1 test, with 0 failures (0 unexpected) in 550.627 (550.632) seconds
+Test Suite 'Selected tests' passed at 2026-10-16 14:26:43.883.
+	 Executed 1 test, with 0 failures (0 unexpected) in 550.627 (550.633) seconds
+2026-10-16 14:26:47.874 xcodebuild[8909:31237] [MT] IDETestOperationsObserverDebug: 594.230 elapsed -- Testing started completed.
+2026-10-16 14:26:47.876 xcodebuild[8909:31237] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-16 14:26:47.876 xcodebuild[8909:31237] [MT] IDETestOperationsObserverDebug: 594.230 sec, +594.230 sec -- end
 
 Test session results, code coverage, and logs:
-	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.16_13-36-58-+0000.xcresult
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.16_14-16-44-+0000.xcresult
 
 ** TEST EXECUTE SUCCEEDED **
 
