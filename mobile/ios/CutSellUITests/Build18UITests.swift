@@ -361,8 +361,10 @@ final class Build18UITests: XCTestCase {
             log("\(kind) block hittable=\(blockElement.isHittable) frame=\(blockElement.frame) state=[\(state())]")
             if !(field("sel", in: state()) == "overlay") { blockElement.tap(); pause(1) }
             let start0 = blockElement.value as? String ?? ""
-            let b = blockElement.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            b.press(forDuration: 0.05, thenDragTo: b.withOffset(CGVector(dx: 30, dy: 0)))
+            // A finger's drag: down, then a steady slide (a 0.05 s flick arrives as a tap on a busy main thread).
+            let b = blockElement.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
+            b.press(forDuration: 0.15, thenDragTo: b.withOffset(CGVector(dx: 60, dy: 0)),
+                    withVelocity: XCUIGestureVelocity(120), thenHoldForDuration: 0.2)
             log("after the drag: [\(state())]")
             let movedOK = wait(15) { (blocks.first?.value as? String ?? "") != start0 }
             check(movedOK, "\(kind) overlay moves with a plain drag when selected", "\(start0) -> \(blocks.first?.value as? String ?? "")")
@@ -371,7 +373,10 @@ final class Build18UITests: XCTestCase {
                 let handle = element(edge)
                 if handle.exists {
                     let h = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                    h.press(forDuration: 0.1, thenDragTo: h.withOffset(CGVector(dx: dx, dy: 0)))
+                    h.press(forDuration: 0.15, thenDragTo: h.withOffset(CGVector(dx: dx, dy: 0)),
+                            withVelocity: XCUIGestureVelocity(120), thenHoldForDuration: 0.2)
+                } else {
+                    log("no \(edge) handle: [\(state())]")
                 }
                 let changed = wait(15) { (blocks.first?.value as? String ?? "") != before }
                 check(changed, "\(kind) overlay \(edge == "overlayTrimEnd" ? "end" : "start") trimmed (\(dx > 0 ? "longer" : "longer to the left"))",
@@ -413,9 +418,10 @@ final class Build18UITests: XCTestCase {
         pause(3)
         shot("system_photo_picker")
         // A photo of the picker: an image that can be touched (the editor behind the sheet can't).
-        var image = element("overlayGallery").descendants(matching: .image).firstMatch
+        // The picker's photos: touchable images of a thumbnail's size (the editor behind can't be touched).
+        var image = app.images["no-such-image"]
         // The picker loads its library slowly the first time in the Simulator.
-        for _ in 0..<12 where !image.exists {
+        for _ in 0..<15 where !image.exists {
             if let found = app.images.allElementsBoundByIndex.first(where: {
                 $0.isHittable && $0.frame.minY > 160 && $0.frame.width > 50 && $0.frame.width < 220
             }) { image = found; break }
