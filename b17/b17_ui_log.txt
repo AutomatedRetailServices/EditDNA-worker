@@ -1,2 +1,13 @@
-B17UI    22.6 opened zoom_keyframes=0 user_keyframes=0
-B17UI   118.2 sounds_downloaded=false
+B17UI    21.2 opened ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
+B17UI   118.8 sounds_downloaded=false
+B17UI   155.4 add_enabled=false exists=false
+B17UI   159.1 missing addSoundAtPlayhead
+B17UI   171.1 typing_added=false panel=false values=[] ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
+B17UI   186.8 typing_split=false values=[] ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
+B17UI   201.1 typing_piece_deleted=false values=[] ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
+B17UI   201.3 no sound block: skipping move / trim
+B17UI   214.5 missing volumeMute
+B17UI   217.1 clip_selected_panel=false mute_badges=0 ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
+B17UI   222.5 clean_up toggle missing
+B17UI   226.2 missing volumeMute
+B17UI   230.7 whole_video_panel=true mute_badges=0 ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000

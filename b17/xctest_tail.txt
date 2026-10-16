@@ -1,55 +1,55 @@
- 101.93s Checking existence of `"soundDownloading" Any`
-    t =   103.08s Checking existence of `"soundDownloading" Any`
-    t =   103.90s Checking existence of `"soundDownloading" Any`
-    t =   104.54s Checking existence of `"soundDownloading" Any`
-    t =   105.31s Checking existence of `"soundDownloading" Any`
-    t =   105.99s Checking existence of `"soundDownloading" Any`
-    t =   106.86s Checking existence of `"soundDownloading" Any`
-    t =   107.67s Checking existence of `"soundDownloading" Any`
-    t =   108.40s Checking existence of `"soundDownloading" Any`
-    t =   109.31s Checking existence of `"soundDownloading" Any`
-    t =   110.09s Checking existence of `"soundDownloading" Any`
-    t =   110.87s Checking existence of `"soundDownloading" Any`
-    t =   111.95s Checking existence of `"soundDownloading" Any`
-    t =   112.90s Checking existence of `"soundDownloading" Any`
-    t =   113.69s Checking existence of `"soundDownloading" Any`
-    t =   114.65s Checking existence of `"soundDownloading" Any`
-    t =   115.46s Checking existence of `"soundDownloading" Any`
-    t =   116.85s Checking existence of `"soundDownloading" Any`
-    t =   117.72s Checking existence of `"soundDownloading" Any`
-B17UI   118.2 sounds_downloaded=false
-    t =   118.48s Waiting 3.0s for "sound_typing" Any to exist
-    t =   119.51s     Checking `Expect predicate `existsNoRetry == 1` for object "sound_typing" Any`
-    t =   119.51s         Checking existence of `"sound_typing" Any`
-    t =   119.86s Find the "sound_typing" Any
-    t =   120.19s Tap "sound_typing" Button
-    t =   120.19s     Wait for ai.cutsell.app to idle
-    t =   120.20s     Find the "sound_typing" Button
-    t =   120.48s     Check for interrupting elements affecting "sound_typing" Button
-    t =   120.63s     Synthesize event
-    t =   120.94s     Wait for ai.cutsell.app to idle
-    t =   122.75s Find the "addSoundAtPlayhead" Any
-    t =   125.39s     Find the "addSoundAtPlayhead" Any (retry 1)
-    t =   127.56s     Find the "addSoundAtPlayhead" Any (retry 2)
-    t =   128.37s     Collecting debug information to assist test failure triage
-    t =   128.37s         Requesting snapshot of accessibility hierarchy for app with pid 15929
-    t =   128.53s     Requesting snapshot of accessibility hierarchy for app with pid 15929
-    t =   128.73s     Requesting snapshot of accessibility hierarchy for app with pid 15929
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build17UITests.swift:127: error: -[CutSellUITests.Build17UITests testBuild17OnARealCut] : Failed to get matching snapshot: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"addSoundAtPlayhead" IN identifiers'`, given input App element pid: 15929
-    t =   129.85s Tear Down
-Test Case '-[CutSellUITests.Build17UITests testBuild17OnARealCut]' failed (131.073 seconds).
-Test Suite 'Build17UITests' failed at 2026-10-16 03:36:01.867.
-	 Executed 1 test, with 1 failure (0 unexpected) in 131.073 (131.075) seconds
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-16 03:36:01.867.
-	 Executed 1 test, with 1 failure (0 unexpected) in 131.073 (131.076) seconds
-Test Suite 'Selected tests' failed at 2026-10-16 03:36:01.867.
-	 Executed 1 test, with 1 failure (0 unexpected) in 131.073 (131.077) seconds
-2026-10-16 03:36:43.660 xcodebuild[13414:43002] [MT] IDETestOperationsObserverDebug: 247.949 elapsed -- Testing started completed.
-2026-10-16 03:36:43.661 xcodebuild[13414:43002] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
-2026-10-16 03:36:43.661 xcodebuild[13414:43002] [MT] IDETestOperationsObserverDebug: 247.949 sec, +247.949 sec -- end
+== 1` for object "volumeMute" Any`
+    t =   223.50s         Checking existence of `"volumeMute" Any`
+    t =   223.74s         Capturing element debug description
+    t =   224.48s     Checking `Expect predicate `existsNoRetry == 1` for object "volumeMute" Any`
+    t =   224.48s         Checking existence of `"volumeMute" Any`
+    t =   224.73s         Capturing element debug description
+    t =   225.45s     Checking `Expect predicate `existsNoRetry == 1` for object "volumeMute" Any`
+    t =   225.45s         Checking existence of `"volumeMute" Any`
+    t =   225.76s         Capturing element debug description
+    t =   225.76s     Checking existence of `"volumeMute" Any`
+    t =   226.05s Collecting debug information to assist test failure triage
+    t =   226.05s     Requesting snapshot of accessibility hierarchy for app with pid 6769
+B17UI   226.2 missing volumeMute
+    t =   227.92s Tap "timelineV4" Any[0.00, 0.00] -> (62.0, 62.0)
+    t =   227.92s     Wait for ai.cutsell.app to idle
+    t =   227.93s     Find the "timelineV4" Any
+    t =   227.98s     Check for interrupting elements affecting "timelineV4" StaticText
+    t =   228.06s     Synthesize event
+    t =   228.07s         Find the "timelineV4" StaticText
+    t =   228.11s         Find the "timelineV4" StaticText
+    t =   228.15s         Find the "timelineV4" StaticText
+    t =   228.48s     Wait for ai.cutsell.app to idle
+    t =   229.29s Waiting 5.0s for "Whole video" StaticText to exist
+    t =   230.33s     Checking `Expect predicate `existsNoRetry == 1` for object "Whole video" StaticText`
+    t =   230.33s         Checking existence of `"Whole video" StaticText`
+    t =   230.38s Get number of matches for: Elements matching predicate '"muteBadge" IN identifiers'
+    t =   230.43s Checking existence of `"b17State" Any`
+    t =   230.52s Find the "b17State" Any
+B17UI   230.7 whole_video_panel=true mute_badges=0 ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
+    t =   230.79s Checking existence of `"panelClose" Any`
+    t =   231.04s Checking existence of `"b17State" Any`
+    t =   231.13s Find the "b17State" Any
+    t =   231.23s Waiting 3.0s for "tool_style" Any to exist
+    t =   232.26s     Checking `Expect predicate `existsNoRetry == 1` for object "tool_style" Any`
+    t =   232.26s         Checking existence of `"tool_style" Any`
+    t =   232.46s Find the "tool_style" Any
+    t =   234.17s Requesting snapshot of accessibility hierarchy for app with pid 6769
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build17UITests.swift:104: error: -[CutSellUITests.Build17UITests testBuild17OnARealCut] : Failed to determine hittability of "tool_style" Button: Activation point invalid and no suggested hit points based on element frame
+    t =   235.00s Tear Down
+Test Case '-[CutSellUITests.Build17UITests testBuild17OnARealCut]' failed (235.497 seconds).
+Test Suite 'Build17UITests' failed at 2026-10-16 03:55:15.656.
+	 Executed 1 test, with 1 failure (0 unexpected) in 235.497 (235.499) seconds
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-16 03:55:15.656.
+	 Executed 1 test, with 1 failure (0 unexpected) in 235.497 (235.499) seconds
+Test Suite 'Selected tests' failed at 2026-10-16 03:55:15.656.
+	 Executed 1 test, with 1 failure (0 unexpected) in 235.497 (235.500) seconds
+2026-10-16 03:55:40.586 xcodebuild[5276:21055] [MT] IDETestOperationsObserverDebug: 317.927 elapsed -- Testing started completed.
+2026-10-16 03:55:40.587 xcodebuild[5276:21055] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-16 03:55:40.587 xcodebuild[5276:21055] [MT] IDETestOperationsObserverDebug: 317.927 sec, +317.927 sec -- end
 
 Test session results, code coverage, and logs:
-	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.16_03-32-27-+0000.xcresult
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.16_03-50-16-+0000.xcresult
 
 Failing tests:
 	Build17UITests.testBuild17OnARealCut()
