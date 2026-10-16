@@ -1,0 +1,6 @@
+B19UI    47.8 short: gallery shows 0 videos
+B19UI    48.6 FAIL short: video in the gallery
+B19UI    49.1 FAILURES (short): short: video in the gallery
+B19UI    96.1 big4k: gallery shows 0 videos
+B19UI    96.2 FAIL big4k: video in the gallery
+B19UI    96.4 FAILURES (big 4K): big4k: video in the gallery

@@ -1,0 +1,48 @@
+ifiers'
+    t =    29.91s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    30.56s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    31.18s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    31.83s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    32.45s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    33.07s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    33.65s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    34.94s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    36.09s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    36.73s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    37.55s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    38.36s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    39.04s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    39.75s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    40.47s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    41.28s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    41.91s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    42.61s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    43.20s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    43.81s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    44.64s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    45.23s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    45.78s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    46.33s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =    46.38s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+B19UI    96.1 big4k: gallery shows 0 videos
+    t =    46.44s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+B19UI    96.2 FAIL big4k: video in the gallery
+B19UI    96.4 FAILURES (big 4K): big4k: video in the gallery
+    t =    46.72s Tear Down
+Test Case '-[CutSellUITests.Build19UITests test2Big4KVideo]' passed (46.987 seconds).
+Test Suite 'Build19UITests' passed at 2026-10-16 23:26:03.126.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 96.568 (96.572) seconds
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-16 23:26:03.126.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 96.568 (96.572) seconds
+Test Suite 'Selected tests' passed at 2026-10-16 23:26:03.127.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 96.568 (96.574) seconds
+2026-10-16 23:26:05.384 xcodebuild[17181:53314] [MT] IDETestOperationsObserverDebug: 147.837 elapsed -- Testing started completed.
+2026-10-16 23:26:05.385 xcodebuild[17181:53314] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-16 23:26:05.385 xcodebuild[17181:53314] [MT] IDETestOperationsObserverDebug: 147.837 sec, +147.837 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.16_23-23-22-+0000.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started
