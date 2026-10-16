@@ -75,7 +75,7 @@ def test_overlay_opens_the_gallery_straight_away_and_has_no_text():
     assert '"Add to the video"' not in v4 and "confirmationDialog" not in v4
     assert "addTextOverlay" not in v4 and '"Add text"' not in v4
     assert "onAddOverlay: { openOverlayPanel() }" in v4
-    assert "videosOnly: !galleryPhotos, photosOnly: galleryPhotos" in v4
+    assert "videosOnly: !photos, photosOnly: photos" in v4
 
 
 def test_picked_media_uploads_with_progress_and_retries_without_losing_it():
