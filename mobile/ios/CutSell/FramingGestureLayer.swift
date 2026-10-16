@@ -43,6 +43,10 @@ struct FramingGestureLayer: UIViewRepresentable {
         }
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:)))
         tap.cancelsTouchesInView = false
+        // A drag, pinch or twist is never also a tap (it would start playback and drop the framing).
+        tap.require(toFail: pan)
+        tap.require(toFail: pinch)
+        tap.require(toFail: rotation)
         view.addGestureRecognizer(tap)
         return view
     }

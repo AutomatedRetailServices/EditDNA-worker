@@ -125,6 +125,8 @@ struct EditorMixEntry: Equatable, Identifiable {
     let volume: Double
     /// Loudness measured in the mix over its window (dBFS); nil until measured.
     var measuredDB: Double?
+    /// Loudest level that really went through the player while it played (nil: not played yet).
+    var heardDB: Double?
     var problem: String?
 
     var inMix: Bool { insertedSeconds > 0.01 && volume > 0.001 }
@@ -146,10 +148,11 @@ struct EditorMixReport: Equatable {
     /// One short line per sound, for the probe's hidden label and the report.
     var summary: String {
         let sounds = entries.map { entry in
-            String(format: "%@@%.2f+%.2f file=%@ dur=%@ in=%.2f vol=%.2f db=%@%@", entry.label.replacingOccurrences(of: " ", with: "_"),
+            String(format: "%@@%.2f+%.2f file=%@ dur=%@ in=%.2f vol=%.2f db=%@ heard=%@%@", entry.label.replacingOccurrences(of: " ", with: "_"),
                    entry.start, entry.length, entry.fileOnPhone ? "yes" : "no",
                    entry.fileSeconds.map { String(format: "%.2f", $0) } ?? "?", entry.insertedSeconds, entry.volume,
-                   entry.measuredDB.map { String(format: "%.1f", $0) } ?? "?", entry.problem.map { " problem=\($0)" } ?? "")
+                   entry.measuredDB.map { String(format: "%.1f", $0) } ?? "?",
+                   entry.heardDB.map { String(format: "%.1f", $0) } ?? "?", entry.problem.map { " problem=\($0)" } ?? "")
         }
         let base = videoLevels.map { String(format: "%.1f-%.1f:%.2f", $0.start, $0.end, $0.level) }.joined(separator: ",")
         return "mix sounds=[\(sounds.joined(separator: ";"))] video=[\(base)] video_volume=\(String(format: "%.2f", videoVolume))"
@@ -246,6 +249,7 @@ enum DiagnosticsFacts {
             parts.append(entry.inMix ? String(format: "in mix %.2f s", entry.insertedSeconds) : "NOT in mix")
             parts.append(String(format: "volume %.0f%%", entry.volume * 100))
             if let db = entry.measuredDB { parts.append(String(format: "level %.1f dB", db)) }
+            parts.append(entry.heardDB.map { String(format: "heard while playing %.1f dB", $0) } ?? "not played yet")
             if let problem = entry.problem { parts.append("problem: \(problem)") }
             return parts.joined(separator: " · ")
         }

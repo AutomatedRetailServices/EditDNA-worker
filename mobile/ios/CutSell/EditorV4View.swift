@@ -49,6 +49,8 @@ struct EditorV4View: View {
     @State private var keyPendingTime: Double = 0
     @State private var keyGestureBase: TransformValue?
     @State private var lastVideoTap = Date.distantPast
+    /// The last moment the fingers framed the video (a tap right after is part of that gesture).
+    @State private var lastFraming = Date.distantPast
 
     private var duration: Double { max(0.1, playback.duration > 0 ? playback.duration : model.timelineDuration) }
 
@@ -165,6 +167,7 @@ struct EditorV4View: View {
             + "muted_clips=\(mutedClips) user_scales=\(keys.joined(separator: ",")) user_rot=\(rotations.joined(separator: ",")) "
             + "auto_zoom=\(model.autoZoomEnabled) overlays=\(overlays.joined(separator: ",")) sel=\(selectionName) pending=\(pending) "
             + String(format: "vv=%.2f t=%.2f zoom=%.3f rot=%.1f ", model.videoVolume, playback.currentTime, shown.scale, shown.rotation)
+            + "playing=\(playback.isPlaying) "
             + "session=\(AVAudioSession.sharedInstance().category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: ""))/"
             + AVAudioSession.sharedInstance().mode.rawValue.replacingOccurrences(of: "AVAudioSessionMode", with: "")
     }
@@ -758,8 +761,10 @@ struct EditorV4View: View {
     }
 
     private func videoTapped() {
-        // SwiftUI's tap and the framing layer's tap can both see one touch: one toggle only.
-        guard Date().timeIntervalSince(lastVideoTap) > 0.35 else { return }
+        // SwiftUI's tap and the framing layer's tap can both see one touch: one toggle only. A touch
+        // that pinched, twisted or dragged the video is never a tap.
+        guard Date().timeIntervalSince(lastVideoTap) > 0.35, keyGestureBase == nil,
+              Date().timeIntervalSince(lastFraming) > 0.6 else { return }
         lastVideoTap = Date()
         if captionFocused { finishCaptionEditing(); return }
         playback.togglePlayback()
@@ -1155,6 +1160,7 @@ struct EditorV4View: View {
         case .video: shown = shownVideoTransform
         case .overlay(let id): shown = shownOverlayTransform(id)
         }
+        lastFraming = Date()
         keyGestureBase = keyPendingTarget == target ? (keyPending ?? shown) : shown
         keyPendingTarget = target
         keyPendingTime = playback.currentTime
@@ -1163,11 +1169,13 @@ struct EditorV4View: View {
 
     private func framingChanged(_ change: FramingGestureLayer.Change, size: CGSize) {
         guard let base = keyGestureBase, let target = keyPendingTarget else { return }
+        lastFraming = Date()
         let next = FramingMath.apply(change, to: base, frame: size)
         if case .video = target { keyPending = next.clampedForVideo } else { keyPending = next.clampedForOverlay }
     }
 
     private func framingEnded(_ change: FramingGestureLayer.Change) {
+        lastFraming = Date()
         guard keyGestureBase != nil, let target = keyPendingTarget, let value = keyPending else {
             keyGestureBase = nil
             return

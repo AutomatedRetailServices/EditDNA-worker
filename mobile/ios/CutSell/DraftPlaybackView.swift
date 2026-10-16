@@ -465,6 +465,7 @@ final class DraftPlaybackController: ObservableObject {
             // sound's file must be on this iPhone (SfxLibrary); when it arrives the preview rebuilds.
             var usedAudio: Set<String> = []
             var report = EditorMixReport()
+            PlaybackMeter.shared.reset()
             var measured: [(index: Int, track: AVMutableCompositionTrack, start: Double, length: Double, volume: Double)] = []
             for placement in model.previewVoices {
                 let effective = max(0, min(2, placement.volume)) * master
@@ -478,7 +479,7 @@ final class DraftPlaybackController: ObservableObject {
                 if superseded() { return }
                 if let track {
                     let parameters = AVMutableAudioMixInputParameters(track: track)
-                    AudioGainTap.apply(effective, to: parameters)
+                    AudioGainTap.apply(effective, to: parameters, meter: placement.key)
                     mixInputs.append(parameters)
                     measured.append((report.entries.count, track, entry.start, entry.insertedSeconds, effective))
                 }
@@ -620,12 +621,34 @@ final class DraftPlaybackController: ObservableObject {
     func pause() {
         player.pause()
         isPlaying = false
+        recordHeardLevels()
+    }
+
+    /// Diagnostics: what each sound / voice really sounded like while the preview played.
+    private func recordHeardLevels() {
+        let heard = PlaybackMeter.shared.heard()
+        guard !heard.isEmpty else { return }
+        var report = EditorDiagnostics.shared.mix
+        var changed = false
+        for index in report.entries.indices {
+            if let db = heard[report.entries[index].id], report.entries[index].heardDB != db {
+                report.entries[index].heardDB = db
+                changed = true
+            }
+        }
+        guard changed else { return }
+        EditorDiagnostics.shared.mix = report
+        let levels = report.entries.compactMap(\.heardDB)
+        CutSellDiagnostics.log("sounds_heard", ["played": String(levels.count),
+                                                "quietest_db": String(format: "%.1f", levels.min() ?? -120),
+                                                "loudest_db": String(format: "%.1f", levels.max() ?? -120)])
     }
 
     /// End of the cut: stop the player (not just the button) and stay on the last frame.
     private func stopAtEnd() {
         player.pause()
         isPlaying = false
+        recordHeardLevels()
         currentTime = duration
     }
 

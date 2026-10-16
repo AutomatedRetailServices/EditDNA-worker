@@ -142,6 +142,12 @@ struct TimelineV4: View {
         .frame(height: timelineHeight)
         .overlay(alignment: .top) { Rectangle().fill(CS.borderDefault).frame(height: 1).offset(y: -1) }
         .animation(.easeOut(duration: 0.2), value: rows.count)
+        // Build 18: the selected voice / sound / overlay's row is always in view (with a panel open
+        // only two rows show; the selected overlay's row was hidden below, so it could not be
+        // dragged or trimmed).
+        .onChange(of: selection) { _, _ in revealSelectedRow() }
+        .onChange(of: compact) { _, _ in revealSelectedRow() }
+        .onChange(of: rows.count) { _, _ in revealSelectedRow() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("timelineV4")
     }
@@ -152,6 +158,33 @@ struct TimelineV4: View {
         case .voice: voiceTrack(width: width, x: x)
         case .sounds: soundTrack(width: width, x: x)
         case .layer(let layer): overlayTrack(layer: layer, width: width, x: x)
+        }
+    }
+
+    /// The row (under the video) of the selected item, if any.
+    private var selectedRowIndex: Int? {
+        switch selection {
+        case .voiceOver?: return rows.firstIndex(of: .voice)
+        case .sound(let id)?:
+            if model.audioClips.first(where: { $0.id == id })?.kind == .voice { return rows.firstIndex(of: .voice) }
+            return rows.firstIndex(of: .sounds)
+        case .overlay(let id, isText: false)?:
+            let layer = model.overlaysOnScreen.first { $0.id == id }?.style.layer ?? 0
+            return rows.firstIndex(of: .layer(layer))
+        case .overlay(_, isText: true)?, .broll?: return rows.firstIndex(of: .layer(0))
+        default: return nil
+        }
+    }
+
+    private func revealSelectedRow() {
+        guard let index = selectedRowIndex else { return }
+        let visible = max(1, Int(((timelineHeight - Self.lowerTop) / Self.rowHeight).rounded(.down)))
+        let top = CGFloat(index) * Self.rowHeight
+        let current = min(rowScroll, maxRowScroll)
+        if top < current {
+            withAnimation(.easeOut(duration: 0.2)) { rowScroll = top }
+        } else if index >= Int((current / Self.rowHeight).rounded()) + visible {
+            withAnimation(.easeOut(duration: 0.2)) { rowScroll = min(maxRowScroll, CGFloat(index - visible + 1) * Self.rowHeight) }
         }
     }
 

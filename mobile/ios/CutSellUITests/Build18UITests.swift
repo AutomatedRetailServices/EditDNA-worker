@@ -122,9 +122,21 @@ final class Build18UITests: XCTestCase {
 
     /// "field=value" from a text ("vv=1.00 t=2.00 …").
     private func field(_ name: String, in text: String) -> String? {
-        guard let range = text.range(of: "\(name)=") else { return nil }
-        let rest = text[range.upperBound...]
-        return String(rest.prefix { $0 != " " })
+        // The whole key only ("zoom=" must not match inside "auto_zoom=").
+        var search = text.startIndex..<text.endIndex
+        while let range = text.range(of: "\(name)=", range: search) {
+            let before = range.lowerBound == text.startIndex ? " " : text[text.index(before: range.lowerBound)]
+            if before == " " || before == "[" || before == ";" {
+                return String(text[range.upperBound...].prefix { $0 != " " && $0 != ";" && $0 != "]" })
+            }
+            search = range.upperBound..<text.endIndex
+        }
+        return nil
+    }
+
+    /// Pause the preview if it plays (a measurement needs a still frame).
+    private func ensurePaused() {
+        if field("playing", in: state()) == "true" { tap("editorPlay") }
     }
 
     private func number(_ name: String, in text: String) -> Double? { field(name, in: text).flatMap(Double.init) }
@@ -214,6 +226,10 @@ final class Build18UITests: XCTestCase {
         tap("editorPlay")
         let session = field("session", in: state()) ?? "?"
         check(session.hasPrefix("Playback/MoviePlayback"), "audio session playback", session)
+        // What really went through the player while it played (its tap), not only what the mix holds.
+        _ = wait(10) { (self.soundEntries().first.flatMap { self.number("heard", in: $0) }) != nil }
+        let heard = soundEntries().first.flatMap { number("heard", in: $0) } ?? -120
+        check(heard > -45, "typing heard while the preview played", String(format: "%.1f dB", heard))
         shot("new_way_played")
 
         // C. Sound edits rebuild the mix: select, plain drag, Split, trim, Delete.
@@ -276,6 +292,7 @@ final class Build18UITests: XCTestCase {
         shot("speaker_on_again")
 
         // E. Keyframes with the fingers on the video (UIKit pinch / twist / drag), measured on screen.
+        ensurePaused()
         seek(0)
         let flatWidth = whiteWidth()
         tapClipAtCursor()
@@ -297,6 +314,7 @@ final class Build18UITests: XCTestCase {
         let v = element("editorVideo").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         v.press(forDuration: 0.05, thenDragTo: v.withOffset(CGVector(dx: 30, dy: 0)))
         pause(1)
+        check(field("playing", in: state()) == "false", "a drag on the video never starts playback", state())
         tap("editorKeyframe")
         let secondKey = wait(10) { (self.field("user", in: self.state()) ?? "0") == "2" }
         check(secondKey, "second ◇ with the turn", "user_rot=\(field("user_rot", in: state()) ?? "?")")
@@ -313,8 +331,10 @@ final class Build18UITests: XCTestCase {
         let distinct = Set(samples).count
         check(distinct >= 4, "smooth change while playing", samples.joined(separator: " "))
         // Auto Zoom AI ◇ on screen.
+        ensurePaused()
         tap("b18AIPeak")
         pause(1.5)
+        log("at the AI zoom: \(state())")
         let aiZoom = number("zoom", in: state()) ?? 1
         let aiWidth = whiteWidth()
         check(aiZoom > 1.01 && aiWidth > flatWidth * 1.01, "Auto Zoom AI zooms the preview",
@@ -333,6 +353,7 @@ final class Build18UITests: XCTestCase {
             let blocks = app.descendants(matching: .any).matching(identifier: "overlayBlock").allElementsBoundByIndex
                 .filter { ($0.value as? String ?? "").hasPrefix(kind) }
             guard let blockElement = blocks.first else { check(false, "\(kind) overlay block"); continue }
+            log("\(kind) block hittable=\(blockElement.isHittable) frame=\(blockElement.frame)")
             if !(field("sel", in: state()) == "overlay") { blockElement.tap(); pause(1) }
             let start0 = blockElement.value as? String ?? ""
             let b = blockElement.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -385,10 +406,14 @@ final class Build18UITests: XCTestCase {
         let picker = wait(15) { self.element("overlayGallery").exists }
         pause(3)
         shot("system_photo_picker")
-        // Only inside the picker sheet (the editor's own icons are images too).
-        let image = element("overlayGallery").descendants(matching: .image).firstMatch
+        // A photo of the picker: an image that can be touched (the editor behind the sheet can't).
+        var image = element("overlayGallery").descendants(matching: .image).firstMatch
+        if !image.exists {
+            image = app.images.allElementsBoundByIndex.first { $0.isHittable && $0.frame.minY > 160 && $0.frame.width > 60 } ?? image
+        }
+        log("picker images=\(app.images.count) cells=\(app.cells.count) chosen=\(image.exists ? "\(image.frame)" : "none")")
         var picked = false
-        if picker, image.waitForExistence(timeout: 8) {
+        if picker, image.exists {
             let overlaysBefore = overlayItems("photo").count
             image.tap()
             picked = wait(60) { self.overlayItems("photo").count > overlaysBefore }
@@ -423,7 +448,13 @@ final class Build18UITests: XCTestCase {
         shot("diagnostics")
         let build = element("diagBuild").exists ? element("diagBuild").label : "missing"
         let photos = element("diagPhotos").exists ? element("diagPhotos").label : "missing"
-        let events = app.staticTexts.allElementsBoundByIndex.prefix(400).map(\.label).filter { $0.contains("sound_added") || $0.contains("keyframe_added") }
+        var events: [String] = []
+        for _ in 0..<8 {
+            events = app.staticTexts.allElementsBoundByIndex.map(\.label).filter { $0.contains("sound_") || $0.contains("keyframe_") || $0.contains("playback_ready") }
+            if !events.isEmpty { break }
+            app.swipeUp(); pause(0.8)
+        }
+        shot("diagnostics_events")
         check(shown, "Diagnostics opens with five taps on the version", "build=\(build) photos=\(photos)")
         check(!events.isEmpty, "Diagnostics lists the editor's events", events.prefix(2).joined(separator: " | "))
         let send = element("diagSendReport")

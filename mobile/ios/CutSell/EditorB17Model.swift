@@ -711,11 +711,16 @@ enum AudioGainTap {
     final class Box {
         let gain: Float
         var isFloat = true
+        /// Build 18: what really goes through the player while it plays: the loudest stretch (RMS of
+        /// one processed slice) and how many samples went through.
+        var loudest: Double = 0
+        var count: Int = 0
         init(gain: Float) { self.gain = gain }
     }
 
-    static func make(gain: Double) -> MTAudioProcessingTap? {
-        let box = Box(gain: Float(gain))
+    static func make(gain: Double) -> MTAudioProcessingTap? { makeTap(box: Box(gain: Float(gain))) }
+
+    static func makeTap(box: Box) -> MTAudioProcessingTap? {
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(box).toOpaque()),
@@ -733,12 +738,20 @@ enum AudioGainTap {
                 guard MTAudioProcessingTapGetSourceAudio(tap, frames, buffers, flagsOut, nil, framesOut) == noErr else { return }
                 let box = Unmanaged<Box>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
                 guard box.isFloat else { return }
+                var sum: Double = 0
+                var count = 0
                 for buffer in UnsafeMutableAudioBufferListPointer(buffers) {
                     guard let data = buffer.mData else { continue }
-                    let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
-                    let samples = data.assumingMemoryBound(to: Float.self)
-                    for index in 0..<count { samples[index] = max(-1, min(1, samples[index] * box.gain)) }
+                    let samples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                    let floats = data.assumingMemoryBound(to: Float.self)
+                    if box.gain != 1 {
+                        for index in 0..<samples { floats[index] = max(-1, min(1, floats[index] * box.gain)) }
+                    }
+                    for index in 0..<samples { sum += Double(floats[index] * floats[index]) }
+                    count += samples
                 }
+                if count > 0 { box.loudest = max(box.loudest, (sum / Double(count)).squareRoot()) }
+                box.count += count
             }
         )
         var tap: MTAudioProcessingTap?
@@ -746,13 +759,40 @@ enum AudioGainTap {
         return status == noErr ? tap : nil
     }
 
-    /// Volume `level` (0...2) on a mix input: up to 1 by the mix, the rest by a tap.
-    static func apply(_ level: Double, to parameters: AVMutableAudioMixInputParameters) {
-        if level > 1.001, let tap = make(gain: level) {
-            parameters.audioTapProcessor = tap
-            parameters.setVolume(1, at: .zero)
-        } else {
-            parameters.setVolume(Float(max(0, min(1, level))), at: .zero)
+    /// Volume `level` (0...2) on a mix input: up to 1 by the mix, the rest by a tap. With `meter`
+    /// the tap is always there and measures what is heard (Diagnostics: "heard while playing").
+    static func apply(_ level: Double, to parameters: AVMutableAudioMixInputParameters, meter: String? = nil) {
+        let gain = level > 1.001 ? level : 1
+        if meter != nil || gain > 1 {
+            let box = Box(gain: Float(gain))
+            if let tap = makeTap(box: box) {
+                parameters.audioTapProcessor = tap
+                parameters.setVolume(Float(max(0, min(1, level))), at: .zero)
+                if let meter { PlaybackMeter.shared.register(meter, box) }
+                return
+            }
         }
+        parameters.setVolume(Float(max(0, min(1, level))), at: .zero)
+    }
+}
+
+/// Build 18: the level each sound / voice really has while the preview plays (from its tap).
+final class PlaybackMeter: @unchecked Sendable {
+    static let shared = PlaybackMeter()
+    private let lock = NSLock()
+    private var boxes: [String: AudioGainTap.Box] = [:]
+
+    func reset() { lock.lock(); boxes = [:]; lock.unlock() }
+
+    func register(_ id: String, _ box: AudioGainTap.Box) { lock.lock(); boxes[id] = box; lock.unlock() }
+
+    /// dBFS of the loudest slice heard so far, per id; nil when it has not played yet.
+    func heard() -> [String: Double] {
+        lock.lock(); defer { lock.unlock() }
+        var result: [String: Double] = [:]
+        for (id, box) in boxes where box.count > 0 {
+            result[id] = box.loudest > 0 ? max(-120, 20 * log10(box.loudest)) : -120
+        }
+        return result
     }
 }
