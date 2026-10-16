@@ -57,6 +57,13 @@ final class Build17UITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
+    /// The editor's own state as text (Debug build, probe "b17_ui" only).
+    private func state() -> String { let e = element("b17State"); return e.exists ? e.label : "no-state" }
+
+    /// Safe reads: a query on a missing element would stop the whole test.
+    private func enabled(_ id: String) -> Bool { let e = element(id); return e.exists && e.isEnabled }
+    private func value(_ id: String) -> String { let e = element(id); return e.exists ? (e.value as? String ?? "") : "missing" }
+
     private func count(_ id: String) -> Int {
         app.descendants(matching: .any).matching(identifier: id).count
     }
@@ -104,17 +111,17 @@ final class Build17UITests: XCTestCase {
 
     private func soundValues() -> [String] {
         app.descendants(matching: .any).matching(identifier: "soundBlock").allElementsBoundByIndex
-            .compactMap { $0.value as? String }
+            .compactMap { $0.exists ? $0.value as? String : nil }
     }
 
     // MARK: The test
 
     func testBuild17OnARealCut() throws {
         XCTAssertTrue(timeline.waitForExistence(timeout: 90), "editor did not open")
-        XCTAssertTrue(wait(90) { self.element("editorPlay").isEnabled }, "preview not ready")
+        XCTAssertTrue(wait(90) { self.enabled("editorPlay") }, "preview not ready")
         pause(6)
         shot("editor_open")
-        log("opened zoom_keyframes=\(count("zoomKeyframe")) user_keyframes=\(count("userKeyframe"))")
+        log("opened \(state())")
 
         // 1. Typing: add, Split, delete a piece, hold-and-move, trim.
         tool("audio")
@@ -124,19 +131,20 @@ final class Build17UITests: XCTestCase {
         shot("audio_panel")
         tap("sound_typing")
         pause(1)
-        XCTAssertTrue(wait(30) { self.element("addSoundAtPlayhead").isEnabled }, "Add stays disabled")
+        let addable = wait(30) { self.enabled("addSoundAtPlayhead") }
+        log("add_enabled=\(addable) exists=\(element("addSoundAtPlayhead").exists)")
         tap("addSoundAtPlayhead")
         let added = wait(10) { self.count("soundBlock") == 1 }
-        log("typing_added=\(added) panel=\(element("soundClipPanel").exists) values=\(soundValues())")
+        log("typing_added=\(added) panel=\(element("soundClipPanel").exists) values=\(soundValues()) \(state())")
         shot("typing_added_selected")
         scrub(seconds: 1)
         tool("split")
         let split = wait(10) { self.count("soundBlock") == 2 }
-        log("typing_split=\(split) values=\(soundValues())")
+        log("typing_split=\(split) values=\(soundValues()) \(state())")
         shot("typing_split")
         tool("delete")
         let deleted = wait(10) { self.count("soundBlock") == 1 }
-        log("typing_piece_deleted=\(deleted) values=\(soundValues())")
+        log("typing_piece_deleted=\(deleted) values=\(soundValues()) \(state())")
         let block = element("soundBlock")
         guard block.exists else {
             log("no sound block: skipping move / trim")
@@ -145,12 +153,12 @@ final class Build17UITests: XCTestCase {
         block.tap()
         pause(1)
         let selected = element("soundClipPanel").waitForExistence(timeout: 5)
-        let before = block.value as? String ?? ""
+        let before = value("soundBlock")
         let start = block.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: 75, dy: 0)))
         pause(1.5)
-        let moved = element("soundBlock").value as? String ?? ""
-        log("typing_selected=\(selected) move \(before) -> \(moved)")
+        let moved = value("soundBlock")
+        log("typing_selected=\(selected) move \(before) -> \(moved) \(state())")
         shot("typing_moved")
         if !element("audioTrimEnd").exists { element("soundBlock").tap(); pause(0.8) }
         if !element("audioTrimEnd").exists { element("soundBlock").tap(); pause(0.8) }
@@ -160,7 +168,7 @@ final class Build17UITests: XCTestCase {
             h.press(forDuration: 0.1, thenDragTo: h.withOffset(CGVector(dx: -24, dy: 0)))
             pause(1.5)
         }
-        log("typing_trim handle=\(handle.exists) \(moved) -> \(element("soundBlock").value as? String ?? "")")
+        log("typing_trim handle=\(handle.exists) \(moved) -> \(value("soundBlock")) \(state())")
         shot("typing_trimmed")
         if element("panelClose").exists { tap("panelClose") }
         try runAfterSounds()
@@ -173,7 +181,7 @@ final class Build17UITests: XCTestCase {
         let selectedClip = app.staticTexts["Selected clip"].waitForExistence(timeout: 5)
         tap("volumeMute")
         pause(1.5)
-        log("clip_selected_panel=\(selectedClip) mute_badges=\(count("muteBadge"))")
+        log("clip_selected_panel=\(selectedClip) mute_badges=\(count("muteBadge")) \(state())")
         shot("volume_selected_clip_muted")
 
         // 3. Clean up voice on that clip: Cleaning… % -> playing the clean voice -> Off.
@@ -195,21 +203,22 @@ final class Build17UITests: XCTestCase {
         pause(1)
         tapClipAtCursor()             // nothing selected: Whole video
         let whole = app.staticTexts["Whole video"].waitForExistence(timeout: 5)
-        log("whole_video_panel=\(whole) mute_badges=\(count("muteBadge"))")
+        log("whole_video_panel=\(whole) mute_badges=\(count("muteBadge")) \(state())")
         shot("volume_whole_video")
         if element("panelClose").exists { tap("panelClose") }
 
         // 4. Auto Zoom AI ◇ and the Style toggle.
-        let aiMarks = count("zoomKeyframe")
+        let aiMarks = state()
         tool("style")
         let autoZoom = app.switches["editorAutoZoomToggle"]
         if autoZoom.waitForExistence(timeout: 5) {
-            let wasOn = (autoZoom.value as? String) == "1"
+            let wasOn = autoZoom.exists && (autoZoom.value as? String) == "1"
             autoZoom.tap(); pause(1.5)
             shot("style_auto_zoom_toggled")
-            let after = (autoZoom.value as? String) == "1"
+            let after = autoZoom.exists && (autoZoom.value as? String) == "1"
+            log("auto_zoom before=[\(aiMarks)] on_before=\(wasOn) after_toggle=\(after) [\(state())]")
             autoZoom.tap(); pause(1.5)
-            log("auto_zoom ai_marks=\(aiMarks) on_before=\(wasOn) after_toggle=\(after) back=\((autoZoom.value as? String) == "1")")
+            log("auto_zoom back=\(autoZoom.exists && (autoZoom.value as? String) == "1") [\(state())]")
         }
         tool("style")
         shot("auto_zoom_marks")
@@ -219,20 +228,20 @@ final class Build17UITests: XCTestCase {
         let key = element("editorKeyframe")
         tap("editorKeyframe")
         pause(1.2)
-        let first = count("userKeyframe")
+        let first = state()
         scrub(seconds: 1)
         element("editorVideo").pinch(withScale: 1.3, velocity: 1.5)
         pause(1)
         shot("keyframe_pinched_130")
         tap("editorKeyframe")
         pause(1.2)
-        let second = count("userKeyframe")
-        let filled = key.value as? String ?? ""
+        let second = state()
+        let filled = value("editorKeyframe")
         shot("keyframes_two")
         tap("editorKeyframe")
         pause(1.2)
-        let afterDelete = count("userKeyframe")
-        log("keyframes first=\(first) second=\(second) button_on_second=\(filled) after_delete=\(afterDelete)")
+        let afterDelete = state()
+        log("keyframes first=[\(first)] second=[\(second)] button_on_second=\(filled) after_delete=[\(afterDelete)]")
         shot("keyframe_deleted")
 
         // 6. Export.

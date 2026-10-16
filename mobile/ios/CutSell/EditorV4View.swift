@@ -110,8 +110,29 @@ struct EditorV4View: View {
             if panel == .micPermission {
                 micPermissionCard
             }
+            #if DEBUG
+            if previewState?.probe == "b17_ui" {
+                // Build 17 probe only: the editor's state as text, read by the UI test.
+                Text(b17State).font(.system(size: 1)).opacity(0.02).frame(width: 2, height: 2)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(b17State)
+                    .accessibilityIdentifier("b17State")
+            }
+            #endif
         }
     }
+
+    #if DEBUG
+    private var b17State: String {
+        let marks = model.videoKeyframeMarks
+        let sounds = model.soundClips.map { String(format: "%@@%.2f+%.2f%@", $0.sfxID ?? $0.kind.rawValue, $0.start, $0.length, $0.muted ? "m" : "") }
+        let keys = model.transformKeyframes.filter { !$0.isAI }.map { String(format: "%.2f", $0.value.scale) }
+        let mutedClips = model.selectedClips.filter { $0["audio_muted"]?.boolValue == true }.count
+        return "ai=\(marks.filter(\.isAI).count) user=\(marks.filter { !$0.isAI }.count) sounds=\(sounds.joined(separator: ",")) "
+            + "muted_clips=\(mutedClips) user_scales=\(keys.joined(separator: ",")) auto_zoom=\(model.autoZoomEnabled) "
+            + String(format: "t=%.2f zoom=%.3f", playback.currentTime, shownVideoTransform.scale)
+    }
+    #endif
 
     /// Height used under the video: controls, then the timeline, a menu (captions 2b, style) or the
     /// voice-over panel, then the toolbar (Figma: the video is 472 high with the timeline and while
