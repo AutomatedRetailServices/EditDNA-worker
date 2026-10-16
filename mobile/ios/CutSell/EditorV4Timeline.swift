@@ -142,6 +142,7 @@ struct TimelineV4: View {
         .frame(height: timelineHeight)
         .overlay(alignment: .top) { Rectangle().fill(CS.borderDefault).frame(height: 1).offset(y: -1) }
         .animation(.easeOut(duration: 0.2), value: rows.count)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("timelineV4")
     }
 
@@ -383,6 +384,7 @@ struct TimelineV4: View {
             }
         }
         .frame(width: width, height: 50, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("videoTrack")
     }
 
@@ -725,6 +727,7 @@ struct TimelineV4: View {
             }
         }
         .frame(width: width, height: 30, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("voiceTrack")
     }
 
@@ -761,6 +764,7 @@ struct TimelineV4: View {
             }
         }
         .frame(width: width, height: 30, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("soundTrack")
     }
 

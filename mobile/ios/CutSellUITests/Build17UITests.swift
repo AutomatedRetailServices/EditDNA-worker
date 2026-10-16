@@ -92,16 +92,25 @@ final class Build17UITests: XCTestCase {
 
     /// The video clip under the cursor (tap toggles its selection).
     private func tapClipAtCursor() {
-        timeline.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 62, dy: 62)).tap()
+        timeline.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 62, dy: 86)).tap()
         pause(0.8)
     }
 
-    private func tool(_ name: String) { tap("tool_\(name)") }
+    /// A toolbar button; the toolbar scrolls sideways when the button is past the right edge.
+    private func tool(_ name: String) {
+        let button = element("tool_\(name)")
+        guard button.waitForExistence(timeout: 3) else { log("missing tool_\(name)"); return }
+        let screen = app.windows.firstMatch.frame
+        if button.frame.maxX > screen.maxX - 4 { element("tool_overlay").swipeLeft(); pause(0.8) }
+        if button.frame.minX < screen.minX + 4 { element("tool_overlay").swipeRight(); pause(0.8) }
+        tap("tool_\(name)")
+    }
 
     /// Taps when it is there (a missing element is logged, the test goes on to the next check).
     private func tap(_ id: String) {
         let target = element(id)
-        if target.waitForExistence(timeout: 3) && target.isHittable {
+        let screen = app.windows.firstMatch.frame
+        if target.waitForExistence(timeout: 3) && screen.contains(CGPoint(x: target.frame.midX, y: target.frame.midY)) {
             target.tap()
         } else {
             log("missing \(id)")
@@ -137,6 +146,11 @@ final class Build17UITests: XCTestCase {
         let added = wait(10) { self.count("soundBlock") == 1 }
         log("typing_added=\(added) panel=\(element("soundClipPanel").exists) values=\(soundValues()) \(state())")
         shot("typing_added_selected")
+        guard added else {
+            log("no sound added: skipping split / delete / move / trim")
+            if element("panelClose").exists { tap("panelClose") }
+            return try runAfterSounds()
+        }
         scrub(seconds: 1)
         tool("split")
         let split = wait(10) { self.count("soundBlock") == 2 }

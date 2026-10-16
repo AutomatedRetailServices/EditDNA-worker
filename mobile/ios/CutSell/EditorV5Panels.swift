@@ -176,6 +176,7 @@ struct OverlayAddPanelV5: View {
             .padding(.top, 6)
         }
         .frame(height: EditorPanelKind.overlayAdd.height())
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("overlayAddPanel")
     }
 
@@ -230,6 +231,7 @@ struct OverlayPanelV5: View {
         .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color(hex: 0x19345F), lineWidth: 1))
         .padding(.horizontal, 16)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("overlayPanel")
     }
 
@@ -396,6 +398,7 @@ struct VolumePanelV5: View {
         .frame(height: EditorPanelKind.volume.height())
         .onAppear { value = model.volume(of: target) }
         .onChange(of: target) { _, new in value = model.volume(of: new) }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("volumePanel")
     }
 }
@@ -471,6 +474,7 @@ struct SpeedPanelV5: View {
             .padding(.top, 10)
         }
         .frame(height: EditorPanelKind.speed.height())
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("speedPanel")
     }
 }
@@ -520,6 +524,7 @@ struct VoiceClipPanelV5: View {
         .frame(height: EditorPanelKind.voice(clipID).height())
         .onAppear { value = clip?.volume ?? 1 }
         .onChange(of: clipID) { _, _ in value = clip?.volume ?? 1 }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("voiceClipPanel")
     }
 
@@ -569,6 +574,7 @@ struct SoundClipPanelV5: View {
         .frame(height: EditorPanelKind.sound(clipID).height())
         .onAppear { value = clip?.volume ?? 1 }
         .onChange(of: clipID) { _, _ in value = clip?.volume ?? 1 }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("soundClipPanel")
     }
 
@@ -660,6 +666,7 @@ struct AudioPanelV5: View {
         }
         .frame(height: EditorPanelKind.audio.height())
         .task { await library.ensure() }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("audioPanel")
     }
 }
