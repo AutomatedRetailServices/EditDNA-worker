@@ -74,6 +74,16 @@ final class Build19UITests: XCTestCase {
         let upload = element("hubUpload")
         guard upload.waitForExistence(timeout: 60) else { check(false, "\(name): Create screen"); return }
         upload.tap()
+        // The system's Photos permission prompt, the first time (answered like the creator would).
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for _ in 0..<10 {
+            let allow = springboard.buttons["Allow Full Access"]
+            if allow.exists { allow.tap(); log("\(name): Photos access allowed"); break }
+            let inApp = app.buttons["Allow Full Access"]
+            if inApp.exists { inApp.tap(); log("\(name): Photos access allowed"); break }
+            if element("galleryTile").exists { break }
+            pause(1)
+        }
         let tiles = app.descendants(matching: .any).matching(identifier: "galleryTile")
         _ = wait(30) { tiles.count > index }
         log("\(name): gallery shows \(tiles.count) videos")
