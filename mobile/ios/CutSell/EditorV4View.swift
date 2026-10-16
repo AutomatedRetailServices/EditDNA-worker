@@ -34,7 +34,6 @@ struct EditorV4View: View {
     @State private var countdown: Int?
     /// "Record again" on a voice-over: the take replaces that one.
     @State private var recordAgainID: String?
-    @State private var galleryPhotos = false
     @State private var musicPicker = false
     @State private var musicNotice = false
     @AppStorage("cutsell.musicRightsNoticeShown") private var musicNoticeShown = false
@@ -1414,12 +1413,13 @@ struct EditorV4View: View {
     @ViewBuilder
     private func sheetView(_ which: EditorSheet) -> some View {
         switch which {
-        case .overlay:
+        case .overlay, .overlayPhoto:
+            let photos = which == .overlayPhoto
             OverlayGallerySheet(onPick: { url in
                 closeCard()
                 model.addOverlay(fileURL: url, at: playback.currentTime)
-            }, sampleTiles: usesSampleGallery, videosOnly: !galleryPhotos, photosOnly: galleryPhotos,
-               title: galleryPhotos ? "Photos" : "Videos")
+            }, sampleTiles: usesSampleGallery, videosOnly: !photos, photosOnly: photos,
+               title: photos ? "Photos" : "Videos")
         case .broll, .brollGallery:
             // Full-screen B-roll: a video from the phone, as a clip of the main track at the cursor.
             OverlayGallerySheet(onPick: { url in
@@ -1485,8 +1485,7 @@ struct EditorV4View: View {
     }
 
     private func openGallery(photos: Bool) {
-        galleryPhotos = photos
-        sheet = .overlay
+        sheet = photos ? .overlayPhoto : .overlay
     }
 
     private func cancelVoiceSheet() {

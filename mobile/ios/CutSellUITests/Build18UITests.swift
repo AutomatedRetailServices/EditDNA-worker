@@ -182,6 +182,11 @@ final class Build18UITests: XCTestCase {
         return Double(best) / Double(max(1, width))
     }
 
+    /// On an existing ◇ (filled button) a pinch edits that one; a new ◇ needs a free moment.
+    private func stepOffExistingKeyframe() {
+        for _ in 0..<3 where value("editorKeyframe") == "filled" { tap("b18Half") }
+    }
+
     // MARK: test1 — the editor
 
     func test1EditorOnARealCut() throws {
@@ -297,6 +302,7 @@ final class Build18UITests: XCTestCase {
         let flatWidth = whiteWidth()
         tapClipAtCursor()
         seek(1)
+        stepOffExistingKeyframe()
         element("editorVideo").pinch(withScale: 1.6, velocity: 1.2)
         pause(1)
         let pinched = state()
@@ -307,6 +313,7 @@ final class Build18UITests: XCTestCase {
         let zoomedWidth = whiteWidth()
         check(zoomedWidth > flatWidth * 1.15, "zoom visible on screen", String(format: "white %.3f -> %.3f", flatWidth, zoomedWidth))
         seek(3)
+        stepOffExistingKeyframe()
         element("editorVideo").rotate(CGFloat.pi / 5, withVelocity: 1.5)
         pause(1)
         let turned = number("rot", in: state()) ?? 0
@@ -368,7 +375,8 @@ final class Build18UITests: XCTestCase {
             log("after the drag: [\(state())]")
             let movedOK = wait(15) { (blocks.first?.value as? String ?? "") != start0 }
             check(movedOK, "\(kind) overlay moves with a plain drag when selected", "\(start0) -> \(blocks.first?.value as? String ?? "")")
-            for (edge, dx) in [("overlayTrimEnd", 40.0), ("overlayTrimStart", -20.0)] {
+            // A photo can start earlier; a video can't start before its own first frame, so its start is shortened.
+            for (edge, dx) in [("overlayTrimEnd", 40.0), ("overlayTrimStart", kind == "photo" ? -20.0 : 20.0)] {
                 let before = blocks.first?.value as? String ?? ""
                 let handle = element(edge)
                 if handle.exists {
@@ -379,7 +387,7 @@ final class Build18UITests: XCTestCase {
                     log("no \(edge) handle: [\(state())]")
                 }
                 let changed = wait(15) { (blocks.first?.value as? String ?? "") != before }
-                check(changed, "\(kind) overlay \(edge == "overlayTrimEnd" ? "end" : "start") trimmed (\(dx > 0 ? "longer" : "longer to the left"))",
+                check(changed, "\(kind) overlay \(edge == "overlayTrimEnd" ? "end" : "start") trimmed",
                       "\(before) -> \(blocks.first?.value as? String ?? "")")
             }
             // Two fingers on the video move / size / turn the selected overlay.
@@ -430,13 +438,20 @@ final class Build18UITests: XCTestCase {
         shot("system_photo_picker_loaded")
         log("picker images=\(app.images.count) cells=\(app.cells.count) chosen=\(image.exists ? "\(image.frame)" : "none")")
         var picked = false
-        if picker, image.exists {
+        if picker {
             let overlaysBefore = overlayItems("photo").count
-            image.tap()
+            // The picker's grid lives in another process: its first tile, under the "Private Access" note.
+            if image.exists { image.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.16, dy: 0.43)).tap() }
             picked = wait(60) { self.overlayItems("photo").count > overlaysBefore }
+            shot("photo_from_picker")
         }
-        check(picker, "system photo picker opens", "photo picked=\(picked)")
-        if !picked, element("overlayGallery").exists { app.swipeDown(); pause(1) }
+        check(picker && picked, "system photo picker: a photo picked becomes an overlay", field("overlays", in: state()) ?? "")
+        if !picked {
+            // Close the picker (Export can't be reached under it).
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.13)).tap()
+            pause(1.5)
+            if !element("editorExport").isHittable { app.swipeDown(velocity: .fast); pause(1.5) }
+        }
 
         // H. Export.
         let exportStarted = Date()

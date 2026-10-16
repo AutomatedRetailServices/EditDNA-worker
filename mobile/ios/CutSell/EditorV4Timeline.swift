@@ -496,13 +496,6 @@ struct TimelineV4: View {
             .onEnded { _ in moveEnded() }
     }
 
-    /// Move for an item on the timeline: plain drag when selected, hold-and-drag otherwise.
-    private func itemMove(kind: MoveDragState.Kind, id: String, start: Double, length: Double, selected: Bool) -> AnyGesture<Void> {
-        selected
-            ? AnyGesture(directMoveGesture(kind: kind, id: id, start: start, length: length).map { _ in () })
-            : AnyGesture(moveGesture(kind: kind, id: id, start: start, length: length).map { _ in () })
-    }
-
     private func moveChanged(kind: MoveDragState.Kind, id: String, start: Double, length: Double, dx: CGFloat) {
         if moveDrag == nil {
             #if DEBUG
@@ -745,7 +738,10 @@ struct TimelineV4: View {
                     .scaleEffect(moveDrag?.id == clip.id ? 1.05 : 1)
                     .offset(x: left, y: moveDrag?.id == clip.id ? -2 : 0)
                     .onTapGesture { selection = isSelected ? nil : .voiceOver(clip.id) }
-                    .gesture(itemMove(kind: .voice, id: clip.id, start: clip.start, length: clip.length, selected: isSelected))
+                    .highPriorityGesture(directMoveGesture(kind: .voice, id: clip.id, start: clip.start, length: clip.length),
+                                             including: isSelected ? .all : .subviews)
+                        .gesture(moveGesture(kind: .voice, id: clip.id, start: clip.start, length: clip.length),
+                                 including: isSelected ? .subviews : .all)
                     if isSelected && moveDrag == nil {
                         audioTrimHandle(.start, clip: clip).offset(x: left - TrimHandleV4.outside)
                         audioTrimHandle(.end, clip: clip).offset(x: left + blockWidth - TrimHandleV4.width + TrimHandleV4.outside)
@@ -811,7 +807,10 @@ struct TimelineV4: View {
                         .scaleEffect(moveDrag?.id == clip.id ? 1.05 : 1)
                         .offset(x: left, y: moveDrag?.id == clip.id ? -2 : 0)
                         .onTapGesture { selection = isSelected ? nil : .sound(clip.id) }
-                        .gesture(itemMove(kind: .sound, id: clip.id, start: clip.start, length: clip.length, selected: isSelected))
+                        .highPriorityGesture(directMoveGesture(kind: .sound, id: clip.id, start: clip.start, length: clip.length),
+                                             including: isSelected ? .all : .subviews)
+                        .gesture(moveGesture(kind: .sound, id: clip.id, start: clip.start, length: clip.length),
+                                 including: isSelected ? .subviews : .all)
                     if isSelected && moveDrag == nil {
                         audioTrimHandle(.start, clip: clip).offset(x: left - TrimHandleV4.outside)
                         audioTrimHandle(.end, clip: clip).offset(x: left + blockWidth - TrimHandleV4.width + TrimHandleV4.outside)
@@ -942,7 +941,10 @@ struct TimelineV4: View {
                             if item.failed { model.retryPendingOverlay(id: item.id); return }
                             selection = isSelected ? nil : .overlay(item.id, isText: false)
                         }
-                        .gesture(itemMove(kind: .overlay, id: item.id, start: item.start, length: item.end - item.start, selected: isSelected))
+                        .highPriorityGesture(directMoveGesture(kind: .overlay, id: item.id, start: item.start, length: item.end - item.start),
+                                             including: isSelected ? .all : .subviews)
+                        .gesture(moveGesture(kind: .overlay, id: item.id, start: item.start, length: item.end - item.start),
+                                 including: isSelected ? .subviews : .all)
                     if isSelected && moveDrag == nil {
                         overlayTrimHandle(.start, item: item)
                             .offset(x: left - TrimHandleV4.outside)

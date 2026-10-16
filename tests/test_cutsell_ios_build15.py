@@ -110,7 +110,7 @@ def test_overlay_row_has_real_thumbnails_trim_move_delete():
     tl = read("EditorV4Timeline.swift")
     assert "struct OverlayBlockV4: View" in tl and "OverlayMediaPicture(url: item.url" in tl
     assert "overlayTrimHandle(.start, item: item)" in tl and "overlayTrimHandle(.end, item: item)" in tl
-    assert "itemMove(kind: .overlay" in tl
+    assert "directMoveGesture(kind: .overlay" in tl
     assert "model.setOverlayTime(id: item.id, start: trim.start, end: trim.end, sourceStart: sourceStart)" in tl
     assert "await model.removeMediaOverlay(id: id)" in read("EditorV4View.swift")
 

@@ -271,7 +271,7 @@ struct EditorV2View: View {
                 case .failed: break
                 }
             }
-        case .overlay:
+        case .overlay, .overlayPhoto:
             OverlayView(model: model)
         case .broll, .brollGallery:
             BrollView(model: model, initialPlacementID: nil)
@@ -861,6 +861,9 @@ struct EditorPreviewState {
 
 enum EditorSheet: String, Identifiable {
     case captions, voiceOver, overlay, broll, brollGallery, export
+    /// Build 18: the Overlay panel's Photo button (the choice travels with the sheet; a separate
+    /// @State was read stale on the first presentation and Photo opened videos only).
+    case overlayPhoto
     var id: String { rawValue }
 }
 

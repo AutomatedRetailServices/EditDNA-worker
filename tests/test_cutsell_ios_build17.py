@@ -28,7 +28,7 @@ def test_sounds_are_never_added_silent_and_the_preview_follows_their_download():
 
 def test_sound_blocks_move_split_trim_and_are_easy_to_touch():
     timeline = read("EditorV4Timeline.swift")
-    assert ".gesture(itemMove(kind: .sound, id: clip.id" in timeline
+    assert ".highPriorityGesture(directMoveGesture(kind: .sound, id: clip.id" in timeline
     assert "audioTrimHandle(.end, clip: clip)" in timeline
     assert ".frame(width: max(width, 32), alignment: .leading)" in timeline
     v4 = read("EditorV4View.swift")

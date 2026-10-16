@@ -73,8 +73,10 @@ def test_keyframes_use_uikit_pinch_rotation_pan():
 def test_selected_items_move_with_a_plain_drag():
     timeline = read("EditorV4Timeline.swift")
     assert "DragGesture(minimumDistance: 6, coordinateSpace: .global)" in timeline
+    # On a selected item the drag wins over the tap (a moving finger never deselects it).
     for kind in ("voice", "sound", "overlay"):
-        assert f".gesture(itemMove(kind: .{kind}," in timeline and "selected: isSelected))" in timeline
+        assert f".highPriorityGesture(directMoveGesture(kind: .{kind}," in timeline
+    assert timeline.count("including: isSelected ? .all : .subviews") == 3
     v4 = read("EditorV4View.swift")
     assert '"Wait until it finishes uploading, then split it."' in v4
 
@@ -87,6 +89,9 @@ def test_gallery_uses_the_system_picker_and_says_when_access_is_limited():
     gallery = read("GalleryPickerView.swift")
     assert '"Select more photos"' in gallery and '"Change permission"' in gallery
     assert "if preview == nil, library.status == .limited { limitedBanner }" in gallery
+    # Photo opens photos: the choice travels with the sheet (a separate @State was read stale).
+    v4 = read("EditorV4View.swift")
+    assert "sheet = photos ? .overlayPhoto : .overlay" in v4 and "galleryPhotos" not in v4
 
 
 def test_diagnostics_screen_report_and_privacy():
