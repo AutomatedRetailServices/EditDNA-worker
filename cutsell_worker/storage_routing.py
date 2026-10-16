@@ -73,12 +73,16 @@ def is_readable_bucket(bucket: str, current: str | None = None) -> bool:
 
 
 def default_client(*, region_name: str | None = None):
-    """The current storage's client (boto3 honours AWS_ENDPOINT_URL_S3 for R2)."""
-    import boto3
+    """The current storage's client (boto3 honours AWS_ENDPOINT_URL_S3 for R2).
 
-    if region_name is None:
-        return boto3.client("s3")
-    return boto3.client("s3", region_name=region_name)
+    Region from the runtime config (AWS_REGION, e.g. "auto" on R2) when not given, and always
+    Signature V4: without a region boto3 falls back to us-east-1 and signs PRESIGNED links with
+    the legacy V2 scheme, which Cloudflare R2 refuses (401) -- found live on the Clean up link."""
+    import boto3
+    from botocore.config import Config
+
+    region = region_name or load_runtime_config().aws_region or None
+    return boto3.client("s3", region_name=region, config=Config(signature_version="s3v4"))
 
 
 def _make_fallback_client(fallback: FallbackStorage):

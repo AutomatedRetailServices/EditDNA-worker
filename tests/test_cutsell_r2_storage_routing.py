@@ -213,3 +213,21 @@ class _ManifestClient:
 
     def __getattr__(self, name):
         return getattr(self.inner, name)
+
+
+def test_default_client_signs_links_with_v4_in_the_configured_region(monkeypatch):
+    # Live finding (16 Oct 2026, after the R2 move): a client made without a region signed
+    # presigned GET links with the legacy V2 scheme, and R2 answered 401 to the Clean up link.
+    from urllib.parse import urlparse, parse_qs
+    from cutsell_worker import storage_routing
+    monkeypatch.setenv("AWS_REGION", "auto")
+    monkeypatch.setenv("AWS_ENDPOINT_URL_S3", "https://account.r2.cloudflarestorage.com")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-id")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    url = storage_routing.default_client().generate_presigned_url(
+        "get_object", Params={"Bucket": "cutsell-videos", "Key": "a/b.m4a"}, ExpiresIn=60)
+    query = parse_qs(urlparse(url).query)
+    assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+    assert query["X-Amz-Credential"][0].split("/")[2] == "auto"
+    assert urlparse(url).hostname.endswith("r2.cloudflarestorage.com")
