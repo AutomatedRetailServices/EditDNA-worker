@@ -87,7 +87,6 @@ final class Build17UITests: XCTestCase {
         // Play for about that long, then pause (the cursor moves on like for the creator).
         let before = state()
         tap("editorPlay")
-        pause(seconds)
         tap("editorPlay")
         pause(0.6)
         log("cursor moved: [\(before)] -> [\(state())]")

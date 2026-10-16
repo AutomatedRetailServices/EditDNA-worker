@@ -722,6 +722,8 @@ struct EditorV4View: View {
                 .rotationEffect(.degrees(key.rotation))
                 .offset(x: box.size.width * key.x, y: box.size.height * key.y)
                 .frame(width: box.size.width, height: box.size.height)
+                // Zoomed past the card, the picture must not take the taps meant for ◇, Play, Undo.
+                .allowsHitTesting(false)
         }
             .animation(.easeOut(duration: 0.2), value: model.isMirrored(at: playback.currentTime))
             .animation(.easeOut(duration: 0.25), value: degrees)
@@ -965,7 +967,10 @@ struct EditorV4View: View {
         switch selection {
         case .overlay(let id, isText: false):
             return model.overlayStyle(id).layout == .float ? .overlay(id) : nil
-        case .video(let id): return .video(id)
+        case .video(let id):
+            // The cursor left the selected clip: ◇ and the fingers work on the clip under the cursor.
+            if let under = model.clipWindow(at: playback.currentTime)?.clipID, under != id { return .video(under) }
+            return .video(id)
         case .zoom(let id):
             if let mark = model.videoKeyframeMarks.first(where: { $0.id == id }) { return mark.target }
             for overlay in model.overlaysOnScreen where model.overlayKeyframeMarks(overlayID: overlay.id).contains(where: { $0.id == id }) {
