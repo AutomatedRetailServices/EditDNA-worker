@@ -443,6 +443,13 @@ final class DraftPlaybackController: ObservableObject {
             seek(to: min(resumeAt, max(0, duration - 0.05)))
             if wasPlaying { togglePlayback() }
             CutSellDiagnostics.log("playback_ready", ["duration_s": String(format: "%.2f", duration)])
+            #if DEBUG
+            // Build 17 probe: what the preview really mixes (clip levels, voices / sounds, clean copies).
+            let base = baseLevels.map { String(format: "%.1f-%.1f:%.2f", $0.start, $0.end, $0.level) }.joined(separator: ",")
+            let voices = model.previewVoices.map { String(format: "%@@%.1f:%.2f", $0.url.lastPathComponent, $0.start, $0.volume * master) }
+                .joined(separator: ",")
+            NSLog("CUTSELLB17 mix base=[%@] voices=[%@] clean_tracks=%d master=%.2f", base, voices, cleanTracks.count, master)
+            #endif
         } catch {
             player.replaceCurrentItem(with: nil)
             isReady = false

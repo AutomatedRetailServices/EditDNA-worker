@@ -579,6 +579,8 @@ struct EditorV4View: View {
             .contentShape(Rectangle())
             .onTapGesture { videoTapped() }
             .gesture(videoFramingGesture(size: size), including: framingEnabled ? .all : .subviews)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("editorVideo")
             .overlay(alignment: .topLeading) { zoomBadge }
             .overlay(alignment: .bottom) { videoBottomPill }
     }

@@ -313,8 +313,11 @@ extension DraftEditorViewModel {
             key.time = min(max(0, time - overlay.start), overlay.end - overlay.start)
         }
         let made = key
-        // The first keyframe also keeps Auto Zoom AI's state as it is (AI ones stay as they were).
         applyDraftChange { object in Self.setKeyframes(&object) { $0 + [made] } }
+        #if DEBUG
+        NSLog("CUTSELLB17 keyframe_add target=%@ at=%.2f scale=%.3f x=%.3f y=%.3f rotation=%.1f",
+              made.target.rawValue, time, made.value.scale, made.value.x, made.value.y, made.value.rotation)
+        #endif
         return id
     }
 
@@ -601,6 +604,9 @@ final class CleanAudioCenter: ObservableObject {
             try? FileManager.default.removeItem(at: target)
             try FileManager.default.moveItem(at: file, to: target)
             states[name] = .ready(target)
+            #if DEBUG
+            NSLog("CUTSELLB17 clean_ready target=%@ id=%@", key.target, key.id)
+            #endif
         } catch {
             states[name] = .failed
             CutSellDiagnostics.log("clean_audio_failed", ["reason": String(describing: type(of: error))])
