@@ -133,6 +133,8 @@ final class DraftEditorViewModel: ObservableObject {
     private var overlayUploads: Set<String> = []
     /// The overlay just added (the editor selects it).
     @Published var lastAddedOverlayID: String?
+    /// An overlay that finished uploading: its upload id and its id on the draft.
+    @Published var placedOverlayRename: OverlayRename?
     /// A full-screen B-roll video going into the main track (upload %).
     @Published private(set) var pendingBroll: PendingBroll?
     /// What Export is doing before the server takes over ("Saving your changes…").
@@ -264,6 +266,9 @@ final class DraftEditorViewModel: ObservableObject {
         errorMessage = shownError
         guard added.value else { return false }
         pendingOverlays.removeAll { $0.id == item.id }
+        // The overlay keeps being the selected one under its new id (build 17: the selection kept the
+        // upload's id, so after the upload nothing was selected: no drag, no trim, no fingers).
+        placedOverlayRename = OverlayRename(from: item.id, to: placed)
         if lastAddedOverlayID == item.id { lastAddedOverlayID = placed }
         return true
     }
@@ -1975,3 +1980,8 @@ extension DraftEditorViewModel {
     }
 }
 #endif
+
+struct OverlayRename: Equatable {
+    let from: String
+    let to: String
+}

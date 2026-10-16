@@ -132,6 +132,7 @@ struct EditorV4View: View {
                         // waits for the app to go idle while the video plays).
                         probeButton("b17Step") { playback.seek(to: playback.currentTime + 1) }
                         probeButton("b18Back") { playback.seek(to: max(0, playback.currentTime - 1)) }
+                        probeButton("b18Half") { playback.seek(to: playback.currentTime + 0.5) }
                         probeButton("b18Start") { playback.seek(to: 0) }
                         probeButton("b18AIPeak") {
                             if let peak = ProbeMedia.firstAIPlateau(model.videoKeyframeMarks) { playback.seek(to: peak) }
@@ -177,7 +178,8 @@ struct EditorV4View: View {
         case .video?: return "video"
         case .sound?: return "sound"
         case .voiceOver?: return "voice"
-        case .overlay?: return "overlay"
+        case .overlay(let id, _)?:
+            return model.overlaysOnScreen.contains { $0.id == id } ? "overlay" : "overlay_gone"
         case .zoom?: return "keyframe"
         case nil: return "none"
         default: return "other"
@@ -239,6 +241,12 @@ struct EditorV4View: View {
             .onChange(of: playback.currentTime) { _, time in
                 // A framing not kept with ◇ belongs to its moment: moving the cursor drops it.
                 if keyPending != nil, keyGestureBase == nil, abs(time - keyPendingTime) > 0.03 { clearKeyPending() }
+            }
+            // An overlay that finished uploading stays selected under its new id.
+            .onChange(of: model.placedOverlayRename) { _, rename in
+                guard let rename else { return }
+                if selection == .overlay(rename.from, isText: false) { selection = .overlay(rename.to, isText: false) }
+                if keyPendingTarget == .overlay(rename.from) { clearKeyPending() }
             }
             // A photo / video just picked for an overlay comes selected (move it, pinch it).
             .onChange(of: model.lastAddedOverlayID) { _, id in

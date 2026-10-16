@@ -319,17 +319,22 @@ final class Build18UITests: XCTestCase {
         let secondKey = wait(10) { (self.field("user", in: self.state()) ?? "0") == "2" }
         check(secondKey, "second ◇ with the turn", "user_rot=\(field("user_rot", in: state()) ?? "?")")
         shot("keyframes_two")
-        // Play from 1 s to 3 s: the framing changes smoothly between the two ◇.
+        // From 1 s to 3 s the framing changes smoothly between the ◇ (what playback shows at each moment).
         seek(1)
         var samples: [String] = []
-        tap("editorPlay")
-        for _ in 0..<8 {
-            pause(0.3)
-            samples.append(String(format: "%@/%@", field("zoom", in: state()) ?? "?", field("rot", in: state()) ?? "?"))
+        for index in 0..<5 {
+            if index > 0 { tap("b18Half") }
+            let now = state()
+            samples.append("\(field("t", in: now) ?? "?"):\(field("zoom", in: now) ?? "?")/\(field("rot", in: now) ?? "?")")
         }
-        tap("editorPlay")
-        let distinct = Set(samples).count
-        check(distinct >= 4, "smooth change while playing", samples.joined(separator: " "))
+        let distinct = Set(samples.map { $0.split(separator: ":").last.map(String.init) ?? "" }).count
+        check(distinct >= 4, "framing changes smoothly between the ◇", samples.joined(separator: " "))
+        // And while really playing: the framing on screen moves with the cursor.
+        seek(1)
+        let before = field("zoom", in: state()) ?? "?"
+        tap("editorPlay"); pause(0.8); tap("editorPlay")
+        let after = state()
+        log("playing 1 s -> t=\(field("t", in: after) ?? "?") zoom \(before) -> \(field("zoom", in: after) ?? "?") rot=\(field("rot", in: after) ?? "?")")
         // Auto Zoom AI ◇ on screen.
         ensurePaused()
         tap("b18AIPeak")
@@ -353,11 +358,12 @@ final class Build18UITests: XCTestCase {
             let blocks = app.descendants(matching: .any).matching(identifier: "overlayBlock").allElementsBoundByIndex
                 .filter { ($0.value as? String ?? "").hasPrefix(kind) }
             guard let blockElement = blocks.first else { check(false, "\(kind) overlay block"); continue }
-            log("\(kind) block hittable=\(blockElement.isHittable) frame=\(blockElement.frame)")
+            log("\(kind) block hittable=\(blockElement.isHittable) frame=\(blockElement.frame) state=[\(state())]")
             if !(field("sel", in: state()) == "overlay") { blockElement.tap(); pause(1) }
             let start0 = blockElement.value as? String ?? ""
             let b = blockElement.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             b.press(forDuration: 0.05, thenDragTo: b.withOffset(CGVector(dx: 30, dy: 0)))
+            log("after the drag: [\(state())]")
             let movedOK = wait(15) { (blocks.first?.value as? String ?? "") != start0 }
             check(movedOK, "\(kind) overlay moves with a plain drag when selected", "\(start0) -> \(blocks.first?.value as? String ?? "")")
             for (edge, dx) in [("overlayTrimEnd", 40.0), ("overlayTrimStart", -20.0)] {
@@ -408,9 +414,14 @@ final class Build18UITests: XCTestCase {
         shot("system_photo_picker")
         // A photo of the picker: an image that can be touched (the editor behind the sheet can't).
         var image = element("overlayGallery").descendants(matching: .image).firstMatch
-        if !image.exists {
-            image = app.images.allElementsBoundByIndex.first { $0.isHittable && $0.frame.minY > 160 && $0.frame.width > 60 } ?? image
+        // The picker loads its library slowly the first time in the Simulator.
+        for _ in 0..<12 where !image.exists {
+            if let found = app.images.allElementsBoundByIndex.first(where: {
+                $0.isHittable && $0.frame.minY > 160 && $0.frame.width > 50 && $0.frame.width < 220
+            }) { image = found; break }
+            pause(2)
         }
+        shot("system_photo_picker_loaded")
         log("picker images=\(app.images.count) cells=\(app.cells.count) chosen=\(image.exists ? "\(image.frame)" : "none")")
         var picked = false
         if picker, image.exists {

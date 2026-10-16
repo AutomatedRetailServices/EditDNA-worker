@@ -505,6 +505,9 @@ struct TimelineV4: View {
 
     private func moveChanged(kind: MoveDragState.Kind, id: String, start: Double, length: Double, dx: CGFloat) {
         if moveDrag == nil {
+            #if DEBUG
+            NSLog("CUTSELLB18 move_start kind=%@ selection=%@", "\(kind)", "\(String(describing: selection))")
+            #endif
             playback.pause()
             SnapFeedback.lift()
             moveDrag = MoveDragState(kind: kind, id: id, originalStart: start, length: length, start: start)
@@ -933,6 +936,9 @@ struct TimelineV4: View {
                         .scaleEffect(moveDrag?.id == item.id ? 1.05 : 1)
                         .offset(x: left, y: moveDrag?.id == item.id ? -2 : 0)
                         .onTapGesture {
+                            #if DEBUG
+                            NSLog("CUTSELLB18 overlay_block_tap id=%@ selected=%@", item.id, isSelected ? "yes" : "no")
+                            #endif
                             if item.failed { model.retryPendingOverlay(id: item.id); return }
                             selection = isSelected ? nil : .overlay(item.id, isText: false)
                         }
@@ -1000,6 +1006,9 @@ struct TimelineV4: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         if overlayTrim == nil {
+                            #if DEBUG
+                            NSLog("CUTSELLB18 overlay_trim_start edge=%@", edge == .start ? "start" : "end")
+                            #endif
                             playback.pause()
                             overlayTrim = OverlayTrimState(id: item.id, edge: edge, start: item.start, end: item.end,
                                                            originalStart: item.start, originalEnd: item.end)
