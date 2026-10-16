@@ -1,60 +1,59 @@
- =    25.79s Find the StaticText (Element at index 8)
-    t =    25.86s Find the StaticText (Element at index 9)
-    t =    25.92s Find the StaticText (Element at index 10)
-    t =    25.99s Find the StaticText (Element at index 11)
-    t =    26.05s Find the StaticText (Element at index 12)
-    t =    26.13s Find the StaticText (Element at index 13)
-    t =    26.20s Find the StaticText (Element at index 14)
-    t =    26.29s Find the StaticText (Element at index 15)
-    t =    26.36s Find the StaticText (Element at index 16)
-    t =    26.43s Find the StaticText (Element at index 17)
-    t =    26.51s Find the StaticText (Element at index 18)
-    t =    26.57s Find the StaticText (Element at index 19)
-    t =    26.64s Find the StaticText (Element at index 20)
-    t =    26.71s Find the StaticText (Element at index 21)
-    t =    26.78s Find the StaticText (Element at index 22)
-    t =    26.85s Find the StaticText (Element at index 23)
-    t =    26.92s Find the StaticText (Element at index 24)
-    t =    26.98s Find the StaticText (Element at index 25)
-    t =    27.06s Find the StaticText (Element at index 26)
-    t =    27.13s Find the StaticText (Element at index 27)
-    t =    27.20s Find the StaticText (Element at index 28)
-B18UI   583.3 PASS Diagnostics opens with five taps on the version · build=Build, 1 photos=Permission, Not asked yet
-B18UI   583.3 PASS Diagnostics lists the editor's events · 10-16 19:48:41 keyframe_changed rotation=13.0 scale=1.000 | 10-16 19:48:39 keyframe_changed rotation=13.0 scale=1.000
-    t =    27.42s Waiting 5.0s for "diagSendReport" Any to exist
-    t =    28.46s     Checking `Expect predicate `existsNoRetry == 1` for object "diagSendReport" Any`
-    t =    28.46s         Checking existence of `"diagSendReport" Any`
-    t =    28.59s Tap "diagSendReport" Any
-    t =    28.59s     Wait for ai.cutsell.app to idle
-    t =    28.59s     Find the "diagSendReport" Any
-    t =    28.70s     Check for interrupting elements affecting "diagSendReport" Other
-    t =    28.78s     Synthesize event
-    t =    29.09s     Wait for ai.cutsell.app to idle
-    t =    29.81s Checking existence of `"ActivityListView" Other`
-    t =    30.01s Checking existence of `"Copy" Button`
-    t =    30.12s Get number of matches for: Descendants matching type Cell
-    t =    30.18s Get number of matches for: Descendants matching type NavigationBar
-    t =    30.65s Checking existence of `"ActivityListView" Other`
-    t =    30.72s Checking existence of `"Copy" Button`
-    t =    30.79s Get number of matches for: Descendants matching type Cell
-    t =    31.28s Get number of matches for: Descendants matching type NavigationBar
-    t =    32.02s Checking existence of `"ActivityListView" Other`
-B18UI   589.4 PASS Send report opens the share sheet
-B18UI   589.4 FAILURES (diagnostics): none
-    t =    33.53s Tear Down
-Test Case '-[CutSellUITests.Build18UITests test2DiagnosticsFromSettings]' passed (34.084 seconds).
-Test Suite 'Build18UITests' passed at 2026-10-16 19:51:54.620.
-	 Executed 2 tests, with 0 failures (0 unexpected) in 589.873 (589.876) seconds
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-16 19:51:54.621.
-	 Executed 2 tests, with 0 failures (0 unexpected) in 589.873 (589.877) seconds
-Test Suite 'Selected tests' passed at 2026-10-16 19:51:54.621.
-	 Executed 2 tests, with 0 failures (0 unexpected) in 589.873 (589.879) seconds
-2026-10-16 19:51:56.988 xcodebuild[7074:25933] [MT] IDETestOperationsObserverDebug: 620.519 elapsed -- Testing started completed.
-2026-10-16 19:51:56.989 xcodebuild[7074:25933] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
-2026-10-16 19:51:56.989 xcodebuild[7074:25933] [MT] IDETestOperationsObserverDebug: 620.519 sec, +620.519 sec -- end
+=    46.36s Find the StaticText (Element at index 10)
+    t =    46.44s Find the StaticText (Element at index 11)
+    t =    46.54s Find the StaticText (Element at index 12)
+    t =    46.61s Find the StaticText (Element at index 13)
+    t =    46.70s Find the StaticText (Element at index 14)
+    t =    46.79s Find the StaticText (Element at index 15)
+    t =    46.88s Find the StaticText (Element at index 16)
+    t =    47.00s Find the StaticText (Element at index 17)
+    t =    47.10s Find the StaticText (Element at index 18)
+    t =    47.19s Find the StaticText (Element at index 19)
+    t =    47.30s Find the StaticText (Element at index 20)
+    t =    47.40s Find the StaticText (Element at index 21)
+    t =    47.51s Find the StaticText (Element at index 22)
+    t =    47.60s Find the StaticText (Element at index 23)
+    t =    47.70s Find the StaticText (Element at index 24)
+    t =    47.81s Find the StaticText (Element at index 25)
+B18UI  1449.8 PASS Diagnostics opens with five taps on the version · build=Build, 1 photos=Permission, Not asked yet
+B18UI  1449.8 PASS Diagnostics lists the editor's events · 10-16 20:07:51 keyframe_added at=3.00 rotation=30.4 scale=1.000 target=video_clip | 10-16 20:07:21 keyframe_deleted ai=true
+    t =    48.32s Waiting 5.0s for "diagSendReport" Any to exist
+    t =    49.35s     Checking `Expect predicate `existsNoRetry == 1` for object "diagSendReport" Any`
+    t =    49.35s         Checking existence of `"diagSendReport" Any`
+    t =    49.59s Tap "diagSendReport" Any
+    t =    49.59s     Wait for ai.cutsell.app to idle
+    t =    49.59s     Find the "diagSendReport" Any
+    t =    49.77s     Check for interrupting elements affecting "diagSendReport" Other
+    t =    49.92s     Synthesize event
+    t =    50.25s     Wait for ai.cutsell.app to idle
+    t =    51.07s Checking existence of `"ActivityListView" Other`
+    t =    51.89s Checking existence of `"Copy" Button`
+    t =    52.20s Get number of matches for: Descendants matching type Cell
+    t =    52.31s Get number of matches for: Descendants matching type NavigationBar
+    t =    52.83s Checking existence of `"ActivityListView" Other`
+    t =    52.94s Checking existence of `"Copy" Button`
+    t =    53.04s Get number of matches for: Descendants matching type Cell
+    t =    53.15s Get number of matches for: Descendants matching type NavigationBar
+    t =    53.75s Checking existence of `"ActivityListView" Other`
+    t =    55.18s Checking existence of `"Copy" Button`
+    t =    55.73s Get number of matches for: Descendants matching type Cell
+    t =    55.89s Get number of matches for: Descendants matching type NavigationBar
+    t =    56.40s Checking existence of `"ActivityListView" Other`
+B18UI  1459.5 PASS Send report opens the share sheet
+B18UI  1459.5 FAILURES (diagnostics): none
+    t =    58.04s Tear Down
+Test Case '-[CutSellUITests.Build18UITests test2DiagnosticsFromSettings]' passed (58.334 seconds).
+Test Suite 'Build18UITests' passed at 2026-10-16 20:27:03.270.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 1459.701 (1459.706) seconds
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-16 20:27:03.272.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 1459.701 (1459.708) seconds
+Test Suite 'Selected tests' passed at 2026-10-16 20:27:03.273.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 1459.701 (1459.710) seconds
+2026-10-16 20:27:05.942 xcodebuild[9493:33252] [MT] IDETestOperationsObserverDebug: 1508.309 elapsed -- Testing started completed.
+2026-10-16 20:27:05.942 xcodebuild[9493:33252] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-16 20:27:05.942 xcodebuild[9493:33252] [MT] IDETestOperationsObserverDebug: 1508.309 sec, +1508.309 sec -- end
 
 Test session results, code coverage, and logs:
-	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.16_19-41-28-+0000.xcresult
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.16_20-01-48-+0000.xcresult
 
 ** TEST EXECUTE SUCCEEDED **
 
