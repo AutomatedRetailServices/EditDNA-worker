@@ -1,15 +1,16 @@
-B17UI    30.6 opened ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
-B17UI    38.0 sounds_downloaded=true
-B17UI    44.8 add_enabled=true exists=true
-B17UI    52.1 typing_added=true panel=true values=["3.00-90.00"] ai=8 user=0 sounds=typing@3.00+3.00 muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000
-B17UI    66.8 cursor moved: [ai=8 user=0 sounds=typing@3.00+3.00 muted_clips=0 user_scales= auto_zoom=true t=3.00 zoom=1.000] -> [ai=8 user=0 sounds=typing@3.00+3.00 muted_clips=0 user_scales= auto_zoom=true t=11.63 zoom=1.000]
-B17UI    81.6 typing_split=false values=["3.00-90.00"] ai=8 user=0 sounds=typing@3.00+3.00 muted_clips=0 user_scales= auto_zoom=true t=11.63 zoom=1.000
-B17UI    97.8 typing_piece_deleted=false values=[] ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=11.63 zoom=1.000
-B17UI    99.5 no sound block: skipping move / trim
-B17UI   131.9 clip_selected_panel=true mute_badges=1 ai=8 user=0 sounds= muted_clips=1 user_scales= auto_zoom=true t=11.63 zoom=1.000
-B17UI   379.5 clean_up progress_shown=true ready=false failed=true
-B17UI   390.0 clean_up_off ready_text=false
-B17UI   401.4 whole_video_panel=true mute_badges=0 ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=11.63 zoom=1.000
-B17UI   437.0 cursor moved: [ai=8 user=1 sounds= muted_clips=0 user_scales=1.00 auto_zoom=true t=11.63 zoom=1.000] -> [ai=8 user=1 sounds= muted_clips=0 user_scales=1.00 auto_zoom=true t=1.92 zoom=1.042]
-B17UI   454.0 keyframes first=[ai=8 user=1 sounds= muted_clips=0 user_scales=1.00 auto_zoom=true t=11.63 zoom=1.000] second=[ai=8 user=2 sounds= muted_clips=0 user_scales=1.00,2.51 auto_zoom=true t=5.51 zoom=2.514] button_on_second=filled after_delete=[ai=8 user=1 sounds= muted_clips=0 user_scales=1.00 auto_zoom=true t=5.51 zoom=1.000]
-B17UI   483.9 export finished=yes ok=yes seconds=29.7
+B17UI    39.4 opened ai=8 user=0 sounds= muted_clips=0 user_scales= auto_zoom=true t=0.00 zoom=1.000
+B17UI    48.2 sounds_downloaded=true
+B17UI    55.4 add_enabled=true exists=true
+B17UI    61.3 typing_added=true panel=true values=["0.00-90.00"] ai=8 user=0 sounds=typing@0.00+3.00 muted_clips=0 user_scales= auto_zoom=true t=0.00 zoom=1.000
+B17UI    67.0 cursor moved: [ai=8 user=0 sounds=typing@0.00+3.00 muted_clips=0 user_scales= auto_zoom=true t=0.00 zoom=1.000] -> [ai=8 user=0 sounds=typing@0.00+3.00 muted_clips=0 user_scales= auto_zoom=true t=1.00 zoom=1.080]
+B17UI    73.7 typing_split=true values=["0.00-30.00", "1.00-60.00"] ai=8 user=0 sounds=typing@0.00+1.00,typing@1.00+2.00 muted_clips=0 user_scales= auto_zoom=true t=1.00 zoom=1.080
+B17UI    79.1 typing_piece_deleted=true values=["1.00-60.00"] ai=8 user=0 sounds=typing@1.00+2.00 muted_clips=0 user_scales= auto_zoom=true t=1.00 zoom=1.080
+B17UI    89.5 typing_selected=true move 1.00-60.00 -> 3.27-60.00 ai=8 user=0 sounds=typing@3.27+2.00 muted_clips=0 user_scales= auto_zoom=true t=1.00 zoom=1.080
+B17UI    99.6 typing_trim handle=true 3.27-60.00 -> 3.27-39.39 ai=8 user=0 sounds=typing@3.27+1.31 muted_clips=0 user_scales= auto_zoom=true t=1.00 zoom=1.080
+B17UI   129.8 clip_selected_panel=true mute_badges=1 ai=8 user=0 sounds=typing@3.27+1.31 muted_clips=1 user_scales= auto_zoom=true t=1.00 zoom=1.080
+B17UI   224.2 clean_up progress_shown=true ready=true failed=false
+B17UI   229.7 clean_up_off ready_text=false
+B17UI   245.4 whole_video_panel=true mute_badges=0 ai=8 user=0 sounds=typing@3.27+1.31 muted_clips=0 user_scales= auto_zoom=true t=1.00 zoom=1.080
+B17UI   288.8 cursor moved: [ai=8 user=1 sounds=typing@3.27+1.31 muted_clips=0 user_scales=1.08 auto_zoom=true t=1.00 zoom=1.080] -> [ai=8 user=1 sounds=typing@3.27+1.31 muted_clips=0 user_scales=1.08 auto_zoom=true t=2.00 zoom=1.016]
+B17UI   302.6 keyframes first=[ai=8 user=1 sounds=typing@3.27+1.31 muted_clips=0 user_scales=1.08 auto_zoom=true t=1.00 zoom=1.080] second=[ai=8 user=2 sounds=typing@3.27+1.31 muted_clips=0 user_scales=1.08,2.55 auto_zoom=true t=2.00 zoom=2.554] button_on_second=filled after_delete=[ai=8 user=1 sounds=typing@3.27+1.31 muted_clips=0 user_scales=1.08 auto_zoom=true t=2.00 zoom=1.016]
+B17UI   343.1 export finished=yes ok=yes seconds=40.0
