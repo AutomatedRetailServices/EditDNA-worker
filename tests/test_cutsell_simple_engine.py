@@ -700,3 +700,8 @@ def test_review_mode_is_off_unless_asked(monkeypatch):
     monkeypatch.delenv("CUTSELL_SIMPLE_ENGINE_MODE", raising=False)
     import inspect
     assert '"rules").strip().lower()' in inspect.getsource(E.process)
+
+
+def test_sale_review_knows_the_restarted_pitch():
+    from cutsell_worker.simple_engine import engine as E
+    assert "restart" in E.SALE_REVIEW_KINDS and "RESTARTED PITCH" in E.SALE_REVIEW_PROMPT
