@@ -1,24 +1,47 @@
-video 16% → 55s Preparing your video 17% → 57s Preparing your video 18% → 65s Preparing your video 20% → 69s Preparing your video 22% → 74s Preparing your video 24% → 79s Preparing your video 25% → 82s Preparing your video 26% → 87s Preparing your video 28% → 92s Preparing your video 30% → 95s Preparing your video 31% → 100s Preparing your video 32% → 109s Preparing your video 34% → 114s Preparing your video 35% → 118s Preparing your video 36% → 120s Preparing your video 37% → 123s Preparing your video 38% → 125s Preparing your video 39% → 132s Preparing your video 41% → 136s Preparing your video 43% → 140s Preparing your video 44% → 142s Preparing your video 45% → 145s Preparing your video 46% → 149s Preparing your video 48% → 157s Preparing your video 50% → 159s Preparing your video 51% → 161s Preparing your video 52% → 164s Preparing your video 54% → 166s Preparing your video 55% → 173s Preparing your video 57% → 183s Preparing your video 58% → 191s Preparing your video 60% → 199s Preparing your video 61% → 204s Preparing your video 62% → 210s Preparing your video 64% → 215s Preparing your video 65% → 219s Preparing your video 67% → 223s Preparing your video 69% → 228s Preparing your video 70% → 231s Preparing your video 71% → 234s Preparing your video 73% → 237s Preparing your video 75% → 240s Preparing your video 76% → 242s Preparing your video 77% → 245s Preparing your video 78% → 247s Preparing your video 79% → 253s Preparing your video 80% → 258s Preparing your video 82% → 260s Preparing your video 83% → 262s Preparing your video 84% → 264s Preparing your video 85% → 267s Preparing your video 87% → 269s Preparing your video 88% → 272s Preparing your video 89% → 275s Preparing your video 90% → 278s Creating your project … → 280s Uploading your video 0%
-B19UI   362.8 FAIL big4k: upload % moves past 0 · never
-B19UI   362.8 FAIL big4k: no error screen · Upload paused | ! | The upload stopped | Error: network error -1.
 
-Your video is saved on this iPhone. Try again to continue where it stopped. | Processing |  | Hold on… | We’re saving you hours per day… | Uploading your video | 0% | Step 1 of 8 | Keep CutSell open while your video uploads. | We’ll let you know in CutSell when your cut is ready. | Create | Edits | Plan | You | Create | Turn your raw video into a ready-to-sell cut. | Recent cuts | 1 / 30 cuts · | Plan | Upload videos | From your gallery. AI cuts it for you. | Record with CutSell | Camera with clips · 60s · 3m · 10m | Voice Over project | Record your voice over photos or clips
-B19UI   362.8 FAIL big4k: uploaded and processed · 295 s from Create
-B19UI   363.0 FAILURES (big 4K): big4k: upload % moves past 0 | big4k: no error screen | big4k: uploaded and processed
-    t =   309.27s Tear Down
-Test Case '-[CutSellUITests.Build19UITests test2Big4KVideo]' passed (310.997 seconds).
-Test Suite 'Build19UITests' passed at 2026-10-17 01:18:46.877.
-	 Executed 2 tests, with 0 failures (0 unexpected) in 364.588 (364.594) seconds
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-17 01:18:46.878.
-	 Executed 2 tests, with 0 failures (0 unexpected) in 364.588 (364.595) seconds
-Test Suite 'Selected tests' passed at 2026-10-17 01:18:46.879.
-	 Executed 2 tests, with 0 failures (0 unexpected) in 364.588 (364.598) seconds
-2026-10-17 01:18:49.729 xcodebuild[20620:60812] [MT] IDETestOperationsObserverDebug: 405.076 elapsed -- Testing started completed.
-2026-10-17 01:18:49.729 xcodebuild[20620:60812] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
-2026-10-17 01:18:49.729 xcodebuild[20620:60812] [MT] IDETestOperationsObserverDebug: 405.076 sec, +405.076 sec -- end
+    t =   133.06s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   133.60s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   134.14s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   134.69s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   135.22s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   135.76s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   136.31s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   136.86s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   137.42s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   137.97s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   138.51s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   139.05s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   139.58s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   140.12s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   140.66s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   141.20s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   141.74s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   142.27s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   142.81s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   143.38s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   143.93s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   144.49s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   145.10s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   145.67s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+    t =   145.86s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+B19UI   226.0 big4k: gallery shows 0 videos
+    t =   146.05s Get number of matches for: Elements matching predicate '"galleryTile" IN identifiers'
+B19UI   226.1 FAIL big4k: video in the gallery
+B19UI   226.3 FAILURES (big 4K): big4k: video in the gallery
+    t =   146.39s Tear Down
+Test Case '-[CutSellUITests.Build19UITests test2Big4KVideo]' passed (147.363 seconds).
+Test Suite 'Build19UITests' passed at 2026-10-17 01:33:17.733.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 227.109 (227.118) seconds
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-17 01:33:17.734.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 227.109 (227.118) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 01:33:17.734.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 227.109 (227.120) seconds
+2026-10-17 01:33:21.520 xcodebuild[10844:36396] [MT] IDETestOperationsObserverDebug: 260.768 elapsed -- Testing started completed.
+2026-10-17 01:33:21.523 xcodebuild[10844:36396] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-17 01:33:21.523 xcodebuild[10844:36396] [MT] IDETestOperationsObserverDebug: 260.768 sec, +260.768 sec -- end
 
 Test session results, code coverage, and logs:
-	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.17_01-11-58-+0000.xcresult
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.17_01-28-52-+0000.xcresult
 
 ** TEST EXECUTE SUCCEEDED **
 
