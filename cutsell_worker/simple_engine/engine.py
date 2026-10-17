@@ -374,6 +374,25 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0, plan=None):
         keep.update(_ints(beat.get("lines"), n))
     if not keep:
         raise RuntimeError("understanding step kept nothing: " + json.dumps(plan, ensure_ascii=False)[:600])
+    # A sentence inside a COMPLETE attempt is part of the pitch she meant: it is kept unless it is noise, talk off
+    # camera or a repeat of a kept line (the Cut AI video lost its whole price-comparison proof as "intento roto").
+    for att in plan.get("attempts", []) or []:
+        try:
+            a_, b_, state = int(att[0]), int(att[1]), str(att[2]).lower()
+        except Exception:
+            continue
+        if state.startswith("complete"):
+            drops = {}
+            for d in plan.get("drop", []) or []:
+                try:
+                    for ln in range(int(d[0]), int(d[1]) + 1):
+                        drops[ln] = str(d[2]).lower() if len(d) > 2 else ""
+                except Exception:
+                    continue
+            for ln in range(max(1, a_), min(n, b_) + 1):
+                why = drops.get(ln, "")
+                if ln not in keep and not why.startswith(("ruido", "fuera", "repetido")):
+                    keep.add(ln)
     reasons = {}
     for d in plan.get("drop", []) or []:
         try:

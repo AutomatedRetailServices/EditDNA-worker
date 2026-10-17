@@ -19,6 +19,9 @@ Work in this order:
    consecutive beats from the SAME complete attempt so the video sounds like one continuous take; use another attempt
    only for a beat the complete attempt lacks (very often the HOOK is only in the first attempt). Each beat lists the
    whole LINES that deliver it.
+   Inside the attempt you build on, keep EVERY complete sentence that tells the viewer something (a fact, a proof, a
+   price, a comparison, a feeling about the product); drop only noise, talk off camera, or a sentence that repeats
+   another kept line.
 4. COHERENCE. Read your script from first line to last as the viewer will hear it. It must sound like one person saying
    one pitch: no sentence cut in the middle (never end on "porque", "que", "and", "because"...), no idea said twice (no
    repeated price, benefit, hook or call to action), no jump that only makes sense if you heard a deleted line, nothing
