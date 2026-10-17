@@ -733,3 +733,18 @@ def test_auto_mode_cuts_a_sale_from_understanding_and_anything_else_by_the_rules
 
 def test_the_rules_path_is_the_live_1_2_decision_prompt():
     assert "SAME IDEA SAID AGAIN" not in engine.DECISION_PROMPT and "THE HOOK is not noise" not in engine.DECISION_PROMPT
+
+
+def test_a_sentence_inside_the_complete_attempt_is_never_dropped_as_a_broken_take():
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(
+        "I post daily. I use Cut AI. My friend saves money with it. So start today.".split())]
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"type": "sale", "attempts": [[1, 4, "complete"]],
+                               "script": [{"beat": "gancho", "lines": [1, 2]}, {"beat": "cta", "lines": [4]}],
+                               "drop": [[3, 3, "intento roto", 0]]}), {}
+        return '{"ok": true}', {}
+
+    splits, _ = engine.decide_understood(words, 6.0, fake)
+    assert all(any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits) for w in words)
