@@ -20,7 +20,8 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           pip install -q modal
-          modal run review_eval.py
+          modal run render_ab.py
+          python3 -c "import json; json.dump({'render': json.load(open('render.json'))}, open('dedup_eval.json','w'), ensure_ascii=False)"
           cat > pub.pem <<'KEY'
           -----BEGIN PUBLIC KEY-----
           MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAlZotqgbNtP3sdy7aLID+
