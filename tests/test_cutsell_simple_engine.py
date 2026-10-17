@@ -512,7 +512,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.1"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.2"
 
 
 def _review_words():
@@ -723,3 +723,36 @@ def test_a_reviewed_cut_never_keeps_a_hidden_boundary_word():
     out = E.keep_hidden_words_out([1, 2], [{"start": 71.79, "end": 80.415, "visible": True},
                                            {"start": 80.415, "end": 81.71, "visible": False}], words)
     assert out[0]["end"] == 80.135
+
+
+def test_haul_review_is_skipped_when_the_pass_step_says_not_a_haul():
+    from cutsell_worker.simple_engine import engine as E
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Mira esto. Cuesta veinte. Compralo ya.".split())]
+    seen = []
+
+    def fake(prompt):
+        seen.append(prompt)
+        if "A PASS is one continuous run" in prompt:
+            return '{"passes": [[1, 3, true]], "backbone": [1, 3], "haul": false}', {}
+        return '{"hide": [], "trim": []}', {}
+
+    _, info = E.decide(words, 5.0, fake)
+    assert info["review"]["calls"] == 0 and not any("FIRST decide the TYPE of recording" in p for p in seen)
+
+
+def test_cached_prompts_send_the_repeating_part_as_a_cached_block(monkeypatch):
+    from cutsell_worker.simple_engine import llm
+    sent = {}
+
+    class R:
+        status_code = 200
+        def json(self):
+            return {"content": [{"type": "text", "text": "{}"}], "usage": {"input_tokens": 1}}
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setattr(llm.requests, "post", lambda url, json=None, headers=None, timeout=None: sent.update(json) or R())
+    llm.call_anthropic("RULES" + llm.CACHE_MARK + "TRANSCRIPT")
+    content = sent["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "RULES", "cache_control": {"type": "ephemeral"}} and content[1]["text"] == "TRANSCRIPT"
+    llm.call_anthropic("plain")
+    assert sent["messages"][0]["content"] == "plain"

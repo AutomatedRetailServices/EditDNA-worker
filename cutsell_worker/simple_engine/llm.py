@@ -8,6 +8,7 @@ import requests
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
 API_URL = "https://api.anthropic.com/v1/messages"
+CACHE_MARK = "\u241e"      # never in a transcript; marks the end of the cached part of a prompt
 
 
 def model_name() -> str:
@@ -19,7 +20,14 @@ def call_anthropic(prompt: str, *, max_tokens: int = 16000, attempts: int = 4) -
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY missing")
-    body = {"model": model_name(), "max_tokens": max_tokens, "messages": [{"role": "user", "content": prompt}]}
+    # CACHE_MARK splits a prompt into a part that repeats (rules / the same cut read 3 times) and the rest; the
+    # repeating part is sent as a cached block (Anthropic bills a cache read at a fraction of normal input).
+    if CACHE_MARK in prompt:
+        head, tail = prompt.split(CACHE_MARK, 1)
+        content = [{"type": "text", "text": head, "cache_control": {"type": "ephemeral"}}, {"type": "text", "text": tail}]
+    else:
+        content = prompt
+    body = {"model": model_name(), "max_tokens": max_tokens, "messages": [{"role": "user", "content": content}]}
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
     last: Exception | None = None
     for attempt in range(attempts):

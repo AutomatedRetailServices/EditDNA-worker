@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
@@ -207,7 +207,7 @@ def decide(words, duration, call: LLMCall, run: int = 0):
             "SINGLE PASS: the recording is one continuous story/pitch. When a sentence is retaken and each version has a concrete detail the other "
             "lacks (a body part or place, a number, a name, an example, a cause), keep BOTH versions; when one version only rephrases the other with "
             "nothing new, keep the most complete one. A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
-    prompt = DECISION_PROMPT + "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text
+    prompt = DECISION_PROMPT + _llm.CACHE_MARK + "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text
     d, u = _ask(call, f"v3dec-{run}", prompt); usage += u
     lab = labels(d, words, units)
     kept = sum(1 for st, _ in lab if st == "keep")
@@ -216,7 +216,12 @@ def decide(words, duration, call: LLMCall, run: int = 0):
         lab2 = labels(d2, words, units)
         if sum(1 for st, _ in lab2 if st == "keep") > kept:
             lab = lab2
-    lab, u, rv = review(words, units, lab, call, run); usage += u
+    # The pass step already read the whole recording: when it says it is not a haul / try-on, the haul review
+    # (which changes nothing on anything else) is not called. Missing flag -> called as before.
+    if p.get("haul") is False:
+        rv = {"haul": False, "hide": [], "unhide": [], "calls": 0, "errors": 0, "skipped": "pass step: not a haul"}
+    else:
+        lab, u, rv = review(words, units, lab, call, run); usage += u
     splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
     return splits, {"passes": len(passes) if multi else 1, "usage": usage, "review": rv, "labels": lab}
 
@@ -266,7 +271,7 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=None):
         answer = None
         for attempt in range(2):
             try:
-                text, u = call(prompt + f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
+                text, u = call(prompt + _llm.CACHE_MARK + f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
                 answer = _json_obj(text, "fixes")
                 break
             except Exception:

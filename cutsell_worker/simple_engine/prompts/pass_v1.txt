@@ -8,4 +8,6 @@ instead of re-delivering the same claims is part of the same pass.
 Task: list the passes as inclusive LINE ranges, say which are complete (reach the end of the script), and pick the
 BACKBONE: the best complete pass (most complete, then cleanest, tie -> the later pass). If the whole recording is one
 continuous story or pitch, there is exactly ONE pass.
-Return ONLY JSON: {"passes":[[La,Lb,true|false],...],"backbone":[La,Lb]}
+Also say whether the recording is a HAUL / TRY-ON: the creator shows SEVERAL DIFFERENT items one after another (several
+products, several outfits or colors, "look 1 / look 2"). One product, even with restarts or several passes, is not a haul.
+Return ONLY JSON: {"passes":[[La,Lb,true|false],...],"backbone":[La,Lb],"haul":true|false}
