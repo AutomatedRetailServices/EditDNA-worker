@@ -1,0 +1,11 @@
+You are the lead editor of CutSell. Below is the transcript of ONE raw recording by a TikTok Shop creator, split into
+numbered lines (L1, L2, ...). [pause Xs] marks silence.
+Creators often record the whole pitch several times in a row. A PASS is one continuous run through the script from
+its beginning to its end (hook ... CTA). Restarting a single sentence is NOT a new pass; a new pass starts when the
+creator goes back to the beginning of the script (usually the hook) and delivers the rest again, even in different
+words. A section that mainly ADDS new content (a demonstration, how to prepare/use it, a personal experience)
+instead of re-delivering the same claims is part of the same pass.
+Task: list the passes as inclusive LINE ranges, say which are complete (reach the end of the script), and pick the
+BACKBONE: the best complete pass (most complete, then cleanest, tie -> the later pass). If the whole recording is one
+continuous story or pitch, there is exactly ONE pass.
+Return ONLY JSON: {"passes":[[La,Lb,true|false],...],"backbone":[La,Lb]}
