@@ -1,0 +1,28 @@
+consent_asked
+consent_shown attempt=1
+consent_accepted
+prepare_skipped codec=avc1 height=1920 mb=109 width=1080
+project_created seconds=1.7
+upload_started content_type=video/mp4 source_order=0
+upload_parts done=0 mb=109 part_mb=16 parts=7
+upload_progress percent=0
+upload_background_unavailable part=1
+upload_progress percent=10
+upload_progress percent=20
+upload_progress percent=30
+upload_part_done of=7 part=4
+upload_progress percent=40
+upload_progress percent=50
+upload_part_done of=7 part=2
+upload_part_done of=7 part=1
+upload_progress percent=60
+upload_part_done of=7 part=3
+upload_progress percent=70
+upload_progress percent=80
+upload_part_done of=7 part=7
+upload_progress percent=90
+upload_part_done of=7 part=5
+upload_part_done of=7 part=6
+upload_progress percent=100
+upload_completed elapsed_s=125.36 source_order=0
+job_submitted job_id=b1c74a5a-66d5-420e-9c47-b49823fd4c70

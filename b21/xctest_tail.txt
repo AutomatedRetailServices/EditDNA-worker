@@ -1,0 +1,47 @@
+ng existence of `"processingPercent" Any`
+    t =   199.57s Find the "processingPercent" Any
+    t =   199.64s Find the "processingStage" Any
+    t =   199.68s Find the "processingStage" StaticText
+    t =   201.25s Checking existence of `"readyReviewButton" Any`
+B21UI   204.7 screen steps: 4s Creating your project … → 8s Uploading your video 0% → 13s Uploading your video 5% → 17s Uploading your video 8% → 20s Uploading your video 11% → 25s Uploading your video 15% → 57s Uploading your video 43% → 60s Uploading your video 44% → 62s Uploading your video 47% → 65s Uploading your video 49% → 68s Uploading your video 51% → 70s Uploading your video 53% → 73s Uploading your video 56% → 76s Uploading your video 58% → 80s Uploading your video 61% → 84s Uploading your video 65% → 87s Uploading your video 67% → 90s Uploading your video 70% → 93s Uploading your video 72% → 96s Uploading your video 75% → 99s Uploading your video 78% → 102s Uploading your video 80% → 105s Uploading your video 83% → 108s Uploading your video 85% → 111s Uploading your video 87% → 114s Uploading your video 89% → 116s Uploading your video 91% → 119s Uploading your video 94% → 122s Uploading your video 96% → 125s Uploading your video 99% → 131s Starting your cut … → 140s Waiting for CutSell 21% → 148s Waiting for CutSell 28% → 154s Waiting for CutSell 53% → 160s Waiting for CutSell 95%
+B21UI   204.7 PASS left CutSell mid-upload and came back
+B21UI   204.7 PASS upload finished · 123 s uploading (limited to ~1 MB/s)
+B21UI   204.7 PASS no 'No data sent' notice
+B21UI   204.7 PASS upload % never went back
+B21UI   204.7 PASS no error screen
+B21UI   204.7 PASS processed · 174 s from Create
+    t =   204.70s Tap "readyReviewButton" Any
+    t =   204.70s     Wait for ai.cutsell.app to idle
+    t =   204.70s     Find the "readyReviewButton" Any
+    t =   204.91s     Check for interrupting elements affecting "readyReviewButton" Button
+    t =   205.07s     Synthesize event
+    t =   205.42s     Wait for ai.cutsell.app to idle
+    t =   206.07s Waiting 120.0s for "timelineV4" Any to exist
+    t =   207.07s     Checking `Expect predicate `existsNoRetry == 1` for object "timelineV4" Any`
+    t =   207.08s         Checking existence of `"timelineV4" Any`
+    t =   207.39s         Capturing element debug description
+    t =   208.13s     Checking `Expect predicate `existsNoRetry == 1` for object "timelineV4" Any`
+    t =   208.13s         Checking existence of `"timelineV4" Any`
+    t =   208.43s         Capturing element debug description
+    t =   209.15s     Checking `Expect predicate `existsNoRetry == 1` for object "timelineV4" Any`
+    t =   209.15s         Checking existence of `"timelineV4" Any`
+B21UI   214.5 PASS opens in the editor
+B21UI   214.5 FAILURES: none
+    t =   214.29s Tear Down
+Test Case '-[CutSellUITests.Build21UITests testThrottledUploadLeavingTheApp]' passed (217.655 seconds).
+Test Suite 'Build21UITests' passed at 2026-10-17 01:52:44.694.
+	 Executed 1 test, with 0 failures (0 unexpected) in 217.655 (217.660) seconds
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-17 01:52:44.695.
+	 Executed 1 test, with 0 failures (0 unexpected) in 217.655 (217.662) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 01:52:44.697.
+	 Executed 1 test, with 0 failures (0 unexpected) in 217.655 (217.665) seconds
+2026-10-17 01:52:47.263 xcodebuild[21329:62680] [MT] IDETestOperationsObserverDebug: 256.936 elapsed -- Testing started completed.
+2026-10-17 01:52:47.263 xcodebuild[21329:62680] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-17 01:52:47.263 xcodebuild[21329:62680] [MT] IDETestOperationsObserverDebug: 256.936 sec, +256.936 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.17_01-48-24-+0000.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started

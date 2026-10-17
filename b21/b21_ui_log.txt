@@ -1,0 +1,14 @@
+B21UI    25.9 Photos access allowed
+B21UI    26.3 gallery shows 1 videos
+B21UI    32.5 AI notice agreed
+B21UI    55.1 leaving CutSell at 15%
+B21UI    84.4 back in CutSell: Uploading your video 40%
+B21UI   204.7 screen steps: 4s Creating your project … → 8s Uploading your video 0% → 13s Uploading your video 5% → 17s Uploading your video 8% → 20s Uploading your video 11% → 25s Uploading your video 15% → 57s Uploading your video 43% → 60s Uploading your video 44% → 62s Uploading your video 47% → 65s Uploading your video 49% → 68s Uploading your video 51% → 70s Uploading your video 53% → 73s Uploading your video 56% → 76s Uploading your video 58% → 80s Uploading your video 61% → 84s Uploading your video 65% → 87s Uploading your video 67% → 90s Uploading your video 70% → 93s Uploading your video 72% → 96s Uploading your video 75% → 99s Uploading your video 78% → 102s Uploading your video 80% → 105s Uploading your video 83% → 108s Uploading your video 85% → 111s Uploading your video 87% → 114s Uploading your video 89% → 116s Uploading your video 91% → 119s Uploading your video 94% → 122s Uploading your video 96% → 125s Uploading your video 99% → 131s Starting your cut … → 140s Waiting for CutSell 21% → 148s Waiting for CutSell 28% → 154s Waiting for CutSell 53% → 160s Waiting for CutSell 95%
+B21UI   204.7 PASS left CutSell mid-upload and came back
+B21UI   204.7 PASS upload finished · 123 s uploading (limited to ~1 MB/s)
+B21UI   204.7 PASS no 'No data sent' notice
+B21UI   204.7 PASS upload % never went back
+B21UI   204.7 PASS no error screen
+B21UI   204.7 PASS processed · 174 s from Create
+B21UI   214.5 PASS opens in the editor
+B21UI   214.5 FAILURES: none
