@@ -716,11 +716,12 @@ def caption_groups(caps, max_words: int = 3, max_gap: float = 0.45):
 def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cut_list=None,
             llm: Optional[LLMCall] = None, mode: Optional[str] = None) -> dict:
     """words: [{"w","s","e"}] from Deepgram. Returns splits (full non-destructive timeline) + captions.
-    mode "rules" = the 1.2 decision only (default); "review" = 1.2 + the sale review (CUTSELL_SIMPLE_ENGINE_MODE)."""
+    mode "review" (default, 1.2.1) = the 1.2 decision + the sale review; "rules" = the 1.2 decision only
+    (CUTSELL_SIMPLE_ENGINE_MODE=rules in the Modal secret switches back without a redeploy)."""
     if not words:
         raise ValueError("simple engine: no words to edit")
     call = llm or _llm.call_anthropic
-    mode = (mode or os.environ.get("CUTSELL_SIMPLE_ENGINE_MODE", "") or "rules").strip().lower()
+    mode = (mode or os.environ.get("CUTSELL_SIMPLE_ENGINE_MODE", "") or "review").strip().lower()
     if mode == "review":
         splits, info = decide_reviewed(words, float(duration), call, run)
     else:

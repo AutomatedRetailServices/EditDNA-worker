@@ -16,6 +16,12 @@ import pytest
 from cutsell_worker import config as cutsell_config
 from cutsell_worker import draft_edits, simple_engine_adapter, worker_job
 from cutsell_worker.contracts import JobState, ProcessingRequest, SourceAsset
+
+
+@pytest.fixture(autouse=True)
+def _rules_path(monkeypatch):
+    """These tests count the 1.2 decision calls; the 1.2.1 sale review has its own tests below."""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "rules")
 from cutsell_worker.serde import draft_from_dict, result_to_dict
 from cutsell_worker.simple_engine import asr as se_asr
 from cutsell_worker.simple_engine import engine as se
@@ -699,11 +705,11 @@ def test_sale_review_never_loses_the_price(monkeypatch):
     assert info.get("rejected") and all(l[0] == "keep" for l in lab)
 
 
-def test_review_mode_is_off_unless_asked(monkeypatch):
+def test_review_mode_is_the_default_and_rules_switches_it_off(monkeypatch):
     from cutsell_worker.simple_engine import engine as E
     monkeypatch.delenv("CUTSELL_SIMPLE_ENGINE_MODE", raising=False)
     import inspect
-    assert '"rules").strip().lower()' in inspect.getsource(E.process)
+    assert '"review").strip().lower()' in inspect.getsource(E.process) and 'mode == "review"' in inspect.getsource(E.process)
 
 
 def test_sale_review_knows_the_restarted_pitch():
