@@ -1,6 +1,10 @@
-B19UI    47.8 short: gallery shows 0 videos
-B19UI    48.6 FAIL short: video in the gallery
-B19UI    49.1 FAILURES (short): short: video in the gallery
-B19UI    96.1 big4k: gallery shows 0 videos
-B19UI    96.2 FAIL big4k: video in the gallery
-B19UI    96.4 FAILURES (big 4K): big4k: video in the gallery
+B19UI    28.3 short: Photos access allowed
+B19UI    30.4 short: gallery shows 2 videos
+B19UI    51.1 short: no AI notice (already agreed)
+B19UI  1852.8 short: screen steps: 
+B19UI  1852.8 FAIL short: upload % moves past 0 · never
+B19UI  1852.8 PASS short: no error screen
+B19UI  1852.8 FAIL short: uploaded and processed · 1818 s from Create
+B19UI  1853.1 FAILURES (short): short: upload % moves past 0 | short: uploaded and processed
+B19UI  1866.6 big4k: gallery shows 2 videos
+B19UI  1885.9 big4k: no AI notice (already agreed)
