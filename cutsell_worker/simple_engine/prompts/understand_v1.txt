@@ -22,7 +22,10 @@ Work in this order:
 
 The HOOK is the first sentence she says TO THE VIEWER, even when it sounds like a reaction or a joke to herself
 ("¿Quién me mandó a comprar esto?", "Attention all my short girls", "You need this"); it opens the video when she said
-one. The LAST line of the video must end as a complete sentence or a natural goodbye, never on "pero mira," or "so,".
+one. Her CLOSER after the call to action (a last punch like "pero mira, irresistible, van a querer comer", "trust me,
+you need it", a goodbye) is part of the pitch: keep it as the last beat. The video must end on a complete sentence: if
+the line you end on finishes with a connector ("pero mira,", "so,"), also keep the line that completes it; never cut the
+closer to avoid it.
 Rules: use only lines that exist; never reorder (the lines of the script, all beats together, must be in increasing
 order: if the best delivery of a beat comes earlier in the recording than a beat before it, pick another delivery or
 drop the beat); never invent words; when one line mixes a good part and a stumble, keep the whole line. Keep her personality and her own phrases. Write "message", "beat", "why" and "reason" in Spanish.
