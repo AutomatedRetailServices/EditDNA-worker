@@ -15,9 +15,9 @@ image = (
     .env({"CUTSELL_ENGINE": "simple"})
     .add_local_dir("cutsell_worker", remote_path="/root/cutsell_worker", ignore=["**/__pycache__/**", "**/*.pyc"])
 )
-PROJECTS = ("d87a5b66",)
+PROJECTS = ("d87a5b66", "9ea8d6f2", "ec57457c", "71627def")
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-PREFIX = "engine-ab-tests/2026-10-17-comprension9"
+PREFIX = "engine-ab-tests/2026-10-17-v14-auto"
 
 
 def _h(v):
@@ -83,9 +83,9 @@ def one(ph):
         usage = []
         def call(prompt):
             text, u = call_anthropic(prompt); usage.append(u); return text, u
-        new = engine.process(words, duration, audio, video_path=src, llm=call, mode="understand")
+        new = engine.process(words, duration, audio, video_path=src, llm=call)
         links = {}
-        for name, splits, label in (("actual", stored, "ACTUAL (1.2)"), ("nueva", new["splits"], "NUEVA (COMPRENSION)")):
+        for name, splits, label in (("actual", stored, "ACTUAL (1.2)"), ("nueva", new["splits"], "NUEVA (1.4)")):
             out = _render(src, splits, label, str(Path(d) / f"{name}.mp4"))
             key = f"{PREFIX}/{ph}-{name}.mp4"
             s3.upload_file(out, bucket, key, ExtraArgs={"ContentType": "video/mp4"})
@@ -99,7 +99,7 @@ def one(ph):
     return {"project": ph, "duration": round(duration, 1), "language": heard.get("language"), "links": links,
             "actual": show(stored), "nueva": show(new["splits"]), "usage": usage,
             "words": words, "raw_splits": new["splits"], "log": new.get("log"),
-            "comprension": (new.get("log") or {}).get("comprension"), "revision": (new.get("log") or {}).get("revision")}
+            "comprension": (new.get("log") or {}).get("comprension"), "modo": (new.get("log") or {}).get("modo"), "revision": (new.get("log") or {}).get("revision")}
 
 
 @app.local_entrypoint()
