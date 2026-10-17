@@ -1,4 +1,4 @@
-"""CutSell simple engine v1.0 - decision + finishing, calibrated on the 25-video Human Gold set.
+"""CutSell simple engine v1.3 - decision + finishing, calibrated on the 25-video Human Gold set.
 
 words (Deepgram, word times) -> pass step -> decision step -> loose-piece rule -> silence refine
 -> shot-change snap -> splits (visible / hidden + reason) + captions on the timeline of the cut.
@@ -20,7 +20,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2"
+VERSION = "1.3"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
@@ -29,7 +29,7 @@ FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v1.txt").read_text(encoding="ut
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
 OV = 0.08                                   # audio crossfade assumed at every junction (s)
-WHY = {"r": "retoma", "a": "frase abandonada", "n": "ruido", "p": "otra pasada"}
+WHY = {"r": "retoma", "a": "frase abandonada", "n": "ruido", "p": "otra pasada", "d": "repetido"}
 # splits_from_labels
 MAX_INNER_PAUSE, INNER_PAUSE_KEEP, PAD_BEFORE, PAD_AFTER, MERGE_GAP = 0.60, 0.25, 0.08, 0.15, 0.12
 MAX_WORD, WORD_CLAMP = 1.2, 0.9
@@ -61,7 +61,7 @@ def parse(text: str) -> dict:
                 obj = json.JSONDecoder().raw_decode(candidate[match.start():])[0]
             except Exception:
                 continue
-            if isinstance(obj, dict) and ("hide" in obj or "passes" in obj or "trim" in obj):
+            if isinstance(obj, dict) and ("hide" in obj or "passes" in obj or "trim" in obj or "dup" in obj):
                 best = obj
         if best is not None:
             return best
@@ -106,17 +106,81 @@ def _ask(call: LLMCall, tag: str, prompt: str, tries: int = 3):
     raise RuntimeError(f"engine answer unreadable after {tries} tries: {last}")
 
 
+def _quote(words, unit, n=7) -> str:
+    text = " ".join(words[k]["w"] for k in unit[:n])
+    return text + ("…" if len(unit) > n else "")
+
+
+def _repeat_reason(words, units, lw) -> str:
+    """'repetido · queda L12 «first words of the kept version…»' (shown in the log)."""
+    try:
+        lw = int(lw)
+    except Exception:
+        return "repetido"
+    if not 1 <= lw <= len(units):
+        return "repetido"
+    return f"repetido · queda L{lw} «{_quote(words, units[lw - 1])}»"
+
+
+_NUMBER = re.compile(r"\d|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred|"
+                     r"uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|veinte|treinta|cuarenta|cincuenta|cien|mil)\b", re.I)
+
+
+def _facts(text: str) -> set:
+    """Numbers/prices in a line (digits and spelled-out numbers), to never lose a fact to the 'repetido' rule."""
+    return {_norm(m.group(0)) for m in re.finditer(r"\$?\d[\d.,]*|\b[a-záéíóúñ]+\b", text.lower()) if _NUMBER.search(m.group(0))}
+
+
 def labels(dec, words, units):
     n = len(units)
     lab = [("keep", "se queda")] * len(words)
+    repeats = []
     for h in dec.get("hide", []):
         try:
             a, b = int(h[0]), int(h[1])
         except Exception:
             continue
+        code = h[2] if len(h) > 2 else ""
+        if code == "d":
+            repeats.append((max(1, a), min(n, b), h[3] if len(h) > 3 else None))
+            continue
         for ln in range(max(1, a), min(n, b) + 1):
             for k in units[ln - 1]:
-                lab[k] = ("hide", WHY.get(h[2] if len(h) > 2 else "", "ruido"))
+                lab[k] = ("hide", WHY.get(code, "ruido"))
+    # "d" (same idea said again) is applied after the other hides, with two guards (when in doubt, keep):
+    # the kept version must really be on screen, and no number/price may disappear from the cut.
+    for a, b, lw in repeats:
+        try:
+            lw_ok = 1 <= int(lw) <= n and not (a <= int(lw) <= b) and all(lab[k][0] == "keep" for k in units[int(lw) - 1])
+        except Exception:
+            lw_ok = False
+        if not lw_ok:
+            continue
+        for ln in range(a, b + 1):
+            line = " ".join(words[k]["w"] for k in units[ln - 1])
+            kept_text = " ".join(words[k]["w"] for k, l in enumerate(lab) if l[0] == "keep" and k not in units[ln - 1])
+            if _facts(line) - _facts(kept_text):
+                continue
+            for k in units[ln - 1]:
+                lab[k] = ("hide", _repeat_reason(words, units, lw))
+    for t in dec.get("dup", []):
+        try:
+            ln = int(t[0])
+            target = [_norm(x) for x in str(t[1]).split() if _norm(x)]
+            lw = t[2] if len(t) > 2 else None
+        except Exception:
+            continue
+        if not (1 <= ln <= n) or not target:
+            continue
+        u = units[ln - 1]
+        toks = [_norm(words[k]["w"]) for k in u]
+        for i in range(len(toks) - len(target) + 1):
+            if toks[i:i + len(target)] == target:
+                rest = len(toks) - len(target)
+                if rest >= 3 and all(lab[k][0] == "keep" for k in u):
+                    for k in u[i:i + len(target)]:
+                        lab[k] = ("hide", _repeat_reason(words, units, lw))
+                break
     for t in dec.get("trim", []):
         try:
             ln = int(t[0])
@@ -199,9 +263,10 @@ def decide(words, duration, call: LLMCall, run: int = 0):
              and isinstance(backbone, list) and len(backbone) == 2)
     mode = ("MULTI-PASS: the recording has several passes. The BACKBONE is fixed: lines L%d..L%d. Hide everything outside it with code \"p\", "
             "except a whole sentence with a fact the backbone truly lacks." % (backbone[0], backbone[1])) if multi else (
-            "SINGLE PASS: the recording is one continuous story/pitch. When a sentence is retaken and each version has a concrete detail the other "
-            "lacks (a body part or place, a number, a name, an example, a cause), keep BOTH versions; when one version only rephrases the other with "
-            "nothing new, keep the most complete one. A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
+            "SINGLE PASS: the recording is one continuous story/pitch. When the same idea is said twice (a retake, or the same claim, benefit, "
+            "price, hook or call to action said again later), keep ONLY the most complete and best delivered version. Keep the other version only "
+            "for an important new fact it adds (a number, a price, another benefit, a proof), and then only its new part when it can be cut "
+            "cleanly (\"dup\"). A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
     prompt = DECISION_PROMPT + "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text
     d, u = _ask(call, f"v3dec-{run}", prompt); usage += u
     lab = labels(d, words, units)
@@ -283,10 +348,15 @@ def review(words, units, lab, call: LLMCall, run: int = 0):
 
     hide, unhide = (votes("hide"), votes("unhide")) if haul else (set(), set())
     lab = list(lab)
+    refs = {}
+    for a in answers:
+        for x in a.get("hide", []) or []:
+            if isinstance(x, (list, tuple)) and len(x) > 1 and _line_no(x) is not None:
+                refs.setdefault(_line_no(x), x[1])
     for ln in hide:
         if kept[ln - 1]:
             for k in units[ln - 1]:
-                lab[k] = ("hide", "retoma")
+                lab[k] = ("hide", _repeat_reason(words, units, refs.get(ln)) if ln in refs else "retoma")
     for ln in unhide:
         if not kept[ln - 1]:
             for k in units[ln - 1]:

@@ -40,7 +40,8 @@ STRICT DEFINITION OF A RETAKE (most important rule): two sentences are attempts 
 clearly re-saying the same line: the second comes right after the first (or right after a stumble, a pause or a comment
 about the recording), starts the same way and replaces it. If other content was said in between and the creator comes back
 to the topic later (a callback, a recap, a conclusion, a second example, a reaction, a CTA said again at the end of a story),
-these are DIFFERENT ideas: list them separately and keep both. In a storytelling or conversational recording (one continuous
+these are not RETAKES (code "r"); but if the later sentence gives the same claim, benefit, price, hook or call to action
+again, it is the SAME IDEA SAID AGAIN (code "d", below). In a storytelling or conversational recording (one continuous
 story) almost every complete sentence is kept; only immediate restarts, abandoned sentences and stumbles are hidden.
 EXCEPTION - RESTARTED PITCH: when the creator starts the script again from its beginning (says the hook / opening line again,
 for example after "otra vez", "vamos otra vez", an interruption, or a long pause), every sentence of the earlier run that the
@@ -54,15 +55,31 @@ even if its sentences are worded differently. Rescue from the hidden run only a 
 run lacks (a number, a size, a price, a name); a feeling, a benefit or a description already covered in other words is not
 a new fact. This applies only when the same introduction is said again for the same item; a new item is new content.
 The short goodbye at the very end ("bye", "chao", "besitos", "me cuentan en los comentarios") is always kept.
-When you are not sure whether a complete sentence is a retake or new content, KEEP it: hiding real content is a worse error
-than leaving a repetition.
+SAME IDEA SAID AGAIN (code "d", "repetido"): inside one run, the final video must never say the same thing twice. Two
+complete sentences carry the SAME IDEA when they give the same product claim, the same benefit, the same price, the same
+hook or the same call to action, even far apart and in other words (for example "huele a mujer con dinero" ... later
+"huele como mujer con dinero, con vision"; "lo mejor es el precio" ... later "y lo mejor es el precio, veinte dolares";
+"I'm bringing the pizza, give me the money" ... later "I'm bringing a pizza and, like, pay me for the pizza").
+- Keep ONLY the most complete and best delivered version (checklist C); hide the other with code "d" and Lw = the kept line.
+- Keep both only when the other version adds an IMPORTANT NEW FACT the kept one lacks (another number, another price,
+  another benefit, another proof/example). Then hide just its repeated words with "dup" (see ANSWER FORMAT) when the new
+  part still reads as a complete sentence on its own; if it cannot be cut cleanly, keep the whole line.
+- Never let the same price, the same hook or the same call to action play twice in the final video.
+- NOT the same idea: a new item or product, a new step, a new example, a different fact about the same topic, the short
+  goodbye at the very end, and a story's reaction or punchline that adds nothing factual but is part of the story's flow
+  only when it is NOT a restatement of an earlier line.
+When you are not sure whether a complete sentence is new content, KEEP it. But a sentence that clearly repeats an idea
+already kept is not "unsure": hide it with "d".
 
 
 ANSWER FORMAT. Everything you do not list is KEPT. Return ONLY JSON, no prose, as short as possible:
-{"hide":[[La,Lb,"code",Lw],...],"trim":[[L,"exact words"],...]}
+{"hide":[[La,Lb,"code",Lw],...],"trim":[[L,"exact words"],...],"dup":[[L,"exact words",Lw],...]}
 "hide" = line ranges to hide (La..Lb inclusive, numbers only). code: "r" = retake of a line that is kept (add Lw = the
 line number of the kept version), "a" = abandoned / cut-off sentence, "n" = noise (off camera, comment about the
-recording, setup, after the ending), "p" = belongs to another pass than the backbone.
+recording, setup, after the ending), "p" = belongs to another pass than the backbone, "d" = the same idea as a line that is kept, said again
+(add Lw = the line number of the kept version).
 "trim" = a stumble INSIDE a kept line: the line number and the exact words to remove, copied from the line (a repeated
 word, a false start, a hesitation sound, the wrong half of a self-correction). Use it only for clear stumbles.
+"dup" = the repeated words INSIDE a line that is kept only for its new fact: the line number, the exact words to remove
+(copied from the line) and Lw = the line that already says them.
 Do not list kept lines. Do not explain.

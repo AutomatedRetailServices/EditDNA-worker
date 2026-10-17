@@ -16,6 +16,7 @@ import pytest
 from cutsell_worker import config as cutsell_config
 from cutsell_worker import draft_edits, simple_engine_adapter, worker_job
 from cutsell_worker.contracts import JobState, ProcessingRequest, SourceAsset
+from cutsell_worker.simple_engine import engine
 from cutsell_worker.serde import draft_from_dict, result_to_dict
 from cutsell_worker.simple_engine import asr as se_asr
 from cutsell_worker.simple_engine import engine as se
@@ -506,7 +507,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.3"
 
 
 def _review_words():
@@ -589,3 +590,37 @@ def test_fix_words_changes_caption_text_only_for_kept_words():
     shown, fixes, usage = engine.fix_words(words, splits, call)
     assert shown[2]["w"] == "Shein" and shown[3]["w"] == "malo" and words[2]["w"] == "por"
     assert fixes == [[2, "por", "Shein"]] and len(usage) == 1
+
+
+def _w(text):
+    return [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(text.split())]
+
+
+def test_repetido_hides_the_same_idea_with_a_reference_to_the_kept_line():
+    words = _w("Lo mejor es el precio. Huele a mujer con dinero. Y lo mejor es el precio.")
+    units = engine.lines_of(words)
+    lab = engine.labels({"hide": [[3, 3, "d", 1]]}, words, units)
+    assert all(l == ("hide", "repetido · queda L1 «Lo mejor es el precio.»") for l in lab[-6:])
+    assert all(l[0] == "keep" for l in lab[:-6])
+    assert engine.WHY["d"] == "repetido" and '"d" = the same idea' in engine.DECISION_PROMPT
+
+
+def test_repetido_never_drops_a_number_and_needs_a_kept_reference():
+    words = _w("Lo mejor es el precio. Huele a mujer con dinero. Y lo mejor es el precio, veinte dolares.")
+    units = engine.lines_of(words)
+    # the repeat carries a number the cut does not have anywhere else: kept
+    assert all(l[0] == "keep" for l in engine.labels({"hide": [[3, 3, "d", 1]]}, words, units))
+    plain = _w("Lo mejor es el precio. Huele a mujer con dinero. Y lo mejor es el precio.")
+    pu = engine.lines_of(plain)
+    # reference missing, pointing at itself, or at a hidden line: kept
+    for dec in ({"hide": [[3, 3, "d"]]}, {"hide": [[3, 3, "d", 3]]}, {"hide": [[1, 1, "a"], [3, 3, "d", 1]]}):
+        assert all(l[0] == "keep" for l in engine.labels(dec, plain, pu)[-6:]), dec
+
+
+def test_dup_removes_only_the_repeated_words_when_the_rest_stands_alone():
+    words = _w("Huele a mujer con dinero. Huele a mujer con dinero y dura todo el dia en la piel.")
+    units = engine.lines_of(words)
+    lab = engine.labels({"dup": [[2, "Huele a mujer con dinero y", 1]]}, words, units)
+    second = [lab[k] for k in units[1]]
+    assert [l[0] for l in second[:6]] == ["hide"] * 6 and second[0][1].startswith("repetido · queda L1")
+    assert all(l == ("keep", "se queda") for l in second[6:])
