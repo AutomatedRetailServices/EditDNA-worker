@@ -17,7 +17,7 @@ image = (
 )
 PROJECTS = ("d87a5b66",)
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-PREFIX = "engine-ab-tests/2026-10-17-comprension2"
+PREFIX = "engine-ab-tests/2026-10-17-comprension3"
 
 
 def _h(v):
@@ -98,6 +98,7 @@ def one(ph):
                 for s in splits]
     return {"project": ph, "duration": round(duration, 1), "language": heard.get("language"), "links": links,
             "actual": show(stored), "nueva": show(new["splits"]), "usage": usage,
+            "words": words, "raw_splits": new["splits"], "log": new.get("log"),
             "comprension": (new.get("log") or {}).get("comprension"), "revision": (new.get("log") or {}).get("revision")}
 
 
