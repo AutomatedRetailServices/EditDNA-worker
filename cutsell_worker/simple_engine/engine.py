@@ -768,6 +768,8 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
         scene_cut_list = scene_cuts(video_path)
     log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
     splits = breathe(splits, words, float(duration))
+    if mode == "understand":            # the breathing pause may not reach into a hidden word either
+        splits = keep_hidden_words_out(info.get("hidden_idx") or [], splits, words)
     shown, fixes, u = fix_words(words, splits, call); info["usage"] += u
     caps, cut_duration = captions(shown, splits)
     log["revision"] = info.get("review"); log["palabras"] = fixes
