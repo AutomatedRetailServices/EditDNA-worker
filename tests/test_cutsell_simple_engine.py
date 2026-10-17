@@ -512,7 +512,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.1"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.2"
 
 
 def _review_words():

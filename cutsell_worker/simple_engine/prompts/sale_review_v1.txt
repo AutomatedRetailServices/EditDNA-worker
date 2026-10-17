@@ -26,4 +26,5 @@ C. MISSING ("missing"): her hook (first sentence to the viewer), the price, the 
 Never touch anything else. Never hide a line only because it is informal, long or emotional. When unsure, no fix.
 Return ONLY JSON:
 {"type":"sale","fixes":[{"kind":"restart"|"mixed"|"repeat"|"missing","hide":[L,...],"unhide":[L,...],"why":"..."}]}
-Write "why" in Spanish. Use only line numbers that exist.
+Write "why" in Spanish, at most 8 words. Use only line numbers that exist.
+Your whole answer is that JSON object and nothing else: no analysis, no headings, no notes before or after it, no code fences.

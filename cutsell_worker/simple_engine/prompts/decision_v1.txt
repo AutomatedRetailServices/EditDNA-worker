@@ -66,3 +66,4 @@ recording, setup, after the ending), "p" = belongs to another pass than the back
 "trim" = a stumble INSIDE a kept line: the line number and the exact words to remove, copied from the line (a repeated
 word, a false start, a hesitation sound, the wrong half of a self-correction). Use it only for clear stumbles.
 Do not list kept lines. Do not explain.
+Your whole answer is that JSON object and nothing else: no analysis, no headings, no notes before or after it, no code fences.

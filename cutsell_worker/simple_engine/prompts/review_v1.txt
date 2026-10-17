@@ -19,3 +19,4 @@ Fix ONLY these two problems, nothing else:
    take: hide the line from the other take and keep (unhide) the matching [CUT] line of the chosen take.
 Do not touch anything else. If the cut has neither problem, return empty lists. When unsure, change nothing.
 Return ONLY JSON: {"type":"haul"|"other","hide":[[L, Lk],...],"unhide":[line numbers]}  (for each hidden line L, Lk = the KEEP line that already says it)
+Your whole answer is that JSON object and nothing else: no analysis, no headings, no notes before or after it, no code fences.
