@@ -1,23 +1,31 @@
-ai_consent_asked
-ai_consent_shown attempt=1
-ai_consent_answered agreed=true
-photos_copied seconds=0.1
-project_created
+project_created seconds=1.5
 upload_started content_type=video/mp4 source_order=0
 upload_parts done=0 mb=0 part_mb=16 parts=1
-upload_retry attempt=1 error=NSCocoaErrorDomain 514 what=part 1
-upload_retry attempt=2 error=NSCocoaErrorDomain 514 what=part 1
-cut_submit_failed error=NSCocoaErrorDomain 514 reason=NSError step=Uploading your video
-photos_copied seconds=0.2
+upload_progress percent=0
+upload_retry attempt=1 error=network error -1 what=part 1
+upload_retry attempt=2 error=network error -1 what=part 1
+upload_failed reason=network error -1 step=Uploading your video type=NSURLError
 prepare_started height=2160 mb=271 width=3840
+prepare_progress percent=0
+prepare_progress percent=10
+prepare_progress percent=20
+prepare_progress percent=30
+prepare_progress percent=40
+prepare_progress percent=50
+prepare_progress percent=60
+prepare_progress percent=70
+prepare_progress percent=80
+prepare_progress percent=90
 prepare_finished mb=136
-project_created
+prepare_progress percent=100
+project_created seconds=1.7
 upload_started content_type=video/mp4 source_order=0
 upload_parts done=0 mb=136 part_mb=16 parts=9
-upload_retry attempt=1 error=NSCocoaErrorDomain 514 what=part 1
-upload_retry attempt=1 error=NSCocoaErrorDomain 514 what=part 2
-upload_retry attempt=1 error=NSCocoaErrorDomain 514 what=part 3
-upload_retry attempt=2 error=NSCocoaErrorDomain 514 what=part 1
-upload_retry attempt=2 error=NSCocoaErrorDomain 514 what=part 2
-upload_retry attempt=2 error=NSCocoaErrorDomain 514 what=part 3
-cut_submit_failed error=NSCocoaErrorDomain 514 reason=NSError step=Uploading your video
+upload_progress percent=0
+upload_retry attempt=1 error=network error -1 what=part 1
+upload_retry attempt=1 error=network error -1 what=part 2
+upload_retry attempt=1 error=network error -1 what=part 3
+upload_retry attempt=2 error=network error -1 what=part 1
+upload_retry attempt=2 error=network error -1 what=part 3
+upload_retry attempt=2 error=network error -1 what=part 2
+upload_failed reason=network error -1 step=Uploading your video type=NSURLError
