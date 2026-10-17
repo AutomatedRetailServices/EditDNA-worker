@@ -664,7 +664,6 @@ def test_understanding_mode_never_ends_a_kept_line_on_a_hanging_comma():
 def test_a_kept_part_never_stretches_over_the_next_hidden_words():
     words = [{"w": "fue,", "s": 101.435, "e": 101.755}, {"w": "pero", "s": 101.755, "e": 101.915},
              {"w": "mira,", "s": 101.915, "e": 102.475}, {"w": "irresistible", "s": 102.475, "e": 103.275}]
-    before = [{"start": 100.0, "end": 101.76, "visible": True}, {"start": 101.76, "end": 104.0, "visible": False}]
     after = [{"start": 100.0, "end": 102.195, "visible": True}, {"start": 102.195, "end": 104.0, "visible": False}]
-    out = engine.keep_hidden_words_out(before, after, words)
+    out = engine.keep_hidden_words_out([1, 2, 3], after, words)
     assert out[0]["end"] == 101.755 and out[1]["start"] == 101.755

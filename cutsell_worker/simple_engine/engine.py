@@ -387,6 +387,7 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0):
     splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
     understanding = {k: plan.get(k) for k in ("product", "message", "attempts", "script", "coherence")}
     return splits, {"passes": len(plan.get("attempts") or []) or 1, "usage": usage, "review": view,
+                    "hidden_idx": [k for k, l in enumerate(lab) if l[0] == "hide"],
                     "understanding": understanding}
 
 
@@ -508,11 +509,11 @@ def _threshold(db):
     return floor + 0.30 * (loud - floor)
 
 
-def keep_hidden_words_out(before, after, words):
+def keep_hidden_words_out(hidden_idx, after, words):
     """The silence refine can stretch a kept part over the first words of the next (hidden) line when she says them
     with no pause ("…qué tal te fue, pero mira,"). A word hidden by the decision stays out of every kept part."""
     mid = lambda w: (w["s"] + w["e"]) / 2
-    hidden = [w for w in words if any(not s["visible"] and s["start"] <= mid(w) <= s["end"] for s in before)]
+    hidden = [words[k] for k in sorted(set(hidden_idx))]
     out = [dict(s) for s in after]
     for s in out:
         if not s["visible"]:
@@ -755,10 +756,9 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
     log = {"sueltos": orphans(splits, words)}
     if info.get("understanding"):
         log["comprension"] = info["understanding"]
-    decided = [dict(x) for x in splits]
     splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
     if mode == "understand":
-        splits = keep_hidden_words_out(decided, splits, words)
+        splits = keep_hidden_words_out(info.get("hidden_idx") or [], splits, words)
     if scene_cut_list is None and video_path:
         scene_cut_list = scene_cuts(video_path)
     log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
