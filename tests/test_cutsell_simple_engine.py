@@ -680,7 +680,7 @@ def test_a_kept_part_never_stretches_over_the_next_hidden_words():
     assert out2[0]["end"] == 80.135
 
 
-def test_the_viewer_pass_cannot_remove_the_closer_or_the_hook():
+def test_the_viewer_pass_never_removes_content():
     words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Mira esto. Cuesta veinte. Irresistible, van a querer comer.".split())]
 
     def fake(prompt):

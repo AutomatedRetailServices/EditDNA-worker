@@ -369,14 +369,9 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0, plan=None):
     if plan is None:
         plan, u = understand(words, call, run)
         usage += u
-    keep, protected = set(), set()
+    keep = set()
     for beat in plan.get("script", []) or []:
-        lines = _ints(beat.get("lines"), n)
-        keep.update(lines)
-        # The hook, the price, the call to action and her closer were chosen by understanding the whole pitch; the
-        # viewer pass only reads the finished text, so it may not take them out.
-        if re.search(r"gancho|hook|precio|price|llamad|acci[oó]n|cta|cierre|closer|despedida|goodbye", str(beat.get("beat", "")), re.I):
-            protected.update(lines)
+        keep.update(_ints(beat.get("lines"), n))
     if not keep:
         raise RuntimeError("understanding step kept nothing: " + json.dumps(plan, ensure_ascii=False)[:600])
     reasons = {}
@@ -398,17 +393,16 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0, plan=None):
                     lab[k] = ("hide", reasons.get(ln, "fuera del guion"))
         return lab
 
-    # The viewer reads the finished cut once; its smallest fix is applied (never emptying the cut).
+    # The viewer reads the finished cut once; a line it says is missing is put back.
     lab = labels_now()
     view, u = _ask_json(call, VIEWER_PROMPT + "\nTHE VIDEO:\n" + review_text(words, units, _line_kept(lab, units)),
                         "ok", f"viewer-{run}")
     usage += u
     if not view.get("ok", True):
         remove, add = set(_ints(view.get("remove"), n)), set(_ints(view.get("add"), n))
-        if keep - remove:
-            for ln in (remove & keep) - protected:
-                keep.discard(ln); reasons[ln] = "revisión: " + str(view.get("notes") or "no encaja")[:60]
-            keep |= add
+        # The viewer only reads text: it may put a missing line back, never take content out (it removed the
+        # closer of the perfume video and a whole proof sentence of the Cut AI video). Its removals stay in the log.
+        keep |= add
     lab = labels_now()
     # Mechanics guard: a kept line that ends on a dangling connector right before a cut loses that connector.
     for ln in range(1, n + 1):
