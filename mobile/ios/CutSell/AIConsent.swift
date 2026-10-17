@@ -22,7 +22,7 @@ final class AIConsentCenter: ObservableObject {
     /// calling the server (builds 16-18 on a real iPhone).
     func ensure() async -> Bool {
         if agreed { return true }
-        CutSellDiagnostics.log("ai_consent_asked", [:])
+        CutSellDiagnostics.log("consent_asked", [:])
         return await withCheckedContinuation { continuation in
             waiting.append(continuation)
             guard !asking else { return }
@@ -49,17 +49,17 @@ final class AIConsentCenter: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self, self.asking else { return }
             if let shown = self.presented, shown.viewIfLoaded?.window != nil {
-                CutSellDiagnostics.log("ai_consent_shown", ["attempt": String(attempt)])
+                CutSellDiagnostics.log("consent_shown", ["attempt": String(attempt)])
                 return
             }
-            if attempt % 10 == 0 { CutSellDiagnostics.log("ai_consent_not_shown_yet", ["attempt": String(attempt)]) }
+            if attempt % 10 == 0 { CutSellDiagnostics.log("consent_not_shown_yet", ["attempt": String(attempt)]) }
             self.present(attempt: attempt + 1)
         }
     }
 
     func answer(_ agree: Bool) {
         if agree { UserDefaults.standard.set(true, forKey: Self.key) }
-        CutSellDiagnostics.log("ai_consent_answered", ["agreed": String(agree)])
+        CutSellDiagnostics.log(agree ? "consent_accepted" : "consent_declined", [:])
         asking = false
         presented?.dismiss(animated: true)
         presented = nil

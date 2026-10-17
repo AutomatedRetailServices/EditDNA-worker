@@ -118,7 +118,7 @@ final class AppState: ObservableObject {
             "/v1/projects",
             method: "POST",
             body: Body(user_id: session.userID, title: title),
-            timeout: 25
+            timeout: 20
         )
         projects.insert(project, at: 0)
         return project

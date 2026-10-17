@@ -3,7 +3,7 @@ import Foundation
 /// Build 19: a new cut must never sit at "Uploading 0 %" forever (Swanny's iPhone, builds 16-18).
 /// - `Retry`: every request and every part is tried 3 times before it fails.
 /// - `ByteTally`: the real % of a multipart upload, byte by byte, across parts in flight.
-/// - `StallWatch`: when nothing moves for 60 s the work stops with the real error and the screen
+/// - `StallWatch`: when nothing moves for 30 s the work stops with the real error and the screen
 ///   offers "Try again".
 
 enum Retry {
@@ -96,13 +96,13 @@ enum StallWatch {
         let step: String
         let lastError: String?
         var errorDescription: String? {
-            let base = "Nothing happened for 60 seconds while \(step.isEmpty ? "uploading" : step.lowercased())."
+            let base = "Nothing happened for 30 seconds while \(step.isEmpty ? "uploading" : step.lowercased())."
             return lastError.map { "\(base) Last error: \($0)." } ?? base
         }
     }
 
     @MainActor
-    static func run<T>(_ submitter: CutSubmitter, limit: TimeInterval = 60,
+    static func run<T>(_ submitter: CutSubmitter, limit: TimeInterval = 30,
                        _ work: @escaping @MainActor () async throws -> T) async throws -> T {
         submitter.touch()
         return try await withCheckedThrowingContinuation { continuation in
@@ -117,8 +117,8 @@ enum StallWatch {
                     if AIConsentCenter.shared.asking { submitter.touch(); continue }
                     if Date().timeIntervalSince(submitter.lastActivity) > limit {
                         let stalled = Stalled(step: submitter.stageTitle, lastError: submitter.lastError)
-                        CutSellDiagnostics.log("upload_stalled", ["step": submitter.stageTitle,
-                                                                  "last_error": submitter.lastError ?? "none"])
+                        CutSellDiagnostics.log("upload_failed", ["reason": "no progress for 30 s", "step": submitter.stageTitle,
+                                                                 "last_error": submitter.lastError ?? "none"])
                         once.finish(.failure(stalled))
                         task.cancel()
                         return

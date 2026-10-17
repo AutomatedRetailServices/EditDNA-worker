@@ -7,14 +7,27 @@ import Foundation
 enum EditorAudio {
     private static var active = false
 
+    /// Build 19: Playback from the moment the app opens (the report showed SoloAmbient outside the
+    /// editor). Only the category is set here, mixing with other apps, so opening CutSell never
+    /// stops the creator's music; `preparePlayback()` activates it when something plays.
+    static func setUpAtLaunch() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            CutSellDiagnostics.log("audio_session_launch", ["category": "Playback"])
+        } catch {
+            CutSellDiagnostics.log("audio_session_failed", ["at": "launch", "code": String((error as NSError).code)])
+        }
+    }
+
     /// Playback category, movie mode: sounds, voices and the video play with the ring/silent switch
     /// on silent too (build 18: checked at every play, since a voice-over recording changes it).
     static func preparePlayback() {
         let session = AVAudioSession.sharedInstance()
         // Already set up (the usual case when tapping play): nothing to wait for.
-        if active, session.category == .playback, session.mode == .moviePlayback { return }
+        if active, session.category == .playback, session.mode == .moviePlayback, !session.categoryOptions.contains(.mixWithOthers) { return }
         do {
-            if session.category != .playback || session.mode != .moviePlayback {
+            if session.category != .playback || session.mode != .moviePlayback || session.categoryOptions.contains(.mixWithOthers) {
                 try session.setCategory(.playback, mode: .moviePlayback, options: [])
             }
             try session.setActive(true)

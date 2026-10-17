@@ -340,12 +340,28 @@ struct CreateFlowView: View {
     private func export(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {
         submitter.announce(count > 1 ? "Getting video \(index + 1) of \(count) from Photos…" : "Getting your video from Photos…")
         let title = count > 1 ? "Downloading video \(index + 1) of \(count) from iCloud" : "Downloading from iCloud"
+        let copying = count > 1 ? "Getting video \(index + 1) of \(count) from Photos" : "Getting your video from Photos"
         let started = Date()
-        let video = try await GalleryExport.export(asset, name: nil) { fraction in
+        CutSellDiagnostics.log("asset_export_started", ["index": String(index + 1), "of": String(count),
+                                                        "seconds_long": String(format: "%.0f", asset.duration)])
+        let video = try await GalleryExport.export(asset, name: nil, progress: { fraction in
             // Only called while the video comes down from iCloud (not when it is on the iPhone).
-            Task { @MainActor in submitter.stage(title, fraction) }
-        }
-        CutSellDiagnostics.log("photos_copied", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started))])
+            Task { @MainActor in
+                submitter.stage(title, fraction)
+                submitter.logStep("asset_export_progress", fraction)
+            }
+        }, copied: { bytes in
+            Task { @MainActor in
+                if !submitter.stageTitle.hasPrefix("Downloading") {
+                    submitter.stage("\(copying) · \(bytes / 1_048_576) MB")
+                } else {
+                    submitter.touch()
+                }
+            }
+        })
+        let mb = ((try? FileManager.default.attributesOfItem(atPath: video.url.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        CutSellDiagnostics.log("asset_export_done", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started)),
+                                                     "mb": String(mb / 1_048_576)])
         return video
     }
 }

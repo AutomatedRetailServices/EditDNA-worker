@@ -42,6 +42,7 @@ struct CutSellApp: App {
                 .environmentObject(appState)
                 .environmentObject(notificationCenter)
                 .task {
+                    EditorAudio.setUpAtLaunch()
                     await notificationCenter.requestPermission()
                     await appState.bootstrap()
                     if let session = appState.session {

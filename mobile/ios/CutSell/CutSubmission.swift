@@ -30,6 +30,7 @@ final class CutSubmitter: ObservableObject {
         stagePercent = nil
         lastError = nil
         currentProjectID = nil
+        loggedTenths = [:]
         touch()
     }
 
@@ -43,6 +44,15 @@ final class CutSubmitter: ObservableObject {
             stagePercent = percent
             touch()
         }
+    }
+
+    /// Diagnostics: one event per 10 % of a step (the report keeps the last 50 events).
+    private var loggedTenths: [String: Int] = [:]
+    func logStep(_ event: String, _ fraction: Double) {
+        let tenth = Int((min(1, max(0, fraction)) * 10).rounded(.down))
+        guard tenth > (loggedTenths[event] ?? -1) else { return }
+        loggedTenths[event] = tenth
+        CutSellDiagnostics.log(event, ["percent": String(tenth * 10)])
     }
 
     /// A retry happened (the work is alive; the screen keeps the step).
@@ -103,7 +113,10 @@ final class CutSubmitter: ObservableObject {
                         fileURL: video.url,
                         contentType: video.contentType
                     ) { [weak self] fraction in
-                        Task { @MainActor in self?.stage(title, fraction) }
+                        Task { @MainActor in
+                            self?.stage(title, fraction)
+                            self?.logStep("prepare_progress", fraction)
+                        }
                     }
                     if prepared.wasTranscoded { transientPreparedFiles.append(prepared.url) }
                     preparedVideos.append(LocalVideo(
@@ -122,13 +135,14 @@ final class CutSubmitter: ObservableObject {
             } else {
                 say("Creating project…")
                 stage("Creating your project")
+                let createStarted = Date()
                 let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let project = try await Retry.run("project", onRetry: { [weak self] _, error in
                     self?.retried(Retry.short(error))
                 }) {
                     try await appState.createProject(title: (cleanTitle?.isEmpty ?? true) ? nil : cleanTitle)
                 }
-                CutSellDiagnostics.log("project_created", [:])
+                CutSellDiagnostics.log("project_created", ["seconds": String(format: "%.1f", Date().timeIntervalSince(createStarted))])
                 createdProjectID = project.projectID
                 currentProjectID = project.projectID
                 projectID = project.projectID
@@ -179,6 +193,7 @@ final class CutSubmitter: ObservableObject {
                     Task { @MainActor in
                         self?.progress = lower + span * min(1, max(0, overall))
                         self?.stage(uploadTitle, partProgress)
+                        self?.logStep("upload_progress", partProgress)
                     }
                 }
                 // Keep this file on the phone for the editor's preview (no download later).
@@ -221,7 +236,7 @@ final class CutSubmitter: ObservableObject {
                     dialogue_overlap_enabled: audioOverlap,
                     auto_zoom_enabled: autoZoom
                 ),
-                timeout: 30
+                timeout: 20
             ) }
             // D-133: bounded diagnostics only -- logs the backend job id.
             CutSellDiagnostics.log("job_submitted", ["job_id": submitResponse.jobID])
@@ -231,8 +246,8 @@ final class CutSubmitter: ObservableObject {
             try? await appState.refreshProjects()
             return projectID
         } catch {
-            CutSellDiagnostics.log("cut_submit_failed", ["reason": String(describing: type(of: error)), "error": Retry.short(error),
-                                                         "step": stageTitle])
+            CutSellDiagnostics.log("upload_failed", ["reason": Retry.short(error), "type": String(describing: type(of: error)),
+                                                     "step": stageTitle])
             if !pendingSaved {
                 for url in transientPreparedFiles { try? FileManager.default.removeItem(at: url) }
             }

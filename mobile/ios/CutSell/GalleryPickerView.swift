@@ -97,7 +97,8 @@ enum GalleryExport {
     /// `name` nil = the video's own file name from Photos (shown on the Processing screen).
     /// `progress` (0...1) while the video downloads from iCloud (only called when it is not on the
     /// iPhone); `activity` on every step, so the upload screen knows the copy is alive.
-    static func export(_ asset: PHAsset, name: String?, progress: (@Sendable (Double) -> Void)? = nil) async throws -> LocalVideo {
+    static func export(_ asset: PHAsset, name: String?, progress: (@Sendable (Double) -> Void)? = nil,
+                       copied: (@Sendable (Int64) -> Void)? = nil) async throws -> LocalVideo {
         let resources = PHAssetResource.assetResources(for: asset)
         guard let resource = resources.first(where: { $0.type == .fullSizeVideo })
             ?? resources.first(where: { $0.type == .video }) else {
@@ -111,12 +112,23 @@ enum GalleryExport {
         if let progress {
             options.progressHandler = { value in progress(value) }
         }
+        // Build 19: a video already on the iPhone reports no %, so the bytes written are watched
+        // (the upload screen knows the copy is alive and shows the MB).
+        let watcher = Task {
+            var last: Int64 = -1
+            while !Task.isCancelled {
+                let size = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0
+                if size != last { last = size; copied?(size) }
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+        }
+        defer { watcher.cancel() }
         do {
             try await PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options)
         } catch {
             try? FileManager.default.removeItem(at: destination)
-            CutSellDiagnostics.log("photos_copy_failed", ["domain": (error as NSError).domain,
-                                                          "code": String((error as NSError).code)])
+            CutSellDiagnostics.log("asset_export_failed", ["domain": (error as NSError).domain,
+                                                           "code": String((error as NSError).code)])
             throw Failure.unavailable
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)

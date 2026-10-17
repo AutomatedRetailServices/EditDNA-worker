@@ -120,7 +120,7 @@ actor MultipartUploadManager {
                             URLQueryItem(name: "project_id", value: projectID),
                             URLQueryItem(name: "user_id", value: session.userID)
                         ],
-                        timeout: 25
+                        timeout: 20
                     )
                 }
                 guard status.partCount == saved.start.partCount else {
@@ -187,7 +187,7 @@ actor MultipartUploadManager {
                             "/v1/uploads/multipart/\(uploadID)/parts/\(partNumber)/presign",
                             method: "POST",
                             body: OwnerBody(project_id: projectID, user_id: userID),
-                            timeout: 25
+                            timeout: 20
                         )
                         let response = try await self.uploadPart(
                             data, uploadID: uploadID, partNumber: partNumber, signedURL: signed.uploadURL,
@@ -256,7 +256,7 @@ actor MultipartUploadManager {
                 content_type: contentType,
                 size_bytes: size
             ),
-            timeout: 25
+            timeout: 20
         )
     }
 
