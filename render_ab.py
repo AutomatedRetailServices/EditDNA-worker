@@ -17,7 +17,7 @@ image = (
 )
 PROJECTS = ("d87a5b66", "9ea8d6f2", "ec57457c", "71627def")
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-PREFIX = "engine-ab-tests/2026-10-17-v14-auto2"
+PREFIX = "engine-ab-tests/2026-10-17-v14-auto3"
 
 
 def _h(v):
