@@ -9,5 +9,5 @@ Read only the [KEEP] lines, in order, as one video. Then check:
 - Is something missing that the video needs to be understood (what the product is, the price if she said one, where
   to buy)? Only lines from the recording can be used.
 If it is good, return {"ok":true,"remove":[],"add":[],"notes":"..."}.
-Otherwise propose the SMALLEST fix: "remove" = KEEP lines to take out, "add" = CUT lines to put back (whole lines that
-exist). Write "notes" in Spanish. Return ONLY JSON: {"ok":true|false,"remove":[L,...],"add":[L,...],"notes":"..."}
+Otherwise propose the SMALLEST fix: "add" = CUT lines to put back (whole lines that exist); "remove" = KEEP lines you
+think should go (they are only noted for a human, not removed). Write "notes" in Spanish. Return ONLY JSON: {"ok":true|false,"remove":[L,...],"add":[L,...],"notes":"..."}
