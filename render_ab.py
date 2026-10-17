@@ -17,7 +17,7 @@ image = (
 )
 PROJECTS = ("d87a5b66", "9ea8d6f2", "ec57457c", "71627def")
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-PREFIX = "engine-ab-tests/2026-10-17"
+PREFIX = "engine-ab-tests/2026-10-17-v131"
 
 
 def _h(v):
@@ -85,7 +85,7 @@ def one(ph):
             text, u = call_anthropic(prompt); usage.append(u); return text, u
         new = engine.process(words, duration, audio, video_path=src, llm=call)
         links = {}
-        for name, splits, label in (("actual", stored, "ACTUAL (1.2)"), ("nueva", new["splits"], "NUEVA (1.3)")):
+        for name, splits, label in (("actual", stored, "ACTUAL (1.2)"), ("nueva", new["splits"], "NUEVA (1.3.1)")):
             out = _render(src, splits, label, str(Path(d) / f"{name}.mp4"))
             key = f"{PREFIX}/{ph}-{name}.mp4"
             s3.upload_file(out, bucket, key, ExtraArgs={"ContentType": "video/mp4"})
@@ -104,6 +104,6 @@ def one(ph):
 def main():
     out = list(one.map(PROJECTS, return_exceptions=True))
     report = [x if isinstance(x, dict) else {"error": repr(x)[:400]} for x in out]
-    with open("dedup_eval.json", "w") as f:
+    with open("render.json", "w") as f:
         json.dump(report, f, ensure_ascii=False, default=str)
     print("::notice title=render::" + ", ".join(f"{x.get('project')}:{'ok' if 'links' in x else x.get('error','?')[:80]}" for x in report))

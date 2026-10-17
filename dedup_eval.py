@@ -96,10 +96,9 @@ def real_videos():
 @app.local_entrypoint()
 def main():
     gold = json.load(open("benchmarks/simple_engine_gold/gold_v1.json"))
-    items = [(v["id"], ver) for v in gold["videos"] for ver in ("1.2", "1.3")]
-    real = real_videos.spawn()
+    items = [(v["id"], "1.3") for v in gold["videos"]]
     results = list(gold_one.map(items, return_exceptions=True))
-    report = {"gold": [x if isinstance(x, dict) else {"error": repr(x)[:300]} for x in results], "real": real.get()}
+    report = {"gold": [x if isinstance(x, dict) else {"error": repr(x)[:300]} for x in results], "real": []}
     with open("dedup_eval.json", "w") as f:
         json.dump(report, f, ensure_ascii=False, default=str)
     tin = sum(int(u.get("input_tokens") or 0) for g in report["gold"] for u in g.get("usage", []))
