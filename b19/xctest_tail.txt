@@ -1,0 +1,25 @@
+0% → 60s Preparing your video 21% → 74s Preparing your video 23% → 78s Preparing your video 25% → 81s Preparing your video 26% → 83s Preparing your video 27% → 86s Preparing your video 28% → 91s Preparing your video 30% → 94s Preparing your video 31% → 98s Preparing your video 32% → 104s Preparing your video 34% → 109s Preparing your video 35% → 112s Preparing your video 36% → 119s Preparing your video 37% → 122s Preparing your video 39% → 126s Preparing your video 40% → 128s Preparing your video 42% → 133s Preparing your video 43% → 136s Preparing your video 44% → 140s Preparing your video 45% → 144s Preparing your video 47% → 147s Preparing your video 48% → 149s Preparing your video 49% → 152s Preparing your video 50% → 154s Preparing your video 51% → 156s Preparing your video 52% → 164s Preparing your video 54% → 170s Preparing your video 56% → 173s Preparing your video 57% → 175s Preparing your video 58% → 182s Preparing your video 59% → 189s Preparing your video 61% → 193s Preparing your video 62% → 196s Preparing your video 64% → 201s Preparing your video 65% → 203s Preparing your video 66% → 207s Preparing your video 67% → 211s Preparing your video 69% → 215s Preparing your video 70% → 217s Preparing your video 72% → 222s Preparing your video 73% → 224s Preparing your video 74% → 228s Preparing your video 75% → 232s Preparing your video 76% → 236s Preparing your video 78% → 239s Preparing your video 79% → 241s Preparing your video 80% → 244s Preparing your video 81% → 246s Preparing your video 82% → 251s Preparing your video 83% → 259s Preparing your video 85% → 262s Preparing your video 86% → 264s Preparing your video 87% → 266s Preparing your video 88% → 273s Preparing your video 90% → 279s Creating your project … → 282s Uploading your video 0%
+B19UI   372.7 FAIL big4k: upload % moves past 0 · never
+B19UI   372.7 FAIL big4k: no error screen · Upload paused | ! | The upload stopped | Error: NSCocoaErrorDomain 514.
+
+Your video is saved on this iPhone. Try again to continue where it stopped. | Processing |  | Hold on… | We’re saving you hours per day… | Uploading your video | 0% | Step 1 of 8 | Keep CutSell open while your video uploads. | We’ll let you know in CutSell when your cut is ready. | Create | Edits | Plan | You | Create | Turn your raw video into a ready-to-sell cut. | Recent cuts | 1 / 30 cuts · | Plan | Upload videos | From your gallery. AI cuts it for you. | Record with CutSell | Camera with clips · 60s · 3m · 10m | Voice Over project | Record your voice over photos or clips
+B19UI   372.7 FAIL big4k: uploaded and processed · 298 s from Create
+B19UI   372.9 FAILURES (big 4K): big4k: upload % moves past 0 | big4k: no error screen | big4k: uploaded and processed
+    t =   316.20s Tear Down
+Test Case '-[CutSellUITests.Build19UITests test2Big4KVideo]' passed (317.148 seconds).
+Test Suite 'Build19UITests' passed at 2026-10-17 00:58:34.075.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 373.750 (373.753) seconds
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-17 00:58:34.076.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 373.750 (373.754) seconds
+Test Suite 'Selected tests' passed at 2026-10-17 00:58:34.077.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 373.750 (373.755) seconds
+2026-10-17 00:58:35.992 xcodebuild[25765:72031] [MT] IDETestOperationsObserverDebug: 421.752 elapsed -- Testing started completed.
+2026-10-17 00:58:35.992 xcodebuild[25765:72031] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-17 00:58:35.992 xcodebuild[25765:72031] [MT] IDETestOperationsObserverDebug: 421.752 sec, +421.752 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.17_00-51-27-+0000.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started
