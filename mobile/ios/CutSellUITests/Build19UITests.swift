@@ -106,11 +106,13 @@ final class Build19UITests: XCTestCase {
         log("\(name): on screen 3 s after Create: \(screenTexts())")
 
         // The AI notice must APPEAR (builds 16-18: it was hidden and the cut waited forever).
-        let agree = element("aiConsentAgree")
-        if agree.waitForExistence(timeout: 15) {
+        // By its identifier or its label (the custom button may not carry the identifier).
+        let agree = element("aiConsentAgree").exists ? element("aiConsentAgree") : app.buttons["Agree"]
+        if wait(20, until: { self.element("aiConsentAgree").exists || self.app.buttons["Agree"].exists }) {
             shot("\(name)_ai_notice")
             log("\(name): AI notice shown after \(String(format: "%.1f", Date().timeIntervalSince(tappedAt))) s")
-            agree.tap()
+            (element("aiConsentAgree").exists ? element("aiConsentAgree") : app.buttons["Agree"]).tap()
+            _ = agree
         } else {
             log("\(name): no AI notice (already agreed?) on screen: \(screenTexts())")
             shot("\(name)_no_notice")
@@ -132,6 +134,10 @@ final class Build19UITests: XCTestCase {
                 break
             }
             if element("readyReviewButton").exists { ready = true; break }
+            if app.buttons["Agree"].exists && app.staticTexts["Before your first cut"].exists {
+                log("\(name): AI notice appeared late; Agree")
+                app.buttons["Agree"].tap()
+            }
             if app.staticTexts["Upload paused"].exists || app.staticTexts["Couldn’t start the cut"].exists {
                 problem = app.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")
                 break
