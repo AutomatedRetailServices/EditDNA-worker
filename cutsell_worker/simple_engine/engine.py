@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2.1"
+VERSION = "1.2.3"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
@@ -197,7 +197,8 @@ def decide(words, duration, call: LLMCall, run: int = 0):
     units = lines_of(words)
     text = transcript(words, units)
     usage = []
-    p, u = _ask(call, f"v3pass-{run}", PASS_PROMPT + "\nTRANSCRIPT:\n" + text); usage += u
+    with _llm.step("pass"):
+        p, u = _ask(call, f"v3pass-{run}", PASS_PROMPT + "\nTRANSCRIPT:\n" + text); usage += u
     passes = p.get("passes", [])
     backbone = p.get("backbone")
     multi = (sum(1 for x in passes if len(x) > 2 and x[2]) >= 2
@@ -208,11 +209,13 @@ def decide(words, duration, call: LLMCall, run: int = 0):
             "lacks (a body part or place, a number, a name, an example, a cause), keep BOTH versions; when one version only rephrases the other with "
             "nothing new, keep the most complete one. A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
     prompt = DECISION_PROMPT + "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text
-    d, u = _ask(call, f"v3dec-{run}", prompt); usage += u
+    with _llm.step("decision"):
+        d, u = _ask(call, f"v3dec-{run}", prompt); usage += u
     lab = labels(d, words, units)
     kept = sum(1 for st, _ in lab if st == "keep")
     if len(words) >= 30 and kept < 0.05 * len(words):   # hides almost everything: ask once more, keep the gentler answer
-        d2, u = _ask(call, f"v3dec-{run}-net", prompt); usage += u
+        with _llm.step("decision"):
+            d2, u = _ask(call, f"v3dec-{run}-net", prompt); usage += u
         lab2 = labels(d2, words, units)
         if sum(1 for st, _ in lab2 if st == "keep") > kept:
             lab = lab2
@@ -256,6 +259,22 @@ def _numbers(text: str) -> set:
     return {_norm(m.group(0)) for m in re.finditer(r"\$?\d[\d.,]*|\b\w+\b", text.lower()) if _DIGITS.search(m.group(0))}
 
 
+def _is_sale(answer) -> bool:
+    return str(answer.get("type", "")).lower() == "sale"
+
+
+def _sale_keys(answer, kinds, n) -> set:
+    keys = set()
+    for f in answer.get("fixes", []) or []:
+        kind = str(f.get("kind", "")).lower()
+        if kind not in kinds:
+            continue
+        for act in ("hide", "unhide"):
+            for ln in _line_numbers(f.get(act, []), n):
+                keys.add((kind, act, ln))
+    return keys
+
+
 def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=None):
     kinds = kinds or SALE_REVIEW_KINDS
     n = len(units)
@@ -266,7 +285,8 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=None):
         answer = None
         for attempt in range(2):
             try:
-                text, u = call(prompt + f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
+                with _llm.step("sale_review"):
+                    text, u = call(prompt + f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
                 answer = _json_obj(text, "fixes")
                 break
             except Exception:
@@ -275,22 +295,18 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=None):
         first = answers[0]
         if r == 0 and (str(first.get("type", "")).lower() != "sale" or not first.get("fixes")):
             break
-    sale = sum(1 for a in answers if str(a.get("type", "")).lower() == "sale") >= (2 if len(answers) > 1 else 1)
+        # two readings that are both "sale" and propose exactly the same (enabled) fixes already decide the vote:
+        # a third reading cannot add or remove a 2-of-3 majority, so it is not asked (same cut, one call less)
+        if r == 1 and all(_is_sale(a) for a in answers) and _sale_keys(answers[0], kinds, n) == _sale_keys(answers[1], kinds, n):
+            break
+    sale = sum(1 for a in answers if _is_sale(a)) >= (2 if len(answers) > 1 else 1)
     info = {"type": "sale" if sale else (answers[0].get("type") or "other"), "calls": len(answers), "applied": [],
             "proposed": answers[0].get("fixes") if answers else []}
-    if not sale or len(answers) < 3:
+    if not sale or len(answers) < 2:
         return lab, usage, info
     votes = {}
     for a in answers:
-        seen = set()
-        for f in a.get("fixes", []) or []:
-            kind = str(f.get("kind", "")).lower()
-            if kind not in kinds:
-                continue
-            for act in ("hide", "unhide"):
-                for ln in _line_numbers(f.get(act, []), n):
-                    seen.add((kind, act, ln))
-        for key in seen:
+        for key in _sale_keys(a, kinds, n):
             votes[key] = votes.get(key, 0) + 1
     chosen = sorted(k for k, c in votes.items() if c >= 2)
     new = list(lab)
@@ -365,6 +381,10 @@ def _line_no(x):
         return None
 
 
+def _review_lines(answer, key, n) -> set:
+    return {ln for ln in {_line_no(x) for x in answer.get(key, []) or []} - {None} if 1 <= ln <= n}
+
+
 def review(words, units, lab, call: LLMCall, run: int = 0):
     """An editor reads the finished cut. Only for a haul / try-on (several different items) it may hide a repeated
     announcement and fix mixed takes. A change is applied only when 2 of 3 independent answers agree; when the first
@@ -377,7 +397,8 @@ def review(words, units, lab, call: LLMCall, run: int = 0):
         answer = None
         for attempt in range(3):                     # transport errors / unreadable answers: ask again, never guess
             try:
-                text, u = call(prompt + f"\n(review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
+                with _llm.step("haul_review"):
+                    text, u = call(prompt + f"\n(review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
                 answer = _parse_review(text)
                 break
             except Exception:
@@ -385,6 +406,10 @@ def review(words, units, lab, call: LLMCall, run: int = 0):
         answers.append(answer or {"type": "error", "hide": [], "unhide": []})
         first = answers[0]
         if r == 0 and (first.get("type") != "haul" or not (first.get("hide") or first.get("unhide"))):
+            break
+        # two "haul" answers with the same lines already decide the 2-of-3 vote: no third call (same cut)
+        if r == 1 and all(a.get("type") == "haul" for a in answers) and all(
+                _review_lines(answers[0], key, len(units)) == _review_lines(answers[1], key, len(units)) for key in ("hide", "unhide")):
             break
     haul = sum(1 for a in answers if a.get("type") == "haul") >= 2
 
@@ -505,14 +530,13 @@ def fix_words(words, splits, call: LLMCall):
 
 def _parse_fix_answer(text: str):
     """v2 answer {"fix": [...], "zoom": [...]}; a bare v1 list [[i, "w"], ...] is still accepted."""
-    m = re.search(r"\{.*\}", text, re.S)
-    if m:
+    for match in reversed(list(re.finditer(r"\{", text))):      # last complete answer wins (the model may correct itself)
         try:
-            data = json.loads(m.group(0))
-            if isinstance(data, dict):
-                return list(data.get("fix") or []), list(data.get("zoom") or [])
+            data = json.JSONDecoder().raw_decode(text[match.start():])[0]
         except ValueError:
-            pass
+            continue
+        if isinstance(data, dict) and ("fix" in data or "zoom" in data):
+            return list(data.get("fix") or []), list(data.get("zoom") or [])
     m = re.search(r"\[.*\]", text, re.S)
     if not m:
         raise ValueError("no JSON in the word-fix answer")
@@ -532,7 +556,8 @@ def fix_words_and_moments(words, splits, call: LLMCall):
     pairs, marks = None, []
     for attempt in range(3):
         try:
-            text, u = call(prompt + (f"\n(retry {attempt})" if attempt else "")); usage.append(u)
+            with _llm.step("fixwords"):
+                text, u = call(prompt + (f"\n(retry {attempt})" if attempt else "")); usage.append(u)
             pairs, marks = _parse_fix_answer(text)
             break
         except Exception:

@@ -512,7 +512,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.1"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.3"
 
 
 def _review_words():
@@ -534,7 +534,7 @@ def test_review_hides_a_repeated_announcement_only_when_two_answers_agree():
     def call(prompt):
         calls.append(prompt); return next(answers), {"input_tokens": 1, "output_tokens": 1}
     new, usage, info = engine.review(words, units, lab, call)
-    assert info["haul"] and info["hide"] == [2] and len(calls) == 3 and len(usage) == 3
+    assert info["haul"] and info["hide"] == [2] and len(calls) == 2 and len(usage) == 2   # 2 agreeing answers decide
     assert all(new[k][0] == "hide" for k in units[1]) and all(new[k][0] == "keep" for k in units[2])
 
 
@@ -685,6 +685,8 @@ def test_sale_review_applies_a_fix_only_when_two_of_three_readings_agree(monkeyp
     fix = '{"type":"sale","fixes":[{"kind":"repeat","hide":[1],"unhide":[],"why":"dicho dos veces"}]}'
     other = '{"type":"sale","fixes":[{"kind":"repeat","hide":[2],"unhide":[],"why":"x"}]}'
     E, words, units, (lab, usage, info) = _sr([fix, fix, other])
+    assert info["applied"] == [["repeat", "hide", 1]] and len(usage) == 2     # two agreeing readings decide
+    E, words, units, (lab, usage, info) = _sr([fix, other, fix])
     assert info["applied"] == [["repeat", "hide", 1]] and len(usage) == 3
     assert all(lab[k][0] == "hide" for k in units[0]) and all(lab[k][0] == "keep" for k in units[1])
     E, words, units, (lab, usage, info) = _sr([fix, other, '{"type":"sale","fixes":[]}'])
@@ -723,3 +725,95 @@ def test_a_reviewed_cut_never_keeps_a_hidden_boundary_word():
     out = E.keep_hidden_words_out([1, 2], [{"start": 71.79, "end": 80.415, "visible": True},
                                            {"start": 80.415, "end": 81.71, "visible": False}], words)
     assert out[0]["end"] == 80.135
+
+
+# ------------------------------------------------------------------ 1.2.3 savings (same cut, fewer tokens)
+
+def test_third_reading_is_never_needed_when_two_agree_same_result_as_three(monkeypatch):
+    """Exhaustive: whenever the first two readings agree, every possible third reading gives the same cut."""
+    from cutsell_worker.simple_engine import engine as E0
+    monkeypatch.setattr(E0, "SALE_REVIEW_KINDS", E0.SALE_REVIEW_ALL_KINDS)
+    opts = ['{"type":"sale","fixes":[]}', '{"type":"other","fixes":[]}',
+            '{"type":"sale","fixes":[{"kind":"repeat","hide":[1],"unhide":[],"why":"x"}]}',
+            '{"type":"sale","fixes":[{"kind":"repeat","hide":[2],"unhide":[],"why":"x"}]}',
+            '{"type":"sale","fixes":[{"kind":"mixed","hide":[1],"unhide":[],"why":"x"}]}']
+    for a in opts:
+        results = set()
+        for c in opts:
+            E, words, units, (lab, usage, info) = _sr([a, a, c])
+            results.add((tuple(lab), tuple(map(tuple, info["applied"]))))
+        assert len(results) == 1
+
+
+def test_word_fix_reads_the_last_answer_and_does_not_ask_again_for_trailing_text():
+    from cutsell_worker.simple_engine import engine
+    words = [{"w": "por", "s": 0.0, "e": 0.3}, {"w": "set", "s": 0.4, "e": 0.7}]
+    splits = [{"start": 0.0, "end": 1.0, "visible": True, "reason": "se queda"}]
+    calls = []
+    def call(p):
+        calls.append(p)
+        return ('{"fix": [[1, "Shein"]], "zoom": [[0, "hook"]]}\n\nWait, I should keep {that} as is.', {})
+    shown, fixes, moments, usage = engine.fix_words_and_moments(words, splits, call)
+    assert len(calls) == 1 and fixes == [[1, "set", "Shein"]] and moments == [{"i": 0, "kind": "hook"}]
+    calls.clear()
+    def corrected(p):
+        calls.append(p)
+        return '{"fix": [[1, "Shein"]], "zoom": []}  Actually: {"fix": [], "zoom": [[0, "hook"]]}', {}
+    shown, fixes, moments, usage = engine.fix_words_and_moments(words, splits, corrected)
+    assert len(calls) == 1 and fixes == [] and moments == [{"i": 0, "kind": "hook"}]
+
+
+def test_effort_per_step_is_off_by_default_and_reaches_the_request(monkeypatch):
+    from cutsell_worker.simple_engine import llm
+    monkeypatch.delenv("CUTSELL_SIMPLE_ENGINE_EFFORT", raising=False)
+    with llm.step("pass"):
+        assert llm.effort_for() == ""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_EFFORT", "pass=medium,fixwords=low,decision=bogus")
+    with llm.step("pass"):
+        assert llm.effort_for() == "medium"
+    with llm.step("fixwords"):
+        assert llm.effort_for() == "low"
+    with llm.step("decision"):
+        assert llm.effort_for() == ""
+    assert llm.effort_for() == ""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_EFFORT", "medium")
+    with llm.step("sale_review"):
+        assert llm.effort_for() == "medium"
+
+    sent = {}
+    class R:
+        status_code = 200
+        def json(self):
+            return {"content": [{"type": "text", "text": "ok"}], "usage": {}}
+    def fake_post(url, json=None, **kw):
+        sent.update(json); return R()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setattr(llm.requests, "post", fake_post)
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_EFFORT", "fixwords=low")
+    with llm.step("fixwords"):
+        llm.call_anthropic("x")
+    assert sent["output_config"] == {"effort": "low"}
+    sent.clear()
+    with llm.step("decision"):
+        llm.call_anthropic("x")
+    assert "output_config" not in sent
+
+
+def test_every_engine_call_is_tagged_with_its_step(video):
+    from cutsell_worker.simple_engine import engine, llm
+    steps = []
+    def call(prompt):
+        steps.append(llm._STEP.get())
+        if "A PASS is one continuous run" in prompt:
+            return '{"passes":[[1,3,true]],"backbone":[1,3]}', {}
+        if "FIRST decide the TYPE" in prompt:
+            return '{"type":"other","hide":[],"unhide":[]}', {}
+        if "checking a FIRST CUT" in prompt:
+            return '{"type":"other","fixes":[]}', {}
+        if "index:word" in prompt:
+            return '{"fix":[],"zoom":[]}', {}
+        return '{"hide":[]}', {}
+    words = [{"w": w, "s": i * 0.4, "e": i * 0.4 + 0.3} for i, w in enumerate("Hola chicas. Miren esto. Cuesta diez.".split())]
+    splits, info = engine.decide_reviewed(words, 4.0, call)
+    engine.fix_words_and_moments(words, splits, call)
+    assert steps == ["pass", "decision", "haul_review", "sale_review", "fixwords"]
