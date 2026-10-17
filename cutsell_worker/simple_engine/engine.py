@@ -508,6 +508,34 @@ def _threshold(db):
     return floor + 0.30 * (loud - floor)
 
 
+def keep_hidden_words_out(before, after, words):
+    """The silence refine can stretch a kept part over the first words of the next (hidden) line when she says them
+    with no pause ("…qué tal te fue, pero mira,"). A word hidden by the decision stays out of every kept part."""
+    mid = lambda w: (w["s"] + w["e"]) / 2
+    hidden = [w for w in words if any(not s["visible"] and s["start"] <= mid(w) <= s["end"] for s in before)]
+    out = [dict(s) for s in after]
+    for s in out:
+        if not s["visible"]:
+            continue
+        inside = [w for w in hidden if s["start"] < mid(w) < s["end"]]
+        kept = [w for w in words if s["start"] < mid(w) < s["end"] and w not in inside]
+        if not inside or not kept:
+            continue
+        first_kept, last_kept = kept[0], kept[-1]
+        tail = [w for w in inside if w["s"] >= last_kept["e"] - 0.01]
+        head = [w for w in inside if w["e"] <= first_kept["s"] + 0.01]
+        if tail:
+            s["end"] = round(max(last_kept["e"], min(w["s"] for w in tail)), 3)
+        if head:
+            s["start"] = round(min(first_kept["s"], max(w["e"] for w in head)), 3)
+    # the neighbours take back what was released
+    for i in range(len(out) - 1):
+        out[i + 1]["start"] = out[i]["end"] if not out[i + 1]["visible"] else out[i + 1]["start"]
+        if not out[i]["visible"] and out[i + 1]["visible"]:
+            out[i]["end"] = out[i + 1]["start"]
+    return [x for x in out if x["end"] - x["start"] > 0.001]
+
+
 def breathe(splits, words, duration):
     """Leave a short natural pause after (and a shorter one before) each kept part, taken only from the silence
     next to it, never over a hidden word. The cut sounds like an editor, not like phrases glued end to end."""
@@ -727,7 +755,10 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
     log = {"sueltos": orphans(splits, words)}
     if info.get("understanding"):
         log["comprension"] = info["understanding"]
+    decided = [dict(x) for x in splits]
     splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
+    if mode == "understand":
+        splits = keep_hidden_words_out(decided, splits, words)
     if scene_cut_list is None and video_path:
         scene_cut_list = scene_cuts(video_path)
     log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
