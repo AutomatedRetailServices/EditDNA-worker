@@ -108,3 +108,26 @@ pitch). Measured per fix kind on the Gold's 21 sales videos, 2 runs (the 3 answe
 Perfume video: the restart fix removes the abandoned first run (31-72 s) and keeps hook + problem + the full second
 run, ending on her closer. Mode: CUTSELL_SIMPLE_ENGINE_MODE=review (default in code: rules = exactly 1.2).
 Cost: one extra call per sale video (~USD 0.01), three when a fix is proposed (~0.04).
+
+## 1.2.3: same cut, fewer tokens (2026-10-17, branch feat/simple-engine-save, NOT deployed)
+- Sale review and haul review: when the first two readings agree, the third is not asked. A third reading
+  cannot change a 2-of-3 vote, so the cut is identical (exhaustive test).
+- Word fix: the last complete JSON answer is read; trailing text no longer forces a second call.
+- `CUTSELL_SIMPLE_ENGINE_EFFORT` (thinking effort per step). Default `pass=medium,haul_review=low`;
+  decision, sale review and word fix stay at the model default (high). `high` = every step as in 1.2.1
+  (rollback without a redeploy).
+- Measured on the Gold (26 videos x 2 runs, Sonnet 5.5), Claude cost per video and agreement on sales videos:
+
+| | cost | sales | all |
+|---|---|---|---|
+| live 1.2.1 | 4.10-4.43 c | 95.2-95.7 % | 94.6-95.4 % |
+| A: pass medium, haul review low, word fix low | 3.45-3.66 c | 94.9-96.0 % | 94.9-95.1 % |
+| B: pass/haul/word fix low, decision + sale review medium | 2.72-2.76 c | 93.4-94.7 % | 92.2-92.6 % |
+
+  B is rejected: 5 sales videos below the live minimum (G01 26/37). A is within the run-to-run variance;
+  its one lower video (B07, 15/16) came from the decision step, which A does not change. The word fix at
+  `low` once wrote a wrong brand ("acicalfares" -> "Aquaphor", the live engine wrote "Cicalfate"), so the
+  default keeps the word fix at high. Expected cost: about 3.6-3.8 c per video, 13-15 % less than 1.2.1.
+- Prompt caching was not adopted: within one video the shared prompt is read again only when a review needs
+  a second reading (about 1 video in 5). At low volume, the cache-write premium on every first call costs
+  about as much as the reads save.

@@ -25,11 +25,18 @@ def step(name: str):
         _STEP.reset(token)
 
 
+# Measured on the Gold (2026-10-17, 26 videos x 2 runs): less thinking in the pass step and the haul review keeps the
+# cut quality; the decision, the sale review and the word fix stay at the model default (high). A lower effort on the
+# word fix wrote a wrong brand name into a caption, and a lower effort on the decision lost sales lines.
+DEFAULT_EFFORT = "pass=medium,haul_review=low"
+
+
 def effort_for(name: str = "") -> str:
-    """Thinking effort for a step from CUTSELL_SIMPLE_ENGINE_EFFORT: "medium" (every step) or
-    "pass=medium,fixwords=low" (only those steps). Unset / unknown -> "" = the model default (high), as in 1.2.1."""
-    raw = os.environ.get("CUTSELL_SIMPLE_ENGINE_EFFORT", "").strip().lower()
-    if not raw:
+    """Thinking effort for a step from CUTSELL_SIMPLE_ENGINE_EFFORT (else DEFAULT_EFFORT): "medium" (every step) or
+    "pass=medium,fixwords=low" (only those steps). "high" = every step at the model default, exactly as in 1.2.1
+    (the rollback without a redeploy). A step not listed / an unknown value -> "" = the model default (high)."""
+    raw = (os.environ.get("CUTSELL_SIMPLE_ENGINE_EFFORT", "").strip() or DEFAULT_EFFORT).lower()
+    if raw == "high":
         return ""
     if "=" not in raw:
         return raw if raw in EFFORTS else ""

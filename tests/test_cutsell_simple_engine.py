@@ -763,11 +763,17 @@ def test_word_fix_reads_the_last_answer_and_does_not_ask_again_for_trailing_text
     assert len(calls) == 1 and fixes == [] and moments == [{"i": 0, "kind": "hook"}]
 
 
-def test_effort_per_step_is_off_by_default_and_reaches_the_request(monkeypatch):
+def test_effort_per_step_default_rollback_and_request(monkeypatch):
     from cutsell_worker.simple_engine import llm
     monkeypatch.delenv("CUTSELL_SIMPLE_ENGINE_EFFORT", raising=False)
-    with llm.step("pass"):
-        assert llm.effort_for() == ""
+    expected = {"pass": "medium", "haul_review": "low", "decision": "", "sale_review": "", "fixwords": ""}
+    for name, value in expected.items():
+        with llm.step(name):
+            assert llm.effort_for() == value, name
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_EFFORT", "high")          # rollback: every step as in 1.2.1
+    for name in expected:
+        with llm.step(name):
+            assert llm.effort_for() == ""
     monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_EFFORT", "pass=medium,fixwords=low,decision=bogus")
     with llm.step("pass"):
         assert llm.effort_for() == "medium"
