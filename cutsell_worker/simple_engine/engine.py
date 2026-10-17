@@ -20,7 +20,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.3"
+VERSION = "1.3.1"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
