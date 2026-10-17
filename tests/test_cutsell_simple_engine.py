@@ -815,3 +815,19 @@ def test_a_sentence_inside_the_complete_attempt_is_never_dropped_as_a_broken_tak
 
     splits, _ = engine.decide_understood(words, 6.0, fake)
     assert all(any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits) for w in words)
+
+
+def test_only_the_backbone_attempt_gets_its_sentences_back():
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(
+        "Mira este perfume. Huele rico. Mira este perfume. Huele rico. Cuesta veinte.".split())]
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"type": "sale", "attempts": [[1, 2, "complete"], [3, 5, "complete"]],
+                               "script": [{"beat": "gancho", "lines": [3]}, {"beat": "precio", "lines": [5]}],
+                               "drop": [[1, 2, "otro intento", 0], [4, 4, "intento roto", 0]]}), {}
+        return '{"ok": true}', {}
+
+    splits, _ = engine.decide_understood(words, 6.0, fake)
+    kept = [w["w"] for w in words if any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits)]
+    assert kept == "Mira este perfume. Huele rico. Cuesta veinte.".split()

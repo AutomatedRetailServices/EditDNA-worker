@@ -377,11 +377,19 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0, plan=None):
         raise RuntimeError("understanding step kept nothing: " + json.dumps(plan, ensure_ascii=False)[:600])
     # A sentence inside a COMPLETE attempt is part of the pitch she meant: it is kept unless it is noise, talk off
     # camera or a repeat of a kept line (the Cut AI video lost its whole price-comparison proof as "intento roto").
+    # Only the ONE complete attempt the script is built on (the one holding most script lines): the model often marks
+    # two passes "complete", and keeping both would put the whole pitch in twice (Gold Y06, Y08).
+    backbone, best = None, 0
     for att in plan.get("attempts", []) or []:
         try:
             a_, b_, state = int(att[0]), int(att[1]), str(att[2]).lower()
         except Exception:
             continue
+        held = sum(1 for ln in keep if a_ <= ln <= b_)
+        if state.startswith("complete") and held > best:
+            backbone, best = (a_, b_), held
+    for att in ([[backbone[0], backbone[1], "complete"]] if backbone else []):
+        a_, b_, state = int(att[0]), int(att[1]), str(att[2]).lower()
         if state.startswith("complete"):
             drops = {}
             for d in plan.get("drop", []) or []:
