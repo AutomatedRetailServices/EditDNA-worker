@@ -507,7 +507,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.3.1" and "THE HOOK is not noise" in engine.DECISION_PROMPT
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.4-exp" and "THE HOOK is not noise" in engine.DECISION_PROMPT
 
 
 def _review_words():
@@ -624,3 +624,23 @@ def test_dup_removes_only_the_repeated_words_when_the_rest_stands_alone():
     second = [lab[k] for k in units[1]]
     assert [l[0] for l in second[:6]] == ["hide"] * 6 and second[0][1].startswith("repetido · queda L1")
     assert all(l == ("keep", "se queda") for l in second[6:])
+
+
+def test_understanding_mode_keeps_the_script_lines_and_drops_a_dangling_connector():
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(
+        "¿Quién me mandó a comprar esto? No puedo dejar de usarlo porque [pause] Yo no quería gastar dinero. El precio son veinte dólares.".replace("[pause] ", "").split())]
+    words[12:] = [dict(w, s=w["s"] + 2, e=w["e"] + 2) for w in words[12:]]          # a pause after "porque" ends that line
+    units = engine.lines_of(words)
+    assert len(units) == 4
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"product": "perfume", "message": "m", "attempts": [[1, 2, "broken"], [3, 4, "complete"]],
+                               "script": [{"beat": "gancho", "lines": [1, 2]}, {"beat": "precio", "lines": [4]}],
+                               "drop": [[3, 3, "otro intento", 0]]}), {}
+        return '{"ok": true, "remove": [], "add": []}', {}
+
+    splits, info = engine.decide_understood(words, 20.0, fake)
+    kept = " ".join(w["w"] for w in words if any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits))
+    assert "porque" not in kept and "usarlo" in kept and "veinte" in kept and "gastar" not in kept
+    assert info["understanding"]["product"] == "perfume" and len(info["usage"]) == 2
