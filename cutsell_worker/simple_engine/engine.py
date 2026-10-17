@@ -523,7 +523,7 @@ def keep_hidden_words_out(hidden_idx, after, words):
     for s in out:
         if not s["visible"]:
             continue
-        inside = [w for w in hidden if s["start"] < mid(w) < s["end"]]
+        inside = [w for w in hidden if min(w["e"], s["end"]) - max(w["s"], s["start"]) > 0.04]
         kept = [w for w in words if s["start"] < mid(w) < s["end"] and w not in inside]
         if not inside or not kept:
             continue
