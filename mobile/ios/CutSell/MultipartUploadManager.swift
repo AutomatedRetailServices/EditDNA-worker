@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct MultipartStartResponse: Codable {
@@ -285,11 +286,19 @@ actor MultipartUploadManager {
         return try await backgroundUploader.upload(fileURL: partFile, to: signedURL, onBytes: onBytes)
     }
 
+    /// A short, stable folder name for an upload id of any length (SHA-256, first 32 hex digits).
+    static func folderName(for uploadID: String) -> String {
+        SHA256.hash(data: Data(uploadID.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
     private func writePartFile(_ data: Data, uploadID: String, partNumber: Int) throws -> URL {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CutSell", isDirectory: true)
             .appendingPathComponent("UploadParts", isDirectory: true)
-            .appendingPathComponent(uploadID, isDirectory: true)
+            // Build 19: a short folder name made from the upload id. Cloudflare R2's upload ids are
+            // ~350 characters; used as a folder name they broke iOS's 255-character limit
+            // (NSCocoaErrorDomain 514) and no part ever left the iPhone after the move to R2.
+            .appendingPathComponent(Self.folderName(for: uploadID), isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let destination = root.appendingPathComponent(String(format: "part-%05d.bin", partNumber))
         try data.write(to: destination, options: .atomic)

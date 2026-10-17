@@ -87,3 +87,12 @@ def test_audio_is_playback_from_launch_without_stopping_other_apps():
     tools = read("AudioTools.swift")
     assert "static func setUpAtLaunch()" in tools and "options: [.mixWithOthers]" in tools
     assert "EditorAudio.setUpAtLaunch()" in read("CutSellApp.swift")
+
+
+def test_part_files_never_use_the_long_r2_upload_id_as_a_name():
+    """Second cause, R2 only: Cloudflare R2's upload ids are ~350 characters; the part folder was
+    named after it and iOS refused it (NSCocoaErrorDomain 514), so no part ever left the iPhone."""
+    manager = read("MultipartUploadManager.swift")
+    assert ".appendingPathComponent(Self.folderName(for: uploadID), isDirectory: true)" in manager
+    assert "SHA256.hash(data: Data(uploadID.utf8)).prefix(16)" in manager
+    assert ".appendingPathComponent(uploadID, isDirectory: true)" not in manager
