@@ -13,6 +13,7 @@ only with a full re-run of the evaluation (scripts/simple_engine_eval.py).
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,12 +21,14 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2"
+VERSION = "1.2.1"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
+SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encoding="utf-8")
+SALE_REVIEW_KINDS = ("mixed", "repeat", "missing")
 ZOOM_KINDS = ("hook", "product", "price", "cta")
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
@@ -214,7 +217,112 @@ def decide(words, duration, call: LLMCall, run: int = 0):
             lab = lab2
     lab, u, rv = review(words, units, lab, call, run); usage += u
     splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
-    return splits, {"passes": len(passes) if multi else 1, "usage": usage, "review": rv}
+    return splits, {"passes": len(passes) if multi else 1, "usage": usage, "review": rv, "labels": lab}
+
+
+# ---------------------------------------------------------------- sale review (1.2.1): understanding as a reviewer
+# The 1.2 decision stays the editor. A senior editor reads that cut and may fix only three known problems in a sale:
+# a mixed attempt, an idea said twice, a missing hook / price / CTA / closer. A fix is applied only when 2 of 3
+# independent readings propose it, never removes a number/price the cut would lose, and never takes out more than a
+# quarter of the kept words. Anything else, or any doubt: the 1.2 cut stands.
+
+def _json_obj(text: str, key: str) -> dict:
+    for match in reversed(list(re.finditer(r"\{", text))):
+        try:
+            obj = json.JSONDecoder().raw_decode(text[match.start():])[0]
+        except Exception:
+            continue
+        if isinstance(obj, dict) and key in obj:
+            return obj
+    raise ValueError(f"no JSON with {key!r}")
+
+
+def _line_numbers(xs, n):
+    out = []
+    for x in xs if isinstance(xs, (list, tuple)) else [xs]:
+        nums = [int(m) for m in re.findall(r"\d+", str(x))]
+        if len(nums) == 2 and re.search(r"[-–]\s*L?\d", str(x)):
+            nums = list(range(nums[0], nums[1] + 1))
+        out += [v for v in nums if 1 <= v <= n]
+    return out
+
+
+_DIGITS = re.compile(r"\d|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred|"
+                     r"uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|veinte|treinta|cuarenta|cincuenta|cien|mil)\b", re.I)
+
+
+def _numbers(text: str) -> set:
+    return {_norm(m.group(0)) for m in re.finditer(r"\$?\d[\d.,]*|\b\w+\b", text.lower()) if _DIGITS.search(m.group(0))}
+
+
+def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=SALE_REVIEW_KINDS):
+    n = len(units)
+    kept = _line_kept(lab, units)
+    prompt = SALE_REVIEW_PROMPT + "\nFIRST CUT:\n" + review_text(words, units, kept)
+    answers, usage = [], []
+    for r in range(3):
+        answer = None
+        for attempt in range(2):
+            try:
+                text, u = call(prompt + f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
+                answer = _json_obj(text, "fixes")
+                break
+            except Exception:
+                continue
+        answers.append(answer or {"type": "error", "fixes": []})
+        first = answers[0]
+        if r == 0 and (str(first.get("type", "")).lower() != "sale" or not first.get("fixes")):
+            break
+    sale = sum(1 for a in answers if str(a.get("type", "")).lower() == "sale") >= (2 if len(answers) > 1 else 1)
+    info = {"type": "sale" if sale else (answers[0].get("type") or "other"), "calls": len(answers), "applied": [],
+            "proposed": answers[0].get("fixes") if answers else []}
+    if not sale or len(answers) < 3:
+        return lab, usage, info
+    votes = {}
+    for a in answers:
+        seen = set()
+        for f in a.get("fixes", []) or []:
+            kind = str(f.get("kind", "")).lower()
+            if kind not in kinds:
+                continue
+            for act in ("hide", "unhide"):
+                for ln in _line_numbers(f.get(act, []), n):
+                    seen.add((kind, act, ln))
+        for key in seen:
+            votes[key] = votes.get(key, 0) + 1
+    chosen = sorted(k for k, c in votes.items() if c >= 2)
+    new = list(lab)
+    for kind, act, ln in chosen:
+        if act == "hide" and kept[ln - 1]:
+            for k in units[ln - 1]:
+                new[k] = ("hide", {"mixed": "revisión: otro intento", "repeat": "revisión: repetido"}.get(kind, "revisión"))
+        elif act == "unhide" and not kept[ln - 1]:
+            for k in units[ln - 1]:
+                new[k] = ("keep", "revisión: faltaba" if kind == "missing" else "se queda")
+    before = " ".join(w["w"] for w, l in zip(words, lab) if l[0] == "keep")
+    after = " ".join(w["w"] for w, l in zip(words, new) if l[0] == "keep")
+    removed = sum(1 for a, b in zip(lab, new) if a[0] == "keep" and b[0] == "hide")
+    if _numbers(before) - _numbers(after):
+        info["rejected"] = "a number/price would disappear"
+        return lab, usage, info
+    if removed > 0.25 * max(1, sum(1 for l in lab if l[0] == "keep")):
+        info["rejected"] = "too much removed"
+        return lab, usage, info
+    info["applied"] = [list(k) for k in chosen]
+    return new, usage, info
+
+
+def decide_reviewed(words, duration, call: LLMCall, run: int = 0, kinds=SALE_REVIEW_KINDS):
+    """1.2 decision, then the sale review on top of it."""
+    splits, info = decide(words, duration, call, run)
+    units = lines_of(words)
+    lab, u, srv = sale_review(words, units, info["labels"], call, run, kinds)
+    info["usage"] = info["usage"] + u
+    info["sale_review"] = srv
+    if srv.get("applied"):
+        splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
+    info["labels"] = lab
+    return splits, info
 
 
 # ---------------------------------------------------------------- editor review (hauls / try-ons only)
@@ -573,12 +681,17 @@ def caption_groups(caps, max_words: int = 3, max_gap: float = 0.45):
 # ---------------------------------------------------------------- entry point
 
 def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cut_list=None,
-            llm: Optional[LLMCall] = None) -> dict:
-    """words: [{"w","s","e"}] from Deepgram. Returns splits (full non-destructive timeline) + captions."""
+            llm: Optional[LLMCall] = None, mode: Optional[str] = None) -> dict:
+    """words: [{"w","s","e"}] from Deepgram. Returns splits (full non-destructive timeline) + captions.
+    mode "rules" = the 1.2 decision only (default); "review" = 1.2 + the sale review (CUTSELL_SIMPLE_ENGINE_MODE)."""
     if not words:
         raise ValueError("simple engine: no words to edit")
     call = llm or _llm.call_anthropic
-    splits, info = decide(words, float(duration), call, run)
+    mode = (mode or os.environ.get("CUTSELL_SIMPLE_ENGINE_MODE", "") or "rules").strip().lower()
+    if mode == "review":
+        splits, info = decide_reviewed(words, float(duration), call, run)
+    else:
+        splits, info = decide(words, float(duration), call, run)
     log = {"sueltos": orphans(splits, words)}
     splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
     if scene_cut_list is None and video_path:
@@ -588,6 +701,8 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
     shown, fixes, moments, u = fix_words_and_moments(words, splits, call); info["usage"] += u
     caps, cut_duration = captions(shown, splits)
     log["revision"] = info.get("review"); log["palabras"] = fixes
+    if info.get("sale_review"):
+        log["revision_venta"] = info["sale_review"]
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
             "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"],
             "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"]} for m in moments]}

@@ -506,7 +506,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.1"
 
 
 def _review_words():
@@ -656,3 +656,47 @@ def test_word_fix_still_accepts_the_old_list_answer():
     shown, fixes, moments, _ = engine.fix_words_and_moments(
         words, splits, lambda p: ('{"fix": [], "zoom": [[0, "price"], [9, "price"]]}', {}))
     assert fixes == [] and moments == [{"i": 0, "kind": "price"}]      # index 9 is not a kept word
+
+
+# ------------------------------------------------------------------ 1.2.1 sale review (off by default)
+
+def _sr_words(text):
+    return [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(text.split())]
+
+
+def _sr(answers):
+    from cutsell_worker.simple_engine import engine as E
+    words = _sr_words("Huele rico. Mira esto. Huele rico de verdad. Cuesta veinte dólares. Cómpralo ya.")
+    units = E.lines_of(words)
+    lab = [("keep", "se queda")] * len(words)
+    it = iter(answers)
+    return E, words, units, E.sale_review(words, units, lab, lambda p: (next(it), {}))
+
+
+def test_sale_review_applies_a_fix_only_when_two_of_three_readings_agree():
+    fix = '{"type":"sale","fixes":[{"kind":"repeat","hide":[1],"unhide":[],"why":"dicho dos veces"}]}'
+    other = '{"type":"sale","fixes":[{"kind":"repeat","hide":[2],"unhide":[],"why":"x"}]}'
+    E, words, units, (lab, usage, info) = _sr([fix, fix, other])
+    assert info["applied"] == [["repeat", "hide", 1]] and len(usage) == 3
+    assert all(lab[k][0] == "hide" for k in units[0]) and all(lab[k][0] == "keep" for k in units[1])
+    E, words, units, (lab, usage, info) = _sr([fix, other, '{"type":"sale","fixes":[]}'])
+    assert info["applied"] == [] and all(l[0] == "keep" for l in lab)
+
+
+def test_sale_review_stops_after_one_call_when_nothing_to_fix_or_not_a_sale():
+    for first in ('{"type":"sale","fixes":[]}', '{"type":"other","fixes":[]}'):
+        E, words, units, (lab, usage, info) = _sr([first])
+        assert len(usage) == 1 and info["applied"] == [] and all(l[0] == "keep" for l in lab)
+
+
+def test_sale_review_never_loses_the_price():
+    fix = '{"type":"sale","fixes":[{"kind":"repeat","hide":[4],"unhide":[],"why":"x"}]}'
+    E, words, units, (lab, usage, info) = _sr([fix, fix, fix])
+    assert info.get("rejected") and all(l[0] == "keep" for l in lab)
+
+
+def test_review_mode_is_off_unless_asked(monkeypatch):
+    from cutsell_worker.simple_engine import engine as E
+    monkeypatch.delenv("CUTSELL_SIMPLE_ENGINE_MODE", raising=False)
+    import inspect
+    assert '"rules").strip().lower()' in inspect.getsource(E.process)
