@@ -77,7 +77,8 @@ def pick_models():
              if "generateContent" in (m.get("supportedGenerationMethods") or [])] if r.status_code == 200 else []
     lite = sorted([n for n in names if "flash-lite" in n and "preview" not in n and "exp" not in n])
     out["gemini_all_flash_lite"] = lite
-    out["gemini"] = ("gemini-2.5-flash-lite" if "gemini-2.5-flash-lite" in lite else (lite[-1] if lite else None))
+    # 2.5 Flash-Lite answers 404 "no longer available to new users"; 3.5 Flash-Lite is the current one.
+    out["gemini"] = next((n for n in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest") if n in lite), None)
     try:
         t, u = _anthropic(HAIKU, 'Return only {"ok":true}')
         out["haiku_ok"] = True
@@ -96,7 +97,7 @@ def one(item):
 
     def call(prompt):
         kind = _kind(prompt)
-        model = SONNET if kind == "decision" else cheap
+        model = SONNET if kind in ("decision", "pass") else cheap      # pass picks the backbone: Haiku broke Y08
         text, u = (_gemini if model.startswith("gemini") else _anthropic)(model, prompt)
         calls.append({"kind": kind, "model": model, "in": u.get("input_tokens"), "out": u.get("output_tokens"), "head": text[:200]})
         return text, u
