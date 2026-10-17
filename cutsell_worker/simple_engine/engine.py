@@ -28,7 +28,7 @@ DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="ut
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
 SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encoding="utf-8")
-SALE_REVIEW_KINDS = ("mixed", "repeat", "missing")
+SALE_REVIEW_KINDS = ("restart", "mixed", "repeat", "missing")
 ZOOM_KINDS = ("hook", "product", "price", "cta")
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
@@ -295,7 +295,8 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=SALE_REVIE
     for kind, act, ln in chosen:
         if act == "hide" and kept[ln - 1]:
             for k in units[ln - 1]:
-                new[k] = ("hide", {"mixed": "revisión: otro intento", "repeat": "revisión: repetido"}.get(kind, "revisión"))
+                new[k] = ("hide", {"mixed": "revisión: otro intento", "repeat": "revisión: repetido",
+                                   "restart": "revisión: venta reiniciada"}.get(kind, "revisión"))
         elif act == "unhide" and not kept[ln - 1]:
             for k in units[ln - 1]:
                 new[k] = ("keep", "revisión: faltaba" if kind == "missing" else "se queda")
@@ -305,7 +306,9 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=SALE_REVIE
     if _numbers(before) - _numbers(after):
         info["rejected"] = "a number/price would disappear"
         return lab, usage, info
-    if removed > 0.25 * max(1, sum(1 for l in lab if l[0] == "keep")):
+    # a restarted pitch can legitimately take out a whole first run (about a third of the cut)
+    limit = 0.40 if any(k[0] == "restart" for k in chosen) else 0.25
+    if removed > limit * max(1, sum(1 for l in lab if l[0] == "keep")):
         info["rejected"] = "too much removed"
         return lab, usage, info
     info["applied"] = [list(k) for k in chosen]
