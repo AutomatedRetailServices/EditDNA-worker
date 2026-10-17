@@ -20,12 +20,14 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.3.1"
+VERSION = "1.4-exp"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v1.txt").read_text(encoding="utf-8")
+UNDERSTAND_PROMPT = (_HERE / "prompts" / "understand_v1.txt").read_text(encoding="utf-8")
+VIEWER_PROMPT = (_HERE / "prompts" / "viewer_v1.txt").read_text(encoding="utf-8")
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
 OV = 0.08                                   # audio crossfade assumed at every junction (s)
@@ -279,6 +281,103 @@ def decide(words, duration, call: LLMCall, run: int = 0):
     lab, u, rv = review(words, units, lab, call, run); usage += u
     splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
     return splits, {"passes": len(passes) if multi else 1, "usage": usage, "review": rv}
+
+
+# ---------------------------------------------------------------- understanding first (experimental, mode="understand")
+# The model first writes what the creator wants to say (product, message, attempts, the script of beats) and the cut is
+# the lines of that script; then a "viewer" reads the finished cut once and proposes the smallest fix. Rules are not
+# applied here; code only guards the mechanics (no line ending on a dangling connector).
+
+CONNECTORS = {"porque", "que", "y", "pero", "o", "entonces", "cuando", "como", "and", "because", "but", "so", "that", "or",
+              "when", "cause", "like"}
+
+
+def _json_with(text: str, key: str) -> dict:
+    for match in reversed(list(re.finditer(r"\{", text))):
+        try:
+            obj = json.JSONDecoder().raw_decode(text[match.start():])[0]
+        except Exception:
+            continue
+        if isinstance(obj, dict) and key in obj:
+            return obj
+    raise ValueError(f"no JSON with {key!r}")
+
+
+def _ask_json(call: LLMCall, prompt: str, key: str, tag: str, tries: int = 3):
+    usage, last = [], None
+    for i in range(tries):
+        try:
+            text, u = call(prompt + f"\n({tag}{'-retry' + str(i) if i else ''})"); usage.append(u)
+            return _json_with(text, key), usage
+        except Exception as exc:
+            last = exc
+    raise RuntimeError(f"engine answer unreadable after {tries} tries: {last}")
+
+
+def _ints(xs, n):
+    out = []
+    for x in xs or []:
+        try:
+            v = int(x)
+        except Exception:
+            continue
+        if 1 <= v <= n:
+            out.append(v)
+    return out
+
+
+def decide_understood(words, duration, call: LLMCall, run: int = 0):
+    units = lines_of(words)
+    n = len(units)
+    usage = []
+    plan, u = _ask_json(call, UNDERSTAND_PROMPT + "\nTRANSCRIPT:\n" + transcript(words, units), "script", f"understand-{run}")
+    usage += u
+    keep = set()
+    for beat in plan.get("script", []) or []:
+        keep.update(_ints(beat.get("lines"), n))
+    if not keep:
+        raise RuntimeError("understanding step kept nothing")
+    reasons = {}
+    for d in plan.get("drop", []) or []:
+        try:
+            a, b = int(d[0]), int(d[1])
+            why = str(d[2]) if len(d) > 2 else "fuera del guion"
+            ref = int(d[3]) if len(d) > 3 and str(d[3]).strip() not in ("", "0", "None") else 0
+        except Exception:
+            continue
+        for ln in range(max(1, a), min(n, b) + 1):
+            reasons[ln] = _repeat_reason(words, units, ref) if why.startswith("repetido") and ref else why
+
+    def labels_now():
+        lab = [("keep", "se queda")] * len(words)
+        for ln in range(1, n + 1):
+            if ln not in keep:
+                for k in units[ln - 1]:
+                    lab[k] = ("hide", reasons.get(ln, "fuera del guion"))
+        return lab
+
+    # The viewer reads the finished cut once; its smallest fix is applied (never emptying the cut).
+    lab = labels_now()
+    view, u = _ask_json(call, VIEWER_PROMPT + "\nTHE VIDEO:\n" + review_text(words, units, _line_kept(lab, units)),
+                        "ok", f"viewer-{run}")
+    usage += u
+    if not view.get("ok", True):
+        remove, add = set(_ints(view.get("remove"), n)), set(_ints(view.get("add"), n))
+        if keep - remove:
+            for ln in remove & keep:
+                keep.discard(ln); reasons[ln] = "revisión: " + str(view.get("notes") or "no encaja")[:60]
+            keep |= add
+    lab = labels_now()
+    # Mechanics guard: a kept line that ends on a dangling connector right before a cut loses that connector.
+    for ln in range(1, n + 1):
+        if ln in keep and (ln + 1) not in keep:
+            u_ = units[ln - 1]
+            while len(u_) > 2 and _norm(words[u_[-1]]["w"]) in CONNECTORS and not words[u_[-1]]["w"].rstrip().endswith((".", "?", "!")):
+                lab[u_[-1]] = ("hide", "frase cortada"); u_ = u_[:-1]
+    splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
+    understanding = {k: plan.get(k) for k in ("product", "message", "attempts", "script", "coherence")}
+    return splits, {"passes": len(plan.get("attempts") or []) or 1, "usage": usage, "review": view,
+                    "understanding": understanding}
 
 
 # ---------------------------------------------------------------- editor review (hauls / try-ons only)
@@ -609,13 +708,15 @@ def caption_groups(caps, max_words: int = 3, max_gap: float = 0.45):
 # ---------------------------------------------------------------- entry point
 
 def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cut_list=None,
-            llm: Optional[LLMCall] = None) -> dict:
+            llm: Optional[LLMCall] = None, mode: str = "rules") -> dict:
     """words: [{"w","s","e"}] from Deepgram. Returns splits (full non-destructive timeline) + captions."""
     if not words:
         raise ValueError("simple engine: no words to edit")
     call = llm or _llm.call_anthropic
-    splits, info = decide(words, float(duration), call, run)
+    splits, info = (decide_understood if mode == "understand" else decide)(words, float(duration), call, run)
     log = {"sueltos": orphans(splits, words)}
+    if info.get("understanding"):
+        log["comprension"] = info["understanding"]
     splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
     if scene_cut_list is None and video_path:
         scene_cut_list = scene_cuts(video_path)

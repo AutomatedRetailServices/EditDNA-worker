@@ -107,3 +107,18 @@ Of the 11 extra removals: 9 are repetitions the Gold keeps (B13 ×6 -- the same 
 real losses: Y07 ×3 (story details: a symptom with a body place, "soy la única en mi familia"), B03 ×1 (wrong
 reference), Y05 ×1 (goodbye). Real videos: both repetitions found in the live review are gone. Decision pending
 with the Product Owner (Gold vs new rule) before a 1.3.1 run.
+
+### 1.3.1 (hook protection) and Product Owner decision, 2026-10-17
+PO: the engine is for SALES videos; her new "repetido" rule wins over Gold repetitions (B13/B08/B12), and extra
+cuts in a personal story (Y07) are acceptable. 1.3.1 adds: the opening hook is content, never "n"/"d".
+
+| | agree vs Gold | removed (Gold keeps) | kept (Gold cuts) | duplicate pairs left |
+|---|---|---|---|---|
+| 1.2 (live) | 94.6 % | 23 | 9 | 29 |
+| 1.3.1 | 92.7 % | 37 | 6 | 14 |
+
+Extra removals: B13 ×7 (pizza repeated), B08 ×3, Y06 (CTA said again, already in L26), B03 (hook line said again,
+already in L7), Y07 ×1, Y05 (cut-off goodbye). Perfume hook "¿Quién me mandó a comprar esto?" now kept.
+Known log issue: the `queda L<n>` reference sometimes points at a neighbouring line, not the exact one.
+Deploy = fast-forward feat/simple-engine-v1 (Modal deploy workflow); rollback = revert those commits on
+feat/simple-engine-v1 (redeploys 1.2) or `modal app rollback cutsell-worker v15`.
