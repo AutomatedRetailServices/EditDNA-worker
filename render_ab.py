@@ -15,9 +15,9 @@ image = (
     .env({"CUTSELL_ENGINE": "simple"})
     .add_local_dir("cutsell_worker", remote_path="/root/cutsell_worker", ignore=["**/__pycache__/**", "**/*.pyc"])
 )
-PROJECTS = ("d87a5b66", "9ea8d6f2", "ec57457c", "71627def")
+PROJECTS = ("d87a5b66",)
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-PREFIX = "engine-ab-tests/2026-10-17-v121-review2"
+PREFIX = "engine-ab-tests/2026-10-17-v121-review3"
 
 
 def _h(v):
