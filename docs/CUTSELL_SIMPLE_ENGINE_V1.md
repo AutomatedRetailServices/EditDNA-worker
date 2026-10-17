@@ -136,3 +136,18 @@ Tested on the perfume video only (PO: the only sales video of the four): the cut
 and take 2 complete, ending on her closer. PO verdict on the rendered MP4: ok.
 Next: decide how it is switched on (sales videos only, the step itself says whether the recording is a sale), then
 measure on the Gold's sales videos before any deploy request.
+
+### 1.4 deployed 2026-10-17 (b2bad4d, Modal deploy run 39046843639), then measured on the Gold
+PO: "activate for sales videos, measure afterwards with the Gold's sales videos". Measured after the deploy
+(1 run, decision step, same harness as the 1.2 baseline; 20 of 26 Gold videos classified "sale"):
+
+| sales videos (20) | agree | removed (Gold keeps) | kept (Gold cuts) | duplicate pairs |
+|---|---|---|---|---|
+| 1.2 rules | 94.7 % | 14 | 7 | 8 |
+| 1.4 (live b2bad4d) | 90.4 % | 19 | 19 | 14 |
+| 1.4.1 (backbone-only keep guard, branch feat/simple-engine-1.4, NOT deployed) | 90.7 % | 22 | 15 | 10 |
+
+Regressions: Y06 / Y08 (a different pass than the Gold, or both passes), G01 (haul: items she kept were cut),
+Y03 (repeats). Non-sales videos (Y01, Y02, Y07, B12, B13) stay on the 1.2 rules. Recommendation to the PO: switch
+back to 1.2 (CUTSELL_SIMPLE_ENGINE_MODE=rules in the Modal secret, or revert to db3f61d) until understanding beats
+1.2 on the Gold.
