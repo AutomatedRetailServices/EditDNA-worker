@@ -644,3 +644,18 @@ def test_understanding_mode_keeps_the_script_lines_and_drops_a_dangling_connecto
     kept = " ".join(w["w"] for w in words if any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits))
     assert "porque" not in kept and "usarlo" in kept and "veinte" in kept and "gastar" not in kept
     assert info["understanding"]["product"] == "perfume" and len(info["usage"]) == 2
+
+
+def test_understanding_mode_never_ends_a_kept_line_on_a_hanging_comma():
+    text = "Lo puedes encontrar en el carrito naranja, dale clic y me dices qué tal te fue, pero mira,"
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(text.split())]
+    words += [{"w": w, "s": 10 + i * 0.3, "e": 10.25 + i * 0.3} for i, w in enumerate("mira, irresistible.".split())]
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"script": [{"beat": "cta", "lines": ["L1"]}], "drop": [[2, 2, "ruido", 0]]}), {}
+        return '{"ok": true}', {}
+
+    splits, _ = engine.decide_understood(words, 12.0, fake)
+    kept = " ".join(w["w"] for w in words if any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits))
+    assert kept.endswith("qué tal te fue,") and "pero" not in kept

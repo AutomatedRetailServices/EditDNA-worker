@@ -378,6 +378,12 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0):
             u_ = units[ln - 1]
             while len(u_) > 2 and _norm(words[u_[-1]]["w"]) in CONNECTORS and not words[u_[-1]]["w"].rstrip().endswith((".", "?", "!")):
                 lab[u_[-1]] = ("hide", "frase cortada"); u_ = u_[:-1]
+            # A line left hanging on a comma ("…qué tal te fue, pero mira,") loses its last short clause.
+            if words[u_[-1]]["w"].rstrip().endswith(","):
+                commas = [i for i, k in enumerate(u_[:-1]) if words[k]["w"].rstrip().endswith((",", ".", "?", "!"))]
+                if commas and len(u_) - 1 - commas[-1] <= 3:
+                    for k in u_[commas[-1] + 1:]:
+                        lab[k] = ("hide", "frase cortada")
     splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
     understanding = {k: plan.get(k) for k in ("product", "message", "attempts", "script", "coherence")}
     return splits, {"passes": len(plan.get("attempts") or []) or 1, "usage": usage, "review": view,
