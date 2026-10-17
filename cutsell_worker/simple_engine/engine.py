@@ -315,14 +315,18 @@ def _ask_json(call: LLMCall, prompt: str, key: str, tag: str, tries: int = 3):
 
 
 def _ints(xs, n):
+    """Line numbers the model may write as 5, "5", "L5", "L5-L8", "5..8" or [5, 8]-style pairs."""
     out = []
+    if isinstance(xs, (int, str)):
+        xs = [xs]
     for x in xs or []:
-        try:
-            v = int(x)
-        except Exception:
+        if isinstance(x, (list, tuple)):
+            out += _ints(list(x), n)
             continue
-        if 1 <= v <= n:
-            out.append(v)
+        nums = [int(m) for m in re.findall(r"\d+", str(x))]
+        if len(nums) == 2 and re.search(r"[-–.]{1,2}\s*L?\d", str(x)):
+            nums = list(range(nums[0], nums[1] + 1))
+        out += [v for v in nums if 1 <= v <= n]
     return out
 
 
@@ -336,7 +340,7 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0):
     for beat in plan.get("script", []) or []:
         keep.update(_ints(beat.get("lines"), n))
     if not keep:
-        raise RuntimeError("understanding step kept nothing")
+        raise RuntimeError("understanding step kept nothing: " + json.dumps(plan, ensure_ascii=False)[:600])
     reasons = {}
     for d in plan.get("drop", []) or []:
         try:
