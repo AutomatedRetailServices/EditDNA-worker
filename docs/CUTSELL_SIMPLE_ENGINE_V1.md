@@ -89,3 +89,22 @@ With `simple`, the worker does not build the brain runtime and does not load Whi
 
 The prompts and the numeric constants were tuned together. Any change to either needs a full re-run
 on the Gold and a comparison of the score, per video, before it is merged.
+
+## 1.2.1: 1.2 + sale review (2026-10-17, branch feat/simple-engine-review, NOT deployed)
+After 1.4 (understanding as the editor) lost to 1.2 on the Gold's sales videos, the PO approved this plan: 1.2 keeps
+deciding; a senior-editor reading of the 1.2 cut may only fix known problems in a SALE, applied only when 2 of 3
+readings agree, never losing a number/price, never removing more than 25 % of the kept words (40 % for a restarted
+pitch). Measured per fix kind on the Gold's 21 sales videos, 2 runs (the 3 answers replayed per kind):
+
+| kind | run 1 | run 2 | any video worse? |
+|---|---|---|---|
+| none (1.2) | 90.4 % | 96.0 % | -- |
+| restart (abandoned first run kept next to the full run) | +2 | +1 | no -> enabled |
+| mixed (half sentence from an abandoned take) | +1 | 0 | no -> enabled |
+| repeat (same claim twice) | 0 | -1 | yes (B03, B08) -> off |
+| missing (hook/price/CTA/closer) | 0 | 0 | never fired -> off |
+
+(1.2 itself moved 90.4 -> 96.0 % between the two runs: run-to-run variance is larger than any fix.)
+Perfume video: the restart fix removes the abandoned first run (31-72 s) and keeps hook + problem + the full second
+run, ending on her closer. Mode: CUTSELL_SIMPLE_ENGINE_MODE=review (default in code: rules = exactly 1.2).
+Cost: one extra call per sale video (~USD 0.01), three when a fix is proposed (~0.04).
