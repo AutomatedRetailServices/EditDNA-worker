@@ -336,9 +336,14 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0):
     usage = []
     plan, u = _ask_json(call, UNDERSTAND_PROMPT + "\nTRANSCRIPT:\n" + transcript(words, units), "script", f"understand-{run}")
     usage += u
-    keep = set()
+    keep, protected = set(), set()
     for beat in plan.get("script", []) or []:
-        keep.update(_ints(beat.get("lines"), n))
+        lines = _ints(beat.get("lines"), n)
+        keep.update(lines)
+        # The hook, the price, the call to action and her closer were chosen by understanding the whole pitch; the
+        # viewer pass only reads the finished text, so it may not take them out.
+        if re.search(r"gancho|hook|precio|price|llamad|acci[oó]n|cta|cierre|closer|despedida|goodbye", str(beat.get("beat", "")), re.I):
+            protected.update(lines)
     if not keep:
         raise RuntimeError("understanding step kept nothing: " + json.dumps(plan, ensure_ascii=False)[:600])
     reasons = {}
@@ -368,7 +373,7 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0):
     if not view.get("ok", True):
         remove, add = set(_ints(view.get("remove"), n)), set(_ints(view.get("add"), n))
         if keep - remove:
-            for ln in remove & keep:
+            for ln in (remove & keep) - protected:
                 keep.discard(ln); reasons[ln] = "revisión: " + str(view.get("notes") or "no encaja")[:60]
             keep |= add
     lab = labels_now()

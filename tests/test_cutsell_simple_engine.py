@@ -667,3 +667,16 @@ def test_a_kept_part_never_stretches_over_the_next_hidden_words():
     after = [{"start": 100.0, "end": 102.195, "visible": True}, {"start": 102.195, "end": 104.0, "visible": False}]
     out = engine.keep_hidden_words_out([1, 2, 3], after, words)
     assert out[0]["end"] == 101.755 and out[1]["start"] == 101.755
+
+
+def test_the_viewer_pass_cannot_remove_the_closer_or_the_hook():
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Mira esto. Cuesta veinte. Irresistible, van a querer comer.".split())]
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"script": [{"beat": "gancho", "lines": [1]}, {"beat": "precio", "lines": [2]},
+                                          {"beat": "cierre", "lines": [3]}]}), {}
+        return '{"ok": false, "remove": [1, 3], "add": []}', {}
+
+    splits, _ = engine.decide_understood(words, 5.0, fake)
+    assert all(s["visible"] for s in splits if s["end"] - s["start"] > 0.2)
