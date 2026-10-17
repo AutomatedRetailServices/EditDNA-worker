@@ -1,4 +1,4 @@
-"""CutSell simple engine v1.0 - decision + finishing, calibrated on the 25-video Human Gold set.
+"""CutSell simple engine v1.3 - decision + finishing, calibrated on the 25-video Human Gold set.
 
 words (Deepgram, word times) -> pass step -> decision step -> loose-piece rule -> silence refine
 -> shot-change snap -> splits (visible / hidden + reason) + captions on the timeline of the cut.
@@ -13,6 +13,7 @@ only with a full re-run of the evaluation (scripts/simple_engine_eval.py).
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,17 +21,19 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2"
+VERSION = "1.4"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
 ZOOM_KINDS = ("hook", "product", "price", "cta")
+UNDERSTAND_PROMPT = (_HERE / "prompts" / "understand_v1.txt").read_text(encoding="utf-8")
+VIEWER_PROMPT = (_HERE / "prompts" / "viewer_v1.txt").read_text(encoding="utf-8")
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
 OV = 0.08                                   # audio crossfade assumed at every junction (s)
-WHY = {"r": "retoma", "a": "frase abandonada", "n": "ruido", "p": "otra pasada"}
+WHY = {"r": "retoma", "a": "frase abandonada", "n": "ruido", "p": "otra pasada", "d": "repetido"}
 # splits_from_labels
 MAX_INNER_PAUSE, INNER_PAUSE_KEEP, PAD_BEFORE, PAD_AFTER, MERGE_GAP = 0.60, 0.25, 0.08, 0.15, 0.12
 MAX_WORD, WORD_CLAMP = 1.2, 0.9
@@ -62,7 +65,7 @@ def parse(text: str) -> dict:
                 obj = json.JSONDecoder().raw_decode(candidate[match.start():])[0]
             except Exception:
                 continue
-            if isinstance(obj, dict) and ("hide" in obj or "passes" in obj or "trim" in obj):
+            if isinstance(obj, dict) and ("hide" in obj or "passes" in obj or "trim" in obj or "dup" in obj):
                 best = obj
         if best is not None:
             return best
@@ -107,17 +110,81 @@ def _ask(call: LLMCall, tag: str, prompt: str, tries: int = 3):
     raise RuntimeError(f"engine answer unreadable after {tries} tries: {last}")
 
 
+def _quote(words, unit, n=7) -> str:
+    text = " ".join(words[k]["w"] for k in unit[:n])
+    return text + ("…" if len(unit) > n else "")
+
+
+def _repeat_reason(words, units, lw) -> str:
+    """'repetido · queda L12 «first words of the kept version…»' (shown in the log)."""
+    try:
+        lw = int(lw)
+    except Exception:
+        return "repetido"
+    if not 1 <= lw <= len(units):
+        return "repetido"
+    return f"repetido · queda L{lw} «{_quote(words, units[lw - 1])}»"
+
+
+_NUMBER = re.compile(r"\d|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred|"
+                     r"uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|veinte|treinta|cuarenta|cincuenta|cien|mil)\b", re.I)
+
+
+def _facts(text: str) -> set:
+    """Numbers/prices in a line (digits and spelled-out numbers), to never lose a fact to the 'repetido' rule."""
+    return {_norm(m.group(0)) for m in re.finditer(r"\$?\d[\d.,]*|\b[a-záéíóúñ]+\b", text.lower()) if _NUMBER.search(m.group(0))}
+
+
 def labels(dec, words, units):
     n = len(units)
     lab = [("keep", "se queda")] * len(words)
+    repeats = []
     for h in dec.get("hide", []):
         try:
             a, b = int(h[0]), int(h[1])
         except Exception:
             continue
+        code = h[2] if len(h) > 2 else ""
+        if code == "d":
+            repeats.append((max(1, a), min(n, b), h[3] if len(h) > 3 else None))
+            continue
         for ln in range(max(1, a), min(n, b) + 1):
             for k in units[ln - 1]:
-                lab[k] = ("hide", WHY.get(h[2] if len(h) > 2 else "", "ruido"))
+                lab[k] = ("hide", WHY.get(code, "ruido"))
+    # "d" (same idea said again) is applied after the other hides, with two guards (when in doubt, keep):
+    # the kept version must really be on screen, and no number/price may disappear from the cut.
+    for a, b, lw in repeats:
+        try:
+            lw_ok = 1 <= int(lw) <= n and not (a <= int(lw) <= b) and all(lab[k][0] == "keep" for k in units[int(lw) - 1])
+        except Exception:
+            lw_ok = False
+        if not lw_ok:
+            continue
+        for ln in range(a, b + 1):
+            line = " ".join(words[k]["w"] for k in units[ln - 1])
+            kept_text = " ".join(words[k]["w"] for k, l in enumerate(lab) if l[0] == "keep" and k not in units[ln - 1])
+            if _facts(line) - _facts(kept_text):
+                continue
+            for k in units[ln - 1]:
+                lab[k] = ("hide", _repeat_reason(words, units, lw))
+    for t in dec.get("dup", []):
+        try:
+            ln = int(t[0])
+            target = [_norm(x) for x in str(t[1]).split() if _norm(x)]
+            lw = t[2] if len(t) > 2 else None
+        except Exception:
+            continue
+        if not (1 <= ln <= n) or not target:
+            continue
+        u = units[ln - 1]
+        toks = [_norm(words[k]["w"]) for k in u]
+        for i in range(len(toks) - len(target) + 1):
+            if toks[i:i + len(target)] == target:
+                rest = len(toks) - len(target)
+                if rest >= 3 and all(lab[k][0] == "keep" for k in u):
+                    for k in u[i:i + len(target)]:
+                        lab[k] = ("hide", _repeat_reason(words, units, lw))
+                break
     for t in dec.get("trim", []):
         try:
             ln = int(t[0])
@@ -217,6 +284,165 @@ def decide(words, duration, call: LLMCall, run: int = 0):
     return splits, {"passes": len(passes) if multi else 1, "usage": usage, "review": rv}
 
 
+# ---------------------------------------------------------------- understanding first (experimental, mode="understand")
+# The model first writes what the creator wants to say (product, message, attempts, the script of beats) and the cut is
+# the lines of that script; then a "viewer" reads the finished cut once and proposes the smallest fix. Rules are not
+# applied here; code only guards the mechanics (no line ending on a dangling connector).
+
+CONNECTORS = {"porque", "que", "y", "pero", "o", "entonces", "cuando", "como", "and", "because", "but", "so", "that", "or",
+              "when", "cause", "like"}
+
+
+def _json_with(text: str, key: str) -> dict:
+    for match in reversed(list(re.finditer(r"\{", text))):
+        try:
+            obj = json.JSONDecoder().raw_decode(text[match.start():])[0]
+        except Exception:
+            continue
+        if isinstance(obj, dict) and key in obj:
+            return obj
+    raise ValueError(f"no JSON with {key!r}")
+
+
+def _ask_json(call: LLMCall, prompt: str, key: str, tag: str, tries: int = 3):
+    usage, last = [], None
+    for i in range(tries):
+        try:
+            text, u = call(prompt + f"\n({tag}{'-retry' + str(i) if i else ''})"); usage.append(u)
+            return _json_with(text, key), usage
+        except Exception as exc:
+            last = exc
+    raise RuntimeError(f"engine answer unreadable after {tries} tries: {last}")
+
+
+def _ints(xs, n):
+    """Line numbers the model may write as 5, "5", "L5", "L5-L8", "5..8" or [5, 8]-style pairs."""
+    out = []
+    if isinstance(xs, (int, str)):
+        xs = [xs]
+    for x in xs or []:
+        if isinstance(x, (list, tuple)):
+            out += _ints(list(x), n)
+            continue
+        nums = [int(m) for m in re.findall(r"\d+", str(x))]
+        if len(nums) == 2 and re.search(r"[-–.]{1,2}\s*L?\d", str(x)):
+            nums = list(range(nums[0], nums[1] + 1))
+        out += [v for v in nums if 1 <= v <= n]
+    return out
+
+
+def understand(words, call: LLMCall, run: int = 0):
+    """What she sells, whether the recording is a sale at all, and the script of the video she meant."""
+    units = lines_of(words)
+    return _ask_json(call, UNDERSTAND_PROMPT + "\nTRANSCRIPT:\n" + transcript(words, units), "script", f"understand-{run}")
+
+
+def is_sale(plan) -> bool:
+    return str((plan or {}).get("type", "")).strip().lower() in ("sale", "venta", "sales")
+
+
+def decide_auto(words, duration, call: LLMCall, run: int = 0):
+    """Sales videos are cut from the understanding of the pitch; any other recording (a story, a personal video) keeps
+    the rules path that was live before (1.2). The understanding call decides which one it is."""
+    try:
+        plan, usage = understand(words, call, run)
+    except Exception as exc:                 # an unreadable understanding never fails the cut: the 1.2 path runs
+        splits, info = decide(words, duration, call, run)
+        info["mode"] = "rules"
+        info["understanding"] = {"error": str(exc)[:200]}
+        return splits, info
+    if is_sale(plan):
+        splits, info = decide_understood(words, duration, call, run, plan=plan)
+        info["usage"] = usage + info["usage"]
+        info["mode"] = "understand"
+        return splits, info
+    splits, info = decide(words, duration, call, run)
+    info["usage"] = usage + info["usage"]
+    info["mode"] = "rules"
+    info["understanding"] = {"type": plan.get("type"), "product": plan.get("product"), "message": plan.get("message")}
+    return splits, info
+
+
+def decide_understood(words, duration, call: LLMCall, run: int = 0, plan=None):
+    units = lines_of(words)
+    n = len(units)
+    usage = []
+    if plan is None:
+        plan, u = understand(words, call, run)
+        usage += u
+    keep = set()
+    for beat in plan.get("script", []) or []:
+        keep.update(_ints(beat.get("lines"), n))
+    if not keep:
+        raise RuntimeError("understanding step kept nothing: " + json.dumps(plan, ensure_ascii=False)[:600])
+    # A sentence inside a COMPLETE attempt is part of the pitch she meant: it is kept unless it is noise, talk off
+    # camera or a repeat of a kept line (the Cut AI video lost its whole price-comparison proof as "intento roto").
+    for att in plan.get("attempts", []) or []:
+        try:
+            a_, b_, state = int(att[0]), int(att[1]), str(att[2]).lower()
+        except Exception:
+            continue
+        if state.startswith("complete"):
+            drops = {}
+            for d in plan.get("drop", []) or []:
+                try:
+                    for ln in range(int(d[0]), int(d[1]) + 1):
+                        drops[ln] = str(d[2]).lower() if len(d) > 2 else ""
+                except Exception:
+                    continue
+            for ln in range(max(1, a_), min(n, b_) + 1):
+                why = drops.get(ln, "")
+                if ln not in keep and not why.startswith(("ruido", "fuera", "repetido")):
+                    keep.add(ln)
+    reasons = {}
+    for d in plan.get("drop", []) or []:
+        try:
+            a, b = int(d[0]), int(d[1])
+            why = str(d[2]) if len(d) > 2 else "fuera del guion"
+            ref = int(d[3]) if len(d) > 3 and str(d[3]).strip() not in ("", "0", "None") else 0
+        except Exception:
+            continue
+        for ln in range(max(1, a), min(n, b) + 1):
+            reasons[ln] = _repeat_reason(words, units, ref) if why.startswith("repetido") and ref else why
+
+    def labels_now():
+        lab = [("keep", "se queda")] * len(words)
+        for ln in range(1, n + 1):
+            if ln not in keep:
+                for k in units[ln - 1]:
+                    lab[k] = ("hide", reasons.get(ln, "fuera del guion"))
+        return lab
+
+    # The viewer reads the finished cut once; a line it says is missing is put back.
+    lab = labels_now()
+    view, u = _ask_json(call, VIEWER_PROMPT + "\nTHE VIDEO:\n" + review_text(words, units, _line_kept(lab, units)),
+                        "ok", f"viewer-{run}")
+    usage += u
+    if not view.get("ok", True):
+        remove, add = set(_ints(view.get("remove"), n)), set(_ints(view.get("add"), n))
+        # The viewer only reads text: it may put a missing line back, never take content out (it removed the
+        # closer of the perfume video and a whole proof sentence of the Cut AI video). Its removals stay in the log.
+        keep |= add
+    lab = labels_now()
+    # Mechanics guard: a kept line that ends on a dangling connector right before a cut loses that connector.
+    for ln in range(1, n + 1):
+        if ln in keep and (ln + 1) not in keep:
+            u_ = units[ln - 1]
+            while len(u_) > 2 and _norm(words[u_[-1]]["w"]) in CONNECTORS and not words[u_[-1]]["w"].rstrip().endswith((".", "?", "!")):
+                lab[u_[-1]] = ("hide", "frase cortada"); u_ = u_[:-1]
+            # A line left hanging on a comma ("…qué tal te fue, pero mira,") loses its last short clause.
+            if words[u_[-1]]["w"].rstrip().endswith(","):
+                commas = [i for i, k in enumerate(u_[:-1]) if words[k]["w"].rstrip().endswith((",", ".", "?", "!"))]
+                if commas and len(u_) - 1 - commas[-1] <= 3:
+                    for k in u_[commas[-1] + 1:]:
+                        lab[k] = ("hide", "frase cortada")
+    splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
+    understanding = {k: plan.get(k) for k in ("type", "product", "message", "attempts", "script", "coherence")}
+    return splits, {"passes": len(plan.get("attempts") or []) or 1, "usage": usage, "review": view,
+                    "hidden_idx": [k for k, l in enumerate(lab) if l[0] == "hide"],
+                    "understanding": understanding}
+
+
 # ---------------------------------------------------------------- editor review (hauls / try-ons only)
 
 def _line_kept(lab, units):
@@ -284,10 +510,15 @@ def review(words, units, lab, call: LLMCall, run: int = 0):
 
     hide, unhide = (votes("hide"), votes("unhide")) if haul else (set(), set())
     lab = list(lab)
+    refs = {}
+    for a in answers:
+        for x in a.get("hide", []) or []:
+            if isinstance(x, (list, tuple)) and len(x) > 1 and _line_no(x) is not None:
+                refs.setdefault(_line_no(x), x[1])
     for ln in hide:
         if kept[ln - 1]:
             for k in units[ln - 1]:
-                lab[k] = ("hide", "retoma")
+                lab[k] = ("hide", _repeat_reason(words, units, refs.get(ln)) if ln in refs else "retoma")
     for ln in unhide:
         if not kept[ln - 1]:
             for k in units[ln - 1]:
@@ -328,6 +559,34 @@ def _threshold(db):
     import numpy as np
     floor, loud = np.percentile(db, 15), np.percentile(db, 90)
     return floor + 0.30 * (loud - floor)
+
+
+def keep_hidden_words_out(hidden_idx, after, words):
+    """The silence refine can stretch a kept part over the first words of the next (hidden) line when she says them
+    with no pause ("…qué tal te fue, pero mira,"). A word hidden by the decision stays out of every kept part."""
+    mid = lambda w: (w["s"] + w["e"]) / 2
+    hidden = [words[k] for k in sorted(set(hidden_idx))]
+    out = [dict(s) for s in after]
+    for s in out:
+        if not s["visible"]:
+            continue
+        inside = [w for w in hidden if min(w["e"], s["end"]) - max(w["s"], s["start"]) > 0.04]
+        kept = [w for w in words if s["start"] < mid(w) < s["end"] and w not in inside]
+        if not inside or not kept:
+            continue
+        first_kept, last_kept = kept[0], kept[-1]
+        tail = [w for w in inside if w["s"] >= last_kept["e"] - 0.01]
+        head = [w for w in inside if w["e"] <= first_kept["s"] + 0.01]
+        if tail:
+            s["end"] = round(max(last_kept["e"], min(w["s"] for w in tail)), 3)
+        if head:
+            s["start"] = round(min(first_kept["s"], max(w["e"] for w in head)), 3)
+    # the neighbours take back what was released
+    for i in range(len(out) - 1):
+        out[i + 1]["start"] = out[i]["end"] if not out[i + 1]["visible"] else out[i + 1]["start"]
+        if not out[i]["visible"] and out[i + 1]["visible"]:
+            out[i]["end"] = out[i + 1]["start"]
+    return [x for x in out if x["end"] - x["start"] > 0.001]
 
 
 def breathe(splits, words, duration):
@@ -573,21 +832,33 @@ def caption_groups(caps, max_words: int = 3, max_gap: float = 0.45):
 # ---------------------------------------------------------------- entry point
 
 def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cut_list=None,
-            llm: Optional[LLMCall] = None) -> dict:
+            llm: Optional[LLMCall] = None, mode: Optional[str] = None) -> dict:
     """words: [{"w","s","e"}] from Deepgram. Returns splits (full non-destructive timeline) + captions."""
     if not words:
         raise ValueError("simple engine: no words to edit")
     call = llm or _llm.call_anthropic
-    splits, info = decide(words, float(duration), call, run)
+    # "auto" (default): sales videos are cut from understanding, anything else by the 1.2 rules.
+    # CUTSELL_SIMPLE_ENGINE_MODE=rules switches the whole engine back to 1.2 without a redeploy.
+    mode = (mode or os.environ.get("CUTSELL_SIMPLE_ENGINE_MODE", "") or "auto").strip().lower()
+    decider = {"understand": decide_understood, "rules": decide}.get(mode, decide_auto)
+    splits, info = decider(words, float(duration), call, run)
+    understood = bool(info.get("hidden_idx") is not None)
     log = {"sueltos": orphans(splits, words)}
+    if info.get("understanding"):
+        log["comprension"] = info["understanding"]
     splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
+    if understood:
+        splits = keep_hidden_words_out(info.get("hidden_idx") or [], splits, words)
     if scene_cut_list is None and video_path:
         scene_cut_list = scene_cuts(video_path)
     log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
     splits = breathe(splits, words, float(duration))
+    if understood:                      # the breathing pause may not reach into a hidden word either
+        splits = keep_hidden_words_out(info.get("hidden_idx") or [], splits, words)
     shown, fixes, moments, u = fix_words_and_moments(words, splits, call); info["usage"] += u
     caps, cut_duration = captions(shown, splits)
     log["revision"] = info.get("review"); log["palabras"] = fixes
+    log["modo"] = info.get("mode") or ("understand" if understood else "rules")
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
             "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"],
             "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"]} for m in moments]}

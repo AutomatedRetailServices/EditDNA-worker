@@ -1,0 +1,13 @@
+You are a viewer watching a short TikTok Shop video for the first time. Below is EVERYTHING the video says, line by
+line (L = line number in the raw recording). Lines marked [CUT] were removed from the video; you do not hear them.
+Read only the [KEEP] lines, in order, as one video. Then check:
+- Does it make sense from start to end, like one person saying one pitch?
+- Is any sentence cut in the middle, or does a line start or end mid-thought? Look hardest at the FIRST and the LAST
+  line: the video must open with her hook (if she said one) and end with her closer (her last punch line or goodbye after the
+  call to action) as a complete sentence. If her closer is [CUT], add it back.
+- Is any idea, price, benefit, hook or call to action said twice?
+- Is something missing that the video needs to be understood (what the product is, the price if she said one, where
+  to buy)? Only lines from the recording can be used.
+If it is good, return {"ok":true,"remove":[],"add":[],"notes":"..."}.
+Otherwise propose the SMALLEST fix: "add" = CUT lines to put back (whole lines that exist); "remove" = KEEP lines you
+think should go (they are only noted for a human, not removed). Write "notes" in Spanish. Return ONLY JSON: {"ok":true|false,"remove":[L,...],"add":[L,...],"notes":"..."}

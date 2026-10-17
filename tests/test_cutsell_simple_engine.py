@@ -16,6 +16,13 @@ import pytest
 from cutsell_worker import config as cutsell_config
 from cutsell_worker import draft_edits, simple_engine_adapter, worker_job
 from cutsell_worker.contracts import JobState, ProcessingRequest, SourceAsset
+from cutsell_worker.simple_engine import engine
+
+
+@pytest.fixture(autouse=True)
+def _rules_path_by_default(monkeypatch):
+    """The older tests exercise the 1.2 rules path; the auto/understanding tests pass their mode explicitly."""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "rules")
 from cutsell_worker.serde import draft_from_dict, result_to_dict
 from cutsell_worker.simple_engine import asr as se_asr
 from cutsell_worker.simple_engine import engine as se
@@ -506,7 +513,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.4" and "TYPE." in engine.UNDERSTAND_PROMPT
 
 
 def _review_words():
@@ -656,3 +663,155 @@ def test_word_fix_still_accepts_the_old_list_answer():
     shown, fixes, moments, _ = engine.fix_words_and_moments(
         words, splits, lambda p: ('{"fix": [], "zoom": [[0, "price"], [9, "price"]]}', {}))
     assert fixes == [] and moments == [{"i": 0, "kind": "price"}]      # index 9 is not a kept word
+
+
+def _w(text):
+    return [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(text.split())]
+
+
+def test_repetido_hides_the_same_idea_with_a_reference_to_the_kept_line():
+    words = _w("Lo mejor es el precio. Huele a mujer con dinero. Y lo mejor es el precio.")
+    units = engine.lines_of(words)
+    lab = engine.labels({"hide": [[3, 3, "d", 1]]}, words, units)
+    assert all(l == ("hide", "repetido · queda L1 «Lo mejor es el precio.»") for l in lab[-6:])
+    assert all(l[0] == "keep" for l in lab[:-6])
+    assert engine.WHY["d"] == "repetido"
+
+
+def test_repetido_never_drops_a_number_and_needs_a_kept_reference():
+    words = _w("Lo mejor es el precio. Huele a mujer con dinero. Y lo mejor es el precio, veinte dolares.")
+    units = engine.lines_of(words)
+    # the repeat carries a number the cut does not have anywhere else: kept
+    assert all(l[0] == "keep" for l in engine.labels({"hide": [[3, 3, "d", 1]]}, words, units))
+    plain = _w("Lo mejor es el precio. Huele a mujer con dinero. Y lo mejor es el precio.")
+    pu = engine.lines_of(plain)
+    # reference missing, pointing at itself, or at a hidden line: kept
+    for dec in ({"hide": [[3, 3, "d"]]}, {"hide": [[3, 3, "d", 3]]}, {"hide": [[1, 1, "a"], [3, 3, "d", 1]]}):
+        assert all(l[0] == "keep" for l in engine.labels(dec, plain, pu)[-6:]), dec
+
+
+def test_dup_removes_only_the_repeated_words_when_the_rest_stands_alone():
+    words = _w("Huele a mujer con dinero. Huele a mujer con dinero y dura todo el dia en la piel.")
+    units = engine.lines_of(words)
+    lab = engine.labels({"dup": [[2, "Huele a mujer con dinero y", 1]]}, words, units)
+    second = [lab[k] for k in units[1]]
+    assert [l[0] for l in second[:6]] == ["hide"] * 6 and second[0][1].startswith("repetido · queda L1")
+    assert all(l == ("keep", "se queda") for l in second[6:])
+
+
+def test_understanding_mode_keeps_the_script_lines_and_drops_a_dangling_connector():
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(
+        "¿Quién me mandó a comprar esto? No puedo dejar de usarlo porque [pause] Yo no quería gastar dinero. El precio son veinte dólares.".replace("[pause] ", "").split())]
+    words[12:] = [dict(w, s=w["s"] + 2, e=w["e"] + 2) for w in words[12:]]          # a pause after "porque" ends that line
+    units = engine.lines_of(words)
+    assert len(units) == 4
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"product": "perfume", "message": "m", "attempts": [[1, 2, "broken"], [3, 4, "complete"]],
+                               "script": [{"beat": "gancho", "lines": [1, 2]}, {"beat": "precio", "lines": [4]}],
+                               "drop": [[3, 3, "ruido", 0]]}), {}
+        return '{"ok": true, "remove": [], "add": []}', {}
+
+    splits, info = engine.decide_understood(words, 20.0, fake)
+    kept = " ".join(w["w"] for w in words if any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits))
+    assert "porque" not in kept and "usarlo" in kept and "veinte" in kept and "gastar" not in kept
+    assert info["understanding"]["product"] == "perfume" and len(info["usage"]) == 2
+
+
+def test_understanding_mode_never_ends_a_kept_line_on_a_hanging_comma():
+    text = "Lo puedes encontrar en el carrito naranja, dale clic y me dices qué tal te fue, pero mira,"
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(text.split())]
+    words += [{"w": w, "s": 10 + i * 0.3, "e": 10.25 + i * 0.3} for i, w in enumerate("mira, irresistible.".split())]
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"script": [{"beat": "cta", "lines": ["L1"]}], "drop": [[2, 2, "ruido", 0]]}), {}
+        return '{"ok": true}', {}
+
+    splits, _ = engine.decide_understood(words, 12.0, fake)
+    kept = " ".join(w["w"] for w in words if any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits))
+    assert kept.endswith("qué tal te fue,") and "pero" not in kept
+
+
+def test_a_kept_part_never_stretches_over_the_next_hidden_words():
+    words = [{"w": "fue,", "s": 101.435, "e": 101.755}, {"w": "pero", "s": 101.755, "e": 101.915},
+             {"w": "mira,", "s": 101.915, "e": 102.475}, {"w": "irresistible", "s": 102.475, "e": 103.275}]
+    after = [{"start": 100.0, "end": 102.195, "visible": True}, {"start": 102.195, "end": 104.0, "visible": False}]
+    out = engine.keep_hidden_words_out([1, 2, 3], after, words)
+    assert out[0]["end"] == 101.755 and out[1]["start"] == 101.755
+    # a hidden word whose midpoint sits exactly on the boundary ("Mi" of "Mi amor") is still taken out
+    words2 = [{"w": "Shop.", "s": 79.575, "e": 80.135}, {"w": "Mi", "s": 80.135, "e": 80.695}, {"w": "amor.", "s": 80.695, "e": 81.095}]
+    out2 = engine.keep_hidden_words_out([1, 2], [{"start": 71.79, "end": 80.415, "visible": True},
+                                                {"start": 80.415, "end": 81.71, "visible": False}], words2)
+    assert out2[0]["end"] == 80.135
+
+
+def test_the_viewer_pass_never_removes_content():
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Mira esto. Cuesta veinte. Irresistible, van a querer comer.".split())]
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"script": [{"beat": "gancho", "lines": [1]}, {"beat": "precio", "lines": [2]},
+                                          {"beat": "cierre", "lines": [3]}]}), {}
+        return '{"ok": false, "remove": [1, 3], "add": []}', {}
+
+    splits, _ = engine.decide_understood(words, 5.0, fake)
+    assert all(any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits) for w in words)
+
+
+def _auto_words():
+    return [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Mira esto. Cuesta veinte. Compralo ya.".split())]
+
+
+def test_auto_mode_cuts_a_sale_from_understanding_and_anything_else_by_the_rules(monkeypatch):
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "auto")
+    seen = []
+
+    def sale(prompt):
+        seen.append(prompt[:40])
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"type": "sale", "script": [{"beat": "gancho", "lines": [1, 2, 3]}]}), {}
+        return '{"ok": true}', {}
+
+    splits, info = engine.decide_auto(_auto_words(), 5.0, sale)
+    assert info["mode"] == "understand" and len(info["usage"]) == 2
+
+    def story(prompt):
+        if "UNDERSTAND." in prompt:
+            return '{"type": "other", "script": []}', {}
+        if '"passes"' in prompt:
+            return '{"passes": [[1, 3, true]], "backbone": [1, 3]}', {}
+        if "senior editor" in prompt:
+            return '{"type": "other", "hide": [], "unhide": []}', {}
+        return '{"hide": [], "trim": []}', {}
+
+    splits, info = engine.decide_auto(_auto_words(), 5.0, story)
+    assert info["mode"] == "rules" and info["understanding"]["type"] == "other"
+
+    def broken(prompt):
+        if "UNDERSTAND." in prompt:
+            return "not json", {}
+        return story(prompt)
+
+    splits, info = engine.decide_auto(_auto_words(), 5.0, broken)
+    assert info["mode"] == "rules" and "error" in info["understanding"]
+
+
+def test_the_rules_path_is_the_live_1_2_decision_prompt():
+    assert "SAME IDEA SAID AGAIN" not in engine.DECISION_PROMPT and "THE HOOK is not noise" not in engine.DECISION_PROMPT
+
+
+def test_a_sentence_inside_the_complete_attempt_is_never_dropped_as_a_broken_take():
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(
+        "I post daily. I use Cut AI. My friend saves money with it. So start today.".split())]
+
+    def fake(prompt):
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"type": "sale", "attempts": [[1, 4, "complete"]],
+                               "script": [{"beat": "gancho", "lines": [1, 2]}, {"beat": "cta", "lines": [4]}],
+                               "drop": [[3, 3, "intento roto", 0]]}), {}
+        return '{"ok": true}', {}
+
+    splits, _ = engine.decide_understood(words, 6.0, fake)
+    assert all(any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits) for w in words)
