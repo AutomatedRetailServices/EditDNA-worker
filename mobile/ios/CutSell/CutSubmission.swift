@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Uploads the chosen videos and starts the AI cut. This is the same pipeline the app always used
 /// (prepare → create project → save a resumable record → multipart upload → /v1/flow-b/jobs);
@@ -14,7 +15,7 @@ final class CutSubmitter: ObservableObject {
     /// "Preparing your video", "Uploading your video"…); nil percent = no % for that step.
     @Published private(set) var stageTitle = "Getting your video ready"
     @Published private(set) var stagePercent: Int?
-    /// Last time anything moved (a step, a %, a retry): the 60 s stall watch reads it.
+    /// Last time anything moved (a byte, a step, a retry): the 90 s stall watch reads it.
     private(set) var lastActivity = Date()
     /// The last error a retry saw, in plain words (shown if the upload stalls).
     private(set) var lastError: String?
@@ -34,7 +35,26 @@ final class CutSubmitter: ObservableObject {
         touch()
     }
 
-    func touch() { lastActivity = Date() }
+    func touch() {
+        lastActivity = Date()
+        if stalled != nil {
+            stalled = nil
+            CutSellDiagnostics.log("upload_moving_again", [:])
+        }
+    }
+
+    /// Build 21: "No data sent for 90 seconds…" while the upload keeps trying (nothing is
+    /// cancelled); nil again as soon as a byte moves.
+    @Published private(set) var stalled: String?
+    func markStalled(_ detail: String) { stalled = detail }
+    func clearStalled() { stalled = nil }
+
+    /// "Try again" on a paused upload: restarts only the parts in flight.
+    func restartStuckParts() {
+        CutSellDiagnostics.log("upload_try_again", ["step": stageTitle])
+        MultipartUploadManager.restartStuckParts()
+        touch()
+    }
 
     /// One step and its real % (0...1), shown as it is.
     func stage(_ title: String, _ fraction: Double? = nil) {
@@ -89,7 +109,11 @@ final class CutSubmitter: ObservableObject {
         // Nothing is uploaded or processed before the AI notice is agreed to (once).
         guard await AIConsentCenter.shared.ensure() else { throw AIConsentError.declined }
         isSubmitting = true
-        defer { isSubmitting = false }
+        // Build 21: extra time from iOS when the creator leaves CutSell mid-upload, so every part is
+        // handed to the background upload service (which then keeps sending with the app closed).
+        let backgroundTime = BackgroundTime()
+        backgroundTime.begin()
+        defer { isSubmitting = false; backgroundTime.end() }
         let span = progressRange.upperBound - progressRange.lowerBound
         func report(_ value: Double) { progress = progressRange.lowerBound + span * min(1, max(0, value)) }
         func say(_ text: String) { statusText = label.isEmpty ? text : "\(label) · \(text)" }
@@ -192,6 +216,8 @@ final class CutSubmitter: ObservableObject {
                     let lower = progressRange.lowerBound
                     Task { @MainActor in
                         self?.progress = lower + span * min(1, max(0, overall))
+                        // Called only when more bytes went out: that is activity for the 90 s watch.
+                        self?.touch()
                         self?.stage(uploadTitle, partProgress)
                         self?.logStep("upload_progress", partProgress)
                     }

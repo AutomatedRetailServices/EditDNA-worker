@@ -36,10 +36,11 @@ def test_every_step_shows_its_real_percent():
     assert 'Text(stage.percent >= 0 ? "\\(stage.percent)%" : "…")' in read("ProcessingScreen.swift")
 
 
-def test_three_tries_and_a_30_second_stall_watch_with_the_real_error():
+def test_three_tries_and_a_stall_watch_with_the_real_error():
     reliability = read("UploadReliability.swift")
     assert "static func run<T>(_ what: String, attempts: Int = 3" in reliability
-    assert "limit: TimeInterval = 30" in reliability and "if AIConsentCenter.shared.asking { submitter.touch(); continue }" in reliability
+    # Build 21: 90 s, measured on bytes, never cancelling (see test_cutsell_ios_build21.py).
+    assert "static let limit: TimeInterval = 90" in reliability and "if AIConsentCenter.shared.asking { submitter.touch(); continue }" in reliability
     manager = read("MultipartUploadManager.swift")
     for what in ('Retry.run("start"', 'Retry.run("part \\(partNumber)"', 'Retry.run("complete"', 'Retry.run("status"'):
         assert what in manager, what
@@ -51,8 +52,8 @@ def test_three_tries_and_a_30_second_stall_watch_with_the_real_error():
 
 def test_r2_multipart_contract_unchanged():
     manager = read("MultipartUploadManager.swift")
-    # Same part size for every part but the last (the server's 16 MiB), every ETag kept, parts sorted.
-    assert "let readCount = min(start.partSize, remaining)" in manager
+    # Same part size for every part but the last (whatever the server answers), every ETag kept, parts sorted.
+    assert "let readCount = Int(min(Int64(start.partSize), size - offset))" in manager
     assert ".sorted { $0.partNumber < $1.partNumber }" in manager
     assert "guard parts.count == start.partCount else { throw UploadError.incompleteUpload }" in manager
 
@@ -72,7 +73,7 @@ def test_every_step_is_an_event_in_diagnostics():
         "CreateFlowView.swift": ['"asset_export_started"', '"asset_export_progress"', '"asset_export_done"'],
         "GalleryPickerView.swift": ['"asset_export_failed"'],
         "CutSubmission.swift": ['"project_created"', '"upload_started"', '"upload_progress"', '"upload_failed"', '"prepare_progress"'],
-        "UploadReliability.swift": ['"upload_failed"', '"upload_retry"'],
+        "UploadReliability.swift": ['"upload_stalled"', '"upload_retry"'],
     }
     for name, needles in events.items():
         source = read(name)

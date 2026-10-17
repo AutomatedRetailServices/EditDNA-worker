@@ -82,7 +82,7 @@ def test_editor_load_is_not_cancelled_by_its_spinner():
 def test_no_leaving_during_upload_and_one_cut_at_a_time():
     screen = read("ProcessingScreen.swift")
     assert "private var uploading: Bool { submitter?.isSubmitting == true || (projectID == nil && submitter != nil) }" in screen
-    assert '"Keep CutSell open while your video uploads."' in screen
+    assert '"Your video keeps uploading if you leave CutSell or lock the screen."' in screen
     assert screen.count(".disabled(uploading)") >= 3
     flow = read("CreateFlowView.swift")
     assert "guard !submitter.isSubmitting, job == nil else { return }" in flow and "submitter.reset()" in flow

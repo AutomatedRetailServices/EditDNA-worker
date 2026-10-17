@@ -30,6 +30,9 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 15 * 60
         configuration.timeoutIntervalForResource = 60 * 60
+        // Build 21: every part is queued at once (the upload goes on with CutSell in the background
+        // or the screen locked); iOS sends three at a time.
+        configuration.httpMaximumConnectionsPerHost = 3
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
 
@@ -50,6 +53,7 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
             pending[task.taskIdentifier] = Pending(continuation: continuation, response: nil, onBytes: onBytes)
             lock.unlock()
             task.resume()
+            startPolling()
         }
     }
 
@@ -59,6 +63,44 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
         let callback = pending[task.taskIdentifier]?.onBytes
         lock.unlock()
         callback?(totalBytesSent)
+    }
+
+    // MARK: Build 21: bytes polled every 2 s (iOS delivers didSendBodyData from its background
+    // upload service in bursts: on Swanny's iPhone nothing came for 90 s while parts were sending).
+
+    private var poller: DispatchSourceTimer?
+
+    private func startPolling() {
+        lock.lock(); defer { lock.unlock() }
+        guard poller == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.setEventHandler { [weak self] in self?.poll() }
+        poller = timer
+        timer.resume()
+    }
+
+    private func poll() {
+        session.getAllTasks { [weak self] tasks in
+            guard let self else { return }
+            self.lock.lock()
+            let callbacks = tasks.compactMap { task -> (@Sendable (Int64) -> Void, Int64)? in
+                guard let callback = self.pending[task.taskIdentifier]?.onBytes, task.countOfBytesSent > 0 else { return nil }
+                return (callback, task.countOfBytesSent)
+            }
+            let idle = self.pending.isEmpty
+            if idle { self.poller?.cancel(); self.poller = nil }
+            self.lock.unlock()
+            for (callback, bytes) in callbacks { callback(bytes) }
+        }
+    }
+
+    /// "Try again" after 90 s without a byte: the parts in flight are restarted (each part is
+    /// retried on its own; the parts already uploaded stay uploaded).
+    func restartStuckParts() {
+        session.getAllTasks { tasks in
+            for task in tasks where task.state == .running || task.state == .suspended { task.cancel() }
+        }
     }
 
     func acceptBackgroundEventsCompletion(_ completion: @escaping () -> Void) {

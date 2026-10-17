@@ -35,6 +35,8 @@ struct CutProgressView: View {
                     thumbnail: uploading ? thumbnail : (cut?.thumbnail ?? thumbnail),
                     failed: !uploading && cut?.isFailed == true,
                     uploading: uploading,
+                    stalled: uploading ? submitter?.stalled : nil,
+                    onTryAgain: { submitter?.restartStuckParts() },
                     onClose: onClose,
                     onOpenEdits: onOpenEdits
                 )
@@ -107,6 +109,10 @@ struct ProcessingContent: View {
     var failed = false
     /// While the video uploads from this iPhone CutSell must stay open, so there is no way out.
     var uploading = false
+    /// Build 21: "No data sent for 90 seconds…" (the upload keeps trying; nothing was cancelled).
+    var stalled: String? = nil
+    /// "Try again": restarts only the parts in flight.
+    var onTryAgain: () -> Void = {}
     let onClose: () -> Void
     let onOpenEdits: () -> Void
 
@@ -175,12 +181,27 @@ struct ProcessingContent: View {
                     .foregroundStyle(CS.textSecondaryF)
                 StageDots(current: stage.step, total: CutTracker.stepCount)
                     .padding(.top, 6)
+                if let stalled {
+                    VStack(spacing: 8) {
+                        Text(stalled)
+                            .font(CS.sf(13))
+                            .foregroundStyle(Color(hex: 0xFFC48A))
+                            .multilineTextAlignment(.center)
+                            .accessibilityIdentifier("uploadStalled")
+                        Button("Try again", action: onTryAgain)
+                            .font(CS.sf(15, .semibold))
+                            .foregroundStyle(CS.cyan)
+                            .accessibilityIdentifier("uploadTryAgain")
+                    }
+                    .padding(.top, 8)
+                    .padding(.horizontal, 24)
+                }
             }
 
             Spacer(minLength: 8)
 
             VStack(spacing: 12) {
-                Text(uploading ? "Keep CutSell open while your video uploads." : "Processing continues if you leave this screen.")
+                Text(uploading ? "Your video keeps uploading if you leave CutSell or lock the screen." : "Processing continues if you leave this screen.")
                     .font(CS.sf(13))
                     .foregroundStyle(Color(hex: 0xB8D1F5))
                     .frame(maxWidth: .infinity)

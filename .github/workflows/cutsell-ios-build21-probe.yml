@@ -1,0 +1,148 @@
+name: CutSell iOS build 21 probe
+
+# Build 21: the upload in REAL conditions (Swanny's iPhone, build 19: ~1 MB/s, the app cancelled
+# its own parts after 30 s). The Mac's outgoing HTTPS is limited to ~1 MB/s (dummynet) while the
+# app uploads a 1080p H.264 video over 100 MB (uploaded as it is, never re-encoded), and the test
+# leaves CutSell (Home) for 25 s in the middle of the upload. Synthetic video made here, never
+# committed. Only PNG frames and text logs go to design-screenshots (b21/). Manual: push to
+# probe/build21.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/build21]
+
+concurrency:
+  group: cutsell-ios-build21-probe
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+
+      - name: Add the UI test target (probe only) and build for testing
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen ffmpeg >/dev/null
+          cat >> project.yml <<'YML'
+            CutSellUITests:
+              type: bundle.ui-testing
+              platform: iOS
+              sources:
+                - CutSellUITests
+              dependencies:
+                - target: CutSell
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app.uitests
+                  GENERATE_INFOPLIST_FILE: YES
+                  TEST_TARGET_NAME: CutSell
+          schemes:
+            CutSellUITests:
+              build:
+                targets:
+                  CutSell: all
+                  CutSellUITests: [test]
+              test:
+                config: Debug
+                targets:
+                  - CutSellUITests
+          YML
+          xcodegen generate
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          print(c[-1][2])')"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          set +e
+          xcodebuild build-for-testing -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -8 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          exit $status
+
+      - name: Make the test video (1080p H.264, over 100 MB, 75 s)
+        run: |
+          cd "$RUNNER_TEMP"
+          text="Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. And right now it is on sale in my shop. Grab yours today."
+          say -v Samantha -o s.aiff "$text $text $text $text $text"
+          ffmpeg -loglevel error -y -i s.aiff -ar 48000 -ac 1 speech.wav
+          ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=75" -i speech.wav \
+            -vf "noise=alls=20:allf=t" -af "apad" -map 0:v -map 1:a -t 75 \
+            -c:v libx264 -preset ultrafast -b:v 12M -maxrate 12M -bufsize 24M -pix_fmt yuv420p -c:a aac -b:a 128k big1080.mp4
+          mb=$(du -m big1080.mp4 | cut -f1)
+          if [ "$mb" -lt 100 ]; then echo "::error title=video::big1080.mp4 is $mb MB (want over 100)"; exit 1; fi
+          echo "::notice title=video::big1080.mp4 $mb MB, $(ffprobe -v error -show_entries format=duration -of csv=p=0 big1080.mp4) s, $(ffprobe -v error -select_streams v -show_entries stream=width,height,codec_name -of csv=p=0 big1080.mp4)"
+
+      - name: Session for the probe user
+        run: |
+          python3 - <<'PYX'
+          import json, os, urllib.request
+          r = urllib.request.Request("https://cutsell-api.onrender.com/v1/auth/session", method="POST", data=None,
+                                     headers={"content-type": "application/json"})
+          s = json.load(urllib.request.urlopen(r, timeout=120))
+          print("::add-mask::" + s["access_token"])
+          with open(os.environ["GITHUB_ENV"], "a") as f: f.write(f"PROBE_TOKEN={s['access_token']}\nPROBE_USER={s['user_id']}\n")
+          PYX
+
+      - name: The Create flow at ~1 MB/s, leaving the app mid-upload (XCUITest)
+        working-directory: mobile/ios
+        run: |
+          mkdir -p "$RUNNER_TEMP/b21"
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl ui "$SIM_UDID" appearance dark || true
+          xcrun simctl privacy "$SIM_UDID" grant photos ai.cutsell.app || true
+          xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/big1080.mp4"; sleep 3
+          # ~1 MB/s for outgoing HTTPS (the upload), like Swanny's iPhone in the build 19 report.
+          sudo dnctl pipe 1 config bw 8Mbit/s
+          echo "dummynet out proto tcp from any to any port 443 pipe 1" | sudo pfctl -f - 2>&1 | tail -2 || true
+          sudo pfctl -E 2>&1 | tail -1 || true
+          sudo dnctl show pipe 1 | head -3 || true
+          set +e
+          TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
+          TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B21_OUT="$RUNNER_TEMP/b21" \
+            xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+              -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build21UITests \
+              CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
+          status=$?
+          sudo pfctl -f /etc/pf.conf 2>/dev/null; sudo dnctl -q flush 2>/dev/null || true
+          grep -E "B21UI|error:|failed|passed" "$RUNNER_TEMP/test.log" | grep -v "Bearer" | tail -60
+          tail -c 4000 "$RUNNER_TEMP/test.log" | grep -v "Bearer" > "$RUNNER_TEMP/b21/xctest_tail.txt" || true
+          xcrun simctl spawn "$SIM_UDID" log show --last 60m --style compact \
+            --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(ai_consent|consent_|prepare_|project_created|upload_|cut_submit|job_submitted).*' \
+            | cut -c1-300 > "$RUNNER_TEMP/b21/app_events.txt" || true
+          tail -60 "$RUNNER_TEMP/b21/app_events.txt"
+          while IFS= read -r line; do echo "::notice title=b21::$line"; done < <(sed 's/^B21UI *//' "$RUNNER_TEMP/b21/b21_ui_log.txt" 2>/dev/null | grep -E "PASS|FAIL|FAILURES|leaving|back in|STALL" | cut -c1-900)
+          while IFS= read -r line; do echo "::notice title=app::$line"; done < <(grep -E "prepare_|upload_parts|upload_background|upload_stalled|upload_moving|upload_failed|upload_completed|upload_app" "$RUNNER_TEMP/b21/app_events.txt" | tail -15)
+          echo "TEST_STATUS=$status" >> "$GITHUB_ENV"
+
+      - name: Frames and logs to design-screenshots (b21/), never a video
+        if: always()
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
+          rm -rf b21 && mkdir -p b21
+          cp "$RUNNER_TEMP"/b21/*.png b21/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/b21/*.txt b21/ 2>/dev/null || true
+          find b21 -type f \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4a' -o -iname '*.caf' -o -iname '*.wav' -o -iname '*.aiff' \) -delete
+          sed -i '' -E 's/(Bearer|token)[^ ]*/\1 <hidden>/g' b21/*.txt 2>/dev/null || true
+          echo "source commit: ${{ github.sha }} test status: ${TEST_STATUS:-?}" > b21/SOURCE.txt
+          git add -A b21
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "build 21 probe for ${{ github.sha }}" || true
+          git push --quiet origin design-screenshots

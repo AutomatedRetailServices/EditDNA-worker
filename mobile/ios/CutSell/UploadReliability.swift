@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Build 19: a new cut must never sit at "Uploading 0 %" forever (Swanny's iPhone, builds 16-18).
 /// - `Retry`: every request and every part is tried 3 times before it fails.
@@ -66,8 +67,11 @@ final class ByteTally: @unchecked Sendable {
         self.report = report
     }
 
+    /// Reports only when a part has sent MORE bytes (the 2 s poll repeats the same count; a
+    /// repeat is not activity for the 90 s watch).
     func sent(part: Int, bytes: Int64) {
         lock.lock()
+        guard bytes > (inFlight[part] ?? 0) else { lock.unlock(); return }
         inFlight[part] = bytes
         let value = Double(finished + inFlight.values.reduce(0, +)) / Double(total)
         lock.unlock()
@@ -89,43 +93,48 @@ final class ByteTally: @unchecked Sendable {
     }
 }
 
-/// Stops `work` when the submitter shows no activity for `limit` seconds (the AI notice waiting for
-/// the creator does not count). The error says which step stopped and the last error seen.
+/// Build 21: watches `work` and NEVER cancels it. When no byte (and no other step) moves for
+/// `limit` seconds (90), the screen says the upload is paused and offers "Try again", which restarts
+/// only the parts in flight; as soon as a byte moves again the notice goes away by itself.
+/// (Build 19 cancelled the whole upload after 30 s: on Swanny's iPhone that killed parts that were
+/// still sending -- NSURLError -999.) The work itself ends only when it finishes or a part has
+/// failed 3 times.
 enum StallWatch {
+    static let limit: TimeInterval = 90
+
     struct Stalled: LocalizedError {
         let step: String
         let lastError: String?
         var errorDescription: String? {
-            let base = "Nothing happened for 30 seconds while \(step.isEmpty ? "uploading" : step.lowercased())."
+            let base = "No data sent for 90 seconds while \(step.isEmpty ? "uploading" : step.lowercased())."
             return lastError.map { "\(base) Last error: \($0)." } ?? base
         }
     }
 
     @MainActor
-    static func run<T>(_ submitter: CutSubmitter, limit: TimeInterval = 30,
+    static func run<T>(_ submitter: CutSubmitter, limit: TimeInterval = StallWatch.limit,
                        _ work: @escaping @MainActor () async throws -> T) async throws -> T {
         submitter.touch()
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = Once(continuation)
-            let task = Task { @MainActor in
-                do { once.finish(.success(try await work())) } catch { once.finish(.failure(error)) }
-            }
-            Task { @MainActor in
-                while !once.isDone {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    guard !once.isDone else { return }
-                    if AIConsentCenter.shared.asking { submitter.touch(); continue }
-                    if Date().timeIntervalSince(submitter.lastActivity) > limit {
-                        let stalled = Stalled(step: submitter.stageTitle, lastError: submitter.lastError)
-                        CutSellDiagnostics.log("upload_failed", ["reason": "no progress for 30 s", "step": submitter.stageTitle,
-                                                                 "last_error": submitter.lastError ?? "none"])
-                        once.finish(.failure(stalled))
-                        task.cancel()
-                        return
-                    }
+        let watcher = Task { @MainActor in
+            var lastTick = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if Task.isCancelled { return }
+                // Back from the background (or the screen was locked): the parts kept going in iOS's
+                // upload service; the 2 s poll reports them now. Not a stall.
+                if Date().timeIntervalSince(lastTick) > 10 { submitter.touch() }
+                lastTick = Date()
+                if AIConsentCenter.shared.asking { submitter.touch(); continue }
+                if Date().timeIntervalSince(submitter.lastActivity) > limit, submitter.stalled == nil {
+                    let stalled = Stalled(step: submitter.stageTitle, lastError: submitter.lastError)
+                    CutSellDiagnostics.log("upload_stalled", ["reason": "no bytes for 90 s", "step": submitter.stageTitle,
+                                                              "last_error": submitter.lastError ?? "none"])
+                    submitter.markStalled(stalled.localizedDescription)
                 }
             }
         }
+        defer { watcher.cancel(); submitter.clearStalled() }
+        return try await work()
     }
 
     /// Resumes a continuation exactly once.
@@ -141,5 +150,26 @@ enum StallWatch {
             lock.unlock()
             current?.resume(with: result)
         }
+    }
+}
+
+/// Asks iOS for time to finish handing the parts to the background upload service when the
+/// creator leaves CutSell (or locks the screen) mid-upload.
+@MainActor
+final class BackgroundTime {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    func begin() {
+        guard id == .invalid else { return }
+        id = UIApplication.shared.beginBackgroundTask(withName: "cutsell-upload") { [weak self] in
+            CutSellDiagnostics.log("upload_app_suspended", [:])
+            self?.end()
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }

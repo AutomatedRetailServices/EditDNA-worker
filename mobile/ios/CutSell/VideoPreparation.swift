@@ -10,9 +10,7 @@ struct PreparedVideo: Sendable {
 actor VideoPreparation {
     static let shared = VideoPreparation()
 
-    private let maxUploadBytesWithoutPreparation: Int64 = 500 * 1024 * 1024
-
-    /// `progress` (0...1) while a 4K / very large video is converted to 1080p (it can take minutes:
+    /// `progress` (0...1) while a 4K (or not H.264/HEVC) video is made smaller (it can take minutes:
     /// build 19 shows it instead of a frozen 0 %).
     func prepare(fileURL: URL, contentType: String,
                  progress: @Sendable @escaping (Double) -> Void = { _ in }) async throws -> PreparedVideo {
@@ -29,15 +27,26 @@ actor VideoPreparation {
         let width = abs(displaySize.width)
         let height = abs(displaySize.height)
 
-        let exceeds1080WorkingResolution = min(width, height) > 1080.5 || max(width, height) > 1920.5
-        let oversizedFile = size > maxUploadBytesWithoutPreparation
-        guard exceeds1080WorkingResolution || oversizedFile else {
+        // Build 21: a video that is already fine (H.264 or HEVC, under 4K) is uploaded as it is,
+        // never re-encoded. (Build 19 re-encoded a 1180x2556 screen recording and it grew from
+        // 72 MB to 103 MB.)
+        let codec = try await Self.codec(of: track)
+        let under4K = max(width, height) < 3839.5 && min(width, height) < 2159.5
+        let fineCodec = codec == kCMVideoCodecType_H264 || codec == kCMVideoCodecType_HEVC
+        if fineCodec && under4K {
+            CutSellDiagnostics.log("prepare_skipped", ["width": String(Int(width)), "height": String(Int(height)),
+                                                       "codec": Self.fourCC(codec), "mb": String(size / 1_048_576)])
             return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
 
-        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1920x1080) else {
-            throw VideoPreparationError.exportUnavailable
+        // Otherwise it is only made SMALLER: HEVC 1080p capped near 10 Mb/s (+ audio), and used only
+        // if it really came out lighter than the original.
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHEVC1920x1080)
+                ?? AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1920x1080) else {
+            return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
+        let seconds = max(1, CMTimeGetSeconds(try await asset.load(.duration)))
+        exporter.fileLengthLimit = min(size - 1, Int64(seconds * (Self.targetBitsPerSecond + 192_000) / 8))
         let destination = try preparedDestination()
         try? FileManager.default.removeItem(at: destination)
         exporter.outputURL = destination
@@ -45,7 +54,7 @@ actor VideoPreparation {
         exporter.shouldOptimizeForNetworkUse = true
 
         CutSellDiagnostics.log("prepare_started", ["width": String(Int(width)), "height": String(Int(height)),
-                                                   "mb": String(size / 1_048_576)])
+                                                   "codec": Self.fourCC(codec), "mb": String(size / 1_048_576)])
         let watcher = Task {
             while !Task.isCancelled {
                 progress(Double(exporter.progress))
@@ -53,27 +62,52 @@ actor VideoPreparation {
             }
         }
         defer { watcher.cancel() }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            exporter.exportAsynchronously {
-                switch exporter.status {
-                case .completed:
-                    continuation.resume(returning: ())
-                case .failed:
-                    continuation.resume(throwing: exporter.error ?? VideoPreparationError.exportFailed)
-                case .cancelled:
-                    continuation.resume(throwing: VideoPreparationError.cancelled)
-                default:
-                    continuation.resume(throwing: exporter.error ?? VideoPreparationError.exportFailed)
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                exporter.exportAsynchronously {
+                    switch exporter.status {
+                    case .completed: continuation.resume(returning: ())
+                    case .cancelled: continuation.resume(throwing: VideoPreparationError.cancelled)
+                    default: continuation.resume(throwing: exporter.error ?? VideoPreparationError.exportFailed)
+                    }
                 }
             }
+        } catch {
+            // A video CutSell can't shrink is uploaded as it is.
+            try? FileManager.default.removeItem(at: destination)
+            CutSellDiagnostics.log("prepare_failed_original_kept", ["mb": String(size / 1_048_576),
+                                                                     "code": String((error as NSError).code)])
+            progress(1)
+            return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
         }
 
-        let preparedAttributes = try FileManager.default.attributesOfItem(atPath: destination.path)
-        let preparedSize = (preparedAttributes[.size] as? NSNumber)?.int64Value ?? 0
-        guard preparedSize > 0 else { throw VideoPreparationError.exportFailed }
+        let preparedAttributes = try? FileManager.default.attributesOfItem(atPath: destination.path)
+        let preparedSize = (preparedAttributes?[.size] as? NSNumber)?.int64Value ?? 0
         progress(1)
-        CutSellDiagnostics.log("prepare_finished", ["mb": String(preparedSize / 1_048_576)])
+        // Never upload a file heavier than the original.
+        guard preparedSize > 0, preparedSize < size else {
+            try? FileManager.default.removeItem(at: destination)
+            CutSellDiagnostics.log("prepare_finished", ["mb_before": String(size / 1_048_576),
+                                                        "mb_after": String(preparedSize / 1_048_576), "used": "original"])
+            return PreparedVideo(url: fileURL, contentType: contentType, wasTranscoded: false)
+        }
+        CutSellDiagnostics.log("prepare_finished", ["mb_before": String(size / 1_048_576),
+                                                    "mb_after": String(preparedSize / 1_048_576), "used": "smaller"])
         return PreparedVideo(url: destination, contentType: "video/mp4", wasTranscoded: true)
+    }
+
+    /// ~10 Mb/s for 1080p.
+    static let targetBitsPerSecond: Double = 10_000_000
+
+    static func codec(of track: AVAssetTrack) async throws -> FourCharCode {
+        let descriptions = try await track.load(.formatDescriptions)
+        return descriptions.first.map { CMFormatDescriptionGetMediaSubType($0) } ?? 0
+    }
+
+    static func fourCC(_ code: FourCharCode) -> String {
+        let bytes = [24, 16, 8, 0].map { UInt8((code >> $0) & 0xFF) }
+        let text = String(bytes: bytes, encoding: .ascii) ?? ""
+        return text.trimmingCharacters(in: .whitespaces).isEmpty ? "unknown" : text
     }
 
     private func preparedDestination() throws -> URL {

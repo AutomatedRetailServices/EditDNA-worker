@@ -128,7 +128,7 @@ def test_preview_and_upload_speedups():
     playback = read("DraftPlaybackView.swift")
     assert "withTaskGroup(of: (String, LoadedSource?).self)" in playback and "sourceCache[id]" in playback
     upload = read("MultipartUploadManager.swift")
-    assert "let maxInFlight = 3" in upload and "withThrowingTaskGroup" in upload
+    assert "httpMaximumConnectionsPerHost = 3" in upload and "withThrowingTaskGroup" in upload
     frames = read("ClipFrames.swift")
     assert "generators[url.path]" in frames
 

@@ -22,7 +22,7 @@ def test_part_upload_sends_no_content_type():
     # Build 19: parts go through a foreground URLSession (iOS's background service failed every
     # part to R2 with NSURLErrorUnknown); the same empty Content-Type is sent.
     assert 'request.setValue(BackgroundPartUploader.partContentType, forHTTPHeaderField: "Content-Type")' in manager
-    assert "Self.partSession.upload(for: request, from: data, delegate: delegate)" in manager
+    assert "partSession.upload(for: request, fromFile: file, delegate: delegate)" in manager
 
 
 def test_server_part_links_sign_the_content_type():

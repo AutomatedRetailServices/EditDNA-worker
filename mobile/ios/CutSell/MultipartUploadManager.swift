@@ -79,7 +79,7 @@ actor MultipartUploadManager {
     static let shared = MultipartUploadManager()
     private let api = APIClient.shared
     private let resumeStore = UploadResumeStore.shared
-    private let backgroundUploader = BackgroundPartUploader.shared
+    static let requestedPartSize = 8 * 1024 * 1024
 
     func upload(
         fileURL: URL,
@@ -162,23 +162,28 @@ actor MultipartUploadManager {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
 
-        // Up to three parts at a time (they used to go one after another, each waiting for its own
-        // link first), so the phone's connection stays busy instead of idle between parts.
+        // Build 21: every missing part is written to its own small file and queued at once in the
+        // background URLSession (iOS sends 3 at a time and keeps going with CutSell in the background
+        // or the screen locked). Each part is retried on its own, up to 3 times; parts already
+        // uploaded are never sent again. Nothing here cancels a part that is sending.
         let missing = (1...start.partCount).filter { completedParts[$0] == nil }
-        let maxInFlight = 3
+        let folder = try partsFolder(uploadID: start.uploadID)
+        let uploadID = start.uploadID
+        let userID = session.userID
+        let useForeground = foreground
         try await withThrowingTaskGroup(of: (Int, String).self) { group in
-            var next = 0
-            func launch(_ partNumber: Int) throws {
-                let offset = UInt64((partNumber - 1) * start.partSize)
-                try handle.seek(toOffset: offset)
-                let remaining = max(0, Int(size) - Int(offset))
-                let readCount = min(start.partSize, remaining)
+            for partNumber in missing {
+                let offset = Int64(partNumber - 1) * Int64(start.partSize)
+                let readCount = Int(min(Int64(start.partSize), size - offset))
+                try handle.seek(toOffset: UInt64(offset))
                 let data = try handle.read(upToCount: readCount) ?? Data()
                 guard !data.isEmpty else { throw UploadError.missingPart(partNumber) }
-                let uploadID = start.uploadID
-                let userID = session.userID
+                let partFile = folder.appendingPathComponent(String(format: "part-%05d.bin", partNumber))
+                try data.write(to: partFile, options: .atomic)
+                let partBytes = Int64(data.count)
                 group.addTask {
-                    struct OwnerBody: Encodable { let project_id: String; let user_id: String }
+                    struct SignBody: Encodable { let project_id: String; let user_id: String; let expires_in: Int }
+                    defer { try? FileManager.default.removeItem(at: partFile) }
                     // A fresh link and the PUT, tried 3 times (a link can expire while a part waits).
                     let etagValue: String = try await Retry.run("part \(partNumber)", onRetry: { attempt, error in
                         tally.reset(part: partNumber)
@@ -187,28 +192,29 @@ actor MultipartUploadManager {
                         let signed: MultipartPartSignResponse = try await self.api.request(
                             "/v1/uploads/multipart/\(uploadID)/parts/\(partNumber)/presign",
                             method: "POST",
-                            body: OwnerBody(project_id: projectID, user_id: userID),
+                            // expires_in: 1 h once the server reads it (the current server keeps 15 min).
+                            body: SignBody(project_id: projectID, user_id: userID, expires_in: 3600),
                             timeout: 20
                         )
-                        let response = try await self.uploadPart(
-                            data, uploadID: uploadID, partNumber: partNumber, signedURL: signed.uploadURL,
-                            foreground: foreground, onBytes: { tally.sent(part: partNumber, bytes: $0) }
+                        let response = try await Self.uploadPart(
+                            file: partFile, bytes: partBytes, partNumber: partNumber, signedURL: signed.uploadURL,
+                            foreground: useForeground, onBytes: { tally.sent(part: partNumber, bytes: $0) }
                         )
                         guard let etag = response.value(forHTTPHeaderField: "ETag"), !etag.isEmpty else {
                             throw UploadError.missingETag(partNumber)
                         }
                         return etag
                     }
-                    tally.done(part: partNumber, size: Int64(data.count))
+                    tally.done(part: partNumber, size: partBytes)
+                    CutSellDiagnostics.log("upload_part_done", ["part": String(partNumber), "of": String(start.partCount)])
                     return (partNumber, etagValue)
                 }
             }
-            while next < missing.count && next < maxInFlight { try launch(missing[next]); next += 1 }
             while let (partNumber, etag) = try await group.next() {
                 completedParts[partNumber] = etag
-                if next < missing.count { try launch(missing[next]); next += 1 }
             }
         }
+        try? FileManager.default.removeItem(at: folder)
 
         struct CompleteBody: Encodable {
             let project_id: String
@@ -246,6 +252,9 @@ actor MultipartUploadManager {
             let original_name: String
             let content_type: String
             let size_bytes: Int64
+            /// Build 21: 8 MiB parts (all equal except the last, as R2 requires). The current server
+            /// ignores it and answers 16 MiB; the app always uses the part size the server answers.
+            let part_size: Int
         }
         return try await api.request(
             "/v1/uploads/multipart/start",
@@ -255,55 +264,75 @@ actor MultipartUploadManager {
                 user_id: session.userID,
                 original_name: fileURL.lastPathComponent,
                 content_type: contentType,
-                size_bytes: size
+                size_bytes: size,
+                part_size: Self.requestedPartSize
             ),
             timeout: 20
         )
     }
 
-    private func uploadPart(
-        _ data: Data,
-        uploadID: String,
+    /// Set after iOS's background upload service fails a part with NSURLErrorUnknown (-1; the
+    /// Simulator always does): the rest of the parts go through the normal session.
+    private static let backgroundBroken = Flag()
+
+    static func uploadPart(
+        file: URL,
+        bytes: Int64,
         partNumber: Int,
         signedURL: URL,
-        foreground: Bool = false,
-        onBytes: (@Sendable (Int64) -> Void)? = nil
+        foreground: Bool,
+        onBytes: (@Sendable (Int64) -> Void)?
     ) async throws -> HTTPURLResponse {
-        // Build 19: every part goes through a normal (foreground) URLSession, like overlays and
-        // voice-overs. Through iOS's background upload service every part to Cloudflare R2 ended in
-        // NSURLErrorUnknown (-1) and the upload never moved past 0 %. CutSell stays open while a
-        // video uploads (the screen says so); a stopped upload resumes from the parts already sent.
-        _ = foreground
+        if !foreground && !backgroundBroken.value {
+            do {
+                let response = try await BackgroundPartUploader.shared.upload(fileURL: file, to: signedURL, onBytes: onBytes)
+                onBytes?(bytes)
+                return response
+            } catch let error as NSError where error.domain == NSURLErrorDomain && error.code == NSURLErrorUnknown {
+                backgroundBroken.set()
+                CutSellDiagnostics.log("upload_background_unavailable", ["part": String(partNumber)])
+            }
+        }
         var request = URLRequest(url: signedURL)
         request.httpMethod = "PUT"
         // Same empty Content-Type the server signs (see BackgroundPartUploader).
         request.setValue(BackgroundPartUploader.partContentType, forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 30
         let delegate = PartProgressDelegate(onBytes: onBytes)
-        let (_, response) = try await Self.partSession.upload(for: request, from: data, delegate: delegate)
+        let (_, response) = try await partSession.upload(for: request, fromFile: file, delegate: delegate)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw BackgroundUploadError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
-        onBytes?(Int64(data.count))
+        onBytes?(bytes)
         return http
     }
 
-    /// One session for the parts (a request without progress for 30 s is retried).
-    private static let partSession: URLSession = {
+    /// The normal session (short B-roll uploads, and the fallback). A request fails only after
+    /// 90 s with no byte moving; three parts at a time.
+    static let partSession: URLSession = {
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 30 * 60
+        configuration.timeoutIntervalForRequest = 90
+        configuration.timeoutIntervalForResource = 60 * 60
         configuration.waitsForConnectivity = false
-        configuration.httpMaximumConnectionsPerHost = 4
+        configuration.httpMaximumConnectionsPerHost = 3
         return URLSession(configuration: configuration)
     }()
+
+    /// "Try again" after 90 s with no byte sent: restarts the parts that are sending (each is
+    /// retried on its own; finished parts stay finished).
+    static func restartStuckParts() {
+        BackgroundPartUploader.shared.restartStuckParts()
+        partSession.getAllTasks { tasks in
+            for task in tasks where task.state == .running || task.state == .suspended { task.cancel() }
+        }
+        CutSellDiagnostics.log("upload_restart_stuck_parts", [:])
+    }
 
     /// A short, stable folder name for an upload id of any length (SHA-256, first 32 hex digits).
     static func folderName(for uploadID: String) -> String {
         SHA256.hash(data: Data(uploadID.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
-    private func writePartFile(_ data: Data, uploadID: String, partNumber: Int) throws -> URL {
+    private func partsFolder(uploadID: String) throws -> URL {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CutSell", isDirectory: true)
             .appendingPathComponent("UploadParts", isDirectory: true)
@@ -312,10 +341,15 @@ actor MultipartUploadManager {
             // (NSCocoaErrorDomain 514) and no part ever left the iPhone after the move to R2.
             .appendingPathComponent(Self.folderName(for: uploadID), isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let destination = root.appendingPathComponent(String(format: "part-%05d.bin", partNumber))
-        try data.write(to: destination, options: .atomic)
-        return destination
+        return root
     }
+}
+
+final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    var value: Bool { lock.lock(); defer { lock.unlock() }; return on }
+    func set() { lock.lock(); on = true; lock.unlock() }
 }
 
 enum UploadError: LocalizedError {
