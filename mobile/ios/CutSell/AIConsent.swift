@@ -31,19 +31,30 @@ final class AIConsentCenter: ObservableObject {
         }
     }
 
-    private func present() {
-        guard let top = Self.topViewController() else {
-            // No window yet: try again in a moment (never answer for the creator).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                if self?.asking == true { self?.present() }
-            }
-            return
+    /// Presents the notice and makes sure it is really on screen: while iOS is still closing the
+    /// gallery (or any sheet), a presentation is silently refused, so it tries again every 0.5 s.
+    private func present(attempt: Int = 1) {
+        guard asking else { return }
+        if let presented, presented.viewIfLoaded?.window != nil { return }
+        if let top = Self.topViewController(), top.transitionCoordinator == nil, !top.isBeingPresented, !top.isBeingDismissed {
+            let host = presented ?? {
+                let host = UIHostingController(rootView: AIConsentSheet())
+                host.modalPresentationStyle = .pageSheet
+                host.isModalInPresentation = true
+                return host
+            }()
+            presented = host
+            if host.presentingViewController == nil { top.present(host, animated: true) }
         }
-        let host = UIHostingController(rootView: AIConsentSheet())
-        host.modalPresentationStyle = .pageSheet
-        host.isModalInPresentation = true
-        presented = host
-        top.present(host, animated: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, self.asking else { return }
+            if let shown = self.presented, shown.viewIfLoaded?.window != nil {
+                CutSellDiagnostics.log("ai_consent_shown", ["attempt": String(attempt)])
+                return
+            }
+            if attempt % 10 == 0 { CutSellDiagnostics.log("ai_consent_not_shown_yet", ["attempt": String(attempt)]) }
+            self.present(attempt: attempt + 1)
+        }
     }
 
     func answer(_ agree: Bool) {

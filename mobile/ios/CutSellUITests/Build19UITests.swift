@@ -58,6 +58,11 @@ final class Build19UITests: XCTestCase {
         return condition()
     }
 
+    /// The texts on screen (to see where a flow stopped).
+    private func screenTexts() -> String {
+        app.staticTexts.allElementsBoundByIndex.prefix(30).map(\.label).filter { !$0.isEmpty }.joined(separator: " | ")
+    }
+
     private func launch() {
         app = XCUIApplication()
         app.launchArguments = ["-CutSellScreen", "create_probe"]
@@ -96,6 +101,9 @@ final class Build19UITests: XCTestCase {
         guard style.waitForExistence(timeout: 10) else { check(false, "\(name): style sheet"); return }
         style.tap()
         let tappedAt = Date()
+        pause(3)
+        shot("\(name)_after_create")
+        log("\(name): on screen 3 s after Create: \(screenTexts())")
 
         // The AI notice must APPEAR (builds 16-18: it was hidden and the cut waited forever).
         let agree = element("aiConsentAgree")
@@ -104,7 +112,8 @@ final class Build19UITests: XCTestCase {
             log("\(name): AI notice shown after \(String(format: "%.1f", Date().timeIntervalSince(tappedAt))) s")
             agree.tap()
         } else {
-            log("\(name): no AI notice (already agreed)")
+            log("\(name): no AI notice (already agreed?) on screen: \(screenTexts())")
+            shot("\(name)_no_notice")
         }
 
         // Follow the Processing screen: every step and % it shows, until the cut is ready.
@@ -114,7 +123,14 @@ final class Build19UITests: XCTestCase {
         let deadline = Date().addingTimeInterval(30 * 60)
         var ready = false
         var problem = ""
+        var lastChange = Date()
         while Date() < deadline {
+            // Nothing new on the screen for 4 minutes: record what is there and stop.
+            if Date().timeIntervalSince(lastChange) > 240 {
+                problem = "no change for 4 min: \(screenTexts())"
+                shot("\(name)_stuck")
+                break
+            }
             if element("readyReviewButton").exists { ready = true; break }
             if app.staticTexts["Upload paused"].exists || app.staticTexts["Couldn’t start the cut"].exists {
                 problem = app.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")
@@ -126,6 +142,7 @@ final class Build19UITests: XCTestCase {
                 let now = "\(stage.label) \(percent.exists ? percent.label : "")"
                 if now != last {
                     last = now
+                    lastChange = Date()
                     let at = Date().timeIntervalSince(tappedAt)
                     seen.append(String(format: "%.0fs %@", at, now))
                     if firstUploadPercent == nil, stage.label.contains("Uploading"), percent.label != "0%" {
