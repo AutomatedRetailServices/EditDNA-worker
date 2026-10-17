@@ -74,7 +74,8 @@ def _summary(diag, draft):
 
 
 @app.function(image=worker_image, secrets=[secret], timeout=1800, cpu=2.0, memory=4096)
-def inspect(run_test: bool = True):
+def inspect(run_test: bool = True, project: str = ""):
+    os.environ["ENGINE_CHECK_PROJECT"] = project
     from redis import Redis
     r = Redis.from_url(os.environ["REDIS_URL"])
     report = {"cuts": []}
@@ -129,6 +130,26 @@ def inspect(run_test: bool = True):
 
     if run_test:
         report["test"] = _fresh_run(rows)
+    # Stored decisions with their words, for the cuts that hid speech (no new processing).
+    report["stored_detail"] = []
+    for row in rows[:8]:
+        orig = row["original"]
+        if not (orig.get("alternates")):
+            continue
+        clips = sorted([(c.get("start"), c.get("end"), c.get("selected"), c.get("text")) for c in
+                        list(orig.get("selected") or []) + list(orig.get("alternates") or [])], key=lambda c: (c[0] or 0))
+        se = (orig.get("diagnostics") or {}).get("simple_engine") or {}
+        splits = ((se.get("sources") or [{}])[0]).get("splits") or []
+        def reason_at(a, b):
+            best = None
+            for sp in splits:
+                o = min(b, sp["end"]) - max(a, sp["start"])
+                if o > 0 and (best is None or o > best[0]):
+                    best = (o, sp.get("reason"), sp.get("visible"))
+            return best[1] if best else None
+        report["stored_detail"].append({"project": _h(row["snap"].get("project_id")), "title": row["project"].get("title"),
+                                        "clips": [{"start": a, "end": b, "kept": k, "reason": reason_at(a or 0, b or 0), "text": t}
+                                                  for a, b, k, t in clips]})
     return report
 
 
@@ -165,7 +186,10 @@ def _fresh_run(rows):
     pool = list(candidates(True)) or list(candidates(False))
     if not pool:
         return {"error": "no real 30-60 s video found in stored drafts"}
-    pool.sort(key=lambda x: (x[0] >= 2, x[1]["created"]), reverse=True)
+    want = os.environ.get("ENGINE_CHECK_PROJECT", "")
+    if want:
+        pool = [x for x in pool if _h(x[1]["snap"].get("project_id")) == want] or pool
+    pool.sort(key=lambda x: (x[0], x[1]["created"]), reverse=True)
     hidden_before, row, src, dur = pool[0]
     with tempfile.TemporaryDirectory() as d:
         path = download_source(src["uri"], str(Path(d) / "v.mp4"))
@@ -200,7 +224,7 @@ def main():
     w = env_with_secret.remote()
     secret_names = sorted(set(w["names"]) - plain_names)
     worker = env_as_worker.remote()
-    report = inspect.remote(True)
+    report = inspect.remote(True, "ec57457c")
     report["secret_names"] = secret_names
     report["secret_values_shown"] = w["values"]
     report["as_worker"] = worker
