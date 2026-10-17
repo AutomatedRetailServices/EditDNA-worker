@@ -13,6 +13,7 @@ only with a full re-run of the evaluation (scripts/simple_engine_eval.py).
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,7 +21,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.4-exp"
+VERSION = "1.4"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
@@ -265,10 +266,9 @@ def decide(words, duration, call: LLMCall, run: int = 0):
              and isinstance(backbone, list) and len(backbone) == 2)
     mode = ("MULTI-PASS: the recording has several passes. The BACKBONE is fixed: lines L%d..L%d. Hide everything outside it with code \"p\", "
             "except a whole sentence with a fact the backbone truly lacks." % (backbone[0], backbone[1])) if multi else (
-            "SINGLE PASS: the recording is one continuous story/pitch. When the same idea is said twice (a retake, or the same claim, benefit, "
-            "price, hook or call to action said again later), keep ONLY the most complete and best delivered version. Keep the other version only "
-            "for an important new fact it adds (a number, a price, another benefit, a proof), and then only its new part when it can be cut "
-            "cleanly (\"dup\"). A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
+            "SINGLE PASS: the recording is one continuous story/pitch. When a sentence is retaken and each version has a concrete detail the other "
+            "lacks (a body part or place, a number, a name, an example, a cause), keep BOTH versions; when one version only rephrases the other with "
+            "nothing new, keep the most complete one. A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
     prompt = DECISION_PROMPT + "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text
     d, u = _ask(call, f"v3dec-{run}", prompt); usage += u
     lab = labels(d, words, units)
@@ -330,12 +330,45 @@ def _ints(xs, n):
     return out
 
 
-def decide_understood(words, duration, call: LLMCall, run: int = 0):
+def understand(words, call: LLMCall, run: int = 0):
+    """What she sells, whether the recording is a sale at all, and the script of the video she meant."""
+    units = lines_of(words)
+    return _ask_json(call, UNDERSTAND_PROMPT + "\nTRANSCRIPT:\n" + transcript(words, units), "script", f"understand-{run}")
+
+
+def is_sale(plan) -> bool:
+    return str((plan or {}).get("type", "")).strip().lower() in ("sale", "venta", "sales")
+
+
+def decide_auto(words, duration, call: LLMCall, run: int = 0):
+    """Sales videos are cut from the understanding of the pitch; any other recording (a story, a personal video) keeps
+    the rules path that was live before (1.2). The understanding call decides which one it is."""
+    try:
+        plan, usage = understand(words, call, run)
+    except Exception as exc:                 # an unreadable understanding never fails the cut: the 1.2 path runs
+        splits, info = decide(words, duration, call, run)
+        info["mode"] = "rules"
+        info["understanding"] = {"error": str(exc)[:200]}
+        return splits, info
+    if is_sale(plan):
+        splits, info = decide_understood(words, duration, call, run, plan=plan)
+        info["usage"] = usage + info["usage"]
+        info["mode"] = "understand"
+        return splits, info
+    splits, info = decide(words, duration, call, run)
+    info["usage"] = usage + info["usage"]
+    info["mode"] = "rules"
+    info["understanding"] = {"type": plan.get("type"), "product": plan.get("product"), "message": plan.get("message")}
+    return splits, info
+
+
+def decide_understood(words, duration, call: LLMCall, run: int = 0, plan=None):
     units = lines_of(words)
     n = len(units)
     usage = []
-    plan, u = _ask_json(call, UNDERSTAND_PROMPT + "\nTRANSCRIPT:\n" + transcript(words, units), "script", f"understand-{run}")
-    usage += u
+    if plan is None:
+        plan, u = understand(words, call, run)
+        usage += u
     keep, protected = set(), set()
     for beat in plan.get("script", []) or []:
         lines = _ints(beat.get("lines"), n)
@@ -390,7 +423,7 @@ def decide_understood(words, duration, call: LLMCall, run: int = 0):
                     for k in u_[commas[-1] + 1:]:
                         lab[k] = ("hide", "frase cortada")
     splits = splits_from_labels(words, [(st, why, False) for st, why in lab], duration)
-    understanding = {k: plan.get(k) for k in ("product", "message", "attempts", "script", "coherence")}
+    understanding = {k: plan.get(k) for k in ("type", "product", "message", "attempts", "script", "coherence")}
     return splits, {"passes": len(plan.get("attempts") or []) or 1, "usage": usage, "review": view,
                     "hidden_idx": [k for k, l in enumerate(lab) if l[0] == "hide"],
                     "understanding": understanding}
@@ -752,26 +785,32 @@ def caption_groups(caps, max_words: int = 3, max_gap: float = 0.45):
 # ---------------------------------------------------------------- entry point
 
 def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cut_list=None,
-            llm: Optional[LLMCall] = None, mode: str = "rules") -> dict:
+            llm: Optional[LLMCall] = None, mode: Optional[str] = None) -> dict:
     """words: [{"w","s","e"}] from Deepgram. Returns splits (full non-destructive timeline) + captions."""
     if not words:
         raise ValueError("simple engine: no words to edit")
     call = llm or _llm.call_anthropic
-    splits, info = (decide_understood if mode == "understand" else decide)(words, float(duration), call, run)
+    # "auto" (default): sales videos are cut from understanding, anything else by the 1.2 rules.
+    # CUTSELL_SIMPLE_ENGINE_MODE=rules switches the whole engine back to 1.2 without a redeploy.
+    mode = (mode or os.environ.get("CUTSELL_SIMPLE_ENGINE_MODE", "") or "auto").strip().lower()
+    decider = {"understand": decide_understood, "rules": decide}.get(mode, decide_auto)
+    splits, info = decider(words, float(duration), call, run)
+    understood = bool(info.get("hidden_idx") is not None)
     log = {"sueltos": orphans(splits, words)}
     if info.get("understanding"):
         log["comprension"] = info["understanding"]
     splits = keep_spoken_words(refine(splits, audio_path, float(duration), words), words)
-    if mode == "understand":
+    if understood:
         splits = keep_hidden_words_out(info.get("hidden_idx") or [], splits, words)
     if scene_cut_list is None and video_path:
         scene_cut_list = scene_cuts(video_path)
     log["tomas"] = snap(splits, words, scene_cut_list) if scene_cut_list else []
     splits = breathe(splits, words, float(duration))
-    if mode == "understand":            # the breathing pause may not reach into a hidden word either
+    if understood:                      # the breathing pause may not reach into a hidden word either
         splits = keep_hidden_words_out(info.get("hidden_idx") or [], splits, words)
     shown, fixes, u = fix_words(words, splits, call); info["usage"] += u
     caps, cut_duration = captions(shown, splits)
     log["revision"] = info.get("review"); log["palabras"] = fixes
+    log["modo"] = info.get("mode") or ("understand" if understood else "rules")
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
             "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"]}

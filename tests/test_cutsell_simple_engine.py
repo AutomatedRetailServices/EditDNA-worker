@@ -17,6 +17,12 @@ from cutsell_worker import config as cutsell_config
 from cutsell_worker import draft_edits, simple_engine_adapter, worker_job
 from cutsell_worker.contracts import JobState, ProcessingRequest, SourceAsset
 from cutsell_worker.simple_engine import engine
+
+
+@pytest.fixture(autouse=True)
+def _rules_path_by_default(monkeypatch):
+    """The older tests exercise the 1.2 rules path; the auto/understanding tests pass their mode explicitly."""
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "rules")
 from cutsell_worker.serde import draft_from_dict, result_to_dict
 from cutsell_worker.simple_engine import asr as se_asr
 from cutsell_worker.simple_engine import engine as se
@@ -507,7 +513,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.4-exp" and "THE HOOK is not noise" in engine.DECISION_PROMPT
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.4" and "TYPE." in engine.UNDERSTAND_PROMPT
 
 
 def _review_words():
@@ -602,7 +608,7 @@ def test_repetido_hides_the_same_idea_with_a_reference_to_the_kept_line():
     lab = engine.labels({"hide": [[3, 3, "d", 1]]}, words, units)
     assert all(l == ("hide", "repetido · queda L1 «Lo mejor es el precio.»") for l in lab[-6:])
     assert all(l[0] == "keep" for l in lab[:-6])
-    assert engine.WHY["d"] == "repetido" and '"d" = the same idea' in engine.DECISION_PROMPT
+    assert engine.WHY["d"] == "repetido"
 
 
 def test_repetido_never_drops_a_number_and_needs_a_kept_reference():
@@ -685,3 +691,45 @@ def test_the_viewer_pass_cannot_remove_the_closer_or_the_hook():
 
     splits, _ = engine.decide_understood(words, 5.0, fake)
     assert all(any(s["visible"] and s["start"] <= (w["s"] + w["e"]) / 2 <= s["end"] for s in splits) for w in words)
+
+
+def _auto_words():
+    return [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Mira esto. Cuesta veinte. Compralo ya.".split())]
+
+
+def test_auto_mode_cuts_a_sale_from_understanding_and_anything_else_by_the_rules(monkeypatch):
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_MODE", "auto")
+    seen = []
+
+    def sale(prompt):
+        seen.append(prompt[:40])
+        if "UNDERSTAND." in prompt:
+            return json.dumps({"type": "sale", "script": [{"beat": "gancho", "lines": [1, 2, 3]}]}), {}
+        return '{"ok": true}', {}
+
+    splits, info = engine.decide_auto(_auto_words(), 5.0, sale)
+    assert info["mode"] == "understand" and len(info["usage"]) == 2
+
+    def story(prompt):
+        if "UNDERSTAND." in prompt:
+            return '{"type": "other", "script": []}', {}
+        if '"passes"' in prompt:
+            return '{"passes": [[1, 3, true]], "backbone": [1, 3]}', {}
+        if "senior editor" in prompt:
+            return '{"type": "other", "hide": [], "unhide": []}', {}
+        return '{"hide": [], "trim": []}', {}
+
+    splits, info = engine.decide_auto(_auto_words(), 5.0, story)
+    assert info["mode"] == "rules" and info["understanding"]["type"] == "other"
+
+    def broken(prompt):
+        if "UNDERSTAND." in prompt:
+            return "not json", {}
+        return story(prompt)
+
+    splits, info = engine.decide_auto(_auto_words(), 5.0, broken)
+    assert info["mode"] == "rules" and "error" in info["understanding"]
+
+
+def test_the_rules_path_is_the_live_1_2_decision_prompt():
+    assert "SAME IDEA SAID AGAIN" not in engine.DECISION_PROMPT and "THE HOOK is not noise" not in engine.DECISION_PROMPT
