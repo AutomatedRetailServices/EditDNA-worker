@@ -20,7 +20,7 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           pip install -q modal
-          modal run dedup_eval.py
+          modal run render_ab.py
           cat > pub.pem <<'KEY'
           -----BEGIN PUBLIC KEY-----
           MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAlZotqgbNtP3sdy7aLID+
