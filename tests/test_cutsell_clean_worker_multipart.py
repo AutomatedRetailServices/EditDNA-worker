@@ -254,3 +254,20 @@ def test_part_url_is_sigv4_for_r2_endpoint(monkeypatch):
     assert out["upload_url"].startswith("https://example.r2.cloudflarestorage.com/")
     assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in out["upload_url"]
     assert "/auto/s3/aws4_request" in out["upload_url"].replace("%2F", "/")
+
+
+def test_routes_accept_optional_part_size_and_link_life():
+    from cutsell_app.multipart_routes import MultipartSignRequest, MultipartStartRequest
+    import pydantic
+
+    base = {"project_id": "p", "user_id": "u", "original_name": "a.mp4", "size_bytes": 10}
+    assert MultipartStartRequest(**base).part_size is None
+    assert MultipartStartRequest(**base, part_size=8 * 1024 * 1024).part_size == 8 * 1024 * 1024
+    for bad in (1024, 65 * 1024 * 1024):
+        try:
+            MultipartStartRequest(**base, part_size=bad)
+        except pydantic.ValidationError:
+            continue
+        raise AssertionError(bad)
+    assert MultipartSignRequest(project_id="p", user_id="u").expires_in is None
+    assert MultipartSignRequest(project_id="p", user_id="u", expires_in=3600).expires_in == 3600
