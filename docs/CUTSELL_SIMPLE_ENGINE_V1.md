@@ -89,3 +89,21 @@ With `simple`, the worker does not build the brain runtime and does not load Whi
 
 The prompts and the numeric constants were tuned together. Any change to either needs a full re-run
 on the Gold and a comparison of the score, per video, before it is merged.
+
+## 1.3 candidate: "repetido" (2026-10-17, branch feat/simple-engine-dedup, NOT deployed)
+Rule: the same claim / benefit / price / hook / CTA never plays twice; keep the most complete version, keep the
+other only for an important new fact (and then only the new part, `dup`). Reason in the log:
+`repetido · queda L<n> «…»`. Code guards: the kept version must be on screen; no number/price may disappear.
+
+A/B on the Gold words (26 videos, 1 run each, decision step only, same harness for both):
+
+| | agree | removed wrongly | kept wrongly | duplicate pairs left |
+|---|---|---|---|---|
+| 1.2 (live) | 560/592 = 94.6 % | 23 | 9 | 29 |
+| 1.3 | 550/592 = 92.9 % | 34 | 8 | 20 |
+| Gold itself | — | — | — | 26 |
+
+Of the 11 extra removals: 9 are repetitions the Gold keeps (B13 ×6 -- the same pizza story --, B08 ×2, B12 ×1);
+real losses: Y07 ×3 (story details: a symptom with a body place, "soy la única en mi familia"), B03 ×1 (wrong
+reference), Y05 ×1 (goodbye). Real videos: both repetitions found in the live review are gone. Decision pending
+with the Product Owner (Gold vs new rule) before a 1.3.1 run.
