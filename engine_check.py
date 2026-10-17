@@ -65,6 +65,10 @@ def _summary(diag, draft):
             "llm_calls_total": len(usage), "review_calls": rev.get("calls"), "review_errors": rev.get("errors"),
             "review_changes": {"haul": rev.get("haul"), "hide": rev.get("hide"), "unhide": rev.get("unhide")},
             "caption_word_fixes": len((s.get("log") or {}).get("palabras") or []),
+            "calls": [{"in": u.get("input_tokens"), "out": u.get("output_tokens"),
+                       "cache_read": u.get("cache_read_input_tokens"), "cache_write": u.get("cache_creation_input_tokens")}
+                      for u in usage],
+            "revision_venta": (s.get("log") or {}).get("revision_venta"),
             "tokens_in": sum(int(u.get("input_tokens") or 0) for u in usage),
             "tokens_out": sum(int(u.get("output_tokens") or 0) for u in usage),
             "hidden_splits": len(hidden), "hidden_reasons": reasons, "visible_splits": len(splits) - len(hidden),
@@ -119,7 +123,7 @@ def inspect(run_test: bool = True, project: str = ""):
                      "created": proj.get("created_at") or "", "apple": apple})
     rows.sort(key=lambda x: x["created"] or x["when"], reverse=True)
     report["drafts_total"] = len(rows)
-    for row in rows[:8]:
+    for row in rows[:3]:
         orig, snap = row["original"], row["snap"]
         report["cuts"].append({
             "project": _h(snap.get("project_id")), "user": _h(snap.get("user_id")), "apple_user": row["apple"],
@@ -130,6 +134,8 @@ def inspect(run_test: bool = True, project: str = ""):
 
     if run_test:
         report["test"] = _fresh_run(rows)
+    if not run_test:
+        return report
     # Stored decisions with their words, for the cuts that hid speech (no new processing).
     report["stored_detail"] = []
     for row in rows[:8]:
@@ -224,7 +230,7 @@ def main():
     w = env_with_secret.remote()
     secret_names = sorted(set(w["names"]) - plain_names)
     worker = env_as_worker.remote()
-    report = inspect.remote(True, "ec57457c")
+    report = inspect.remote(False, "")
     report["secret_names"] = secret_names
     report["secret_values_shown"] = w["values"]
     report["as_worker"] = worker
