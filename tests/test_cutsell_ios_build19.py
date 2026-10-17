@@ -31,8 +31,7 @@ def test_every_step_shows_its_real_percent():
     assert "progress(Double(exporter.progress))" in prep
     submitter = read("CutSubmission.swift")
     assert 'stage("Creating your project")' in submitter and "self?.stage(uploadTitle, partProgress)" in submitter
-    uploader = read("BackgroundPartUploader.swift")
-    assert "didSendBodyData" in uploader and "callback?(totalBytesSent)" in uploader
+    assert "final class PartProgressDelegate" in read("MultipartUploadManager.swift")
     assert "ByteTally(total: size" in read("MultipartUploadManager.swift")
     assert 'Text(stage.percent >= 0 ? "\\(stage.percent)%" : "…")' in read("ProcessingScreen.swift")
 

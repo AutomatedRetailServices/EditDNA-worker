@@ -269,22 +269,34 @@ actor MultipartUploadManager {
         foreground: Bool = false,
         onBytes: (@Sendable (Int64) -> Void)? = nil
     ) async throws -> HTTPURLResponse {
-        if foreground {
-            var request = URLRequest(url: signedURL)
-            request.httpMethod = "PUT"
-            // Same empty Content-Type the server signs (see BackgroundPartUploader).
-            request.setValue(BackgroundPartUploader.partContentType, forHTTPHeaderField: "Content-Type")
-            let (_, response) = try await URLSession.shared.upload(for: request, from: data)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                throw BackgroundUploadError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
-            }
-            onBytes?(Int64(data.count))
-            return http
+        // Build 19: every part goes through a normal (foreground) URLSession, like overlays and
+        // voice-overs. Through iOS's background upload service every part to Cloudflare R2 ended in
+        // NSURLErrorUnknown (-1) and the upload never moved past 0 %. CutSell stays open while a
+        // video uploads (the screen says so); a stopped upload resumes from the parts already sent.
+        _ = foreground
+        var request = URLRequest(url: signedURL)
+        request.httpMethod = "PUT"
+        // Same empty Content-Type the server signs (see BackgroundPartUploader).
+        request.setValue(BackgroundPartUploader.partContentType, forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        let delegate = PartProgressDelegate(onBytes: onBytes)
+        let (_, response) = try await Self.partSession.upload(for: request, from: data, delegate: delegate)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw BackgroundUploadError.http((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
-        let partFile = try writePartFile(data, uploadID: uploadID, partNumber: partNumber)
-        defer { try? FileManager.default.removeItem(at: partFile) }
-        return try await backgroundUploader.upload(fileURL: partFile, to: signedURL, onBytes: onBytes)
+        onBytes?(Int64(data.count))
+        return http
     }
+
+    /// One session for the parts (a request without progress for 30 s is retried).
+    private static let partSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 30 * 60
+        configuration.waitsForConnectivity = false
+        configuration.httpMaximumConnectionsPerHost = 4
+        return URLSession(configuration: configuration)
+    }()
 
     /// A short, stable folder name for an upload id of any length (SHA-256, first 32 hex digits).
     static func folderName(for uploadID: String) -> String {
@@ -321,5 +333,17 @@ enum UploadError: LocalizedError {
         case .resumeMetadataMismatch: return "The saved upload does not match the server session."
         case .incompleteUpload: return "The upload is missing one or more parts."
         }
+    }
+}
+
+
+/// Bytes sent by one part (the upload screen's real %).
+final class PartProgressDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let onBytes: (@Sendable (Int64) -> Void)?
+    init(onBytes: (@Sendable (Int64) -> Void)?) { self.onBytes = onBytes }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        onBytes?(totalBytesSent)
     }
 }

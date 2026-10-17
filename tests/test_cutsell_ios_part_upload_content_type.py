@@ -19,7 +19,10 @@ def test_part_upload_sends_no_content_type():
     body = uploader.split("func upload(fileURL: URL, to signedURL: URL", 1)[1]
     assert body.index("Self.partContentType") < body.index("for (key, value) in headers")
     manager = (APP / "MultipartUploadManager.swift").read_text()
-    assert "backgroundUploader.upload(fileURL: partFile, to: signedURL, onBytes: onBytes)" in manager
+    # Build 19: parts go through a foreground URLSession (iOS's background service failed every
+    # part to R2 with NSURLErrorUnknown); the same empty Content-Type is sent.
+    assert 'request.setValue(BackgroundPartUploader.partContentType, forHTTPHeaderField: "Content-Type")' in manager
+    assert "Self.partSession.upload(for: request, from: data, delegate: delegate)" in manager
 
 
 def test_server_part_links_sign_the_content_type():
