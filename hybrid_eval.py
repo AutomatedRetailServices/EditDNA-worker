@@ -69,22 +69,32 @@ def _gemini(model, prompt):
 
 @app.function(image=image, secrets=[secret], timeout=120)
 def pick_models():
+    """Every Gemini model this key can call (names only), and the arms to test."""
     import requests
-    out = {}
-    r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+    r = requests.get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=500",
                      headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip()}, timeout=30)
-    names = [m["name"].split("/")[-1] for m in r.json().get("models", [])
-             if "generateContent" in (m.get("supportedGenerationMethods") or [])] if r.status_code == 200 else []
-    lite = sorted([n for n in names if "flash-lite" in n and "preview" not in n and "exp" not in n])
-    out["gemini_all_flash_lite"] = lite
-    # 2.5 Flash-Lite answers 404 "no longer available to new users"; 3.5 Flash-Lite is the current one.
-    out["gemini"] = next((n for n in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest") if n in lite), None)
-    try:
-        t, u = _anthropic(HAIKU, 'Return only {"ok":true}')
-        out["haiku_ok"] = True
-    except Exception as exc:
-        out["haiku_ok"] = repr(exc)[:200]
-    return out
+    models = r.json().get("models", []) if r.status_code == 200 else []
+    gen = sorted(m["name"].split("/")[-1] for m in models if "generateContent" in (m.get("supportedGenerationMethods") or []))
+    emb = sorted(m["name"].split("/")[-1] for m in models if "embedContent" in (m.get("supportedGenerationMethods") or []))
+    plain = [n for n in gen if not any(x in n for x in ("preview", "exp", "image", "tts", "audio", "live", "latest"))]
+    lite = [n for n in plain if "flash-lite" in n]
+    flash = [n for n in plain if n.endswith("-flash") or "-flash-0" in n]
+
+    def newest(names):
+        def ver(n):
+            import re
+            m = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
+            return float(m.group(1)) if m else 0
+        return max(names, key=ver) if names else None
+
+    arms = []
+    if newest(lite):
+        arms.append(("gemini_lite", newest(lite)))
+    if "gemini-3.8-flash" in gen:
+        arms.append(("gemini_flash", "gemini-3.8-flash"))
+    elif newest(flash):
+        arms.append(("gemini_flash", newest(flash)))
+    return {"generate": gen, "embed": emb, "arms": arms}
 
 
 @app.function(image=image, secrets=[secret], timeout=1500, max_containers=10, retries=1)
@@ -115,12 +125,10 @@ def one(item):
 @app.local_entrypoint()
 def main():
     models = pick_models.remote()
-    print("::notice title=models::" + json.dumps(models)[:900])
-    arms = []
-    if models.get("haiku_ok") is True:
-        arms.append(("haiku", HAIKU))
-    if models.get("gemini"):
-        arms.append(("gemini", models["gemini"]))
+    print("::notice title=arms::" + json.dumps(models.get("arms")))
+    print("::notice title=gemini generate::" + ", ".join(models.get("generate", []))[:3000])
+    print("::notice title=gemini embed::" + ", ".join(models.get("embed", []))[:1500])
+    arms = [tuple(a) for a in models.get("arms", [])]
     ids = [v["id"] for v in json.load(open("benchmarks/simple_engine_gold/gold_v1.json"))["videos"]]
     items = [(v, arm, m, r) for r in range(RUNS) for arm, m in arms for v in ids]
     results = [x if isinstance(x, dict) else {"error": repr(x)[:300]} for x in one.map(items, return_exceptions=True)]
