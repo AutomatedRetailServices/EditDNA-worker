@@ -673,7 +673,9 @@ def _sr(answers):
     return E, words, units, E.sale_review(words, units, lab, lambda p: (next(it), {}))
 
 
-def test_sale_review_applies_a_fix_only_when_two_of_three_readings_agree():
+def test_sale_review_applies_a_fix_only_when_two_of_three_readings_agree(monkeypatch):
+    from cutsell_worker.simple_engine import engine as E0
+    monkeypatch.setattr(E0, "SALE_REVIEW_KINDS", E0.SALE_REVIEW_ALL_KINDS)
     fix = '{"type":"sale","fixes":[{"kind":"repeat","hide":[1],"unhide":[],"why":"dicho dos veces"}]}'
     other = '{"type":"sale","fixes":[{"kind":"repeat","hide":[2],"unhide":[],"why":"x"}]}'
     E, words, units, (lab, usage, info) = _sr([fix, fix, other])
@@ -689,7 +691,9 @@ def test_sale_review_stops_after_one_call_when_nothing_to_fix_or_not_a_sale():
         assert len(usage) == 1 and info["applied"] == [] and all(l[0] == "keep" for l in lab)
 
 
-def test_sale_review_never_loses_the_price():
+def test_sale_review_never_loses_the_price(monkeypatch):
+    from cutsell_worker.simple_engine import engine as E0
+    monkeypatch.setattr(E0, "SALE_REVIEW_KINDS", E0.SALE_REVIEW_ALL_KINDS)
     fix = '{"type":"sale","fixes":[{"kind":"repeat","hide":[4],"unhide":[],"why":"x"}]}'
     E, words, units, (lab, usage, info) = _sr([fix, fix, fix])
     assert info.get("rejected") and all(l[0] == "keep" for l in lab)
@@ -704,4 +708,12 @@ def test_review_mode_is_off_unless_asked(monkeypatch):
 
 def test_sale_review_knows_the_restarted_pitch():
     from cutsell_worker.simple_engine import engine as E
-    assert "restart" in E.SALE_REVIEW_KINDS and "RESTARTED PITCH" in E.SALE_REVIEW_PROMPT
+    assert E.SALE_REVIEW_KINDS == ("restart", "mixed") and "RESTARTED PITCH" in E.SALE_REVIEW_PROMPT
+
+
+def test_a_reviewed_cut_never_keeps_a_hidden_boundary_word():
+    from cutsell_worker.simple_engine import engine as E
+    words = [{"w": "Shop.", "s": 79.575, "e": 80.135}, {"w": "Mi", "s": 80.135, "e": 80.695}, {"w": "amor.", "s": 80.695, "e": 81.095}]
+    out = E.keep_hidden_words_out([1, 2], [{"start": 71.79, "end": 80.415, "visible": True},
+                                           {"start": 80.415, "end": 81.71, "visible": False}], words)
+    assert out[0]["end"] == 80.135
