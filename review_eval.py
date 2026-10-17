@@ -18,7 +18,8 @@ image = (
 SALES = ["Y03", "Y04", "Y05", "Y06", "Y08", "Y09", "Y10", "B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08",
          "B09", "B10", "B11", "B14", "N01", "G01"]
 RUNS = 2
-VARIANTS = {"mixed": ("mixed",), "repeat": ("repeat",), "missing": ("missing",), "all": ("mixed", "repeat", "missing")}
+VARIANTS = {"restart": ("restart",), "mixed": ("mixed",), "repeat": ("repeat",), "missing": ("missing",),
+            "restart+mixed": ("restart", "mixed"), "all": ("restart", "mixed", "repeat", "missing")}
 
 
 @app.function(image=image, secrets=[secret], timeout=1200, max_containers=10, retries=1)
@@ -58,7 +59,7 @@ def one(item):
 def main():
     items = [(v, r) for r in range(RUNS) for v in SALES]
     results = [x if isinstance(x, dict) else {"error": repr(x)[:300]} for x in one.map(items, return_exceptions=True)]
-    with open("dedup_eval.json", "w") as f:
+    with open("gold.json", "w") as f:
         json.dump({"gold": results}, f, ensure_ascii=False, default=str)
     tin = sum(int(u.get("input_tokens") or 0) for g in results for u in g.get("usage", []))
     tout = sum(int(u.get("output_tokens") or 0) for g in results for u in g.get("usage", []))
