@@ -643,7 +643,7 @@ def test_understanding_mode_keeps_the_script_lines_and_drops_a_dangling_connecto
         if "UNDERSTAND." in prompt:
             return json.dumps({"product": "perfume", "message": "m", "attempts": [[1, 2, "broken"], [3, 4, "complete"]],
                                "script": [{"beat": "gancho", "lines": [1, 2]}, {"beat": "precio", "lines": [4]}],
-                               "drop": [[3, 3, "otro intento", 0]]}), {}
+                               "drop": [[3, 3, "ruido", 0]]}), {}
         return '{"ok": true, "remove": [], "add": []}', {}
 
     splits, info = engine.decide_understood(words, 20.0, fake)
