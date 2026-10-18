@@ -98,3 +98,10 @@ def test_bulk_skips_the_single_processing_screen():
     start = flow.index("if newJob.mode == .bulk, case .library(let assets)")
     block = flow[start:start + 300]
     assert "bulkSheetCount = assets.count" in block and "} else {\n                job = newJob" in block
+
+
+def test_no_step_x_of_8_text_anywhere():
+    ios = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    screen = (ios / "ProcessingScreen.swift").read_text()
+    body = screen.split("struct StageDots", 1)[0]
+    assert 'Text("Step ' not in body and "StageDots(current:" not in body

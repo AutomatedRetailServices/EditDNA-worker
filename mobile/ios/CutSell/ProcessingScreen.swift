@@ -176,11 +176,8 @@ struct ProcessingContent: View {
                     .contentTransition(.numericText())
                     .animation(.easeOut, value: stage.percent)
                     .accessibilityIdentifier("processingPercent")
-                Text("Step \(stage.step) of \(CutTracker.stepCount)")
-                    .font(CS.sf(13))
-                    .foregroundStyle(CS.textSecondaryF)
-                StageDots(current: stage.step, total: CutTracker.stepCount)
-                    .padding(.top, 6)
+                // Build 25: no "Step x of 8" text or step dots (Single, Bulk and Combine): the stage
+                // name and its % are enough.
                 if let background {
                     Text(background)
                         .font(CS.sf(13))
