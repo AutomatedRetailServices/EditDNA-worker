@@ -6,7 +6,11 @@ name: CutSell iOS build 24 probe
 # here, never committed. Frames and text logs only (b24/). Manual: push to probe/build24.
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: "Tests to run (space separated)"
+        default: "testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab"
   push:
     branches: [probe/build24]
 
@@ -111,7 +115,7 @@ jobs:
           echo "dummynet out proto tcp from any to any port 443 pipe 1" | sudo pfctl -f - 2>&1 | tail -2 || true
           sudo pfctl -E 2>&1 | tail -1 || true
           status=0
-          for t in testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab; do
+          for t in ${{ inputs.tests || 'testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab' }}; do
             start=$(date '+%Y-%m-%d %H:%M:%S')
             set +e
             TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
