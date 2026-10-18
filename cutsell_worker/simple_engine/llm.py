@@ -50,21 +50,58 @@ def effort_for(name: str = "") -> str:
     return ""
 
 
+class Prompt(str):
+    """A prompt that is still a plain string (tests and replays see the same text) but remembers its parts: the fixed
+    instructions of a step, then the video's own text, then the run tag. call_anthropic sends the parts as separate
+    content blocks and marks the fixed instructions for prompt caching (identical for every video, so the next video
+    within 5 minutes reads them at the cache price). The text the model reads is exactly the same."""
+
+    def __new__(cls, *parts: str, schema: dict | None = None):
+        obj = super().__new__(cls, "".join(parts))
+        obj.parts = tuple(p for p in parts if p)
+        obj.schema = schema
+        return obj
+
+
+def _content(prompt):
+    parts = getattr(prompt, "parts", None)
+    if not parts or not cache_enabled():
+        return str(prompt)
+    blocks = [{"type": "text", "text": p} for p in parts]
+    blocks[0]["cache_control"] = {"type": "ephemeral"}
+    return blocks
+
+
+def json_enabled() -> bool:
+    """CUTSELL_SIMPLE_ENGINE_JSON=0 lets the model answer in free text again (rollback without a redeploy)."""
+    return os.environ.get("CUTSELL_SIMPLE_ENGINE_JSON", "1").strip() != "0"
+
+
+def cache_enabled() -> bool:
+    """CUTSELL_SIMPLE_ENGINE_CACHE=0 sends one plain text block again (rollback without a redeploy)."""
+    return os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE", "1").strip() != "0"
+
+
 def model_name() -> str:
     return os.environ.get("CUTSELL_SIMPLE_ENGINE_MODEL", "").strip() or DEFAULT_MODEL
 
 
-def call_anthropic(prompt: str, *, max_tokens: int = 16000, attempts: int = 4) -> tuple[str, dict]:
+def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tuple[str, dict]:
     """One user message in, (text, usage) out. Retries transient failures; never logs the prompt or the key."""
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY missing")
-    body = {"model": model_name(), "max_tokens": max_tokens, "messages": [{"role": "user", "content": prompt}]}
+    body = {"model": model_name(), "max_tokens": max_tokens, "messages": [{"role": "user", "content": _content(prompt)}]}
     effort = effort_for()
     if effort:
         body["output_config"] = {"effort": effort}
+    schema = getattr(prompt, "schema", None)
+    if schema and json_enabled():
+        # Structured output: the visible answer is only the JSON (no notes before it). Thinking is not affected.
+        body.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": schema}
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
     last: Exception | None = None
+    json_refused = False
     for attempt in range(attempts):
         try:
             response = requests.post(API_URL, json=body, headers=headers, timeout=(20, 600))
@@ -80,11 +117,20 @@ def call_anthropic(prompt: str, *, max_tokens: int = 16000, attempts: int = 4) -
                     "thinking": "adaptive", "effort": effort or "default(high)",
                     "thinking_blocks": sum(1 for b in data.get("content", []) if b.get("type") == "thinking"),
                     "answer_chars": len(text), "stop_reason": data.get("stop_reason"),
+                    "json_format": "format" in body.get("output_config", {}), "json_refused": json_refused,
                 })
                 _LOG.info("simple_engine_llm_call %s", json.dumps({k: usage.get(k) for k in (
                     "step", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
                     "max_tokens", "thinking", "effort", "answer_chars", "stop_reason")}))
                 return text, usage
+            if response.status_code == 400 and "format" in body.get("output_config", {}):
+                # The JSON format was refused: ask again in free text (the parsers read both) and say so in the logs.
+                _LOG.warning("simple_engine_llm_json_refused step=%s; asking again without the JSON format", _STEP.get())
+                body["output_config"].pop("format")
+                if not body["output_config"]:
+                    body.pop("output_config")
+                json_refused = True
+                continue
             if response.status_code in (400, 401, 403, 404):
                 raise RuntimeError(f"Anthropic HTTP {response.status_code}")
             last = RuntimeError(f"Anthropic HTTP {response.status_code}")

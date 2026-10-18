@@ -823,3 +823,22 @@ def test_every_engine_call_is_tagged_with_its_step(video):
     splits, info = engine.decide_reviewed(words, 4.0, call)
     engine.fix_words_and_moments(words, splits, call)
     assert steps == ["pass", "decision", "haul_review", "sale_review", "fixwords"]
+
+
+def test_prompt_parts_keep_the_same_text_and_cache_the_fixed_instructions(monkeypatch):
+    from cutsell_worker.simple_engine import llm
+    p = llm.Prompt("FIXED", "own", "\n(run x)", schema={"type": "object"})
+    assert str(p) == "FIXEDown\n(run x)" and p.schema == {"type": "object"}
+    blocks = llm._content(p)
+    assert [b["text"] for b in blocks] == ["FIXED", "own", "\n(run x)"]
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in blocks[1]
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_CACHE", "0")
+    assert llm._content(p) == "FIXEDown\n(run x)"
+
+
+def test_every_step_has_a_strict_json_schema():
+    from cutsell_worker.simple_engine import engine as E
+    assert set(E.SCHEMAS) == {"pass", "decision", "haul_review", "sale_review", "fixwords"}
+    for schema in E.SCHEMAS.values():
+        assert schema["additionalProperties"] is False and set(schema["required"]) == set(schema["properties"])
+    assert "why" not in E.SALE_REVIEW_PROMPT
