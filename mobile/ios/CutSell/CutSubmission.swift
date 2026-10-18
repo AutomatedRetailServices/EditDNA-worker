@@ -56,6 +56,9 @@ final class CutSubmitter: ObservableObject {
         touch()
     }
 
+    /// Build 24: the Edits · Processing row of the cut being sent now (its state follows each step).
+    var queueItem: UUID?
+
     /// One step and its real % (0...1), shown as it is.
     func stage(_ title: String, _ fraction: Double? = nil) {
         let percent = fraction.map { Int((min(1, max(0, $0)) * 100).rounded(.down)) }
@@ -63,6 +66,8 @@ final class CutSubmitter: ObservableObject {
             stageTitle = title
             stagePercent = percent
             touch()
+            let serverSide = title.contains("Cutting your video") || title.contains("Starting your cut")
+            ProcessingQueue.shared.update(queueItem, state: serverSide ? .processing(0) : .uploading(percent ?? 0))
         }
     }
 

@@ -64,8 +64,8 @@ def test_resume_uses_r2_list_of_parts_and_sends_only_the_missing_ones():
 
 def test_finishes_on_reopen_and_background_wake():
     app = read("CutSellApp.swift")
-    assert 'PendingUploadFinisher.run(session: appState.session, reason: "launch")' in app
-    assert 'PendingUploadFinisher.run(session: appState.session, reason: "reopen")' in app
+    assert 'PendingUploadFinisher.run(session: appState.session, reason: "launch"' in app
+    assert 'PendingUploadFinisher.run(session: appState.session, reason: "reopen"' in app
     assert "PendingUploadFinisher.wokeForUploads()" in app
     assert "PendingUploadFinisher.uploadEventsDelivered()" in read("BackgroundPartUploader.swift")
     finisher = read("PendingUploadFinisher.swift")

@@ -16,7 +16,8 @@ enum PendingUploadFinisher {
     /// `session` nil = the one saved in the Keychain (a background wake can come before the screen
     /// has loaded the account).
     @discardableResult
-    static func run(session: CutSellSession?, reason: String) async -> Int {
+    static func run(session: CutSellSession?, reason: String,
+                    resumeUpload: ((PendingCutRecord) async -> Void)? = nil) async -> Int {
         guard !running else { return 0 }
         running = true
         defer { running = false }
@@ -44,8 +45,15 @@ enum PendingUploadFinisher {
                                                                          userID: current.userID)
                 if state != .allPartsUploaded && state != .completed { ready = false }
             }
-            // Parts still missing: the creator resumes it ("Try again" / "Resume upload"), which sends only those.
-            guard ready else { continue }
+            // Build 24: parts still missing -- the upload goes on by itself on reopen (only the missing
+            // parts are sent); without a resumer (background wake) it waits for CutSell to open.
+            guard ready else {
+                if let resumeUpload {
+                    CutSellDiagnostics.log("upload_auto_resumed", ["reason": reason, "videos": String(record.videos.count)])
+                    await resumeUpload(record)
+                }
+                continue
+            }
             ActiveUploads.shared.insert(record.projectID)
             let time = BackgroundTime("cutsell-auto-finish")
             time.begin()

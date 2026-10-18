@@ -27,6 +27,13 @@ struct CreateFlowView: View {
     @State private var processingFileName = ""
     @State private var processingThumbnail: UIImage?
     @State private var path: [Project] = []
+    /// Build 24: jobs chosen while another one is still uploading (they start one after another,
+    /// shown as "Queued" in Edits · Processing).
+    @State private var waiting: [(job: CreateJob, items: [UUID])] = []
+    /// The Processing-queue items of the job running now (one per cut).
+    @State private var jobItems: [UUID] = []
+    /// Bulk: "Your N videos are being edited" (Figma 1134:4635).
+    @State private var bulkSheetCount: Int?
 
     enum AfterCamera { case gallery, job(CreateJob) }
 
@@ -106,9 +113,26 @@ struct CreateFlowView: View {
                     projectID: processingProjectID,
                     fileName: processingFileName,
                     thumbnail: processingThumbnail,
-                    onClose: { job = nil },
-                    onOpenEdits: { job = nil; selectTab(.edits) }
+                    // Build 24: "Continue in background" works at every step; the work goes on here.
+                    onClose: { closeProcessing() },
+                    onOpenEdits: { closeProcessing(); openEditsProcessing() }
                 )
+                .overlay(alignment: .bottom) {
+                    if let count = bulkSheetCount {
+                        ZStack(alignment: .bottom) {
+                            Color.black.opacity(0.6).ignoresSafeArea()
+                                .onTapGesture { bulkSheetCount = nil }
+                            BulkStartedSheet(count: count, onGoToEdits: {
+                                bulkSheetCount = nil
+                                closeProcessing()
+                                openEditsProcessing()
+                            }, onStay: { bulkSheetCount = nil })
+                        }
+                        .ignoresSafeArea(edges: .bottom)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeOut(duration: 0.25), value: bulkSheetCount)
             }
             .environmentObject(appState)
             .fullScreenCover(item: $problem) { shown in
@@ -160,8 +184,17 @@ struct CreateFlowView: View {
     }
 
     private func launch(_ newJob: CreateJob) {
-        // One cut at a time from this screen: the upload screen cannot be left until it is done.
-        guard !submitter.isSubmitting, job == nil else { return }
+        // Build 24: a job chosen while another one is still uploading waits its turn ("Queued").
+        if submitter.isSubmitting || job != nil {
+            Task { @MainActor in
+                guard await AIConsentCenter.shared.ensure() else { return }
+                let items = ProcessingQueue.shared.add(Self.entries(for: newJob))
+                waiting.append((newJob, items))
+                CutSellDiagnostics.log("job_queued", ["videos": String(items.count), "waiting": String(waiting.count)])
+                if newJob.mode == .bulk && items.count > 1 { openEditsProcessing() }
+            }
+            return
+        }
         // Build 19: the AI notice is answered BEFORE the upload screen covers everything (it used to
         // be asked under it, invisible, and the cut waited at 0 % forever).
         Task { @MainActor in
@@ -170,9 +203,12 @@ struct CreateFlowView: View {
         }
     }
 
-    private func start(_ newJob: CreateJob) {
-        guard !submitter.isSubmitting, job == nil else { return }
+    private func start(_ newJob: CreateJob, items: [UUID]? = nil, present: Bool = true) {
+        guard !submitter.isSubmitting else { return }
         submitter.reset()
+        jobItems = items ?? ProcessingQueue.shared.add(Self.entries(for: newJob))
+        submitter.queueItem = jobItems.first
+        loadThumbnails(for: newJob, items: jobItems)
         problem = nil
         failure = nil
         CutSellDiagnostics.log("create_style_chosen", ["overlap_audio": String(newJob.style.overlapAudio), "auto_zoom": String(newJob.style.autoZoom), "mode": newJob.mode.rawValue])
@@ -183,8 +219,68 @@ struct CreateFlowView: View {
         case .recorded(let video): processingFileName = video.url.lastPathComponent
         case .library: processingFileName = ""
         }
-        job = newJob
-        Task { await run(newJob) }
+        if present {
+            job = newJob
+            // Bulk: the "being edited" sheet over the Processing screen (Figma 1134:4635).
+            if newJob.mode == .bulk, case .library(let assets) = newJob.source, assets.count > 1 {
+                bulkSheetCount = assets.count
+            }
+        }
+        Task {
+            await run(newJob)
+            startNextWaiting()
+        }
+    }
+
+    /// Closes the Processing screen; the upload and the cut go on (this view stays alive).
+    private func closeProcessing() {
+        bulkSheetCount = nil
+        job = nil
+        CutSellDiagnostics.log("continue_in_background", ["step": submitter.isSubmitting ? submitter.stageTitle : "server"])
+    }
+
+    private func openEditsProcessing() {
+        ProcessingQueue.shared.requestedEditsFilter = "processing"
+        selectTab(.edits)
+    }
+
+    /// The next job chosen while this one ran (no screen: it shows in Edits · Processing).
+    private func startNextWaiting() {
+        guard !submitter.isSubmitting, !waiting.isEmpty else { return }
+        let next = waiting.removeFirst()
+        start(next.job, items: next.items, present: false)
+    }
+
+    /// One Processing row per cut: Bulk = one per video; Combine = one; a recording = one.
+    static func entries(for job: CreateJob) -> [(name: String, duration: Double)] {
+        switch job.source {
+        case .recorded(let video):
+            return [(video.name, video.duration)]
+        case .library(let assets):
+            let names = assets.map { asset -> String in
+                PHAssetResource.assetResources(for: asset).first { $0.type == .video }?.originalFilename ?? "Video"
+            }
+            if job.mode == .combine {
+                return [("\(assets.count) clips", assets.reduce(0) { $0 + $1.duration })]
+            }
+            return zip(names, assets).map { ($0, $1.duration) }
+        }
+    }
+
+    /// Small first-frame thumbnails for the Processing rows (from Photos, no download).
+    private func loadThumbnails(for job: CreateJob, items: [UUID]) {
+        guard case .library(let assets) = job.source else { return }
+        let targets = job.mode == .combine ? Array(assets.prefix(1)) : assets
+        for (asset, id) in zip(targets, items) {
+            let options = PHImageRequestOptions()
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .opportunistic
+            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 138, height: 180),
+                                                  contentMode: .aspectFill, options: options) { image, _ in
+                guard let image else { return }
+                Task { @MainActor in ProcessingQueue.shared.update(id, thumbnail: image) }
+            }
+        }
     }
 
     /// A recording the person closed without making a cut: remove it from the phone.
@@ -196,6 +292,7 @@ struct CreateFlowView: View {
     @MainActor
     private func startTracking(projectID: String, videos: [LocalVideo], thumbnail: UIImage?) {
         let footage = videos.reduce(0) { $0 + $1.duration }
+        ProcessingQueue.shared.update(submitter.queueItem, thumbnail: thumbnail, projectID: projectID, state: .processing(0))
         CutTracker.shared.track(
             projectID: projectID, jobID: submitter.lastJobID,
             title: appState.projects.first { $0.projectID == projectID }?.title ?? "Untitled Cut",
@@ -279,7 +376,50 @@ struct CreateFlowView: View {
             case .unavailable: problem = .couldNotAdd
             }
         } catch {
+            markFailed(submitter.queueItem, error: error, retryJob: current)
             show(error)
+        }
+    }
+
+    /// Build 24: a failed cut stays in Edits · Processing as FAILED with Retry: the upload continues
+    /// where it stopped (a saved project), or the video is sent again (nothing was saved yet).
+    @MainActor
+    private func markFailed(_ item: UUID?, error: Error, retryJob: CreateJob) {
+        guard let item else { return }
+        let projectID = (error as? CutSubmitError)?.projectID ?? submitter.currentProjectID
+        let detail = Self.plain((error as? CutSubmitError)?.underlying ?? error)
+        ProcessingQueue.shared.fail(item, detail: detail) {
+            Task { @MainActor in await retryInBackground(item: item, projectID: projectID, job: retryJob) }
+        }
+    }
+
+    @MainActor
+    private func retryInBackground(item: UUID, projectID: String?, job retryJob: CreateJob) async {
+        CutSellDiagnostics.log("queue_retry", ["saved": projectID == nil ? "no" : "yes"])
+        if let projectID, let record = await PendingCutStore.shared.record(projectID: projectID) {
+            // Its own submitter: a retry never waits behind (or disturbs) the upload running now.
+            let retrying = CutSubmitter()
+            retrying.queueItem = item
+            let videos = record.videos.map { LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType) }
+            do {
+                let id = try await retrying.submit(
+                    videos: videos, title: record.title, mode: record.mode, audioOverlap: record.audioOverlap,
+                    autoZoom: record.autoZoom ?? true, resumeProjectID: projectID, appState: appState
+                )
+                CutTracker.shared.track(projectID: id, jobID: retrying.lastJobID, title: record.title,
+                                        fileName: videos.count == 1 ? videos[0].name : "\(videos.count) clips",
+                                        thumbnail: nil, footageSeconds: videos.reduce(0) { $0 + $1.duration })
+                ProcessingQueue.shared.update(item, projectID: id, state: .processing(0))
+            } catch {
+                ProcessingQueue.shared.fail(item, detail: Self.plain((error as? CutSubmitError)?.underlying ?? error)) {
+                    Task { @MainActor in await retryInBackground(item: item, projectID: projectID, job: retryJob) }
+                }
+            }
+        } else if submitter.isSubmitting {
+            ProcessingQueue.shared.update(item, state: .queued)
+            waiting.append((retryJob, [item]))
+        } else {
+            start(retryJob, items: [item], present: false)
         }
     }
 
@@ -314,6 +454,10 @@ struct CreateFlowView: View {
                     var firstFailure: Error?
                     var failedClips: [Int] = []
                     for (index, asset) in assets.enumerated() where index >= startedInJob {
+                        // Build 24: this video's row in Edits · Processing.
+                        let item = index < jobItems.count ? jobItems[index] : nil
+                        submitter.queueItem = item
+                        ProcessingQueue.shared.update(item, state: .uploading(0))
                         do {
                             let video = try await export(asset, index: index, count: count)
                             let thumbnail = await prepareScreen(for: [video])
@@ -330,6 +474,8 @@ struct CreateFlowView: View {
                             failedClips.append(index + 1)
                             firstFailure = firstFailure ?? error
                             CutSellDiagnostics.log("clip_cut_failed", Retry.fields(error, ["source_order": String(index), "of": String(count)]))
+                            markFailed(item, error: error,
+                                       retryJob: CreateJob(mode: .single, source: .library([asset]), style: current.style))
                         }
                         startedInJob = index + 1
                     }

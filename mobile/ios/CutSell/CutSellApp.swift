@@ -2,6 +2,13 @@ import SwiftUI
 import UIKit
 
 final class CutSellAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Build 24: Background App Refresh checks cuts still being made.
+        MainActor.assumeIsolated { BackgroundFollow.register() }
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         handleEventsForBackgroundURLSession identifier: String,
@@ -52,11 +59,14 @@ struct CutSellApp: App {
                         await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
                     }
                     // Build 22: an upload whose parts are all on R2 is completed and its cut started.
-                    if await PendingUploadFinisher.run(session: appState.session, reason: "launch") > 0 {
+                    if await PendingUploadFinisher.run(session: appState.session, reason: "launch", resumeUpload: { record in
+                        await ResumeRunner.resume(record, appState: appState)
+                    }) > 0 {
                         try? await appState.refreshProjects()
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    if phase == .background { BackgroundFollow.enteredBackground() }
                     guard phase == .active, appState.session != nil else { return }
                     Task {
                         do {
@@ -67,7 +77,9 @@ struct CutSellApp: App {
                         if let current = appState.session {
                             await notificationCenter.refresh(session: current)
                         }
-                        if await PendingUploadFinisher.run(session: appState.session, reason: "reopen") > 0 {
+                        if await PendingUploadFinisher.run(session: appState.session, reason: "reopen", resumeUpload: { record in
+                        await ResumeRunner.resume(record, appState: appState)
+                    }) > 0 {
                             try? await appState.refreshProjects()
                         }
                     }

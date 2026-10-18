@@ -127,8 +127,6 @@ struct ProcessingContent: View {
                     Image("ControlBack").resizable().frame(width: 36, height: 36)
                 }
                 .accessibilityLabel("Back")
-                .opacity(uploading ? 0.3 : 1)
-                .disabled(uploading)
                 Spacer()
                 Text("Processing")
                     .font(CS.inter(22, .semibold))
@@ -138,8 +136,6 @@ struct ProcessingContent: View {
                     .font(CS.inter(15, .semibold))
                     .foregroundStyle(CS.cyan)
                     .frame(width: 44, alignment: .trailing)
-                    .opacity(uploading ? 0.3 : 1)
-                    .disabled(uploading)
             }
             .frame(height: 46)
 
@@ -214,7 +210,7 @@ struct ProcessingContent: View {
             Spacer(minLength: 8)
 
             VStack(spacing: 12) {
-                Text(uploading ? "Your video keeps uploading if you leave CutSell or lock the screen." : "Processing continues if you leave this screen.")
+                Text(uploading ? "Your video keeps uploading if you leave this screen or CutSell." : "Processing continues if you leave this screen.")
                     .font(CS.sf(13))
                     .foregroundStyle(Color(hex: 0xB8D1F5))
                     .frame(maxWidth: .infinity)
@@ -238,8 +234,7 @@ struct ProcessingContent: View {
                         .shadow(color: Color(hex: 0x1969FF, opacity: 0.25), radius: 9, y: 6)
                 }
                 .buttonStyle(.plain)
-                .disabled(uploading)
-                .opacity(uploading ? 0.4 : 1)
+                // Build 24: active at every step (uploading, analysing, cutting, saving).
                 .accessibilityIdentifier("continueInBackground")
                 Text("We’ll let you know in CutSell when your cut is ready.")
                     .font(CS.sf(12))

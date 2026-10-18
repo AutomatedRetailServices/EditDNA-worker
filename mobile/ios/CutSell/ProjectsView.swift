@@ -1,12 +1,20 @@
 import SwiftUI
 
-/// D-129 mobile UI decision: Edits has exactly these three tabs -- no
-/// "Processing" tab/folder. Processing is a transient operational state
-/// (still visible under "All" while it runs), never a place a user files
-/// work into.
+/// Edits filters (Figma 1134:2683 / 1134:2885): Processing (N) · Ready (N) · Drafts (N) · All (N).
+/// Build 24 (Product Owner, 18 Oct): "Processing" is shown only while something is being made; a
+/// cut leaves it the moment it is ready and is in Ready at once.
 enum EditsTab: String, CaseIterable, Identifiable, Hashable {
-    case all = "All", ready = "Ready", drafts = "Drafts"
+    case processing = "Processing", ready = "Ready", drafts = "Drafts", all = "All"
     var id: String { rawValue }
+
+    /// Figma chip widths (12 pt SF semibold, height 38).
+    var chipWidth: CGFloat {
+        switch self {
+        case .processing: return 100
+        case .ready, .drafts: return 84
+        case .all: return 66
+        }
+    }
 }
 
 /// Edits tab (Figma 05 Edits, 195:39; empty state 207:92): the saved cuts as a grid with the
@@ -23,12 +31,14 @@ struct ProjectsView: View {
     @State private var selectedTab: EditsTab = .all
     @State private var showingSearch = false
     @State private var searchText = ""
+    @ObservedObject private var queue = ProcessingQueue.shared
+    @ObservedObject private var tracker = CutTracker.shared
 
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: 3) }
 
     private var visibleProjects: [Project] {
         switch selectedTab {
-        case .all:
+        case .all, .processing:
             return appState.projects
         case .ready:
             return appState.projects.filter { $0.state == "draft_ready" }
@@ -45,8 +55,28 @@ struct ProjectsView: View {
         return visibleProjects.filter { $0.title.localizedCaseInsensitiveContains(query) }
     }
 
+    /// The Processing rows, in order: this iPhone's uploads and cuts, cuts still processing on the
+    /// server, and uploads that stopped (FAILED · Retry continues where they stopped).
+    private var processingRows: [ProcessingQueue.Row] {
+        var rows = queue.rows(projects: appState.projects, tracker: tracker)
+        let listed = Set(rows.compactMap(\.projectID))
+        for pending in pendingCuts where !listed.contains(pending.projectID) {
+            rows.append(ProcessingQueue.Row(id: "pending-" + pending.projectID, itemID: nil, projectID: pending.projectID,
+                                            name: pending.title.isEmpty ? "Interrupted Cut" : pending.title,
+                                            duration: pending.videos.reduce(0) { $0 + $1.duration },
+                                            thumbnail: ThumbnailStore.shared.image(for: pending.projectID),
+                                            state: .failed("Upload paused")))
+        }
+        return rows
+    }
+
+    private var visibleTabs: [EditsTab] {
+        processingRows.isEmpty ? [.all, .ready, .drafts] : EditsTab.allCases
+    }
+
     private func count(_ tab: EditsTab) -> Int {
         switch tab {
+        case .processing: return processingRows.count
         case .all: return appState.projects.count
         case .ready: return appState.projects.filter { $0.state == "draft_ready" }.count
         case .drafts:
@@ -67,7 +97,8 @@ struct ProjectsView: View {
                             .font(CS.inter(34, .semibold))
                             .foregroundStyle(.white)
                             .padding(.top, 12)
-                        Text("Your saved cuts, ready to review or share.")
+                        Text(selectedTab == .processing ? "Cuts being edited now. You can leave the app."
+                                                        : "Your saved cuts, ready to review or share.")
                             .font(CS.inter(14))
                             .foregroundStyle(CS.textSecondary)
                             .padding(.top, 2)
@@ -84,18 +115,38 @@ struct ProjectsView: View {
                                 .accessibilityIdentifier("editsSearchField")
                         }
 
-                        HStack(spacing: 0) {
-                            ForEach(EditsTab.allCases) { tab in
-                                FilterChip(title: "\(tab.rawValue) (\(count(tab)))", isSelected: selectedTab == tab) {
-                                    selectedTab = tab
+                        if visibleTabs.contains(.processing) {
+                            // Figma 1134:2817-2823: 100 / 84 / 84 / 66 pt chips, 6 pt apart.
+                            HStack(spacing: 6) {
+                                ForEach(visibleTabs) { tab in
+                                    EditsFilterChip(title: "\(tab.rawValue) (\(count(tab)))", isSelected: selectedTab == tab) {
+                                        selectedTab = tab
+                                    }
+                                    .frame(width: tab.chipWidth)
+                                    .accessibilityIdentifier("editsFilter\(tab.rawValue)")
                                 }
-                                .frame(width: 96)
-                                if tab != EditsTab.allCases.last { Spacer(minLength: 8) }
+                                Spacer(minLength: 0)
                             }
+                            .padding(.top, 22)
+                            .accessibilityIdentifier("editsTabPicker")
+                        } else {
+                            HStack(spacing: 0) {
+                                ForEach(visibleTabs) { tab in
+                                    FilterChip(title: "\(tab.rawValue) (\(count(tab)))", isSelected: selectedTab == tab) {
+                                        selectedTab = tab
+                                    }
+                                    .frame(width: 96)
+                                    .accessibilityIdentifier("editsFilter\(tab.rawValue)")
+                                    if tab != visibleTabs.last { Spacer(minLength: 8) }
+                                }
+                            }
+                            .padding(.top, 22)
+                            .accessibilityIdentifier("editsTabPicker")
                         }
-                        .padding(.top, 22)
-                        .accessibilityIdentifier("editsTabPicker")
 
+                        if selectedTab == .processing {
+                            processingList
+                        } else {
                         if !pendingCuts.isEmpty {
                             VStack(spacing: 8) {
                                 ForEach(pendingCuts) { pending in
@@ -119,6 +170,7 @@ struct ProjectsView: View {
                                 }
                             }
                             .padding(.top, 10)
+                        }
                         }
                     }
                     .padding(.horizontal, 20)
@@ -144,6 +196,13 @@ struct ProjectsView: View {
                     .onDisappear { Task { await refreshPendingCuts() } }
             }
             .task { await refreshPendingCuts() }
+            // "Go to Edits" (Bulk sheet / Processing screen) opens on Processing.
+            .onAppear { takeRequestedFilter() }
+            .onChange(of: queue.requestedEditsFilter) { _, _ in takeRequestedFilter() }
+            // The last cut finished: Processing disappears, Ready shows it.
+            .onChange(of: processingRows.isEmpty) { _, empty in
+                if empty && selectedTab == .processing { selectedTab = .ready }
+            }
             .confirmationDialog(
                 "Delete project?",
                 isPresented: Binding(
@@ -167,6 +226,60 @@ struct ProjectsView: View {
             )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
         }
         .tint(CS.cyan)
+    }
+
+    private func takeRequestedFilter() {
+        guard queue.requestedEditsFilter == "processing" else { return }
+        queue.requestedEditsFilter = nil
+        selectedTab = .processing
+        Task { await refreshPendingCuts() }
+    }
+
+    /// Figma 1134:2825-2884: "In order", the rows, and the note.
+    private var processingList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("In order").font(CS.inter(16, .semibold)).foregroundStyle(.white)
+                Spacer()
+                Text("Each one moves to Ready when it’s done").font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
+            }
+            .padding(.top, 16)
+            VStack(spacing: 8) {
+                ForEach(Array(processingRows.enumerated()), id: \.element.id) { index, row in
+                    processingRow(index + 1, row)
+                }
+            }
+            .padding(.top, 12)
+            Text("Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready.")
+                .font(CS.inter(12))
+                .foregroundStyle(Color(hex: 0x99A3BD))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(hex: 0x0F1726), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
+                .padding(.top, 18)
+        }
+        .accessibilityIdentifier("editsProcessingList")
+    }
+
+    @ViewBuilder
+    private func processingRow(_ order: Int, _ row: ProcessingQueue.Row) -> some View {
+        let retry: () -> Void = {
+            if let item = row.itemID {
+                queue.retry(item)
+            } else if let pending = pendingCuts.first(where: { $0.projectID == row.projectID }) {
+                resumeCut = pending
+            }
+        }
+        if let id = row.projectID, let project = appState.projects.first(where: { $0.projectID == id }),
+           pendingCuts.first(where: { $0.projectID == id }) == nil {
+            NavigationLink(value: project) { QueueRowView(order: order, row: row, onRetry: retry) }
+                .buttonStyle(.plain)
+        } else {
+            QueueRowView(order: order, row: row, onRetry: retry)
+        }
     }
 
     private var header: some View {
@@ -245,7 +358,7 @@ struct ProjectsView: View {
     private var emptyTitle: String {
         if !searchText.isEmpty { return "No matches" }
         switch selectedTab {
-        case .all: return "No edits yet"
+        case .all, .processing: return "No edits yet"
         case .ready: return "No ready edits"
         case .drafts: return "No drafts"
         }
@@ -426,5 +539,37 @@ struct UploadNotFinishedView: View {
             NewCutView(pending: record)
                 .environmentObject(appState)
         }
+    }
+}
+
+
+/// Edits filter chip as drawn in Figma 1134:2817 (38 pt high, 12 pt SF semibold; selected = cyan→blue
+/// gradient with a cyan stroke; others dark with a blue stroke).
+struct EditsFilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(CS.sf(12, .semibold))
+                .foregroundStyle(Color(hex: 0xF0F7FF))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity)
+                .frame(height: 38)
+                .background {
+                    if isSelected {
+                        Capsule().fill(LinearGradient(colors: [Color(hex: 0x0DCCFF), Color(hex: 0x1459FF)],
+                                                      startPoint: .leading, endPoint: .trailing))
+                    } else {
+                        Capsule().fill(Color(hex: 0x03060F))
+                    }
+                }
+                .overlay(Capsule().stroke(isSelected ? Color(hex: 0x0DE5FF) : Color(hex: 0x1F4794), lineWidth: 1.3))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

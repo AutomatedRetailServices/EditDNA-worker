@@ -1,0 +1,148 @@
+name: CutSell iOS build 24 probe
+
+# Build 24: background processing + Edits · Processing. Bulk of 3 (sheet → Go to Edits → rows in
+# order → each one to Ready with the notice) and a single video left with "Continue in background",
+# Home, and closed (terminated) while uploading and while being cut. ~1 MB/s. Synthetic videos made
+# here, never committed. Frames and text logs only (b24/). Manual: push to probe/build24.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/build24]
+
+concurrency:
+  group: cutsell-ios-build24-probe
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+
+      - name: Add the UI test target (probe only) and build for testing
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen ffmpeg >/dev/null
+          cat >> project.yml <<'YML'
+            CutSellUITests:
+              type: bundle.ui-testing
+              platform: iOS
+              sources:
+                - CutSellUITests
+              dependencies:
+                - target: CutSell
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app.uitests
+                  GENERATE_INFOPLIST_FILE: YES
+                  TEST_TARGET_NAME: CutSell
+          schemes:
+            CutSellUITests:
+              build:
+                targets:
+                  CutSell: all
+                  CutSellUITests: [test]
+              test:
+                config: Debug
+                targets:
+                  - CutSellUITests
+          YML
+          xcodegen generate
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          print(c[-1][2])')"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          set +e
+          xcodebuild build-for-testing -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -8 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          exit $status
+
+      - name: Make the test videos (1080p H.264, 4 clips of 20-45 s)
+        run: |
+          cd "$RUNNER_TEMP"
+          text="Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. And right now it is on sale in my shop. Grab yours today."
+          say -v Samantha -o s.aiff "$text $text $text"
+          ffmpeg -loglevel error -y -i s.aiff -ar 48000 -ac 1 speech.wav
+          i=0
+          for d in 20 25 30 45; do
+            i=$((i+1))
+            ffmpeg -loglevel error -y -f lavfi -i "testsrc2=s=1080x1920:r=30:d=$d" -i speech.wav \
+              -vf "noise=alls=20:allf=t,hue=h=$((i*40))" -af "apad" -map 0:v -map 1:a -t $d -metadata creation_time=2026-10-18T1$i:00:00Z \
+              -c:v libx264 -preset ultrafast -b:v 8M -maxrate 8M -bufsize 16M -pix_fmt yuv420p -c:a aac -b:a 128k c$i.mp4
+          done
+          ls -la c*.mp4
+
+      - name: Session for the probe user
+        run: |
+          python3 - <<'PYX'
+          import json, os, urllib.request
+          r = urllib.request.Request("https://cutsell-api.onrender.com/v1/auth/session", method="POST", data=None,
+                                     headers={"content-type": "application/json"})
+          s = json.load(urllib.request.urlopen(r, timeout=120))
+          print("::add-mask::" + s["access_token"])
+          with open(os.environ["GITHUB_ENV"], "a") as f: f.write(f"PROBE_TOKEN={s['access_token']}\nPROBE_USER={s['user_id']}\n")
+          PYX
+
+      - name: Background processing and Edits · Processing (XCUITest)
+        working-directory: mobile/ios
+        run: |
+          mkdir -p "$RUNNER_TEMP/b24"
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl ui "$SIM_UDID" appearance dark || true
+          xcrun simctl privacy "$SIM_UDID" grant photos ai.cutsell.app || true
+          for i in 1 2 3 4; do xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/c$i.mp4"; sleep 2; done
+          sudo dnctl pipe 1 config bw 8Mbit/s
+          echo "dummynet out proto tcp from any to any port 443 pipe 1" | sudo pfctl -f - 2>&1 | tail -2 || true
+          sudo pfctl -E 2>&1 | tail -1 || true
+          status=0
+          for t in testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab; do
+            start=$(date '+%Y-%m-%d %H:%M:%S')
+            set +e
+            TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
+            TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B24_OUT="$RUNNER_TEMP/b24" \
+              xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+                -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/$t \
+                CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test_$t.log" 2>&1
+            [ $? -ne 0 ] && status=1
+            set -e
+            grep -E "B24UI|error:|failed|passed" "$RUNNER_TEMP/test_$t.log" | grep -v Bearer | tail -60 > "$RUNNER_TEMP/b24/xctest_$t.txt" || true
+            xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
+              --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(upload_|job_|processing_|audio_|server_step|editor_opened|video_|clip_|combine_|continue_in_background|follow_|cut_ready|queue_|bulk|asset_).*' \
+              | cut -c1-300 > "$RUNNER_TEMP/b24/app_events_$t.txt" || true
+          done
+          sudo pfctl -f /etc/pf.conf 2>/dev/null; sudo dnctl -q flush 2>/dev/null || true
+          while IFS= read -r line; do echo "::notice title=b24::$line"; done < <(sed 's/^B24UI *//' "$RUNNER_TEMP/b24/b24_ui_log.txt" 2>/dev/null | grep -E "PASS|FAIL|closing|reopen|notice|rows at start" | cut -c1-600)
+          echo "TEST_STATUS=$status" >> "$GITHUB_ENV"
+
+      - name: Frames and logs to design-screenshots (b24/), never a video
+        if: always()
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
+          rm -rf b24 && mkdir -p b24
+          cp "$RUNNER_TEMP"/b24/*.png b24/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/b24/*.txt b24/ 2>/dev/null || true
+          find b24 -type f \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4a' -o -iname '*.caf' -o -iname '*.wav' -o -iname '*.aiff' \) -delete
+          sed -i '' -E 's/(Bearer|token)[^ ]*/\1 <hidden>/g' b24/*.txt 2>/dev/null || true
+          echo "source commit: ${{ github.sha }} test status: ${TEST_STATUS:-?}" > b24/SOURCE.txt
+          git add -A b24
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "build 22 probe for ${{ github.sha }}" || true
+          git push --quiet origin design-screenshots

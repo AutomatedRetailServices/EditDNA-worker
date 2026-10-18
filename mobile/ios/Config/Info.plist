@@ -9,5 +9,15 @@
 	<string>$(CUTSELL_API_BASE_URL)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- Build 24: iOS may wake CutSell now and then to check cuts still being made and say when
+	     they are ready (Background App Refresh). -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>ai.cutsell.app.follow-cuts</string>
+	</array>
 </dict>
 </plist>

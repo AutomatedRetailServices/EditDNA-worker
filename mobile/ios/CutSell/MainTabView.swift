@@ -28,6 +28,7 @@ struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var tracker = CutTracker.shared
     @ObservedObject private var exports = ExportTracker.shared
+    @ObservedObject private var queue = ProcessingQueue.shared
     /// A ready cut opened from the "Your cut is ready" banner.
     @State private var openReady: ReadyRoute?
 
@@ -38,11 +39,16 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        Group {
+        ZStack {
+            // Build 24: Create stays alive in every tab, so an upload left with "Continue in background"
+            // (or "Go to Edits") keeps going while the creator is elsewhere in CutSell.
+            CreateFlowView(selectTab: select)
+                .opacity(tab == .create ? 1 : 0)
+                .allowsHitTesting(tab == .create)
+                .accessibilityHidden(tab != .create)
             switch tab {
             case .create:
-                // Home Hub (Figma 1068:22); camera and gallery open full screen from it.
-                CreateFlowView(selectTab: select)
+                EmptyView()
             case .edits:
                 ProjectsView(selectTab: select)
             case .plan:
@@ -51,6 +57,23 @@ struct MainTabView: View {
                 YouView(selectTab: select)
             }
         }
+        .overlay(alignment: .bottom) {
+            // "<name> is ready · View" (Figma 1134:3027), above the tab bar, in every tab.
+            if let toast = queue.readyToast {
+                ReadyToast(name: toast.name) {
+                    queue.readyToast = nil
+                    openReady = ReadyRoute(id: toast.projectID)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 110)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .task(id: toast.projectID) {
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    if queue.readyToast?.projectID == toast.projectID { queue.readyToast = nil }
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: queue.readyToast?.projectID)
         .overlay(alignment: .top) {
             if let projectID = tracker.readyBanner {
                 ReadyBanner {
@@ -88,7 +111,19 @@ struct MainTabView: View {
             }
             .environmentObject(appState)
         }
-        .task { AppStateBridge.refreshProjects = { try await appState.refreshProjects() } }
+        .task {
+            AppStateBridge.refreshProjects = { try await appState.refreshProjects() }
+            AppStateBridge.markReady = { id in
+                if let index = appState.projects.firstIndex(where: { $0.projectID == id }) {
+                    appState.projects[index].state = "draft_ready"
+                }
+            }
+            // Build 24: cuts still being made on the server (e.g. CutSell was closed meanwhile) are
+            // followed from launch, so they move to Ready with the notice as soon as they finish.
+            for project in appState.projects where Project.processingStates.contains(project.state) {
+                CutTracker.shared.follow(project: project)
+            }
+        }
         .preferredColorScheme(.dark)
     }
 

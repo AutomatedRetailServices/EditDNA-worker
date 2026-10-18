@@ -52,6 +52,9 @@ final class CutTracker: ObservableObject {
         if let count = Int(fileName.split(separator: " ").first ?? ""), fileName.hasSuffix("clips") { cut.clips = count }
         cut.trackedAt = Date()
         cuts[projectID] = cut
+        var following = Set(UserDefaults.standard.stringArray(forKey: "cutsell.follow.processing") ?? [])
+        following.insert(projectID)
+        UserDefaults.standard.set(Array(following), forKey: "cutsell.follow.processing")
         CutSellDiagnostics.log("server_step", ["step": "submitted", "seconds": "0"])
         startLoop()
     }
@@ -68,6 +71,10 @@ final class CutTracker: ObservableObject {
     }
 
     func cut(_ projectID: String) -> Cut? { cuts[projectID] }
+
+    /// Build 24: cuts still being made (followed in the background, remembered for App Refresh).
+    var activeCount: Int { cuts.values.filter { !$0.isReady && !$0.isFailed }.count }
+    var hasActiveCuts: Bool { activeCount > 0 }
 
     // MARK: Polling
 
@@ -130,14 +137,21 @@ final class CutTracker: ObservableObject {
         CutSellDiagnostics.log("cut_ready_seen", ["project_id": cut.id])
         if UIApplication.shared.applicationState != .active {
             let content = UNMutableNotificationContent()
-            content.title = "Your cut is ready"
+            content.title = "\(cut.title.isEmpty ? "Your cut" : cut.title) is ready"
             content.body = "Open CutSell to review and export it."
             content.sound = .default
             let request = UNNotificationRequest(identifier: "cut-ready-\(cut.id)", content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request)
-        } else if visibleProjectID != cut.id {
-            readyBanner = cut.id
         }
+        // Build 24: the cut leaves Edits · Processing and is in Ready at once, with the
+        // "<name> is ready · View" notice (not on the cut's own Processing / Ready screen).
+        if visibleProjectID != cut.id {
+            ProcessingQueue.shared.ready(projectID: cut.id, title: cut.title)
+        } else {
+            ProcessingQueue.shared.ready(projectID: cut.id, title: cut.title)
+            ProcessingQueue.shared.readyToast = nil
+        }
+        AppStateBridge.markReady?(cut.id)
         Task { try? await AppStateBridge.refreshProjects?() }
     }
 
@@ -199,4 +213,6 @@ final class CutTracker: ObservableObject {
 @MainActor
 enum AppStateBridge {
     static var refreshProjects: (() async throws -> Void)?
+    /// Build 24: the cut shows in Edits · Ready at once (before the server list is fetched again).
+    static var markReady: ((String) -> Void)?
 }
