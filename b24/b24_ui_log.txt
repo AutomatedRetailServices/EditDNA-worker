@@ -1,18 +1,34 @@
-B24UI    46.8 Photos access allowed
-B24UI    48.5 gallery CTA: Create 1 cut
-B24UI    55.6 PASS Processing screen
-B24UI    56.0 PASS Continue in background active while: Creating your project
-B24UI    58.7 PASS screen closed, work goes on · Creating your project
-B24UI    65.8 rows after continue: ["PROCESSING 0%", "FAILED"]
-B24UI   110.8 rows after Home: ["FAILED"]
-B24UI   110.9 closing CutSell with rows: ["FAILED"]
-B24UI   134.9 no Processing chip
-B24UI   158.6 rows after reopen: []
-B24UI   400.3 PASS the cut finished after leaving and closing CutSell
-B24UI   400.7 FAILURES: none
-B24UI    21.5 PASS the bulk chip opened the gallery in bulk
-B24UI    25.7 gallery CTA: Create 3 cuts
-B24UI    51.8 PASS bulk sheet shown
-B24UI    56.0 PASS Edits opens on Processing
-B24UI    59.7 rows at start: ["01, c4.mp4, 0:45, PROCESSING 53%", "PROCESSING 53%", "UPLOADING 0%", "QUEUED"]
-B24UI    59.7 FAIL 3 rows in order · 01, c4.mp4, 0:45, PROCESSING 53%, PROCESSING 53%, UPLOADING 0%, QUEUED
+B24UI    44.2 Photos access allowed
+B24UI    45.7 gallery CTA: Create 1 cut
+B24UI    52.0 PASS Processing screen
+B24UI    52.4 PASS Continue in background active while: Creating your project
+B24UI    54.6 PASS screen closed, work goes on · Creating your project
+B24UI    61.4 rows after continue: ["UPLOADING 0%", "FAILED"]
+B24UI   119.2 rows after Home: ["FAILED"]
+B24UI   119.4 closing CutSell with rows: ["FAILED"]
+B24UI   152.7 no Processing chip
+B24UI   176.8 rows after reopen: []
+B24UI   418.4 PASS the cut finished after leaving and closing CutSell
+B24UI   418.6 FAILURES: none
+B24UI    18.4 PASS the bulk chip opened the gallery in bulk
+B24UI    22.2 gallery CTA: Create 3 cuts
+B24UI    47.8 PASS bulk sheet shown
+B24UI    50.9 PASS Edits opens on Processing
+B24UI    53.3 rows at start: ["PROCESSING 20%", "PROCESSING 0%", "QUEUED", "FAILED"]
+B24UI    53.3 FAIL 3 rows in order · PROCESSING 20%, PROCESSING 0%, QUEUED, FAILED
+B24UI    53.9 bulk rows: [PROCESSING 20%, PROCESSING 0%, QUEUED, FAILED]
+B24UI    57.5 bulk rows: [PROCESSING 53%, PROCESSING 0%, QUEUED, FAILED]
+B24UI    61.1 bulk rows: [PROCESSING 53%, PROCESSING 21%, UPLOADING 0%]
+B24UI    66.1 bulk rows: [PROCESSING 53%, PROCESSING 20%, UPLOADING 0%]
+B24UI    71.1 bulk notice: ✓  c4 is ready
+B24UI    71.4 bulk rows: [PROCESSING 20%, PROCESSING 0%]
+B24UI    76.4 bulk rows: [PROCESSING 20%, PROCESSING 21%]
+B24UI    80.4 bulk notice: ✓  c3 is ready
+B24UI    80.8 bulk rows: [PROCESSING 21%, FAILED]
+B24UI    85.8 bulk rows: [PROCESSING 53%, FAILED]
+B24UI    93.1 bulk notice: ✓  c2 is ready
+B24UI    93.4 bulk rows: [FAILED]
+B24UI  1553.3 FAIL every cut left Processing
+B24UI  1553.3 PASS ready notice shown · 3
+B24UI  1553.7 ready chip: Ready (4)
+B24UI  1554.0 FAILURES: 3 rows in order | every cut left Processing
