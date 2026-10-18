@@ -128,6 +128,9 @@ struct ProjectsView: View {
                                 Spacer(minLength: 0)
                             }
                             .padding(.top, 22)
+                            // .contain keeps each chip's own id (editsFilterProcessing…); without it the
+                            // stack's id replaced the chips' ids and "Processing" could not be found.
+                            .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("editsTabPicker")
                         } else {
                             HStack(spacing: 0) {
@@ -141,6 +144,9 @@ struct ProjectsView: View {
                                 }
                             }
                             .padding(.top, 22)
+                            // .contain keeps each chip's own id (editsFilterProcessing…); without it the
+                            // stack's id replaced the chips' ids and "Processing" could not be found.
+                            .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("editsTabPicker")
                         }
 

@@ -66,3 +66,14 @@ def test_work_goes_on_after_leaving_or_closing():
     assert "<string>fetch</string>" in plist and "ai.cutsell.app.follow-cuts" in plist
     finisher = read("PendingUploadFinisher.swift")
     assert '"upload_auto_resumed"' in finisher
+
+
+def test_bulk_chip_and_processing_chip_are_findable():
+    ios = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    hub = (ios / "HomeHubView.swift").read_text()
+    # The card's own Single tap is only on its upper part; chips are separate buttons.
+    assert "chipTappedAt" not in hub and ".onTapGesture { onUpload(.single) }" in hub
+    gallery = (ios / "GalleryPickerView.swift").read_text()
+    assert ".onChange(of: initialMode)" in gallery
+    projects = (ios / "ProjectsView.swift").read_text()
+    assert projects.count('.accessibilityElement(children: .contain)\n                            .accessibilityIdentifier("editsTabPicker")') == 2

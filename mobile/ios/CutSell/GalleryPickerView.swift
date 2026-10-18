@@ -332,6 +332,8 @@ struct GalleryPickerView: View {
             await library.start()
             if library.status == .limited { showingLimitedCard = true }
         }
+        // The mode chip that opened the gallery wins even if it arrives after the first render.
+        .onChange(of: initialMode) { _, newMode in if selection.isEmpty { mode = newMode } }
         .onDisappear { library.stop() }
         .fullScreenCover(item: $problem) { current in
             CreateProblemView(

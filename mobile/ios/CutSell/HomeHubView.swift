@@ -12,7 +12,6 @@ struct HomeHubView: View {
     @ObservedObject private var tracker = CutTracker.shared
     @ObservedObject private var thumbnails = ThumbnailStore.shared
     @State private var voiceOverSoon = false
-    @State private var chipTappedAt: Date?
 
     private var recent: [Project] { Array(appState.projects.prefix(3)) }
 
@@ -115,7 +114,10 @@ struct HomeHubView: View {
     }
 
     private var uploadCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Build 24: only this upper part is the card's own tap (Single). The Single / Bulk / Combine
+            // chips below are separate buttons, so a Bulk tap can never also open the gallery in Single.
+            VStack(alignment: .leading, spacing: 4) {
                 Image("HubUpload")
                     .resizable()
                     .frame(width: 26, height: 26)
@@ -128,9 +130,13 @@ struct HomeHubView: View {
                 Text("From your gallery. AI cuts it for you.")
                     .font(CS.inter(14))
                     .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { onUpload(.single) }
                 HStack(spacing: 6) {
                     ForEach(CreateMode.allCases, id: \.self) { mode in
-                        Button { chipTappedAt = Date(); onUpload(mode) } label: {
+                        Button { onUpload(mode) } label: {
                             Text(mode.title)
                                 .font(CS.inter(12, .semibold))
                                 .foregroundStyle(.white)
@@ -149,13 +155,6 @@ struct HomeHubView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(CS.brandFull, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .shadow(color: Color(hex: 0x7C3AED, opacity: 0.55), radius: 25, y: 18)
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            // Build 24: a tap on Single / Bulk / Combine is not ALSO the card's tap (it used to open the
-            // gallery in Single right after the chip asked for Bulk).
-            .onTapGesture {
-                if let chip = chipTappedAt, Date().timeIntervalSince(chip) < 0.6 { return }
-                onUpload(.single)
-            }
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("hubUpload")
