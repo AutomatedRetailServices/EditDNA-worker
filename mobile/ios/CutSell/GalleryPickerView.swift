@@ -1,3 +1,4 @@
+import AVFoundation
 import Photos
 import SwiftUI
 import UIKit
@@ -149,6 +150,110 @@ enum GalleryExport {
         default: contentType = "video/quicktime"
         }
         return LocalVideo(url: destination, name: name ?? resource.originalFilename, duration: asset.duration, contentType: contentType)
+    }
+}
+
+extension GalleryExport {
+    /// Build 23 ("iCloud light"): a video that is only in iCloud is not downloaded whole before the cut
+    /// starts. A small fast copy (960x540) comes down in seconds: its voice starts the cut and the
+    /// editor previews it. The ORIGINAL (byte for byte) downloads and uploads in the background.
+    /// nil = not for this video (already on the iPhone, 4K, unknown size or format): the normal export.
+    static func light(_ asset: PHAsset, progress: (@Sendable (Double) -> Void)? = nil) async throws -> LocalVideo? {
+        let resources = PHAssetResource.assetResources(for: asset)
+        guard let original = resources.first(where: { $0.type == .video }) else { return nil }
+        let ext = (original.originalFilename as NSString).pathExtension.lowercased()
+        guard CreateLimits.supportedExtensions.contains(ext),
+              max(asset.pixelWidth, asset.pixelHeight) < 3840, min(asset.pixelWidth, asset.pixelHeight) < 2160,
+              let bytes = (original.value(forKey: "fileSize") as? NSNumber)?.int64Value, bytes > 0 else { return nil }
+        if CreateLimits.sizeAndLengthLimitsOn && bytes > CreateLimits.maxFileBytes { throw Failure.tooLarge(bytes) }
+        guard await isOnlyInCloud(asset) else { return nil }
+        let started = Date()
+        guard let preview = try? await fastCopy(asset, progress: progress) else { return nil }
+        let previewBytes = ((try? FileManager.default.attributesOfItem(atPath: preview.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        CutSellDiagnostics.log("icloud_light", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started)),
+                                               "preview_mb": String(format: "%.1f", Double(previewBytes) / 1_048_576),
+                                               "original_mb": String(bytes / 1_048_576)])
+        let contentType: String
+        switch ext {
+        case "mp4": contentType = "video/mp4"
+        case "m4v": contentType = "video/x-m4v"
+        default: contentType = "video/quicktime"
+        }
+        return LocalVideo(url: try persistentMediaURL(extension: ext), name: original.originalFilename, duration: asset.duration,
+                          contentType: contentType, cloudAssetID: asset.localIdentifier, previewURL: preview, expectedBytes: bytes)
+    }
+
+    /// True when the original is not on this iPhone (asking Photos without network gives nothing).
+    static func isOnlyInCloud(_ asset: PHAsset) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let options = PHVideoRequestOptions()
+            options.isNetworkAccessAllowed = false
+            options.deliveryMode = .highQualityFormat
+            options.version = .original
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, info in
+                let inCloud = (info?[PHImageResultIsInCloudKey] as? Bool) ?? false
+                continuation.resume(returning: avAsset == nil && inCloud)
+            }
+        }
+    }
+
+    /// A small 960x540 copy from iCloud (Photos' fast version), for the voice and the preview.
+    static func fastCopy(_ asset: PHAsset, progress: (@Sendable (Double) -> Void)?) async throws -> URL {
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .fastFormat
+        if let progress { options.progressHandler = { value, _, _, _ in progress(value * 0.7) } }
+        let session: AVAssetExportSession = try await withCheckedThrowingContinuation { continuation in
+            PHImageManager.default().requestExportSession(forVideo: asset, options: options,
+                                                          exportPreset: AVAssetExportPreset960x540) { session, info in
+                if let session { continuation.resume(returning: session) } else {
+                    continuation.resume(throwing: (info?[PHImageErrorKey] as? Error) ?? Failure.unavailable)
+                }
+            }
+        }
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CutSell", isDirectory: true).appendingPathComponent("Previews", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let destination = root.appendingPathComponent("\(UUID().uuidString).mp4")
+        session.outputURL = destination
+        session.outputFileType = .mp4
+        session.shouldOptimizeForNetworkUse = false
+        let watcher = Task {
+            while !Task.isCancelled {
+                progress?(0.7 + 0.3 * Double(session.progress))
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+        }
+        defer { watcher.cancel() }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            session.exportAsynchronously {
+                if session.status == .completed { continuation.resume() } else {
+                    continuation.resume(throwing: session.error ?? Failure.unavailable)
+                }
+            }
+        }
+        return destination
+    }
+
+    /// The original, byte for byte, into `destination` (background part of iCloud light).
+    static func downloadOriginal(assetID: String, to destination: URL, progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject,
+              let original = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .video }) else {
+            throw Failure.unavailable
+        }
+        try? FileManager.default.removeItem(at: destination)
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        if let progress { options.progressHandler = { progress($0) } }
+        let started = Date()
+        do {
+            try await PHAssetResourceManager.default().writeData(for: original, toFile: destination, options: options)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            CutSellDiagnostics.log("icloud_original_failed", ["domain": (error as NSError).domain, "code": String((error as NSError).code)])
+            throw Failure.unavailable
+        }
+        CutSellDiagnostics.log("icloud_original_done", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started))])
     }
 }
 

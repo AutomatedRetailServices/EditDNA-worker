@@ -138,6 +138,8 @@ final class CutSubmitter: ObservableObject {
             } else {
                 var preparedVideos: [LocalVideo] = []
                 for (index, video) in selected.enumerated() {
+                    // iCloud light: the original is still downloading; it is uploaded as it is.
+                    if video.cloudAssetID != nil { preparedVideos.append(video); continue }
                     say("Preparing \(index + 1) of \(selected.count)…")
                     let title = selected.count > 1 ? "Preparing video \(index + 1) of \(selected.count)" : "Preparing your video"
                     stage(title)
@@ -190,7 +192,9 @@ final class CutSubmitter: ObservableObject {
                             filePath: $0.url.path,
                             name: $0.name,
                             duration: $0.duration,
-                            contentType: $0.contentType
+                            contentType: $0.contentType,
+                            cloudAssetID: $0.cloudAssetID,
+                            expectedBytes: $0.expectedBytes
                         )
                     },
                     createdAt: Date()
@@ -210,6 +214,15 @@ final class CutSubmitter: ObservableObject {
                 report(1)
                 try? await appState.refreshProjects()
                 return projectID
+            }
+            // The whole-video flow needs every original on the iPhone (iCloud light falls back here).
+            for (index, video) in uploadVideos.enumerated() where video.cloudAssetID != nil
+                && !FileManager.default.fileExists(atPath: video.url.path) {
+                let title = uploadVideos.count > 1 ? "Clip \(index + 1) of \(uploadVideos.count) · Downloading from iCloud" : "Downloading from iCloud"
+                stage(title, 0)
+                try await GalleryExport.downloadOriginal(assetID: video.cloudAssetID ?? "", to: video.url) { [weak self] fraction in
+                    Task { @MainActor in self?.stage(title, fraction) }
+                }
             }
             var sources: [SourceInput] = []
             for (index, video) in uploadVideos.enumerated() {
@@ -316,7 +329,7 @@ extension CutSubmitter {
         for (index, video) in videos.enumerated() {
             stage(clip(index, "Preparing…"), 0)
             do {
-                voices.append(try await AudioExtractor.extract(from: video.url) { [weak self] fraction in
+                voices.append(try await AudioExtractor.extract(from: video.previewURL ?? video.url) { [weak self] fraction in
                     Task { @MainActor in self?.stage(clip(index, "Preparing…"), fraction) }
                 })
             } catch AudioExtractor.Failure.noAudioTrack {
@@ -328,9 +341,10 @@ extension CutSubmitter {
         var starts: [MultipartStartResponse] = []
         for video in videos {
             let start = try await MultipartUploadManager.shared.begin(fileURL: video.url, projectID: projectID, session: session,
-                                                                      contentType: video.contentType)
-            // The editor plays the iPhone's own copy: no download, even before the upload ends.
-            await SourceVideoCache.shared.store(fileURL: video.url, uri: start.sourceURI)
+                                                                      contentType: video.contentType, knownSize: video.expectedBytes)
+            // The editor plays the iPhone's own copy (the small iCloud copy until the original is here):
+            // no download, even before the upload ends.
+            await SourceVideoCache.shared.store(fileURL: video.previewURL ?? video.url, uri: start.sourceURI)
             starts.append(start)
         }
         let voiceStarted = Date()

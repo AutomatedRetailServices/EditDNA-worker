@@ -58,6 +58,16 @@ actor SourceVideoCache {
         trim()
     }
 
+    /// Build 23 (iCloud light): the original replaces the small preview copy once it is here.
+    func replace(fileURL: URL, uri: String) {
+        let target = Self.file(forURI: uri)
+        try? FileManager.default.removeItem(at: target)
+        if (try? FileManager.default.linkItem(at: fileURL, to: target)) == nil {
+            try? FileManager.default.copyItem(at: fileURL, to: target)
+        }
+        trim()
+    }
+
     private static let wifiOnly: URLSession = {
         let config = URLSessionConfiguration.default
         config.allowsExpensiveNetworkAccess = false

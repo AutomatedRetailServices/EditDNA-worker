@@ -278,4 +278,10 @@ struct LocalVideo: Identifiable, Hashable {
     let name: String
     let duration: Double
     let contentType: String
+    /// Build 23 ("iCloud light"): the video is still in iCloud. `url` is where its ORIGINAL will be
+    /// downloaded (in the background, for the upload); `previewURL` is a small, fast copy used now
+    /// for the voice and the editor's preview; `expectedBytes` is the original's exact size.
+    var cloudAssetID: String? = nil
+    var previewURL: URL? = nil
+    var expectedBytes: Int64? = nil
 }

@@ -84,11 +84,15 @@ final class BackgroundVideoUploads: ObservableObject {
         var startedAt = Date()
         var bytesPerSecond: Double = 0
         var totalBytes: Int64 = 0
+        /// iCloud light: "Getting your video from iCloud" (with its %) before the upload.
+        var phase: String?
+        var phaseFraction: Double = 0
 
         /// "Uploading video in background · 40 % · about 1 min left"
         var text: String {
             if let failed { return "Video upload paused (\(failed)). It continues when you open CutSell." }
             let clipPart = clips > 1 ? "Clip \(clip) of \(clips) · " : ""
+            if let phase { return "\(clipPart)\(phase) · \(Int(phaseFraction * 100)) %" }
             var line = "\(clipPart)Uploading video in background · \(Int(fraction * 100)) %"
             if bytesPerSecond > 0, totalBytes > 0 {
                 let left = Double(totalBytes) * (1 - fraction) / bytesPerSecond
@@ -116,7 +120,7 @@ final class BackgroundVideoUploads: ObservableObject {
         let projectID = record.projectID
         if tasks[projectID] != nil { return }
         let total = record.videos.reduce(Int64(0)) { sum, video in
-            sum + ((((try? FileManager.default.attributesOfItem(atPath: video.fileURL.path))?[.size]) as? NSNumber)?.int64Value ?? 0)
+            sum + (video.expectedBytes ?? ((((try? FileManager.default.attributesOfItem(atPath: video.fileURL.path))?[.size]) as? NSNumber)?.int64Value ?? 0))
         }
         statuses[projectID] = Status(clips: record.videos.count, totalBytes: total)
         ActiveUploads.shared.insert(projectID)
@@ -130,6 +134,18 @@ final class BackgroundVideoUploads: ObservableObject {
                 for (index, video) in record.videos.enumerated() {
                     self?.statuses[projectID]?.clip = index + 1
                     let base = Double(index) / Double(record.videos.count)
+                    // iCloud light: the original comes down first (byte for byte), then it uploads.
+                    if let assetID = video.cloudAssetID, !FileManager.default.fileExists(atPath: video.fileURL.path) {
+                        self?.statuses[projectID]?.phase = "Getting your video from iCloud"
+                        try await GalleryExport.downloadOriginal(assetID: assetID, to: video.fileURL) { fraction in
+                            Task { @MainActor in self?.statuses[projectID]?.phaseFraction = fraction }
+                        }
+                        let start = try await MultipartUploadManager.shared.begin(fileURL: video.fileURL, projectID: projectID,
+                                                                                  session: session, contentType: video.contentType,
+                                                                                  knownSize: video.expectedBytes)
+                        await SourceVideoCache.shared.replace(fileURL: video.fileURL, uri: start.sourceURI)
+                        self?.statuses[projectID]?.phase = nil
+                    }
                     var attempt = 1
                     var result: MultipartCompleteResponse?
                     while result == nil {

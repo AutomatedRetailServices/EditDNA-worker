@@ -212,7 +212,7 @@ struct CreateFlowView: View {
         if processingFileName.isEmpty || videos.count > 1 {
             processingFileName = videos.count == 1 ? first.name : "\(videos.count) clips"
         }
-        let image = await CutTracker.firstFrame(of: first.url)
+        let image = await CutTracker.firstFrame(of: first.previewURL ?? first.url)
         if processingProjectID == nil { processingThumbnail = image }
         return image
     }
@@ -360,6 +360,18 @@ struct CreateFlowView: View {
         let started = Date()
         CutSellDiagnostics.log("asset_export_started", ["index": String(index + 1), "of": String(count),
                                                         "seconds_long": String(format: "%.0f", asset.duration)])
+        // Build 23 ("iCloud light"): a video only in iCloud starts from a small fast copy; its original
+        // downloads and uploads in the background (needs the server's audio-first flow).
+        if await ServerCapabilities.audioFirst() {
+            let fast = count > 1 ? "Getting video \(index + 1) of \(count) from iCloud" : "Getting your video from iCloud"
+            if let light = try await GalleryExport.light(asset, progress: { fraction in
+                Task { @MainActor in submitter.stage(fast, fraction) }
+            }) {
+                CutSellDiagnostics.log("asset_export_done", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started)),
+                                                             "mode": "icloud_light"])
+                return light
+            }
+        }
         let video = try await GalleryExport.export(asset, name: nil, progress: { fraction in
             // Only called while the video comes down from iCloud (not when it is on the iPhone).
             Task { @MainActor in

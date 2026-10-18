@@ -50,3 +50,19 @@ def test_progress_is_honest():
     assert "Cutting your video…" in tracker
     screen = read("ProcessingScreen.swift")
     assert '"backgroundVideoUpload"' in screen
+
+
+def test_icloud_light_starts_from_a_small_copy_and_downloads_the_original_later():
+    gallery = read("GalleryPickerView.swift")
+    assert "static func light(_ asset: PHAsset" in gallery and "deliveryMode = .fastFormat" in gallery
+    assert "AVAssetExportPreset960x540" in gallery and "func downloadOriginal(assetID" in gallery
+    assert "isNetworkAccessAllowed = false" in gallery and "PHImageResultIsInCloudKey" in gallery
+    flow = read("CreateFlowView.swift")
+    assert "GalleryExport.light(asset" in flow and "await ServerCapabilities.audioFirst()" in flow
+    submitter = read("CutSubmission.swift")
+    assert "AudioExtractor.extract(from: video.previewURL ?? video.url)" in submitter
+    assert "knownSize: video.expectedBytes" in submitter
+    assert "if video.cloudAssetID != nil { preparedVideos.append(video); continue }" in submitter
+    first = read("AudioFirst.swift")
+    assert "GalleryExport.downloadOriginal(assetID: assetID, to: video.fileURL)" in first
+    assert "SourceVideoCache.shared.replace(fileURL: video.fileURL" in first

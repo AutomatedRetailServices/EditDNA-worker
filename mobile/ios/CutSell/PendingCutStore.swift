@@ -5,6 +5,9 @@ struct PendingCutVideo: Codable, Hashable {
     let name: String
     let duration: Double
     let contentType: String
+    /// Build 23 ("iCloud light"): the original is still being downloaded from iCloud to filePath.
+    var cloudAssetID: String? = nil
+    var expectedBytes: Int64? = nil
 
     /// Build 22: found again after an app update moves CutSell's folder.
     var fileURL: URL { ContainerPath.resolve(filePath) }
@@ -42,7 +45,7 @@ actor PendingCutStore {
             return []
         }
         return values.filter { record in
-            !record.videos.isEmpty && record.videos.allSatisfy { FileManager.default.fileExists(atPath: $0.fileURL.path) }
+            !record.videos.isEmpty && record.videos.allSatisfy { FileManager.default.fileExists(atPath: $0.fileURL.path) || $0.cloudAssetID != nil }
         }
     }
 

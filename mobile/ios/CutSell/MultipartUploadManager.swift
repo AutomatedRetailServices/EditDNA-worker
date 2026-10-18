@@ -319,8 +319,10 @@ actor MultipartUploadManager {
 
     /// Build 23 (audio first): the multipart session of a video, created now (or the saved one) so the
     /// cut can name the video's storage URI before any byte of it is uploaded.
-    func begin(fileURL: URL, projectID: String, session: CutSellSession, contentType: String) async throws -> MultipartStartResponse {
-        let size = ((try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
+    /// `knownSize`: the exact size of a file still downloading from iCloud (iCloud light).
+    func begin(fileURL: URL, projectID: String, session: CutSellSession, contentType: String,
+               knownSize: Int64? = nil) async throws -> MultipartStartResponse {
+        let size = knownSize ?? ((try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
         guard size > 0 else { throw UploadError.emptyFile }
         if let saved = await resumeStore.record(fileURL: fileURL, projectID: projectID, size: size),
            saved.start.userID == session.userID, saved.start.sizeBytes == size {
@@ -329,7 +331,7 @@ actor MultipartUploadManager {
         let start = try await Retry.run("start") {
             try await createStart(fileURL: fileURL, projectID: projectID, session: session, contentType: contentType, size: size)
         }
-        await resumeStore.save(start: start, fileURL: fileURL, projectID: projectID, size: size)
+        await resumeStore.save(start: start, fileURL: fileURL, projectID: projectID, size: size, allowMissingFile: knownSize != nil)
         UploadLedger.shared.begin(start)
         return start
     }

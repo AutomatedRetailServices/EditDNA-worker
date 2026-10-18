@@ -24,8 +24,8 @@ actor UploadResumeStore {
         loadAll().values.first { $0.start.uploadID == uploadID }
     }
 
-    func save(start: MultipartStartResponse, fileURL: URL, projectID: String, size: Int64) {
-        var all = loadAll()
+    func save(start: MultipartStartResponse, fileURL: URL, projectID: String, size: Int64, allowMissingFile: Bool = false) {
+        var all = loadAll(keepMissing: allowMissingFile)
         let identity = Self.identity(fileURL: fileURL, projectID: projectID, size: size)
         all[identity] = UploadResumeRecord(
             identity: identity,
@@ -50,12 +50,16 @@ actor UploadResumeStore {
         persist(all)
     }
 
-    private func loadAll() -> [String: UploadResumeRecord] {
+    /// Build 23: a record whose file is still downloading from iCloud (iCloud light) is kept for 2 days.
+    private func loadAll(keepMissing: Bool = true) -> [String: UploadResumeRecord] {
         guard let data = defaults.data(forKey: storageKey),
               let decoded = try? decoder.decode([String: UploadResumeRecord].self, from: data) else {
             return [:]
         }
-        return decoded.filter { FileManager.default.fileExists(atPath: ContainerPath.resolve($0.value.fileURL).path) }
+        return decoded.filter {
+            FileManager.default.fileExists(atPath: ContainerPath.resolve($0.value.fileURL).path)
+                || (keepMissing && Date().timeIntervalSince($0.value.updatedAt) < 2 * 24 * 3600)
+        }
     }
 
     private func persist(_ value: [String: UploadResumeRecord]) {
