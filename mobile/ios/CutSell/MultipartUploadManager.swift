@@ -104,7 +104,7 @@ actor MultipartUploadManager {
         progress: @Sendable @escaping (Double) -> Void
     ) async throws -> MultipartCompleteResponse {
         let clip: [String: String] = clipOrder.map { ["source_order": String($0)] } ?? [:]
-        func tagged(_ fields: [String: String])) -> [String: String] { fields.merging(clip) { a, _ in a } }
+        func tagged(_ fields: [String: String]) -> [String: String] { fields.merging(clip) { a, _ in a } }
         let retried: @Sendable (Int, Error) -> Void = { _, error in onRetry?(Retry.short(error)) }
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
