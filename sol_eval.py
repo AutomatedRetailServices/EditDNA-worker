@@ -58,7 +58,7 @@ def pick_model():
     sol = [n for n in names if re.search(r"6\.1.*sol|sol.*6\.1", n, re.I)]
     plain = [n for n in sol if not re.search(r"preview|mini|nano|audio|realtime|search|\d{4}-\d\d-\d\d", n)]
     pick = (plain or sol or [None])[0]
-    gpt6 = [n for n in names if n.startswith("gpt-6")]
+    gpt6 = [n for n in names if not re.search(r"embedding|tts|whisper|dall-e|image|audio|realtime|moderation|transcribe|search", n)]
     if pick:      # one tiny call: the key really reaches the model
         try:
             _openai(pick, 'Reply with {"ok":1}')
@@ -94,10 +94,10 @@ def one(item):
 @app.local_entrypoint()
 def main():
     found = pick_model.remote()
-    print(f"::notice title=openai models::status {found['status']} pick {found['pick']} gpt6 {found['models'][:20]} "
+    print(f"::notice title=openai models::status {found['status']} pick {found['pick']} gpt6 {found['models'][:200]} "
           f"{found.get('error', '')}")
     results = []
-    if found["pick"]:
+    if found["pick"] and os.environ.get("SOL_RUN") == "1":
         ids = [v["id"] for v in json.load(open("benchmarks/simple_engine_gold/gold_v1.json"))["videos"]]
         items = [(v, r, found["pick"]) for r in range(RUNS) for v in ids]
         results = [x if isinstance(x, dict) else {"error": repr(x)[:300]} for x in one.map(items, return_exceptions=True)]
