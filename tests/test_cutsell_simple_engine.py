@@ -838,7 +838,7 @@ def test_prompt_parts_keep_the_same_text_and_cache_the_fixed_instructions(monkey
 
 def test_every_step_has_a_strict_json_schema():
     from cutsell_worker.simple_engine import engine as E
-    assert set(E.SCHEMAS) == {"pass", "decision", "haul_review", "fixwords"}   # sale review: free text, as live
+    assert set(E.SCHEMAS) == {"decision", "haul_review", "fixwords"}   # pass + sale review: free text, as live
     for schema in E.SCHEMAS.values():
         assert schema["additionalProperties"] is False and set(schema["required"]) == set(schema["properties"])
     assert '"why"' in E.SALE_REVIEW_PROMPT

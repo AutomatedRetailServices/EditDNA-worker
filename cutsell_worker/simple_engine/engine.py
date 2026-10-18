@@ -28,8 +28,9 @@ DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="ut
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
 SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encoding="utf-8")
-# The sale review keeps its free-text answer with "why": on the Gold, the JSON-only answer without "why" proposed
-# fixes almost twice as often (14 vs 8 of 52 first readings) and changed cuts (Y05, B05, B08). Measured 2026-10-18.
+# The pass step and the sale review keep their free-text answers, as live (measured on the Gold 2026-10-18):
+# - pass: its notes before the JSON are where it reasons; JSON-only kept a first-pass hook on Y05 in 3 of 4 runs.
+# - sale review: JSON-only without "why" proposed fixes almost twice as often (14 vs 8 of 52) and changed cuts.
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
 ZOOM_KINDS = ("hook", "product", "price", "cta")
@@ -53,7 +54,7 @@ VS_WIN, VS_TH, VS_FR = 0.6, 0.20, 1 / 30
 LLMCall = Callable[[str], "tuple[str, dict]"]
 
 # Structured output (JSON only, nothing before it): one schema per step, the same keys the parsers already read.
-_INT, _STR, _BOOL = {"type": "integer"}, {"type": "string"}, {"type": "boolean"}
+_INT, _STR = {"type": "integer"}, {"type": "string"}
 
 
 def _obj(**props):
@@ -66,7 +67,6 @@ def _rows(*kinds):
 
 _INTS = {"type": "array", "items": _INT}
 SCHEMAS = {
-    "pass": _obj(passes=_rows(_INT, _BOOL), backbone=_INTS),
     "decision": _obj(hide=_rows(_INT, _STR), trim=_rows(_INT, _STR)),
     "haul_review": _obj(type={"type": "string", "enum": ["haul", "other"]}, hide=_rows(_INT), unhide=_INTS),
     "fixwords": _obj(fix=_rows(_INT, _STR), zoom=_rows(_INT, _STR)),
@@ -222,7 +222,7 @@ def decide(words, duration, call: LLMCall, run: int = 0):
     text = transcript(words, units)
     usage = []
     with _llm.step("pass"):
-        p, u = _ask(call, f"v3pass-{run}", (PASS_PROMPT + "\nTRANSCRIPT:\n", text), schema=SCHEMAS["pass"]); usage += u
+        p, u = _ask(call, f"v3pass-{run}", (PASS_PROMPT + "\nTRANSCRIPT:\n", text)); usage += u
     passes = p.get("passes", [])
     backbone = p.get("backbone")
     multi = (sum(1 for x in passes if len(x) > 2 and x[2]) >= 2
