@@ -1,180 +1,106 @@
-B23UI    22.6 Photos access allowed
-B23UI    36.8 3s Creating your project …
-B23UI    38.6 5s Uploading your video 0%
-B23UI    43.8 10s Uploading your video 4%
-B23UI    46.5 13s Uploading your video 8%
-B23UI    49.0 16s Uploading your video 11%
-B23UI    51.4 18s Uploading your video 14%
-B23UI    53.0 20s Uploading your video 16%
-B23UI    54.5 21s Uploading your video 18%
-B23UI    55.9 23s Uploading your video 20%
-B23UI    58.7 25s Uploading your video 23%
-B23UI    60.5 27s Uploading your video 25%
-B23UI    62.4 29s Uploading your video 27%
-B23UI    63.9 31s Uploading your video 30%
-B23UI    65.3 32s Uploading your video 31%
-B23UI    66.6 33s Uploading your video 32%
-B23UI    68.0 35s Uploading your video 34%
-B23UI    69.4 36s Uploading your video 36%
-B23UI    70.9 38s Uploading your video 37%
-B23UI    72.2 39s Uploading your video 40%
-B23UI    73.9 41s Uploading your video 42%
-B23UI    75.2 42s Uploading your video 43%
-B23UI    76.5 43s Uploading your video 45%
-B23UI    77.7 44s Uploading your video 47%
-B23UI    79.0 46s Uploading your video 49%
-B23UI    80.3 47s Uploading your video 51%
-B23UI    81.8 49s Uploading your video 52%
-B23UI    83.2 50s Uploading your video 53%
-B23UI    84.8 52s Uploading your video 55%
-B23UI    86.2 53s Uploading your video 57%
-B23UI    87.6 54s Uploading your video 59%
-B23UI    88.9 56s Uploading your video 61%
-B23UI    90.3 57s Uploading your video 62%
-B23UI    91.5 58s Uploading your video 63%
-B23UI    93.1 60s Uploading your video 54%
-B23UI    94.5 61s Uploading your video 68%
-B23UI    95.7 62s Uploading your video 69%
-B23UI    97.2 64s Uploading your video 70%
-B23UI    98.9 66s Uploading your video 73%
-B23UI   100.5 67s Uploading your video 75%
-B23UI   102.2 69s Uploading your video 76%
-B23UI   104.2 71s Uploading your video 80%
-B23UI   105.5 72s Uploading your video 81%
-B23UI   106.9 74s Uploading your video 83%
-B23UI   108.2 75s Uploading your video 85%
-B23UI   109.6 76s Uploading your video 87%
-B23UI   110.9 78s Uploading your video 89%
-B23UI   112.2 79s Uploading your video 90%
-B23UI   113.5 80s Uploading your video 91%
-B23UI   114.9 82s Uploading your video 93%
-B23UI   116.4 83s Uploading your video 95%
-B23UI   117.8 84s Uploading your video 96%
-B23UI   119.2 86s Uploading your video 97%
-B23UI   120.6 87s Uploading your video 98%
-B23UI   121.9 89s Uploading your video 99%
-B23UI   123.5 90s Uploading your video 100%
-B23UI   126.2 93s Starting your cut …
-B23UI   132.4 99s Starting your cut 21%
-B23UI   134.4 101s Cutting your video… starting 21%
-B23UI   136.4 103s Cutting your video… starting 20%
-B23UI   141.4 108s Cutting your video… starting 53%
-B23UI   147.7 114s Cutting your video… starting 95%
-B23UI   166.7 TIMING 1min before: Creating your project 3s → Uploading your video 6s → Starting your cut 93s → Cutting your video 101s → ready 127s → editor 131s
-B23UI   166.7 PASS no error screen
-B23UI   166.7 PASS processed · 127 s
-B23UI   166.7 PASS opens in the editor · 131 s from Create
-B23UI   166.7 FAILURES: none
-B23UI    40.8 24s Cutting your video… starting 29% | Uploading video in background · 4 % · about 3 min left
-B23UI    42.7 26s Cutting your video… starting 29% | Uploading video in background · 9 % · about 2 min left
-B23UI    44.5 28s Cutting your video… starting 29% | Uploading video in background · 12 % · about 2 min left
-B23UI    46.1 30s Cutting your video… starting 29% | Uploading video in background · 14 % · about 2 min left
-B23UI    53.3 TIMING 1min after: Cutting your video 21s → ready 30s → editor 35s
-B23UI    53.3 PASS no error screen
-B23UI    53.3 PASS processed · 30 s
-B23UI    53.3 PASS opens in the editor · 35 s from Create
-B23UI    53.3 keeping CutSell open 150 s for the background video upload
-B23UI   203.3 FAILURES: none
-B23UI    49.0 22s Uploading your video 6%
-B23UI    51.2 25s Uploading your video 7%
-B23UI    54.0 28s Uploading your video 8%
-B23UI    56.0 30s Uploading your video 9%
-B23UI    57.9 31s Uploading your video 10%
-B23UI    61.4 35s Uploading your video 11%
-B23UI    65.0 39s Uploading your video 13%
-B23UI    68.8 42s Uploading your video 14%
-B23UI    70.9 44s Uploading your video 15%
-B23UI    72.9 46s Uploading your video 16%
-B23UI    75.3 49s Uploading your video 17%
-B23UI    77.6 51s Uploading your video 18%
-B23UI    80.0 54s Uploading your video 19%
-B23UI    82.5 56s Uploading your video 20%
-B23UI    85.1 59s Uploading your video 21%
-B23UI    86.7 60s Uploading your video 22%
-B23UI    90.0 64s Uploading your video 23%
-B23UI    91.9 65s Uploading your video 24%
-B23UI    94.1 68s Uploading your video 25%
-B23UI    96.2 70s Uploading your video 26%
-B23UI    99.8 73s Uploading your video 27%
-B23UI   102.0 76s Uploading your video 28%
-B23UI   103.9 77s Uploading your video 29%
-B23UI   106.2 80s Uploading your video 30%
-B23UI   108.2 82s Uploading your video 31%
-B23UI   111.8 85s Uploading your video 32%
-B23UI   113.9 87s Uploading your video 33%
-B23UI   117.0 91s Uploading your video 35%
-B23UI   120.6 94s Uploading your video 33%
-B23UI   123.8 97s Uploading your video 37%
-B23UI   128.4 102s Uploading your video 39%
-B23UI   131.5 105s Uploading your video 41%
-B23UI   136.1 110s Uploading your video 42%
-B23UI   138.4 112s Uploading your video 43%
-B23UI   140.6 114s Uploading your video 44%
-B23UI   142.6 116s Uploading your video 45%
-B23UI   144.9 118s Uploading your video 46%
-B23UI   146.9 120s Uploading your video 47%
-B23UI   149.0 123s Uploading your video 48%
-B23UI   150.6 124s Uploading your video 49%
-B23UI   153.5 127s Uploading your video 50%
-B23UI   157.4 131s Uploading your video 52%
-B23UI   160.9 134s Uploading your video 53%
-B23UI   164.7 138s Uploading your video 55%
-B23UI   170.1 144s Uploading your video 57%
-B23UI   171.9 145s Uploading your video 58%
-B23UI   175.6 149s Uploading your video 59%
-B23UI   178.5 152s Uploading your video 60%
-B23UI   179.9 153s Uploading your video 61%
-B23UI   181.8 155s Uploading your video 62%
-B23UI   185.4 159s Uploading your video 63%
-B23UI   187.4 161s Uploading your video 64%
-B23UI   189.8 163s Uploading your video 65%
-B23UI   191.3 165s Uploading your video 66%
-B23UI   194.7 168s Uploading your video 67%
-B23UI   196.6 170s Uploading your video 68%
-B23UI   199.5 173s Uploading your video 69%
-B23UI   203.4 177s Uploading your video 70%
-B23UI   207.1 181s Uploading your video 72%
-B23UI   211.6 185s Uploading your video 74%
-B23UI   213.7 187s Uploading your video 75%
-B23UI   216.3 190s Uploading your video 76%
-B23UI   218.2 192s Uploading your video 77%
-B23UI   222.2 196s Uploading your video 79%
-B23UI   226.1 200s Uploading your video 80%
-B23UI   228.3 202s Uploading your video 81%
-B23UI   230.4 204s Uploading your video 82%
-B23UI   232.7 206s Uploading your video 83%
-B23UI   234.4 208s Uploading your video 84%
-B23UI   238.2 212s Uploading your video 85%
-B23UI   240.0 214s Uploading your video 86%
-B23UI   241.8 215s Uploading your video 87%
-B23UI   243.9 217s Uploading your video 88%
-B23UI   247.4 221s Uploading your video 89%
-B23UI   249.4 223s Uploading your video 84%
-B23UI   251.6 225s Uploading your video 91%
-B23UI   253.7 227s Uploading your video 92%
-B23UI   258.1 232s Uploading your video 94%
-B23UI   260.3 234s Uploading your video 95%
-B23UI   262.5 236s Uploading your video 96%
-B23UI   266.2 240s Uploading your video 97%
-B23UI   267.8 241s Uploading your video 92%
-B23UI   269.7 243s Uploading your video 98%
-B23UI   271.9 245s Uploading your video 99%
-B23UI   276.9 250s Uploading your video …
-B23UI   279.2 253s Starting your cut …
-B23UI   285.2 259s Cutting your video… starting 21%
-B23UI   300.0 274s Cutting your video… starting 28%
-B23UI   306.6 280s Cutting your video… starting 53%
-B23UI   321.1 295s Cutting your video… starting 95%
-B23UI   455.2 TIMING 3min before: Uploading your video 22s → Starting your cut 252s → Cutting your video 258s → ready 304s → editor -1s
-B23UI   455.2 PASS no error screen
-B23UI   455.2 PASS processed · 304 s
-B23UI   455.2 FAIL opens in the editor · -1 s from Create
-B23UI   455.2 FAILURES: opens in the editor
-B23UI    42.2 24s Cutting your video… starting 21% | Uploading video in background · 0 % · about 21 min left
-B23UI    44.8 26s Cutting your video… starting 21% | Uploading video in background · 2 % · about 6 min left
-B23UI    46.7 28s Cutting your video… starting 21% | Uploading video in background · 3 % · about 6 min left
-B23UI    48.8 31s Cutting your video… starting 53% | Uploading video in background · 4 % · about 5 min left
-B23UI    52.1 34s Cutting your video… starting 53% | Uploading video in background · 5 % · about 5 min left
-B23UI    54.8 36s Cutting your video… starting 53% | Uploading video in background · 6 % · about 5 min left
-B23UI    56.8 38s Cutting your video… starting 53% | Uploading video in background · 7 % · about 5 min left
-B23UI    59.0 41s Cutting your video… starting 53% | Uploading video in background · 8 % · about 5 min left
+B23UI    32.9 Photos access allowed
+B23UI    64.7 17s Preparing… 22%
+B23UI    70.2 23s Preparing… 67%
+B23UI    73.0 26s Preparing… 97%
+B23UI    75.2 28s Preparing… 100%
+B23UI    77.4 30s Uploading audio… 0%
+B23UI    79.2 32s Cutting your video… …
+B23UI    88.1 41s Cutting your video… starting 21% | Uploading video in background · 0 %
+B23UI    91.8 45s Cutting your video… starting 21% | Uploading video in background · 1 % · about 7 min left
+B23UI    97.8 51s Cutting your video… starting 21% | Uploading video in background · 4 % · about 5 min left
+B23UI   102.3 55s Cutting your video… starting 21% | Uploading video in background · 6 % · about 5 min left
+B23UI   104.6 57s Cutting your video… starting 21% | Uploading video in background · 7 % · about 5 min left
+B23UI   107.3 60s Cutting your video… starting 95% | Uploading video in background · 8 % · about 5 min left
+B23UI   113.3 66s Cutting your video… starting  | Uploading video in background · 10 % · about 5 min left
+B23UI   122.2 TIMING 3min after: Preparing… 14s → Uploading audio… 30s → Cutting your video 31s → ready 67s → editor 73s
+B23UI   122.2 PASS no error screen
+B23UI   122.2 PASS processed · 67 s
+B23UI   122.2 PASS opens in the editor · 73 s from Create
+B23UI   122.2 keeping CutSell open 330 s for the background video upload
+B23UI   452.2 FAILURES: none
+B23UI    58.2 22s Uploading your video 7%
+B23UI    60.4 24s Uploading your video 8%
+B23UI    64.7 28s Uploading your video 10%
+B23UI    68.5 32s Uploading your video 11%
+B23UI    70.3 34s Uploading your video 12%
+B23UI    72.5 36s Uploading your video 13%
+B23UI    76.0 40s Uploading your video 14%
+B23UI    77.7 41s Uploading your video 15%
+B23UI    79.3 43s Uploading your video 16%
+B23UI    81.0 45s Uploading your video 17%
+B23UI    84.6 48s Uploading your video 18%
+B23UI    86.9 51s Uploading your video 19%
+B23UI    89.4 53s Uploading your video 14%
+B23UI    92.2 56s Uploading your video 21%
+B23UI    94.2 58s Uploading your video 22%
+B23UI    96.1 60s Uploading your video 23%
+B23UI    98.3 62s Uploading your video 24%
+B23UI   100.2 64s Uploading your video 25%
+B23UI   103.7 68s Uploading your video 26%
+B23UI   105.3 69s Uploading your video 27%
+B23UI   108.0 72s Uploading your video 28%
+B23UI   111.6 75s Uploading your video 30%
+B23UI   115.2 79s Uploading your video 31%
+B23UI   118.3 82s Uploading your video 29%
+B23UI   119.8 84s Uploading your video 33%
+B23UI   121.3 85s Uploading your video 34%
+B23UI   124.1 88s Uploading your video 35%
+B23UI   127.1 91s Uploading your video 36%
+B23UI   129.0 93s Uploading your video 37%
+B23UI   131.1 95s Uploading your video 38%
+B23UI   135.9 100s Uploading your video 40%
+B23UI   140.1 104s Uploading your video 41%
+B23UI   142.4 106s Uploading your video 42%
+B23UI   144.8 109s Uploading your video 43%
+B23UI   147.7 111s Uploading your video 44%
+B23UI   150.6 114s Uploading your video 46%
+B23UI   153.4 117s Uploading your video 47%
+B23UI   157.5 121s Uploading your video 49%
+B23UI   161.8 126s Uploading your video 50%
+B23UI   166.5 130s Uploading your video 52%
+B23UI   169.9 134s Uploading your video 54%
+B23UI   172.5 136s Uploading your video 55%
+B23UI   174.9 139s Uploading your video 56%
+B23UI   178.0 142s Uploading your video 57%
+B23UI   180.0 144s Uploading your video 58%
+B23UI   181.9 146s Uploading your video 59%
+B23UI   184.5 148s Uploading your video 60%
+B23UI   187.6 151s Uploading your video 61%
+B23UI   189.4 153s Uploading your video 62%
+B23UI   193.1 157s Uploading your video 64%
+B23UI   195.2 159s Uploading your video 65%
+B23UI   197.5 161s Uploading your video 66%
+B23UI   201.5 165s Uploading your video 67%
+B23UI   203.5 167s Uploading your video 68%
+B23UI   205.7 169s Uploading your video 69%
+B23UI   207.7 171s Uploading your video 70%
+B23UI   209.7 173s Uploading your video 71%
+B23UI   211.6 175s Uploading your video 72%
+B23UI   215.8 180s Uploading your video 73%
+B23UI   219.3 183s Uploading your video 75%
+B23UI   222.9 187s Uploading your video 76%
+B23UI   224.5 188s Uploading your video 77%
+B23UI   226.1 190s Uploading your video 78%
+B23UI   229.3 193s Uploading your video 79%
+B23UI   231.0 195s Uploading your video 80%
+B23UI   234.3 198s Uploading your video 81%
+B23UI   236.4 200s Uploading your video 82%
+B23UI   238.8 203s Uploading your video 83%
+B23UI   243.5 207s Uploading your video 85%
+B23UI   246.1 210s Uploading your video 86%
+B23UI   251.2 215s Uploading your video 87%
+B23UI   253.5 217s Uploading your video 89%
+B23UI   255.5 219s Uploading your video 90%
+B23UI   258.3 222s Uploading your video 91%
+B23UI   262.3 226s Uploading your video 93%
+B23UI   265.1 229s Uploading your video 94%
+B23UI   267.6 231s Uploading your video 95%
+B23UI   269.9 234s Uploading your video 96%
+B23UI   271.7 235s Uploading your video 97%
+B23UI   277.7 242s Uploading your video 99%
+B23UI   282.3 246s Uploading your video 100%
+B23UI   284.5 248s Starting your cut …
+B23UI   291.1 255s Cutting your video… starting 21%
+B23UI   300.9 265s Cutting your video… starting 20%
+B23UI   307.3 271s Cutting your video… starting 53%
+B23UI   326.7 291s Cutting your video… starting 95%

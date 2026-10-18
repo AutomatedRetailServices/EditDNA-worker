@@ -1,0 +1,25 @@
+objc[12856]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x10b170310) and /Library/Developer/CoreSimulator/Volumes/iOS_23F77/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.5.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x10b1a4398). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+B23UI    32.9 Photos access allowed
+B23UI    64.7 17s Preparing… 22%
+B23UI    70.2 23s Preparing… 67%
+B23UI    73.0 26s Preparing… 97%
+B23UI    75.2 28s Preparing… 100%
+B23UI    77.4 30s Uploading audio… 0%
+B23UI    79.2 32s Cutting your video… …
+B23UI    88.1 41s Cutting your video… starting 21% | Uploading video in background · 0 %
+B23UI    91.8 45s Cutting your video… starting 21% | Uploading video in background · 1 % · about 7 min left
+B23UI    97.8 51s Cutting your video… starting 21% | Uploading video in background · 4 % · about 5 min left
+B23UI   102.3 55s Cutting your video… starting 21% | Uploading video in background · 6 % · about 5 min left
+B23UI   104.6 57s Cutting your video… starting 21% | Uploading video in background · 7 % · about 5 min left
+B23UI   107.3 60s Cutting your video… starting 95% | Uploading video in background · 8 % · about 5 min left
+B23UI   113.3 66s Cutting your video… starting  | Uploading video in background · 10 % · about 5 min left
+B23UI   122.2 TIMING 3min after: Preparing… 14s → Uploading audio… 30s → Cutting your video 31s → ready 67s → editor 73s
+B23UI   122.2 PASS no error screen
+B23UI   122.2 PASS processed · 67 s
+B23UI   122.2 PASS opens in the editor · 73 s from Create
+B23UI   122.2 keeping CutSell open 330 s for the background video upload
+B23UI   452.2 FAILURES: none
+Test Case '-[CutSellUITests.Build23UITests testTimeToEditor]' passed (452.655 seconds).
+Test Suite 'Build23UITests' passed at 2026-10-18 17:38:44.439.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 17:38:44.439.
+Test Suite 'Selected tests' passed at 2026-10-18 17:38:44.440.

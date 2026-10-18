@@ -1,0 +1,72 @@
+asset_export_started index=1 of=1 seconds_long=180
+server_capabilities audio_first=yes
+asset_resource photos_edit=no used=original
+asset_export_done mb=217 seconds=2.8
+prepare_skipped codec=avc1 height=1920 mb=217 width=1080
+project_created seconds=2.2
+audio_extracted kb=1208 seconds=16.3 video_seconds=180
+stage_timing seconds=16.4 stage=audio_extract
+audio_uploaded kb=1208 seconds=2.2 source_order=0
+stage_timing seconds=2.2 stage=audio_upload
+processing_started sources=1
+job_submitted job_id=da97f2d0-1c83-4a6c-874a-a2be0237a460
+audio_first_started clips=1 job_id=da97f2d0-1c83-4a6c-874a-a2be0237a460
+video_background_started clips=1 mb=217
+server_step seconds=0 step=submitted
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=28
+upload_parts done=0 mb=217 part_mb=8 parts=28 source_order=0
+upload_background_unavailable part=1
+server_step progress=94 seconds=20.8 step=created
+upload_part_done of=28 part=1 source_order=0
+audio_session_ready category=Playback mode=MoviePlayback output=Speaker
+video_volume=1.00
+upload_part_done of=28 part=2 source_order=0
+upload_part_done of=28 part=22 source_order=0
+editor_opened local_video=yes seconds=4.6
+upload_part_done of=28 part=3 source_order=0
+upload_part_done of=28 part=6 source_order=0
+upload_part_done of=28 part=4 source_order=0
+upload_part_done of=28 part=5 source_order=0
+upload_part_done of=28 part=7 source_order=0
+upload_part_done of=28 part=8 source_order=0
+upload_part_done of=28 part=9 source_order=0
+upload_retry attempt=1 error=timed out what=part 13
+upload_retry attempt=1 error=timed out what=part 14
+upload_retry attempt=1 error=timed out what=part 15
+upload_retry attempt=1 error=timed out what=part 16
+upload_retry attempt=1 error=timed out what=part 17
+upload_retry attempt=1 error=timed out what=part 19
+upload_retry attempt=1 error=timed out what=part 18
+upload_retry attempt=1 error=timed out what=part 20
+upload_retry attempt=1 error=timed out what=part 21
+upload_retry attempt=1 error=timed out what=part 23
+upload_retry attempt=1 error=timed out what=part 24
+upload_retry attempt=1 error=timed out what=part 25
+upload_retry attempt=1 error=timed out what=part 26
+upload_retry attempt=1 error=timed out what=part 27
+upload_retry attempt=1 error=timed out what=part 28
+upload_part_done of=28 part=10 source_order=0
+upload_part_done of=28 part=11 source_order=0
+upload_part_done of=28 part=12 source_order=0
+upload_part_done of=28 part=13 source_order=0
+upload_part_done of=28 part=14 source_order=0
+upload_part_done of=28 part=15 source_order=0
+upload_part_done of=28 part=17 source_order=0
+upload_part_done of=28 part=16 source_order=0
+upload_part_done of=28 part=19 source_order=0
+upload_part_done of=28 part=20 source_order=0
+upload_part_done of=28 part=21 source_order=0
+upload_part_done of=28 part=18 source_order=0
+upload_retry attempt=2 error=timed out what=part 26
+upload_retry attempt=2 error=timed out what=part 27
+upload_retry attempt=2 error=timed out what=part 28
+upload_part_done of=28 part=23 source_order=0
+upload_part_done of=28 part=25 source_order=0
+upload_part_done of=28 part=24 source_order=0
+upload_part_done of=28 part=28 source_order=0
+upload_part_done of=28 part=26 source_order=0
+upload_part_done of=28 part=27 source_order=0
+upload_complete_started mb=217 part_mb=8 parts=28 source_order=0
+upload_complete_done seconds=4.6 source_order=0 state=uploaded
+video_ready_sent source_order=0
+video_background_done seconds=249
