@@ -27,7 +27,9 @@ PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
-SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v2.txt").read_text(encoding="utf-8")   # v1 without "why"
+SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encoding="utf-8")
+# The sale review keeps its free-text answer with "why": on the Gold, the JSON-only answer without "why" proposed
+# fixes almost twice as often (14 vs 8 of 52 first readings) and changed cuts (Y05, B05, B08). Measured 2026-10-18.
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
 ZOOM_KINDS = ("hook", "product", "price", "cta")
@@ -67,8 +69,6 @@ SCHEMAS = {
     "pass": _obj(passes=_rows(_INT, _BOOL), backbone=_INTS),
     "decision": _obj(hide=_rows(_INT, _STR), trim=_rows(_INT, _STR)),
     "haul_review": _obj(type={"type": "string", "enum": ["haul", "other"]}, hide=_rows(_INT), unhide=_INTS),
-    "sale_review": _obj(type={"type": "string", "enum": ["sale", "other"]}, fixes={"type": "array", "items": _obj(
-        kind={"type": "string", "enum": ["restart", "mixed", "repeat", "missing"]}, hide=_INTS, unhide=_INTS)}),
     "fixwords": _obj(fix=_rows(_INT, _STR), zoom=_rows(_INT, _STR)),
 }
 
@@ -310,7 +310,7 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=None):
         for attempt in range(2):
             try:
                 with _llm.step("sale_review"):
-                    text, u = call(_llm.Prompt(fixed, own, f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")"), schema=SCHEMAS["sale_review"])); usage.append(u)
+                    text, u = call(_llm.Prompt(fixed, own, f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")"))); usage.append(u)
                 answer = _json_obj(text, "fixes")
                 break
             except Exception:
