@@ -2,26 +2,37 @@ bulk overlap_audio=true
 asset_export_started index=1 of=3 seconds_long=45
 audio_first=yes
 asset_resource photos_edit=no used=original
-asset_export_done mb=43 seconds=1.5
-audio_extracted kb=244 seconds=2.1 video_seconds=45
+asset_export_done mb=43 seconds=2.8
+audio_extracted kb=244 seconds=3.0 video_seconds=45
 audio_extract
-audio_uploaded kb=244 seconds=1.1 source_order=0
+audio_uploaded kb=244 seconds=1.2 source_order=0
 audio_upload
 processing_started sources=1
-job_submitted job_id=3290681e-4310-4fdc-83a0-a299ceb1b0dc
-audio_first_started clips=1 job_id=3290681e-4310-4fdc-83a0-a299ceb1b0dc
+job_submitted job_id=d9d88f57-a7a9-4e6a-a11f-a49e3d3f47a6
+audio_first_started clips=1 job_id=d9d88f57-a7a9-4e6a-a11f-a49e3d3f47a6
 video_background_started clips=1 mb=43
-upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
-upload_parts done=0 mb=43 part_mb=8 parts=6 source_order=0
 server_step seconds=0 step=submitted
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
 asset_export_started index=2 of=3 seconds_long=30
+upload_parts done=0 mb=43 part_mb=8 parts=6 source_order=0
 asset_resource photos_edit=no used=original
-asset_export_done mb=29 seconds=0.4
+asset_export_done mb=29 seconds=0.6
 upload_background_unavailable part=1
-server_step progress=1 seconds=6.8 step=created
-audio_extracted kb=236 seconds=2.0 video_seconds=30
+continue_in_background step=Creating your project
+server_step progress=42 seconds=6.5 step=processing
+audio_extracted kb=236 seconds=1.9 video_seconds=30
 audio_extract
-audio_uploaded kb=236 seconds=2.6 source_order=0
+server_step progress=100 seconds=12.8 step=ready
+cut_ready_seen project_id=prj_9435e53418ba416dbee8cf3ab75cea48
+audio_uploaded kb=236 seconds=2.8 source_order=0
 audio_upload
 processing_started sources=1
-server_step progress=42 seconds=12.7 step=processing
+job_submitted job_id=c649005e-3485-476a-972c-3cef325aab14
+audio_first_started clips=1 job_id=c649005e-3485-476a-972c-3cef325aab14
+video_background_started clips=1 mb=29
+server_step seconds=0 step=submitted
+asset_export_started index=3 of=3 seconds_long=25
+asset_resource photos_edit=no used=original
+asset_export_done mb=24 seconds=0.1
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=4
+upload_parts done=0 mb=29 part_mb=8 parts=4 source_order=0

@@ -1,8 +1,11 @@
-B24UI    21.0 PASS the bulk chip opened the gallery in bulk
-B24UI    24.8 gallery CTA: Create 3 cuts
-B24UI    50.4 PASS bulk sheet shown
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:168: error: -[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab] : Failed to tap "bulkGoToEdits" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"bulkGoToEdits" IN identifiers'`, given input App element pid: 43152
-Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' failed (56.192 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-18 20:40:07.251.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 20:40:07.253.
-Test Suite 'Selected tests' failed at 2026-10-18 20:40:07.253.
+B24UI    21.5 PASS the bulk chip opened the gallery in bulk
+B24UI    25.7 gallery CTA: Create 3 cuts
+B24UI    51.8 PASS bulk sheet shown
+B24UI    56.0 PASS Edits opens on Processing
+B24UI    59.7 rows at start: ["01, c4.mp4, 0:45, PROCESSING 53%", "PROCESSING 53%", "UPLOADING 0%", "QUEUED"]
+B24UI    59.7 FAIL 3 rows in order · 01, c4.mp4, 0:45, PROCESSING 53%, PROCESSING 53%, UPLOADING 0%, QUEUED
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:135: error: -[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab] : Failed to get matching snapshot: No matches found for Element at index 2 from input {(
+Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' failed (65.980 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-18 21:01:47.229.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 21:01:47.230.
+Test Suite 'Selected tests' failed at 2026-10-18 21:01:47.233.
