@@ -176,6 +176,7 @@ final class Build24UITests: XCTestCase {
         let sheet = element("bulkStartedSheet")
         check(sheet.waitForExistence(timeout: 30), "bulk sheet shown")
         shot("bulk_sheet")
+        check(!element("processingStage").exists, "Bulk shows no single-video Processing screen (Step x of 8)")
         element("bulkGoToEdits").tap()
         let list = element("editsProcessingList")
         check(list.waitForExistence(timeout: 15), "Edits opens on Processing")

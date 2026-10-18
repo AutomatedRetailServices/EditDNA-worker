@@ -54,6 +54,21 @@ struct CreateFlowView: View {
                 selectTab: selectTab
             )
             .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .bottom) {
+                if let count = bulkSheetCount {
+                    ZStack(alignment: .bottom) {
+                        Color.black.opacity(0.6).ignoresSafeArea()
+                            .onTapGesture { bulkSheetCount = nil }
+                        BulkStartedSheet(count: count, onGoToEdits: {
+                            bulkSheetCount = nil
+                            openEditsProcessing()
+                        }, onStay: { bulkSheetCount = nil })
+                    }
+                    .ignoresSafeArea(edges: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeOut(duration: 0.25), value: bulkSheetCount)
             .navigationDestination(for: Project.self) { project in
                 ProjectDetailView(project: project, onOpenEdits: { selectTab(.edits) })
             }
@@ -122,22 +137,6 @@ struct CreateFlowView: View {
                     onClose: { closeProcessing() },
                     onOpenEdits: { closeProcessing(); openEditsProcessing() }
                 )
-                .overlay(alignment: .bottom) {
-                    if let count = bulkSheetCount {
-                        ZStack(alignment: .bottom) {
-                            Color.black.opacity(0.6).ignoresSafeArea()
-                                .onTapGesture { bulkSheetCount = nil }
-                            BulkStartedSheet(count: count, onGoToEdits: {
-                                bulkSheetCount = nil
-                                closeProcessing()
-                                openEditsProcessing()
-                            }, onStay: { bulkSheetCount = nil })
-                        }
-                        .ignoresSafeArea(edges: .bottom)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .animation(.easeOut(duration: 0.25), value: bulkSheetCount)
             }
             .environmentObject(appState)
             .fullScreenCover(item: $problem) { shown in
@@ -225,10 +224,12 @@ struct CreateFlowView: View {
         case .library: processingFileName = ""
         }
         if present {
-            job = newJob
-            // Bulk: the "being edited" sheet over the Processing screen (Figma 1134:4635).
+            // Bulk: no single-video Processing screen ("Step 1 of 8"); only the "being edited" sheet
+            // (Figma 1134:4635), and the videos are followed in Edits · Processing.
             if newJob.mode == .bulk, case .library(let assets) = newJob.source, assets.count > 1 {
                 bulkSheetCount = assets.count
+            } else {
+                job = newJob
             }
         }
         Task {
@@ -371,6 +372,8 @@ struct CreateFlowView: View {
         do {
             try await StallWatch.run(submitter) { try await work(current) }
         } catch let exportFailure as GalleryExport.Failure {
+            // No Processing screen (Bulk, or left with Continue in background): the row shows FAILED.
+            if job == nil { markFailed(submitter.queueItem, error: exportFailure, retryJob: current) }
             switch exportFailure {
             case .unsupported: problem = .unsupportedMedia
             case .tooLarge(let bytes):

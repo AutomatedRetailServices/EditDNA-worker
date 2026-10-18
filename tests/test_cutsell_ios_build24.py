@@ -90,3 +90,11 @@ def test_paused_uploads_follow_the_queue():
     projects = (ios / "ProjectsView.swift").read_text()
     assert "!ActiveUploads.shared.contains(pending.projectID)" in projects
     assert ".onReceive(queue.$items.dropFirst())" in projects
+
+
+def test_bulk_skips_the_single_processing_screen():
+    ios = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    flow = (ios / "CreateFlowView.swift").read_text()
+    start = flow.index("if newJob.mode == .bulk, case .library(let assets)")
+    block = flow[start:start + 300]
+    assert "bulkSheetCount = assets.count" in block and "} else {\n                job = newJob" in block
