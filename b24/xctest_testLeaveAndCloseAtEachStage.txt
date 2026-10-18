@@ -1,16 +1,16 @@
-B24UI    25.2 Photos access allowed
-B24UI    27.0 gallery CTA: Create 1 cut
-B24UI    34.7 PASS Processing screen
-B24UI    35.0 PASS Continue in background active while: Getting your video from Photos
-B24UI    38.7 PASS screen closed, work goes on · Getting your video from Photos
-B24UI    49.1 rows after continue: ["PROCESSING 0%", "FAILED"]
-B24UI    94.4 rows after Home: ["FAILED"]
-B24UI    94.7 closing CutSell with rows: ["FAILED"]
-B24UI   118.3 no Processing chip
-B24UI   142.2 rows after reopen: []
-B24UI   405.6 PASS the cut finished after leaving and closing CutSell
-B24UI   405.9 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage]' passed (406.458 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-18 20:17:06.262.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 20:17:06.263.
-Test Suite 'Selected tests' passed at 2026-10-18 20:17:06.263.
+B24UI    33.3 Photos access allowed
+B24UI    35.1 gallery CTA: Create 1 cut
+B24UI    41.0 PASS Processing screen
+B24UI    41.7 PASS Continue in background active while: Creating your project
+B24UI    44.1 PASS screen closed, work goes on · Creating your project
+B24UI    56.0 rows after continue: ["PROCESSING 0%", "FAILED"]
+B24UI   100.1 rows after Home: ["FAILED"]
+B24UI   100.3 closing CutSell with rows: ["FAILED"]
+B24UI   126.3 no Processing chip
+B24UI   150.2 rows after reopen: []
+B24UI   391.3 PASS the cut finished after leaving and closing CutSell
+B24UI   391.6 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage]' passed (392.192 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-18 20:38:30.062.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 20:38:30.064.
+Test Suite 'Selected tests' passed at 2026-10-18 20:38:30.064.
