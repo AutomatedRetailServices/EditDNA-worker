@@ -61,6 +61,8 @@ struct DesignScreenshotRoot: View {
             .background(CS.base.ignoresSafeArea())
         case "create_probe":
             CreateProbe()
+        case "app_probe":
+            AppProbe()
         case "editor_probe":
             EditorProbe()
         case "perf_probe":
@@ -168,6 +170,35 @@ private struct CreateProbe: View {
             await APIClient.shared.setSession(session)
             appState.session = session
             ready = true
+        }
+    }
+}
+
+/// CI only (Debug): the whole app (all four tabs) with the probe's session, and the same start-up
+/// steps as a real launch (uploads to finish or resume). Build 24 probe.
+private struct AppProbe: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var ready = false
+
+    var body: some View {
+        Group {
+            if ready { MainTabView() } else { ProgressView("Probe…") }
+        }
+        .task {
+            let env = ProcessInfo.processInfo.environment
+            guard let token = env["CUTSELL_PROBE_TOKEN"], let user = env["CUTSELL_PROBE_USER"],
+                  let api = env["CUTSELL_PROBE_API"] else { return }
+            UserDefaults.standard.set(api, forKey: "cutsell.api.baseURL")
+            let session = CutSellSession(userID: user, accessToken: token)
+            await APIClient.shared.setSession(session)
+            appState.session = session
+            try? await appState.refreshProjects()
+            ready = true
+            if await PendingUploadFinisher.run(session: session, reason: "launch", resumeUpload: { record in
+                await ResumeRunner.resume(record, appState: appState)
+            }) > 0 {
+                try? await appState.refreshProjects()
+            }
         }
     }
 }

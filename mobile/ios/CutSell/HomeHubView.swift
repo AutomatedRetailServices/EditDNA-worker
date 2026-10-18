@@ -12,6 +12,7 @@ struct HomeHubView: View {
     @ObservedObject private var tracker = CutTracker.shared
     @ObservedObject private var thumbnails = ThumbnailStore.shared
     @State private var voiceOverSoon = false
+    @State private var chipTappedAt: Date?
 
     private var recent: [Project] { Array(appState.projects.prefix(3)) }
 
@@ -129,7 +130,7 @@ struct HomeHubView: View {
                     .foregroundStyle(.white)
                 HStack(spacing: 6) {
                     ForEach(CreateMode.allCases, id: \.self) { mode in
-                        Button { onUpload(mode) } label: {
+                        Button { chipTappedAt = Date(); onUpload(mode) } label: {
                             Text(mode.title)
                                 .font(CS.inter(12, .semibold))
                                 .foregroundStyle(.white)
@@ -149,7 +150,12 @@ struct HomeHubView: View {
             .background(CS.brandFull, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .shadow(color: Color(hex: 0x7C3AED, opacity: 0.55), radius: 25, y: 18)
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .onTapGesture { onUpload(.single) }
+            // Build 24: a tap on Single / Bulk / Combine is not ALSO the card's tap (it used to open the
+            // gallery in Single right after the chip asked for Bulk).
+            .onTapGesture {
+                if let chip = chipTappedAt, Date().timeIntervalSince(chip) < 0.6 { return }
+                onUpload(.single)
+            }
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("hubUpload")

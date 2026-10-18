@@ -84,7 +84,8 @@ final class Build24UITests: XCTestCase {
 
     private func launchApp(fresh: Bool) {
         app = XCUIApplication()
-        app.launchArguments = ["-CutSellScreen", "create_probe"]
+        // The whole app (four tabs + start-up steps), with the probe's session.
+        app.launchArguments = ["-CutSellScreen", "app_probe"]
         let env = ProcessInfo.processInfo.environment
         for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_API"] {
             if let value = env[key] { app.launchEnvironment[key] = value }
