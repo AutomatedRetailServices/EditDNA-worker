@@ -61,7 +61,7 @@ final class UploadLedger: @unchecked Sendable {
     }
 
     func markCompleteSent(_ uploadID: String) {
-        update(uploadID) { entry in entry?.completeSentAt = entry?.completeSentAt ?? Date() }
+        update(uploadID) { entry in if entry?.completeSentAt == nil { entry?.completeSentAt = Date() } }
     }
 
     func markCompleted(_ uploadID: String, sourceURI: String) {
