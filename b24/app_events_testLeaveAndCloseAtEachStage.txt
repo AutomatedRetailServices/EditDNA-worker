@@ -3,38 +3,29 @@ audio_first=yes
 asset_resource photos_edit=no used=original
 asset_export_done mb=43 seconds=1.2
 continue_in_background step=Creating your project
-audio_extracted kb=244 seconds=5.2 video_seconds=45
+audio_extracted kb=244 seconds=4.9 video_seconds=45
 audio_extract
-audio_uploaded kb=244 seconds=1.4 source_order=0
+audio_uploaded kb=244 seconds=1.2 source_order=0
 audio_upload
 processing_started sources=1
-job_submitted job_id=6d97f905-68cc-4c53-82da-414e84a181d6
-audio_first_started clips=1 job_id=6d97f905-68cc-4c53-82da-414e84a181d6
+job_submitted job_id=7d4246ef-ba3e-48b6-81f4-48304198b559
+audio_first_started clips=1 job_id=7d4246ef-ba3e-48b6-81f4-48304198b559
 video_background_started clips=1 mb=43
 server_step seconds=0 step=submitted
 upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
 upload_parts done=0 mb=43 part_mb=8 parts=6 source_order=0
-server_step progress=-1 seconds=18.0 step=created
-upload_background_unavailable part=2
-upload_background_unavailable part=3
-upload_background_unavailable part=4
 upload_background_unavailable part=1
-upload_background_unavailable part=5
-upload_background_unavailable part=6
-server_step progress=100 seconds=24.0 step=ready
-cut_ready_seen project_id=prj_dfc6d94459ce4236a900d160e1f613c9
+server_step progress=-1 seconds=5.7 step=created
+server_step progress=42 seconds=11.6 step=processing
+server_step progress=100 seconds=23.5 step=ready
+cut_ready_seen project_id=prj_1d206abe3c7f4e2488735ede3315689d
+upload_part_done of=6 part=1 source_order=0
+upload_part_done of=6 part=3 source_order=0
+upload_part_done of=6 part=5 source_order=0
+upload_part_done of=6 part=6 source_order=0
 upload_part_done of=6 part=4 source_order=0
 upload_part_done of=6 part=2 source_order=0
-upload_part_done of=6 part=3 source_order=0
-video_background_resumed reason=launch
-video_background_started clips=1 mb=43
-upload_resumed etags_on_iphone=3 resumed_part_count=3 source_order=0 total_part_count=6
-upload_parts done=3 mb=43 part_mb=8 parts=6 source_order=0
-upload_background_unavailable part=5
-upload_part_done of=6 part=6 source_order=0
-upload_part_done of=6 part=5 source_order=0
-upload_part_done of=6 part=1 source_order=0
 upload_complete_started mb=43 part_mb=8 parts=6 source_order=0
-upload_complete_done seconds=2.0 source_order=0 state=uploaded
+upload_complete_done seconds=1.9 source_order=0 state=uploaded
 video_ready_sent source_order=0
-video_background_done seconds=29
+video_background_done seconds=58

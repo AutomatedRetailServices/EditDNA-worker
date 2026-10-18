@@ -1,16 +1,13 @@
-B24UI    44.2 Photos access allowed
-B24UI    45.7 gallery CTA: Create 1 cut
-B24UI    52.0 PASS Processing screen
-B24UI    52.4 PASS Continue in background active while: Creating your project
-B24UI    54.6 PASS screen closed, work goes on · Creating your project
-B24UI    61.4 rows after continue: ["UPLOADING 0%", "FAILED"]
-B24UI   119.2 rows after Home: ["FAILED"]
-B24UI   119.4 closing CutSell with rows: ["FAILED"]
-B24UI   152.7 no Processing chip
-B24UI   176.8 rows after reopen: []
-B24UI   418.4 PASS the cut finished after leaving and closing CutSell
-B24UI   418.6 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage]' passed (419.057 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-18 21:21:13.855.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 21:21:13.856.
-Test Suite 'Selected tests' passed at 2026-10-18 21:21:13.856.
+B24UI    27.2 Photos access allowed
+B24UI    29.8 gallery CTA: Create 1 cut
+B24UI    36.8 PASS Processing screen
+B24UI    37.2 PASS Continue in background active while: Creating your project
+B24UI    39.5 PASS screen closed, work goes on · Creating your project
+B24UI    50.1 rows after continue: ["PROCESSING 0%"]
+B24UI   103.9 rows after Home: []
+B24UI   104.2 closing CutSell with rows: []
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:94: error: -[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage] : Failed to get matching snapshots: Timed out while evaluating UI query.
+Test Case '-[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage]' failed (201.170 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-18 22:02:56.033.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 22:02:56.034.
+Test Suite 'Selected tests' failed at 2026-10-18 22:02:56.034.

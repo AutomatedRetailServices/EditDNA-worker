@@ -1,26 +1,27 @@
-B24UI    18.4 PASS the bulk chip opened the gallery in bulk
-B24UI    22.2 gallery CTA: Create 3 cuts
-B24UI    47.8 PASS bulk sheet shown
-B24UI    50.9 PASS Edits opens on Processing
-B24UI    53.3 rows at start: ["PROCESSING 20%", "PROCESSING 0%", "QUEUED", "FAILED"]
-B24UI    53.3 FAIL 3 rows in order · PROCESSING 20%, PROCESSING 0%, QUEUED, FAILED
-B24UI    53.9 bulk rows: [PROCESSING 20%, PROCESSING 0%, QUEUED, FAILED]
-B24UI    57.5 bulk rows: [PROCESSING 53%, PROCESSING 0%, QUEUED, FAILED]
-B24UI    61.1 bulk rows: [PROCESSING 53%, PROCESSING 21%, UPLOADING 0%]
-B24UI    66.1 bulk rows: [PROCESSING 53%, PROCESSING 20%, UPLOADING 0%]
-B24UI    71.1 bulk notice: ✓  c4 is ready
-B24UI    71.4 bulk rows: [PROCESSING 20%, PROCESSING 0%]
-B24UI    76.4 bulk rows: [PROCESSING 20%, PROCESSING 21%]
-B24UI    80.4 bulk notice: ✓  c3 is ready
-B24UI    80.8 bulk rows: [PROCESSING 21%, FAILED]
-B24UI    85.8 bulk rows: [PROCESSING 53%, FAILED]
-B24UI    93.1 bulk notice: ✓  c2 is ready
-B24UI    93.4 bulk rows: [FAILED]
-B24UI  1553.3 FAIL every cut left Processing
-B24UI  1553.3 PASS ready notice shown · 3
-B24UI  1553.7 ready chip: Ready (4)
-B24UI  1554.0 FAILURES: 3 rows in order | every cut left Processing
-Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' passed (1554.889 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-18 21:47:48.174.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 21:47:48.176.
-Test Suite 'Selected tests' passed at 2026-10-18 21:47:48.179.
+B24UI    24.9 PASS the bulk chip opened the gallery in bulk
+B24UI    28.9 gallery CTA: Create 3 cuts
+B24UI    55.6 PASS bulk sheet shown
+B24UI    61.3 PASS Edits opens on Processing
+B24UI    63.7 rows at start: ["PROCESSING 21%", "UPLOADING 0%", "QUEUED"]
+B24UI    63.7 PASS 3 rows in order · PROCESSING 21%, UPLOADING 0%, QUEUED
+B24UI    64.6 bulk rows: [PROCESSING 21%, UPLOADING 0%, QUEUED]
+B24UI    68.8 bulk rows: [PROCESSING 53%, PROCESSING 0%, QUEUED]
+B24UI    73.6 bulk rows: [PROCESSING 53%, PROCESSING 21%, UPLOADING 0%]
+B24UI    76.9 bulk notice: ✓  c4 is ready
+B24UI    77.3 bulk rows: [PROCESSING 21%, UPLOADING 0%]
+B24UI    80.7 bulk rows: [PROCESSING 21%, PROCESSING 0%]
+B24UI    84.7 bulk rows: [PROCESSING 53%, PROCESSING 21%]
+B24UI    89.4 bulk rows: [PROCESSING 53%, PROCESSING 29%]
+B24UI    93.0 bulk notice: ✓  c3 is ready
+B24UI    93.3 bulk rows: [PROCESSING 29%]
+B24UI   102.4 bulk rows: [PROCESSING 95%]
+B24UI   106.8 bulk notice: ✓  c2 is ready
+B24UI   107.3 bulk rows: []
+B24UI   108.5 PASS every cut left Processing
+B24UI   108.5 PASS ready notice shown · 3
+B24UI   109.2 ready chip: Ready (4)
+B24UI   109.5 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' passed (110.537 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-18 22:07:04.040.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 22:07:04.042.
+Test Suite 'Selected tests' passed at 2026-10-18 22:07:04.042.
