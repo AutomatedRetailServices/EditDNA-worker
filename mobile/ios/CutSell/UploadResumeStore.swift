@@ -55,7 +55,7 @@ actor UploadResumeStore {
               let decoded = try? decoder.decode([String: UploadResumeRecord].self, from: data) else {
             return [:]
         }
-        return decoded.filter { FileManager.default.fileExists(atPath: $0.value.fileURL) }
+        return decoded.filter { FileManager.default.fileExists(atPath: ContainerPath.resolve($0.value.fileURL).path) }
     }
 
     private func persist(_ value: [String: UploadResumeRecord]) {

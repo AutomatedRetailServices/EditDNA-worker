@@ -42,7 +42,8 @@ def test_parts_go_to_the_background_session_each_retried_on_its_own():
     assert "configuration.httpMaximumConnectionsPerHost = 3" in uploader
     assert "task.countOfBytesSent" in uploader and "repeating: 2" in uploader
     assert "func restartStuckParts()" in uploader
-    assert "beginBackgroundTask(withName: \"cutsell-upload\")" in read("UploadReliability.swift")
+    reliability = read("UploadReliability.swift")
+    assert 'init(_ name: String = "cutsell-upload")' in reliability and "beginBackgroundTask(withName: name)" in reliability
 
 
 def test_eight_mib_parts_requested():

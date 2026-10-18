@@ -36,7 +36,10 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
 
+    /// Build 22: `uploadID` + `part` travel with the task (taskDescription), so the part's ETag is saved
+    /// to disk (UploadLedger) even when it finishes with CutSell suspended or relaunched by iOS.
     func upload(fileURL: URL, to signedURL: URL, headers: [String: String] = [:],
+                uploadID: String? = nil, part: Int? = nil,
                 onBytes: (@Sendable (Int64) -> Void)? = nil) async throws -> HTTPURLResponse {
         var request = URLRequest(url: signedURL)
         request.httpMethod = "PUT"
@@ -49,6 +52,7 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
 
         return try await withCheckedThrowingContinuation { continuation in
             let task = session.uploadTask(with: request, fromFile: fileURL)
+            if let uploadID, let part { task.taskDescription = Self.tag(uploadID: uploadID, part: part) }
             lock.lock()
             pending[task.taskIdentifier] = Pending(continuation: continuation, response: nil, onBytes: onBytes)
             lock.unlock()
@@ -126,10 +130,31 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
         completionHandler(.allow)
     }
 
+    static func tag(uploadID: String, part: Int) -> String { "cutsell-part|\(part)|\(uploadID)" }
+
+    static func untag(_ description: String?) -> (uploadID: String, part: Int)? {
+        let pieces = (description ?? "").split(separator: "|", maxSplits: 2).map(String.init)
+        guard pieces.count == 3, pieces[0] == "cutsell-part", let part = Int(pieces[1]), !pieces[2].isEmpty else { return nil }
+        return (pieces[2], part)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         lock.lock()
         let item = pending.removeValue(forKey: task.taskIdentifier)
         lock.unlock()
+        // Build 22: the ETag goes to disk first, whoever is (or is not) waiting for this part.
+        let http = item?.response ?? task.response as? HTTPURLResponse
+        if error == nil, let http, (200..<300).contains(http.statusCode), let tag = Self.untag(task.taskDescription),
+           let etag = http.value(forHTTPHeaderField: "ETag"), !etag.isEmpty {
+            UploadLedger.shared.recordPart(uploadID: tag.uploadID, part: tag.part, etag: etag)
+            if item == nil {
+                CutSellDiagnostics.log("upload_part_done_background", ["part": String(tag.part), "etag_saved": "yes"])
+            }
+        } else if item == nil, let tag = Self.untag(task.taskDescription) {
+            CutSellDiagnostics.log("upload_part_failed_background", ["part": String(tag.part),
+                                                                     "status": String(http?.statusCode ?? -1),
+                                                                     "error": error.map { Retry.short($0) } ?? "none"])
+        }
         guard let item else { return }
 
         if let error {
@@ -151,6 +176,8 @@ final class BackgroundPartUploader: NSObject, URLSessionTaskDelegate, URLSession
         backgroundEventsCompletion = nil
         lock.unlock()
         DispatchQueue.main.async { completion?() }
+        // Build 22: finish ("complete" + start the cut) what these parts were for, before iOS suspends.
+        Task { @MainActor in PendingUploadFinisher.uploadEventsDelivered() }
     }
 }
 

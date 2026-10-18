@@ -35,9 +35,41 @@ enum Retry {
         return true
     }
 
+    /// Build 22: a server / R2 message, short and with no links or long ids (R2 upload ids are ~350 chars).
+    static func clip(_ text: String, max: Int = 160) -> String {
+        var value = text.replacingOccurrences(of: #"https?://\S+"#, with: "<link>", options: .regularExpression)
+        value = value.replacingOccurrences(of: #"[A-Za-z0-9_\-]{40,}"#, with: "<id>", options: .regularExpression)
+        value = value.replacingOccurrences(of: "\n", with: " ")
+        return value.count > max ? String(value.prefix(max)) + "…" : value
+    }
+
+    /// Build 22: the Diagnostics fields of a failure: type, HTTP code and the real message (never a
+    /// bare "APIError").
+    static func fields(_ error: Error, _ extra: [String: String] = [:]) -> [String: String] {
+        var out = extra
+        out["type"] = String(describing: type(of: error))
+        switch error {
+        case APIError.http(let code, let message):
+            out["code"] = String(code); out["message"] = clip(message)
+        case APIError.invalidResponse:
+            out["code"] = "none"; out["message"] = "no HTTP answer from the server"
+        case BackgroundUploadError.http(let code):
+            out["code"] = String(code); out["message"] = "R2 refused the part"
+        default:
+            let ns = error as NSError
+            out["code"] = "\(ns.domain) \(ns.code)"; out["message"] = clip(error.localizedDescription)
+        }
+        return out
+    }
+
     /// A short, plain description of an error (no links, no ids).
     static func short(_ error: Error) -> String {
-        if case APIError.http(let code, _) = error { return "HTTP \(code)" }
+        if case APIError.http(let code, let message) = error {
+            let detail = clip(message, max: 90)
+            return detail.isEmpty ? "HTTP \(code)" : "HTTP \(code): \(detail)"
+        }
+        if case APIError.invalidResponse = error { return "no answer from the server" }
+        if let flow = error as? UploadFlowError { return flow.localizedDescription }
         if case BackgroundUploadError.http(let code) = error { return "HTTP \(code)" }
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain {
@@ -50,6 +82,17 @@ enum Retry {
             }
         }
         return "\(ns.domain) \(ns.code)"
+    }
+}
+
+/// Build 22: failures of the upload flow itself, in plain words.
+enum UploadFlowError: LocalizedError {
+    case notSignedIn
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn: return "CutSell is not signed in yet (no session)"
+        }
     }
 }
 
@@ -158,11 +201,13 @@ enum StallWatch {
 @MainActor
 final class BackgroundTime {
     private var id = UIBackgroundTaskIdentifier.invalid
+    private let name: String
+    init(_ name: String = "cutsell-upload") { self.name = name }
 
     func begin() {
         guard id == .invalid else { return }
-        id = UIApplication.shared.beginBackgroundTask(withName: "cutsell-upload") { [weak self] in
-            CutSellDiagnostics.log("upload_app_suspended", [:])
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            CutSellDiagnostics.log("upload_app_suspended", ["during": self?.name ?? "?"])
             self?.end()
         }
     }

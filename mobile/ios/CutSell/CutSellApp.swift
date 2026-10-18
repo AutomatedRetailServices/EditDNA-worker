@@ -12,6 +12,9 @@ final class CutSellAppDelegate: NSObject, UIApplicationDelegate {
             return
         }
         BackgroundPartUploader.shared.acceptBackgroundEventsCompletion(completionHandler)
+        // Build 22: iOS woke CutSell because parts finished with the app closed: keep some time to
+        // complete the upload and start the cut.
+        MainActor.assumeIsolated { PendingUploadFinisher.wokeForUploads() }
     }
 }
 
@@ -48,6 +51,10 @@ struct CutSellApp: App {
                     if let session = appState.session {
                         await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
                     }
+                    // Build 22: an upload whose parts are all on R2 is completed and its cut started.
+                    if await PendingUploadFinisher.run(session: appState.session, reason: "launch") > 0 {
+                        try? await appState.refreshProjects()
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active, appState.session != nil else { return }
@@ -59,6 +66,9 @@ struct CutSellApp: App {
                         }
                         if let current = appState.session {
                             await notificationCenter.refresh(session: current)
+                        }
+                        if await PendingUploadFinisher.run(session: appState.session, reason: "reopen") > 0 {
+                            try? await appState.refreshProjects()
                         }
                     }
                 }

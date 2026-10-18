@@ -51,8 +51,11 @@ struct MultipartStatusResponse: Codable {
     let partCount: Int
     let uploadedParts: [MultipartUploadedPart]
     let uploadedPartNumbers: [Int]
+    /// Build 22 server: "completed" when the file is already whole on R2 (absent on older servers).
+    var state: String? = nil
 
     enum CodingKeys: String, CodingKey {
+        case state
         case uploadID = "upload_id"
         case sourceURI = "source_uri"
         case partCount = "part_count"
@@ -92,8 +95,16 @@ actor MultipartUploadManager {
         foreground: Bool = false,
         /// Build 19: each retry (what failed, in plain words), so the screen and Diagnostics show it.
         onRetry: (@Sendable (String) -> Void)? = nil,
+        /// Build 22: every part is on R2 and "complete" is about to be sent (the caller asks iOS for
+        /// time so "complete" and the start of the processing finish even if CutSell is left now).
+        onPartsUploaded: (@Sendable () -> Void)? = nil,
+        /// Build 22: the clip's place in a Combine / Multiple cut (0-based), written on every
+        /// Diagnostics event of this upload as source_order.
+        clipOrder: Int? = nil,
         progress: @Sendable @escaping (Double) -> Void
     ) async throws -> MultipartCompleteResponse {
+        let clip: [String: String] = clipOrder.map { ["source_order": String($0)] } ?? [:]
+        func tagged(_ fields: [String: String])) -> [String: String] { fields.merging(clip) { a, _ in a } }
         let retried: @Sendable (Int, Error) -> Void = { _, error in onRetry?(Retry.short(error)) }
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
@@ -112,6 +123,17 @@ actor MultipartUploadManager {
         if let saved,
            saved.start.projectID == projectID,
            saved.start.userID == session.userID,
+           saved.start.sizeBytes == size,
+           let done = UploadLedger.shared.entry(saved.start.uploadID), done.completedAt != nil {
+            // Build 22: R2 already has the whole file (the app was closed before it started the cut).
+            CutSellDiagnostics.log("upload_already_complete", tagged(["parts": String(done.partCount)]))
+            progress(1)
+            return Self.completed(saved.start, sourceURI: done.sourceURI)
+        }
+
+        if let saved,
+           saved.start.projectID == projectID,
+           saved.start.userID == session.userID,
            saved.start.sizeBytes == size {
             do {
                 let status: MultipartStatusResponse = try await Retry.run("status", onRetry: retried) {
@@ -124,18 +146,42 @@ actor MultipartUploadManager {
                         timeout: 20
                     )
                 }
+                if status.state == "completed" {
+                    UploadLedger.shared.markCompleted(saved.start.uploadID, sourceURI: status.sourceURI)
+                    CutSellDiagnostics.log("upload_complete_done", tagged(["how": "server_says_completed"]))
+                    progress(1)
+                    return Self.completed(saved.start, sourceURI: status.sourceURI)
+                }
                 guard status.partCount == saved.start.partCount else {
                     throw UploadError.resumeMetadataMismatch
                 }
-                for part in status.uploadedParts { completedParts[part.partNumber] = part.etag }
+                let known = UploadLedger.shared.entry(saved.start.uploadID)?.etags ?? [:]
+                for part in status.uploadedParts {
+                    // R2's own list (ListParts) decides which parts are there; the ETag saved on the
+                    // iPhone fills in only if the list gave none.
+                    completedParts[part.partNumber] = part.etag.isEmpty ? (known[part.partNumber] ?? "") : part.etag
+                }
+                completedParts = completedParts.filter { !$0.value.isEmpty }
                 start = saved.start
                 // D-133: bounded, diagnostics-only resume-detection log --
                 // no change to the existing reconciliation logic above.
-                CutSellDiagnostics.log("upload_resumed", [
+                CutSellDiagnostics.log("upload_resumed", tagged([
                     "resumed_part_count": String(completedParts.count),
                     "total_part_count": String(start.partCount),
-                ])
-            } catch APIError.http(let code, _) where code == 404 {
+                    "etags_on_iphone": String(known.count),
+                ]))
+            } catch APIError.http(let code, let message) where code == 404 {
+                // Build 22: the server closes the session when "complete" succeeds. If this iPhone had
+                // already sent "complete", the file IS on R2 (only the answer was lost): never upload it again.
+                if UploadLedger.shared.entry(saved.start.uploadID)?.completeSentAt != nil {
+                    UploadLedger.shared.markCompleted(saved.start.uploadID, sourceURI: saved.start.sourceURI)
+                    CutSellDiagnostics.log("upload_complete_done", tagged(["how": "already_completed_on_server",
+                                                                    "detail": Retry.clip(message)]))
+                    progress(1)
+                    return Self.completed(saved.start, sourceURI: saved.start.sourceURI)
+                }
+                CutSellDiagnostics.log("upload_session_gone", tagged(["detail": Retry.clip(message),
+                                                               "parts_lost": String(saved.start.partCount)]))
                 await resumeStore.remove(uploadID: saved.start.uploadID)
                 start = try await Retry.run("start", onRetry: retried) {
                     try await createStart(fileURL: fileURL, projectID: projectID, session: session,
@@ -148,10 +194,12 @@ actor MultipartUploadManager {
                                       contentType: contentType, size: size)
             }
         }
-        CutSellDiagnostics.log("upload_parts", ["parts": String(start.partCount), "part_mb": String(start.partSize / 1_048_576),
-                                                "mb": String(size / 1_048_576), "done": String(completedParts.count)])
+        CutSellDiagnostics.log("upload_parts", tagged(["parts": String(start.partCount), "part_mb": String(start.partSize / 1_048_576),
+                                                "mb": String(size / 1_048_576), "done": String(completedParts.count)]))
 
         await resumeStore.save(start: start, fileURL: fileURL, projectID: projectID, size: size)
+        UploadLedger.shared.begin(start)
+        for (number, etag) in completedParts { UploadLedger.shared.recordPart(uploadID: start.uploadID, part: number, etag: etag) }
         // The real %: bytes of finished parts + bytes the parts in flight have sent.
         let already = completedParts.keys.reduce(Int64(0)) { sum, number in
             sum + Int64(min(start.partSize, max(0, Int(size) - (number - 1) * start.partSize)))
@@ -198,15 +246,17 @@ actor MultipartUploadManager {
                         )
                         let response = try await Self.uploadPart(
                             file: partFile, bytes: partBytes, partNumber: partNumber, signedURL: signed.uploadURL,
-                            foreground: useForeground, onBytes: { tally.sent(part: partNumber, bytes: $0) }
+                            uploadID: uploadID, foreground: useForeground, onBytes: { tally.sent(part: partNumber, bytes: $0) }
                         )
                         guard let etag = response.value(forHTTPHeaderField: "ETag"), !etag.isEmpty else {
                             throw UploadError.missingETag(partNumber)
                         }
+                        UploadLedger.shared.recordPart(uploadID: uploadID, part: partNumber, etag: etag)
                         return etag
                     }
                     tally.done(part: partNumber, size: partBytes)
-                    CutSellDiagnostics.log("upload_part_done", ["part": String(partNumber), "of": String(start.partCount)])
+                    CutSellDiagnostics.log("upload_part_done", ["part": String(partNumber), "of": String(start.partCount)]
+                        .merging(clip) { a, _ in a })
                     return (partNumber, etagValue)
                 }
             }
@@ -226,17 +276,68 @@ actor MultipartUploadManager {
             .sorted { $0.partNumber < $1.partNumber }
         guard parts.count == start.partCount else { throw UploadError.incompleteUpload }
 
-        let result: MultipartCompleteResponse = try await Retry.run("complete", onRetry: retried) {
-            try await api.request(
-                "/v1/uploads/multipart/\(start.uploadID)/complete",
-                method: "POST",
-                body: CompleteBody(project_id: projectID, user_id: session.userID, parts: parts),
-                timeout: 60
-            )
+        // Build 22: the final step is visible in Diagnostics, with the real code and message.
+        onPartsUploaded?()
+        let sentBefore = UploadLedger.shared.entry(start.uploadID)?.completeSentAt != nil
+        UploadLedger.shared.markCompleteSent(start.uploadID)
+        CutSellDiagnostics.log("upload_complete_started", tagged(["parts": String(parts.count), "mb": String(size / 1_048_576),
+                                                          "part_mb": String(start.partSize / 1_048_576)]))
+        let completeStarted = Date()
+        let sends = Counter()
+        let result: MultipartCompleteResponse
+        do {
+            result = try await Retry.run("complete", onRetry: retried) {
+                sends.add()
+                return try await api.request(
+                    "/v1/uploads/multipart/\(start.uploadID)/complete",
+                    method: "POST",
+                    body: CompleteBody(project_id: projectID, user_id: session.userID, parts: parts),
+                    timeout: 45
+                )
+            }
+            CutSellDiagnostics.log("upload_complete_done", tagged(["state": result.state,
+                                                           "seconds": String(format: "%.1f", Date().timeIntervalSince(completeStarted))]))
+        } catch APIError.http(let code, let message) where code == 404 && (sentBefore || sends.value > 1) {
+            // A "complete" sent earlier succeeded on R2 and the server closed the session; its answer
+            // never reached the iPhone (CutSell was suspended). The file is there.
+            CutSellDiagnostics.log("upload_complete_done", tagged(["how": "already_completed_on_server", "detail": Retry.clip(message)]))
+            result = Self.completed(start, sourceURI: start.sourceURI)
+        } catch {
+            CutSellDiagnostics.log("upload_complete_failed", tagged(Retry.fields(error)))
+            throw error
         }
-        await resumeStore.remove(fileURL: fileURL, projectID: projectID, size: size)
+        UploadLedger.shared.markCompleted(start.uploadID, sourceURI: result.sourceURI)
         progress(1)
         return result
+    }
+
+    /// The answer "complete" gives, for an upload R2 already finished.
+    static func completed(_ start: MultipartStartResponse, sourceURI: String) -> MultipartCompleteResponse {
+        MultipartCompleteResponse(uploadID: start.uploadID, state: "uploaded",
+                                  sourceURI: sourceURI.isEmpty ? start.sourceURI : sourceURI, sizeBytes: start.sizeBytes)
+    }
+
+    enum Readiness: Equatable { case notStarted, partsMissing, allPartsUploaded, completed }
+
+    /// Build 22: what this iPhone knows about a video's upload (no network): the finisher completes
+    /// only uploads whose parts are all on R2.
+    func readiness(fileURL: URL, projectID: String, userID: String) async -> Readiness {
+        let size = ((try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        guard size > 0, let record = await resumeStore.record(fileURL: fileURL, projectID: projectID, size: size),
+              record.start.userID == userID else { return .notStarted }
+        guard let entry = UploadLedger.shared.entry(record.start.uploadID) else { return .partsMissing }
+        if entry.completedAt != nil { return .completed }
+        if entry.completeSentAt != nil || entry.etags.count >= entry.partCount { return .allPartsUploaded }
+        return .partsMissing
+    }
+
+    /// Build 22: called after the cut started on the server (until then the upload stays resumable).
+    func finished(fileURL: URL, projectID: String) async {
+        let size = ((try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        if let record = await resumeStore.record(fileURL: fileURL, projectID: projectID, size: size) {
+            UploadLedger.shared.remove(record.start.uploadID)
+        }
+        await resumeStore.remove(fileURL: fileURL, projectID: projectID, size: size)
     }
 
     private func createStart(
@@ -280,12 +381,14 @@ actor MultipartUploadManager {
         bytes: Int64,
         partNumber: Int,
         signedURL: URL,
+        uploadID: String? = nil,
         foreground: Bool,
         onBytes: (@Sendable (Int64) -> Void)?
     ) async throws -> HTTPURLResponse {
         if !foreground && !backgroundBroken.value {
             do {
-                let response = try await BackgroundPartUploader.shared.upload(fileURL: file, to: signedURL, onBytes: onBytes)
+                let response = try await BackgroundPartUploader.shared.upload(fileURL: file, to: signedURL, uploadID: uploadID,
+                                                                             part: partNumber, onBytes: onBytes)
                 onBytes?(bytes)
                 return response
             } catch let error as NSError where error.domain == NSURLErrorDomain && error.code == NSURLErrorUnknown {
@@ -343,6 +446,13 @@ actor MultipartUploadManager {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
+}
+
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    func add() { lock.lock(); count += 1; lock.unlock() }
 }
 
 final class Flag: @unchecked Sendable {

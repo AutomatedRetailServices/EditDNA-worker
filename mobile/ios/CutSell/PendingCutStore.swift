@@ -6,7 +6,8 @@ struct PendingCutVideo: Codable, Hashable {
     let duration: Double
     let contentType: String
 
-    var fileURL: URL { URL(fileURLWithPath: filePath) }
+    /// Build 22: found again after an app update moves CutSell's folder.
+    var fileURL: URL { ContainerPath.resolve(filePath) }
 }
 
 struct PendingCutRecord: Codable, Hashable, Identifiable {
@@ -38,7 +39,7 @@ actor PendingCutStore {
             return []
         }
         return values.filter { record in
-            !record.videos.isEmpty && record.videos.allSatisfy { FileManager.default.fileExists(atPath: $0.filePath) }
+            !record.videos.isEmpty && record.videos.allSatisfy { FileManager.default.fileExists(atPath: $0.fileURL.path) }
         }
     }
 

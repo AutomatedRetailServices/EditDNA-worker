@@ -308,19 +308,35 @@ struct CreateFlowView: View {
                     startTracking(projectID: projectID, videos: videos, thumbnail: thumbnail)
                 } else {
                     // Single: one asset. Bulk: one separate cut per video, one after another.
+                    // Build 22: a clip that fails does NOT stop the others; it stays saved to resume
+                    // ("Try again" sends only its missing parts) and the failure is shown at the end.
                     let count = assets.count
+                    var firstFailure: Error?
+                    var failedClips: [Int] = []
                     for (index, asset) in assets.enumerated() where index >= startedInJob {
-                        let video = try await export(asset, index: index, count: count)
-                        let thumbnail = await prepareScreen(for: [video])
-                        let lower = Double(index) / Double(count)
-                        let projectID = try await submitter.submit(
-                            videos: [video], title: Self.cutTitle([video]), mode: CutSubmitter.singleMode,
-                            audioOverlap: current.style.overlapAudio, autoZoom: current.style.autoZoom, resumeProjectID: nil, appState: appState,
-                            progressRange: lower...(lower + 1 / Double(count)),
-                            label: count > 1 ? "Cut \(index + 1) of \(count)" : ""
-                        )
-                        startTracking(projectID: projectID, videos: [video], thumbnail: thumbnail)
+                        do {
+                            let video = try await export(asset, index: index, count: count)
+                            let thumbnail = await prepareScreen(for: [video])
+                            let lower = Double(index) / Double(count)
+                            let projectID = try await submitter.submit(
+                                videos: [video], title: Self.cutTitle([video]), mode: CutSubmitter.singleMode,
+                                audioOverlap: current.style.overlapAudio, autoZoom: current.style.autoZoom, resumeProjectID: nil, appState: appState,
+                                progressRange: lower...(lower + 1 / Double(count)),
+                                label: count > 1 ? "Cut \(index + 1) of \(count)" : ""
+                            )
+                            startTracking(projectID: projectID, videos: [video], thumbnail: thumbnail)
+                        } catch {
+                            if count == 1 || error is AIConsentError { throw error }
+                            failedClips.append(index + 1)
+                            firstFailure = firstFailure ?? error
+                            CutSellDiagnostics.log("clip_cut_failed", Retry.fields(error, ["source_order": String(index), "of": String(count)]))
+                        }
                         startedInJob = index + 1
+                    }
+                    if let firstFailure {
+                        CutSellDiagnostics.log("multiple_finished", ["failed_clips": failedClips.map(String.init).joined(separator: ","),
+                                                                     "of": String(count)])
+                        throw firstFailure
                     }
                 }
             }

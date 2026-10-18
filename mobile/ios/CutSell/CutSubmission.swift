@@ -105,7 +105,10 @@ final class CutSubmitter: ObservableObject {
         progressRange: ClosedRange<Double> = 0...1,
         label: String = ""
     ) async throws -> String {
-        guard let session = appState.session else { throw APIError.invalidResponse }
+        guard let session = appState.session else {
+            CutSellDiagnostics.log("upload_failed", Retry.fields(UploadFlowError.notSignedIn, ["step": "start"]))
+            throw UploadFlowError.notSignedIn
+        }
         // Nothing is uploaded or processed before the AI notice is agreed to (once).
         guard await AIConsentCenter.shared.ensure() else { throw AIConsentError.declined }
         isSubmitting = true
@@ -113,7 +116,11 @@ final class CutSubmitter: ObservableObject {
         // handed to the background upload service (which then keeps sending with the app closed).
         let backgroundTime = BackgroundTime()
         backgroundTime.begin()
-        defer { isSubmitting = false; backgroundTime.end() }
+        // Build 22: fresh time from iOS once every part is on R2, for "complete" and the start of the
+        // processing (on 18 Oct iOS suspended CutSell right after "complete" was sent: the cut never started).
+        let finishing = BackgroundTime("cutsell-finish")
+        if let resumeProjectID { ActiveUploads.shared.insert(resumeProjectID) }
+        defer { isSubmitting = false; backgroundTime.end(); finishing.end() }
         let span = progressRange.upperBound - progressRange.lowerBound
         func report(_ value: Double) { progress = progressRange.lowerBound + span * min(1, max(0, value)) }
         func say(_ text: String) { statusText = label.isEmpty ? text : "\(label) · \(text)" }
@@ -121,6 +128,7 @@ final class CutSubmitter: ObservableObject {
         var transientPreparedFiles: [URL] = []
         var pendingSaved = resumeProjectID != nil
         var createdProjectID = resumeProjectID
+        defer { if let id = createdProjectID { ActiveUploads.shared.remove(id) } }
 
         do {
             let uploadVideos: [LocalVideo]
@@ -168,6 +176,7 @@ final class CutSubmitter: ObservableObject {
                 }
                 CutSellDiagnostics.log("project_created", ["seconds": String(format: "%.1f", Date().timeIntervalSince(createStarted))])
                 createdProjectID = project.projectID
+                ActiveUploads.shared.insert(project.projectID)
                 currentProjectID = project.projectID
                 projectID = project.projectID
                 let pending = PendingCutRecord(
@@ -195,33 +204,60 @@ final class CutSubmitter: ObservableObject {
             var sources: [SourceInput] = []
             for (index, video) in uploadVideos.enumerated() {
                 say("Uploading \(index + 1) of \(uploadVideos.count)…")
-                let uploadTitle = uploadVideos.count > 1 ? "Uploading video \(index + 1) of \(uploadVideos.count)" : "Uploading your video"
+                // Build 22: "Clip 2 of 3 · Uploading 40 %" (each clip its own upload).
+                let uploadTitle = uploadVideos.count > 1 ? "Clip \(index + 1) of \(uploadVideos.count) · Uploading" : "Uploading your video"
                 stage(uploadTitle, 0)
                 let base = Double(index) / Double(uploadVideos.count)
                 // D-133: bounded, diagnostics-only upload-timing log around
                 // the EXISTING multipart upload call -- no networking change.
                 let uploadStartedAt = Date()
+                let fileMB = ((try? FileManager.default.attributesOfItem(atPath: video.url.path))?[.size] as? NSNumber)?.int64Value ?? 0
                 CutSellDiagnostics.log("upload_started", [
                     "source_order": String(index),
+                    "of": String(uploadVideos.count),
                     "content_type": video.contentType,
+                    "mb": String(fileMB / 1_048_576),
                 ])
-                let result = try await MultipartUploadManager.shared.upload(
-                    fileURL: video.url,
-                    projectID: projectID,
-                    session: session,
-                    contentType: video.contentType,
-                    onRetry: { [weak self] error in Task { @MainActor in self?.retried(error) } }
-                ) { [weak self] partProgress in
-                    let overall = base + partProgress / Double(uploadVideos.count)
-                    let lower = progressRange.lowerBound
-                    Task { @MainActor in
-                        self?.progress = lower + span * min(1, max(0, overall))
-                        // Called only when more bytes went out: that is activity for the 90 s watch.
-                        self?.touch()
-                        self?.stage(uploadTitle, partProgress)
-                        self?.logStep("upload_progress", partProgress)
+                // Build 22: each clip is its own upload; when one fails it is tried again on its own (up to
+                // 3 times, sending only the parts R2 does not have yet) -- the other clips are not touched.
+                var clipAttempt = 1
+                var clipResult: MultipartCompleteResponse?
+                while clipResult == nil {
+                    do {
+                        clipResult = try await MultipartUploadManager.shared.upload(
+                            fileURL: video.url,
+                            projectID: projectID,
+                            session: session,
+                            contentType: video.contentType,
+                            onRetry: { [weak self] error in Task { @MainActor in self?.retried(error) } },
+                            onPartsUploaded: { Task { @MainActor in finishing.begin() } },
+                            clipOrder: index,
+                            progress: { [weak self] partProgress in
+                                let overall = base + partProgress / Double(uploadVideos.count)
+                                let lower = progressRange.lowerBound
+                                Task { @MainActor in
+                                    self?.progress = lower + span * min(1, max(0, overall))
+                                    // Called only when more bytes went out: that is activity for the 90 s watch.
+                                    self?.touch()
+                                    self?.stage(uploadTitle, partProgress)
+                                    self?.logStep(uploadVideos.count > 1 ? "upload_progress_clip\(index + 1)" : "upload_progress", partProgress)
+                                }
+                            }
+                        )
+                    } catch {
+                        if error is CancellationError || Task.isCancelled || clipAttempt >= 3 || !Self.clipRetriable(error) {
+                            CutSellDiagnostics.log("clip_upload_failed", Retry.fields(error, ["source_order": String(index),
+                                                                                              "attempts": String(clipAttempt)]))
+                            throw error
+                        }
+                        CutSellDiagnostics.log("clip_upload_retry", Retry.fields(error, ["source_order": String(index),
+                                                                                         "attempt": String(clipAttempt)]))
+                        retried(Retry.short(error))
+                        clipAttempt += 1
+                        try await Task.sleep(nanoseconds: 3_000_000_000)
                     }
                 }
+                guard let result = clipResult else { throw UploadError.incompleteUpload }
                 // Keep this file on the phone for the editor's preview (no download later).
                 await SourceVideoCache.shared.store(fileURL: video.url, uri: result.sourceURI)
                 CutSellDiagnostics.log("upload_completed", [
@@ -238,48 +274,76 @@ final class CutSubmitter: ObservableObject {
 
             say("Starting AI edit…")
             stage("Starting your cut")
-            struct Body: Encodable {
-                let project_id: String
-                let user_id: String
-                let sources: [SourceInput]
-                let language_hint: String?
-                let audio_overlap: Bool
-                /// Same choice under its canonical name (the API reads either).
-                let dialogue_overlap_enabled: Bool
-                let auto_zoom_enabled: Bool
-            }
-            let submitResponse: FlowBSubmitResponse = try await Retry.run("start cut", onRetry: { [weak self] _, error in
-                self?.retried(Retry.short(error))
-            }) { try await APIClient.shared.request(
-                "/v1/flow-b/jobs",
-                method: "POST",
-                body: Body(
-                    project_id: projectID,
-                    user_id: session.userID,
-                    sources: sources,
-                    language_hint: nil,
-                    audio_overlap: audioOverlap,
-                    dialogue_overlap_enabled: audioOverlap,
-                    auto_zoom_enabled: autoZoom
-                ),
-                timeout: 20
-            ) }
-            // D-133: bounded diagnostics only -- logs the backend job id.
-            CutSellDiagnostics.log("job_submitted", ["job_id": submitResponse.jobID])
-            lastJobID = submitResponse.jobID
+            let jobID = try await Self.startJob(projectID: projectID, session: session, sources: sources,
+                                                audioOverlap: audioOverlap, autoZoom: autoZoom,
+                                                onRetry: { [weak self] error in self?.retried(error) })
+            lastJobID = jobID
+            for video in uploadVideos { await MultipartUploadManager.shared.finished(fileURL: video.url, projectID: projectID) }
             await PendingCutStore.shared.remove(projectID: projectID, deleteLocalFiles: true)
             report(1)
             try? await appState.refreshProjects()
             return projectID
         } catch {
-            CutSellDiagnostics.log("upload_failed", ["reason": Retry.short(error), "type": String(describing: type(of: error)),
-                                                     "step": stageTitle])
+            CutSellDiagnostics.log("upload_failed", Retry.fields(error, ["reason": Retry.short(error), "step": stageTitle]))
             if !pendingSaved {
                 for url in transientPreparedFiles { try? FileManager.default.removeItem(at: url) }
             }
             throw CutSubmitError(underlying: error, savedForResume: pendingSaved, projectID: pendingSaved ? createdProjectID : nil)
         }
     }
+}
+
+extension CutSubmitter {
+    /// A clip upload worth trying again on its own (a refused request -- 4xx -- would only fail again).
+    nonisolated static func clipRetriable(_ error: Error) -> Bool {
+        if error is AIConsentError || error is UploadFlowError { return false }
+        if case UploadError.emptyFile = error { return false }
+        return Retry.retriable(error)
+    }
+
+    /// Starts the AI cut on the server for sources already on R2. Logs processing_started, then
+    /// job_submitted or job_submit_failed with the real code and message.
+    static func startJob(projectID: String, session: CutSellSession, sources: [SourceInput], audioOverlap: Bool,
+                         autoZoom: Bool, onRetry: ((String) -> Void)? = nil) async throws -> String {
+        struct Body: Encodable {
+            let project_id: String
+            let user_id: String
+            let sources: [SourceInput]
+            let language_hint: String?
+            let audio_overlap: Bool
+            /// Same choice under its canonical name (the API reads either).
+            let dialogue_overlap_enabled: Bool
+            let auto_zoom_enabled: Bool
+        }
+        CutSellDiagnostics.log("processing_started", ["sources": String(sources.count)])
+        do {
+            let response: FlowBSubmitResponse = try await Retry.run("start cut", onRetry: { _, error in
+                onRetry?(Retry.short(error))
+            }) { try await APIClient.shared.request(
+                "/v1/flow-b/jobs",
+                method: "POST",
+                body: Body(project_id: projectID, user_id: session.userID, sources: sources, language_hint: nil,
+                           audio_overlap: audioOverlap, dialogue_overlap_enabled: audioOverlap, auto_zoom_enabled: autoZoom),
+                timeout: 30
+            ) }
+            CutSellDiagnostics.log("job_submitted", ["job_id": response.jobID])
+            return response.jobID
+        } catch {
+            CutSellDiagnostics.log("job_submit_failed", Retry.fields(error))
+            throw error
+        }
+    }
+}
+
+/// Build 22: projects whose upload is running in this process right now (the finisher never starts a
+/// second copy of the same upload).
+@MainActor
+final class ActiveUploads {
+    static let shared = ActiveUploads()
+    private(set) var ids: Set<String> = []
+    func insert(_ id: String) { ids.insert(id) }
+    func remove(_ id: String) { ids.remove(id) }
+    func contains(_ id: String) -> Bool { ids.contains(id) }
 }
 
 /// A failed submission. `savedForResume` tells whether the upload record was already saved

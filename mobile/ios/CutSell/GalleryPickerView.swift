@@ -100,10 +100,15 @@ enum GalleryExport {
     static func export(_ asset: PHAsset, name: String?, progress: (@Sendable (Double) -> Void)? = nil,
                        copied: (@Sendable (Int64) -> Void)? = nil) async throws -> LocalVideo {
         let resources = PHAssetResource.assetResources(for: asset)
-        guard let resource = resources.first(where: { $0.type == .fullSizeVideo })
-            ?? resources.first(where: { $0.type == .video }) else {
+        // Build 22: the ORIGINAL file as recorded (copied byte for byte, never re-encoded). Before, an
+        // edited render ("fullSizeVideo") came first: Swanny's 72 MB video was uploaded as 101 MB.
+        let original = resources.first(where: { $0.type == .video })
+        let edited = resources.first(where: { $0.type == .fullSizeVideo })
+        guard let resource = original ?? edited else {
             throw Failure.unavailable
         }
+        CutSellDiagnostics.log("asset_resource", ["used": original != nil ? "original" : "edited",
+                                                  "photos_edit": edited != nil ? "yes" : "no"])
         let ext = (resource.originalFilename as NSString).pathExtension.lowercased()
         guard CreateLimits.supportedExtensions.contains(ext) else { throw Failure.unsupported }
         let destination = try persistentMediaURL(extension: ext)
