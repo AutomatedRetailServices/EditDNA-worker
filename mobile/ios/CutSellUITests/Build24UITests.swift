@@ -94,9 +94,9 @@ final class Build24UITests: XCTestCase {
     }
 
     private func pickAndCreate(mode: String, count: Int) -> Bool {
+        // A mode chip on the Home Hub opens the gallery in that mode.
         let modeChip = element("hubMode_\(mode)")
-        if modeChip.waitForExistence(timeout: 10) { modeChip.tap() }
-        element("hubUpload").tap()
+        if modeChip.waitForExistence(timeout: 10) { modeChip.tap() } else { element("hubUpload").tap() }
         allowPhotos()
         let tiles = app.descendants(matching: .any).matching(identifier: "galleryTile")
         _ = wait(30) { tiles.count >= count }
