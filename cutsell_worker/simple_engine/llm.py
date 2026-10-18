@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import json
+import logging
 import os
 import time
 
@@ -13,6 +15,7 @@ API_URL = "https://api.anthropic.com/v1/messages"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 STEPS = ("pass", "decision", "haul_review", "sale_review", "fixwords")
 _STEP: contextvars.ContextVar = contextvars.ContextVar("cutsell_simple_engine_step", default="")
+_LOG = logging.getLogger("cutsell.simple_engine.llm")
 
 
 @contextlib.contextmanager
@@ -68,7 +71,20 @@ def call_anthropic(prompt: str, *, max_tokens: int = 16000, attempts: int = 4) -
             if response.status_code == 200:
                 data = response.json()
                 text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
-                return text, dict(data.get("usage") or {})
+                usage = dict(data.get("usage") or {})
+                # Measurement only (the call itself is unchanged): which step, the max_tokens ceiling, the thinking
+                # setting (adaptive thinking is the model default; effort "" = the model default, high) and how big the
+                # visible answer is. output_tokens includes the thinking; the thinking text itself is not returned.
+                usage.update({
+                    "step": _STEP.get() or "other", "max_tokens": max_tokens,
+                    "thinking": "adaptive", "effort": effort or "default(high)",
+                    "thinking_blocks": sum(1 for b in data.get("content", []) if b.get("type") == "thinking"),
+                    "answer_chars": len(text), "stop_reason": data.get("stop_reason"),
+                })
+                _LOG.info("simple_engine_llm_call %s", json.dumps({k: usage.get(k) for k in (
+                    "step", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+                    "max_tokens", "thinking", "effort", "answer_chars", "stop_reason")}))
+                return text, usage
             if response.status_code in (400, 401, 403, 404):
                 raise RuntimeError(f"Anthropic HTTP {response.status_code}")
             last = RuntimeError(f"Anthropic HTTP {response.status_code}")
