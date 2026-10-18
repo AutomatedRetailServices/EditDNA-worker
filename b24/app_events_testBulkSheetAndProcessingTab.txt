@@ -1,0 +1,29 @@
+asset_export_started index=1 of=1 seconds_long=25
+audio_first=yes
+asset_resource photos_edit=no used=original
+asset_export_done mb=24 seconds=1.8
+audio_extracted kb=197 seconds=1.7 video_seconds=25
+audio_extract
+audio_uploaded kb=197 seconds=1.4 source_order=0
+audio_upload
+processing_started sources=1
+job_submitted job_id=12366bd1-0a98-469e-a9e2-9cb29d1f3119
+audio_first_started clips=1 job_id=12366bd1-0a98-469e-a9e2-9cb29d1f3119
+video_background_started clips=1 mb=24
+server_step seconds=0 step=submitted
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=4
+upload_parts done=0 mb=24 part_mb=8 parts=4 source_order=0
+upload_background_unavailable part=1
+upload_background_unavailable part=2
+server_step progress=12 seconds=5.1 step=created
+upload_part_done of=4 part=4 source_order=0
+server_step progress=42 seconds=11.0 step=processing
+server_step progress=100 seconds=17.0 step=ready
+cut_ready_seen project_id=prj_86cc671d1eea4b17b7a8e3b06b21bd70
+upload_part_done of=4 part=1 source_order=0
+upload_part_done of=4 part=2 source_order=0
+upload_part_done of=4 part=3 source_order=0
+upload_complete_started mb=24 part_mb=8 parts=4 source_order=0
+upload_complete_done seconds=2.2 source_order=0 state=uploaded
+video_ready_sent source_order=0
+video_background_done seconds=35

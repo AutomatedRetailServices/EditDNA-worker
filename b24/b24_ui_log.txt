@@ -1,0 +1,11 @@
+B24UI    21.1 Photos access allowed
+B24UI    28.6 PASS Processing screen
+B24UI    28.9 PASS Continue in background active while: Creating your project
+B24UI    30.9 PASS screen closed, work goes on · Creating your project
+B24UI    34.3 rows after continue: []
+B24UI    81.3 rows after Home: []
+B24UI    81.5 closing CutSell with rows: []
+B24UI   134.4 rows after reopen: []
+B24UI   380.3 PASS the cut finished after leaving and closing CutSell
+B24UI   380.7 FAILURES: none
+B24UI    76.1 FAIL bulk sheet shown

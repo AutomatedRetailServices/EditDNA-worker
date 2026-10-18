@@ -1,5 +1,6 @@
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:99: error: -[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab] : Failed to not hittable: Button, {{20.0, 209.3}, {380.0, 205.0}}, identifier: 'hubUpload'
-Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' failed (22.620 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-18 18:55:45.859.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 18:55:45.860.
-Test Suite 'Selected tests' failed at 2026-10-18 18:55:45.861.
+B24UI    76.1 FAIL bulk sheet shown
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:155: error: -[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab] : Failed to tap "bulkGoToEdits" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"bulkGoToEdits" IN identifiers'`, given input App element pid: 38448
+Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' failed (80.777 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-18 19:16:48.632.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 19:16:48.633.
+Test Suite 'Selected tests' failed at 2026-10-18 19:16:48.633.

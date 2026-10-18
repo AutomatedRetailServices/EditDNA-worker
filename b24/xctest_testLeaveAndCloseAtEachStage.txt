@@ -1,5 +1,14 @@
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:99: error: -[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage] : Failed to not hittable: Button, {{20.0, 209.3}, {380.0, 205.0}}, identifier: 'hubUpload'
-Test Case '-[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage]' failed (23.418 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-18 18:54:23.171.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 18:54:23.171.
-Test Suite 'Selected tests' failed at 2026-10-18 18:54:23.172.
+B24UI    21.1 Photos access allowed
+B24UI    28.6 PASS Processing screen
+B24UI    28.9 PASS Continue in background active while: Creating your project
+B24UI    30.9 PASS screen closed, work goes on · Creating your project
+B24UI    34.3 rows after continue: []
+B24UI    81.3 rows after Home: []
+B24UI    81.5 closing CutSell with rows: []
+B24UI   134.4 rows after reopen: []
+B24UI   380.3 PASS the cut finished after leaving and closing CutSell
+B24UI   380.7 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage]' passed (381.652 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-18 19:13:37.555.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 19:13:37.557.
+Test Suite 'Selected tests' passed at 2026-10-18 19:13:37.559.
