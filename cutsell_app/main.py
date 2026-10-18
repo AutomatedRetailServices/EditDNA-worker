@@ -379,6 +379,12 @@ def submit_flow_b(payload: FlowBSubmitRequest):
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
 
 
+@app.get("/v1/capabilities")
+def capabilities():
+    """What this server can do (the app checks before using a newer flow; an older server answers 404)."""
+    return {"audio_first": True, "video_ready": True, "idempotent_multipart_complete": True}
+
+
 class VideoReadyRequest(BaseModel):
     user_id: str
     uri: str

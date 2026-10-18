@@ -894,3 +894,4 @@ def test_video_ready_endpoint_queues_the_followup(monkeypatch):
     assert queued == [{"project_id": "p1", "user_id": "u1", "uri": "s3://b/k.mp4", "source_order": 0}]
     monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kw: (_ for _ in ()).throw(ValueError("not yours")))
     assert client.post("/v1/projects/p1/video-ready", json={"user_id": "u1", "uri": "s3://x"}).status_code == 422
+    assert client.get("/v1/capabilities").json()["audio_first"] is True
