@@ -184,7 +184,7 @@ final class Build24UITests: XCTestCase {
         let first = rowStatuses()
         log("rows at start: \(first)")
         check(first.count == 3, "3 rows in order", first.joined(separator: ", "))
-        let result = waitForProcessingToEmpty("bulk", minutes: 25)
+        let result = waitForProcessingToEmpty("bulk", minutes: 5)
         check(result.done, "every cut left Processing")
         check(result.toasts >= 1, "ready notice shown", "\(result.toasts)")
         let ready = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Ready ('")).firstMatch
@@ -236,7 +236,7 @@ final class Build24UITests: XCTestCase {
             openEdits()
             if element("editsFilterProcessing").waitForExistence(timeout: 10) { element("editsFilterProcessing").tap() }
         }
-        let result = waitForProcessingToEmpty("single", minutes: 15)
+        let result = waitForProcessingToEmpty("single", minutes: 6)
         check(result.done, "the cut finished after leaving and closing CutSell")
         shot("single_end")
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
