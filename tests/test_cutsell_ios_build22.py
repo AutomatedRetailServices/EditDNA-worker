@@ -30,7 +30,7 @@ def test_final_step_is_visible_with_real_codes():
     manager = read("MultipartUploadManager.swift")
     for event in ('"upload_complete_started"', '"upload_complete_done"', '"upload_complete_failed"'):
         assert event in manager
-    assert 'CutSellDiagnostics.log("upload_complete_failed", Retry.fields(error))' in manager
+    assert 'CutSellDiagnostics.log("upload_complete_failed", tagged(Retry.fields(error)))' in manager
     submitter = read("CutSubmission.swift")
     assert '"processing_started"' in submitter and '"job_submitted"' in submitter and '"job_submit_failed"' in submitter
     reliability = read("UploadReliability.swift")
@@ -90,3 +90,14 @@ def test_eight_mib_parts_requested_and_saved_paths_survive_updates():
     assert "static let requestedPartSize = 8 * 1024 * 1024" in manager
     assert "ContainerPath.resolve(filePath)" in read("PendingCutStore.swift")
     assert "ContainerPath.resolve(" in read("UploadResumeStore.swift")
+
+
+def test_each_clip_is_its_own_upload_and_a_failing_clip_does_not_stop_the_others():
+    submitter = read("CutSubmission.swift")
+    assert "clipOrder: index," in submitter and "clipAttempt >= 3" in submitter
+    assert '"clip_upload_retry"' in submitter and '"clip_upload_failed"' in submitter
+    assert '"Clip \\(index + 1) of \\(uploadVideos.count) · Uploading"' in submitter
+    manager = read("MultipartUploadManager.swift")
+    assert 'clipOrder.map { ["source_order": String($0)] }' in manager
+    flow = read("CreateFlowView.swift")
+    assert '"clip_cut_failed"' in flow and '"multiple_finished"' in flow and "firstFailure = firstFailure ?? error" in flow
