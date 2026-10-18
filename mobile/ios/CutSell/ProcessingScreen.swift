@@ -17,6 +17,7 @@ struct CutProgressView: View {
 
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var tracker = CutTracker.shared
+    @ObservedObject private var videos = BackgroundVideoUploads.shared
     @State private var openEditor = false
 
     private var cut: CutTracker.Cut? { projectID.flatMap { tracker.cut($0) } }
@@ -36,6 +37,7 @@ struct CutProgressView: View {
                     failed: !uploading && cut?.isFailed == true,
                     uploading: uploading,
                     stalled: uploading ? submitter?.stalled : nil,
+                    background: projectID.flatMap { videos.status($0)?.text },
                     onTryAgain: { submitter?.restartStuckParts() },
                     onClose: onClose,
                     onOpenEdits: onOpenEdits
@@ -111,6 +113,8 @@ struct ProcessingContent: View {
     var uploading = false
     /// Build 21: "No data sent for 90 seconds…" (the upload keeps trying; nothing was cancelled).
     var stalled: String? = nil
+    /// Build 23: "Uploading video in background · 40 % · about 1 min left" (audio first).
+    var background: String? = nil
     /// "Try again": restarts only the parts in flight.
     var onTryAgain: () -> Void = {}
     let onClose: () -> Void
@@ -181,6 +185,15 @@ struct ProcessingContent: View {
                     .foregroundStyle(CS.textSecondaryF)
                 StageDots(current: stage.step, total: CutTracker.stepCount)
                     .padding(.top, 6)
+                if let background {
+                    Text(background)
+                        .font(CS.sf(13))
+                        .foregroundStyle(CS.textSecondaryF)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 6)
+                        .padding(.horizontal, 24)
+                        .accessibilityIdentifier("backgroundVideoUpload")
+                }
                 if let stalled {
                     VStack(spacing: 8) {
                         Text(stalled)

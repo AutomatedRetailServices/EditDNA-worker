@@ -18,6 +18,9 @@ struct PendingCutRecord: Codable, Hashable, Identifiable {
     /// Auto Zoom AI chosen in "Choose your style" (nil on records saved before it existed = on).
     var autoZoom: Bool? = nil
     let videos: [PendingCutVideo]
+    /// Build 23 (audio first): the cut already started on the server from the voice; only the full
+    /// video is still uploading (in the background). nil = nothing started yet ("Resume upload").
+    var jobID: String? = nil
     let createdAt: Date
 
     var id: String { projectID }
@@ -45,6 +48,14 @@ actor PendingCutStore {
 
     func record(projectID: String) -> PendingCutRecord? {
         list().first { $0.projectID == projectID }
+    }
+
+    /// Build 23: the cut started from the voice; the record stays until the video is uploaded.
+    func markStarted(projectID: String, jobID: String) {
+        var values = list()
+        guard let index = values.firstIndex(where: { $0.projectID == projectID }) else { return }
+        values[index].jobID = jobID
+        persist(values)
     }
 
     func save(_ record: PendingCutRecord) {

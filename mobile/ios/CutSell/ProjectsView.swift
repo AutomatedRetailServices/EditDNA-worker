@@ -269,7 +269,9 @@ struct ProjectsView: View {
 
     @MainActor
     private func refreshPendingCuts() async {
-        pendingCuts = await PendingCutStore.shared.list()
+        // Build 23: a cut that already started from its voice is not "Resume upload" (its video
+        // uploads by itself in the background).
+        pendingCuts = await PendingCutStore.shared.list().filter { $0.jobID == nil }
     }
 
     @MainActor
@@ -412,12 +414,12 @@ struct UploadNotFinishedView: View {
             .padding(.horizontal, 28)
         }
         .task {
-            pending = await PendingCutStore.shared.list().first { $0.projectID == project.projectID }
+            pending = await PendingCutStore.shared.list().first { $0.projectID == project.projectID && $0.jobID == nil }
             checked = true
         }
         .sheet(item: $resuming, onDismiss: {
             Task {
-                pending = await PendingCutStore.shared.list().first { $0.projectID == project.projectID }
+                pending = await PendingCutStore.shared.list().first { $0.projectID == project.projectID && $0.jobID == nil }
                 try? await appState.refreshProjects()
             }
         }) { record in

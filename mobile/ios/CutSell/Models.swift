@@ -72,12 +72,16 @@ struct SourceInput: Codable, Hashable {
     let uri: String
     let sourceOrder: Int
     let durationSec: Double
+    /// Build 23 (audio first): {"audio_uri": "<voice file>"} -- the server cuts from it while the
+    /// video (uri) is still uploading. nil = not sent.
+    var metadata: [String: String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case originalName = "original_name"
         case uri
         case sourceOrder = "source_order"
         case durationSec = "duration_sec"
+        case metadata
     }
 }
 

@@ -30,6 +30,14 @@ enum PendingUploadFinisher {
         var finished = 0
 
         for record in await PendingCutStore.shared.list() where !ActiveUploads.shared.contains(record.projectID) {
+            if BackgroundVideoUploads.shared.isRunning(record.projectID) { continue }
+            // Build 23: the cut already started from the voice; only the video is left: it goes on
+            // uploading by itself (only the parts R2 does not have yet).
+            if record.jobID != nil {
+                CutSellDiagnostics.log("video_background_resumed", ["reason": reason])
+                BackgroundVideoUploads.shared.start(record: record, session: current)
+                continue
+            }
             var ready = true
             for video in record.videos {
                 let state = await MultipartUploadManager.shared.readiness(fileURL: video.fileURL, projectID: record.projectID,

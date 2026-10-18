@@ -146,19 +146,20 @@ final class CutTracker: ObservableObject {
         let job = cut.jobProgress
         func scaled(_ fallback: Int) -> Int { 20 + Int(Double(job ?? fallback) * 0.8) }
         switch state {
+        // Build 23: one honest name for the server's work, with what it is doing now.
         case "queued", "uploaded", "preparing", "created":
-            return Stage(step: 3, title: "Waiting for CutSell", percent: scaled(2))
+            return Stage(step: 3, title: "Cutting your video… starting", percent: scaled(2))
         case "transcribing":
-            return Stage(step: 4, title: "Listening to your video", percent: scaled(12))
+            return Stage(step: 4, title: "Cutting your video… listening", percent: scaled(12))
         case "analyzing":
             let p = job ?? 30
             return p < 50
-                ? Stage(step: 5, title: "Finding your best takes", percent: scaled(30))
-                : Stage(step: 6, title: "Structuring your cut", percent: scaled(55))
+                ? Stage(step: 5, title: "Cutting your video… choosing the best takes", percent: scaled(30))
+                : Stage(step: 6, title: "Cutting your video… building the edit", percent: scaled(55))
         case "composing":
-            return Stage(step: 7, title: "Building your sales edit", percent: scaled(84))
+            return Stage(step: 7, title: "Cutting your video… almost done", percent: scaled(84))
         default:
-            return Stage(step: 3, title: "Waiting for CutSell", percent: scaled(2))
+            return Stage(step: 3, title: "Cutting your video… starting", percent: scaled(2))
         }
     }
 

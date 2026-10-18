@@ -317,6 +317,23 @@ actor MultipartUploadManager {
                                   sourceURI: sourceURI.isEmpty ? start.sourceURI : sourceURI, sizeBytes: start.sizeBytes)
     }
 
+    /// Build 23 (audio first): the multipart session of a video, created now (or the saved one) so the
+    /// cut can name the video's storage URI before any byte of it is uploaded.
+    func begin(fileURL: URL, projectID: String, session: CutSellSession, contentType: String) async throws -> MultipartStartResponse {
+        let size = ((try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        guard size > 0 else { throw UploadError.emptyFile }
+        if let saved = await resumeStore.record(fileURL: fileURL, projectID: projectID, size: size),
+           saved.start.userID == session.userID, saved.start.sizeBytes == size {
+            return saved.start
+        }
+        let start = try await Retry.run("start") {
+            try await createStart(fileURL: fileURL, projectID: projectID, session: session, contentType: contentType, size: size)
+        }
+        await resumeStore.save(start: start, fileURL: fileURL, projectID: projectID, size: size)
+        UploadLedger.shared.begin(start)
+        return start
+    }
+
     enum Readiness: Equatable { case notStarted, partsMissing, allPartsUploaded, completed }
 
     /// Build 22: what this iPhone knows about a video's upload (no network): the finisher completes

@@ -1754,6 +1754,17 @@ final class DraftEditorViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000)
             waited += 0.5
         }
+        // Build 23 (audio first): the export needs the full video; it may still be uploading in the
+        // background. Wait for it (the editor already plays the iPhone's own copy).
+        while BackgroundVideoUploads.shared.isUploading(project.projectID) {
+            exportPreparing = BackgroundVideoUploads.shared.status(project.projectID)?.text ?? "Uploading your video…"
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        if let failed = BackgroundVideoUploads.shared.status(project.projectID)?.failed {
+            exportPreparing = nil
+            errorMessage = "Your video hasn’t finished uploading (\(failed)). Open CutSell on a good connection and try the export again."
+            return
+        }
         _ = await actionChain?.value
         let preparedSeconds = Date().timeIntervalSince(started)
         guard let snapshot else { exportPreparing = nil; return }
