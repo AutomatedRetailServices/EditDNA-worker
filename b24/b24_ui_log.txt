@@ -1,11 +1,15 @@
-B24UI    21.1 Photos access allowed
-B24UI    28.6 PASS Processing screen
-B24UI    28.9 PASS Continue in background active while: Creating your project
-B24UI    30.9 PASS screen closed, work goes on · Creating your project
-B24UI    34.3 rows after continue: []
-B24UI    81.3 rows after Home: []
-B24UI    81.5 closing CutSell with rows: []
-B24UI   134.4 rows after reopen: []
-B24UI   380.3 PASS the cut finished after leaving and closing CutSell
-B24UI   380.7 FAILURES: none
-B24UI    76.1 FAIL bulk sheet shown
+B24UI    69.8 Photos access allowed
+B24UI    71.5 gallery CTA: Create 1 cut
+B24UI    81.0 PASS Processing screen
+B24UI    82.3 PASS Continue in background active while: Preparing your video
+B24UI    91.8 PASS screen closed, work goes on · Preparing your video
+B24UI   101.8 no Processing chip
+B24UI   102.2 rows after continue: []
+B24UI   148.4 rows after Home: []
+B24UI   148.4 closing CutSell with rows: []
+B24UI   172.8 no Processing chip
+B24UI   196.3 rows after reopen: []
+B24UI   437.4 PASS the cut finished after leaving and closing CutSell
+B24UI   437.7 FAILURES: none
+B24UI    23.2 gallery CTA: Create 1 cut
+B24UI    77.0 FAIL bulk sheet shown
