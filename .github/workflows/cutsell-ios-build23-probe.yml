@@ -111,7 +111,7 @@ jobs:
           status=0
           xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/v60.mp4"; sleep 3
           xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/v180.mp4"; sleep 3
-          for run in 3min_after_180_330 3min_before_180_0; do
+          for run in 3min_after_180_300; do
             set -- $(echo "$run" | tr '_' ' ')
             start=$(date '+%Y-%m-%d %H:%M:%S')
             set +e

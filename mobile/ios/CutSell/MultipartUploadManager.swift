@@ -415,6 +415,10 @@ actor MultipartUploadManager {
                 CutSellDiagnostics.log("upload_background_unavailable", ["part": String(partNumber)])
             }
         }
+        // Build 23: at most 3 parts at a time in the normal session. Queued all at once, the parts
+        // waiting for a connection ran out their 90 s and were retried (probe, 3-min video at 1 MB/s).
+        await foregroundSlots.acquire()
+        defer { Task { await foregroundSlots.release() } }
         var request = URLRequest(url: signedURL)
         request.httpMethod = "PUT"
         // Same empty Content-Type the server signs (see BackgroundPartUploader).
@@ -427,6 +431,8 @@ actor MultipartUploadManager {
         onBytes?(bytes)
         return http
     }
+
+    static let foregroundSlots = AsyncSlots(3)
 
     /// The normal session (short B-roll uploads, and the fallback). A request fails only after
     /// 90 s with no byte moving; three parts at a time.
@@ -464,6 +470,22 @@ actor MultipartUploadManager {
             .appendingPathComponent(Self.folderName(for: uploadID), isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
+    }
+}
+
+/// A small async semaphore: `count` holders at a time, the rest wait in order.
+actor AsyncSlots {
+    private var free: Int
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    init(_ count: Int) { free = count }
+
+    func acquire() async {
+        if free > 0 { free -= 1; return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func release() {
+        if waiting.isEmpty { free += 1 } else { waiting.removeFirst().resume() }
     }
 }
 
