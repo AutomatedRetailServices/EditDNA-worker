@@ -113,6 +113,7 @@ def process_with_simple_engine(
     progress: Optional[ProgressCallback] = None,
     transcribe: Optional[Callable[..., dict]] = None,
     llm: Optional[Callable[[str], "tuple[str, dict]"]] = None,
+    audio_only: Optional[set] = None,
 ) -> ProcessingResult:
     """`transcribe` and `llm` are injectable for tests; production uses Deepgram and Anthropic."""
     notify = progress or (lambda stage, percent: None)
@@ -156,7 +157,10 @@ def process_with_simple_engine(
 
             notify("analyzing", base + int(30 / total))
             # The silence refine reads the audio decoded from the source file itself (what it was calibrated on).
-            out = _process(words, duration, path, video_path=path, llm=llm)
+            # A voice-only source (audio first) has no picture yet: no shot-change snap for its first cut.
+            voice_only = bool(audio_only) and source.source_asset_id in audio_only
+            out = _process(words, duration, path, video_path=None if voice_only else path,
+                           scene_cut_list=[] if voice_only else None, llm=llm)
             notify("composing", base + int(70 / total))
 
             hidden_index = 0

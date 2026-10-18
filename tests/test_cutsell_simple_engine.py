@@ -823,3 +823,74 @@ def test_every_engine_call_is_tagged_with_its_step(video):
     splits, info = engine.decide_reviewed(words, 4.0, call)
     engine.fix_words_and_moments(words, splits, call)
     assert steps == ["pass", "decision", "haul_review", "sale_review", "fixwords"]
+
+
+# ------------------------------------------------------------------ audio first (iOS build 23)
+
+def test_audio_first_source_is_cut_from_its_voice_file_without_waiting_for_the_video(wired_worker, monkeypatch, video, tmp_path):
+    import subprocess
+    voice = str(tmp_path / "voice.m4a")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", video, "-vn", "-ac", "1", "-c:a", "aac", "-b:a", "64k", voice], check=True)
+    monkeypatch.setenv("CUTSELL_ENGINE", "simple")
+    monkeypatch.setattr(worker_job, "build_brain_runtime", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no legacy")))
+    monkeypatch.setattr(se_asr, "transcribe_words", _fake_transcribe)
+    monkeypatch.setattr(se_llm, "call_anthropic", FakeLLM())
+    seen = {"videos": []}
+    from cutsell_worker import simple_engine_adapter as adapter
+    real = adapter._process
+
+    def spy(words, duration, path, video_path=None, scene_cut_list=None, llm=None):
+        seen["videos"].append((path, video_path, scene_cut_list))
+        return real(words, duration, path, video_path=video_path, scene_cut_list=scene_cut_list, llm=llm)
+
+    monkeypatch.setattr(adapter, "_process", spy)
+    downloads = []
+    original_download = worker_job.download_source
+
+    def tracking(uri, destination, *, client=None):
+        downloads.append(uri)
+        return original_download(uri, destination)
+
+    monkeypatch.setattr(worker_job, "download_source", tracking)
+    gate_inputs = []
+    monkeypatch.setattr(worker_job, "resolve_sources_for_editorial_entry",
+                        lambda paths, **kw: (gate_inputs.append(dict(paths)) or (dict(paths), [], [], [])))
+    payload = {"project_id": "p1", "user_id": "u1", "sources": [
+        {"source_asset_id": "s1", "uri": "s3://bucket/users/u1/projects/p1/uploads/not-there-yet.mp4",
+         "original_name": "clip.mp4", "metadata": {"audio_uri": voice}}]}
+
+    result = worker_job.run_flow_b_job(payload)
+
+    assert downloads == [voice]                                 # the video was never needed
+    assert gate_inputs == [{}]                                  # no video format gate on a voice file
+    assert seen["videos"] and seen["videos"][0][1] is None and seen["videos"][0][2] == []
+    assert result["primary_video"] == {"status": "waiting_for_video"} and result["audio_first_sources"] == ["s1"]
+    stored = wired_worker["drafts"][0]
+    assert stored["sources"][0]["uri"].endswith("not-there-yet.mp4")   # the draft points at the video
+    assert stored["sources"][0]["timeline_assets"]["status"] == "waiting_for_video"
+    assert stored["draft"]["selected"]
+
+
+def test_video_followup_registers_the_primary_video(wired_worker, monkeypatch, video):
+    import cutsell_worker.timeline_asset_s3 as assets
+    registered = []
+    monkeypatch.setattr(assets, "register_primary_video", lambda **kw: registered.append(kw) or {"status": "registered"})
+    out = worker_job.run_video_followup_job({"project_id": "p1", "user_id": "u1", "uri": video, "source_order": 0})
+    assert out["state"] == "video_ready" and out["primary_video"] == {"status": "registered"}
+    assert registered and registered[0]["source_uri"] == video
+    out = worker_job.run_video_followup_job({"project_id": "p1", "user_id": "u1", "uri": video, "source_order": 1})
+    assert out["primary_video"] == {"status": "not_first_source"} and len(registered) == 1
+
+
+def test_video_ready_endpoint_queues_the_followup(monkeypatch):
+    from fastapi.testclient import TestClient
+    import cutsell_app.main as api
+    queued = []
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kw: None)
+    monkeypatch.setattr(api, "enqueue_video_followup", lambda payload: queued.append(payload) or SimpleNamespace(job_id="j9", queue_name="cutsell"))
+    client = TestClient(api.app)
+    response = client.post("/v1/projects/p1/video-ready", json={"user_id": "u1", "uri": "s3://b/k.mp4", "source_order": 0})
+    assert response.status_code == 202 and response.json()["job_id"] == "j9"
+    assert queued == [{"project_id": "p1", "user_id": "u1", "uri": "s3://b/k.mp4", "source_order": 0}]
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kw: (_ for _ in ()).throw(ValueError("not yours")))
+    assert client.post("/v1/projects/p1/video-ready", json={"user_id": "u1", "uri": "s3://x"}).status_code == 422

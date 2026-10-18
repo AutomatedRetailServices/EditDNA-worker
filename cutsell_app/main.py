@@ -42,7 +42,7 @@ from cutsell_worker.draft_store import (
     undo_draft_snapshot,
 )
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
-from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
+from cutsell_worker.queueing import enqueue_export, enqueue_flow_b, enqueue_video_followup
 from cutsell_worker.serde import draft_from_dict
 from .clean_audio_routes import router as clean_audio_router
 from cutsell_worker.source_identity import stable_source_id
@@ -377,6 +377,24 @@ def submit_flow_b(payload: FlowBSubmitRequest):
         processing_payload["dialogue_overlap_enabled"] = payload.dialogue_overlap_enabled
     submission = enqueue_flow_b(processing_payload)
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
+
+
+class VideoReadyRequest(BaseModel):
+    user_id: str
+    uri: str
+    source_order: int = Field(default=0, ge=0)
+
+
+@app.post("/v1/projects/{project_id}/video-ready", status_code=status.HTTP_202_ACCEPTED)
+def video_ready(project_id: str, payload: VideoReadyRequest):
+    """Audio first (iOS build 23): the video of a source cut from its voice only is now on storage."""
+    try:
+        validate_product_source_uri(payload.uri, project_id=project_id, user_id=payload.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    submission = enqueue_video_followup({"project_id": project_id, "user_id": payload.user_id,
+                                         "uri": payload.uri, "source_order": payload.source_order})
+    return {"job_id": submission.job_id, "queue": submission.queue_name}
 
 
 @app.get("/v1/projects/{project_id}/draft")

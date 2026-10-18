@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 
 from .asr import FasterWhisperASR
@@ -434,9 +435,24 @@ def resolve_sources_for_editorial_entry(
     return resolved_local_paths, source_format_diagnostics, normalization_diagnostics, blocked_sources
 
 
-def _build_timeline_assets(request, local_paths: dict[str, str], directory: str) -> dict[str, dict]:
+def audio_first_uri(source, *, project_id: str, user_id: str) -> str | None:
+    """The voice-only file of an audio-first source (iOS build 23), validated like any source URI."""
+    raw = (source.metadata or {}).get("audio_uri") if isinstance(source.metadata, dict) else None
+    if not raw:
+        return None
+    validate_product_source_uri(str(raw), project_id=project_id, user_id=user_id)
+    return str(raw)
+
+
+def _build_timeline_assets(request, local_paths: dict[str, str], directory: str,
+                           audio_only: set[str] | None = None) -> dict[str, dict]:
     output: dict[str, dict] = {}
     for source in request.sources:
+        if audio_only and source.source_asset_id in audio_only:
+            # Made from the video by the follow-up job (run_video_followup_job) when it arrives.
+            output[source.source_asset_id] = {"status": "waiting_for_video", "filmstrip": [], "waveform_uri": None,
+                                              "waveform_bucket_count": 0}
+            continue
         try:
             source_path = local_paths[source.source_asset_id]
             probe = probe_media(source_path)
@@ -553,27 +569,41 @@ def run_flow_b_job(payload: dict) -> dict:
         with tempfile.TemporaryDirectory(prefix="cutsell-flow-b-") as directory:
             local_paths = {}
             measured_by_source: dict[str, float] = {}
+            # Audio first (iOS build 23): a source can arrive with only its voice (metadata.audio_uri,
+            # a small AAC file) while the video is still uploading. The cut needs only the voice; the
+            # video is used later (export, timeline strip, primary video) once it is on storage.
+            audio_only: set[str] = set()
             for index, source in enumerate(request.sources):
                 validate_product_source_uri(
                     source.uri,
                     project_id=request.project_id,
                     user_id=request.user_id,
                 )
-                suffix = Path(source.original_name).suffix or ".mp4"
-                destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}")
-                local_paths[source.source_asset_id] = download_source(source.uri, destination)
+                audio_uri = audio_first_uri(source, project_id=request.project_id, user_id=request.user_id)
+                if audio_uri:
+                    audio_only.add(source.source_asset_id)
+                    destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}.m4a")
+                    local_paths[source.source_asset_id] = download_source(audio_uri, destination)
+                else:
+                    suffix = Path(source.original_name).suffix or ".mp4"
+                    destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}")
+                    local_paths[source.source_asset_id] = download_source(source.uri, destination)
                 probe = probe_media(local_paths[source.source_asset_id])
                 measured_by_source[source.source_asset_id] = float(probe.duration_sec)
                 measured_seconds += max(0.0, float(probe.duration_sec))
                 publish("preparing", min(10, 2 + int((index + 1) * 8 / len(request.sources))))
 
             downloaded_paths = dict(local_paths)
+            # The video format gate is for videos; a voice-only source skips it (its video is checked
+            # by the follow-up job when it arrives).
+            video_paths = {key: path for key, path in local_paths.items() if key not in audio_only}
             (
-                local_paths,
+                resolved_video_paths,
                 source_format_diagnostics,
                 source_normalization_diagnostics,
                 blocked_sources,
-            ) = resolve_sources_for_editorial_entry(local_paths, output_directory=directory)
+            ) = resolve_sources_for_editorial_entry(video_paths, output_directory=directory)
+            local_paths = {key: resolved_video_paths.get(key, path) for key, path in local_paths.items()}
             if blocked_sources:
                 # D-272A Stage 3-9, extended by D-274F Stage 5/6/19/20:
                 # every source must reach ACCEPT -- either natively or via
@@ -589,7 +619,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 from .simple_engine import llm as simple_engine_llm
                 from .simple_engine_adapter import process_with_simple_engine
 
-                result = process_with_simple_engine(request, local_paths, progress=publish)
+                result = process_with_simple_engine(request, local_paths, progress=publish, audio_only=audio_only)
                 serialized = result_to_dict(result)
                 serialized["brain_backend"] = "simple_engine"
                 serialized["external_brain_calls_enabled"] = True
@@ -626,7 +656,7 @@ def run_flow_b_job(payload: dict) -> dict:
             serialized["source_normalization_diagnostics"] = source_normalization_diagnostics
 
             publish("draft_ready", 94)
-            timeline_assets = _build_timeline_assets(request, local_paths, directory)
+            timeline_assets = _build_timeline_assets(request, local_paths, directory, audio_only=audio_only)
             source_records = [
                 {
                     "source_asset_id": source.source_asset_id,
@@ -652,9 +682,12 @@ def run_flow_b_job(payload: dict) -> dict:
             serialized["timeline_assets"] = timeline_assets
             # The primary video is registered before the project reads draft_ready, so
             # the editor can place voice-over and B-roll as soon as it opens.
-            serialized["primary_video"] = _register_primary_video(
-                request, downloaded_paths, local_paths, directory,
+            serialized["primary_video"] = (
+                {"status": "waiting_for_video"} if audio_only and min(
+                    request.sources, key=lambda source: source.source_order).source_asset_id in audio_only
+                else _register_primary_video(request, downloaded_paths, local_paths, directory)
             )
+            serialized["audio_first_sources"] = sorted(audio_only)
             serialized["project_tracking_start"] = tracking_start
             serialized["project_tracking"] = safe_update_project(
                 user_id=request.user_id,
@@ -711,3 +744,30 @@ def run_flow_b_job(payload: dict) -> dict:
                 metadata={"job_id": job_id, "outcome": outcome, "source_count": len(request.sources)},
             )
         release_processing_slot(user_id=request.user_id)
+
+def run_video_followup_job(payload: dict) -> dict:
+    """Audio first (iOS build 23): the video of a source whose cut was made from its voice only has now
+    finished uploading. Registers it as the project's primary video (the base B-roll and voice-over
+    are placed on) when it is the first source. The cut itself is never changed. Never raises for a
+    missing piece: the result says what happened."""
+    project_id = str(payload.get("project_id") or "")
+    user_id = str(payload.get("user_id") or "")
+    uri = str(payload.get("uri") or "")
+    source_order = int(payload.get("source_order") or 0)
+    if not project_id or not user_id or not uri:
+        raise ValueError("project_id, user_id and uri are required")
+    validate_product_source_uri(uri, project_id=project_id, user_id=user_id)
+    started = time.time()
+    with tempfile.TemporaryDirectory(prefix="cutsell-video-followup-") as directory:
+        suffix = Path(uri).suffix or ".mp4"
+        local = download_source(uri, str(Path(directory) / f"video{suffix}"))
+        probe = probe_media(local)
+        primary: dict = {"status": "not_first_source"}
+        if source_order == 0:
+            from .timeline_asset_s3 import register_primary_video
+            primary = register_primary_video(
+                user_id=user_id, project_id=project_id, source_uri=uri,
+                original_local_path=local, cut_local_path=local, scratch_dir=directory,
+            )
+    return {"state": "video_ready", "source_order": source_order, "duration_sec": round(float(probe.duration_sec), 3),
+            "primary_video": primary, "seconds": round(time.time() - started, 2)}
