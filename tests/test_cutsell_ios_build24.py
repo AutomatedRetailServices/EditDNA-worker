@@ -83,3 +83,10 @@ def test_bulk_sheet_buttons_keep_their_ids():
     ios = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
     queue = (ios / "ProcessingQueue.swift").read_text()
     assert '.accessibilityElement(children: .contain)\n        .accessibilityIdentifier("bulkStartedSheet")' in queue
+
+
+def test_paused_uploads_follow_the_queue():
+    ios = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    projects = (ios / "ProjectsView.swift").read_text()
+    assert "!ActiveUploads.shared.contains(pending.projectID)" in projects
+    assert ".onReceive(queue.$items.dropFirst())" in projects

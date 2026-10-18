@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Edits filters (Figma 1134:2683 / 1134:2885): Processing (N) · Ready (N) · Drafts (N) · All (N).
 /// Build 24 (Product Owner, 18 Oct): "Processing" is shown only while something is being made; a
@@ -60,7 +61,10 @@ struct ProjectsView: View {
     private var processingRows: [ProcessingQueue.Row] {
         var rows = queue.rows(projects: appState.projects, tracker: tracker)
         let listed = Set(rows.compactMap(\.projectID))
-        for pending in pendingCuts where !listed.contains(pending.projectID) {
+        // A record whose upload is running in CutSell right now is not "paused" (its queue row already
+        // shows Uploading); only a really interrupted upload is listed as Failed with Retry.
+        for pending in pendingCuts where !listed.contains(pending.projectID)
+            && !ActiveUploads.shared.contains(pending.projectID) {
             rows.append(ProcessingQueue.Row(id: "pending-" + pending.projectID, itemID: nil, projectID: pending.projectID,
                                             name: pending.title.isEmpty ? "Interrupted Cut" : pending.title,
                                             duration: pending.videos.reduce(0) { $0 + $1.duration },
@@ -202,6 +206,10 @@ struct ProjectsView: View {
                     .onDisappear { Task { await refreshPendingCuts() } }
             }
             .task { await refreshPendingCuts() }
+            // Build 24: the paused-upload list follows the queue (a cut that started from its voice or
+            // finished uploading leaves it right away instead of staying as a stale "Failed").
+            .onReceive(queue.$items.dropFirst()) { _ in Task { await refreshPendingCuts() } }
+            .onReceive(tracker.$cuts.dropFirst()) { _ in Task { await refreshPendingCuts() } }
             // "Go to Edits" (Bulk sheet / Processing screen) opens on Processing.
             .onAppear { takeRequestedFilter() }
             .onChange(of: queue.requestedEditsFilter) { _, _ in takeRequestedFilter() }
