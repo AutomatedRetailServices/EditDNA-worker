@@ -338,10 +338,11 @@ def test_cut_job_hook_never_fails_the_cut(monkeypatch):
 
 def test_primary_video_is_registered_before_the_project_reads_draft_ready():
     source = inspect.getsource(worker_job.run_flow_b_job)
-    hook = source.index('serialized["primary_video"] = _register_primary_video(')
+    # Build 23 (audio first): a voice-only first source waits for its video (follow-up job).
+    hook = source.index('else _register_primary_video(request, downloaded_paths, local_paths, directory)')
     ready = source.index('state="draft_ready"')
     assert source.index("create_initial_draft(") < hook < ready
-    assert source.index("downloaded_paths = dict(local_paths)") < source.index("resolve_sources_for_editorial_entry(local_paths")
+    assert source.index("downloaded_paths = dict(local_paths)") < source.index("resolve_sources_for_editorial_entry(video_paths")
 
 
 # ---------------------------------------------------------------------------
