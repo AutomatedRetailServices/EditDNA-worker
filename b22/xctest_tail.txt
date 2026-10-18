@@ -1,0 +1,53 @@
+74s Checking existence of `"processingPercent" Any`
+    t =   369.11s Find the "processingPercent" Any
+    t =   369.46s Find the "processingStage" Any
+    t =   370.20s Find the "processingStage" StaticText
+    t =   372.57s Checking existence of `"readyReviewButton" Any`
+    t =   373.50s Checking existence of `"uploadTryAgain" Any`
+    t =   374.06s Checking existence of `"uploadStalled" Any`
+    t =   374.64s Checking existence of `"Upload paused" StaticText`
+    t =   374.69s Checking existence of `"Couldn’t start the cut" StaticText`
+    t =   374.78s Checking existence of `"processingStage" Any`
+    t =   374.99s Checking existence of `"processingPercent" Any`
+    t =   375.28s Find the "processingPercent" Any
+    t =   375.56s Find the "processingStage" Any
+    t =   375.73s Find the "processingStage" StaticText
+    t =   377.52s Checking existence of `"readyReviewButton" Any`
+B22UI   378.8 screen steps: 5s Creating your project … → 10s Uploading your video 0% → 23s Uploading your video 7% → 29s Uploading your video 10% → 34s Uploading your video 11% → 38s Uploading your video 14% → 42s Uploading your video 16% → 46s Uploading your video 17% → 51s Uploading your video 19% → 55s Uploading your video 21% → 61s Uploading your video 23% → 67s Uploading your video 26% → 74s Uploading your video 28% → 81s Uploading your video 32% → 86s Uploading your video 33% → 94s Uploading your video 37% → 103s Uploading your video 41% → 177s Uploading your video 72% → 182s Uploading your video 74% → 187s Uploading your video 76% → 194s Uploading your video 79% → 198s Uploading your video 80% → 202s Uploading your video 82% → 210s Uploading your video 85% → 281s Waiting for CutSell 53% → 285s Waiting for CutSell 95%
+B22UI   378.8 PASS left CutSell mid-upload (60 s) and came back
+B22UI   378.8 PASS left CutSell near the end (60 s) and came back
+B22UI   378.8 PASS no Try again needed
+B22UI   378.8 PASS upload finished · 270 s uploading (limited to ~0.5 MB/s)
+B22UI   378.8 PASS no 'No data sent' notice
+B22UI   378.8 PASS upload % never went back
+B22UI   378.8 PASS no error screen
+B22UI   378.8 PASS processed · 302 s from Create
+    t =   378.89s Tap "readyReviewButton" Any
+    t =   378.89s     Wait for ai.cutsell.app to idle
+    t =   378.89s     Find the "readyReviewButton" Any
+    t =   379.49s     Check for interrupting elements affecting "readyReviewButton" Button
+    t =   379.68s     Synthesize event
+    t =   380.03s     Wait for ai.cutsell.app to idle
+    t =   381.83s Waiting 120.0s for "timelineV4" Any to exist
+    t =   382.86s     Checking `Expect predicate `existsNoRetry == 1` for object "timelineV4" Any`
+    t =   382.89s         Checking existence of `"timelineV4" Any`
+B22UI   388.7 PASS opens in the editor
+B22UI   388.7 FAILURES: none
+    t =   388.61s Tear Down
+Test Case '-[CutSellUITests.Build22UITests testThrottledUploadLeavingTheApp]' passed (389.835 seconds).
+Test Suite 'Build22UITests' passed at 2026-10-18 16:22:22.177.
+	 Executed 1 test, with 0 failures (0 unexpected) in 389.835 (389.843) seconds
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 16:22:22.182.
+	 Executed 1 test, with 0 failures (0 unexpected) in 389.835 (389.849) seconds
+Test Suite 'Selected tests' passed at 2026-10-18 16:22:22.183.
+	 Executed 1 test, with 0 failures (0 unexpected) in 389.835 (389.852) seconds
+2026-10-18 16:22:24.175 xcodebuild[15823:49448] [MT] IDETestOperationsObserverDebug: 439.102 elapsed -- Testing started completed.
+2026-10-18 16:22:24.175 xcodebuild[15823:49448] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-18 16:22:24.175 xcodebuild[15823:49448] [MT] IDETestOperationsObserverDebug: 439.102 sec, +439.102 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/build/Logs/Test/Test-CutSellUITests-2026.10.18_16-14-55-+0000.xcresult
+
+** TEST EXECUTE SUCCEEDED **
+
+Testing started
