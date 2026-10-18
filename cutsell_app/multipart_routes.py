@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from cutsell_worker.multipart_uploads import (
+    StorageError,
     abort_multipart_upload,
     complete_multipart_upload,
     list_multipart_parts,
@@ -21,11 +22,19 @@ class MultipartStartRequest(BaseModel):
     original_name: str
     content_type: str | None = None
     size_bytes: int = Field(gt=0)
+    # Optional (iOS build 21 asks for 8 MiB). Absent = the server default (16 MiB). R2/S3 minimum
+    # is 5 MiB for every part but the last.
+    part_size: int | None = Field(default=None, ge=5 * 1024 * 1024, le=64 * 1024 * 1024)
 
 
 class MultipartOwnerRequest(BaseModel):
     project_id: str
     user_id: str
+
+
+class MultipartSignRequest(MultipartOwnerRequest):
+    # Optional link life (60-3600 s); absent = 900 s as before.
+    expires_in: int | None = Field(default=None, ge=60, le=3600)
 
 
 class MultipartPart(BaseModel):
@@ -38,6 +47,11 @@ class MultipartCompleteRequest(MultipartOwnerRequest):
 
 
 def _translate_error(exc: Exception):
+    if isinstance(exc, StorageError):
+        # R2's own code and message reach the app (shown in Diagnostics).
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    if isinstance(exc, ValueError) and "already completed" in str(exc):
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     if isinstance(exc, KeyError):
         raise HTTPException(status_code=404, detail="multipart upload session not found") from None
     if isinstance(exc, PermissionError):
@@ -58,6 +72,7 @@ def start_upload(payload: MultipartStartRequest):
             original_name=payload.original_name,
             content_type=payload.content_type,
             size_bytes=payload.size_bytes,
+            **({"part_size": payload.part_size} if payload.part_size else {}),
         )
     except Exception as exc:
         _translate_error(exc)
@@ -76,13 +91,14 @@ def resume_upload(upload_id: str, project_id: str, user_id: str):
 
 
 @router.post("/{upload_id}/parts/{part_number}/presign")
-def sign_part(upload_id: str, part_number: int, payload: MultipartOwnerRequest):
+def sign_part(upload_id: str, part_number: int, payload: MultipartSignRequest):
     try:
         return presign_multipart_part(
             upload_id=upload_id,
             project_id=payload.project_id,
             user_id=payload.user_id,
             part_number=part_number,
+            **({"expires_in": payload.expires_in} if payload.expires_in else {}),
         )
     except Exception as exc:
         _translate_error(exc)

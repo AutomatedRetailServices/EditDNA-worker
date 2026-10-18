@@ -107,7 +107,22 @@ def test_multipart_session_can_resume_sign_and_complete(monkeypatch):
     assert completed["state"] == "uploaded"
     assert completed["source_uri"].startswith("s3://bucket/cutsell/uploads/")
     assert s3.completed[0]["MultipartUpload"]["Parts"][0]["PartNumber"] == 1
-    assert redis.data == {}
+    # Build 22: the session stays (24 h) as completed -- a repeated complete is not a 404.
+    again = multipart.complete_multipart_upload(
+        upload_id="upload-123", user_id="user-1", project_id="project-1",
+        parts=[{"part_number": 1, "etag": '"etag-1"'}], s3=s3, redis_client=redis,
+    )
+    assert again == completed and len(s3.completed) == 1
+    status = multipart.list_multipart_parts(
+        upload_id="upload-123", user_id="user-1", project_id="project-1", s3=s3, redis_client=redis,
+    )
+    assert status["state"] == "completed" and status["source_uri"] == completed["source_uri"]
+    try:
+        multipart.presign_multipart_part(upload_id="upload-123", user_id="user-1", project_id="project-1",
+                                         part_number=1, s3=s3, redis_client=redis)
+        raise AssertionError("a completed upload must not sign parts")
+    except ValueError as exc:
+        assert "already completed" in str(exc)
 
 
 def test_multipart_session_rejects_wrong_owner(monkeypatch):
@@ -254,3 +269,45 @@ def test_part_url_is_sigv4_for_r2_endpoint(monkeypatch):
     assert out["upload_url"].startswith("https://example.r2.cloudflarestorage.com/")
     assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in out["upload_url"]
     assert "/auto/s3/aws4_request" in out["upload_url"].replace("%2F", "/")
+
+
+def test_routes_accept_optional_part_size_and_link_life():
+    from cutsell_app.multipart_routes import MultipartSignRequest, MultipartStartRequest
+    import pydantic
+
+    base = {"project_id": "p", "user_id": "u", "original_name": "a.mp4", "size_bytes": 10}
+    assert MultipartStartRequest(**base).part_size is None
+    assert MultipartStartRequest(**base, part_size=8 * 1024 * 1024).part_size == 8 * 1024 * 1024
+    for bad in (1024, 65 * 1024 * 1024):
+        try:
+            MultipartStartRequest(**base, part_size=bad)
+        except pydantic.ValidationError:
+            continue
+        raise AssertionError(bad)
+    assert MultipartSignRequest(project_id="p", user_id="u").expires_in is None
+    assert MultipartSignRequest(project_id="p", user_id="u", expires_in=3600).expires_in == 3600
+
+
+def test_r2_refusal_reaches_the_app_with_its_code(monkeypatch):
+    redis = FakeRedis()
+
+    class Refusing(FakeS3):
+        def complete_multipart_upload(self, **kwargs):
+            exc = Exception("boom")
+            exc.response = {"Error": {"Code": "InvalidPart", "Message": "One or more of the specified parts could not be found."}}
+            raise exc
+
+    s3 = Refusing()
+    monkeypatch.setattr(multipart, "prepare_upload_target", lambda **kwargs: _target(kwargs["size_bytes"]))
+    multipart.start_multipart_upload(project_id="p", user_id="u", original_name="v.mov", content_type="video/quicktime",
+                                     size_bytes=20 * 1024 * 1024, s3=s3, redis_client=redis)
+    monkeypatch.setattr(routes, "complete_multipart_upload",
+                        lambda **kw: multipart.complete_multipart_upload(**kw, s3=s3, redis_client=redis))
+    client = TestClient(app)
+    response = client.post("/v1/uploads/multipart/upload-123/complete",
+                           json={"project_id": "p", "user_id": "u",
+                                 "parts": [{"part_number": 1, "etag": "a"}, {"part_number": 2, "etag": "b"}]})
+    assert response.status_code == 502
+    assert "InvalidPart" in response.json()["detail"] and "CompleteMultipartUpload" in response.json()["detail"]
+    # Not completed: the session is still open for a retry.
+    assert "completed" not in json.loads(list(redis.data.values())[0])
