@@ -131,3 +131,25 @@ Cost: one extra call per sale video (~USD 0.01), three when a fix is proposed (~
 - Prompt caching was not adopted: within one video the shared prompt is read again only when a review needs
   a second reading (about 1 video in 5). At low volume, the cache-write premium on every first call costs
   about as much as the reads save.
+
+## 1.2.4 candidate: token measurement + prompt caching (2026-10-18, branch feat/engine-token-cost, NOT deployed)
+Measured per Claude call on the Gold (26 videos x 2 runs), prices from platform.claude.com/docs/en/about-claude/pricing
+(Sonnet 5.5: input $2, output $10 incl. thinking, cache write 5 min $2.50, cache read $0.10 per million tokens).
+- Live 1.2.3: 3.84 c per video. Input 52 % of the cost, thinking 35 %, visible answer 13 %. Per step: decision
+  1.40 c, sale review 1.07, pass 0.49, haul review 0.45, word fix 0.44. max_tokens 16000, longest output 2763 (a
+  ceiling only, not changed). No malformed-JSON retries.
+- Changes kept: (a) each step's fixed instructions are sent as their own content block marked for prompt caching
+  (the text the model reads is byte-identical, checked on the 26 Gold videos); (b) decision, haul review and word fix
+  answer through structured output (JSON only). Every call logs step, tokens, cache tokens, max_tokens and thinking.
+- Changes reverted because they changed the cut: pass step JSON-only (Y08 read as one pass, 3 of 3 runs, free text:
+  several passes, 3 of 3) and sale review JSON-only without "why" (fixes proposed 14 vs 8 of 52, cuts changed).
+- Not done: word-index answers for the decision (the answer is already line ranges, ~70 tokens; the input would grow),
+  one transcript shared by the 4 calls (each step reads a different text: lines, KEEP/CUT lines, index:word; sharing
+  would change what the model reads), thinking/effort/max_tokens untouched.
+- Cut: the live engine itself gives the identical cut in only 11 of 26 videos between two runs (355 words decided
+  differently). Candidate vs live stays inside that band (223-469 words); Gold agreement 92.7-94.1 % vs live 93.8-95.1 %.
+  A control with caching and JSON switched off (= live requests) moved Y05/B07 exactly as much.
+- Cost per video: 2.78 c when the cached instructions are read (another video within 5 minutes, e.g. Bulk),
+  4.15 c when they must be written (a lone video). Break-even: about 1 video in 5 finding the cache warm.
+- Rollback without a redeploy: CUTSELL_SIMPLE_ENGINE_CACHE=0 (one plain text block again), CUTSELL_SIMPLE_ENGINE_JSON=0
+  (free-text answers again). Both at 0 = the live 1.2.3 requests.

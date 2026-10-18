@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
@@ -29,7 +29,8 @@ REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8"
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
 SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encoding="utf-8")
 # The pass step and the sale review keep their free-text answers, as live (measured on the Gold 2026-10-18):
-# - pass: its notes before the JSON are where it reasons; JSON-only kept a first-pass hook on Y05 in 3 of 4 runs.
+# - pass: its notes before the JSON are where it reasons; JSON-only read Y08 as one pass in 3 of 3 runs (free text:
+#   several passes, 3 of 3) -> a different cut.
 # - sale review: JSON-only without "why" proposed fixes almost twice as often (14 vs 8 of 52) and changed cuts.
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
