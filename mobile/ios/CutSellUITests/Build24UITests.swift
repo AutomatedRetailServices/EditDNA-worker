@@ -101,8 +101,11 @@ final class Build24UITests: XCTestCase {
         let tiles = app.descendants(matching: .any).matching(identifier: "galleryTile")
         _ = wait(30) { tiles.count >= count }
         guard tiles.count >= count else { check(false, "\(count) videos in the gallery", "\(tiles.count)"); return false }
-        for index in 0..<count { tiles.element(boundBy: index).tap(); pause(0.4) }
-        element("galleryCreateButton").tap()
+        for index in 0..<count { tiles.element(boundBy: index).tap(); pause(0.8) }
+        let create = element("galleryCreateButton")
+        log("gallery CTA: \(create.label)")
+        shot("gallery_\(mode)")
+        create.tap()
         let style = element("styleCreateButton")
         guard style.waitForExistence(timeout: 10) else { check(false, "style sheet"); return false }
         style.tap()
@@ -113,9 +116,12 @@ final class Build24UITests: XCTestCase {
     }
 
     private func openEdits() {
-        let edits = app.buttons["Edits"].firstMatch
-        if edits.waitForExistence(timeout: 5) { edits.tap() }
-        pause(1)
+        let edits = element("tab_edits")
+        if edits.waitForExistence(timeout: 5) { edits.tap() } else { log("no Edits tab button") }
+        pause(1.5)
+        // Edits opens on All: show Processing when it is there.
+        let processing = element("editsFilterProcessing")
+        if processing.waitForExistence(timeout: 5) { processing.tap(); pause(1) } else { log("no Processing chip") }
     }
 
     private func rowStatuses() -> [String] {
