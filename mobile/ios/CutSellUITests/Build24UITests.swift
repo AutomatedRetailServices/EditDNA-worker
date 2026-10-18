@@ -131,8 +131,19 @@ final class Build24UITests: XCTestCase {
         if processing.waitForExistence(timeout: 5) { processing.tap(); pause(1) } else { log("no Processing chip") }
     }
 
+    /// The status text of each Processing row, top to bottom. Read from one snapshot of the screen, so a
+    /// row that moves to Ready while it is being read cannot fail the test ("no matches for index 2").
     private func rowStatuses() -> [String] {
-        app.descendants(matching: .any).matching(identifier: "queueRowStatus").allElementsBoundByIndex.map(\.label)
+        guard let root = try? app.snapshot() else { return [] }
+        var found: [(y: CGFloat, label: String)] = []
+        func walk(_ node: XCUIElementSnapshot) {
+            if node.identifier == "queueRowStatus", node.elementType == .staticText {
+                found.append((node.frame.minY, node.label))
+            }
+            node.children.forEach(walk)
+        }
+        walk(root)
+        return found.sorted { $0.y < $1.y }.map(\.label)
     }
 
     /// Waits until Edits · Processing is empty; logs the rows and every "is ready" notice.
