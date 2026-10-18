@@ -77,3 +77,9 @@ def test_bulk_chip_and_processing_chip_are_findable():
     assert ".onChange(of: initialMode)" in gallery
     projects = (ios / "ProjectsView.swift").read_text()
     assert projects.count('.accessibilityElement(children: .contain)\n                            .accessibilityIdentifier("editsTabPicker")') == 2
+
+
+def test_bulk_sheet_buttons_keep_their_ids():
+    ios = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    queue = (ios / "ProcessingQueue.swift").read_text()
+    assert '.accessibilityElement(children: .contain)\n        .accessibilityIdentifier("bulkStartedSheet")' in queue

@@ -337,6 +337,7 @@ struct BulkStartedSheet: View {
         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
         .overlay(UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous)
             .stroke(Color(hex: 0x33405C), lineWidth: 1))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bulkStartedSheet")
     }
 

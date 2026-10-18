@@ -267,6 +267,7 @@ struct ProjectsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x33405C), lineWidth: 1))
                 .padding(.top, 18)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editsProcessingList")
     }
 
