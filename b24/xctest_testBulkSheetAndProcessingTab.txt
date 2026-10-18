@@ -1,7 +1,7 @@
-B24UI    20.4 gallery CTA: Create 1 cut
-B24UI    74.4 FAIL bulk sheet shown
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:162: error: -[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab] : Failed to tap "bulkGoToEdits" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"bulkGoToEdits" IN identifiers'`, given input App element pid: 31371
-Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' failed (78.800 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-18 19:56:19.380.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 19:56:19.380.
-Test Suite 'Selected tests' failed at 2026-10-18 19:56:19.381.
+B24UI    25.4 gallery CTA: Create 1 cut
+B24UI    80.0 FAIL bulk sheet shown
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:162: error: -[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab] : Failed to tap "bulkGoToEdits" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"bulkGoToEdits" IN identifiers'`, given input App element pid: 40578
+Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' failed (84.549 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-18 20:19:22.363.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 20:19:22.363.
+Test Suite 'Selected tests' failed at 2026-10-18 20:19:22.364.

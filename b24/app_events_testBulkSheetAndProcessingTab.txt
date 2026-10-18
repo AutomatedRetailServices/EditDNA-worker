@@ -1,29 +1,29 @@
 asset_export_started index=1 of=1 seconds_long=25
 audio_first=yes
 asset_resource photos_edit=no used=original
-asset_export_done mb=24 seconds=1.1
-audio_extracted kb=197 seconds=1.4 video_seconds=25
+asset_export_done mb=24 seconds=1.9
+audio_extracted kb=197 seconds=2.9 video_seconds=25
 audio_extract
-audio_uploaded kb=197 seconds=1.1 source_order=0
+audio_uploaded kb=197 seconds=1.3 source_order=0
 audio_upload
 processing_started sources=1
-job_submitted job_id=08754bb2-4d60-47e0-b974-ff3d83d3815a
-audio_first_started clips=1 job_id=08754bb2-4d60-47e0-b974-ff3d83d3815a
+job_submitted job_id=976e7e34-afe3-48fb-84d7-ac5d3c13518b
+audio_first_started clips=1 job_id=976e7e34-afe3-48fb-84d7-ac5d3c13518b
 video_background_started clips=1 mb=24
-server_step seconds=0 step=submitted
 upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=4
 upload_parts done=0 mb=24 part_mb=8 parts=4 source_order=0
+server_step seconds=0 step=submitted
 upload_background_unavailable part=1
 upload_background_unavailable part=2
-server_step progress=-1 seconds=4.6 step=created
-server_step progress=1 seconds=16.4 step=processing
-upload_part_done of=4 part=1 source_order=0
 upload_part_done of=4 part=4 source_order=0
-upload_part_done of=4 part=3 source_order=0
+server_step progress=-1 seconds=5.1 step=created
+server_step progress=42 seconds=17.0 step=processing
 upload_part_done of=4 part=2 source_order=0
+upload_part_done of=4 part=1 source_order=0
+upload_part_done of=4 part=3 source_order=0
 upload_complete_started mb=24 part_mb=8 parts=4 source_order=0
-upload_complete_done seconds=3.0 source_order=0 state=uploaded
-server_step progress=100 seconds=34.6 step=ready
-cut_ready_seen project_id=prj_a9a5f35f311e4987a798cbaa73ac6fef
+server_step progress=100 seconds=29.8 step=ready
+cut_ready_seen project_id=prj_3241eef37a904133b9c3b3c312d77baa
+upload_complete_done seconds=2.5 source_order=0 state=uploaded
 video_ready_sent source_order=0
-video_background_done seconds=37
+video_background_done seconds=34
