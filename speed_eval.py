@@ -24,7 +24,7 @@ def _ts(value):
     return value.timestamp() if value else None
 
 
-@app.function(image=image, secrets=[secret], timeout=900, cpu=0.5)
+@app.function(image=image, secrets=[secret], timeout=300, cpu=0.5)
 def queue_timings():
     from redis import Redis
     from rq import Queue
@@ -32,12 +32,11 @@ def queue_timings():
     from rq.registry import FailedJobRegistry, FinishedJobRegistry
     conn = Redis.from_url(os.environ["REDIS_URL"])
     q = Queue("cutsell", connection=conn)
-    ids = list(FinishedJobRegistry(queue=q).get_job_ids()) + list(FailedJobRegistry(queue=q).get_job_ids())
+    # Only the latest 40 finished + 20 failed jobs, fetched in one round trip each.
+    ids = list(FinishedJobRegistry(queue=q).get_job_ids(-40, -1)) + list(FailedJobRegistry(queue=q).get_job_ids(-20, -1))
     rows = []
-    for jid in ids:
-        try:
-            job = Job.fetch(jid, connection=conn)
-        except Exception:
+    for job in Job.fetch_many(ids, connection=conn):
+        if job is None:
             continue
         payload = (job.args or [{}])[0] if job.args else {}
         if not isinstance(payload, dict):
