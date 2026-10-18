@@ -109,10 +109,11 @@ jobs:
           echo "dummynet out proto tcp from any to any port 443 pipe 1" | sudo pfctl -f - 2>&1 | tail -2 || true
           sudo pfctl -E 2>&1 | tail -1 || true
           status=0
-          for run in "1min before 60 0" "1min after 60 150" "3min before 180 0" "3min after 180 300"; do
-            set -- $run
-            if [ "$2" = before ]; then xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/v$3.mp4"; sleep 3; fi
-            start=$(date -u +%Y-%m-%dT%H:%M:%S)
+          xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/v60.mp4"; sleep 3
+          xcrun simctl addmedia "$SIM_UDID" "$RUNNER_TEMP/v180.mp4"; sleep 3
+          for run in 3min_after_180_330 3min_before_180_0; do
+            set -- $(echo "$run" | tr '_' ' ')
+            start=$(date '+%Y-%m-%d %H:%M:%S')
             set +e
             TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
             TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B23_OUT="$RUNNER_TEMP/b23" \
@@ -121,6 +122,7 @@ jobs:
                 -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build23UITests \
                 CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test_$1_$2.log" 2>&1
             [ $? -ne 0 ] && status=1
+            grep -E "B23UI|error:|failed|passed|Assertion|crash" "$RUNNER_TEMP/test_$1_$2.log" | grep -v Bearer | tail -40 > "$RUNNER_TEMP/b23/xctest_$1_$2.txt" || true
             set -e
             xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
               --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(prepare_|project_created|upload_|job_|processing_|asset_|audio_|stage_timing|server_step|editor_opened|video_|icloud_|clip_|combine_|server_capab).*' \
