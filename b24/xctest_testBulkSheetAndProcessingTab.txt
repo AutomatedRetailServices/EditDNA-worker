@@ -1,0 +1,21 @@
+B24UI    19.3 PASS the bulk chip opened the gallery in bulk
+B24UI    23.4 gallery CTA: Create 3 cuts
+B24UI    48.2 PASS bulk sheet shown
+B24UI    48.9 PASS Bulk shows no single-video Processing screen (Step x of 8)
+B24UI    51.1 PASS Edits opens on Processing
+B24UI    53.5 rows at start: ["PROCESSING 53%", "PROCESSING 21%", "UPLOADING 0%"]
+B24UI    53.5 PASS 3 rows in order · PROCESSING 53%, PROCESSING 21%, UPLOADING 0%
+B24UI    55.5 bulk rows: [PROCESSING 53%, PROCESSING 21%, UPLOADING 0%]
+B24UI    61.5 bulk rows: [PROCESSING 53%, PROCESSING 53%, PROCESSING 0%]
+B24UI    68.5 bulk rows: [PROCESSING 53%, PROCESSING 21%]
+B24UI    74.0 bulk notice: ✓  c3 is ready
+B24UI    74.4 bulk rows: [PROCESSING 21%]
+B24UI    77.7 bulk rows: []
+B24UI    78.3 PASS every cut left Processing
+B24UI    78.3 PASS ready notice shown · 1
+B24UI    78.7 ready chip: Ready (4)
+B24UI    78.9 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' passed (79.312 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-18 22:49:04.315.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-18 22:49:04.316.
+Test Suite 'Selected tests' passed at 2026-10-18 22:49:04.319.
