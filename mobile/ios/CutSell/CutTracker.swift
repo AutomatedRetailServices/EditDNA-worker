@@ -26,6 +26,10 @@ final class CutTracker: ObservableObject {
         /// The server kept answering 403/404 (project deleted or not ours): stop asking.
         var gone = false
         var clientErrors = 0
+        /// Build 23: when tracking started and the last server step seen (Diagnostics: each step's time).
+        var trackedAt = Date()
+        var lastStep = ""
+        var clips = 1
     }
 
     @Published private(set) var cuts: [String: Cut] = [:]
@@ -45,7 +49,10 @@ final class CutTracker: ObservableObject {
         cut.thumbnail = thumbnail ?? cut.thumbnail
         cut.footageSeconds = footageSeconds ?? cut.footageSeconds
         if !fileName.isEmpty { cut.fileName = fileName }
+        if let count = Int(fileName.split(separator: " ").first ?? ""), fileName.hasSuffix("clips") { cut.clips = count }
+        cut.trackedAt = Date()
         cuts[projectID] = cut
+        CutSellDiagnostics.log("server_step", ["step": "submitted", "seconds": "0"])
         startLoop()
     }
 
@@ -96,6 +103,19 @@ final class CutTracker: ObservableObject {
             }
             cut.clientErrors = 0
             cut.error = cut.isFailed ? (cut.error ?? "processing_failed") : nil
+            // Build 23: every server step with its time since the cut was sent (queue, wake, listening...).
+            let step = cut.isReady ? "ready" : cut.isFailed ? "failed" : (cut.jobState == "queued" ? "queued" : cut.projectState)
+            if step != cut.lastStep {
+                cut.lastStep = step
+                let seconds = String(format: "%.1f", Date().timeIntervalSince(cut.trackedAt))
+                CutSellDiagnostics.log("server_step", ["step": step, "seconds": seconds, "progress": String(cut.jobProgress ?? -1)])
+                if cut.clips > 1 && (step == "ready" || step == "failed") {
+                    CutSellDiagnostics.log(step == "ready" ? "combine_done" : "combine_failed",
+                                           ["clips": String(cut.clips), "seconds": seconds, "reason": cut.error ?? "none"])
+                } else if cut.clips > 1 && step == "transcribing" {
+                    CutSellDiagnostics.log("combine_started", ["clips": String(cut.clips)])
+                }
+            }
         } catch APIError.http(let code, _) where (400..<500).contains(code) && code != 429 {
             cut.clientErrors += 1
             if cut.clientErrors >= 3 { cut.gone = true; cut.error = "not_found" }

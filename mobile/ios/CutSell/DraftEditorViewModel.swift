@@ -812,6 +812,12 @@ final class DraftEditorViewModel: ObservableObject {
     }
 
     func load() async {
+        let openStarted = Date()
+        defer {
+            // Build 23: how long the editor took to show the cut (Diagnostics).
+            CutSellDiagnostics.log("editor_opened", ["seconds": String(format: "%.1f", Date().timeIntervalSince(openStarted)),
+                                                     "local_video": SourceVideoCache.localURL(forURI: self.snapshot?.sources.first?.objectValue?["uri"]?.stringValue ?? "") != nil ? "yes" : "no"])
+        }
         // Open at once with the draft kept on this phone; the server's copy replaces it right after.
         let showedCached: Bool
         if snapshot == nil, let cached = DraftSnapshotCache.load(projectID: project.projectID) {
