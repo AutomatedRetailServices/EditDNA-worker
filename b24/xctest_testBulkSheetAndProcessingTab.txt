@@ -1,0 +1,5 @@
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:99: error: -[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab] : Failed to not hittable: Button, {{20.0, 209.3}, {380.0, 205.0}}, identifier: 'hubUpload'
+Test Case '-[CutSellUITests.Build24UITests testBulkSheetAndProcessingTab]' failed (22.620 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-18 18:55:45.859.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-18 18:55:45.860.
+Test Suite 'Selected tests' failed at 2026-10-18 18:55:45.861.
