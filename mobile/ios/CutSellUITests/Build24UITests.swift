@@ -102,6 +102,12 @@ final class Build24UITests: XCTestCase {
         let tiles = app.descendants(matching: .any).matching(identifier: "galleryTile")
         _ = wait(30) { tiles.count >= count }
         guard tiles.count >= count else { check(false, "\(count) videos in the gallery", "\(tiles.count)"); return false }
+        if mode != "single" {
+            // The chip must open the gallery in its own mode (Single's helper is "One video → one edit.").
+            let openedInSingle = app.staticTexts["One video → one edit."].exists
+            check(!openedInSingle, "the \(mode) chip opened the gallery in \(mode)")
+            if openedInSingle { app.buttons[mode.capitalized].firstMatch.tap(); pause(0.5) }
+        }
         for index in 0..<count { tiles.element(boundBy: index).tap(); pause(0.8) }
         let create = element("galleryCreateButton")
         log("gallery CTA: \(create.label)")

@@ -86,19 +86,24 @@ struct CreateFlowView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: $showingGallery, onDismiss: {
+        // Build 24: the gallery is presented from an item that carries the mode, so the Bulk / Combine chip
+        // that opened it always wins (with isPresented the cover could read a stale galleryMode → Single).
+        .fullScreenCover(item: Binding(
+            get: { showingGallery ? GalleryRoute(mode: galleryMode) : nil },
+            set: { if $0 == nil { showingGallery = false } }
+        ), onDismiss: {
             if let next = jobAfterGallery {
                 jobAfterGallery = nil
                 launch(next)
             }
-        }) {
+        }) { route in
             GalleryPickerView(
                 onCancel: { showingGallery = false },
                 onCreate: { mode, assets, style in
                     jobAfterGallery = CreateJob(mode: mode, source: .library(assets), style: style)
                     showingGallery = false
                 },
-                initialMode: galleryMode
+                initialMode: route.mode
             )
         }
         .fullScreenCover(item: $job, onDismiss: {
@@ -550,4 +555,10 @@ struct CreateJob: Identifiable {
     let mode: CreateMode
     let source: Source
     let style: StyleChoice
+}
+
+/// The gallery sheet and the mode it opens in (Single / Bulk / Combine).
+struct GalleryRoute: Identifiable {
+    let mode: CreateMode
+    var id: String { mode.rawValue }
 }
