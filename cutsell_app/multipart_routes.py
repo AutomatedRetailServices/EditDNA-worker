@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from cutsell_worker.multipart_uploads import (
+    StorageError,
     abort_multipart_upload,
     complete_multipart_upload,
     list_multipart_parts,
@@ -46,6 +47,11 @@ class MultipartCompleteRequest(MultipartOwnerRequest):
 
 
 def _translate_error(exc: Exception):
+    if isinstance(exc, StorageError):
+        # R2's own code and message reach the app (shown in Diagnostics).
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    if isinstance(exc, ValueError) and "already completed" in str(exc):
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     if isinstance(exc, KeyError):
         raise HTTPException(status_code=404, detail="multipart upload session not found") from None
     if isinstance(exc, PermissionError):

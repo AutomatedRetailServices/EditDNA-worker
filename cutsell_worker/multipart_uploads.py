@@ -9,11 +9,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 import math
 from typing import Any
 
 from .config import load_runtime_config
 from .uploads import prepare_upload_target
+
+logger = logging.getLogger("cutsell.multipart")
 
 DEFAULT_PART_SIZE = 16 * 1024 * 1024
 SESSION_TTL_SEC = 24 * 60 * 60
@@ -25,6 +28,22 @@ def _session_key(upload_id: str) -> str:
         raise ValueError("upload_id is required")
     digest = hashlib.sha256(upload_id.encode()).hexdigest()
     return f"cutsell:v1:multipart:{digest}"
+
+
+class StorageError(Exception):
+    """R2 / S3 refused a multipart call; the message carries R2's own code and message."""
+
+
+def _storage_error(operation: str, exc: Exception) -> StorageError:
+    error = getattr(exc, "response", {}) or {}
+    error = error.get("Error", {}) if isinstance(error, dict) else {}
+    code = error.get("Code") or type(exc).__name__
+    message = error.get("Message") or str(exc)
+    return StorageError(f"R2 {operation} failed: {code}: {message}"[:400])
+
+
+def _short(upload_id: str) -> str:
+    return hashlib.sha256(upload_id.encode()).hexdigest()[:12]
 
 
 def _redis_client(client=None):
@@ -121,6 +140,10 @@ def start_multipart_upload(
     return session
 
 
+def _completed(session: dict[str, Any]) -> bool:
+    return session.get("state") == "completed" and isinstance(session.get("completed"), dict)
+
+
 def presign_multipart_part(
     *,
     upload_id: str,
@@ -134,6 +157,8 @@ def presign_multipart_part(
     session = _load_session(
         upload_id, user_id=user_id, project_id=project_id, redis_client=redis_client
     )
+    if _completed(session):
+        raise ValueError("multipart upload is already completed")
     part_number = int(part_number)
     if not 1 <= part_number <= int(session["part_count"]):
         raise ValueError("multipart part_number is outside expected range")
@@ -164,10 +189,23 @@ def list_multipart_parts(
     session = _load_session(
         upload_id, user_id=user_id, project_id=project_id, redis_client=redis_client
     )
+    if _completed(session):
+        # The file is already whole on R2 (a "complete" whose answer never reached the phone).
+        return {
+            "upload_id": upload_id,
+            "state": "completed",
+            "source_uri": session["source_uri"],
+            "part_count": session["part_count"],
+            "uploaded_parts": [],
+            "uploaded_part_numbers": [],
+        }
     client = _s3_client(s3)
-    response = client.list_parts(
-        Bucket=session["bucket"], Key=session["object_key"], UploadId=upload_id
-    )
+    try:
+        response = client.list_parts(
+            Bucket=session["bucket"], Key=session["object_key"], UploadId=upload_id
+        )
+    except Exception as exc:
+        raise _storage_error("ListParts", exc) from None
     parts = [
         {
             "part_number": int(item["PartNumber"]),
@@ -179,6 +217,7 @@ def list_multipart_parts(
     parts.sort(key=lambda item: item["part_number"])
     return {
         "upload_id": upload_id,
+        "state": "uploading",
         "source_uri": session["source_uri"],
         "part_count": session["part_count"],
         "uploaded_parts": parts,
@@ -198,6 +237,10 @@ def complete_multipart_upload(
     session = _load_session(
         upload_id, user_id=user_id, project_id=project_id, redis_client=redis_client
     )
+    if _completed(session):
+        # Idempotent: the same answer again (the phone never got the first one).
+        logger.info("multipart complete repeated upload=%s parts=%d -> already completed", _short(upload_id), len(parts))
+        return dict(session["completed"])
     expected = list(range(1, int(session["part_count"]) + 1))
     normalized = []
     for item in parts:
@@ -211,15 +254,19 @@ def complete_multipart_upload(
         raise ValueError("multipart completion must contain every expected part exactly once")
 
     client = _s3_client(s3)
-    client.complete_multipart_upload(
-        Bucket=session["bucket"],
-        Key=session["object_key"],
-        UploadId=upload_id,
-        MultipartUpload={"Parts": normalized},
-    )
-    redis_target = _redis_client(redis_client)
-    redis_target.delete(_session_key(upload_id))
-    return {
+    logger.info("multipart complete upload=%s parts=%d", _short(upload_id), len(normalized))
+    try:
+        client.complete_multipart_upload(
+            Bucket=session["bucket"],
+            Key=session["object_key"],
+            UploadId=upload_id,
+            MultipartUpload={"Parts": normalized},
+        )
+    except Exception as exc:
+        error = _storage_error("CompleteMultipartUpload", exc)
+        logger.warning("multipart complete upload=%s refused: %s", _short(upload_id), error)
+        raise error from None
+    result = {
         "upload_id": upload_id,
         "state": "uploaded",
         "source_uri": session["source_uri"],
@@ -227,6 +274,13 @@ def complete_multipart_upload(
         "size_bytes": session["size_bytes"],
         "content_type": session["content_type"],
     }
+    # The session is kept (24 h) as "completed": a repeated complete or a resume gets the same answer
+    # instead of 404 (iOS can suspend CutSell before the first answer arrives).
+    session["state"] = "completed"
+    session["completed"] = result
+    _redis_client(redis_client).set(_session_key(upload_id), json.dumps(session, ensure_ascii=False), ex=SESSION_TTL_SEC)
+    logger.info("multipart complete upload=%s done", _short(upload_id))
+    return result
 
 
 def abort_multipart_upload(
