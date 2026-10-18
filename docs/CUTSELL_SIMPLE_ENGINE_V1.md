@@ -109,7 +109,7 @@ Perfume video: the restart fix removes the abandoned first run (31-72 s) and kee
 run, ending on her closer. Mode: CUTSELL_SIMPLE_ENGINE_MODE=review (default in code: rules = exactly 1.2).
 Cost: one extra call per sale video (~USD 0.01), three when a fix is proposed (~0.04).
 
-## 1.2.3: same cut, fewer tokens (2026-10-17, branch feat/simple-engine-save, NOT deployed)
+## 1.2.3: same cut, fewer tokens (2026-10-17, LIVE: deployed 7ba78c6 with Product Owner approval; rollback CUTSELL_SIMPLE_ENGINE_EFFORT=high or redeploy 213dcad)
 - Sale review and haul review: when the first two readings agree, the third is not asked. A third reading
   cannot change a 2-of-3 vote, so the cut is identical (exhaustive test).
 - Word fix: the last complete JSON answer is read; trailing text no longer forces a second call.
