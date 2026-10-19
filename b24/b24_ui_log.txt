@@ -1,0 +1,20 @@
+B24UI    30.9 Photos access allowed
+B24UI    34.3 gallery CTA: Create 1 cut
+B24UI    73.0 PASS the cut is ready
+B24UI    78.7 PASS editor open
+B24UI    81.9 PASS Export button
+B24UI   137.8 PASS export finished · 57 s
+B24UI   140.3 PASS video downloaded to the phone (Save shown)
+B24UI   142.4 PASS saved to Photos
+B24UI   142.7 FAILURES: none
+B24UI    24.3 gallery CTA: Create 1 cut
+B24UI    50.1 PASS Processing screen
+B24UI    50.5 PASS Continue in background active while: Cutting your video… starting
+B24UI    52.8 PASS screen closed, work goes on · Cutting your video… starting
+B24UI    59.8 rows after continue: ["PROCESSING 53%"]
+B24UI   104.7 rows after Home: []
+B24UI   104.8 closing CutSell with rows: []
+B24UI   127.8 no Processing chip
+B24UI   151.8 rows after reopen: []
+B24UI   396.5 PASS the cut finished after leaving and closing CutSell
+B24UI   396.9 FAILURES: none

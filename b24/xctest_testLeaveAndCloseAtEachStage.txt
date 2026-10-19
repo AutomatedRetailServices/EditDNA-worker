@@ -1,0 +1,15 @@
+B24UI    24.3 gallery CTA: Create 1 cut
+B24UI    50.1 PASS Processing screen
+B24UI    50.5 PASS Continue in background active while: Cutting your video… starting
+B24UI    52.8 PASS screen closed, work goes on · Cutting your video… starting
+B24UI    59.8 rows after continue: ["PROCESSING 53%"]
+B24UI   104.7 rows after Home: []
+B24UI   104.8 closing CutSell with rows: []
+B24UI   127.8 no Processing chip
+B24UI   151.8 rows after reopen: []
+B24UI   396.5 PASS the cut finished after leaving and closing CutSell
+B24UI   396.9 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testLeaveAndCloseAtEachStage]' passed (397.283 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-19 17:54:04.676.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-19 17:54:04.677.
+Test Suite 'Selected tests' passed at 2026-10-19 17:54:04.679.

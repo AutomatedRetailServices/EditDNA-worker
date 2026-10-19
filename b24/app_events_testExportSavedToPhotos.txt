@@ -1,0 +1,45 @@
+asset_export_started index=1 of=1 seconds_long=45
+audio_first=yes
+asset_resource photos_edit=no used=original
+asset_export_done mb=43 seconds=1.3
+audio_extracted kb=244 seconds=2.0 video_seconds=45
+audio_extract
+audio_uploaded kb=244 seconds=1.3 source_order=0
+audio_upload
+processing_started sources=1
+job_submitted job_id=d8895606-b04d-4c4a-ae53-46a275cfb54e
+audio_first_started clips=1 job_id=d8895606-b04d-4c4a-ae53-46a275cfb54e
+video_background_started clips=1 mb=43
+server_step seconds=0 step=submitted
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
+upload_parts done=0 mb=43 part_mb=8 parts=6 source_order=0
+upload_background_unavailable part=1
+upload_background_unavailable part=2
+server_step progress=42 seconds=8.0 step=processing
+server_step progress=100 seconds=14.3 step=ready
+cut_ready_seen project_id=prj_de64ee2cb7554fb4a5d338741d9ab8a1
+editor_opened local_video=yes seconds=3.8
+audio_session_ready category=Playback mode=MoviePlayback output=Speaker
+video_volume=1.00
+export_tapped project=9ab8a1
+export_waiting for=original_video_upload
+upload_part_done of=6 part=1 source_order=0
+upload_part_done of=6 part=3 source_order=0
+upload_part_done of=6 part=2 source_order=0
+upload_part_done of=6 part=5 source_order=0
+upload_part_done of=6 part=4 source_order=0
+upload_part_done of=6 part=6 source_order=0
+upload_complete_started mb=43 part_mb=8 parts=6 source_order=0
+upload_complete_done seconds=2.3 source_order=0 state=uploaded
+video_ready_sent source_order=0
+video_background_done seconds=60
+export_requested prepare_s=34.5 sources=1
+export_accepted job_id=ddc51a92-91f3-4fa5-bcbc-b6e4f314cbed
+export_progress job_id=ddc51a92-91f3-4fa5-bcbc-b6e4f314cbed percent=41 state=analyzing
+export_progress job_id=ddc51a92-91f3-4fa5-bcbc-b6e4f314cbed percent=57 state=analyzing
+export_progress job_id=ddc51a92-91f3-4fa5-bcbc-b6e4f314cbed percent=85 state=analyzing
+export_render_done job_id=ddc51a92-91f3-4fa5-bcbc-b6e4f314cbed seconds=54.8
+result_received received=true
+export_downloaded mb=22.7
+save_to_photos_completed succeeded=true
+export_saved_to_photos
