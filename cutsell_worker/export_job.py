@@ -1,6 +1,7 @@
 """RQ export job: edited Draft Timeline -> final MP4 -> scoped S3 URL."""
 from __future__ import annotations
 
+import re
 import time
 
 import threading
@@ -758,6 +759,30 @@ class _RenderProgressTicker:
         self._thread.join(timeout=2)
 
 
+_EXPORT_STEPS = ("download_sources", "download_overlays", "download_audio", "clean_audio", "plan", "render_and_qc",
+                 "upload_and_verify", "finalize")
+
+
+def failure_code(timings: dict, exc: BaseException) -> str:
+    """Build 27: why an export failed, short and safe to show in the app's Diagnostics (export_failed step=...
+    reason=...): the step that was running (the first one not finished) and the error's own code word -- never a
+    path, a key or a URL."""
+    step = next((name for name in _EXPORT_STEPS if name not in timings), "finalize")
+    code = getattr(exc, "error_code", None) or str(exc).split(":", 1)[0]
+    reason = re.sub(r"[^a-z0-9_]+", "_", f"{exc.__class__.__name__}_{code}".lower()).strip("_")[:90]
+    return f"{step}:{reason}"
+
+
+def _remember_failure(job, timings: dict, exc: BaseException) -> None:
+    if job is None:
+        return
+    try:
+        job.meta["error_code"] = failure_code(timings, exc)
+        job.save_meta()
+    except Exception:
+        pass
+
+
 def run_export_job(payload: dict) -> dict:
     # D-288 (finding 5): the real per-job init boundary for the
     # EditorialSlotResolution evidence ContextVar -- see universal_clean_
@@ -1004,6 +1029,7 @@ def run_export_job(payload: dict) -> dict:
                 "render_attempt_count": len(exc.result.attempts),
             },
         )
+        _remember_failure(job, timings, exc)
         raise
     except TenantSafeDeliveryBlocked as exc:
         # D-288: never delivered -- distinct from PostRenderQCFailure above
@@ -1037,6 +1063,7 @@ def run_export_job(payload: dict) -> dict:
                 "watch_listen_gated": perceptual.get("watch_listen_status") is not None,
             },
         )
+        _remember_failure(job, timings, exc)
         raise
     except Exception as exc:
         safe_update_project(
@@ -1053,4 +1080,5 @@ def run_export_job(payload: dict) -> dict:
             payload={"job_id": job_id, "error": exc.__class__.__name__,
                      **({"error_code": exc.error_code} if getattr(exc, "error_code", None) else {})},
         )
+        _remember_failure(job, timings, exc)
         raise

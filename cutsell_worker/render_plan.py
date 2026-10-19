@@ -298,6 +298,24 @@ def _clean_path(clip, draft, clean_audio_paths: Mapping[str, str] | None) -> str
     return path
 
 
+# A cut made from the voice file (audio first, iOS build 23+) uses the voice file's length, which can be a few
+# hundredths of a second longer than the video itself (AAC padding). A clip that ends that little past the end of its
+# real source ends at the source's end instead (there is nothing after it to play); anything larger is a real mismatch
+# and still fails loudly.
+SOURCE_END_TOLERANCE_SEC = 0.5
+
+
+def _source_durations(local_paths: Mapping[str, str]) -> dict:
+    from .media_probe import probe_media
+    out = {}
+    for source_id, path in local_paths.items():
+        try:
+            out[source_id] = float(probe_media(path).duration_sec)
+        except Exception:
+            continue                       # unreadable here: the renderer's own checks decide
+    return out
+
+
 def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
                       clean_audio_paths: Mapping[str, str] | None = None) -> Tuple[RenderSegment, ...]:
     """Translate selected draft clips to concrete source-safe media segments.
@@ -319,10 +337,14 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
     tombstones = tuple(getattr(draft, "zoom_removed", ()) or ())
     if tombstones and zooms:
         zooms = tuple(k for k in zooms if not is_tombstoned_zoom(k, tombstones))
+    durations = _source_durations(local_paths)
     for clip in draft.selected:
         path = local_paths.get(clip.source_asset_id)
         if not path:
             raise ValueError(f"missing source path for selected clip {clip.clip_id}")
+        available = durations.get(clip.source_asset_id)
+        if available and available < clip.end <= available + SOURCE_END_TOLERANCE_SEC and clip.start < available:
+            clip = replace(clip, end=available)
         if clip.end <= clip.start:
             raise ValueError(f"invalid selected clip boundary {clip.clip_id}")
         volume = float(clip.audio_volume)
