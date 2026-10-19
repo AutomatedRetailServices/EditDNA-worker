@@ -2,56 +2,57 @@ bulk overlap_audio=true
 asset_export_started index=1 of=3 seconds_long=45
 audio_first=yes
 asset_resource photos_edit=no used=original
-asset_export_done mb=43 seconds=1.4
-audio_extracted kb=244 seconds=2.1 video_seconds=45
+asset_export_done mb=43 seconds=1.3
+audio_extracted kb=244 seconds=4.2 video_seconds=45
 audio_extract
-audio_uploaded kb=244 seconds=1.5 source_order=0
+audio_uploaded kb=244 seconds=1.1 source_order=0
 audio_upload
 processing_started sources=1
-job_submitted job_id=c027fb18-06de-4af3-85cf-ffecd07c9cd0
-audio_first_started clips=1 job_id=c027fb18-06de-4af3-85cf-ffecd07c9cd0
+job_submitted job_id=ce4d9129-c3dd-4372-84e7-73bef1c96b5f
+audio_first_started clips=1 job_id=ce4d9129-c3dd-4372-84e7-73bef1c96b5f
 video_background_started clips=1 mb=43
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
+upload_parts done=0 mb=43 part_mb=8 parts=6 source_order=0
 server_step seconds=0 step=submitted
 asset_export_started index=2 of=3 seconds_long=30
 asset_resource photos_edit=no used=original
-asset_export_done mb=29 seconds=0.1
-upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=6
-upload_parts done=0 mb=43 part_mb=8 parts=6 source_order=0
+asset_export_done mb=29 seconds=0.2
 upload_background_unavailable part=1
-audio_extracted kb=236 seconds=2.5 video_seconds=30
+server_step progress=42 seconds=6.6 step=processing
+audio_extracted kb=236 seconds=1.6 video_seconds=30
 audio_extract
-server_step progress=12 seconds=7.2 step=created
-audio_uploaded kb=236 seconds=2.4 source_order=0
+audio_uploaded kb=236 seconds=2.1 source_order=0
 audio_upload
 processing_started sources=1
-job_submitted job_id=a7584c97-0f37-432f-b830-0a16154ddefd
-audio_first_started clips=1 job_id=a7584c97-0f37-432f-b830-0a16154ddefd
+job_submitted job_id=d741188d-bdd5-4f4e-beec-62d9586678d0
+audio_first_started clips=1 job_id=d741188d-bdd5-4f4e-beec-62d9586678d0
 video_background_started clips=1 mb=29
-server_step progress=42 seconds=13.9 step=processing
+upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=4
+upload_parts done=0 mb=29 part_mb=8 parts=4 source_order=0
 server_step seconds=0 step=submitted
 asset_export_started index=3 of=3 seconds_long=25
 asset_resource photos_edit=no used=original
-asset_export_done mb=24 seconds=0.1
-upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=4
-upload_parts done=0 mb=29 part_mb=8 parts=4 source_order=0
-audio_extracted kb=197 seconds=0.7 video_seconds=25
+asset_export_done mb=24 seconds=0.2
+audio_extracted kb=197 seconds=2.0 video_seconds=25
 audio_extract
-server_step progress=42 seconds=8.5 step=processing
-audio_uploaded kb=197 seconds=2.0 source_order=0
+server_step progress=100 seconds=22.5 step=ready
+cut_ready_seen project_id=prj_1e2ff429cbf6414faa43a58cc2aba725
+audio_uploaded kb=197 seconds=2.9 source_order=0
 audio_upload
 processing_started sources=1
-job_submitted job_id=b1387d02-1806-4e4a-a1dc-f6796cb68d69
-audio_first_started clips=1 job_id=b1387d02-1806-4e4a-a1dc-f6796cb68d69
-video_background_started clips=1 mb=24
 upload_part_done of=6 part=1 source_order=0
+server_step progress=42 seconds=10.1 step=processing
+job_submitted job_id=28b3134a-f574-4091-972c-8ef83f4be114
+audio_first_started clips=1 job_id=28b3134a-f574-4091-972c-8ef83f4be114
+video_background_started clips=1 mb=24
+upload_part_done of=6 part=3 source_order=0
+server_step seconds=0 step=submitted
 upload_resumed etags_on_iphone=0 resumed_part_count=0 source_order=0 total_part_count=4
 upload_parts done=0 mb=24 part_mb=8 parts=4 source_order=0
-server_step progress=100 seconds=28.6 step=ready
-cut_ready_seen project_id=prj_36f4dc82df1f440ba0885d63673f1fd7
-server_step seconds=0 step=submitted
-upload_part_done of=6 part=3 source_order=0
-server_step progress=100 seconds=20.8 step=ready
-cut_ready_seen project_id=prj_5a5860f184ff41ed8168cb2b6767284b
 upload_part_done of=6 part=2 source_order=0
-server_step progress=100 seconds=9.5 step=ready
-cut_ready_seen project_id=prj_c8c70e9c2a9643f08e27525116c3e13e
+server_step progress=100 seconds=18.0 step=ready
+cut_ready_seen project_id=prj_575e56ac8e80426a8403c9a3b0f8e789
+server_step progress=42 seconds=8.1 step=processing
+server_step progress=100 seconds=14.7 step=ready
+cut_ready_seen project_id=prj_46f3048757574fac9d455a67229da0ea
+upload_part_done of=6 part=6 source_order=0
