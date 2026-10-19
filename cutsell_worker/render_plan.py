@@ -316,6 +316,22 @@ def _source_durations(local_paths: Mapping[str, str]) -> dict:
     return out
 
 
+def bound_draft_to_sources(draft: DraftTimeline, local_paths: Mapping[str, str]) -> DraftTimeline:
+    """The export's draft with every selected clip that ends just past its real source (<= SOURCE_END_TOLERANCE_SEC)
+    ending at the source's end. Applied to the DRAFT (not only the render plan) so the post-render QC, which checks
+    the render against the draft, sees the same clips the renderer drew."""
+    durations = _source_durations(local_paths)
+    changed = False
+    clips = []
+    for clip in draft.selected:
+        available = durations.get(clip.source_asset_id)
+        if available and available < clip.end <= available + SOURCE_END_TOLERANCE_SEC and clip.start < available:
+            clip = replace(clip, end=available)
+            changed = True
+        clips.append(clip)
+    return replace(draft, selected=tuple(clips) if isinstance(draft.selected, tuple) else clips) if changed else draft
+
+
 def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
                       clean_audio_paths: Mapping[str, str] | None = None) -> Tuple[RenderSegment, ...]:
     """Translate selected draft clips to concrete source-safe media segments.

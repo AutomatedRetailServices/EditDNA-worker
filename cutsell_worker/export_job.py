@@ -30,7 +30,7 @@ from .config import EXPORT_GATE_TECHNICAL_QC, export_delivery_gate
 from .perceptual_watch_listen import WATCH_LISTEN_HUMAN_REVIEW_REQUIRED
 from .project_tracking import safe_update_project
 from .render import RENDER_FPS_DEFAULT
-from .render_plan import build_render_plan
+from .render_plan import bound_draft_to_sources, build_render_plan
 from .render_versions import add_render_version
 from .serde import draft_from_dict
 from .storage import download_source
@@ -859,6 +859,9 @@ def run_export_job(payload: dict) -> dict:
                 local_paths[source_id] = download_source(uri, destination)
                 publish("rendering", min(25, 5 + int((index + 1) * 20 / len(sources))))
             mark("download_sources")
+            # A cut made from the voice file can end a few hundredths of a second past the video's own end
+            # (19 Oct: 60.070 vs 60.012 s). Bound the draft itself so the render and its QC agree.
+            draft = bound_draft_to_sources(draft, local_paths)
 
             required_ids = {clip.source_asset_id for clip in draft.selected}
             missing = required_ids - set(local_paths)

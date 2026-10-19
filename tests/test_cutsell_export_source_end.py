@@ -50,3 +50,16 @@ def test_an_export_failure_names_its_step_and_reason():
     timings = {"download_sources": 3.6, "download_overlays": 0, "download_audio": 0, "clean_audio": 0, "plan": 0.09}
     assert failure_code(timings, exc) == "render_and_qc:valueerror_audio_window_exceeds_source_availability"
     assert failure_code({}, RuntimeError("s3://bucket/secret/key")) == "download_sources:runtimeerror_s3"
+
+
+def test_the_export_job_path_bounds_the_draft_itself(tmp_path):
+    """The post-render QC compares the render with the draft: the bound must be on the draft, not only the plan."""
+    from cutsell_worker.live_render_qc import render_with_post_render_qc
+    from cutsell_worker.render_plan import bound_draft_to_sources
+    source = _video(tmp_path / "v.mp4")
+    real = probe_media(source).duration_sec
+    draft = bound_draft_to_sources(_draft(real + 0.058), {"s1": source})
+    assert draft.selected[-1].end == pytest.approx(real)
+    plan = build_render_plan(draft, {"s1": source})
+    qc = render_with_post_render_qc(draft, plan, str(tmp_path / "e.mp4"))
+    assert qc.status != "SEMANTIC_MISMATCH_INVALIDATED", qc.attempts[-1].findings
