@@ -309,7 +309,11 @@ struct ExportSheet: View {
         VStack(spacing: 16) {
             Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 10)
             Text("Export").font(CS.inter(22, .bold)).foregroundStyle(.white)
-            if let preparing = model.exportPreparing {
+            if let problem = model.exportError {
+                // Build 27: an export that could not start says why, in plain words, with Try again.
+                Text(problem).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF).multilineTextAlignment(.center)
+                    .accessibilityIdentifier("exportError")
+            } else if let preparing = model.exportPreparing {
                 Text(preparing).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                 ProgressView(value: 0, total: 100).tint(CS.cyan)
             } else if let job = model.exportJob {
@@ -336,7 +340,7 @@ struct ExportSheet: View {
                 Text("Getting your video ready…").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                 ProgressView().tint(CS.cyan)
             }
-            if let job = model.exportJob, job.state == "failed" || job.state == "canceled" {
+            if model.exportError != nil || model.exportJob.map({ $0.state == "failed" || $0.state == "canceled" }) == true {
                 PrimaryButton(title: "Try again", height: 54, cornerRadius: 18, fontSize: 17) {
                     Task { await model.export() }
                 }
@@ -358,7 +362,7 @@ struct ExportSheet: View {
     static func stageText(_ job: JobStatus) -> String {
         let progress = job.progress ?? 0
         switch job.state {
-        case "queued", "uploaded": return "Waiting for a free editor…"
+        case "queued", "uploaded": return "Preparing your export…"
         default:
             if progress < 25 { return "Getting your clips…" }
             if progress < 85 { return "Making your video…" }

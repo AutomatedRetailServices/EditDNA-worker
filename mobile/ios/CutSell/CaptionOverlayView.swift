@@ -16,8 +16,14 @@ enum CaptionFontLoader {
                 CutSellDiagnostics.log("caption_font_missing", ["font": spec.key])
                 continue
             }
-            if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) {
-                CutSellDiagnostics.log("caption_font_not_registered", ["font": spec.key])
+            var error: Unmanaged<CFError>?
+            if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error) {
+                // Inter is also the app's own UI font (Info.plist UIAppFonts), so iOS has it already:
+                // "already registered" is not a failure.
+                let code = error.map { CFErrorGetCode($0.takeRetainedValue()) } ?? 0
+                if code != CTFontManagerError.alreadyRegistered.rawValue {
+                    CutSellDiagnostics.log("caption_font_not_registered", ["font": spec.key, "code": String(code)])
+                }
             }
         }
     }

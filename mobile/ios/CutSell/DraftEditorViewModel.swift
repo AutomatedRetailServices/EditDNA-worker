@@ -139,6 +139,8 @@ final class DraftEditorViewModel: ObservableObject {
     @Published private(set) var pendingBroll: PendingBroll?
     /// What Export is doing before the server takes over ("Saving your changes…").
     @Published var exportPreparing: String?
+    /// Build 27: an export that could not start, in plain words (the sheet shows it with Try again).
+    @Published var exportError: String?
 
     /// One Undo / Redo history across the draft (clips, captions, overlays...) and the voice row.
     enum UndoStep { case draft; case voices(TimelineComposition) }
@@ -1751,29 +1753,41 @@ final class DraftEditorViewModel: ObservableObject {
     func export() async {
         let started = Date()
         exportJob = nil
+        exportError = nil
+        CutSellDiagnostics.log("export_tapped", ["project": String(project.projectID.suffix(6))])
         exportPreparing = "Saving your changes…"
         _ = await actionChain?.value
         var waited = 0.0
+        var loggedMediaWait = false
         while (!pendingVoiceOvers.filter { !$0.failed }.isEmpty || !pendingOverlays.filter { !$0.failed }.isEmpty
                || (pendingBroll.map { !$0.failed } ?? false)), waited < 90 {
+            if !loggedMediaWait { CutSellDiagnostics.log("export_waiting", ["for": "media_uploads"]); loggedMediaWait = true }
             exportPreparing = "Uploading your media…"
             try? await Task.sleep(nanoseconds: 500_000_000)
             waited += 0.5
         }
         // Build 23 (audio first): the export needs the full video; it may still be uploading in the
         // background. Wait for it (the editor already plays the iPhone's own copy).
+        var loggedVideoWait = false
         while BackgroundVideoUploads.shared.isUploading(project.projectID) {
+            if !loggedVideoWait { CutSellDiagnostics.log("export_waiting", ["for": "original_video_upload"]); loggedVideoWait = true }
             exportPreparing = BackgroundVideoUploads.shared.status(project.projectID)?.text ?? "Uploading your video…"
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
         if let failed = BackgroundVideoUploads.shared.status(project.projectID)?.failed {
             exportPreparing = nil
-            errorMessage = "Your video hasn’t finished uploading (\(failed)). Open CutSell on a good connection and try the export again."
+            exportError = "Your video hasn’t finished uploading. Open CutSell on a good connection and try again."
+            CutSellDiagnostics.log("export_blocked", ["reason": "original_video_upload_failed", "detail": String(failed.prefix(80))])
             return
         }
         _ = await actionChain?.value
         let preparedSeconds = Date().timeIntervalSince(started)
-        guard let snapshot else { exportPreparing = nil; return }
+        guard let snapshot else {
+            exportPreparing = nil
+            exportError = "This cut isn’t loaded yet. Please try again."
+            CutSellDiagnostics.log("export_blocked", ["reason": "draft_not_loaded"])
+            return
+        }
         exportPreparing = "Starting the export…"
         do {
             let sources = allSources.compactMap { object -> JSONValue? in
@@ -1786,9 +1800,11 @@ final class DraftEditorViewModel: ObservableObject {
             if let done = ExportTracker.shared.reusable(projectID: project.projectID, key: key) {
                 exportPreparing = nil
                 exportJob = done
-                NSLog("CUTSELLEXPORT reused %.1f", Date().timeIntervalSince(started))
+                CutSellDiagnostics.log("export_reused", ["seconds": String(format: "%.1f", Date().timeIntervalSince(started))])
                 return
             }
+            CutSellDiagnostics.log("export_requested", ["sources": String(sources.count),
+                                                        "prepare_s": String(format: "%.1f", preparedSeconds)])
             let response: ExportSubmitResponse = try await api.request(
                 "/v1/exports/jobs",
                 method: "POST",
@@ -1799,6 +1815,7 @@ final class DraftEditorViewModel: ObservableObject {
                     "sources": .array(sources)
                 ])
             )
+            CutSellDiagnostics.log("export_accepted", ["job_id": response.jobID])
             exportPreparing = nil
             ExportTracker.shared.remember(jobID: response.jobID, projectID: project.projectID, key: key)
             ExportTracker.shared.follow(jobID: response.jobID, projectID: project.projectID,
@@ -1807,7 +1824,8 @@ final class DraftEditorViewModel: ObservableObject {
             await pollExport(jobID: response.jobID)
         } catch {
             exportPreparing = nil
-            errorMessage = Self.friendly(error)
+            exportError = Self.friendly(error)
+            CutSellDiagnostics.log("export_failed", Retry.fields(error, ["step": "submit"]))
         }
     }
 

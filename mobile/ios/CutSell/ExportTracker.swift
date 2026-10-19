@@ -96,6 +96,19 @@ final class ExportTracker: ObservableObject {
             timing.lastState = status.state
             timing.lastProgress = progress
             NSLog("CUTSELLEXPORT %@ %@ %.1f", jobID, "\(status.state)@\(max(0, progress))", seconds)
+            // Build 27: every step of the export in Diagnostics, and the server's real reason when it fails.
+            switch status.state {
+            case "finished":
+                CutSellDiagnostics.log("export_render_done", ["job_id": jobID, "seconds": String(format: "%.1f", seconds)])
+            case "failed", "canceled":
+                let parts = (status.error ?? "unknown").split(separator: ":", maxSplits: 1).map(String.init)
+                CutSellDiagnostics.log("export_failed", ["job_id": jobID, "state": status.state,
+                                                         "step": parts.count == 2 ? parts[0] : "server",
+                                                         "reason": parts.last ?? "unknown",
+                                                         "last_progress": String(max(0, timing.lastProgress))])
+            default:
+                CutSellDiagnostics.log("export_progress", ["job_id": jobID, "state": status.state, "percent": String(max(0, progress))])
+            }
             if ["finished", "failed", "canceled"].contains(status.state) {
                 let line = timing.marks.map { String(format: "%@=%.1f", $0.label, $0.seconds) }.joined(separator: " ")
                 NSLog("CUTSELLEXPORT summary %@", line)

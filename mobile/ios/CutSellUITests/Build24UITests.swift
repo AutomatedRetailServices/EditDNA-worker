@@ -242,4 +242,43 @@ final class Build24UITests: XCTestCase {
         shot("single_end")
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
+
+    /// Build 27: one cut, then Export all the way to the video saved in Photos (the export of 19 Oct failed on the
+    /// server: a cut made from the voice file ended 0.06 s past the video's end).
+    func testExportSavedToPhotos() throws {
+        launchApp(fresh: true)
+        guard pickAndCreate(mode: "single", count: 1) else { return }
+        let review = element("readyReviewButton")
+        check(review.waitForExistence(timeout: 600), "the cut is ready")
+        review.tap()
+        check(element("timelineV4").waitForExistence(timeout: 120), "editor open")
+        pause(2)
+        let started = Date()
+        let export = element("editorExport")
+        check(export.waitForExistence(timeout: 20), "Export button")
+        export.tap()
+        let done = wait(600) {
+            self.app.staticTexts["Your video is ready."].exists || self.app.staticTexts["The export didn't finish. Please try again."].exists
+                || self.element("exportError").exists
+        }
+        let ready = app.staticTexts["Your video is ready."].exists
+        check(done && ready, "export finished", String(format: "%.0f s", Date().timeIntervalSince(started)))
+        shot("export_result")
+        guard ready else { return }
+        let save = app.buttons["Save"].firstMatch
+        check(save.waitForExistence(timeout: 120), "video downloaded to the phone (Save shown)")
+        save.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for _ in 0..<15 {
+            for label in ["Allow", "Allow Access", "OK", "Allow Full Access"] {
+                let button = springboard.buttons[label]
+                if button.exists { button.tap(); log("Photos add access: \(label)"); break }
+            }
+            if app.buttons["Saved"].exists { break }
+            pause(1)
+        }
+        check(app.buttons["Saved"].waitForExistence(timeout: 60), "saved to Photos")
+        shot("export_saved")
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+    }
 }

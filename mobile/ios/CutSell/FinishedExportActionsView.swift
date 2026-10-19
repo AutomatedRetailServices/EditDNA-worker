@@ -53,6 +53,10 @@ struct FinishedExportActionsView: View {
                 Text(errorMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
+                if localURL == nil {
+                    Button("Retry") { self.errorMessage = nil; Task { await download() } }
+                        .accessibilityIdentifier("exportDownloadRetry")
+                }
             }
         }
         .task { await download() }
@@ -76,9 +80,11 @@ struct FinishedExportActionsView: View {
             // D-133: bounded, diagnostics-only "result received" flag --
             // never the actual (possibly signed) result URL string.
             CutSellDiagnostics.log("result_received", ["received": "true"])
+            CutSellDiagnostics.log("export_downloaded", ["mb": String(format: "%.1f", Double((try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int) ?? 0) / 1e6)])
         } catch {
             errorMessage = error.localizedDescription
             CutSellDiagnostics.log("result_received", ["received": "false"])
+            CutSellDiagnostics.log("export_failed", Retry.fields(error, ["step": "download"]))
         }
     }
 
@@ -97,9 +103,11 @@ struct FinishedExportActionsView: View {
             }
             saved = true
             CutSellDiagnostics.log("save_to_photos_completed", ["succeeded": "true"])
+            CutSellDiagnostics.log("export_saved_to_photos", [:])
         } catch {
             errorMessage = error.localizedDescription
             CutSellDiagnostics.log("save_to_photos_completed", ["succeeded": "false"])
+            CutSellDiagnostics.log("export_failed", Retry.fields(error, ["step": "save_to_photos"]))
         }
     }
 }

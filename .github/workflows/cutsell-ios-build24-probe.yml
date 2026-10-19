@@ -115,7 +115,7 @@ jobs:
           echo "dummynet out proto tcp from any to any port 443 pipe 1" | sudo pfctl -f - 2>&1 | tail -2 || true
           sudo pfctl -E 2>&1 | tail -1 || true
           status=0
-          for t in ${{ inputs.tests || 'testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab' }}; do
+          for t in ${{ inputs.tests || 'testExportSavedToPhotos testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab' }}; do
             start=$(date '+%Y-%m-%d %H:%M:%S')
             set +e
             TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
@@ -127,7 +127,7 @@ jobs:
             set -e
             grep -E "B24UI|error:|failed|passed" "$RUNNER_TEMP/test_$t.log" | grep -v Bearer | tail -60 > "$RUNNER_TEMP/b24/xctest_$t.txt" || true
             xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
-              --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(upload_|job_|processing_|audio_|server_step|editor_opened|video_|clip_|combine_|continue_in_background|follow_|cut_ready|queue_|bulk|asset_).*' \
+              --predicate 'subsystem == "ai.cutsell.app"' 2>/dev/null | grep -oE '(upload_|job_|processing_|audio_|server_step|editor_opened|video_|clip_|combine_|continue_in_background|follow_|cut_ready|queue_|bulk|asset_|export_|caption_font|save_to_photos|result_received).*' \
               | cut -c1-300 > "$RUNNER_TEMP/b24/app_events_$t.txt" || true
           done
           sudo pfctl -f /etc/pf.conf 2>/dev/null; sudo dnctl -q flush 2>/dev/null || true
