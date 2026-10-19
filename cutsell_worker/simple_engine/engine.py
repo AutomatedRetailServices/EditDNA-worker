@@ -21,13 +21,17 @@ from typing import Callable, Optional
 
 from . import llm as _llm
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 _HERE = Path(__file__).parent
 PASS_PROMPT = (_HERE / "prompts" / "pass_v1.txt").read_text(encoding="utf-8")
 DECISION_PROMPT = (_HERE / "prompts" / "decision_v1.txt").read_text(encoding="utf-8")
 REVIEW_PROMPT = (_HERE / "prompts" / "review_v1.txt").read_text(encoding="utf-8")
 FIXWORDS_PROMPT = (_HERE / "prompts" / "fixwords_v2.txt").read_text(encoding="utf-8")
 SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encoding="utf-8")
+# The pass step and the sale review keep their free-text answers, as live (measured on the Gold 2026-10-18):
+# - pass: its notes before the JSON are where it reasons; JSON-only read Y08 as one pass in 3 of 3 runs (free text:
+#   several passes, 3 of 3) -> a different cut.
+# - sale review: JSON-only without "why" proposed fixes almost twice as often (14 vs 8 of 52) and changed cuts.
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
 ZOOM_KINDS = ("hook", "product", "price", "cta")
@@ -49,6 +53,25 @@ RF_MERGE_GAP = 0.10
 VS_WIN, VS_TH, VS_FR = 0.6, 0.20, 1 / 30
 
 LLMCall = Callable[[str], "tuple[str, dict]"]
+
+# Structured output (JSON only, nothing before it): one schema per step, the same keys the parsers already read.
+_INT, _STR = {"type": "integer"}, {"type": "string"}
+
+
+def _obj(**props):
+    return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
+
+
+def _rows(*kinds):
+    return {"type": "array", "items": {"type": "array", "items": {"anyOf": list(kinds)}}}
+
+
+_INTS = {"type": "array", "items": _INT}
+SCHEMAS = {
+    "decision": _obj(hide=_rows(_INT, _STR), trim=_rows(_INT, _STR)),
+    "haul_review": _obj(type={"type": "string", "enum": ["haul", "other"]}, hide=_rows(_INT), unhide=_INTS),
+    "fixwords": _obj(fix=_rows(_INT, _STR), zoom=_rows(_INT, _STR)),
+}
 
 
 def _norm(text: str) -> str:
@@ -98,13 +121,15 @@ def transcript(words, units) -> str:
     return "\n".join(out)
 
 
-def _ask(call: LLMCall, tag: str, prompt: str, tries: int = 3):
-    """One LLM call with the safety net for malformed answers. Returns (decision, [usage])."""
+def _ask(call: LLMCall, tag: str, prompt, tries: int = 3, schema=None):
+    """One LLM call with the safety net for malformed answers. Returns (decision, [usage]).
+    prompt = (fixed instructions, this video's text): the instructions are sent as a cached block (same text)."""
     last = None
+    fixed, own = prompt if isinstance(prompt, tuple) else (prompt, "")
     for i in range(tries):
         run_tag = tag if i == 0 else f"{tag}-retry{i}"
         try:
-            text, usage = call(prompt + f"\n(run {run_tag})")
+            text, usage = call(_llm.Prompt(fixed, own, f"\n(run {run_tag})", schema=schema))
             return parse(text), [usage]
         except Exception as exc:                      # malformed answer or transport error: ask again
             last = exc
@@ -198,7 +223,7 @@ def decide(words, duration, call: LLMCall, run: int = 0):
     text = transcript(words, units)
     usage = []
     with _llm.step("pass"):
-        p, u = _ask(call, f"v3pass-{run}", PASS_PROMPT + "\nTRANSCRIPT:\n" + text); usage += u
+        p, u = _ask(call, f"v3pass-{run}", (PASS_PROMPT + "\nTRANSCRIPT:\n", text)); usage += u
     passes = p.get("passes", [])
     backbone = p.get("backbone")
     multi = (sum(1 for x in passes if len(x) > 2 and x[2]) >= 2
@@ -208,14 +233,14 @@ def decide(words, duration, call: LLMCall, run: int = 0):
             "SINGLE PASS: the recording is one continuous story/pitch. When a sentence is retaken and each version has a concrete detail the other "
             "lacks (a body part or place, a number, a name, an example, a cause), keep BOTH versions; when one version only rephrases the other with "
             "nothing new, keep the most complete one. A RESTARTED SECTION is different: see the RESTARTED SECTION rule.")
-    prompt = DECISION_PROMPT + "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text
+    prompt = (DECISION_PROMPT, "\nFIXED DECISION FROM THE PASS STEP: " + mode + "\n\nTRANSCRIPT:\n" + text)
     with _llm.step("decision"):
-        d, u = _ask(call, f"v3dec-{run}", prompt); usage += u
+        d, u = _ask(call, f"v3dec-{run}", prompt, schema=SCHEMAS["decision"]); usage += u
     lab = labels(d, words, units)
     kept = sum(1 for st, _ in lab if st == "keep")
     if len(words) >= 30 and kept < 0.05 * len(words):   # hides almost everything: ask once more, keep the gentler answer
         with _llm.step("decision"):
-            d2, u = _ask(call, f"v3dec-{run}-net", prompt); usage += u
+            d2, u = _ask(call, f"v3dec-{run}-net", prompt, schema=SCHEMAS["decision"]); usage += u
         lab2 = labels(d2, words, units)
         if sum(1 for st, _ in lab2 if st == "keep") > kept:
             lab = lab2
@@ -279,14 +304,14 @@ def sale_review(words, units, lab, call: LLMCall, run: int = 0, kinds=None):
     kinds = kinds or SALE_REVIEW_KINDS
     n = len(units)
     kept = _line_kept(lab, units)
-    prompt = SALE_REVIEW_PROMPT + "\nFIRST CUT:\n" + review_text(words, units, kept)
+    fixed, own = SALE_REVIEW_PROMPT + "\nFIRST CUT:\n", review_text(words, units, kept)
     answers, usage = [], []
     for r in range(3):
         answer = None
         for attempt in range(2):
             try:
                 with _llm.step("sale_review"):
-                    text, u = call(prompt + f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
+                    text, u = call(_llm.Prompt(fixed, own, f"\n(sale-review {run}-{r}" + (f"-retry{attempt})" if attempt else ")"))); usage.append(u)
                 answer = _json_obj(text, "fixes")
                 break
             except Exception:
@@ -390,7 +415,7 @@ def review(words, units, lab, call: LLMCall, run: int = 0):
     announcement and fix mixed takes. A change is applied only when 2 of 3 independent answers agree; when the first
     answer says "other" or proposes nothing, no confirmation calls are made (cheap for ordinary pitches)."""
     kept = _line_kept(lab, units)
-    prompt = REVIEW_PROMPT + "\nFIRST CUT:\n" + review_text(words, units, kept)
+    fixed, own = REVIEW_PROMPT + "\nFIRST CUT:\n", review_text(words, units, kept)
     answers, usage = [], []
     errors = 0
     for r in range(3):
@@ -398,7 +423,7 @@ def review(words, units, lab, call: LLMCall, run: int = 0):
         for attempt in range(3):                     # transport errors / unreadable answers: ask again, never guess
             try:
                 with _llm.step("haul_review"):
-                    text, u = call(prompt + f"\n(review {run}-{r}" + (f"-retry{attempt})" if attempt else ")")); usage.append(u)
+                    text, u = call(_llm.Prompt(fixed, own, f"\n(review {run}-{r}" + (f"-retry{attempt})" if attempt else ")"), schema=SCHEMAS["haul_review"])); usage.append(u)
                 answer = _parse_review(text)
                 break
             except Exception:
@@ -551,13 +576,13 @@ def fix_words_and_moments(words, splits, call: LLMCall):
     idx = [i for i, w in enumerate(words) if any(a <= (w["s"] + w["e"]) / 2 <= b for a, b in vis)]
     if not idx:
         return words, [], [], []
-    prompt = FIXWORDS_PROMPT + "\n" + " ".join(f"{i}:{words[i]['w']}" for i in idx)
+    fixed, own = FIXWORDS_PROMPT + "\n", " ".join(f"{i}:{words[i]['w']}" for i in idx)
     usage = []
     pairs, marks = None, []
     for attempt in range(3):
         try:
             with _llm.step("fixwords"):
-                text, u = call(prompt + (f"\n(retry {attempt})" if attempt else "")); usage.append(u)
+                text, u = call(_llm.Prompt(fixed, own, f"\n(retry {attempt})" if attempt else "", schema=SCHEMAS["fixwords"])); usage.append(u)
             pairs, marks = _parse_fix_answer(text)
             break
         except Exception:

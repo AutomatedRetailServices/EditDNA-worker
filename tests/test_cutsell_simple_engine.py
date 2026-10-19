@@ -512,7 +512,7 @@ def test_deepgram_request_sends_brand_keyterms(monkeypatch, tmp_path):
 
 def test_decision_prompt_has_restarted_section_rule():
     from cutsell_worker.simple_engine import engine
-    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.3"
+    assert "RESTARTED SECTION" in engine.DECISION_PROMPT and engine.VERSION == "1.2.4"
 
 
 def _review_words():
@@ -895,3 +895,22 @@ def test_video_ready_endpoint_queues_the_followup(monkeypatch):
     monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kw: (_ for _ in ()).throw(ValueError("not yours")))
     assert client.post("/v1/projects/p1/video-ready", json={"user_id": "u1", "uri": "s3://x"}).status_code == 422
     assert client.get("/v1/capabilities").json()["audio_first"] is True
+
+
+def test_prompt_parts_keep_the_same_text_and_cache_the_fixed_instructions(monkeypatch):
+    from cutsell_worker.simple_engine import llm
+    p = llm.Prompt("FIXED", "own", "\n(run x)", schema={"type": "object"})
+    assert str(p) == "FIXEDown\n(run x)" and p.schema == {"type": "object"}
+    blocks = llm._content(p)
+    assert [b["text"] for b in blocks] == ["FIXED", "own", "\n(run x)"]
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in blocks[1]
+    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_CACHE", "0")
+    assert llm._content(p) == "FIXEDown\n(run x)"
+
+
+def test_every_step_has_a_strict_json_schema():
+    from cutsell_worker.simple_engine import engine as E
+    assert set(E.SCHEMAS) == {"decision", "haul_review", "fixwords"}   # pass + sale review: free text, as live
+    for schema in E.SCHEMAS.values():
+        assert schema["additionalProperties"] is False and set(schema["required"]) == set(schema["properties"])
+    assert '"why"' in E.SALE_REVIEW_PROMPT
