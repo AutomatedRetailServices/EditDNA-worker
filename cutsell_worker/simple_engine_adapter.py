@@ -106,6 +106,18 @@ def _clip(*, clip_id: str, source, split: Mapping, words, selected: bool,
     )
 
 
+def is_bulk(sources) -> bool:
+    """A video sent in a Bulk of several (the app puts metadata.bulk_size on each source; iOS build 26+)."""
+    for source in sources:
+        meta = getattr(source, "metadata", None)
+        try:
+            if isinstance(meta, Mapping) and int(str(meta.get("bulk_size", "0"))) > 1:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def process_with_simple_engine(
     request: ProcessingRequest,
     local_paths: Mapping[str, str],
@@ -135,6 +147,7 @@ def process_with_simple_engine(
     if not usage.allowed:
         raise ValueError(f"processing denied: {usage.reason}")
 
+    bulk = is_bulk(sources)
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
     per_source: list[dict] = []
@@ -159,8 +172,9 @@ def process_with_simple_engine(
             # The silence refine reads the audio decoded from the source file itself (what it was calibrated on).
             # A voice-only source (audio first) has no picture yet: no shot-change snap for its first cut.
             voice_only = bool(audio_only) and source.source_asset_id in audio_only
-            out = _process(words, duration, path, video_path=None if voice_only else path,
-                           scene_cut_list=[] if voice_only else None, llm=llm)
+            with _llm.cache_scope(bulk):
+                out = _process(words, duration, path, video_path=None if voice_only else path,
+                               scene_cut_list=[] if voice_only else None, llm=llm)
             notify("composing", base + int(70 / total))
 
             hidden_index = 0
@@ -201,6 +215,7 @@ def process_with_simple_engine(
                 "splits": out["splits"],
                 "log": out["log"],
                 "usage": out["usage"],
+                "prompt_cache": bulk,
             })
 
     if not selected:

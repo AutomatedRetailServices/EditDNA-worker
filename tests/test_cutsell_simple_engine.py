@@ -901,11 +901,21 @@ def test_prompt_parts_keep_the_same_text_and_cache_the_fixed_instructions(monkey
     from cutsell_worker.simple_engine import llm
     p = llm.Prompt("FIXED", "own", "\n(run x)", schema={"type": "object"})
     assert str(p) == "FIXEDown\n(run x)" and p.schema == {"type": "object"}
-    blocks = llm._content(p)
-    assert [b["text"] for b in blocks] == ["FIXED", "own", "\n(run x)"]
-    assert blocks[0]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in blocks[1]
-    monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_CACHE", "0")
-    assert llm._content(p) == "FIXEDown\n(run x)"
+    assert llm._content(p) == "FIXEDown\n(run x)"            # a lone video: no caching (PO decision)
+    with llm.cache_scope(True):                                # a video of a Bulk send
+        blocks = llm._content(p)
+        assert [b["text"] for b in blocks] == ["FIXED", "own", "\n(run x)"]
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in blocks[1]
+        monkeypatch.setenv("CUTSELL_SIMPLE_ENGINE_CACHE", "0")
+        assert llm._content(p) == "FIXEDown\n(run x)"     # the env switch wins
+
+
+def test_only_a_bulk_send_turns_prompt_caching_on():
+    from types import SimpleNamespace as NS
+    from cutsell_worker.simple_engine_adapter import is_bulk
+    assert not is_bulk([NS(metadata={})]) and not is_bulk([NS(metadata=None)])
+    assert not is_bulk([NS(metadata={"bulk_size": "1"})]) and not is_bulk([NS(metadata={"bulk_size": "x"})])
+    assert is_bulk([NS(metadata={"bulk_size": "3", "bulk_id": "b1"})]) and is_bulk([NS(metadata={"bulk_size": 2})])
 
 
 def test_every_step_has_a_strict_json_schema():

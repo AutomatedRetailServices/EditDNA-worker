@@ -77,9 +77,24 @@ def json_enabled() -> bool:
     return os.environ.get("CUTSELL_SIMPLE_ENGINE_JSON", "1").strip() != "0"
 
 
+_CACHE_ON: contextvars.ContextVar = contextvars.ContextVar("cutsell_simple_engine_cache", default=False)
+
+
+@contextlib.contextmanager
+def cache_scope(on: bool):
+    """Prompt caching only inside this block. Product Owner decision (2026-10-19): on only for a video that is part of
+    a Bulk send (the next videos of the same send read the cached instructions); a lone video never pays the cache-write
+    premium."""
+    token = _CACHE_ON.set(bool(on))
+    try:
+        yield
+    finally:
+        _CACHE_ON.reset(token)
+
+
 def cache_enabled() -> bool:
-    """CUTSELL_SIMPLE_ENGINE_CACHE=0 sends one plain text block again (rollback without a redeploy)."""
-    return os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE", "1").strip() != "0"
+    """On inside cache_scope(True) only. CUTSELL_SIMPLE_ENGINE_CACHE=0 turns it off everywhere (no redeploy)."""
+    return _CACHE_ON.get() and os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE", "1").strip() != "0"
 
 
 def model_name() -> str:
@@ -118,10 +133,11 @@ def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tup
                     "thinking_blocks": sum(1 for b in data.get("content", []) if b.get("type") == "thinking"),
                     "answer_chars": len(text), "stop_reason": data.get("stop_reason"),
                     "json_format": "format" in body.get("output_config", {}), "json_refused": json_refused,
+                    "cache": cache_enabled(),
                 })
                 _LOG.info("simple_engine_llm_call %s", json.dumps({k: usage.get(k) for k in (
                     "step", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
-                    "max_tokens", "thinking", "effort", "answer_chars", "stop_reason")}))
+                    "max_tokens", "thinking", "effort", "answer_chars", "stop_reason", "cache", "json_format")}))
                 return text, usage
             if response.status_code == 400 and "format" in body.get("output_config", {}):
                 # The JSON format was refused: ask again in free text (the parsers read both) and say so in the logs.

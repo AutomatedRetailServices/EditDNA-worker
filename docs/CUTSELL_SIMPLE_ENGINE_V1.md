@@ -153,3 +153,7 @@ Measured per Claude call on the Gold (26 videos x 2 runs), prices from platform.
   4.15 c when they must be written (a lone video). Break-even: about 1 video in 5 finding the cache warm.
 - Rollback without a redeploy: CUTSELL_SIMPLE_ENGINE_CACHE=0 (one plain text block again), CUTSELL_SIMPLE_ENGINE_JSON=0
   (free-text answers again). Both at 0 = the live 1.2.3 requests.
+- 2026-10-19, Product Owner approval to deploy 1.2.4 with: prompt caching ON only for a video of a Bulk send (the app
+  sends metadata.bulk_size / bulk_id on each source, iOS build 26+; a lone video never caches), JSON-only on decision /
+  haul review / word fix, pass and sale review unchanged, token log per call. The draft diagnostics record
+  `prompt_cache` per source. If anything fails: CUTSELL_SIMPLE_ENGINE_CACHE=0 and CUTSELL_SIMPLE_ENGINE_JSON=0.
