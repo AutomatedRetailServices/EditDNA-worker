@@ -461,6 +461,10 @@ struct CreateFlowView: View {
                     let count = assets.count
                     var firstFailure: Error?
                     var failedClips: [Int] = []
+                    // Build 26: the videos of one Bulk send carry the same tag (server-side prompt caching).
+                    submitter.bulkTag = current.mode == .bulk && count > 1
+                        ? ["bulk_size": String(count), "bulk_id": UUID().uuidString] : nil
+                    defer { submitter.bulkTag = nil }
                     for (index, asset) in assets.enumerated() where index >= startedInJob {
                         // Build 24: this video's row in Edits · Processing.
                         let item = index < jobItems.count ? jobItems[index] : nil

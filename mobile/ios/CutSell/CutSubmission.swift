@@ -58,6 +58,9 @@ final class CutSubmitter: ObservableObject {
 
     /// Build 24: the Edits · Processing row of the cut being sent now (its state follows each step).
     var queueItem: UUID?
+    /// Build 26: set while the videos of one Bulk send are submitted ({"bulk_size": "3", "bulk_id": …}). Sent in each
+    /// source's metadata so the server caches the cut engine's fixed instructions for that send only.
+    var bulkTag: [String: String]?
 
     /// One step and its real % (0...1), shown as it is.
     func stage(_ title: String, _ fraction: Double? = nil) {
@@ -296,7 +299,8 @@ final class CutSubmitter: ObservableObject {
                     originalName: video.url.lastPathComponent,
                     uri: result.sourceURI,
                     sourceOrder: index,
-                    durationSec: video.duration
+                    durationSec: video.duration,
+                    metadata: bulkTag
                 ))
             }
 
@@ -359,7 +363,7 @@ extension CutSubmitter {
             let voiceURI = try await VoiceUpload.upload(fileURL: voices[index], projectID: projectID, session: session, order: index)
             try? FileManager.default.removeItem(at: voices[index])
             sources.append(SourceInput(originalName: video.url.lastPathComponent, uri: starts[index].sourceURI,
-                                       sourceOrder: index, durationSec: video.duration, metadata: ["audio_uri": voiceURI]))
+                                       sourceOrder: index, durationSec: video.duration, metadata: ["audio_uri": voiceURI].merging(bulkTag ?? [:]) { own, _ in own }))
         }
         CutSellDiagnostics.log("stage_timing", ["stage": "audio_upload", "seconds": String(format: "%.1f", Date().timeIntervalSince(voiceStarted))])
         stage("Cutting your video…")
