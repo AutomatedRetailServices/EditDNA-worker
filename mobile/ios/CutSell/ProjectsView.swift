@@ -388,6 +388,7 @@ struct ProjectsView: View {
         case .all, .processing: return "No edits yet"
         case .ready: return "No ready edits"
         case .drafts: return "No drafts"
+        case .products: return "No products yet"
         }
     }
 
