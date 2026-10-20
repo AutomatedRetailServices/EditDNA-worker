@@ -21,14 +21,20 @@ def ping():
         out["credit"] = {"status": r.status_code, "body": r.text[:300]}
     except Exception as exc:
         out["credit"] = repr(exc)[:200]
-    for model in ("claude-sonnet-5-5", "claude-sonnet-4-6"):
+    for url in ("https://api.kie.ai/claude/v1/messages", "https://api.kie.ai/anthropic/v1/messages"):
+      for model in ("claude-sonnet-5-5",):
         try:
-            r = requests.post("https://api.kie.ai/claude/v1/messages", headers=h, timeout=60, json={
+            r = requests.post(url, headers=h, timeout=60, json={
                 "model": model, "max_tokens": 50, "messages": [{"role": "user", "content": "Reply with the word OK."}]})
-            out[model] = {"status": r.status_code, "headers": {k: v for k, v in r.headers.items() if k.lower().startswith(("retry", "x-ratelimit"))},
+            out[url + " " + model] = {"status": r.status_code, "headers": {k: v for k, v in r.headers.items() if k.lower().startswith(("retry", "x-ratelimit"))},
                           "body": r.text[:400]}
         except Exception as exc:
-            out[model] = repr(exc)[:200]
+            out[url + " " + model] = repr(exc)[:200]
+    try:
+        r = requests.get("https://api.kie.ai/anthropic/v1/models", headers=h, timeout=30)
+        out["models"] = {"status": r.status_code, "body": r.text[:600]}
+    except Exception as exc:
+        out["models"] = repr(exc)[:200]
     return out
 
 
