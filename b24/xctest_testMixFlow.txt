@@ -1,0 +1,34 @@
+B24UI    12.8 PASS Create is for one video (no Bulk, no Mix)
+B24UI    14.7 PASS Plan · New Mix
+B24UI    14.9 PASS Plan · Bulk and This week (SOON)
+B24UI    22.9 Photos access allowed
+B24UI    24.0 PASS Plan · Bulk opens the gallery
+B24UI    29.5 PASS Mix setup
+B24UI    32.1 PASS a product chosen · CeraVe · Hydrating Cleanser
+B24UI    52.0 PASS gallery says Add 3 clips · Add 3 clips
+B24UI   144.1 FAIL section 0 has its clips · 6
+B24UI   153.9 PASS gallery says Add 2 clips · Add 2 clips
+B24UI   245.4 FAIL section 1 has its clips · 10
+B24UI   253.2 PASS gallery says Add 2 clips · Add 2 clips
+B24UI   344.3 FAIL section 2 has its clips · 14
+B24UI   356.8 PASS gallery says Add 2 clips · Add 2 clips
+B24UI   448.0 FAIL section 3 has its clips · 18
+B24UI   469.5 FAIL 9 clips in 4 sections · 18
+B24UI   469.5 PASS 24 videos · about N s each · 24 videos · about 146 s each
+B24UI   489.9 PASS section renamed · Results
+B24UI   491.8 PASS section added
+B24UI   498.0 PASS section deleted
+B24UI   503.9 PASS section moved up · CTA
+B24UI   511.5 PASS section moved back · CTA
+B24UI   513.3 PASS How many videos? sheet
+B24UI   525.8 FAIL preview of the first 4 videos · 8
+B24UI   526.3 PASS 12 chosen · Make 12 videos
+B24UI   533.3 PASS Mix group in Processing
+B24UI   533.8 PASS Processing shows this Mix only
+B24UI   534.8 PASS Mix · 12 videos · Mix · 12 videos
+B24UI   547.2 FAIL Plan · In progress shows the Mix
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:451: error: -[CutSellUITests.Build24UITests testMixFlow] : Failed to tap "planProgressMix" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"planProgressMix" IN identifiers'`, given input App element pid: 14973
+Test Case '-[CutSellUITests.Build24UITests testMixFlow]' failed (553.469 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-20 20:11:18.135.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-20 20:11:18.136.
+Test Suite 'Selected tests' failed at 2026-10-20 20:11:18.136.
