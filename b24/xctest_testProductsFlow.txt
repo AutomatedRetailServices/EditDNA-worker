@@ -1,17 +1,17 @@
-B24UI    10.3 PASS Products filter in Edits
-B24UI    12.2 PASS Products list
-B24UI    16.1 PASS ‘need a product’ notice · 2 videos need a product, We couldn’t tell from the video, Assign ›
-B24UI    17.3 PASS product row
-B24UI    19.5 PASS product view
-B24UI    21.7 videos in the product: 3
-B24UI    41.3 FAIL renamed
-B24UI    50.6 PASS assign sheet with her products
-B24UI    55.2 PASS 3 videos moved out · 3 → 0
-B24UI    61.5 PASS suggestion from the video shown
-B24UI    82.8 FAIL new brand and product created
-B24UI    83.4 FAIL no video left without a product
-B24UI    83.6 FAILURES: renamed | new brand and product created | no video left without a product
-Test Case '-[CutSellUITests.Build24UITests testProductsFlow]' passed (83.853 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-20 15:02:50.314.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-20 15:02:50.315.
-Test Suite 'Selected tests' passed at 2026-10-20 15:02:50.315.
+B24UI    24.4 PASS Products filter in Edits
+B24UI    26.6 PASS Products list
+B24UI    32.2 PASS ‘need a product’ notice · 2 videos need a product, We couldn’t tell from the video, Assign ›
+B24UI    33.5 PASS product row
+B24UI    37.3 PASS product view
+B24UI    39.6 videos in the product: 3
+B24UI    64.3 PASS renamed · Hydrating Cleanser Gel
+B24UI    73.5 PASS assign sheet with her products
+B24UI    79.1 PASS 3 videos moved out · 3 → 0
+B24UI    85.9 PASS suggestion from the video shown
+B24UI    99.4 PASS new brand and product created
+B24UI    99.9 PASS no video left without a product
+B24UI   100.2 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testProductsFlow]' passed (100.624 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-20 15:20:45.327.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-20 15:20:45.333.
+Test Suite 'Selected tests' passed at 2026-10-20 15:20:45.333.
