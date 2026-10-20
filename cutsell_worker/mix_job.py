@@ -28,6 +28,7 @@ from . import mix_store as store
 _LOG = logging.getLogger("cutsell.mix_job")
 DEEPGRAM_USD_PER_MIN = 0.0043          # Nova-3 pre-recorded, pay as you go (Deepgram price list)
 VIDEO_WAIT_LIMIT_SEC = 6 * 3600        # a clip whose video never arrives fails after this
+COMBO_WORKERS = 3                      # videos made side by side (a join is light; the strip + draft are I/O)
 
 
 def units_per_video() -> float:
@@ -298,6 +299,8 @@ def _clean_clip_path(record, cid, deps, work: Path) -> str:
 
 def _combo_phase(user_id, mix_id, record, deps, work: Path) -> dict:
     local_clean = record.get("_local_clean") or {}
+    record["_local_clean"] = local_clean
+    buildable = []
     for combo in record["combos"]:
         if combo.get("state") == "ready":
             continue
@@ -306,34 +309,46 @@ def _combo_phase(user_id, mix_id, record, deps, work: Path) -> dict:
         if any(i.get("state") == "failed" for i in infos):
             n = combo["n"]
             record = _set(user_id, mix_id, deps, lambda d: _combo_state(d, n, "waiting_clip"))
-            continue
-        if not all(i.get("state") == "rendered" for i in infos):
-            continue
-        try:
             record["_local_clean"] = local_clean
-            paths = [_clean_clip_path(record, cid, deps, work) for cid in cids]
-            out = engine.join_clips(paths, str(work / f"combo-{combo['n']:03d}.mp4"))
+            continue
+        if all(i.get("state") == "rendered" for i in infos):
+            buildable.append((combo, cids, infos))
+    # every clean clip needed is on this machine before the videos are made side by side
+    paths = {}
+    for _, cids, _ in buildable:
+        for cid in cids:
+            if cid not in paths:
+                paths[cid] = _clean_clip_path(record, cid, deps, work)
+
+    def build(item):
+        combo, cids, infos = item
+        n = combo["n"]
+        try:
+            out = engine.join_clips([paths[cid] for cid in cids], str(work / f"combo-{n:03d}.mp4"))
             timeline = engine.combo_timeline([{"duration": i["clean_duration"], "captions": i.get("captions") or [],
                                                "moments": i.get("moments") or [], "section": i.get("section")}
                                               for i in infos])
-            name = f"mix-{combo['n']:03d}-{combo['code'].replace(' · ', '-')}.mp4"
+            name = f"mix-{n:03d}-{combo['code'].replace(' · ', '-')}.mp4"
             uri = deps.put(out["path"], f"{_prefix(user_id, combo['project_id'])}{name}", "video/mp4")
             deps.after_combo(user_id=user_id, record=record, combo=combo, uri=uri, name=name, local=out["path"],
                              duration=out["duration"], timeline=timeline, infos=infos, directory=str(work))
-            n, duration = combo["n"], round(out["duration"], 3)
+            duration = round(out["duration"], 3)
 
             def ready(d):
                 _combo_state(d, n, "ready", duration_sec=duration)
                 t = d.setdefault("timing", {})
                 t.setdefault("first_ready_at", time.time())
                 t["last_ready_at"] = time.time()
-            record = _set(user_id, mix_id, deps, ready)
+            _set(user_id, mix_id, deps, ready)
             Path(out["path"]).unlink(missing_ok=True)
         except Exception as exc:
             _LOG.warning("mix_combo_failed %s", exc.__class__.__name__)
-            n = combo["n"]
-            record = _set(user_id, mix_id, deps, lambda d: _combo_state(d, n, "failed",
-                                                                        error="combo_failed:" + exc.__class__.__name__))
+            error = "combo_failed:" + exc.__class__.__name__
+            _set(user_id, mix_id, deps, lambda d: _combo_state(d, n, "failed", error=error))
+
+    with ThreadPoolExecutor(max_workers=COMBO_WORKERS) as pool:
+        list(pool.map(build, buildable))
+    record = store.load(user_id, mix_id, client=deps.client)
     combos = record["combos"]
     done = all(c.get("state") == "ready" for c in combos)
     failed_clips = any(c.get("state") == "failed" for c in record["clips"].values())

@@ -36,7 +36,7 @@ def create_mobile_project(payload: ProjectCreateRequest):
 
 
 @router.get("")
-def list_mobile_projects(user_id: str, limit: int = Query(default=50, ge=1, le=100)):
+def list_mobile_projects(user_id: str, limit: int = Query(default=50, ge=1, le=300)):
     try:
         return {"projects": list_projects(user_id=user_id, limit=limit)}
     except (TypeError, ValueError) as exc:
