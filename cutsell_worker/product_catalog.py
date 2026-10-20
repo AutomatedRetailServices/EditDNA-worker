@@ -318,8 +318,10 @@ def product_videos(user_id: str, product_id: str, projects: list[dict], *, clien
     for project in projects:
         project_id = str(project.get("project_id"))
         if (data["videos"].get(project_id) or {}).get("product_id") == product_id:
+            seconds = sum(float(src.get("duration_sec") or 0) for src in project.get("sources") or []
+                          if isinstance(src, dict))
             videos.append({"project_id": project_id, "title": project.get("title"), "state": project.get("state"),
-                           "bucket": state_bucket(project.get("state"))})
+                           "bucket": state_bucket(project.get("state")), "duration_sec": round(seconds, 1)})
     return {"product_id": product_id, "name": product["name"], "category": product.get("category"),
             "brand_id": product.get("brand_id"), "brand": brand.get("name"), "videos": videos}
 
