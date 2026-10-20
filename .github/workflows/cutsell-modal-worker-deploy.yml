@@ -41,7 +41,7 @@ jobs:
       - name: Install worker dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.cutsell.worker.cpu.txt pytest modal
+          pip install -r requirements.cutsell.worker.cpu.txt pytest modal fakeredis
       - name: Engine, caption, delivery and wake tests
         run: |
           python -m pytest -q \
