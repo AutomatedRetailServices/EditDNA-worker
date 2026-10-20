@@ -703,6 +703,17 @@ def run_flow_b_job(payload: dict) -> dict:
                 payload={"job_id": job_id, "selected_count": len(serialized["draft"].get("selected") or [])},
             )
             outcome = "draft_ready"
+            # Brand / product (Claude Haiku 5.5): AFTER the cut is saved and announced, never able to change or
+            # fail it. The photo step reads the original video when it is here (not for a voice-only source).
+            if use_simple_engine:
+                from .product_tagging import tag_and_record
+                first = min(request.sources, key=lambda source: source.source_order)
+                serialized["product_tagging"] = tag_and_record(
+                    user_id=request.user_id, project_id=request.project_id, draft=serialized["draft"],
+                    sources=request.sources,
+                    video_path=None if first.source_asset_id in audio_only else local_paths.get(first.source_asset_id),
+                    duration=measured_by_source.get(first.source_asset_id),
+                )
             publish("draft_ready", 100)
             return serialized
     except Exception as exc:
@@ -769,5 +780,9 @@ def run_video_followup_job(payload: dict) -> dict:
                 user_id=user_id, project_id=project_id, source_uri=uri,
                 original_local_path=local, cut_local_path=local, scratch_dir=directory,
             )
+        tagging: dict = {"status": "not_first_source"}
+        if source_order == 0:
+            from .product_tagging import photo_followup
+            tagging = photo_followup(user_id=user_id, project_id=project_id, video_path=local)
     return {"state": "video_ready", "source_order": source_order, "duration_sec": round(float(probe.duration_sec), 3),
-            "primary_video": primary, "seconds": round(time.time() - started, 2)}
+            "primary_video": primary, "product_tagging": tagging, "seconds": round(time.time() - started, 2)}

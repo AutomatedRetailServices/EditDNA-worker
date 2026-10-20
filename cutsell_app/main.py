@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from cutsell_app.auth_middleware import AuthScopeMiddleware
 from cutsell_app.auth_routes import router as auth_router
 from cutsell_app.batch_routes import router as batch_router
+from cutsell_app.catalog_routes import router as catalog_router
 from cutsell_app.feedback_routes import router as feedback_router
 from cutsell_app.job_retry_routes import router as job_retry_router
 from cutsell_app.multipart_routes import router as multipart_router
@@ -67,6 +68,7 @@ app.include_router(render_version_router)
 app.include_router(job_retry_router)
 app.include_router(feedback_router)
 app.include_router(batch_router)
+app.include_router(catalog_router)
 app.include_router(notification_router)
 app.include_router(pending_review_router)
 app.include_router(clean_audio_router)
