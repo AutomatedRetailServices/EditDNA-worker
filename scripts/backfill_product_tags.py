@@ -45,24 +45,25 @@ def backfill(write: bool, max_usd: float):
         entry = catalog.video_entry(user_id, project_id, client=r) or {}
         if entry.get("source") == "user" or entry.get("suggestion"):
             continue                                            # placed by hand, or already classified
-        draft = (snap.get("undo") or [snap.get("draft")])[0] or snap.get("draft") or {}
-        sources = snap.get("sources") or []
+        draft = (snap.get("undo") or [snap.get("draft")])[0] or snap.get("draft") or {}   # the cut as the AI made it
+        sources = sorted(snap.get("sources") or [], key=lambda s: s.get("source_order") or 0)
         known = catalog.known_names(catalog.load(user_id, client=r))
-        with tempfile.TemporaryDirectory() as d:
-            text, info = tagging.classify_text(tagging.transcript_lines(draft)[0], known, tagging.album_hint_of(sources))
-            video = None
-            if tagging.needs_photo(text) and sources and sources[0].get("uri"):
-                try:
-                    video = download_source(sources[0]["uri"], str(Path(d) / "v.mp4"))
-                except Exception:
-                    video = None
-            result = tagging.tag(draft, known, video_path=video, duration=sources[0].get("duration_sec") if sources else None,
-                                 album_hint=tagging.album_hint_of(sources))
+        result = tagging.tag(draft, known, album_hint=tagging.album_hint_of(sources))  # text only, no video yet
         spent += (result.get("log") or {}).get("cost_usd") or 0
+        row = {"brand": result.get("brand"), "product": result.get("product"), "confidence": result.get("confidence"),
+               "needs_photo": result.get("needs_photo"), "used_photo": False}
         if write:
             catalog.record_ai_result(user_id, project_id, result, client=r)
-        rows.append({"brand": result.get("brand"), "product": result.get("product"), "confidence": result.get("confidence"),
-                     "used_photo": result.get("used_photo")})
+            if result.get("needs_photo") and sources and sources[0].get("uri"):
+                with tempfile.TemporaryDirectory() as d:
+                    try:
+                        video = download_source(sources[0]["uri"], str(Path(d) / "v.mp4"))
+                        follow = tagging.photo_followup(user_id=user_id, project_id=project_id, video_path=video, client=r)
+                        spent += ((follow.get("log") or {}).get("cost_usd") or 0)
+                        row.update({"used_photo": True, "confidence": follow.get("confidence")})
+                    except Exception as exc:
+                        row["photo_error"] = exc.__class__.__name__
+        rows.append(row)
     return {"videos": len(rows), "spent_usd": round(spent, 4), "written": write, "rows": rows}
 
 
