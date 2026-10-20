@@ -31,5 +31,16 @@ def test_mix_in_edits_and_products():
     assert "MixGroupRow(mix: mix" in edits and "mixCenter.activeProjectIDs" in edits
     products = read("ProductsView.swift")
     assert "Mix ready: \\(total) videos from" in products and "Export all" in products and 'mixCode = "mix_code"' in products
-    assert 'Button(action: onMix)' in read("HomeHubView.swift")
+    hub = read("HomeHubView.swift")
+    assert "ForEach([CreateMode.single, .combine]" in hub and "onMix" not in hub
     assert "$0.state != Project.mixContainerState" in read("AppState.swift")
+
+
+def test_plan_home_has_mix_bulk_in_progress_and_soon():
+    plan = read("PlanView.swift")
+    for text in ("Make videos in batches and plan what to post.", "New Mix", "Hooks × bodies × CTAs → many videos", "Bulk",
+                 "Upload many videos at once", "In progress", "See all in Edits ›", "This week", "SOON", "Plan my week ›"):
+        assert text in plan
+    assert "MixSetupView(" in plan and "queue.requestedCreateMode = .bulk" in plan and "queue.focus = focus" in plan
+    assert "struct PlanView" not in read("MainTabView.swift")
+    assert "allowedModes: route.mode == .bulk ? [.bulk] : [.single, .combine]" in read("CreateFlowView.swift")

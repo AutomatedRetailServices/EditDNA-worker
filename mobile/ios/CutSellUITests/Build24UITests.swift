@@ -361,9 +361,20 @@ final class Build24UITests: XCTestCase {
     /// section, "Pick how many" → 12, Processing shows ONE group, Results (MIX tiles with codes) and Export all.
     func testMixFlow() throws {
         launchApp(fresh: true, extra: ["-CutSellCatalogMock", "-CutSellMixMock"])
-        let chip = element("hubMode_mix")
-        check(chip.waitForExistence(timeout: 20), "Mix on Create")
-        chip.tap()
+        check(!element("hubMode_bulk").exists && !element("hubMode_mix").exists, "Create is for one video (no Bulk, no Mix)")
+        element("tab_plan").tap()
+        let newMix = element("planNewMix")
+        check(newMix.waitForExistence(timeout: 20), "Plan · New Mix")
+        check(element("planBulk").exists && element("planSoon").exists, "Plan · Bulk and This week (SOON)")
+        shot("plan_home")
+        // Bulk opens the Bulk gallery (the same pipeline as before); closed again here.
+        element("planBulk").tap()
+        allowPhotos()
+        let bulkCTA = element("galleryCreateButton")
+        check(bulkCTA.waitForExistence(timeout: 20), "Plan · Bulk opens the gallery")
+        if app.buttons["Close"].firstMatch.exists { app.buttons["Close"].firstMatch.tap() }
+        pause(2)
+        newMix.tap()
         check(element("mixProduct").waitForExistence(timeout: 15), "Mix setup")
         pause(2)
         let product = element("mixProductName")
@@ -427,11 +438,18 @@ final class Build24UITests: XCTestCase {
         shot("mix_how_many")
         element("mixHowManyMake").tap()
 
-        // Edits · Processing: one group for the Mix, then its videos.
+        // Edits · Processing showing this Mix (as from Plan · In progress), one group for it.
         let group = element("mixGroup")
         check(group.waitForExistence(timeout: 30), "Mix group in Processing")
+        check(element("processingFocus").exists, "Processing shows this Mix only")
         check(element("mixGroupTitle").label == "Mix · 12 videos", "Mix · 12 videos", element("mixGroupTitle").label)
         shot("mix_processing")
+        element("tab_plan").tap()
+        let card = element("planProgressMix")
+        check(card.waitForExistence(timeout: 10), "Plan · In progress shows the Mix", card.exists ? card.label : "")
+        shot("plan_in_progress")
+        card.tap()
+        check(group.waitForExistence(timeout: 15), "In progress → Edits · Processing (this Mix)")
         group.tap()
         check(element("mixBanner").waitForExistence(timeout: 15), "Mix results")
         _ = wait(30) { self.element("mixBanner").label.contains("Mix ready") }

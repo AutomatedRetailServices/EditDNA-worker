@@ -204,33 +204,3 @@ struct CSTabBar: View {
         .padding(.bottom, 2)
     }
 }
-
-/// Plan tab: not designed for this phase yet. No plans or prices are shown.
-struct PlanView: View {
-    let selectTab: (MainTab) -> Void
-
-    var body: some View {
-        ZStack {
-            ScreenBackground()
-            VStack(alignment: .leading, spacing: 0) {
-                BrandLogo().padding(.top, 8)
-                Text("Plan")
-                    .font(CS.inter(34, .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.top, 14)
-                Spacer()
-                VStack(spacing: 10) {
-                    Image("TabPlan").resizable().scaledToFit().frame(width: 64, height: 64)
-                    Text("Coming soon")
-                        .font(CS.inter(19, .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(maxWidth: .infinity)
-                Spacer()
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-        }
-        .safeAreaInset(edge: .bottom) { CSTabBar(current: .plan, select: selectTab) }
-    }
-}

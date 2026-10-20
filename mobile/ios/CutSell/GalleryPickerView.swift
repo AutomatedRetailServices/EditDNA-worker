@@ -290,6 +290,8 @@ struct GalleryPickerView: View {
     /// Mix: only pick clips for one section ("Add 2 clips"), up to `pickLimit`; no mode chips, no style sheet.
     var pickTitle: ((Int) -> String)? = nil
     var pickLimit: Int = 10
+    /// The modes offered in the picker (Create: Single / Combine; Plan's Bulk: Bulk only).
+    var allowedModes: [CreateMode] = CreateMode.allCases
 
     @StateObject private var library = GalleryLibrary()
     @State private var mode: CreateMode = .single
@@ -470,8 +472,8 @@ struct GalleryPickerView: View {
                 .font(CS.inter(14))
                 .foregroundStyle(CS.textCaption)
                 .padding(.top, 16)
-            if pickTitle == nil {
-                SegmentedPill(options: CreateMode.allCases, selection: $mode) { $0.title }
+            if pickTitle == nil && allowedModes.count > 1 {
+                SegmentedPill(options: allowedModes, selection: $mode) { $0.title }
                     .padding(.top, 14)
                     .accessibilityIdentifier("createModePicker")
                 Text(mode.helper)

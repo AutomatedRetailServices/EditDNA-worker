@@ -82,6 +82,14 @@ struct ProjectsView: View {
         return rows
     }
 
+    /// Plan · "In progress": only the rows of the group tapped there (a Bulk send); a Mix shows only its group row.
+    private var focusedRows: [ProcessingQueue.Row] {
+        guard let focus = queue.focus else { return processingRows }
+        if mixCenter.mixIDs.contains(focus) { return [] }
+        let ids = Set(queue.items.filter { $0.group == focus }.map(\.id))
+        return processingRows.filter { row in row.itemID.map { ids.contains($0) } ?? false }
+    }
+
     /// Figma 1135:2686: Processing · Ready · Products · Drafts · All, sliding sideways. Processing only while
     /// something is being made.
     private var visibleTabs: [EditsTab] {
@@ -291,13 +299,25 @@ struct ProjectsView: View {
                 Text("Each one moves to Ready when it’s done").font(CS.inter(11, .medium)).foregroundStyle(Color(hex: 0x99A3BD))
             }
             .padding(.top, 16)
+            if let focus = queue.focus {
+                HStack {
+                    Text(mixCenter.mixes.contains { $0.mixID == focus } ? "Showing this Mix" : "Showing this Bulk")
+                        .font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD))
+                    Spacer()
+                    Button("Show all") { queue.focus = nil }
+                        .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
+                        .accessibilityIdentifier("processingShowAll")
+                }
+                .padding(.top, 10)
+                .accessibilityIdentifier("processingFocus")
+            }
             VStack(spacing: 8) {
-                ForEach(mixCenter.active) { mix in
+                ForEach(mixCenter.active.filter { queue.focus == nil || queue.focus == $0.mixID }) { mix in
                     MixGroupRow(mix: mix, onRetry: { Task { await mixCenter.retry(mix, session: appState.session) } }) {
                         if let product = mix.productID { mixRoute = ProductRoute(productID: product, mixID: mix.mixID) }
                     }
                 }
-                ForEach(Array(processingRows.enumerated()), id: \.element.id) { index, row in
+                ForEach(Array(focusedRows.enumerated()), id: \.element.id) { index, row in
                     processingRow(index + 1, row)
                 }
             }

@@ -25,6 +25,8 @@ final class ProcessingQueue: ObservableObject {
         var projectID: String?
         var state: State
         let addedAt: Date
+        /// Plan · In progress: the Bulk send this video belongs to (nil for a single cut).
+        var group: String? = nil
 
         static func == (a: Item, b: Item) -> Bool {
             a.id == b.id && a.name == b.name && a.duration == b.duration && a.projectID == b.projectID
@@ -39,16 +41,38 @@ final class ProcessingQueue: ObservableObject {
     @Published var requestedEditsFilter: String?
     /// Mix: the Mix just started (Edits opens on Processing and shows its group).
     @Published var requestedMix: MixSummary?
+    /// Plan · "In progress": Edits · Processing shows only this group (a Bulk id or a Mix id); nil = everything.
+    @Published var focus: String?
+    /// Plan · "Bulk": the Create flow opens the gallery in Bulk (the same upload pipeline as before).
+    @Published var requestedCreateMode: CreateMode?
+
+    /// A Bulk send followed in Plan · In progress: how many videos it had (the ones still here are not ready).
+    struct BulkGroup: Identifiable, Equatable {
+        let id: String
+        let total: Int
+        let startedAt: Date
+    }
+    @Published private(set) var bulkGroups: [BulkGroup] = []
+
+    /// Bulk sends with videos still being made, newest first: (group, ready, total, first thumbnail).
+    var activeBulks: [(group: BulkGroup, ready: Int, thumbnail: UIImage?)] {
+        bulkGroups.compactMap { group in
+            let left = items.filter { $0.group == group.id }
+            guard !left.isEmpty else { return nil }
+            return (group, max(0, group.total - left.count), left.first { $0.thumbnail != nil }?.thumbnail)
+        }.sorted { $0.group.startedAt > $1.group.startedAt }
+    }
     /// Retry for a failed item (resume the upload, or open the cut).
     private var retries: [UUID: () -> Void] = [:]
 
     /// Adds the videos of a new job, in order; returns their ids.
     @discardableResult
-    func add(_ entries: [(name: String, duration: Double)]) -> [UUID] {
+    func add(_ entries: [(name: String, duration: Double)], group: String? = nil) -> [UUID] {
         let now = Date()
         let new = entries.map { Item(id: UUID(), name: $0.name, duration: $0.duration, thumbnail: nil, projectID: nil,
-                                     state: .queued, addedAt: now) }
+                                     state: .queued, addedAt: now, group: group) }
         items.append(contentsOf: new)
+        if let group, !new.isEmpty { bulkGroups.append(BulkGroup(id: group, total: new.count, startedAt: now)) }
         return new.map(\.id)
     }
 

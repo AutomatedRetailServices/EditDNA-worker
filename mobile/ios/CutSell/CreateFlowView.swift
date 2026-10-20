@@ -9,6 +9,7 @@ struct CreateFlowView: View {
 
     @EnvironmentObject private var appState: AppState
     @StateObject private var submitter = CutSubmitter()
+    @ObservedObject private var queue = ProcessingQueue.shared
     @State private var showingCamera = false
     @State private var afterCamera: AfterCamera?
     @State private var showingGallery = false
@@ -34,7 +35,6 @@ struct CreateFlowView: View {
     @State private var jobItems: [UUID] = []
     /// Bulk: "Your N videos are being edited" (Figma 1134:4635).
     @State private var bulkSheetCount: Int?
-    @State private var showingMix = false
 
     enum AfterCamera { case gallery, job(CreateJob) }
 
@@ -52,8 +52,7 @@ struct CreateFlowView: View {
                 onUpload: { mode in galleryMode = mode; showingGallery = true },
                 onRecord: { showingCamera = true },
                 onOpenProject: { path.append($0) },
-                selectTab: selectTab,
-                onMix: { showingMix = true }
+                selectTab: selectTab
             )
             .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .bottom) {
@@ -76,14 +75,12 @@ struct CreateFlowView: View {
             }
         }
         .tint(CS.cyan)
-        .fullScreenCover(isPresented: $showingMix) {
-            MixSetupView(onClose: { showingMix = false }, onStarted: { summary in
-                showingMix = false
-                ProcessingQueue.shared.requestedEditsFilter = "processing"
-                ProcessingQueue.shared.requestedMix = summary
-                selectTab(.edits)
-            })
-            .environmentObject(appState)
+        // Plan · "Bulk": the gallery opens in Bulk here, so the videos go through the same upload pipeline.
+        .onChange(of: queue.requestedCreateMode) { _, mode in
+            guard let mode else { return }
+            queue.requestedCreateMode = nil
+            galleryMode = mode
+            showingGallery = true
         }
         .fullScreenCover(isPresented: $showingCamera, onDismiss: {
             switch afterCamera {
@@ -129,7 +126,9 @@ struct CreateFlowView: View {
                     jobAfterGallery = CreateJob(mode: mode, source: .library(assets), style: style)
                     showingGallery = false
                 },
-                initialMode: route.mode
+                initialMode: route.mode,
+                // Create is for ONE video (one clip, or several clips made into one); Bulk lives in Plan.
+                allowedModes: route.mode == .bulk ? [.bulk] : [.single, .combine]
             )
         }
         .fullScreenCover(item: $job, onDismiss: {
@@ -203,7 +202,7 @@ struct CreateFlowView: View {
         if submitter.isSubmitting || job != nil {
             Task { @MainActor in
                 guard await AIConsentCenter.shared.ensure() else { return }
-                let items = ProcessingQueue.shared.add(Self.entries(for: newJob))
+                let items = ProcessingQueue.shared.add(Self.entries(for: newJob), group: Self.bulkGroup(for: newJob))
                 waiting.append((newJob, items))
                 CutSellDiagnostics.log("job_queued", ["videos": String(items.count), "waiting": String(waiting.count)])
                 if newJob.mode == .bulk && items.count > 1 { openEditsProcessing() }
@@ -221,7 +220,7 @@ struct CreateFlowView: View {
     private func start(_ newJob: CreateJob, items: [UUID]? = nil, present: Bool = true) {
         guard !submitter.isSubmitting else { return }
         submitter.reset()
-        jobItems = items ?? ProcessingQueue.shared.add(Self.entries(for: newJob))
+        jobItems = items ?? ProcessingQueue.shared.add(Self.entries(for: newJob), group: Self.bulkGroup(for: newJob))
         submitter.queueItem = jobItems.first
         loadThumbnails(for: newJob, items: jobItems)
         problem = nil
@@ -266,6 +265,12 @@ struct CreateFlowView: View {
         guard !submitter.isSubmitting, !waiting.isEmpty else { return }
         let next = waiting.removeFirst()
         start(next.job, items: next.items, present: false)
+    }
+
+    /// Plan · In progress: a Bulk send of several videos is followed as one group.
+    static func bulkGroup(for job: CreateJob) -> String? {
+        if job.mode == .bulk, case .library(let assets) = job.source, assets.count > 1 { return "bulk-" + UUID().uuidString }
+        return nil
     }
 
     /// One Processing row per cut: Bulk = one per video; Combine = one; a recording = one.
