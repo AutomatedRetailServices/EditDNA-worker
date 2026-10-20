@@ -688,6 +688,20 @@ final class MockCatalog {
     private var products: [String: (brand: String, name: String)] = [:]
     private var links: [String: String] = [:]                      // project -> product
     private var seeded = false
+    private var demo: [Project] = []
+
+    /// The probe account may have no cuts yet: the mock then brings its own 12 sample videos.
+    private func effective(_ projects: [Project]) -> [Project] {
+        if !projects.isEmpty { return projects }
+        if demo.isEmpty {
+            let states = ["draft_ready", "draft_ready", "needs_review", "processing"]
+            demo = (0..<12).map { index in
+                Project(projectID: "demo_\(index)", userID: "probe", title: "Sample cut \(index + 1)",
+                        state: states[index % states.count], latestJobID: nil, sourceCount: 1, updatedAt: nil)
+            }
+        }
+        return demo
+    }
 
     private func seed(_ projects: [Project]) {
         guard !seeded, !projects.isEmpty else { return }
@@ -704,7 +718,8 @@ final class MockCatalog {
         state == "draft_ready" ? "ready" : Project.processingStates.contains(state) ? "processing" : "drafts"
     }
 
-    func overview(projects: [Project]) -> CatalogOverview {
+    func overview(projects given: [Project]) -> CatalogOverview {
+        let projects = effective(given)
         seed(projects)
         var out: [CatalogBrand] = []
         for (brandID, name) in brands.sorted(by: { $0.value < $1.value }) {
@@ -725,7 +740,8 @@ final class MockCatalog {
                                videos: links.mapValues { CatalogVideoLink(productID: $0, source: "ai") })
     }
 
-    func detail(_ productID: String, projects: [Project]) throws -> CatalogProductDetail {
+    func detail(_ productID: String, projects given: [Project]) throws -> CatalogProductDetail {
+        let projects = effective(given)
         guard let product = products[productID] else { throw APIError.http(404, "product not found") }
         let videos = projects.filter { links[$0.projectID] == productID }.map {
             CatalogProductVideo(projectID: $0.projectID, title: $0.title, state: $0.state, bucket: bucket($0.state), durationSec: 30)
