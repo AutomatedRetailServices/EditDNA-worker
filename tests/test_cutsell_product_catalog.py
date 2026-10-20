@@ -196,3 +196,8 @@ def test_api_catalog_assign_rename(monkeypatch, r):
     detail = client.get(f"/v1/catalog/products/{product['product_id']}", params={"user_id": "u"}).json()
     assert detail["name"] == "Foaming Cleanser" and len(detail["videos"]) == 3
     assert client.get(f"/v1/catalog/products/{product['product_id']}/thumbnail", params={"user_id": "u"}).status_code == 404
+
+
+def test_a_brand_not_read_on_the_label_is_dropped():
+    assert tagging._read_on_label({"brand": "Nike", "evidence": "PRO NIKE printed on the waistband"})
+    assert not tagging._read_on_label({"brand": "Essentia", "evidence": "16.9 FL OZ (1 PT 0.9 FL OZ) 500ml"})

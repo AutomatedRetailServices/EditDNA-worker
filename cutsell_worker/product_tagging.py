@@ -238,6 +238,10 @@ def tag(draft: dict, known: list[dict], *, video_path: str | None = None, durati
                 log["calls"].append({"kind": "photo", **photo_info["usage"]})
                 if photo_info["error"]:
                     log["errors"].append("photo_" + photo_info["error"])
+                if photo_result is not None and photo_result.get("brand") and not _read_on_label(photo_result):
+                    # A brand the model did not actually read on the product is a guess, not a suggestion (real
+                    # case: a plain water bottle named "Essentia" from "16.9 FL OZ" on its label).
+                    photo_result.update({"brand": None, "product": None, "confidence": min(photo_result["confidence"], 0.2)})
                 if photo_result is not None:
                     better = (photo_result.get("brand") and photo_result.get("product")
                               and photo_result["confidence"] >= result["confidence"])
@@ -260,6 +264,14 @@ def tag(draft: dict, known: list[dict], *, video_path: str | None = None, durati
     _LOG.info("product_tagging %s", json.dumps({k: result.get(k) for k in ("brand", "product", "confidence", "used_photo",
                                                                            "needs_photo")} | result["log"]))
     return result
+
+
+def _read_on_label(photo_result: dict) -> bool:
+    """The brand must appear in what the model says it read (the evidence)."""
+    from .product_catalog import normalize
+    brand = normalize(photo_result.get("brand")).replace(" ", "")
+    evidence = normalize(photo_result.get("evidence")).replace(" ", "")
+    return bool(brand) and brand in evidence
 
 
 def _photo_step(result, first_words, known, video_path, duration):
