@@ -29,6 +29,7 @@ from uuid import uuid4
 from .project_store import _redis_client, _scope
 
 MIN_CONFIDENCE = 0.7
+MIX_CONTAINER_STATE = "mix"
 _MARKS = re.compile(r"[®™©℠]")
 
 
@@ -194,6 +195,22 @@ def assign(user_id: str, project_ids: list[str], *, product_id: str | None = Non
     return _update(user_id, change, client=client)
 
 
+def place_mix(user_id: str, mix_id: str, videos: dict[str, str], *, product_id: str, client=None) -> dict:
+    """The videos of a Mix go straight into the Mix's product (no detection), tagged MIX with their code
+    ({project_id: "H1 · B2 · Be1 · C2"}). Placed like a creator's own choice: the AI never moves them."""
+    def change(data):
+        if product_id not in data["products"]:
+            raise KeyError("product not found")
+        for project_id, code in videos.items():
+            entry = data["videos"].get(project_id) or {}
+            entry.update({"product_id": product_id, "source": "user", "mix_id": mix_id, "mix_code": code,
+                          "updated_at": _now()})
+            data["videos"][project_id] = entry
+        return {"product_id": product_id, "placed": len(videos)}
+
+    return _update(user_id, change, client=client)
+
+
 def create(user_id: str, *, brand: str, product: str | None = None, category: str | None = None, client=None) -> dict:
     def change(data):
         brand_id = _ensure_brand(data, brand)
@@ -284,6 +301,8 @@ def overview(user_id: str, projects: list[dict], *, client=None) -> dict:
     counts: dict[str, dict[str, int]] = {}
     uncategorized = []
     for project_id, project in alive.items():
+        if project.get("state") == MIX_CONTAINER_STATE:
+            continue                                   # the project a Mix's clips were uploaded to: not a video
         entry = data["videos"].get(project_id) or {}
         product_id = entry.get("product_id")
         if product_id and product_id in data["products"]:
@@ -320,8 +339,10 @@ def product_videos(user_id: str, product_id: str, projects: list[dict], *, clien
         if (data["videos"].get(project_id) or {}).get("product_id") == product_id:
             seconds = sum(float(src.get("duration_sec") or 0) for src in project.get("sources") or []
                           if isinstance(src, dict))
+            entry = data["videos"].get(project_id) or {}
             videos.append({"project_id": project_id, "title": project.get("title"), "state": project.get("state"),
-                           "bucket": state_bucket(project.get("state")), "duration_sec": round(seconds, 1)})
+                           "bucket": state_bucket(project.get("state")), "duration_sec": round(seconds, 1),
+                           "mix_id": entry.get("mix_id"), "mix_code": entry.get("mix_code")})
     return {"product_id": product_id, "name": product["name"], "category": product.get("category"),
             "brand_id": product.get("brand_id"), "brand": brand.get("name"), "videos": videos}
 

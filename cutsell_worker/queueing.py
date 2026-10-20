@@ -72,6 +72,21 @@ def enqueue_video_followup(payload: dict, *, queue=None, timeout: int = 1200) ->
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 
+def enqueue_mix(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
+    """One job for a whole Mix (cutsell_worker.mix_job). Started again by video-ready / retry: it is resumable."""
+    target = queue or get_queue()
+    job = target.enqueue(
+        "cutsell_worker.mix_job.run_mix_job",
+        payload,
+        job_timeout=timeout,
+        result_ttl=86400,
+        failure_ttl=86400,
+        meta={"user_id": str(payload.get("user_id") or ""), "project_id": str(payload.get("mix_id") or ""), "mix": True},
+    )
+    threading.Thread(target=wake_worker, name="wake-worker", daemon=True).start()
+    return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+
+
 def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
     target = queue or get_queue()
     job = target.enqueue(

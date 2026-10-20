@@ -101,7 +101,7 @@ def get_project(*, user_id: str, project_id: str, client=None) -> dict[str, Any]
 
 def list_projects(*, user_id: str, client=None, limit: int = 50) -> list[dict[str, Any]]:
     target = _redis_client(client)
-    count = max(1, min(int(limit), 100))
+    count = max(1, min(int(limit), 500))
     ids = target.zrevrange(project_index_key(user_id=user_id), 0, count - 1)
     output = []
     for raw_id in ids:

@@ -14,7 +14,7 @@ router = APIRouter(prefix="/v1/catalog", tags=["catalog"])
 
 
 def _projects(user_id: str) -> list[dict]:
-    return list_projects(user_id=user_id, limit=100)
+    return list_projects(user_id=user_id, limit=500)
 
 
 def _guard(call):

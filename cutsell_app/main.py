@@ -11,6 +11,7 @@ from cutsell_app.auth_middleware import AuthScopeMiddleware
 from cutsell_app.auth_routes import router as auth_router
 from cutsell_app.batch_routes import router as batch_router
 from cutsell_app.catalog_routes import router as catalog_router
+from cutsell_app.mix_routes import router as mix_router
 from cutsell_app.feedback_routes import router as feedback_router
 from cutsell_app.job_retry_routes import router as job_retry_router
 from cutsell_app.multipart_routes import router as multipart_router
@@ -69,6 +70,7 @@ app.include_router(job_retry_router)
 app.include_router(feedback_router)
 app.include_router(batch_router)
 app.include_router(catalog_router)
+app.include_router(mix_router)
 app.include_router(notification_router)
 app.include_router(pending_review_router)
 app.include_router(clean_audio_router)
@@ -384,7 +386,7 @@ def submit_flow_b(payload: FlowBSubmitRequest):
 @app.get("/v1/capabilities")
 def capabilities():
     """What this server can do (the app checks before using a newer flow; an older server answers 404)."""
-    return {"audio_first": True, "video_ready": True, "idempotent_multipart_complete": True}
+    return {"audio_first": True, "video_ready": True, "idempotent_multipart_complete": True, "mix": True}
 
 
 class VideoReadyRequest(BaseModel):
@@ -400,6 +402,18 @@ def video_ready(project_id: str, payload: VideoReadyRequest):
         validate_product_source_uri(payload.uri, project_id=project_id, user_id=payload.user_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    from .mix_routes import is_mix
+    if is_mix(payload.user_id, project_id):
+        # a Mix clip's video: the Mix job goes on (it makes the clean clips once every video is here). A job that
+        # is still working is only told to look again when it ends (no second job for the same Mix).
+        from cutsell_worker import mix_store
+        from cutsell_worker.queueing import enqueue_mix
+        record = mix_store.load(payload.user_id, project_id)
+        if record.get("state") in ("waiting_for_videos", "ready", "needs_retry"):
+            submission = enqueue_mix({"user_id": payload.user_id, "mix_id": project_id})
+            return {"job_id": submission.job_id, "queue": submission.queue_name}
+        mix_store.update(payload.user_id, project_id, lambda d: d.update(rerun=True))
+        return {"job_id": None, "queue": "mix"}
     submission = enqueue_video_followup({"project_id": project_id, "user_id": payload.user_id,
                                          "uri": payload.uri, "source_order": payload.source_order})
     return {"job_id": submission.job_id, "queue": submission.queue_name}
