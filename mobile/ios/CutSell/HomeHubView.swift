@@ -7,6 +7,8 @@ struct HomeHubView: View {
     let onRecord: () -> Void
     let onOpenProject: (Project) -> Void
     let selectTab: (MainTab) -> Void
+    /// Mix: several versions of each part of one product video → every combination.
+    var onMix: () -> Void = {}
 
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var tracker = CutTracker.shared
@@ -147,6 +149,16 @@ struct HomeHubView: View {
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("hubMode_\(mode.rawValue)")
                     }
+                    Button(action: onMix) {
+                        Text("Mix")
+                            .font(CS.inter(12, .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(hex: 0x050814, opacity: 0.3), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("hubMode_mix")
                 }
                 .padding(.top, 12)
             }

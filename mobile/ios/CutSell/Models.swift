@@ -47,6 +47,8 @@ struct Project: Codable, Identifiable, Hashable {
     /// Edits "Drafts"/"Ready" tab filters both reuse (never duplicated).
     /// A new project before its video finished uploading (server `project_store.create_project`).
     static let uploadNotFinishedState = "created"
+    /// The project a Mix's clips are uploaded to (server `product_catalog.MIX_CONTAINER_STATE`): not a video.
+    static let mixContainerState = "mix"
 
     static let processingStates: Set<String> = [
         "processing", "uploaded", "preparing", "transcribing", "analyzing", "composing",

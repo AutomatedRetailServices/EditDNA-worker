@@ -356,4 +356,101 @@ final class Build24UITests: XCTestCase {
         shot("products_after")
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
+    /// Mix (Figma 1136:2724 / 2804 / 2916) with in-memory catalog + Mix (-CutSellCatalogMock -CutSellMixMock): the
+    /// product, clips from Photos in 4 sections (3 hooks, 2 bodies, 2 benefits, 2 CTAs), rename / add / move / delete a
+    /// section, "Pick how many" → 12, Processing shows ONE group, Results (MIX tiles with codes) and Export all.
+    func testMixFlow() throws {
+        launchApp(fresh: true, extra: ["-CutSellCatalogMock", "-CutSellMixMock"])
+        let chip = element("hubMode_mix")
+        check(chip.waitForExistence(timeout: 20), "Mix on Create")
+        chip.tap()
+        check(element("mixProduct").waitForExistence(timeout: 15), "Mix setup")
+        pause(2)
+        let product = element("mixProductName")
+        check(product.exists && product.label.contains("·"), "a product chosen", product.label)
+        shot("mix_setup_empty")
+        for (section, count) in [(0, 3), (1, 2), (2, 2), (3, 2)] {
+            element("mixAddClip_\(section)").tap()
+            let photos = app.buttons["Choose from Photos"].firstMatch
+            guard photos.waitForExistence(timeout: 10) else { check(false, "add-clip menu \(section)"); continue }
+            photos.tap()
+            allowPhotos()
+            let tiles = app.descendants(matching: .any).matching(identifier: "galleryTile")
+            _ = wait(30) { tiles.count >= count }
+            for index in 0..<min(count, tiles.count) { tiles.element(boundBy: index).tap(); pause(0.5) }
+            let add = element("galleryCreateButton")
+            check(add.label.contains("Add \(count) clip"), "gallery says Add \(count) clips", add.label)
+            add.tap()
+            _ = wait(30) { self.element("mixProduct").exists && !self.element("galleryCreateButton").exists }
+            pause(2)
+        }
+        let clips = app.descendants(matching: .any).matching(identifier: "mixClip")
+        check(wait(20) { clips.count == 9 }, "9 clips in 4 sections", "\(clips.count)")
+        let summary = element("mixSummary")
+        check(summary.label.hasPrefix("24 videos"), "24 videos · about N s each", summary.label)
+        shot("mix_setup_filled")
+
+        // Rename Benefit → Results, add a section and delete it, move CTA up and back.
+        element("mixSectionMore_2").tap()
+        if app.buttons["Rename"].firstMatch.waitForExistence(timeout: 5) {
+            app.buttons["Rename"].firstMatch.tap()
+            let field = app.alerts.textFields.firstMatch
+            if field.waitForExistence(timeout: 5) {
+                field.tap(); field.clearAndType("Results")
+                app.alerts.buttons["Save"].firstMatch.tap()
+            }
+        }
+        pause(1)
+        check(element("mixSectionName_2").label == "Results", "section renamed", element("mixSectionName_2").label)
+        element("mixAddSection").tap(); pause(1)
+        check(element("mixSection_4").exists, "section added")
+        element("mixSectionMore_4").tap()
+        app.buttons["Delete section"].firstMatch.tap(); pause(1)
+        check(!element("mixSection_4").exists, "section deleted")
+        element("mixSectionMove_3").tap()
+        app.buttons["Move up"].firstMatch.tap(); pause(1)
+        check(element("mixSectionName_2").label == "CTA", "section moved up", element("mixSectionName_2").label)
+        element("mixSectionMove_2").tap()
+        app.buttons["Move down"].firstMatch.tap(); pause(1)
+        check(element("mixSectionName_3").label == "CTA", "section moved back", element("mixSectionName_3").label)
+
+        // How many videos?
+        element("mixPickHowMany").tap()
+        check(element("mixHowMany").waitForExistence(timeout: 10), "How many videos? sheet")
+        pause(2)
+        let rows = app.descendants(matching: .any).matching(identifier: "mixPreviewRow")
+        check(wait(10) { rows.count == 4 }, "preview of the first 4 videos", "\(rows.count)")
+        check(element("mixHowManyMake").label.contains("12"), "12 chosen", element("mixHowManyMake").label)
+        shot("mix_how_many")
+        element("mixHowManyMake").tap()
+
+        // Edits · Processing: one group for the Mix, then its videos.
+        let group = element("mixGroup")
+        check(group.waitForExistence(timeout: 30), "Mix group in Processing")
+        check(element("mixGroupTitle").label == "Mix · 12 videos", "Mix · 12 videos", element("mixGroupTitle").label)
+        shot("mix_processing")
+        group.tap()
+        check(element("mixBanner").waitForExistence(timeout: 15), "Mix results")
+        _ = wait(30) { self.element("mixBanner").label.contains("Mix ready") }
+        check(element("mixBanner").label.contains("Mix ready: 12 videos from 9 clips"), "Mix ready banner", element("mixBanner").label)
+        let badges = app.descendants(matching: .any).matching(identifier: "mixBadge")
+        check(badges.count >= 6, "MIX tiles with their code", "\(badges.count)")
+        check(element("productSubtitle").label.contains("Mix · 12 videos"), "Brand · Mix · 12 videos", element("productSubtitle").label)
+        shot("mix_results")
+        element("mixExportAll").tap()
+        check(element("mixExportMessage").waitForExistence(timeout: 30), "Export all", element("mixExportMessage").label)
+        shot("mix_exported")
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+    }
+
+}
+
+extension XCUIElement {
+    /// Replaces the text in a field.
+    func clearAndType(_ text: String) {
+        if let current = value as? String, !current.isEmpty {
+            typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        }
+        typeText(text)
+    }
 }

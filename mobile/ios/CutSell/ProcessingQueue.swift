@@ -37,6 +37,8 @@ final class ProcessingQueue: ObservableObject {
     @Published var readyToast: (projectID: String, name: String)?
     /// "processing": Edits opens on its Processing filter ("Go to Edits").
     @Published var requestedEditsFilter: String?
+    /// Mix: the Mix just started (Edits opens on Processing and shows its group).
+    @Published var requestedMix: MixSummary?
     /// Retry for a failed item (resume the upload, or open the cut).
     private var retries: [UUID: () -> Void] = [:]
 

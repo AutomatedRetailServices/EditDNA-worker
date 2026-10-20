@@ -37,7 +37,7 @@ def test_edits_processing_filter_and_rows():
     edits = read("ProjectsView.swift")
     # Products (Figma 1135:2686) sits between Ready and Drafts since the Products build.
     assert 'case processing = "Processing", ready = "Ready", products = "Products", drafts = "Drafts", all = "All"' in edits
-    assert "processingRows.isEmpty ? [.ready, .products, .drafts, .all] : EditsTab.allCases" in edits
+    assert "processingRows.isEmpty && mixCenter.active.isEmpty ? [.ready, .products, .drafts, .all] : EditsTab.allCases" in edits
     assert "Cuts being edited now. You can leave the app." in edits
     assert "Each one moves to Ready when it’s done" in edits and "In order" in edits
     assert "Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready." in edits

@@ -287,6 +287,9 @@ struct GalleryPickerView: View {
     var preview: GalleryPreview?
     /// The mode chip tapped on the Home Hub.
     var initialMode: CreateMode = .single
+    /// Mix: only pick clips for one section ("Add 2 clips"), up to `pickLimit`; no mode chips, no style sheet.
+    var pickTitle: ((Int) -> String)? = nil
+    var pickLimit: Int = 10
 
     @StateObject private var library = GalleryLibrary()
     @State private var mode: CreateMode = .single
@@ -467,15 +470,23 @@ struct GalleryPickerView: View {
                 .font(CS.inter(14))
                 .foregroundStyle(CS.textCaption)
                 .padding(.top, 16)
-            SegmentedPill(options: CreateMode.allCases, selection: $mode) { $0.title }
-                .padding(.top, 14)
-                .accessibilityIdentifier("createModePicker")
-            Text(mode.helper)
-                .font(CS.inter(13))
-                .foregroundStyle(CS.textSecondary)
-                .padding(.top, 14)
-            PrimaryButton(title: mode.ctaTitle(max(selection.count, mode == .single ? 1 : selection.count)), isEnabled: !selection.isEmpty) {
-                showingStyle = true
+            if pickTitle == nil {
+                SegmentedPill(options: CreateMode.allCases, selection: $mode) { $0.title }
+                    .padding(.top, 14)
+                    .accessibilityIdentifier("createModePicker")
+                Text(mode.helper)
+                    .font(CS.inter(13))
+                    .foregroundStyle(CS.textSecondary)
+                    .padding(.top, 14)
+            }
+            PrimaryButton(title: pickTitle?(selection.count) ?? mode.ctaTitle(max(selection.count, mode == .single ? 1 : selection.count)),
+                          isEnabled: !selection.isEmpty) {
+                if pickTitle != nil {
+                    let chosen = selection.compactMap { id in library.assets.first { $0.localIdentifier == id } }
+                    onCreate(mode, chosen, StyleChoice())
+                } else {
+                    showingStyle = true
+                }
             }
             .padding(.top, 14)
             .padding(.bottom, 6)
@@ -507,6 +518,8 @@ struct GalleryPickerView: View {
         }
         if mode == .single {
             selection = [id]
+        } else if pickTitle != nil, selection.count >= pickLimit {
+            return
         } else if selection.count >= CreateLimits.maxClips {
             problem = .clipLimit
         } else {

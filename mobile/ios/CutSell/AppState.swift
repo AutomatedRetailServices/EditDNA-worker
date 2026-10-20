@@ -105,10 +105,12 @@ final class AppState: ObservableObject {
         guard let session else { return }
         let response: ProjectListResponse = try await api.request(
             "/v1/projects",
-            query: [URLQueryItem(name: "user_id", value: session.userID)]
+            // Mix: one Mix can add up to 100 videos; 100 is the most an older server accepts.
+            query: [URLQueryItem(name: "user_id", value: session.userID), URLQueryItem(name: "limit", value: "100")]
         )
-        projects = response.projects
-        ProjectListCache.save(response.projects, userID: session.userID)
+        // The project a Mix's clips were uploaded to is not a video of hers (state "mix"): never listed.
+        projects = response.projects.filter { $0.state != Project.mixContainerState }
+        ProjectListCache.save(projects, userID: session.userID)
     }
 
     func createProject(title: String?) async throws -> Project {

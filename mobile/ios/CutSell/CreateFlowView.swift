@@ -34,6 +34,7 @@ struct CreateFlowView: View {
     @State private var jobItems: [UUID] = []
     /// Bulk: "Your N videos are being edited" (Figma 1134:4635).
     @State private var bulkSheetCount: Int?
+    @State private var showingMix = false
 
     enum AfterCamera { case gallery, job(CreateJob) }
 
@@ -51,7 +52,8 @@ struct CreateFlowView: View {
                 onUpload: { mode in galleryMode = mode; showingGallery = true },
                 onRecord: { showingCamera = true },
                 onOpenProject: { path.append($0) },
-                selectTab: selectTab
+                selectTab: selectTab,
+                onMix: { showingMix = true }
             )
             .toolbar(.hidden, for: .navigationBar)
             .overlay(alignment: .bottom) {
@@ -74,6 +76,15 @@ struct CreateFlowView: View {
             }
         }
         .tint(CS.cyan)
+        .fullScreenCover(isPresented: $showingMix) {
+            MixSetupView(onClose: { showingMix = false }, onStarted: { summary in
+                showingMix = false
+                ProcessingQueue.shared.requestedEditsFilter = "processing"
+                ProcessingQueue.shared.requestedMix = summary
+                selectTab(.edits)
+            })
+            .environmentObject(appState)
+        }
         .fullScreenCover(isPresented: $showingCamera, onDismiss: {
             switch afterCamera {
             case .gallery: showingGallery = true

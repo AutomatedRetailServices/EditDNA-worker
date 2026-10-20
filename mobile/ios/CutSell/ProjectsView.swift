@@ -36,7 +36,9 @@ struct ProjectsView: View {
     @ObservedObject private var queue = ProcessingQueue.shared
     @ObservedObject private var tracker = CutTracker.shared
     @ObservedObject private var catalog = CatalogStore.shared
+    @ObservedObject private var mixCenter = MixCenter.shared
     @State private var assigning: AssignRequest?
+    @State private var mixRoute: ProductRoute?
 
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: 3) }
 
@@ -62,12 +64,15 @@ struct ProjectsView: View {
     /// The Processing rows, in order: this iPhone's uploads and cuts, cuts still processing on the
     /// server, and uploads that stopped (FAILED · Retry continues where they stopped).
     private var processingRows: [ProcessingQueue.Row] {
-        var rows = queue.rows(projects: appState.projects, tracker: tracker)
+        // Mix: its videos are one group (MixGroupRow), not one row each; its upload project is not a cut.
+        let mixVideos = mixCenter.activeProjectIDs
+        var rows = queue.rows(projects: appState.projects.filter { !mixVideos.contains($0.projectID) }, tracker: tracker)
+            .filter { row in row.projectID.map { !mixVideos.contains($0) && !mixCenter.mixIDs.contains($0) } ?? true }
         let listed = Set(rows.compactMap(\.projectID))
         // A record whose upload is running in CutSell right now is not "paused" (its queue row already
         // shows Uploading); only a really interrupted upload is listed as Failed with Retry.
         for pending in pendingCuts where !listed.contains(pending.projectID)
-            && !ActiveUploads.shared.contains(pending.projectID) {
+            && !ActiveUploads.shared.contains(pending.projectID) && !mixCenter.mixIDs.contains(pending.projectID) {
             rows.append(ProcessingQueue.Row(id: "pending-" + pending.projectID, itemID: nil, projectID: pending.projectID,
                                             name: pending.title.isEmpty ? "Interrupted Cut" : pending.title,
                                             duration: pending.videos.reduce(0) { $0 + $1.duration },
@@ -80,7 +85,7 @@ struct ProjectsView: View {
     /// Figma 1135:2686: Processing · Ready · Products · Drafts · All, sliding sideways. Processing only while
     /// something is being made.
     private var visibleTabs: [EditsTab] {
-        processingRows.isEmpty ? [.ready, .products, .drafts, .all] : EditsTab.allCases
+        processingRows.isEmpty && mixCenter.active.isEmpty ? [.ready, .products, .drafts, .all] : EditsTab.allCases
     }
 
     private func chipTitle(_ tab: EditsTab) -> String {
@@ -89,7 +94,7 @@ struct ProjectsView: View {
 
     private func count(_ tab: EditsTab) -> Int {
         switch tab {
-        case .processing: return processingRows.count
+        case .processing: return processingRows.count + mixCenter.active.count
         case .products: return catalog.overview.brands.count
         case .all: return appState.projects.count
         case .ready: return appState.projects.filter { $0.state == "draft_ready" }.count
@@ -188,7 +193,8 @@ struct ProjectsView: View {
             // Cuts still being made: follow them on the server until they are Ready
             // (the card then turns green and gets its thumbnail).
             .task(id: appState.projects.filter { Project.processingStates.contains($0.state) }.map(\.id)) {
-                for project in appState.projects where Project.processingStates.contains(project.state) {
+                for project in appState.projects where Project.processingStates.contains(project.state)
+                    && !mixCenter.activeProjectIDs.contains(project.projectID) {
                     CutTracker.shared.follow(project: project)
                 }
             }
@@ -200,6 +206,21 @@ struct ProjectsView: View {
             }
             .navigationDestination(for: ProductRoute.self) { route in
                 ProductDetailView(route: route).environmentObject(appState)
+            }
+            .navigationDestination(item: $mixRoute) { route in
+                ProductDetailView(route: route).environmentObject(appState)
+            }
+            .task { await mixCenter.refresh(session: appState.session) }
+            // A Mix video just got made: it joins Ready (and its group moves on).
+            .onReceive(NotificationCenter.default.publisher(for: .mixProgress)) { _ in
+                Task { try? await appState.refreshProjects() }
+            }
+            // Mix · Results: "Make videos" opens Processing; a finished Mix opens its videos.
+            .onChange(of: queue.requestedMix) { _, mix in
+                guard let mix else { return }
+                queue.requestedMix = nil
+                selectedTab = .processing
+                if let product = mix.productID, !mix.isActive { mixRoute = ProductRoute(productID: product, mixID: mix.mixID) }
             }
             .sheet(item: $assigning, onDismiss: { Task { await refreshCatalog() } }) { request in
                 AssignProductSheet(request: request)
@@ -222,7 +243,7 @@ struct ProjectsView: View {
             .onAppear { takeRequestedFilter() }
             .onChange(of: queue.requestedEditsFilter) { _, _ in takeRequestedFilter() }
             // The last cut finished: Processing disappears, Ready shows it.
-            .onChange(of: processingRows.isEmpty) { _, empty in
+            .onChange(of: processingRows.isEmpty && mixCenter.active.isEmpty) { _, empty in
                 if empty && selectedTab == .processing { selectedTab = .ready }
             }
             .confirmationDialog(
@@ -271,6 +292,11 @@ struct ProjectsView: View {
             }
             .padding(.top, 16)
             VStack(spacing: 8) {
+                ForEach(mixCenter.active) { mix in
+                    MixGroupRow(mix: mix, onRetry: { Task { await mixCenter.retry(mix, session: appState.session) } }) {
+                        if let product = mix.productID { mixRoute = ProductRoute(productID: product, mixID: mix.mixID) }
+                    }
+                }
                 ForEach(Array(processingRows.enumerated()), id: \.element.id) { index, row in
                     processingRow(index + 1, row)
                 }
@@ -406,6 +432,7 @@ struct ProjectsView: View {
             }
             await refreshPendingCuts()
             await refreshCatalog()
+            await mixCenter.refresh(session: appState.session)
         } catch { errorMessage = error.localizedDescription }
     }
 

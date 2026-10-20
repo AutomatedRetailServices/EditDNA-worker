@@ -62,9 +62,12 @@ struct CatalogProductVideo: Codable, Identifiable, Hashable {
     let state: String?
     let bucket: String
     let durationSec: Double?
+    /// Mix: the Mix it was made in and its code ("H1 · B2 · Be1 · C2"); nil for a normal cut.
+    var mixID: String? = nil
+    var mixCode: String? = nil
     var id: String { projectID }
     enum CodingKeys: String, CodingKey {
-        case projectID = "project_id", title, state, bucket, durationSec = "duration_sec"
+        case projectID = "project_id", title, state, bucket, durationSec = "duration_sec", mixID = "mix_id", mixCode = "mix_code"
     }
 }
 
@@ -81,7 +84,11 @@ struct CatalogProductDetail: Codable {
 }
 
 /// The product a video screen opens (NavigationLink value).
-struct ProductRoute: Hashable { let productID: String }
+struct ProductRoute: Hashable {
+    let productID: String
+    /// Mix · Results (Figma 1136:2916): only the videos of this Mix, with "Export all".
+    var mixID: String? = nil
+}
 
 // MARK: - Store
 
@@ -164,6 +171,27 @@ final class CatalogStore: ObservableObject {
     }
 
     func productID(of projectID: String) -> String? { overview.videos?[projectID]?.productID }
+
+    /// A new brand + product (Mix: "+ New brand or product"). Returns its product id.
+    func createProduct(brand: String, product: String, session: CutSellSession?, projects: [Project]) async throws -> String {
+        struct Body: Encodable { let user_id: String; let brand: String; let product: String }
+        struct Answer: Decodable { let product_id: String? }
+        let id: String?
+        if let mock {
+            id = mock.create(brand: brand, product: product)
+        } else {
+            guard let session else { throw APIError.invalidResponse }
+            let answer: Answer = try await APIClient.shared.request("/v1/catalog/products", method: "POST",
+                                                                    body: Body(user_id: session.userID, brand: brand, product: product))
+            id = answer.product_id
+        }
+        await refresh(session: session, projects: projects)
+        guard let id else { throw APIError.invalidResponse }
+        return id
+    }
+
+    /// Probe only: the videos of a mock Mix land in their product with the MIX tag and code.
+    func mockAddMix(productID: String, videos: [(String, String)]) { mock?.addMix(productID: productID, videos: videos) }
 }
 
 // MARK: - Edits · Products (Figma 1135:2686)
@@ -332,9 +360,21 @@ struct ProductDetailView: View {
     @State private var assigning: AssignRequest?
     @State private var openProject: Project?
     @State private var errorMessage: String?
+    @ObservedObject private var mixes = MixCenter.shared
+    @StateObject private var exporter = MixExporter()
+
+    private var mix: MixSummary? { route.mixID.flatMap { id in mixes.mixes.first { $0.mixID == id } } }
+    private var mixVideos: [CatalogProductVideo] {
+        guard let id = route.mixID else { return [] }
+        let mine = (detail?.videos ?? []).filter { $0.mixID == id }
+        guard let mix else { return mine }
+        let order = Dictionary(uniqueKeysWithValues: mix.videos.map { ($0.projectID, $0.n) })
+        return mine.sorted { (order[$0.projectID] ?? 0) < (order[$1.projectID] ?? 0) }
+    }
 
     private var videos: [CatalogProductVideo] {
         guard let detail else { return [] }
+        if route.mixID != nil { return mixVideos }
         return filter == "all" ? detail.videos : detail.videos.filter { $0.bucket == filter }
     }
 
@@ -378,7 +418,11 @@ struct ProductDetailView: View {
                     }
                     .padding(.top, 12)
                     Text(subtitle).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 4)
+                        .accessibilityIdentifier("productSubtitle")
 
+                    if route.mixID != nil {
+                        mixBanner.padding(.top, 18)
+                    } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             chip("all", "All \(count("all"))", width: 64)
@@ -396,6 +440,7 @@ struct ProductDetailView: View {
                         .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1))
                         .padding(.top, 12)
+                    }
 
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                         ForEach(videos) { video in tile(video) }
@@ -416,6 +461,19 @@ struct ProductDetailView: View {
                                 .overlay(Capsule().stroke(Color(hex: 0x596685), lineWidth: 1))
                         }
                         .accessibilityIdentifier("productSelect")
+                        if route.mixID != nil {
+                            Button { Task { await exportAll() } } label: {
+                                Text(exporter.running ? "Exporting \(exporter.done + 1) of \(exporter.total)…"
+                                     : "Export all \(selecting && !selected.isEmpty ? selected.count : readyMixVideos.count)")
+                                    .font(CS.sf(15, .semibold)).foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity).frame(height: 50)
+                                    .background(Capsule().fill(MixStyle.cta))
+                                    .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
+                            }
+                            .disabled(readyMixVideos.isEmpty || exporter.running)
+                            .opacity(readyMixVideos.isEmpty ? 0.5 : 1)
+                            .accessibilityIdentifier("mixExportAll")
+                        } else {
                         Button { openFirstDraft() } label: {
                             Text("Edit \(drafts.count) draft\(drafts.count == 1 ? "" : "s") in bulk")
                                 .font(CS.sf(15, .semibold)).foregroundStyle(.white)
@@ -428,8 +486,13 @@ struct ProductDetailView: View {
                         .disabled(drafts.isEmpty)
                         .opacity(drafts.isEmpty ? 0.5 : 1)
                         .accessibilityIdentifier("productBulkEdit")
+                        }
                     }
                     .padding(.top, 22)
+                    if let message = exporter.message {
+                        Text(message).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 10)
+                            .accessibilityIdentifier("mixExportMessage")
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
@@ -438,6 +501,7 @@ struct ProductDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await load() }
         .refreshable { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .mixProgress)) { _ in Task { await load() } }
         .navigationDestination(item: $openProject) { project in ProjectDetailView(project: project) }
         .alert("Rename product", isPresented: $renaming) {
             TextField("Product name", text: $newName).accessibilityIdentifier("productRenameField")
@@ -455,8 +519,36 @@ struct ProductDetailView: View {
         } message: { Text(errorMessage ?? "") }
     }
 
+    private var readyMixVideos: [CatalogProductVideo] {
+        let ready = mixVideos.filter { $0.bucket != "processing" }
+        return selecting && !selected.isEmpty ? ready.filter { selected.contains($0.projectID) } : ready
+    }
+
+    /// "✦  Mix ready: 12 videos from 9 clips" (Figma 1136:2920); while it is being made, how many are ready.
+    private var mixBanner: some View {
+        let total = mix?.total ?? mixVideos.count
+        let ready = mix?.ready ?? mixVideos.filter { $0.bucket != "processing" }.count
+        let text = ready >= total ? "✦  Mix ready: \(total) videos from \(mix?.clipCount ?? 0) clips"
+            : "✦  Making your Mix: \(ready) of \(total) ready"
+        return Text(text).font(CS.inter(13, .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 12.5)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1.5))
+            .accessibilityIdentifier("mixBanner")
+    }
+
+    private func exportAll() async {
+        await exporter.exportAll(readyMixVideos.map(\.projectID), session: appState.session)
+        selecting = false; selected = []
+    }
+
     private var subtitle: String {
         guard let detail else { return "" }
+        if route.mixID != nil {
+            let n = mix?.total ?? mixVideos.count
+            return [detail.brand, "Mix", "\(n) video\(n == 1 ? "" : "s")"].compactMap { $0 }.joined(separator: " · ")
+        }
         let parts = [detail.brand, detail.category, "\(detail.videos.count) video\(detail.videos.count == 1 ? "" : "s")"]
         return parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -485,17 +577,26 @@ struct ProductDetailView: View {
                         Image(uiImage: image).resizable().scaledToFill()
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    if video.mixCode != nil {
+                        Text("MIX").font(CS.inter(9, .bold)).foregroundStyle(.white)
+                            .frame(width: 34, height: 18).background(CS.brandFull, in: Capsule()).padding(7)
+                            .accessibilityIdentifier("mixBadge")
+                    }
+                }
                 .overlay(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(video.bucket == "ready" ? "READY" : video.bucket == "processing" ? "PROCESSING" : "DRAFT")
+                        Text(video.mixCode.map { video.bucket == "processing" ? "\($0) · MAKING" : $0 }
+                             ?? (video.bucket == "ready" ? "READY" : video.bucket == "processing" ? "PROCESSING" : "DRAFT"))
                             .font(CS.inter(9, .bold))
-                            .foregroundStyle(video.bucket == "ready" ? Color(hex: 0x33D98C)
+                            .foregroundStyle(video.mixCode != nil ? CS.cyan : video.bucket == "ready" ? Color(hex: 0x33D98C)
                                              : video.bucket == "processing" ? CS.cyan : Color(hex: 0x99A3BD))
+                            .lineLimit(1).minimumScaleFactor(0.8)
                         Text(Self.length(video.durationSec)).font(CS.inter(11, .semibold)).foregroundStyle(.white)
                     }
                     .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-                    .background(Color.black.opacity(0.55))
+                    .frame(maxWidth: .infinity, minHeight: video.mixCode != nil ? 42 : 36, alignment: .leading)
+                    .background(Color.black.opacity(video.mixCode != nil ? 0.6 : 0.55))
                 }
                 .overlay(alignment: .topTrailing) {
                     if selecting {
@@ -519,6 +620,7 @@ struct ProductDetailView: View {
     }
 
     private func load() async {
+        if route.mixID != nil { await MixCenter.shared.refresh(session: appState.session) }
         do {
             detail = try await store.detail(route.productID, session: appState.session, projects: appState.projects)
         } catch {
@@ -743,8 +845,16 @@ final class MockCatalog {
     func detail(_ productID: String, projects given: [Project]) throws -> CatalogProductDetail {
         let projects = effective(given)
         guard let product = products[productID] else { throw APIError.http(404, "product not found") }
-        let videos = projects.filter { links[$0.projectID] == productID }.map {
+        var videos = projects.filter { links[$0.projectID] == productID }.map {
             CatalogProductVideo(projectID: $0.projectID, title: $0.title, state: $0.state, bucket: bucket($0.state), durationSec: 30)
+        }
+        for (id, video) in mixVideos.sorted(by: { Int($0.key.split(separator: "_").last ?? "") ?? 0 < Int($1.key.split(separator: "_").last ?? "") ?? 0 }) where video.productID == productID {
+            let live = MixCenter.shared.mixes.flatMap(\.videos).first { $0.projectID == id }
+            let ready = live?.state == "ready"
+            videos.append(CatalogProductVideo(projectID: id, title: video.code, state: ready ? "draft_ready" : "processing",
+                                              bucket: ready ? "ready" : "processing", durationSec: live?.durationSec,
+                                              mixID: String(id.split(separator: "_").prefix(2).joined(separator: "_")),
+                                              mixCode: video.code))
         }
         return CatalogProductDetail(productID: productID, name: product.name, category: "Skincare", brandID: product.brand,
                                     brand: brands[product.brand], videos: videos)
@@ -769,5 +879,20 @@ final class MockCatalog {
     func rename(kind: String, id: String, name: String) throws {
         if kind == "product", let value = products[id] { products[id] = (value.brand, name) }
         if kind == "brand" { brands[id] = name }
+    }
+
+    private var mixVideos: [String: (productID: String, code: String)] = [:]
+
+    func create(brand: String, product: String) -> String {
+        let brandID = brands.first { $0.value.lowercased() == brand.lowercased() }?.key ?? "brd_\(UUID().uuidString.prefix(6))"
+        brands[brandID] = brands[brandID] ?? brand
+        let id = products.first { $0.value.brand == brandID && $0.value.name.lowercased() == product.lowercased() }?.key
+            ?? "prd_\(UUID().uuidString.prefix(6))"
+        products[id] = products[id] ?? (brandID, product)
+        return id
+    }
+
+    func addMix(productID: String, videos: [(String, String)]) {
+        for (id, code) in videos { mixVideos[id] = (productID, code) }
     }
 }
