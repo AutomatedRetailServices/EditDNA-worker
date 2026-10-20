@@ -70,4 +70,6 @@ def backfill(write: bool, max_usd: float):
 @app.local_entrypoint()
 def main():
     out = backfill.remote(WRITE, MAX_USD)
+    with open("engine_check.json", "w") as handle:
+        json.dump(out, handle)
     print(json.dumps({k: v for k, v in out.items() if k != "rows"}))
