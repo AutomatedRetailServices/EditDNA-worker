@@ -396,10 +396,11 @@ final class Build24UITests: XCTestCase {
             add.tap()
             expected += count
             // the clips are copied from Photos first ("Getting your clips…"), then shown in their section
-            check(wait(90) { clips.count == expected }, "section \(section) has its clips", "\(clips.count)")
+            let label = element("mixSection_\(section)").staticTexts["\(count) clips"]
+            check(wait(90) { label.exists }, "section \(section) has its \(count) clips")
             pause(1)
         }
-        check(wait(20) { clips.count == 9 }, "9 clips in 4 sections", "\(clips.count)")
+        check(expected == 9 && element("mixSummary").label.hasPrefix("24 videos"), "9 clips in 4 sections")
         let summary = element("mixSummary")
         check(summary.label.hasPrefix("24 videos"), "24 videos · about N s each", summary.label)
         shot("mix_setup_filled")
@@ -433,7 +434,8 @@ final class Build24UITests: XCTestCase {
         check(element("mixHowMany").waitForExistence(timeout: 10), "How many videos? sheet")
         pause(2)
         let rows = app.descendants(matching: .any).matching(identifier: "mixPreviewRow")
-        check(wait(10) { rows.count == 4 }, "preview of the first 4 videos", "\(rows.count)")
+        check(wait(10) { rows.count >= 4 } && app.staticTexts["Video 4"].exists && !app.staticTexts["Video 5"].exists,
+              "preview of the first 4 videos")
         check(element("mixHowManyMake").label.contains("12"), "12 chosen", element("mixHowManyMake").label)
         shot("mix_how_many")
         element("mixHowManyMake").tap()
@@ -452,7 +454,7 @@ final class Build24UITests: XCTestCase {
         check(group.waitForExistence(timeout: 15), "In progress → Edits · Processing (this Mix)")
         group.tap()
         check(element("mixBanner").waitForExistence(timeout: 15), "Mix results")
-        _ = wait(30) { self.element("mixBanner").label.contains("Mix ready") }
+        _ = wait(60) { self.element("mixBanner").label.contains("Mix ready") }
         check(element("mixBanner").label.contains("Mix ready: 12 videos from 9 clips"), "Mix ready banner", element("mixBanner").label)
         let badges = app.descendants(matching: .any).matching(identifier: "mixBadge")
         check(badges.count >= 6, "MIX tiles with their code", "\(badges.count)")

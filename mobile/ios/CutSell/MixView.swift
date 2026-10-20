@@ -202,11 +202,11 @@ final class MixCenter: ObservableObject {
         }
     }
 
-    /// Probe: the mock Mix makes one video every half second.
+    /// Probe: the mock Mix makes one video every 3 seconds.
     private func advanceMock() {
         for (index, mix) in mixes.enumerated() where mix.isActive {
             guard let started = mockStarted[mix.mixID] else { continue }
-            let done = min(mix.total, Int(Date().timeIntervalSince(started) / 0.5))
+            let done = min(mix.total, Int(Date().timeIntervalSince(started) / 3))
             mixes[index].ready = done
             for k in 0..<mix.videos.count where k < done {
                 mixes[index].videos[k].state = "ready"
