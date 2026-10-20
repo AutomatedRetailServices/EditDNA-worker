@@ -1,5 +1,0 @@
-asset_resource photos_edit=no used=original
-asset_resource photos_edit=no used=original
-asset_resource photos_edit=no used=original
-asset_resource photos_edit=no used=original
-asset_resource photos_edit=no used=original
