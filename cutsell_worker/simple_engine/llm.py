@@ -68,8 +68,13 @@ def _content(prompt):
     if not parts or not cache_enabled():
         return str(prompt)
     blocks = [{"type": "text", "text": p} for p in parts]
-    blocks[0]["cache_control"] = {"type": "ephemeral"}
+    blocks[0]["cache_control"] = {"type": "ephemeral", **({"ttl": "1h"} if cache_ttl() == "1h" else {})}
     return blocks
+
+
+def cache_ttl() -> str:
+    """CUTSELL_SIMPLE_ENGINE_CACHE_TTL=1h writes the cache for 1 hour (2x write price) instead of 5 minutes (1.25x)."""
+    return "1h" if os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE_TTL", "").strip().lower() == "1h" else "5m"
 
 
 def json_enabled() -> bool:
@@ -94,18 +99,50 @@ def cache_scope(on: bool):
 
 def cache_enabled() -> bool:
     """On inside cache_scope(True) only. CUTSELL_SIMPLE_ENGINE_CACHE=0 turns it off everywhere (no redeploy)."""
-    return _CACHE_ON.get() and os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE", "1").strip() != "0"
+    if os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE", "1").strip() == "0":
+        return False
+    # CUTSELL_SIMPLE_ENGINE_CACHE_SCOPE=all caches every video, not only a Bulk send (measurement / high volume).
+    return _CACHE_ON.get() or os.environ.get("CUTSELL_SIMPLE_ENGINE_CACHE_SCOPE", "").strip().lower() == "all"
 
 
 def model_name() -> str:
     return os.environ.get("CUTSELL_SIMPLE_ENGINE_MODEL", "").strip() or DEFAULT_MODEL
 
 
+KIE_URL = "https://api.kie.ai/claude/v1/messages"
+KIE_TIMEOUT_SEC = 60
+FALLBACK_CHECK_STEPS = ("decision", "sale_review", "fixwords")   # steps that think at the model default (high)
+
+
+def provider() -> str:
+    """CUTSELL_LLM_PROVIDER=kie sends each call to kie.ai first (same model, same request), with Anthropic direct as
+    the automatic fallback. Default and rollback: anthropic."""
+    return "kie" if os.environ.get("CUTSELL_LLM_PROVIDER", "").strip().lower() == "kie" else "anthropic"
+
+
 def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tuple[str, dict]:
-    """One user message in, (text, usage) out. Retries transient failures; never logs the prompt or the key."""
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY missing")
+    """One user message in, (text, usage) out, through the configured provider. The request (model, prompt, thinking,
+    effort, JSON format, cache marks) is the same for both providers; kie.ai answers that are late, broken, or that
+    dropped the thinking or the cache are asked again from Anthropic direct and logged as provider_fallback."""
+    body = _body(prompt, max_tokens)
+    if provider() == "kie":
+        started = time.time()
+        reason, text, usage = _try_kie(body, prompt)
+        usage_kie = usage
+        if reason is None:
+            usage.update({"provider": "kie", "latency_s": round(time.time() - started, 2)})
+            return text, usage
+        _LOG.warning("provider_fallback reason=%s step=%s", reason, _STEP.get() or "other")
+        text, usage = _call_direct(_body(prompt, max_tokens), prompt, max_tokens=max_tokens, attempts=attempts)
+        usage.update({"provider": "anthropic", "provider_fallback": reason,
+                      "kie_dropped": {k: usage_kie.get(k) for k in ("input_tokens", "output_tokens",
+                                                                     "cache_creation_input_tokens",
+                                                                     "cache_read_input_tokens", "credits_consumed")}})
+        return text, usage
+    return _call_direct(body, prompt, max_tokens=max_tokens, attempts=attempts)
+
+
+def _body(prompt, max_tokens: int) -> dict:
     body = {"model": model_name(), "max_tokens": max_tokens, "messages": [{"role": "user", "content": _content(prompt)}]}
     effort = effort_for()
     if effort:
@@ -114,30 +151,101 @@ def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tup
     if schema and json_enabled():
         # Structured output: the visible answer is only the JSON (no notes before it). Thinking is not affected.
         body.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": schema}
+    return body
+
+
+def _usage_of(data: dict, body: dict, text: str, max_tokens: int) -> dict:
+    effort = (body.get("output_config") or {}).get("effort")
+    usage = dict(data.get("usage") or {})
+    usage.update({
+        "step": _STEP.get() or "other", "max_tokens": max_tokens,
+        "thinking": "adaptive", "effort": effort or "default(high)",
+        "thinking_blocks": sum(1 for b in data.get("content", []) if b.get("type") == "thinking"),
+        "answer_chars": len(text), "stop_reason": data.get("stop_reason"),
+        "json_format": "format" in body.get("output_config", {}),
+        "cache": isinstance(body["messages"][0]["content"], list),
+    })
+    if "credits_consumed" in data:
+        usage["credits_consumed"] = data.get("credits_consumed")
+    return usage
+
+
+def _try_kie(body: dict, prompt) -> tuple:
+    """-> (fallback reason or None, text, usage). Never raises."""
+    key = os.environ.get("KIE_API_KEY", "").strip()
+    if not key:
+        return "no_kie_key", "", {}
+    headers = {"Authorization": "Bearer " + key, "content-type": "application/json", "anthropic-version": "2023-06-01"}
+    try:
+        response = requests.post(KIE_URL, json=body, headers=headers, timeout=(10, KIE_TIMEOUT_SEC))
+    except requests.Timeout:
+        return "timeout", "", {}
+    except requests.RequestException as exc:
+        return "network_" + exc.__class__.__name__.lower(), "", {}
+    if response.status_code != 200:
+        return f"http_{response.status_code}", "", {}
+    try:
+        data = response.json()
+    except ValueError:
+        return "not_json_envelope", "", {}
+    if not isinstance(data, dict) or not isinstance(data.get("content"), list):
+        return "bad_envelope_" + str((data or {}).get("code") if isinstance(data, dict) else "x")[:20], "", {}
+    text = "".join(block.get("text", "") for block in data["content"] if block.get("type") == "text")
+    usage = _usage_of(data, body, text, int(body["max_tokens"]))
+    reason = _kie_answer_problem(body, text, usage)
+    if reason:
+        return reason, "", usage                       # usage kept: what kie.ai charged for the answer we dropped
+    _LOG.info("simple_engine_llm_call %s", json.dumps({k: usage.get(k) for k in (
+        "step", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+        "max_tokens", "effort", "answer_chars", "stop_reason", "cache", "json_format", "credits_consumed")} | {"provider": "kie"}))
+    return None, text, usage
+
+
+def _kie_answer_problem(body: dict, text: str, usage: dict):
+    """Why a kie.ai answer cannot be trusted as the same call Anthropic would have answered (None = fine)."""
+    if usage.get("stop_reason") == "max_tokens":
+        return "truncated"
+    if "format" in (body.get("output_config") or {}):
+        try:
+            json.loads(text)
+        except ValueError:
+            return "json_broken"
+    elif "{" not in text and "[" not in text:
+        return "json_broken"
+    if (usage.get("step") in FALLBACK_CHECK_STEPS and usage.get("effort") == "default(high)"
+            and not usage.get("thinking_blocks") and int(usage.get("output_tokens") or 0) <= len(text) / 2.5 + 30):
+        return "thinking_ignored"
+    content = body["messages"][0]["content"]
+    if isinstance(content, list):
+        fixed_chars = len(content[0].get("text", ""))
+        cached = int(usage.get("cache_creation_input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0)
+        if fixed_chars >= 2400 and cached == 0:          # >= ~600 tokens: above Sonnet 5.5's 512-token minimum
+            return "cache_ignored"
+    return None
+
+
+def _call_direct(body: dict, prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tuple[str, dict]:
+    """Anthropic direct. Retries transient failures; never logs the prompt or the key."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY missing")
     headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
     last: Exception | None = None
     json_refused = False
     for attempt in range(attempts):
         try:
+            started = time.time()
             response = requests.post(API_URL, json=body, headers=headers, timeout=(20, 600))
             if response.status_code == 200:
                 data = response.json()
                 text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
-                usage = dict(data.get("usage") or {})
-                # Measurement only (the call itself is unchanged): which step, the max_tokens ceiling, the thinking
-                # setting (adaptive thinking is the model default; effort "" = the model default, high) and how big the
-                # visible answer is. output_tokens includes the thinking; the thinking text itself is not returned.
-                usage.update({
-                    "step": _STEP.get() or "other", "max_tokens": max_tokens,
-                    "thinking": "adaptive", "effort": effort or "default(high)",
-                    "thinking_blocks": sum(1 for b in data.get("content", []) if b.get("type") == "thinking"),
-                    "answer_chars": len(text), "stop_reason": data.get("stop_reason"),
-                    "json_format": "format" in body.get("output_config", {}), "json_refused": json_refused,
-                    "cache": cache_enabled(),
-                })
+                usage = _usage_of(data, body, text, max_tokens)
+                usage.update({"json_refused": json_refused, "provider": "anthropic",
+                              "latency_s": round(time.time() - started, 2)})
                 _LOG.info("simple_engine_llm_call %s", json.dumps({k: usage.get(k) for k in (
                     "step", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
-                    "max_tokens", "thinking", "effort", "answer_chars", "stop_reason", "cache", "json_format")}))
+                    "max_tokens", "thinking", "effort", "answer_chars", "stop_reason", "cache", "json_format",
+                    "provider")}))
                 return text, usage
             if response.status_code == 400 and "format" in body.get("output_config", {}):
                 # The JSON format was refused: ask again in free text (the parsers read both) and say so in the logs.

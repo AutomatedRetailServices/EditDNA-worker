@@ -924,3 +924,48 @@ def test_every_step_has_a_strict_json_schema():
     for schema in E.SCHEMAS.values():
         assert schema["additionalProperties"] is False and set(schema["required"]) == set(schema["properties"])
     assert '"why"' in E.SALE_REVIEW_PROMPT
+
+
+def test_kie_provider_falls_back_to_anthropic_and_says_why(monkeypatch):
+    from cutsell_worker.simple_engine import llm
+
+    class R:
+        def __init__(self, code, data):
+            self.status_code, self._data = code, data
+
+        def json(self):
+            return self._data
+
+    calls = []
+
+    def post(url, json=None, headers=None, timeout=None):
+        calls.append(url)
+        if "kie.ai" in url:
+            return R(200, {"content": [{"type": "text", "text": "not json at all"}],
+                           "usage": {"input_tokens": 10, "output_tokens": 5}, "credits_consumed": 0.01})
+        return R(200, {"content": [{"type": "text", "text": '{"hide":[],"trim":[]}'}], "usage": {"input_tokens": 10}})
+
+    monkeypatch.setattr(llm.requests, "post", post)
+    monkeypatch.setenv("KIE_API_KEY", "k")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    monkeypatch.setenv("CUTSELL_LLM_PROVIDER", "kie")
+    text, usage = llm.call_anthropic(llm.Prompt("x", "y", schema={"type": "object"}))
+    assert calls == [llm.KIE_URL, llm.API_URL]
+    assert usage["provider"] == "anthropic" and usage["provider_fallback"] == "json_broken"
+    assert usage["kie_dropped"]["credits_consumed"] == 0.01 and text.startswith("{")
+    monkeypatch.setenv("CUTSELL_LLM_PROVIDER", "anthropic")
+    calls.clear()
+    llm.call_anthropic(llm.Prompt("x", "y"))
+    assert calls == [llm.API_URL]                     # default / rollback: Anthropic only
+
+
+def test_kie_answer_problems_are_named():
+    from cutsell_worker.simple_engine import llm
+    body = {"messages": [{"content": "p"}], "output_config": {}}
+    ok = {"step": "pass", "effort": "medium", "output_tokens": 20}
+    assert llm._kie_answer_problem(body, '{"passes":[]}', ok) is None
+    assert llm._kie_answer_problem(body, '{}', {**ok, "stop_reason": "max_tokens"}) == "truncated"
+    assert llm._kie_answer_problem(body, '{"hide":[]}', {"step": "decision", "effort": "default(high)",
+                                                          "output_tokens": 12, "thinking_blocks": 0}) == "thinking_ignored"
+    cached = {"messages": [{"content": [{"type": "text", "text": "x" * 3000, "cache_control": {"type": "ephemeral"}}]}]}
+    assert llm._kie_answer_problem(cached, '{"a":1}', {**ok, "cache_creation_input_tokens": 0}) == "cache_ignored"
