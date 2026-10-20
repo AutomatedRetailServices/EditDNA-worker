@@ -369,6 +369,8 @@ final class Build24UITests: XCTestCase {
         let product = element("mixProductName")
         check(product.exists && product.label.contains("·"), "a product chosen", product.label)
         shot("mix_setup_empty")
+        let clips = app.descendants(matching: .any).matching(identifier: "mixClip")
+        var expected = 0
         for (section, count) in [(0, 3), (1, 2), (2, 2), (3, 2)] {
             element("mixAddClip_\(section)").tap()
             let photos = app.buttons["Choose from Photos"].firstMatch
@@ -381,10 +383,11 @@ final class Build24UITests: XCTestCase {
             let add = element("galleryCreateButton")
             check(add.label.contains("Add \(count) clip"), "gallery says Add \(count) clips", add.label)
             add.tap()
-            _ = wait(30) { self.element("mixProduct").exists && !self.element("galleryCreateButton").exists }
-            pause(2)
+            expected += count
+            // the clips are copied from Photos first ("Getting your clips…"), then shown in their section
+            check(wait(90) { clips.count == expected }, "section \(section) has its clips", "\(clips.count)")
+            pause(1)
         }
-        let clips = app.descendants(matching: .any).matching(identifier: "mixClip")
         check(wait(20) { clips.count == 9 }, "9 clips in 4 sections", "\(clips.count)")
         let summary = element("mixSummary")
         check(summary.label.hasPrefix("24 videos"), "24 videos · about N s each", summary.label)
