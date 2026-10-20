@@ -27,8 +27,8 @@ import requests
 from .simple_engine import engine as _engine
 
 _LOG = logging.getLogger("cutsell.mix")
-MIX_VERSION = "mix-1.0"
-PROMPT = (Path(__file__).parent / "mix_prompts" / "mix_clip_v1.txt").read_text(encoding="utf-8")
+MIX_VERSION = "mix-1.0.1"
+PROMPT = (Path(__file__).parent / "mix_prompts" / "mix_clip_v2.txt").read_text(encoding="utf-8")
 API_URL = "https://api.anthropic.com/v1/messages"
 # Measured choice (see docs / the Mix report): CUTSELL_MIX_MODEL overrides without a redeploy.
 DEFAULT_MODEL = "claude-haiku-5-5"

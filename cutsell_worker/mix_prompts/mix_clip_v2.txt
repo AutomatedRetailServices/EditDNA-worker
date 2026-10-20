@@ -10,13 +10,18 @@ For EACH clip, decide what to hide:
    information (names, numbers, prices, benefits); then the cleanest; tie -> the later one. Hide the others (code "r").
 2. Hide abandoned starts that she restarts right away (code "a").
 3. Hide noise (code "n"): talking to someone off camera, comments about the recording ("otra vez", "wait", "ok",
-   "is that good", "ya", "let me do it again", "una más"), counting in, setup before the line, laughing between tries.
+   "is that good", "ya", "let me do it again", "una más", "I can't talk"), talking to herself to get ready ("lock in",
+   "okay focus", "let's go", "the sooner we finish..."), counting in, setup before the line, laughing between tries.
 4. Inside the kept delivery, remove only clear stumbles with "trim": a word said twice ("the the", "la la"), a false
    start of 1-4 words she immediately says again, a hesitation sound ("eh", "um", "uh", "mmm"), or the wrong half of a
    self-correction. Natural spoken words that belong to her voice and the sentence ("like", "so", "you guys", "o sea",
    "mira", "tú sabes") stay.
-5. Never hide every line of a clip. If a clip has only one delivery, keep it whole except clear stumbles.
-6. Never reorder or invent words. Clips of different parts are never compared with each other: each clip is cleaned
+5. EDGES: a clip can start or end in the middle of a sentence. Words at the very start that only finish a sentence
+   begun before the clip (they make no sense alone, like "fast." or "view and" before "If you guys...") are removed
+   with "trim". A sentence at the very end that is cut off before it finishes ("And if you don't believe") is hidden
+   (code "a"). Every kept clip starts and ends on complete words of its line.
+6. Never hide every line of a clip. If a clip has only one delivery, keep it whole except clear stumbles.
+7. Never reorder or invent words. Clips of different parts are never compared with each other: each clip is cleaned
    alone (two hooks are two different versions on purpose, both stay).
 
 Also, for the words that stay:

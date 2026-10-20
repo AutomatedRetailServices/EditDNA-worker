@@ -161,6 +161,21 @@ def _clean_phase(user_id, mix_id, record, deps, work: Path) -> dict:
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         heard = dict(pool.map(hear, todo))
+    # A very short clip can come back empty when Deepgram guesses its language alone: heard again in the language of
+    # the Mix's other clips.
+    languages = [h.get("language") for h in heard.values() if h.get("words") and h.get("language") in ("en", "es")]
+    if languages:
+        main = max(set(languages), key=languages.count)
+        for si, ci, clip in todo:
+            h = heard[clip["clip_id"]]
+            if not h.get("error") and not h.get("words") and h.get("duration", 0) > 1.0:
+                try:
+                    again = deps.transcribe(h["audio"], language_hint=main)
+                    h["words"] = [w for w in again.get("words", []) if float(w["e"]) > float(w["s"])]
+                    h["language"] = again.get("language") or main
+                    h["heard_twice"] = True
+                except Exception:
+                    pass
     speaking = [(si, ci, clip) for si, ci, clip in todo if heard[clip["clip_id"]].get("words")]
     answer, units, usage, ai_error = {"clips": [], "fix": [], "zoom": []}, [], {}, None
     if speaking:

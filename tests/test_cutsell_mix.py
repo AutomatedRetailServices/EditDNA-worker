@@ -294,3 +294,22 @@ def test_the_cut_engine_is_untouched_by_mix():
     if diff.returncode != 0:
         pytest.skip("no history")
     assert diff.stdout.strip() == ""
+
+
+def test_a_short_clip_heard_empty_is_heard_again_in_the_mix_language(r, tmp_path):
+    user, mix_id, files = _mix(r, tmp_path, counts=(2, 1, 1, 1))
+    deps, calls, _ = _deps(r, files, tmp_path)
+    plain = deps.transcribe
+    asked = []
+
+    def transcribe(audio, **k):
+        asked.append(k.get("language_hint"))
+        if "s0c1" in audio and not k.get("language_hint"):
+            return {"language": None, "words": []}           # Deepgram guessed the wrong language on 2 s alone
+        return plain(audio, **k)
+
+    deps.transcribe = transcribe
+    out = mix_job.run_mix_job({"user_id": user, "mix_id": mix_id}, deps)
+    record = mix_store.load(user, mix_id, client=r)
+    assert out["state"] == "ready" and "en" in asked
+    assert record["clips"]["s0c1"]["words"] == 4 and record["clips"]["s0c1"]["captions"]
