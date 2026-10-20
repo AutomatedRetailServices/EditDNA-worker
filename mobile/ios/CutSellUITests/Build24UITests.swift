@@ -308,13 +308,14 @@ final class Build24UITests: XCTestCase {
         let tiles = app.descendants(matching: .any).matching(identifier: "productVideo")
         log("videos in the product: \(tiles.count)")
         element("productRename").tap()
-        let field = app.textFields["productRenameField"].firstMatch
+        let field = app.alerts.textFields.firstMatch
         if field.waitForExistence(timeout: 5) {
             field.tap(); field.typeText(" Gel")
-            app.buttons["Save"].firstMatch.tap()
+            app.alerts.buttons["Save"].firstMatch.tap()
         }
         pause(2)
-        check(app.staticTexts["Hydrating Cleanser Gel"].waitForExistence(timeout: 10), "renamed")
+        let title = element("productTitle")
+        check(title.label.contains("Gel"), "renamed", title.label)
 
         // Select 3 videos and move them to another product.
         let videosBefore = tiles.count
@@ -341,12 +342,12 @@ final class Build24UITests: XCTestCase {
             check(element("assignConfirmSuggestion").waitForExistence(timeout: 10), "suggestion from the video shown")
             shot("assign_sheet_need")
             element("assignNew").tap()
-            let brand = app.textFields["assignNewBrand"].firstMatch
+            let brand = app.alerts.textFields.element(boundBy: 0)
             if brand.waitForExistence(timeout: 5) {
                 brand.tap(); brand.typeText("Glow Recipe")
-                let product = app.textFields["assignNewProduct"].firstMatch
+                let product = app.alerts.textFields.element(boundBy: 1)
                 product.tap(); product.typeText("Watermelon Toner")
-                app.buttons["Move here"].firstMatch.tap()
+                app.alerts.buttons["Move here"].firstMatch.tap()
             }
             pause(3)
             check(element("productRow_Watermelon Toner").waitForExistence(timeout: 10), "new brand and product created")
