@@ -110,6 +110,8 @@ def model_name() -> str:
 
 
 KIE_URL = "https://api.kie.ai/claude/v1/messages"
+# Other Anthropic-compatible resellers, same code path as kie.ai (URL, key env var name).
+PROXIES = {"kie": (KIE_URL, "KIE_API_KEY"), "apimart": ("https://api.apimart.ai/v1/messages", "APIMART_API_KEY")}
 KIE_TIMEOUT_SEC = 60
 FALLBACK_CHECK_STEPS = ("decision", "sale_review", "fixwords")   # steps that think at the model default (high)
 
@@ -117,7 +119,8 @@ FALLBACK_CHECK_STEPS = ("decision", "sale_review", "fixwords")   # steps that th
 def provider() -> str:
     """CUTSELL_LLM_PROVIDER=kie sends each call to kie.ai first (same model, same request), with Anthropic direct as
     the automatic fallback. Default and rollback: anthropic."""
-    return "kie" if os.environ.get("CUTSELL_LLM_PROVIDER", "").strip().lower() == "kie" else "anthropic"
+    name = os.environ.get("CUTSELL_LLM_PROVIDER", "").strip().lower()
+    return name if name in PROXIES else "anthropic"
 
 
 def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tuple[str, dict]:
@@ -125,12 +128,12 @@ def call_anthropic(prompt, *, max_tokens: int = 16000, attempts: int = 4) -> tup
     effort, JSON format, cache marks) is the same for both providers; kie.ai answers that are late, broken, or that
     dropped the thinking or the cache are asked again from Anthropic direct and logged as provider_fallback."""
     body = _body(prompt, max_tokens)
-    if provider() == "kie":
+    if provider() != "anthropic":
         started = time.time()
-        reason, text, usage = _try_kie(body, prompt)
+        reason, text, usage = _try_kie(body, prompt, provider())
         usage_kie = usage
         if reason is None:
-            usage.update({"provider": "kie", "latency_s": round(time.time() - started, 2)})
+            usage.update({"provider": provider(), "latency_s": round(time.time() - started, 2)})
             return text, usage
         _LOG.warning("provider_fallback reason=%s step=%s", reason, _STEP.get() or "other")
         text, usage = _call_direct(_body(prompt, max_tokens), prompt, max_tokens=max_tokens, attempts=attempts)
@@ -170,14 +173,15 @@ def _usage_of(data: dict, body: dict, text: str, max_tokens: int) -> dict:
     return usage
 
 
-def _try_kie(body: dict, prompt) -> tuple:
-    """-> (fallback reason or None, text, usage). Never raises."""
-    key = os.environ.get("KIE_API_KEY", "").strip()
+def _try_kie(body: dict, prompt, name: str = "kie") -> tuple:
+    """A reseller (kie.ai, apimart) -> (fallback reason or None, text, usage). Never raises."""
+    url, key_var = PROXIES[name]
+    key = os.environ.get(key_var, "").strip()
     if not key:
-        return "no_kie_key", "", {}
+        return f"no_{name}_key", "", {}
     headers = {"Authorization": "Bearer " + key, "content-type": "application/json", "anthropic-version": "2023-06-01"}
     try:
-        response = requests.post(KIE_URL, json=body, headers=headers, timeout=(10, KIE_TIMEOUT_SEC))
+        response = requests.post(url, json=body, headers=headers, timeout=(10, KIE_TIMEOUT_SEC))
     except requests.Timeout:
         return "timeout", "", {}
     except requests.RequestException as exc:
@@ -197,7 +201,7 @@ def _try_kie(body: dict, prompt) -> tuple:
         return reason, "", usage                       # usage kept: what kie.ai charged for the answer we dropped
     _LOG.info("simple_engine_llm_call %s", json.dumps({k: usage.get(k) for k in (
         "step", "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
-        "max_tokens", "effort", "answer_chars", "stop_reason", "cache", "json_format", "credits_consumed")} | {"provider": "kie"}))
+        "max_tokens", "effort", "answer_chars", "stop_reason", "cache", "json_format", "credits_consumed")} | {"provider": name}))
     return None, text, usage
 
 
