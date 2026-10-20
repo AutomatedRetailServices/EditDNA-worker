@@ -1,0 +1,22 @@
+B24UI    72.8 PASS Mix on Create
+B24UI    75.0 PASS Mix setup
+B24UI    77.3 PASS a product chosen · CeraVe · Hydrating Cleanser
+B24UI    93.8 Photos access allowed
+B24UI    97.9 PASS gallery says Add 3 clips · Add 3 clips
+B24UI   116.2 FAIL add-clip menu 1
+B24UI   132.5 FAIL add-clip menu 2
+B24UI   143.9 PASS gallery says Add 2 clips · Add 2 clips
+B24UI   167.6 FAIL 9 clips in 4 sections · 10
+B24UI   167.7 FAIL 24 videos · about N s each · Add clips to every part
+B24UI   185.2 PASS section renamed · Results
+B24UI   187.2 PASS section added
+B24UI   193.3 PASS section deleted
+B24UI   199.1 PASS section moved up · CTA
+B24UI   205.6 PASS section moved back · CTA
+B24UI   217.6 FAIL How many videos? sheet
+B24UI   230.1 FAIL preview of the first 4 videos · 0
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:423: error: -[CutSellUITests.Build24UITests testMixFlow] : Failed to get matching snapshot: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"mixHowManyMake" IN identifiers'`, given input App element pid: 14488
+Test Case '-[CutSellUITests.Build24UITests testMixFlow]' failed (236.277 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-20 19:04:40.633.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-20 19:04:40.633.
+Test Suite 'Selected tests' failed at 2026-10-20 19:04:40.634.
