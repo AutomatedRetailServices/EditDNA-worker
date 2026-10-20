@@ -98,6 +98,20 @@ enum GalleryExport {
     /// `name` nil = the video's own file name from Photos (shown on the Processing screen).
     /// `progress` (0...1) while the video downloads from iCloud (only called when it is not on the
     /// iPhone); `activity` on every step, so the upload screen knows the copy is alive.
+    /// The user album that holds this video (not the system ones like Recents or Favorites): a free brand /
+    /// product hint for the server. nil when it is in no album of hers.
+    static func albumName(of asset: PHAsset) -> String? {
+        let albums = PHAssetCollection.fetchAssetCollectionsContaining(asset, with: .album, options: nil)
+        var name: String?
+        albums.enumerateObjects { collection, _, stop in
+            if let title = collection.localizedTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                name = title
+                stop.pointee = true
+            }
+        }
+        return name.map { String($0.prefix(80)) }
+    }
+
     static func export(_ asset: PHAsset, name: String?, progress: (@Sendable (Double) -> Void)? = nil,
                        copied: (@Sendable (Int64) -> Void)? = nil) async throws -> LocalVideo {
         let resources = PHAssetResource.assetResources(for: asset)

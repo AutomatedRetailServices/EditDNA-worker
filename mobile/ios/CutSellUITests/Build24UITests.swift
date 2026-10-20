@@ -82,10 +82,10 @@ final class Build24UITests: XCTestCase {
         }
     }
 
-    private func launchApp(fresh: Bool) {
+    private func launchApp(fresh: Bool, extra: [String] = []) {
         app = XCUIApplication()
         // The whole app (four tabs + start-up steps), with the probe's session.
-        app.launchArguments = ["-CutSellScreen", "app_probe"]
+        app.launchArguments = ["-CutSellScreen", "app_probe"] + extra
         let env = ProcessInfo.processInfo.environment
         for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_API"] {
             if let value = env[key] { app.launchEnvironment[key] = value }
@@ -279,6 +279,80 @@ final class Build24UITests: XCTestCase {
         }
         check(app.buttons["Saved"].waitForExistence(timeout: 60), "saved to Photos")
         shot("export_saved")
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+    }
+
+    /// Edits · Products (Figma 1135:2686 / 2876 / 3059) with the in-memory catalog (-CutSellCatalogMock): the
+    /// Products list, a product, renaming it, assigning the videos that need a product (new brand + product), and
+    /// moving 3 videos to another product.
+    func testProductsFlow() throws {
+        launchApp(fresh: true, extra: ["-CutSellCatalogMock"])
+        element("tab_edits").tap()
+        pause(2)
+        let chip = element("editsFilterProducts")
+        check(chip.waitForExistence(timeout: 20), "Products filter in Edits")
+        chip.tap()
+        check(element("productsList").waitForExistence(timeout: 20), "Products list")
+        pause(2)
+        shot("products_list")
+        let banner = element("productsAssignBanner")
+        check(banner.waitForExistence(timeout: 10), "‘need a product’ notice", banner.exists ? banner.label : "")
+
+        // A product: its videos, then Rename.
+        let row = element("productRow_Hydrating Cleanser")
+        check(row.waitForExistence(timeout: 10), "product row")
+        row.tap()
+        check(element("productTitle").waitForExistence(timeout: 15), "product view")
+        pause(2)
+        shot("product_detail")
+        let tiles = app.descendants(matching: .any).matching(identifier: "productVideo")
+        log("videos in the product: \(tiles.count)")
+        element("productRename").tap()
+        let field = app.textFields["productRenameField"].firstMatch
+        if field.waitForExistence(timeout: 5) {
+            field.tap(); field.typeText(" Gel")
+            app.buttons["Save"].firstMatch.tap()
+        }
+        pause(2)
+        check(app.staticTexts["Hydrating Cleanser Gel"].waitForExistence(timeout: 10), "renamed")
+
+        // Select 3 videos and move them to another product.
+        let videosBefore = tiles.count
+        element("productSelect").tap()
+        pause(1)
+        for index in 0..<min(3, tiles.count) { tiles.element(boundBy: index).tap(); pause(0.4) }
+        shot("product_selected")
+        element("productSelect").tap()                 // "Move N"
+        let option = element("assignOption_Dior · Miss Dior")
+        check(option.waitForExistence(timeout: 10), "assign sheet with her products")
+        shot("assign_sheet_move")
+        option.tap()
+        element("assignMove").tap()
+        pause(3)
+        let videosAfter = app.descendants(matching: .any).matching(identifier: "productVideo").count
+        check(videosAfter == max(0, videosBefore - 3), "3 videos moved out", "\(videosBefore) → \(videosAfter)")
+        element("productBack").tap()
+        pause(2)
+
+        // The videos that need a product: suggestion + a new brand and product.
+        let assign = element("productsAssignBanner")
+        if assign.waitForExistence(timeout: 10) {
+            assign.tap()
+            check(element("assignConfirmSuggestion").waitForExistence(timeout: 10), "suggestion from the video shown")
+            shot("assign_sheet_need")
+            element("assignNew").tap()
+            let brand = app.textFields["assignNewBrand"].firstMatch
+            if brand.waitForExistence(timeout: 5) {
+                brand.tap(); brand.typeText("Glow Recipe")
+                let product = app.textFields["assignNewProduct"].firstMatch
+                product.tap(); product.typeText("Watermelon Toner")
+                app.buttons["Move here"].firstMatch.tap()
+            }
+            pause(3)
+            check(element("productRow_Watermelon Toner").waitForExistence(timeout: 10), "new brand and product created")
+            check(!element("productsAssignBanner").exists, "no video left without a product")
+        }
+        shot("products_after")
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 }

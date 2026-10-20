@@ -35,8 +35,9 @@ def test_bulk_sheet_go_to_edits_and_stay_here():
 
 def test_edits_processing_filter_and_rows():
     edits = read("ProjectsView.swift")
-    assert 'case processing = "Processing", ready = "Ready", drafts = "Drafts", all = "All"' in edits
-    assert "processingRows.isEmpty ? [.all, .ready, .drafts] : EditsTab.allCases" in edits
+    # Products (Figma 1135:2686) sits between Ready and Drafts since the Products build.
+    assert 'case processing = "Processing", ready = "Ready", products = "Products", drafts = "Drafts", all = "All"' in edits
+    assert "processingRows.isEmpty ? [.ready, .products, .drafts, .all] : EditsTab.allCases" in edits
     assert "Cuts being edited now. You can leave the app." in edits
     assert "Each one moves to Ready when it’s done" in edits and "In order" in edits
     assert "Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready." in edits
@@ -76,7 +77,7 @@ def test_bulk_chip_and_processing_chip_are_findable():
     gallery = (ios / "GalleryPickerView.swift").read_text()
     assert ".onChange(of: initialMode)" in gallery
     projects = (ios / "ProjectsView.swift").read_text()
-    assert projects.count('.accessibilityElement(children: .contain)\n                            .accessibilityIdentifier("editsTabPicker")') == 2
+    assert projects.count('.accessibilityElement(children: .contain)\n                            .accessibilityIdentifier("editsTabPicker")') == 1   # one sliding row
 
 
 def test_bulk_sheet_buttons_keep_their_ids():

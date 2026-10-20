@@ -512,6 +512,12 @@ struct CreateFlowView: View {
     }
 
     private func export(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {
+        var video = try await exportFromPhotos(asset, index: index, count: count)
+        video.albumHint = GalleryExport.albumName(of: asset)
+        return video
+    }
+
+    private func exportFromPhotos(_ asset: PHAsset, index: Int, count: Int) async throws -> LocalVideo {
         submitter.announce(count > 1 ? "Getting video \(index + 1) of \(count) from Photos…" : "Getting your video from Photos…")
         let title = count > 1 ? "Downloading video \(index + 1) of \(count) from iCloud" : "Downloading from iCloud"
         let copying = count > 1 ? "Getting video \(index + 1) of \(count) from Photos" : "Getting your video from Photos"

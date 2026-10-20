@@ -284,4 +284,6 @@ struct LocalVideo: Identifiable, Hashable {
     var cloudAssetID: String? = nil
     var previewURL: URL? = nil
     var expectedBytes: Int64? = nil
+    /// The Photos album the video was picked from (e.g. "CeraVe"): a free hint for its brand / product.
+    var albumHint: String? = nil
 }

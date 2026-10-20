@@ -5,7 +5,7 @@ import Combine
 /// Build 24 (Product Owner, 18 Oct): "Processing" is shown only while something is being made; a
 /// cut leaves it the moment it is ready and is in Ready at once.
 enum EditsTab: String, CaseIterable, Identifiable, Hashable {
-    case processing = "Processing", ready = "Ready", drafts = "Drafts", all = "All"
+    case processing = "Processing", ready = "Ready", products = "Products", drafts = "Drafts", all = "All"
     var id: String { rawValue }
 
     /// Figma chip widths (12 pt SF semibold, height 38).
@@ -13,6 +13,7 @@ enum EditsTab: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .processing: return 100
         case .ready, .drafts: return 84
+        case .products: return 80
         case .all: return 66
         }
     }
@@ -34,12 +35,14 @@ struct ProjectsView: View {
     @State private var searchText = ""
     @ObservedObject private var queue = ProcessingQueue.shared
     @ObservedObject private var tracker = CutTracker.shared
+    @ObservedObject private var catalog = CatalogStore.shared
+    @State private var assigning: AssignRequest?
 
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: 3) }
 
     private var visibleProjects: [Project] {
         switch selectedTab {
-        case .all, .processing:
+        case .all, .processing, .products:
             return appState.projects
         case .ready:
             return appState.projects.filter { $0.state == "draft_ready" }
@@ -74,13 +77,20 @@ struct ProjectsView: View {
         return rows
     }
 
+    /// Figma 1135:2686: Processing · Ready · Products · Drafts · All, sliding sideways. Processing only while
+    /// something is being made.
     private var visibleTabs: [EditsTab] {
-        processingRows.isEmpty ? [.all, .ready, .drafts] : EditsTab.allCases
+        processingRows.isEmpty ? [.ready, .products, .drafts, .all] : EditsTab.allCases
+    }
+
+    private func chipTitle(_ tab: EditsTab) -> String {
+        tab == .products ? "Products" : "\(tab.rawValue) (\(count(tab)))"
     }
 
     private func count(_ tab: EditsTab) -> Int {
         switch tab {
         case .processing: return processingRows.count
+        case .products: return catalog.overview.brands.count
         case .all: return appState.projects.count
         case .ready: return appState.projects.filter { $0.state == "draft_ready" }.count
         case .drafts:
@@ -102,7 +112,8 @@ struct ProjectsView: View {
                             .foregroundStyle(.white)
                             .padding(.top, 12)
                         Text(selectedTab == .processing ? "Cuts being edited now. You can leave the app."
-                                                        : "Your saved cuts, ready to review or share.")
+                             : selectedTab == .products ? "Your cuts, organized by brand and product."
+                             : "Your saved cuts, ready to review or share.")
                             .font(CS.inter(14))
                             .foregroundStyle(CS.textSecondary)
                             .padding(.top, 2)
@@ -119,43 +130,30 @@ struct ProjectsView: View {
                                 .accessibilityIdentifier("editsSearchField")
                         }
 
-                        if visibleTabs.contains(.processing) {
-                            // Figma 1134:2817-2823: 100 / 84 / 84 / 66 pt chips, 6 pt apart.
+                        // Figma 1135:2823-2830: 38 pt chips, 6 pt apart, sliding sideways.
+                        ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) {
                                 ForEach(visibleTabs) { tab in
-                                    EditsFilterChip(title: "\(tab.rawValue) (\(count(tab)))", isSelected: selectedTab == tab) {
+                                    EditsFilterChip(title: chipTitle(tab), isSelected: selectedTab == tab) {
                                         selectedTab = tab
                                     }
                                     .frame(width: tab.chipWidth)
                                     .accessibilityIdentifier("editsFilter\(tab.rawValue)")
                                 }
-                                Spacer(minLength: 0)
                             }
-                            .padding(.top, 22)
-                            // .contain keeps each chip's own id (editsFilterProcessing…); without it the
-                            // stack's id replaced the chips' ids and "Processing" could not be found.
-                            .accessibilityElement(children: .contain)
-                            .accessibilityIdentifier("editsTabPicker")
-                        } else {
-                            HStack(spacing: 0) {
-                                ForEach(visibleTabs) { tab in
-                                    FilterChip(title: "\(tab.rawValue) (\(count(tab)))", isSelected: selectedTab == tab) {
-                                        selectedTab = tab
-                                    }
-                                    .frame(width: 96)
-                                    .accessibilityIdentifier("editsFilter\(tab.rawValue)")
-                                    if tab != visibleTabs.last { Spacer(minLength: 8) }
-                                }
-                            }
-                            .padding(.top, 22)
-                            // .contain keeps each chip's own id (editsFilterProcessing…); without it the
-                            // stack's id replaced the chips' ids and "Processing" could not be found.
+                            // .contain keeps each chip's own id (editsFilterProcessing…).
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("editsTabPicker")
                         }
+                        .scrollClipDisabled()
+                        .padding(.top, 22)
 
                         if selectedTab == .processing {
                             processingList
+                        } else if selectedTab == .products {
+                            ProductsList(store: catalog, projects: appState.projects) { ids, suggestion in
+                                assigning = AssignRequest(projectIDs: ids, suggestion: suggestion)
+                            }
                         } else {
                         if !pendingCuts.isEmpty {
                             VStack(spacing: 8) {
@@ -200,6 +198,16 @@ struct ProjectsView: View {
             .navigationDestination(for: Project.self) { project in
                 ProjectDetailView(project: project)
             }
+            .navigationDestination(for: ProductRoute.self) { route in
+                ProductDetailView(route: route).environmentObject(appState)
+            }
+            .sheet(item: $assigning, onDismiss: { Task { await refreshCatalog() } }) { request in
+                AssignProductSheet(request: request)
+                    .environmentObject(appState)
+                    .presentationDetents([.height(560), .large])
+                    .presentationBackground(Color(hex: 0x0D121F))
+            }
+            .task(id: selectedTab) { if selectedTab == .products { await refreshCatalog() } }
             .sheet(item: $resumeCut) { pending in
                 NewCutView(pending: pending)
                     .environmentObject(appState)
@@ -240,6 +248,10 @@ struct ProjectsView: View {
             )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
         }
         .tint(CS.cyan)
+    }
+
+    private func refreshCatalog() async {
+        await catalog.refresh(session: appState.session, projects: appState.projects)
     }
 
     private func takeRequestedFilter() {
@@ -392,6 +404,7 @@ struct ProjectsView: View {
                 await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
             }
             await refreshPendingCuts()
+            await refreshCatalog()
         } catch { errorMessage = error.localizedDescription }
     }
 

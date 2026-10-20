@@ -62,6 +62,13 @@ final class CutSubmitter: ObservableObject {
     /// source's metadata so the server caches the cut engine's fixed instructions for that send only.
     var bulkTag: [String: String]?
 
+    /// Source metadata: the Bulk tag and the Photos album name (a free brand / product hint). nil when empty.
+    static func metadata(_ bulk: [String: String]?, album: String?) -> [String: String]? {
+        var out = bulk ?? [:]
+        if let album, !album.isEmpty { out["album_hint"] = album }
+        return out.isEmpty ? nil : out
+    }
+
     /// One step and its real % (0...1), shown as it is.
     func stage(_ title: String, _ fraction: Double? = nil) {
         let percent = fraction.map { Int((min(1, max(0, $0)) * 100).rounded(.down)) }
@@ -300,7 +307,7 @@ final class CutSubmitter: ObservableObject {
                     uri: result.sourceURI,
                     sourceOrder: index,
                     durationSec: video.duration,
-                    metadata: bulkTag
+                    metadata: Self.metadata(bulkTag, album: video.albumHint)
                 ))
             }
 
@@ -363,7 +370,7 @@ extension CutSubmitter {
             let voiceURI = try await VoiceUpload.upload(fileURL: voices[index], projectID: projectID, session: session, order: index)
             try? FileManager.default.removeItem(at: voices[index])
             sources.append(SourceInput(originalName: video.url.lastPathComponent, uri: starts[index].sourceURI,
-                                       sourceOrder: index, durationSec: video.duration, metadata: ["audio_uri": voiceURI].merging(bulkTag ?? [:]) { own, _ in own }))
+                                       sourceOrder: index, durationSec: video.duration, metadata: ["audio_uri": voiceURI].merging(Self.metadata(bulkTag, album: video.albumHint) ?? [:]) { own, _ in own }))
         }
         CutSellDiagnostics.log("stage_timing", ["stage": "audio_upload", "seconds": String(format: "%.1f", Date().timeIntervalSince(voiceStarted))])
         stage("Cutting your video…")
