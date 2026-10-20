@@ -1,0 +1,9 @@
+B24UI    69.3 PASS Products filter in Edits
+B24UI    72.3 PASS Products list
+B24UI    90.1 FAIL ‘need a product’ notice
+B24UI   101.1 FAIL product row
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:304: error: -[CutSellUITests.Build24UITests testProductsFlow] : Failed to tap "productRow_Hydrating Cleanser" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"productRow_Hydrating Cleanser" IN identifiers'`, given input App element pid: 14695
+Test Case '-[CutSellUITests.Build24UITests testProductsFlow]' failed (107.707 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-20 14:52:47.017.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-20 14:52:47.019.
+Test Suite 'Selected tests' failed at 2026-10-20 14:52:47.019.
