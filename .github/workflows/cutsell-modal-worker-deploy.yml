@@ -48,7 +48,7 @@ jobs:
             tests/test_cutsell_simple_engine.py \
             tests/test_cutsell_export_delivery_gate_policy.py \
             tests/test_cutsell_worker_wake.py \
-            tests/test_cutsell_product_catalog.py
+            tests/test_cutsell_product_catalog.py tests/test_cutsell_mix.py
       - name: Deploy the Modal worker
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
