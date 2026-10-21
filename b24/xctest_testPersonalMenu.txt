@@ -1,9 +1,0 @@
-B24UI    20.3 PASS a Ready video's ••• in Edits · 12 · all tiles 2
-B24UI    30.4 on screen: Couldn’t open this cut | Something didn't save. Please try again. | Create | Edits | Plan | You | Create | Turn your raw video into a ready-to-sell cut. | Recent cuts | 7 / 30 cuts · | Plan | Upload videos | From your gallery. AI cuts it for you. | ⊞ | Mix | Hooks × bodies × CTAs → many videos | Record with CutSell | Camera with clips · 60s · 3m · 10m | Voice Over project | Record your voice over photos or clips · buttons: ["Create", "Edits", "Plan", "You", "Try again", "Back", "7 / 30 cuts ·, Plan", "", "⊞, Mix, Hooks × bodies × CTAs → many videos", "Record with CutSell, Camera with clips · 60s · 3m · 10m", "Voice Over project, Record your voice over photos or clips", "See all in Edits", "Perfume", "Glass of water", "Baby shoes", "Single", "Bulk", "Combine"]
-B24UI    30.4 FAIL ••• shows Personal · don't plan
-B24UI    30.4 FAILURES: ••• shows Personal · don't plan
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:564: error: -[CutSellUITests.Build24UITests testPersonalMenu] : XCTAssertTrue failed - ••• shows Personal · don't plan
-Test Case '-[CutSellUITests.Build24UITests testPersonalMenu]' failed (37.491 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-21 15:51:45.188.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 15:51:45.189.
-Test Suite 'Selected tests' failed at 2026-10-21 15:51:45.189.
