@@ -34,7 +34,7 @@ enum EditorPanelKind: Equatable {
         case .overlay: return isVideoOverlay ? 226 : 214
         case .volume: return 176
         case .speed: return 112
-        case .voice: return 226
+        case .voice: return 176   // Figma 1128:272
         case .sound: return 124
         case .audio: return 230
         }
@@ -479,7 +479,8 @@ struct SpeedPanelV5: View {
     }
 }
 
-// MARK: Voiceover selected (Figma 1119:1634)
+// MARK: Voiceover selected (Figma 1119:1634 · Panel/Voiceover 1, node 1128:272) -- exactly the design:
+// mic tile · title · time range · Lower video · Clean up · Retake · ✓ · divider · Voice slider 0/100/200 · % · Delete voiceover.
 
 struct VoiceClipPanelV5: View {
     @ObservedObject var model: DraftEditorViewModel
@@ -490,46 +491,141 @@ struct VoiceClipPanelV5: View {
     @State private var value: Double = 1
 
     private var clip: AudioClipItem? { model.audioClips.first { $0.id == clipID } }
+    private static let cardBG = Color(hex: 0x0C1730), border = Color(hex: 0x19345F), control = Color(hex: 0x0A1326)
+    private static let secondary = Color(hex: 0xAFC4E8), muted = Color(hex: 0x6F86AE), error = Color(hex: 0xFF4D67)
 
     var body: some View {
-        PanelCardV5(title: clip.map { model.title(of: $0) } ?? "Voiceover", onClose: onClose) {
-            HStack(spacing: 12) {
-                GradientSliderV5(value: $value, maximum: 2) { setVolume(value) }
-                Text("\(Int((value * 100).rounded()))%")
-                    .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
-                    .frame(width: 52, alignment: .trailing)
+        let duck = clip?.duckVideo ?? false
+        let clean = model.cleanUpOn(.audio(clipID))
+        ZStack(alignment: .topLeading) {
+            // mic tile
+            RoundedRectangle(cornerRadius: 8)
+                .fill(LinearGradient(colors: [Color(hex: 0x19E6FF), Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
+                                     startPoint: .leading, endPoint: .trailing).opacity(0.5))
+                .frame(width: 30, height: 30)
+                .overlay(Image("VoPanelMic").resizable().frame(width: 18, height: 18))
+                .offset(x: 15, y: 13)
+            Text(clip.map { model.title(of: $0) } ?? "Voiceover")
+                .font(.system(size: 16, weight: .semibold)).foregroundStyle(CS.textPrimaryF).lineLimit(1)
+                .frame(width: 96, alignment: .leading)
+                .offset(x: 53, y: 12)
+            Text(range).font(.system(size: 11.5)).foregroundStyle(Self.secondary).lineLimit(1)
+                .offset(x: 53, y: 32)
+            action("VoPanelDuck", label: "Lower\nvideo", on: duck, id: "lowerVideoSound") {
+                model.updateAudioClip(id: clipID) { $0.duckVideo.toggle() }
             }
-            .padding(.top, 4)
-            HStack(spacing: 8) {
-                PillButtonV5(title: "Lower video sound", systemImage: "speaker.wave.1", isOn: clip?.duckVideo ?? false) {
-                    model.updateAudioClip(id: clipID) { $0.duckVideo.toggle() }
+            .offset(x: 151, y: 9)
+            action("VoPanelSparkle", label: "Clean up", on: clean, id: "cleanUpToggle") {
+                model.setCleanUp(.audio(clipID), !clean)
+            }
+            .offset(x: 205, y: 9)
+            action("VoPanelRetake", label: "Retake", on: false, id: "recordAgain", action: onRecordAgain)
+                .offset(x: 259, y: 9)
+            Button(action: onClose) {
+                Image("VoPanelCheck").resizable().frame(width: 22, height: 22).frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Done")
+            .accessibilityIdentifier("panelClose")
+            .offset(x: 312, y: 8)
+            Rectangle().fill(Self.border).frame(width: 326, height: 1).offset(x: 15, y: 69)
+            Text("Voice").font(.system(size: 13, weight: .medium)).foregroundStyle(Self.secondary).offset(x: 15, y: 88)
+            slider.offset(x: 80, y: 85)
+            ForEach([(0, 87.5), (100, 182.5), (200, 281.5)], id: \.0) { item in
+                Text("\(item.0)").font(.system(size: 9.5, weight: .medium)).foregroundStyle(Self.muted)
+                    .offset(x: item.1, y: 107)
+            }
+            Text("\(Int((value * 100).rounded()))%")
+                .font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundStyle(CS.textPrimaryF)
+                .frame(width: 48, height: 26)
+                .background(Self.control, in: RoundedRectangle(cornerRadius: 8))
+                .offset(x: 293, y: 83)
+                .accessibilityIdentifier("volumePercent")
+            Button(action: onDelete) {
+                HStack(spacing: 8) {
+                    Image("VoPanelTrash").resizable().frame(width: 18, height: 18)
+                    Text("Delete voiceover").font(.system(size: 13.5, weight: .medium)).foregroundStyle(Self.error)
                 }
-                .accessibilityIdentifier("lowerVideoSound")
-                PillButtonV5(title: "Mute", systemImage: (clip?.muted ?? false) ? "speaker.slash.fill" : "speaker.wave.2",
-                             isOn: clip?.muted ?? false) {
-                    model.setMuted(.audio(clipID), !(clip?.muted ?? false))
-                }
-                .accessibilityIdentifier("voiceMute")
+                .frame(width: 326, height: 38)
+                .background(Self.error.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
             }
-            .padding(.top, 8)
-            CleanUpRowV5(model: model, target: .audio(clipID)).padding(.top, 6)
-            HStack(spacing: 8) {
-                PillButtonV5(title: "Record again", systemImage: "arrow.counterclockwise", action: onRecordAgain)
-                    .accessibilityIdentifier("recordAgain")
-                PillButtonV5(title: "Delete", systemImage: "trash", destructive: true, action: onDelete)
-                    .accessibilityIdentifier("voiceDelete")
-            }
-            .padding(.top, 8)
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("voiceDelete")
+            .offset(x: 15, y: 125)
         }
-        .frame(height: EditorPanelKind.voice(clipID).height())
+        .frame(width: 358, height: 176, alignment: .topLeading)
+        .background(Self.cardBG, in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Self.border, lineWidth: 1))
+        .frame(maxWidth: .infinity)
         .onAppear { value = clip?.volume ?? 1 }
         .onChange(of: clipID) { _, _ in value = clip?.volume ?? 1 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("voiceClipPanel")
     }
 
-    private func setVolume(_ volume: Double) {
-        model.updateAudioClip(id: clipID) { $0.volume = volume }
+    /// "0:03 – 0:11": where the voice plays on the video.
+    private var range: String {
+        guard let clip else { return "" }
+        func t(_ s: Double) -> String { let v = Int(max(0, s).rounded()); return "\(v / 60):" + String(format: "%02d", v % 60) }
+        return "\(t(clip.start)) – \(t(clip.start + (clip.sourceOut - clip.sourceIn)))"
+    }
+
+    /// Figma Btn/Lower video · Clean up · Retake: a 36 pt round control (cyan ring + cyan label when on).
+    private func action(_ icon: String, label: String, on: Bool, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18).fill(Self.control)
+                    if on { RoundedRectangle(cornerRadius: 18).stroke(Color(hex: 0x19E6FF), lineWidth: 2) }
+                    Image(icon).resizable().frame(width: 20, height: 20)
+                }
+                .frame(width: 36, height: 36)
+                Text(label).font(.system(size: 10.5, weight: .medium)).multilineTextAlignment(.center)
+                    .lineSpacing(0).foregroundStyle(on ? Color(hex: 0x19E6FF) : Self.secondary)
+                    .fixedSize()
+            }
+            .frame(width: 54, alignment: .top)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label.replacingOccurrences(of: "\n", with: " "))
+        .accessibilityValue(on ? "on" : "off")
+        .accessibilityIdentifier(id)
+    }
+
+    /// Voice 0 ... 200 %: 200 pt track (#0A1326), gradient fill, 22 pt knob (Figma 1128:300-305).
+    private var slider: some View {
+        let track: CGFloat = 200
+        let x = track * CGFloat(min(max(0, value / 2), 1))
+        return ZStack(alignment: .leading) {
+            Capsule().fill(Self.control).frame(width: track, height: 6)
+            Capsule().fill(LinearGradient(colors: [Color(hex: 0x19E6FF), Color(hex: 0x1769FF), Color(hex: 0x7C3AED), Color(hex: 0xFF21D7)],
+                                          startPoint: .leading, endPoint: .trailing))
+                .frame(width: x, height: 6)
+            Image("VoPanelKnob").resizable().frame(width: 22, height: 22).offset(x: x - 11)
+        }
+        .frame(width: track, height: 22)
+        .padding(.horizontal, 11)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { drag in
+                var result = (Double(min(max(0, (drag.location.x - 11) / track), 1)) * 200).rounded() / 100
+                if abs(result - 1) < 0.03 { result = 1 }
+                value = result
+            }
+            .onEnded { _ in model.updateAudioClip(id: clipID) { $0.volume = value } })
+        .accessibilityElement()
+        .accessibilityLabel("Voice volume")
+        .accessibilityValue("\(Int((value * 100).rounded()))%")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: value = min(2, value + 0.05)
+            case .decrement: value = max(0, value - 0.05)
+            @unknown default: break
+            }
+            model.updateAudioClip(id: clipID) { $0.volume = value }
+        }
     }
 }
 
@@ -702,18 +798,7 @@ struct VoiceOverSheetV5: View {
             if step == .record { recordStep } else { reviewStep }
             Spacer(minLength: 0)
         }
-        .overlay(alignment: .topTrailing) {
-            // Close (like the other panels); also cancels the 3 · 2 · 1 countdown.
-            Button(action: onCancel) {
-                Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(Color(hex: 0xA3B2D6))
-                    .frame(width: 30, height: 30).background(Circle().fill(Color(hex: 0x14203A)))
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 12).padding(.trailing, 14)
-            .disabled(saving)
-            .accessibilityLabel("Close")
-            .accessibilityIdentifier("voiceClose")
-        }
+        // No X (Figma 1119:2316 / 1120:4): it closes by sliding down from the handle or tapping outside it.
         .frame(maxWidth: .infinity)
         .frame(height: Self.height(step), alignment: .top)
         .background(Color(hex: 0x060D1F, opacity: 0.98), in: RoundedRectangle(cornerRadius: 26, style: .continuous))

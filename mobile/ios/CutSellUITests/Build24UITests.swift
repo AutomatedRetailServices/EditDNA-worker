@@ -575,8 +575,9 @@ final class Build24UITests: XCTestCase {
         let sheetOpen = { self.element("voiceRecordSheet").exists || self.element("voiceReviewSheet").exists }
         editorTool("voiceOver")
         check(element("voiceRecordSheet").waitForExistence(timeout: 10), "sheet opens")
-        element("voiceClose").tap()
-        check(wait(3) { !sheetOpen() } && voices().isEmpty, "close: X before recording → editor, no change")
+        check(!element("voiceClose").exists, "no X on the sheet (Figma)")
+        element("voiceRecordSheet").swipeDown(velocity: .fast)
+        check(wait(3) { !sheetOpen() } && voices().isEmpty, "close: slide down from the handle before recording → editor, no change")
         editorTool("voiceOver")
         _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
         element("voiceRecordSheet").swipeDown(velocity: .fast)
@@ -589,15 +590,15 @@ final class Build24UITests: XCTestCase {
         _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
         element("voiceRecord").tap()
         _ = element("voiceCountdown").waitForExistence(timeout: 3)
-        element("voiceClose").tap()
+        element("voiceRecordSheet").swipeDown(velocity: .fast)
         pause(4)
-        check(!sheetOpen() && !element("liveWave").exists && voices().isEmpty, "X cancels the 3·2·1 countdown (nothing recorded)")
+        check(!sheetOpen() && !element("liveWave").exists && voices().isEmpty, "sliding down cancels the 3·2·1 countdown (nothing recorded)")
         editorTool("voiceOver")
         _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
         element("voiceRecord").tap()
         _ = element("liveWave").waitForExistence(timeout: 6)
         pause(1.5)
-        element("voiceClose").tap()
+        element("voiceRecordSheet").swipeDown(velocity: .fast)
         let discard = app.alerts["Discard recording?"]
         check(discard.waitForExistence(timeout: 3), "closing mid-recording asks Discard recording?")
         shot("vo_discard_alert")
@@ -645,7 +646,7 @@ final class Build24UITests: XCTestCase {
         // (c) panel of the selected voice-over (Figma 1119:1634)
         element("voiceBlock").tap(); pause(1)
         check(element("voiceClipPanel").waitForExistence(timeout: 5), "c) voice-over panel")
-        for id in ["lowerVideoSound", "voiceMute", "cleanUpToggle", "recordAgain", "voiceDelete"] {
+        for id in ["lowerVideoSound", "cleanUpToggle", "recordAgain", "panelClose", "voiceDelete"] {
             check(element(id).exists, "c) \(id)")
         }
         element("lowerVideoSound").tap(); pause(1)
@@ -817,13 +818,15 @@ final class Build24UITests: XCTestCase {
         // 10. playback: the line stays in the middle, the timeline slides under it, the zoom moves
         seekTo(0)
         log("PLAY_START epoch=\(Date().timeIntervalSince1970)")
+        let before = stateNumber("t") ?? -1
         element("editorPlay").tap()
-        var played: [String] = []
-        for _ in 0..<8 { pause(0.5); played.append(String(format: "%.2f:%.3f", stateNumber("t") ?? -1, stateNumber("zoom") ?? -1)) }
-        element("editorPlay").tap()
+        pause(2)
+        let during = stateNumber("t") ?? -1
+        if stateField("playing") == "true" { element("editorPlay").tap() }
         log("PLAY_END epoch=\(Date().timeIntervalSince1970)")
-        let times = played.compactMap { Double($0.split(separator: ":")[0]) }
-        check(zip(times, times.dropFirst()).allSatisfy { $1 > $0 }, "10) the line advances while playing", played.joined(separator: " "))
+        // (XCUITest waits for the app to idle while a video plays, so the screen recording shows the motion;
+        // here: the line moved on from where it started)
+        check(during > before + 0.5, "10) the line advances while playing", String(format: "%.2f -> %.2f", before, during))
         shot("kf_after_play")
 
         // Export (measured in the workflow: the square's size frame by frame)
