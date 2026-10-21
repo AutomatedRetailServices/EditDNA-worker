@@ -30,3 +30,8 @@ Plan · Home "This week" (dots per planned video, today's plan, "Plan my week �
 Goal / Week / Day (Figma 1138:2749 / 2798 / 2872), local "Time to post" reminders that open their day, the night
 before (WiFi + charging, BGProcessingTask `ai.cutsell.app.prefetch-posts`) tomorrow's videos are exported and kept
 on the iPhone; otherwise Share exports with its progress.
+
+## 21 Oct: Product Owner decisions (deployed 72ecfa5)
+- One cut per recording. A recording is identified, per source, by its length (±1 s) plus the first words heard in it. Which cut represents it: a posted cut first, then the cut already in this week, then the newest cut.
+- Personal videos: a per-video flag in the plan store. `POST /v1/plan/personal {user_id, project_id, personal}` sets or clears it, and `GET /v1/plan` lists the flagged videos in `personal`. Personal videos stay in Edits and are never planned. App: Edits ••• → "Personal · don't plan" / "Use in Plan".
+- The creator's catalog: the products she named are assigned as `source: user`, so the AI never moves them. The "Cut AI" videos are CutSell · CutSell.ai. 10 personal videos are flagged. Plan has 11 usable videos.
