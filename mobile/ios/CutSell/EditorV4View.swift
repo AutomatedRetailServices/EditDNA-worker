@@ -100,7 +100,7 @@ struct EditorV4View: View {
                 GeometryReader { geo in
                 // Figma 1120:4: the sheet starts right under the 472 pt video (nothing of the editor between them);
                 // the taller record step (1119:2316) overlaps the video's bottom.
-                let videoBottom = 48 + 8 + max(200, min(472, geo.size.height - 48 - 8))
+                let videoBottom = 48 + 8 + max(200, min(472, geo.size.height - 48 - 8 - VoiceOverSheetV5.height(.review)))
                 let sheetHeight = max(VoiceOverSheetV5.height(recorder.recordedURL != nil ? .review : .record), geo.size.height - videoBottom)
                 VStack(spacing: 0) {
                     Color.black.opacity(0.001)
@@ -242,7 +242,7 @@ struct EditorV4View: View {
         case .style: return controls + 1 + TimelineV4.height + toolbar
         // Figma 1119:2316 / 1120:4: with the voice-over sheet up the video keeps its full 472 pt and the sheet
         // covers the controls and the timeline (nothing of the editor shows between the video and the sheet).
-        case .voiceRecord, .voiceReview: return 0
+        case .voiceRecord, .voiceReview: return VoiceOverSheetV5.height(.review)
         case .none, .micPermission:
             // A tall panel makes the video smaller, so the timeline stays in view (Editor v5).
             return controls + 1 + TimelineV4.height(for: model, compact: card != nil) + toolbar + cardHeight
