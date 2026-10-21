@@ -1,0 +1,450 @@
+"""Source-safe conversion of ASR segments into candidate takes."""
+from __future__ import annotations
+
+from dataclasses import replace
+import os
+import re
+from typing import Iterable, Mapping, Tuple
+
+from .canonical_asr_evidence import normalize_transcript_segments
+from .canonical_identity import mint_source_span_id
+from .contracts import CandidateTake, MediaSignals, SourceAsset, TranscriptSegment, Word
+from .polarity_safety import is_bare_polarity_unit
+from .silence_analysis import SilenceGap, silence_ratio
+from .source_identity import stable_clip_id
+
+# D-052 Part A Section 14: OFF by default -- current behavior (Whisper's own
+# per-segment grouping feeds directly into _speech_units/
+# _repair_boundary_fragments below) is unchanged unless explicitly opted in.
+# When enabled, every source's TranscriptSegments are first flattened to a
+# word-level timeline and deterministically re-segmented
+# (canonical_asr_evidence.normalize_transcript_segments) BEFORE this
+# module's own logic runs, so Whisper's arbitrary segment boundaries never
+# reach AttemptReconstructor at all. See
+# tests/test_cutsell_d052_canonical_asr_evidence.py for the equivalence
+# classes this is required to satisfy, and CUTSELL_DECISIONS.md D-052 for
+# why this stays flag-gated pending a live parity RAW.
+_CANONICAL_NORMALIZATION_ENV = "CUTSELL_ASR_CANONICAL_NORMALIZATION"
+
+
+def _canonical_normalization_enabled(env: Mapping[str, str] | None = None) -> bool:
+    values = env if env is not None else os.environ
+    return str(values.get(_CANONICAL_NORMALIZATION_ENV, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Tokens that make a trailing ASR fragment grammatically dependent on what follows.
+# This is intentionally multilingual for the English/Spanish creator footage used by
+# Clean Cut. Ending an ASR chunk on one of these tokens is strong evidence that the
+# chunk boundary is transcription segmentation, not an editorially valid cut point.
+_BRIDGE_CONNECTORS = frozenset({
+    # English
+    "a", "an", "and", "as", "at", "because", "but", "by", "for", "from", "i", "if",
+    "in", "into", "my", "of", "on", "or", "so", "than", "that", "the", "to", "when",
+    "which", "while", "who", "with", "without", "your",
+    # Spanish
+    "a", "al", "como", "con", "cuando", "de", "del", "el", "en", "la", "las", "le",
+    "les", "lo", "los", "me", "mi", "mis", "o", "para", "pero", "por", "porque", "pues",
+    "que", "se", "si", "sin", "su", "sus", "un", "una", "unos", "unas", "y",
+})
+
+_OPEN_PUNCTUATION_RE = re.compile(r"[,;:\-–—]\s*$")
+
+# D-097 Priority D (was the parked D-095.3 proposal): a bare polarity particle
+# is NOT a discourse marker. When ASR puts it in its own speech unit because
+# the speaker paused for emphasis ("No ... quiero sonar a conspiracion"),
+# leaving it orphaned lets a downstream cleanup delete it as micro debris and
+# the following clause is then delivered with its meaning INVERTED. The
+# particle therefore rejoins the clause it negates across a normal, even
+# emphatic, pause -- never across a real section boundary. Vocabulary lives
+# in `polarity_safety` (shared with the fragment guard's protection).
+_MAX_POLARITY_REJOIN_GAP_SEC = 2.0
+_MIN_POLARITY_CLAUSE_WORDS = 3
+
+
+def _audio_quality(segment: TranscriptSegment, silence: float) -> float:
+    confidences = [word.confidence for word in segment.words if word.confidence is not None]
+    speech_confidence = sum(confidences) / len(confidences) if confidences else 0.5
+    duration = max(0.001, segment.end - segment.start)
+    words_per_second = len(segment.words) / duration if segment.words else 0.0
+    if 1.4 <= words_per_second <= 4.2:
+        pace_quality = 1.0
+    elif words_per_second > 0:
+        pace_quality = 0.7
+    else:
+        pace_quality = 0.5
+    score = 0.60 * speech_confidence + 0.25 * (1.0 - silence) + 0.15 * pace_quality
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def _speech_units(segment: TranscriptSegment, *, split_gap_sec: float = 0.75) -> Tuple[TranscriptSegment, ...]:
+    """Split one ASR segment only at strong word-timestamp gaps."""
+    words = tuple(sorted(segment.words, key=lambda word: (word.start, word.end)))
+    if len(words) < 2:
+        return (segment,)
+
+    chunks: list[list[Word]] = [[]]
+    for index, word in enumerate(words):
+        if index:
+            previous = words[index - 1]
+            if word.start - previous.end >= split_gap_sec:
+                chunks.append([])
+        chunks[-1].append(word)
+    if len(chunks) == 1:
+        return (segment,)
+
+    output = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        output.append(TranscriptSegment(
+            source_asset_id=segment.source_asset_id,
+            start=chunk[0].start,
+            end=chunk[-1].end,
+            text=" ".join(word.text.strip() for word in chunk if word.text.strip()),
+            words=tuple(chunk),
+        ))
+    return tuple(output) or (segment,)
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"[\w'’-]+", text, flags=re.UNICODE))
+
+
+_TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)[\"'”’)]*\s*$")
+
+
+def _trails_off(text: str) -> bool:
+    """D-097.11 (R15): a trailing ellipsis is the transcriber's trailing-off /
+    cut-off marker ("... y me diagnosticaron con..."), never a full stop."""
+    return bool(_TRAILING_ELLIPSIS_RE.search(str(text or "").strip()))
+
+
+def _ends_sentence(text: str) -> bool:
+    stripped = str(text or "").strip()
+    if _trails_off(stripped):
+        return False
+    return bool(re.search(r"[.!?][\"'”’)]*\s*$", stripped))
+
+
+def _last_word(text: str) -> str:
+    words = re.findall(r"[\w'’-]+", str(text or "").casefold(), flags=re.UNICODE)
+    return words[-1] if words else ""
+
+
+def _grammatically_open_tail(text: str) -> bool:
+    stripped = str(text or "").strip()
+    if not stripped or _ends_sentence(stripped):
+        return False
+    if _trails_off(stripped):
+        # D-097.11 (R15): RAW 34048444463 marked "Tuve problemas estomacales ...
+        # y me diagnosticaron con..." complete_idea=True because the ellipsis
+        # matched the full-stop pattern first; the abandoned attempt then
+        # carried a complete-delivery marker into ranking, clean-cut and the
+        # Resolver's usability rules (cross_group_truncated_winner_authority
+        # exists to work around exactly this marker error).
+        return True
+    if _OPEN_PUNCTUATION_RE.search(stripped):
+        return True
+    return _last_word(stripped) in _BRIDGE_CONNECTORS
+
+
+def _looks_complete_idea(text: str, duration_sec: float) -> bool:
+    """Conservatively distinguish complete delivery from transcription fragments.
+
+    Duration/word count must never override an obviously open grammatical tail. This
+    matters for long-form creator footage where Whisper can split one sentence into
+    several 3-5 second segments such as ``...todos los test que`` + ``ella pudiera...``.
+    Those pieces are not independent takes merely because each is several seconds long.
+    """
+    if _ends_sentence(text):
+        return True
+    if _grammatically_open_tail(text):
+        return False
+    words = _word_count(text)
+    if words >= 6 or duration_sec >= 3.0:
+        return True
+    return False
+
+
+def _merge_signals(left: CandidateTake, right: CandidateTake) -> MediaSignals | None:
+    if left.signals is None and right.signals is None:
+        return None
+    a = left.signals or MediaSignals(left.source_asset_id, left.start, left.end)
+    b = right.signals or MediaSignals(right.source_asset_id, right.start, right.end)
+    left_duration = max(0.001, left.duration_sec)
+    right_duration = max(0.001, right.duration_sec)
+    total = left_duration + right_duration
+
+    def weighted(x: float, y: float) -> float:
+        return (x * left_duration + y * right_duration) / total
+
+    return MediaSignals(
+        source_asset_id=left.source_asset_id,
+        start=left.start,
+        end=right.end,
+        silence_ratio=weighted(a.silence_ratio, b.silence_ratio),
+        audio_quality=weighted(a.audio_quality, b.audio_quality),
+        face_visibility=weighted(a.face_visibility, b.face_visibility),
+        eye_contact=weighted(a.eye_contact, b.eye_contact),
+        framing_quality=weighted(a.framing_quality, b.framing_quality),
+        product_visibility=weighted(a.product_visibility, b.product_visibility),
+        motion_stability=weighted(a.motion_stability, b.motion_stability),
+        continuity=weighted(a.continuity, b.continuity),
+        visual_fumble=max(a.visual_fumble, b.visual_fumble),
+        expression_naturalness=weighted(a.expression_naturalness, b.expression_naturalness),
+        gesture_naturalness=weighted(a.gesture_naturalness, b.gesture_naturalness),
+        delivery_energy=weighted(a.delivery_energy, b.delivery_energy),
+        distraction_risk=max(a.distraction_risk, b.distraction_risk),
+    )
+
+
+def _canonical_word_index_lookup(segments: Iterable[TranscriptSegment]) -> dict[str, dict[tuple, list[int]]]:
+    """D-235W Part B: the SAME canonical per-source word ordering the
+    Language Spine's own word-adapter derives (`sorted(words, key=lambda
+    word: (word.start, word.end))`, enumerate) -- built here,
+    from the SAME original (pre-`_speech_units`-split) segments
+    `raw_understanding_map.word_timings` is itself built from (D-235O's
+    own confirmed finding: no second ASR pass, ever), so `CandidateTake.
+    word_indices` can be populated at construction using EXACTLY the
+    identity contract D-235P's own module docstring requires: source-
+    scoped `(source_asset_id, canonical_word_index)`, never Python object
+    identity, never a second word-ordinal system.
+
+    Returns `{source_asset_id: {(start, end): [ordinal, ordinal, ...]}}`
+    -- a LIST per `(start, end)` key (not a single value), so a genuine
+    duplicate-timestamp pair (rare in real ASR, never assumed impossible)
+    is matched positionally by `_word_indices_for` below rather than
+    silently colliding on one shared index."""
+    words_by_source: dict[str, list[Word]] = {}
+    for segment in segments:
+        words_by_source.setdefault(segment.source_asset_id, []).extend(segment.words)
+    lookup: dict[str, dict[tuple, list[int]]] = {}
+    for source_asset_id, words in words_by_source.items():
+        ordered = sorted(words, key=lambda word: (word.start, word.end))
+        per_key: dict[tuple, list[int]] = {}
+        for index, word in enumerate(ordered):
+            per_key.setdefault((word.start, word.end), []).append(index)
+        lookup[source_asset_id] = per_key
+    return lookup
+
+
+def _word_indices_for(
+    words: Tuple[Word, ...], source_asset_id: str, lookup: Mapping[str, Mapping[tuple, list]],
+) -> Tuple[int, ...]:
+    """Looks up each of ``words``' own canonical ordinal in ``lookup``
+    (built by `_canonical_word_index_lookup` above) by exact `(start,
+    end)` value match -- never a timestamp-overlap/fuzzy match. A word
+    genuinely absent from the canonical source list (should not happen in
+    practice; defensively handled anyway) is simply skipped -- fail
+    closed, never a fabricated index."""
+    per_key = lookup.get(source_asset_id) or {}
+    cursors: dict[tuple, int] = {}
+    indices: list[int] = []
+    for word in words:
+        key = (word.start, word.end)
+        candidates = per_key.get(key)
+        if not candidates:
+            continue
+        cursor = cursors.get(key, 0)
+        if cursor < len(candidates):
+            indices.append(candidates[cursor])
+            cursors[key] = cursor + 1
+        else:
+            # Every distinct canonical slot for this exact (start, end)
+            # has already been consumed by an earlier word in THIS SAME
+            # take -- reuse the last one rather than silently dropping
+            # the word's own membership.
+            indices.append(candidates[-1])
+    return tuple(indices)
+
+
+def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
+    text = f"{left.text.rstrip()} {right.text.lstrip()}".strip()
+    duration = max(0.0, right.end - left.start)
+    # D-050A: this internal boundary-fragment repair join is itself a small
+    # fusion of two raw ASR spans, so the joined result gets a fresh
+    # source_span_id (physical observation identity for the NEW joined
+    # span) rather than inheriting either parent's -- see
+    # canonical_identity.py's module docstring on why this id is
+    # deliberately timestamp-sensitive.
+    return CandidateTake(
+        clip_id=stable_clip_id(left.source_asset_id, left.start, right.end, text),
+        source_asset_id=left.source_asset_id,
+        source_order=left.source_order,
+        start=left.start,
+        end=right.end,
+        text=text,
+        words=tuple(left.words) + tuple(right.words),
+        signals=_merge_signals(left, right),
+        complete_idea=_looks_complete_idea(text, duration),
+        source_span_id=mint_source_span_id(left.source_asset_id, left.start, right.end, text),
+        # D-235W: concatenate the two operands' own already-resolved
+        # canonical word-index tuples -- never re-derived here, never
+        # simplified to a start/end range (D-235P's own "not provably
+        # always contiguous" finding still applies to a repaired join).
+        word_indices=tuple(left.word_indices) + tuple(right.word_indices),
+    )
+
+
+def _repair_boundary_fragments(
+    takes: Iterable[CandidateTake],
+    *,
+    max_fragment_sec: float = 1.5,
+    max_fragment_words: int = 3,
+    max_join_gap_sec: float = 0.16,
+    max_bridge_fragment_sec: float = 2.8,
+    max_bridge_gap_sec: float = 0.65,
+    max_open_tail_join_sec: float = 20.0,
+    max_polarity_rejoin_gap_sec: float = _MAX_POLARITY_REJOIN_GAP_SEC,
+    polarity_rejoins: list[dict] | None = None,
+) -> Tuple[CandidateTake, ...]:
+    """Reattach contiguous ASR fragments without deleting real short lines.
+
+    Besides tiny boundary debris, a grammatically open trailing chunk may attach to the
+    next nearby chunk even when the first chunk is several seconds long. This repairs
+    Whisper boundaries such as ``...aumento de`` + ``peso`` or ``...los test que`` +
+    ``ella pudiera...`` while still refusing to cross a real pause/source boundary.
+    A one-word discourse marker is deliberately stricter: it may bridge only an almost
+    contiguous ASR boundary, never a normal conversational pause. A bare polarity
+    particle is the one exception (D-097 Priority D): it rejoins the clause it
+    negates across a pause of up to ``max_polarity_rejoin_gap_sec`` because an
+    orphaned particle is a meaning-inversion risk, not granularity. Every such
+    rejoin is appended to ``polarity_rejoins`` (observability, word timings kept).
+    """
+    ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
+    repaired: list[CandidateTake] = []
+
+    for take in ordered:
+        if repaired:
+            previous = repaired[-1]
+            gap = take.start - previous.end
+            same_source = previous.source_asset_id == take.source_asset_id
+            if same_source and -0.02 <= gap <= max_polarity_rejoin_gap_sec:
+                previous_is_bare_polarity = (
+                    previous.duration_sec <= max_fragment_sec and is_bare_polarity_unit(previous.text)
+                )
+                # "No" + "no" (a repeated emphatic particle) first folds into one
+                # bare unit; a bare unit then rejoins a real clause (>= 3 words).
+                if previous_is_bare_polarity and (
+                    _word_count(take.text) >= _MIN_POLARITY_CLAUSE_WORDS
+                    or (take.duration_sec <= max_fragment_sec and is_bare_polarity_unit(take.text))
+                ):
+                    joined = _join_takes(previous, take)
+                    if polarity_rejoins is not None:
+                        polarity_rejoins.append({
+                            "source_asset_id": previous.source_asset_id,
+                            "particle_text": previous.text,
+                            "particle_start": round(float(previous.start), 3),
+                            "particle_end": round(float(previous.end), 3),
+                            "clause_text": take.text,
+                            "clause_start": round(float(take.start), 3),
+                            "gap_sec": round(float(gap), 3),
+                            "joined_clip_id": joined.clip_id,
+                        })
+                    repaired[-1] = joined
+                    continue
+            strict_contiguous = -0.02 <= gap <= max_join_gap_sec
+            bridge_contiguous = -0.02 <= gap <= max_bridge_gap_sec
+            current_is_micro = take.duration_sec <= max_fragment_sec and _word_count(take.text) <= max_fragment_words
+            previous_word_count = _word_count(previous.text)
+            previous_is_open_micro = (
+                previous.duration_sec <= max_fragment_sec
+                and previous_word_count <= max_fragment_words
+                and not _ends_sentence(previous.text)
+            )
+            current_closes_open_previous = current_is_micro and not _ends_sentence(previous.text)
+            previous_is_bridge_fragment = (
+                previous.duration_sec <= max_bridge_fragment_sec
+                and 2 <= previous_word_count <= max_fragment_words
+                and not _ends_sentence(previous.text)
+                and _last_word(previous.text) in _BRIDGE_CONNECTORS
+                and _word_count(take.text) >= 4
+            )
+            previous_has_open_tail = (
+                _grammatically_open_tail(previous.text)
+                and right_span(previous, take) <= max_open_tail_join_sec
+                and (previous_word_count >= 2 or strict_contiguous)
+            )
+
+            if same_source and strict_contiguous and (previous_is_open_micro or current_closes_open_previous):
+                repaired[-1] = _join_takes(previous, take)
+                continue
+            if same_source and bridge_contiguous and (previous_is_bridge_fragment or previous_has_open_tail):
+                repaired[-1] = _join_takes(previous, take)
+                continue
+
+        repaired.append(take)
+
+    return tuple(repaired)
+
+
+def right_span(left: CandidateTake, right: CandidateTake) -> float:
+    return max(0.0, float(right.end) - float(left.start))
+
+
+def segment_takes(
+    segments: Iterable[TranscriptSegment],
+    sources: Iterable[SourceAsset],
+    gaps: Iterable[SilenceGap] = (),
+    *,
+    env: Mapping[str, str] | None = None,
+    diagnostics: dict | None = None,
+) -> Tuple[CandidateTake, ...]:
+    """``diagnostics`` (optional, mutated) receives ``polarity_rejoins``: every
+    D-097 Priority D particle-to-clause rejoin with its word timings, so a
+    RAW can prove where a polarity particle was reattached (observability)."""
+    source_map: Mapping[str, SourceAsset] = {source.source_asset_id: source for source in sources}
+    gap_tuple = tuple(gaps)
+    segment_tuple = tuple(segments)
+    if _canonical_normalization_enabled(env):
+        # D-052: replace Whisper's own per-segment grouping with a
+        # deterministic, word-timeline-derived one before anything else in
+        # this function sees it. Everything below is unchanged -- it simply
+        # now receives already-canonicalized segments.
+        segment_tuple = normalize_transcript_segments(segment_tuple)
+    # D-235W Part B: the canonical per-source word-index lookup, built ONCE
+    # from the original (pre-`_speech_units`-split) segments -- see
+    # `_canonical_word_index_lookup`'s own docstring.
+    word_index_lookup = _canonical_word_index_lookup(segment_tuple)
+    output = []
+    for original_segment in segment_tuple:
+        if original_segment.source_asset_id not in source_map:
+            raise ValueError("transcript source is not registered in processing request")
+        for segment in _speech_units(original_segment):
+            source = source_map[segment.source_asset_id]
+            start = max(0.0, float(segment.start))
+            end = min(float(source.duration_sec), max(start, float(segment.end))) if source.duration_sec > 0 else max(start, float(segment.end))
+            text = segment.text.strip()
+            if not text or end <= start:
+                continue
+            ratio = silence_ratio(start, end, gap_tuple, source.source_asset_id)
+            signals = MediaSignals(
+                source_asset_id=source.source_asset_id,
+                start=start,
+                end=end,
+                silence_ratio=ratio,
+                audio_quality=_audio_quality(segment, ratio),
+            )
+            output.append(CandidateTake(
+                clip_id=stable_clip_id(source.source_asset_id, start, end, text),
+                source_asset_id=source.source_asset_id,
+                source_order=source.source_order,
+                start=start,
+                end=end,
+                text=text,
+                words=segment.words,
+                signals=signals,
+                complete_idea=_looks_complete_idea(text, end - start),
+                # D-050A: the raw physical-observation identity for this
+                # exact ASR span (see canonical_identity.py).
+                source_span_id=mint_source_span_id(source.source_asset_id, start, end, text),
+                # D-235W Part B: exact, source-scoped canonical word-index
+                # membership for this take's own `.words` -- see
+                # `_word_indices_for`'s own docstring.
+                word_indices=_word_indices_for(segment.words, source.source_asset_id, word_index_lookup),
+            ))
+    polarity_rejoins: list[dict] = []
+    repaired = _repair_boundary_fragments(output, polarity_rejoins=polarity_rejoins)
+    if diagnostics is not None:
+        diagnostics["polarity_rejoins"] = polarity_rejoins
+    return repaired
