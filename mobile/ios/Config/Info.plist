@@ -14,10 +14,12 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>processing</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>ai.cutsell.app.follow-cuts</string>
+		<string>ai.cutsell.app.prefetch-posts</string>
 	</array>
 </dict>
 </plist>

@@ -29,6 +29,7 @@ struct MainTabView: View {
     @ObservedObject private var tracker = CutTracker.shared
     @ObservedObject private var exports = ExportTracker.shared
     @ObservedObject private var queue = ProcessingQueue.shared
+    @ObservedObject private var planWeek = PlanWeekStore.shared
     /// A ready cut opened from the "Your cut is ready" banner.
     @State private var openReady: ReadyRoute?
 
@@ -124,6 +125,8 @@ struct MainTabView: View {
                 CutTracker.shared.follow(project: project)
             }
         }
+        // A "Time to post" reminder was tapped: Plan opens that day.
+        .onChange(of: planWeek.requestedDay) { _, day in if day != nil { tab = .plan } }
         .preferredColorScheme(.dark)
     }
 

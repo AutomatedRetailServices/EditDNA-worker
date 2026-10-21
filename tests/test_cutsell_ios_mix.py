@@ -39,8 +39,24 @@ def test_mix_in_edits_and_products():
 def test_plan_home_has_mix_bulk_in_progress_and_soon():
     plan = read("PlanView.swift")
     for text in ("Make videos in batches and plan what to post.", "New Mix", "Hooks × bodies × CTAs → many videos", "Bulk",
-                 "Upload many videos at once", "In progress", "See all in Edits ›", "This week", "SOON", "Plan my week ›"):
+                 "Upload many videos at once", "In progress", "See all in Edits ›", "This week", "Plan my week ›"):
         assert text in plan
     assert "MixSetupView(" in plan and "queue.requestedCreateMode = .bulk" in plan and "queue.focus = focus" in plan
     assert "struct PlanView" not in read("MainTabView.swift")
     assert "allowedModes: route.mode == .bulk ? [.bulk] : [.single, .combine]" in read("CreateFlowView.swift")
+
+
+def test_plan_my_week_screens():
+    week = read("PlanWeekView.swift")
+    for text in ("Plan my week", "VIDEOS PER DAY", "DAYS", "REMINDERS", "Build my week", "This week", "Settings", "POSTED", "TODAY",
+                 "New Mix ›", "✦ SUGGESTED CAPTION", "Share to TikTok", "Save to Photos", "✓  Mark as posted", "Time to post: "):
+        assert text in week
+    for path in ('"/v1/plan"', '"/v1/plan/prefs"', '"/v1/plan/week/build"', '"/v1/plan/slots/move"', '"/v1/plan/slots/remove"',
+                 '"/v1/plan/posted"', '"/v1/plan/caption"'):
+        assert path in week
+    assert "requiresExternalPower = true" in week and "requiresNetworkConnectivity = true" in week
+    assert "UIActivityViewController" in week and "UIPasteboard.general.string" in week
+    plan = read("PlanView.swift")
+    assert "SOON" not in plan and "Plan my week ›" in plan and "path = week.hasWeek ? [.week] : [.goal]" in plan
+    info = (IOS.parent / "Config" / "Info.plist").read_text()
+    assert "ai.cutsell.app.prefetch-posts" in info and "<string>processing</string>" in info

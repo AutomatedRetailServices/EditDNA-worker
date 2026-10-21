@@ -466,6 +466,89 @@ final class Build24UITests: XCTestCase {
         log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
     }
 
+    /// Plan my week (Figma 1138:2749 / 2798 / 2872) with an in-memory plan (-CutSellPlanMock): Goal → Build my week →
+    /// Week (videos of the 4 origins) → move a video → Day: caption edit / copy, Share to TikTok (share sheet with the
+    /// video), Save, Mark as posted → rebuild keeps it posted → a "Time to post" reminder opens its day.
+    func testPlanWeekFlow() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellPlanTestReminder"])
+        element("tab_plan").tap()
+        let card = element("planMyWeek")
+        check(card.waitForExistence(timeout: 20), "Plan · This week card")
+        check(!element("planSoon").exists, "no SOON any more")
+        card.tap()
+        check(element("goalBuild").waitForExistence(timeout: 10), "Plan my week · Goal")
+        element("goalPerDay_2").tap()
+        element("goalReminder_2").tap()                       // Night on
+        element("goalDay_6").tap()                            // Sunday on
+        shot("plan_goal")
+        check(element("goalSummary").label.contains("ready video"), "X ready videos cover Y days", element("goalSummary").label)
+        element("goalBuild").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.buttons["Allow"]
+        if allow.waitForExistence(timeout: 5) { allow.tap() }
+        let subtitle = element("weekSubtitle")
+        check(subtitle.waitForExistence(timeout: 15), "Week built")
+        check(subtitle.label.hasPrefix("9 videos"), "9 videos in the week", subtitle.label)
+        check(element("weekMissing").exists, "the days without videos: New Mix ›")
+        shot("plan_week")
+
+        // Move one video (long press → Move).
+        let slots = app.descendants(matching: .any).matching(identifier: "weekSlot")
+        if slots.count > 2 {
+            slots.element(boundBy: 2).press(forDuration: 1.2)
+            let moveItem = app.buttons["Move to another day or time"].firstMatch
+            if moveItem.waitForExistence(timeout: 5) {
+                moveItem.tap()
+                check(element("moveSave").waitForExistence(timeout: 5), "move sheet")
+                element("moveSave").tap()
+                pause(1.5)
+            }
+        }
+        check(element("weekSubtitle").label.hasPrefix("9 videos"), "still 9 videos after the move")
+
+        // The first day.
+        let firstDay = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDay_'")).firstMatch
+        firstDay.tap()
+        check(element("dayShare").waitForExistence(timeout: 10), "Day")
+        check(element("dayCaption").label.contains("#tiktokshop"), "suggested caption", element("dayCaption").label)
+        shot("plan_day")
+        element("captionEdit").tap()
+        let field = app.alerts.textFields.firstMatch
+        if field.waitForExistence(timeout: 5) {
+            field.tap(); field.clearAndType("My own caption #mine")
+            app.alerts.buttons["Save"].firstMatch.tap()
+        }
+        check(wait(5) { self.element("dayCaption").label == "My own caption #mine" }, "her caption saved", element("dayCaption").label)
+        element("captionCopy").tap()
+        check(element("dayNotice").label == "Caption copied", "Copy")
+        element("dayShare").tap()
+        let sheet = app.otherElements["ActivityListView"]
+        check(wait(30) { sheet.exists || self.app.buttons["Save Video"].exists }, "Share to TikTok opens the share sheet with the video")
+        shot("plan_share")
+        if app.buttons["Close"].firstMatch.exists { app.buttons["Close"].firstMatch.tap() } else { sheet.swipeDown() }
+        pause(1.5)
+        element("dayPosted").tap()
+        check(wait(5) { self.element("dayPosted").label.contains("Posted") }, "Mark as posted", element("dayPosted").label)
+
+        // The reminder (6 s after the day opened): Home, then tap it.
+        XCUIDevice.shared.press(.home)
+        let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Time to post'")).firstMatch
+        let shown = banner.waitForExistence(timeout: 20)
+        check(shown, "\"Time to post\" reminder")
+        if shown { banner.tap() } else { app.activate() }
+        check(element("dayTitle").waitForExistence(timeout: 15), "the reminder opens its day")
+        shot("plan_reminder_opened")
+
+        // Build again: the posted video stays posted.
+        element("planBack").tap()
+        if element("weekSettings").waitForExistence(timeout: 10) { element("weekSettings").tap() }
+        if element("goalBuild").waitForExistence(timeout: 10) { element("goalBuild").tap() }
+        check(element("weekSubtitle").waitForExistence(timeout: 15), "week built again")
+        firstDay.tap()
+        check(wait(10) { self.element("dayPosted").label.contains("Posted") || self.app.staticTexts["Posted"].exists },
+              "posted stays posted after rebuilding")
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+    }
 }
 
 extension XCUIElement {

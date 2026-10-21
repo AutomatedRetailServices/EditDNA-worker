@@ -5,7 +5,12 @@ final class CutSellAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Build 24: Background App Refresh checks cuts still being made.
-        MainActor.assumeIsolated { BackgroundFollow.register() }
+        MainActor.assumeIsolated {
+            BackgroundFollow.register()
+            // Plan my week: tomorrow's videos exported at night (WiFi + charging); reminders open their Day.
+            PostPrefetch.register()
+            PostReminders.shared.install()
+        }
         return true
     }
 
@@ -66,7 +71,7 @@ struct CutSellApp: App {
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .background { BackgroundFollow.enteredBackground() }
+                    if phase == .background { BackgroundFollow.enteredBackground(); PostPrefetch.schedule() }
                     guard phase == .active, appState.session != nil else { return }
                     Task {
                         do {
