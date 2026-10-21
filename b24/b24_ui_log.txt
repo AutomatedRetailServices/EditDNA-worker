@@ -1,20 +1,36 @@
-B24UI    18.0 PASS Plan · This week card
-B24UI    18.3 PASS no SOON any more
-B24UI    20.7 PASS Plan my week · Goal
-B24UI    23.8 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
-B24UI    28.3 PASS Week built
-B24UI    28.7 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
-B24UI    29.0 PASS the days without videos: New Mix ›
-B24UI    36.2 PASS move sheet
-B24UI    39.3 PASS still 9 videos after the move
-B24UI    41.6 PASS Day
-B24UI    42.5 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
-B24UI    60.5 PASS her caption saved · My own caption #mine #tiktokshop
-B24UI    61.7 PASS Copy
-B24UI    65.7 PASS Share to TikTok opens the share sheet with the video
-B24UI    72.6 PASS Mark as posted · ✓  Posted
-B24UI    83.4 PASS "Time to post" reminder
-B24UI    88.0 PASS the reminder opens its day
-B24UI    95.7 PASS week built again
-B24UI    97.1 PASS posted stays posted after rebuilding
-B24UI    97.1 FAILURES: none
+B24UI    25.4 PASS Create is for one video (no Bulk, no Mix)
+B24UI    28.1 PASS Plan · New Mix
+B24UI    28.9 PASS Plan · Bulk and This week
+B24UI    41.0 Photos access allowed
+B24UI    42.6 PASS Plan · Bulk opens the gallery
+B24UI    47.9 PASS Mix setup
+B24UI    50.8 PASS a product chosen · CeraVe · Hydrating Cleanser
+B24UI    62.4 PASS gallery says Add 3 clips · Add 3 clips
+B24UI    66.4 PASS section 0 has its 3 clips
+B24UI    74.4 PASS gallery says Add 2 clips · Add 2 clips
+B24UI    75.7 PASS section 1 has its 2 clips
+B24UI    85.6 PASS gallery says Add 2 clips · Add 2 clips
+B24UI    86.9 PASS section 2 has its 2 clips
+B24UI   100.8 PASS gallery says Add 2 clips · Add 2 clips
+B24UI   103.1 PASS section 3 has its 2 clips
+B24UI   104.3 PASS 9 clips in 4 sections
+B24UI   104.4 PASS 24 videos · about N s each · 24 videos · about 146 s each
+B24UI   142.9 PASS section renamed · Results
+B24UI   144.9 PASS section added
+B24UI   152.0 PASS section deleted
+B24UI   157.5 PASS section moved up · CTA
+B24UI   163.4 PASS section moved back · CTA
+B24UI   165.1 PASS How many videos? sheet
+B24UI   167.4 PASS preview of the first 4 videos
+B24UI   167.8 PASS 12 chosen · Make 12 videos
+B24UI   172.4 PASS Mix group in Processing
+B24UI   172.6 PASS Processing shows this Mix only
+B24UI   173.3 PASS Mix · 12 videos · Mix · 12 videos
+B24UI   176.0 PASS Plan · In progress shows the Mix · MIX, Mix, 1 of 12 ready, 1/12
+B24UI   178.4 PASS In progress → Edits · Processing (this Mix)
+B24UI   181.4 PASS Mix results
+B24UI   207.4 PASS Mix ready banner · ✦  Mix ready: 12 videos from 9 clips
+B24UI   207.6 PASS MIX tiles with their code · 12
+B24UI   208.1 PASS Brand · Mix · 12 videos · CeraVe · Mix · 12 videos
+B24UI   211.7 PASS Export all · 12 videos saved to Photos
+B24UI   212.0 FAILURES: none
