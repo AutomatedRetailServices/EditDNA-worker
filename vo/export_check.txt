@@ -1,5 +1,0 @@
-exports: ['export_1.mp4', 'export_2.mp4'] voices: [('6.00', '3.50', 'dc'), ('9.50', '4.49', 'dc')]
-voice 6.00-9.50 dc: 1 kHz voice -43.3 -> -19.0 dB (+24.3); video speech -21.0 -> -32.8 dB (-11.8)
-voice 9.50-13.99 dc: 1 kHz voice -42.8 -> -17.7 dB (+25.1); video speech -21.6 -> -33.4 dB (-11.8)
-outside the voice 0.2-5.6s: video speech -20.4 -> -20.5 dB
-RESULT: PASS
