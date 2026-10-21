@@ -158,7 +158,94 @@ def candidates(user_id: str, projects: list[dict], *, client=None, plan: dict | 
                     "source": source_of(project, entry, link), "posted_at": entry.get("posted_at"),
                     "caption": entry.get("caption"), "caption_source": entry.get("caption_source"),
                     "duration_sec": round(seconds, 1)})
+    prints = recordings(user_id, [v["project_id"] for v in out if not v.get("mix_id")], client=client)
+    week_ids = {s.get("project_id") for s in (plan.get("week") or {}).get("slots") or []}
+    return one_per_recording(out, prints, prefer=week_ids)
+
+
+# ---------------------------------------------------------------- one cut per recording
+
+FIRST_WORDS = 6
+
+
+def _word(w: dict) -> str:
+    return "".join(ch for ch in str(w.get("text") or w.get("w") or "").lower() if ch.isalnum())
+
+
+def recording_of(snapshot: dict) -> list[tuple[float, str]]:
+    """What a cut was made from: per source, its length and the first words heard in it (from every clip of the
+    draft, kept or not). Two cuts of the same recording share it whatever was kept; a new upload of the same
+    file too (its storage link is new, its sound is not)."""
+    draft = snapshot.get("draft") or {}
+    words: dict[int, list[tuple[float, str]]] = {}
+    for part in ("selected", "alternates", "discarded"):
+        for clip in draft.get(part) or []:
+            order = int(clip.get("source_order") or 0)
+            for i, w in enumerate(clip.get("words") or []):
+                t = w.get("start", w.get("s"))
+                t = float(t) if t is not None else float(clip.get("start") or 0) + i * 1e-3
+                if _word(w):
+                    words.setdefault(order, []).append((t, _word(w)))
+    out = []
+    for k, src in enumerate(snapshot.get("sources") or []):
+        order = int(src.get("source_order", k) or 0)
+        heard = sorted(set(words.get(order, [])))
+        out.append((round(float(src.get("duration_sec") or 0), 2), " ".join(w for _, w in heard[:FIRST_WORDS])))
+    return sorted(out)
+
+
+def same_recording(a: list[tuple[float, str]], b: list[tuple[float, str]]) -> bool:
+    if not a or len(a) != len(b):
+        return False
+    rest = list(b)
+    for dur, text in a:
+        match = next((x for x in rest if text and x[1] == text and abs(x[0] - dur) <= 1.0), None)
+        if match is None:
+            return False
+        rest.remove(match)
+    return True
+
+
+def recordings(user_id: str, project_ids: list[str], *, client=None) -> dict[str, list]:
+    if not project_ids:
+        return {}
+    from . import draft_store
+    target = draft_store._redis_client(client)
+    raw = target.mget([draft_store.draft_key(user_id=user_id, project_id=pid) for pid in project_ids])
+    out = {}
+    for pid, item in zip(project_ids, raw):
+        try:
+            out[pid] = recording_of(json.loads(item.decode() if isinstance(item, bytes) else item)) if item else []
+        except Exception:
+            out[pid] = []
     return out
+
+
+def one_per_recording(videos: list[dict], prints: dict[str, list], *, prefer: set | None = None) -> list[dict]:
+    """The same recording cut more than once is planned once: a posted cut wins (the recording was posted), then the
+    cut already in this week, then the newest cut. Mix videos are separate videos (their own rules)."""
+    prefer = prefer or set()
+    groups: list[list[dict]] = []
+    for v in videos:
+        fp = prints.get(v["project_id"])
+        if v.get("mix_id") or not fp:
+            groups.append([v])
+            continue
+        home = next((g for g in groups if not g[0].get("mix_id") and same_recording(prints.get(g[0]["project_id"]) or [], fp)),
+                    None)
+        if home is None:
+            groups.append([v])
+        else:
+            home.append(v)
+    out = []
+    for g in groups:
+        best = max(g, key=lambda v: (bool(v.get("posted_at")), v["project_id"] in prefer, v.get("created_at") or "",
+                                     v["project_id"]))
+        if len(g) > 1:
+            best = {**best, "other_cuts": len(g) - 1}
+        out.append(best)
+    keep = {v["project_id"] for v in out}
+    return [next(x for x in out if x["project_id"] == v["project_id"]) for v in videos if v["project_id"] in keep]
 
 
 # ---------------------------------------------------------------- building the week (rules, no AI)

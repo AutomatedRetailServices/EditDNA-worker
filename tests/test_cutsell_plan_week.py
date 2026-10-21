@@ -187,3 +187,69 @@ def test_the_rules_hold_on_many_random_libraries():
         week = post_plan.build(videos, prefs, today)
         assert post_plan.check(week["slots"], videos) == [], trial
         assert len({s["project_id"] for s in week["slots"]}) == len(week["slots"])
+
+
+# ---------------------------------------------------------------- one cut per recording
+
+def _cut_of(r, user, title, words, *, duration=106.3, keep=None, created=None):
+    """A Ready cut of one recording: the draft holds every clip heard (kept or not); `keep` = which clips are kept."""
+    from cutsell_worker import draft_store
+    pid = _video(user, title)
+    if created:
+        key = project_store.project_key(user_id=user, project_id=pid)
+        record = json.loads(r.get(key))
+        r.set(key, json.dumps({**record, "created_at": created}))
+    clips = [{"clip_id": f"c{i}", "source_order": 0, "start": i * 2.0, "end": i * 2.0 + 1.8,
+              "words": [{"text": w, "start": i * 2.0 + k * 0.3, "end": i * 2.0 + k * 0.3 + 0.25}
+                        for k, w in enumerate(sentence.split())]}
+             for i, sentence in enumerate(words)]
+    kept = set(range(len(clips))) if keep is None else set(keep)
+    snap = {"draft": {"selected": [c for i, c in enumerate(clips) if i in kept],
+                      "discarded": [c for i, c in enumerate(clips) if i not in kept]},
+            "sources": [{"source_order": 0, "duration_sec": duration, "uri": f"s3://b/{title}.mov"}]}
+    r.set(draft_store.draft_key(user_id=user, project_id=pid), json.dumps(snap))
+    return pid
+
+
+PERFUME = ["¿Quién me mandó a comprar esto?", "Si tú tienes problema con los perfumes", "El precio son veinte dólares"]
+
+
+def test_the_same_recording_cut_three_times_is_planned_once_newest_cut(r):
+    user = "u3"
+    a = _cut_of(r, user, "p1", PERFUME, keep=[0, 1, 2], created="2026-10-17T10:00:00Z")
+    b = _cut_of(r, user, "p2", PERFUME, keep=[1, 2], created="2026-10-18T10:00:00Z", duration=106.1)   # new upload
+    c = _cut_of(r, user, "p3", PERFUME, keep=[0, 2], created="2026-10-19T10:00:00Z")
+    other = _cut_of(r, user, "w", ["If you have this glass of water", "you should be buying this"], duration=50.0)
+    take2 = _cut_of(r, user, "p4", ["Mira, este perfume", "huele a mujer con dinero"], duration=106.3)  # another take
+    videos = post_plan.candidates(user, _projects(user))
+    ids = {v["project_id"] for v in videos}
+    assert ids == {c, other, take2}                                   # the newest cut stands for the recording
+    assert next(v for v in videos if v["project_id"] == c)["other_cuts"] == 2
+    week = post_plan.build_week(user, _projects(user), now=datetime(2026, 10, 19, 14, tzinfo=timezone.utc))
+    assert len(week["slots"]) == 3 and not {a, b} & {s["project_id"] for s in week["slots"]}
+    assert post_plan.view(user, _projects(user), now=datetime(2026, 10, 19, 14, tzinfo=timezone.utc))["summary"]["ready"] == 3
+
+
+def test_a_posted_cut_retires_its_recording_and_the_week_keeps_its_cut(r):
+    user = "u4"
+    old = _cut_of(r, user, "p1", PERFUME, created="2026-10-17T10:00:00Z")
+    new = _cut_of(r, user, "p2", PERFUME, keep=[0, 2], created="2026-10-19T10:00:00Z")
+    post_plan.mark_posted(user, old)
+    videos = post_plan.candidates(user, _projects(user))
+    assert [v["project_id"] for v in videos] == [old] and videos[0]["posted_at"]   # posted: never planned again
+    user = "u5"
+    old = _cut_of(r, user, "p1", PERFUME, created="2026-10-17T10:00:00Z")
+    now = datetime(2026, 10, 19, 14, tzinfo=timezone.utc)
+    week = post_plan.build_week(user, _projects(user), now=now)
+    assert [s["project_id"] for s in week["slots"]] == [old]
+    newer = _cut_of(r, user, "p2", PERFUME, keep=[0], created="2026-10-20T10:00:00Z")
+    week = post_plan.build_week(user, _projects(user), now=now)
+    assert [s["project_id"] for s in week["slots"]] == [old]          # the cut already planned stays; no twin added
+
+
+def test_a_combine_of_the_same_two_recordings_in_another_order_is_the_same_recording():
+    a = [(64.2, "and if you dont believe me i"), (39.9, "dont buy these old navy henleys")]
+    b = [(39.9, "dont buy these old navy henleys"), (64.2, "and if you dont believe me i")]
+    assert post_plan.same_recording(sorted(a), sorted(b))
+    assert not post_plan.same_recording([(52.0, "pull it latch it")], [(97.5, "pull it latch it")])
+    assert not post_plan.same_recording([(50.0, "")], [(50.0, "")])                 # nothing heard: never merged
