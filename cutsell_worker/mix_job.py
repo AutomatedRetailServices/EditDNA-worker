@@ -209,6 +209,7 @@ def _clean_phase(user_id, mix_id, record, deps, work: Path) -> dict:
                 lab = engine.clip_labels(answer, n, words, units[n])
                 splits = engine.finish_clip(words, lab, duration, h["audio"])
                 parts = engine.kept_parts(splits) or [(0.0, duration)]
+                parts = engine.tighten_edges(parts, words, h["audio"])   # ~0.1 s pause at every join of the Mix
                 kept = {k for k, w in enumerate(words) if any(a <= (w["s"] + w["e"]) / 2 <= b for a, b in parts)}
                 fixes, marks = engine.fixes_and_moments(answer, n, words, units[n], kept)
                 shown = [dict(w) for w in words]

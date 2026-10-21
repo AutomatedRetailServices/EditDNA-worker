@@ -31,7 +31,7 @@ MIX_VERSION = "mix-1.0.1"
 PROMPT = (Path(__file__).parent / "mix_prompts" / "mix_clip_v2.txt").read_text(encoding="utf-8")
 API_URL = "https://api.anthropic.com/v1/messages"
 # Measured choice (see docs / the Mix report): CUTSELL_MIX_MODEL overrides without a redeploy.
-DEFAULT_MODEL = "claude-haiku-5-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"   # Product Owner, 21 Oct: Sonnet for mix_clip
 PRICES = {  # USD per million tokens (Anthropic price list), <= 200k context
     "claude-haiku-5-5": {"input": 0.10, "output": 0.50},
     "claude-sonnet-5-5": {"input": 2.00, "output": 10.00},
@@ -280,6 +280,61 @@ def finish_clip(words: list[dict], lab, duration: float, audio_path: str) -> lis
         splits = _engine.splits_from_labels(words, [("keep", "se queda", False)] * len(words), duration)
     splits = _engine.keep_spoken_words(_engine.refine(splits, audio_path, duration, words), words)
     return _engine.breathe(splits, words, duration)
+
+
+EDGE_PAD_SEC = 0.05              # silence left before the first / after the last word of a clean clip: ~0.1 s per join
+EDGE_SEARCH_SEC = (0.30, 0.40)   # how far the voice may start before / end after its word's timestamps
+
+
+def _frames_db(audio_path: str, rate: int = 16000, hop: float = 0.01):
+    import numpy as np
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(audio_path), "-vn", "-ac", "1", "-ar", str(rate),
+                          "-f", "s16le", "-"], capture_output=True, check=True).stdout
+    x = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+    n = int(rate * hop)
+    if len(x) < n:
+        return np.zeros(0), hop
+    frames = x[: len(x) // n * n].reshape(-1, n)
+    return 20 * np.log10(np.sqrt((frames ** 2).mean(1)) + 1e-6), hop
+
+
+def tighten_edges(parts: list[tuple[float, float]], words: list[dict], audio_path: str, *,
+                  pad: float = EDGE_PAD_SEC) -> list[tuple[float, float]]:
+    """Shorten the silence before the clip's first kept word and after its last one to `pad`, so a join between
+    two clean clips is a ~0.1 s pause. The edge follows the VOICE, not only the word timestamps: the sound around a
+    word is measured and the cut never goes inside it (a word's tail or a soft first consonant is kept). Only ever
+    shortens; inner parts are untouched."""
+    if not parts:
+        return parts
+    kept = [w for w in words if any(a <= (w["s"] + w["e"]) / 2 <= b for a, b in parts)]
+    if not kept:
+        return parts
+    try:
+        db, hop = _frames_db(audio_path)
+    except Exception:
+        return parts
+    if len(db) < 10:
+        return parts
+    import numpy as np
+    speech = float(np.percentile(db, 95))
+    floor = float(np.percentile(db, 10))
+    thr = min(max(speech - 30.0, floor + 8.0), speech - 6.0)    # no real silence in the clip: still finds the voice
+    loud = lambda t: 0 <= int(t / hop) < len(db) and db[int(t / hop)] > thr
+    first_s, last_e = float(kept[0]["s"]), float(kept[-1]["e"])
+    onset = first_s
+    while onset - hop >= max(0.0, first_s - EDGE_SEARCH_SEC[0]) and loud(onset - hop):
+        onset -= hop
+    offset = last_e
+    while offset + hop <= last_e + EDGE_SEARCH_SEC[1] and loud(offset):
+        offset += hop
+    out = [list(p) for p in parts]
+    # still voice at the end of the search: the edge is not where the words say -- leave that edge as it was
+    if not loud(onset - hop) or onset - hop < 0:
+        out[0][0] = max(out[0][0], min(onset - pad, first_s - pad))
+    if not loud(offset):
+        out[-1][1] = min(out[-1][1], max(offset + pad, last_e + pad))
+    out = [(round(a, 3), round(b, 3)) for a, b in out if b - a > 0.05]
+    return out or parts
 
 
 def kept_parts(splits) -> list[tuple[float, float]]:

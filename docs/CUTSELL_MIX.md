@@ -10,7 +10,7 @@ reuses its finishing functions (`tests/test_cutsell_mix.py::test_the_cut_engine_
    product (Edits · Products, `source: user`, `mix_id`, `mix_code`) and enqueues ONE job (`mix_job.run_mix_job`).
 2. Job, clean phase (once per clip): Deepgram per clip (a short clip heard empty is heard again in the Mix's
    language) + ONE `mix_clip` call for all the clips (`mix_prompts/mix_clip_v2.txt`, model `CUTSELL_MIX_MODEL`,
-   default `claude-haiku-5-5`), then the cut engine's finishing per clip.
+   default `claude-sonnet-5-5` since 21 Oct, Product Owner decision; `CUTSELL_MIX_MODEL` overrides), then the cut engine's finishing per clip.
 3. Videos phase: when every clip's video is on storage (else `waiting_for_videos`; `/v1/projects/{mix}/video-ready`
    starts the job again), a clean clip per clip (common 1080x1920 or 1920x1080 canvas, 30 fps, -16 LUFS two-pass,
    30 ms fades at every edge), stored under the Mix project (`mix/clean-*.mov`).
@@ -37,3 +37,4 @@ cleanly ("Your Mix couldn't start").
 ## Production check (21 Oct, after deploying a0ab25c)
 - Production Mix with the 3+2+2+2 test clips: 24/24 videos Ready in 178 s. 0 clicks at 72 joins. Every part at -16.0 to -16.1 LUFS. Captions within a median of 0.01–0.06 s of a fresh transcription.
 - Defect found: 1 of the 9 clips (6 s, English), heard alone, came back as Dutch, so it lost its words. Fix on `fix/mix-language`: any clip not heard in the Mix's language (the language most of its words were heard in) is heard again in that language. Not deployed yet; waiting for permission.
+- Joins (21 Oct): `tighten_edges` leaves 0.05 s of silence before a clean clip's first word and after its last, so each join is a ~0.1 s pause. The edge follows the measured voice, not the word timestamps. When the voice goes on past the search window, that edge is left as it was.

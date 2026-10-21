@@ -358,3 +358,47 @@ def test_a_spanish_mix_is_heard_in_spanish_never_forced_to_english(r, tmp_path):
     assert {c["language"] for c in record["clips"].values()} == {"es"}
     assert [a for a in asked if a[1]] == [("s0c1", "es")]                 # heard again in Spanish, nothing in English
     assert "Mirror" not in " ".join(w["w"] for w in record["clips"]["s0c1"]["captions"])
+
+
+def _tone_wav(path, pieces):
+    """pieces: [(seconds, amplitude)] of a 220 Hz voice-like tone over a faint noise floor."""
+    import numpy as np
+    import wave
+    rate, out = 16000, []
+    rng = np.random.default_rng(1)
+    for sec, amp in pieces:
+        t = np.arange(int(sec * rate)) / rate
+        out.append(amp * np.sin(2 * np.pi * 220 * t) + 0.002 * rng.standard_normal(len(t)))
+    x = (np.clip(np.concatenate(out), -1, 1) * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(x.tobytes())
+    return str(path)
+
+
+def test_tighten_edges_leaves_a_tenth_of_a_second_and_never_cuts_the_voice(tmp_path):
+    from cutsell_worker import mix_engine as engine
+    audio = _tone_wav(tmp_path / "a.wav", [(1.0, 0.0), (1.5, 0.3), (1.2, 0.0)])     # voice from 1.0 to 2.5 s
+    # Deepgram's word times start late and end early (1.15 .. 2.35): the voice decides the edge, not the stamps
+    words = [{"w": "hello", "s": 1.15, "e": 1.6}, {"w": "there", "s": 1.7, "e": 2.35}]
+    parts = engine.tighten_edges([(0.0, 3.7)], words, audio)
+    (a, b), = parts
+    assert 0.92 <= a <= 0.97 and 2.53 <= b <= 2.58                  # 0.05 s of silence each side, voice whole
+    # inner parts untouched; a clip whose voice fills its edges is not shortened
+    assert engine.tighten_edges([(0.0, 1.2), (1.3, 3.7)], words, audio)[0][1] == 1.2
+    full = _tone_wav(tmp_path / "b.wav", [(2.0, 0.3)])
+    assert engine.tighten_edges([(0.0, 2.0)], [{"w": "hi", "s": 0.3, "e": 1.7}], full) == [(0.0, 2.0)]
+    assert engine.tighten_edges([(0.0, 3.7)], [], audio) == [(0.0, 3.7)]            # no words: nothing to anchor
+
+
+def test_mix_clip_uses_sonnet_by_default(monkeypatch):
+    from cutsell_worker import mix_engine as engine
+    monkeypatch.delenv("CUTSELL_MIX_MODEL", raising=False)
+    assert engine.model_name() == "claude-sonnet-5-5"
+
+
+def test_tighten_edges_leaves_an_edge_alone_when_the_voice_goes_on_past_the_words(tmp_path):
+    from cutsell_worker import mix_engine as engine
+    audio = _tone_wav(tmp_path / "c.wav", [(0.5, 0.0), (2.5, 0.3), (0.5, 0.0)])    # voice 0.5 .. 3.0
+    words = [{"w": "late", "s": 1.4, "e": 1.8}]                    # stamp 0.9 s after the voice starts
+    (a, b), = engine.tighten_edges([(0.0, 3.5)], words, audio)
+    assert (a, b) == (0.0, 3.5)                                      # voice past both searches: both edges kept
