@@ -1,0 +1,10 @@
+B24UI    27.7 PASS editor open on a real cut
+B24UI    35.3 start ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=0.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI    69.0 PASS export before finished
+B24UI    84.5 PASS a) step 1: Recording voice-over sheet
+B24UI    85.3 FAIL a) Enhance voice switch
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:578: error: -[CutSellUITests.Build24UITests testVoiceOverFlow] : Failed to tap "voiceRecord" Any: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate '"voiceRecord" IN identifiers'`, given input App element pid: 13879
+Test Case '-[CutSellUITests.Build24UITests testVoiceOverFlow]' failed (103.156 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-21 21:16:41.555.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 21:16:41.556.
+Test Suite 'Selected tests' failed at 2026-10-21 21:16:41.557.
