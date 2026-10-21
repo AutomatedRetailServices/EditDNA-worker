@@ -1,60 +1,60 @@
 }: (no error) for placeholderValue using XC_kAXXCAttributePlaceholderValue
-2026-10-21 22:26:02.856 Df CutSell[16720:cc78] [com.apple.dt.xctest:Default] Button, label: 'Export quality: 1080p' (AX element pid: 16720, elementOrHash.elementID: 4441939840.21) faulted in {
+2026-10-21 22:53:28.933 Df CutSell[10590:92e6] [com.apple.dt.xctest:Default] Button, label: 'Export quality: 1080p' (AX element pid: 10590, elementOrHash.elementID: 4399820160.21) faulted in {
     "XC_kAXXCAttributeIdentifier" = exportQuality;
 }: (no error) for identifier using XC_kAXXCAttributeIdentifier
-2026-10-21 22:26:02.858 Df CutSell[16720:cc78] [com.apple.dt.xctest:Default] AX element pid: 16720, elementOrHash.elementID: 4441940288.22 (AX element pid: 16720, elementOrHash.elementID: 4441940288.22) faulted in {
+2026-10-21 22:53:28.933 Df CutSell[10590:92e6] [com.apple.dt.xctest:Default] AX element pid: 10590, elementOrHash.elementID: 4399820608.22 (AX element pid: 10590, elementOrHash.elementID: 4399820608.22) faulted in {
     "XC_kAXXCAttributeLabel" = Export;
 }: (no error) for label using XC_kAXXCAttributeLabel
-2026-10-21 22:26:02.858 Df CutSell[16720:cc78] [com.apple.dt.xctest:Default] label: 'Export' (AX element pid: 16720, elementOrHash.elementID: 4441940288.22) faulted in {
+2026-10-21 22:53:28.934 Df CutSell[10590:92e6] [com.apple.dt.xctest:Default] label: 'Export' (AX element pid: 10590, elementOrHash.elementID: 4399820608.22) faulted in {
     "XC_kAXXCAttributeAutomationType" = 9;
     "XC_kAXXCAttributeElementBaseType" = UIResponder;
     "XC_kAXXCAttributeElementType" = "SwiftUI.AccessibilityNode";
     "XC_kAXXCAttributeTraits" = 8589934593;
 }: (no error) for elementType using XC_kAXXCAttributeElementType, XC_kAXXCAttributeElementBaseType, XC_kAXXCAttributeTraits, XC_kAXXCAttributeAutomationType
-2026-10-21 22:26:02.859 Df CutSell[16720:cc78] [com.apple.dt.xctest:Default] Button, label: 'Export' (AX element pid: 16720, elementOrHash.elementID: 4441940288.22) faulted in {
+2026-10-21 22:53:28.934 Df CutSell[10590:92e6] [com.apple.dt.xctest:Default] Button, label: 'Export' (AX element pid: 10590, elementOrHash.elementID: 4399820608.22) faulted in {
 }: (no error) for value using XC_kAXXCAttributeValue
-2026-10-21 22:26:02.859 Df CutSell[16720:cc78] [com.apple.dt.xctest:Default] Button, label: 'Export' (AX element pid: 16720, elementOrHash.elementID: 4441940288.22) faulted in {
+2026-10-21 22:53:28.935 Df CutSell[10590:92e6] [com.apple.dt.xctest:Default] Button, label: 'Export' (AX element pid: 10590, elementOrHash.elementID: 4399820608.22) faulted in {
 }: (no error) for placeholderValue using XC_kAXXCAttributePlaceholderValue
-2026-10-21 22:26:02.860 Df CutSell[16720:cc78] [com.apple.dt.xctest:Default] Button, label: 'Export' (AX element pid: 16720, elementOrHash.elementID: 4441940288.22) faulted in {
+2026-10-21 22:53:28.935 Df CutSell[10590:92e6] [com.apple.dt.xctest:Default] Button, label: 'Export' (AX element pid: 10590, elementOrHash.elementID: 4399820608.22) faulted in {
     "XC_kAXXCAttributeIdentifier" = editorExport;
 }: (no error) for identifier using XC_kAXXCAttributeIdentifier
-2026-10-21 22:26:02.897 Df CutSell[16720:1c190] [com.apple.dt.xctest:Default] Current tree:
-0x118bc17c0 <App element pid: 16720>
-  0x118bc30c0 <AX element pid: 16720, elementOrHash.elementID: 4394403840.4>
-    0x118bc0dc0 <AX element pid: 16720, elementOrHash.elementID: 4443030528.5>
-      0x118bc2080 <AX element pid: 16720, elementOrHash.elementID: 4442320128.6>
-        0x118bc0500 <AX element pid: 16720, elementOrHash.elementID: 4394402816.7>
-          0x118bc1040 <AX element pid: 16720, elementOrHash.elementID: 4441830080.8>
-            0x118bc1540 <AX element pid: 16720, elementOrHash.elementID: 4442495104.9>
-              0x118bc2a80 <AX element pid: 16720, elementOrHash.elementID: 4442495552.10>
-                0x118bc3ac0 <AX element pid: 16720, elementOrHash.elementID: 4442503168.12>
-                  0x118bc1e00 <AX element pid: 16720, elementOrHash.elementID: 4394762240.14>
-                    0x118bc1a40 <AX element pid: 16720, elementOrHash.elementID: 4441883072.15>
-                      Button, 0x118bc2300, label: 'Back' <AX element pid: 16720, elementOrHash.elementID: 4441937152.19>
-                      Button, 0x118bc1cc0, identifier: 'editorTitle', label: 'Editor probe ✎' <AX element pid: 16720, elementOrHash.elementID: 4441938048.20>
-                      Button, 0x118bc2d00, identifier: 'exportQuality', label: 'Export quality: 1080p' <AX element pid: 16720, elementOrHash.elementID: 4441939840.21>
-                      Button, 0x118bc0b40, identifier: 'editorExport', label: 'Export' <AX element pid: 16720, elementOrHash.elementID: 4441940288.22>
-                      0x118bc3200, identifier: 'editorVideo' <AX element pid: 16720, elementOrHash.elementID: 4441943872.23>
-                      Button, 0x118bc03c0, label: 'Full screen' <AX element pid: 16720, elementOrHash.elementID: 4441944320.24>
-                      Button, 0x118bc2800, identifier: 'editorPlay', label: 'Play' <AX element pid: 16720, elementOrHash.elementID: 4441946112.210>
-                      Button, 0x118bc0c80, identifier: 'editorKeyPrev', label: 'Previous keyframe' <AX element pid: 16720, elementOrHash.elementID: 4442057664.140>
-                      Button, 0x118bc1900, identifier: 'editorKeyframe', label: 'Add keyframe', value: empty <AX element pid: 16720, elementOrHash.elementID: 4442055424.211>
-                      Button, 0x118bc3840, identifier: 'editorKeyNext', label: 'Next keyframe' <AX element pid: 16720, elementOrHash.elementID: 4442057216.142>
-                      Button, 0x118bc1f40, identifier: 'editorUndo', label: 'Undo' <AX element pid: 16720, elementOrHash.elementID: 4441946560.29>
-                      Button, 0x118bc08c0, label: 'Redo' <AX element pid: 16720, elementOrHash.elementID: 4441947008.30>
-                      0x118bc0a00, identifier: 'keyCurveBar' <AX element pid: 16720, elementOrHash.elementID: 4442059008.200>
-                      0x118bc0640, identifier: 'timelineV4' <AX element pid: 16720, elementOrHash.elementID: 4441959360.31>
-                      0x118bc3980 <AX element pid: 16720, elementOrHash.elementID: 4395358208.32>
-                      StaticText, 0x118bc0f00, identifier: 'b17State', label: 'curves=ease_in_out,ease_in_out,ease_in_out key_btn=add ai=8 user=3 sounds= voices= muted_clips=0 user_scales=1.00,1.27,1.00 user_rot=0,12,12 auto_zoom=true overlays= sel=keyframe pending=none vv=1.00 t=11.57 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback' <AX element pid: 16720, elementOrHash.elementID: 4442012096.33>
-                      0x118bc2580 <AX element pid: 16720, elementOrHash.elementID: 4442012544.34>
-                      0x118bc26c0 <AX element pid: 16720, elementOrHash.elementID: 4442012992.35>
-                      0x118bc2f80 <AX element pid: 16720, elementOrHash.elementID: 4442014144.36>
-                      0x118bc2440 <AX element pid: 16720, elementOrHash.elementID: 4442014592.37>
-                      0x118bc12c0 <AX element pid: 16720, elementOrHash.elementID: 4442015040.38>
-                      0x118bc3c00 <AX element pid: 16720, elementOrHash.elementID: 4442015936.39>
-                      0x118bc3340 <AX element pid: 16720, elementOrHash.elementID: 4442016384.40>
-                      0x118bc3480 <AX element pid: 16720, elementOrHash.elementID: 4442016832.41>
-                      0x118bc3e80 <AX element pid: 16720, elementOrHash.elementID: 4442017280.42>
-                      0x118bc21c0 <AX element pid: 16720, elementOrHash.elementID: 4442018176.43>
-              0x118bc2e40 <AX element pid: 16720, elementOrHash.elementID: 4443032576.11>
-                0x118bc3700 <AX element pid: 16720, elementOrHash.elementID: 4443034624.13>
+2026-10-21 22:53:28.965 Df CutSell[10590:a810] [com.apple.dt.xctest:Default] Current tree:
+0x1091f2f80 <App element pid: 10590>
+  0x1091f08c0 <AX element pid: 10590, elementOrHash.elementID: 4398286848.3>
+    0x1091f1e00 <AX element pid: 10590, elementOrHash.elementID: 4447552512.4>
+      0x1091f3d40 <AX element pid: 10590, elementOrHash.elementID: 4446448896.5>
+        0x1091f3e80 <AX element pid: 10590, elementOrHash.elementID: 4398285824.6>
+          0x1091f3480 <AX element pid: 10590, elementOrHash.elementID: 4399722304.7>
+            0x1091f2800 <AX element pid: 10590, elementOrHash.elementID: 4446640256.8>
+              0x1091f2580 <AX element pid: 10590, elementOrHash.elementID: 4446640704.9>
+                0x1091f2a80 <AX element pid: 10590, elementOrHash.elementID: 4446648320.11>
+                  0x1091f3700 <AX element pid: 10590, elementOrHash.elementID: 4398923776.13>
+                    0x1091f0000 <AX element pid: 10590, elementOrHash.elementID: 4399725440.14>
+                      Button, 0x1091f2d00, label: 'Back' <AX element pid: 10590, elementOrHash.elementID: 4399817920.19>
+                      Button, 0x1091f0640, identifier: 'editorTitle', label: 'Editor probe ✎' <AX element pid: 10590, elementOrHash.elementID: 4399818368.20>
+                      Button, 0x1091f3980, identifier: 'exportQuality', label: 'Export quality: 1080p' <AX element pid: 10590, elementOrHash.elementID: 4399820160.21>
+                      Button, 0x1091f0c80, identifier: 'editorExport', label: 'Export' <AX element pid: 10590, elementOrHash.elementID: 4399820608.22>
+                      0x1091f0f00, identifier: 'editorVideo' <AX element pid: 10590, elementOrHash.elementID: 4399725888.23>
+                      Button, 0x1091f1b80, label: 'Full screen' <AX element pid: 10590, elementOrHash.elementID: 4445995008.24>
+                      Button, 0x1091f3c00, identifier: 'editorPlay', label: 'Play' <AX element pid: 10590, elementOrHash.elementID: 4446117312.264>
+                      Button, 0x1091f1900, identifier: 'editorKeyPrev', label: 'Previous keyframe' <AX element pid: 10590, elementOrHash.elementID: 4446111936.140>
+                      Button, 0x1091f3340, identifier: 'editorKeyframe', label: 'Add keyframe', value: empty <AX element pid: 10590, elementOrHash.elementID: 4446123584.265>
+                      Button, 0x1091f30c0, identifier: 'editorKeyNext', label: 'Next keyframe' <AX element pid: 10590, elementOrHash.elementID: 4446112384.142>
+                      Button, 0x1091f3840, identifier: 'editorUndo', label: 'Undo' <AX element pid: 10590, elementOrHash.elementID: 4445997696.29>
+                      Button, 0x1091f1680, label: 'Redo' <AX element pid: 10590, elementOrHash.elementID: 4445998592.30>
+                      0x1091f1f40, identifier: 'keyCurveBar' <AX element pid: 10590, elementOrHash.elementID: 4446117760.200>
+                      0x1091f0500, identifier: 'timelineV4' <AX element pid: 10590, elementOrHash.elementID: 4446009792.31>
+                      0x1091f0140 <AX element pid: 10590, elementOrHash.elementID: 4399519744.32>
+                      StaticText, 0x1091f03c0, identifier: 'b17State', label: 'curves=ease_in_out,ease_in_out,ease_in_out key_btn=add ai=8 user=3 sounds= voices= muted_clips=0 user_scales=1.00,1.27,1.00 user_rot=0,12,12 auto_zoom=true overlays= sel=keyframe pending=none vv=1.00 t=4.16 zoom=1.000 rot=11.2 playing=false session=Playback/MoviePlayback' <AX element pid: 10590, elementOrHash.elementID: 4446061888.33>
+                      0x1091f3ac0 <AX element pid: 10590, elementOrHash.elementID: 4446062336.34>
+                      0x118ebbe80 <AX element pid: 10590, elementOrHash.elementID: 4446062784.35>
+                      0x118eb9040 <AX element pid: 10590, elementOrHash.elementID: 4446063680.36>
+                      0x118eb8dc0 <AX element pid: 10590, elementOrHash.elementID: 4446064128.37>
+                      0x118eba300 <AX element pid: 10590, elementOrHash.elementID: 4446064576.38>
+                      0x118eb8780 <AX element pid: 10590, elementOrHash.elementID: 4446065024.39>
+                      0x118eba1c0 <AX element pid: 10590, elementOrHash.elementID: 4446065920.40>
+                      0x118ebb0c0 <AX element pid: 10590, elementOrHash.elementID: 4446066368.41>
+                      0x118eb83c0 <AX element pid: 10590, elementOrHash.elementID: 4446066816.42>
+                      0x118eb9a40 <AX element pid: 10590, elementOrHash.elementID: 4446067264.43>
+              0x1091f1cc0 <AX element pid: 10590, elementOrHash.elementID: 4447554560.10>
+                0x1091f35c0 <AX element pid: 10590, elementOrHash.elementID: 4447556608.12>
