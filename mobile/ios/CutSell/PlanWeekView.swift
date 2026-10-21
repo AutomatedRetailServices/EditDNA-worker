@@ -262,8 +262,22 @@ final class PlanWeekStore: ObservableObject {
     }
 
     private func mockMissing() -> PlanMissing {
-        let days = Set(mockSlots.map(\.date)).count
-        return PlanMissing(days: ["later"], videos: 3, coveredDays: days, totalDays: days + 2)
+        let used = Set(mockSlots.map(\.date))
+        let calendar = Calendar(identifier: .gregorian)
+        let today = calendar.startOfDay(for: Date())
+        var short: [String] = []
+        var videos = 0
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            let weekday = (calendar.component(.weekday, from: day) + 5) % 7
+            if weekday == 0 && offset > 0 { break }                    // this week only (Monday starts the next)
+            guard mockPrefs.days.contains(weekday) else { continue }
+            let key = PlanDay.iso.string(from: day)
+            let count = mockSlots.filter { $0.date == key }.count
+            if count < mockPrefs.perDay { short.append(key); videos += mockPrefs.perDay - count }
+        }
+        let total = used.union(short).count
+        return PlanMissing(days: short, videos: videos, coveredDays: total - short.count, totalDays: total)
     }
 }
 
@@ -693,7 +707,7 @@ struct PlanWeekView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Videos for \(missing.coveredDays) of \(missing.totalDays) days")
                                     .font(CS.inter(13, .semibold)).foregroundStyle(Color(hex: 0xFFB840))
-                                Text("Make \(missing.videos) more to fill \(missing.days.compactMap { PlanDay.date($0) == nil ? nil : PlanDay.weekdayName($0) }.joined(separator: " and ")).")
+                                Text("Make \(missing.videos) more to fill \(Self.list(missing.days.compactMap { PlanDay.date($0) == nil ? nil : PlanDay.weekdayName($0) })).")
                                     .font(CS.inter(12)).foregroundStyle(PlanStyle.muted).lineLimit(2)
                             }
                             Spacer()
@@ -727,6 +741,12 @@ struct PlanWeekView: View {
     }
 
     struct DayRoute: Identifiable, Hashable { let id: String }
+
+    /// "Fri", "Fri and Sat", "Thu, Fri and Sat"
+    static func list(_ names: [String]) -> String {
+        guard let last = names.last else { return "the week" }
+        return names.count == 1 ? last : names.dropLast().joined(separator: ", ") + " and " + last
+    }
 
     private var subtitle: String {
         let slots = store.state?.week?.slots ?? []
