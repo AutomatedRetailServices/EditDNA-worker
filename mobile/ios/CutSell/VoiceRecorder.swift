@@ -31,6 +31,9 @@ final class VoiceRecorder: ObservableObject {
     /// `enhance`: the iPhone's own voice processing while recording (less room noise); the export
     /// also cleans the take.
     func start(enhance: Bool = false) async {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["CUTSELL_PROBE_FAKE_MIC"] == "1" { return fakeStart() }
+        #endif
         guard await Self.requestPermission() else {
             state = .permissionDenied
             return
@@ -78,12 +81,18 @@ final class VoiceRecorder: ObservableObject {
 
     /// Pauses the take (Editor v2 "Tap to pause"); `resume()` continues the same file.
     func pause() {
+        #if DEBUG
+        if fake, state == .recording { isPaused = true; return }
+        #endif
         guard let recorder, state == .recording, recorder.isRecording else { return }
         recorder.pause()
         isPaused = true
     }
 
     func resume() {
+        #if DEBUG
+        if fake, state == .recording { isPaused = false; return }
+        #endif
         guard let recorder, state == .recording, isPaused else { return }
         recorder.record()
         isPaused = false
@@ -91,6 +100,9 @@ final class VoiceRecorder: ObservableObject {
 
     /// Stops the take and keeps the file for "Use" or "Record again".
     func stop() {
+        #if DEBUG
+        if fake { return fakeStop() }
+        #endif
         guard let recorder, state == .recording else { return }
         isPaused = false
         elapsed = recorder.currentTime
@@ -119,6 +131,48 @@ final class VoiceRecorder: ObservableObject {
     }
 
     #if DEBUG
+    /// Simulator probe only (CUTSELL_PROBE_FAKE_MIC=1, no microphone on the test machine): the take is a 1 kHz tone
+    /// as long as the "recording" lasted, written as the same .m4a the microphone makes.
+    private var fake = false
+
+    private func fakeStart() {
+        discardTake()
+        fake = true
+        elapsed = 0
+        levels = []
+        isPaused = false
+        state = .recording
+        timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.isPaused else { return }
+                self.elapsed += 0.06
+                self.levels.append(Float(0.3 + 0.5 * abs(sin(self.elapsed * 6))))
+                if self.levels.count > 120 { self.levels.removeFirst(self.levels.count - 120) }
+            }
+        }
+    }
+
+    private func fakeStop() {
+        timer?.invalidate()
+        timer = nil
+        fake = false
+        isPaused = false
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("voiceover-\(UUID().uuidString).m4a")
+        let rate = 44_100.0
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate, AVNumberOfChannelsKey: 1]
+        guard elapsed >= 0.3, let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate * elapsed)),
+              let file = try? AVAudioFile(forWriting: url, settings: settings) else {
+            state = .failed("That take was too short. Please record again.")
+            return
+        }
+        buffer.frameLength = buffer.frameCapacity
+        let data = buffer.floatChannelData![0]
+        for i in 0..<Int(buffer.frameLength) { data[i] = Float(0.5 * sin(2 * .pi * 1000 * Double(i) / rate)) }
+        do { try file.write(from: buffer) } catch { state = .failed("The take couldn't be saved."); return }
+        state = .recorded(url)
+    }
+
     /// Design screenshots only: show a take in progress / a finished take without a microphone.
     func previewRecording(levels: [Float], elapsed: TimeInterval) {
         self.levels = levels

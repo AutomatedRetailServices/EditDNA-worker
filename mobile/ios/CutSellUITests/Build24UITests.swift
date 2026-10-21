@@ -486,7 +486,8 @@ final class Build24UITests: XCTestCase {
         check(element("planMeter").exists, "meter X / N cuts · Plan", element("planMeter").label)
         for mode in ["single", "bulk", "combine"] { check(element("hubMode_\(mode)").exists, "Upload videos · \(mode) chip") }
         check(element("hubMix").exists, "Mix row")
-        check(element("hubRecord").exists && element("hubVoiceOver").exists, "Record with CutSell + Voice Over project")
+        check(element("hubRecord").exists, "Record with CutSell")
+        check(!element("hubVoiceOver").exists && !element("hubFaceless").exists, "Faceless video hidden until it is built")
         check(app.buttons["See all in Edits"].exists, "Recent cuts · See all in Edits")
         // Mix row → Mix · Setup (the same screen as New Mix in Plan)
         element("hubMix").tap()
@@ -508,6 +509,175 @@ final class Build24UITests: XCTestCase {
         }
         check(app.staticTexts["Each video becomes a separate edit."].exists, "Bulk chip opened the gallery in Bulk")
         shot("create_gallery_bulk")
+        done()
+    }
+
+    // MARK: Voice-over on a real cut (editor probe): record in 2 steps, timeline, panel, export
+
+    private func editorState() -> String { let e = element("b17State"); return e.exists ? e.label : "no-state" }
+    private func voices() -> [String] {
+        guard let range = editorState().range(of: "voices=") else { return [] }
+        let rest = editorState()[range.upperBound...].split(separator: " ").first.map(String.init) ?? ""
+        return rest.isEmpty ? [] : rest.split(separator: ",").map(String.init)
+    }
+    private func editorTool(_ name: String) {
+        let button = element("tool_\(name)")
+        guard button.waitForExistence(timeout: 5) else { log("missing tool_\(name)"); return }
+        let screen = app.windows.firstMatch.frame
+        for _ in 0..<4 {
+            let f = button.frame
+            if f.minX >= 0 && f.maxX <= screen.maxX - 2 && button.isHittable { break }
+            // swipe the tool row itself (at the button's height) toward the button
+            let y = f.midY / max(1, screen.height)
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: f.minX < 0 ? 0.2 : 0.8, dy: y))
+            let to = app.coordinate(withNormalizedOffset: CGVector(dx: f.minX < 0 ? 0.8 : 0.2, dy: y))
+            from.press(forDuration: 0.05, thenDragTo: to)
+            pause(0.8)
+        }
+        button.tap()
+        pause(1.0)
+    }
+    private func waitExport(_ label: String) -> Bool {
+        element("editorExport").tap()
+        let ready = app.staticTexts["Your video is ready."]
+        let ok = ready.waitForExistence(timeout: 420)
+        check(ok, "export \(label) finished")
+        _ = element("postToTikTok").waitForExistence(timeout: 60)
+        pause(3)
+        shot("export_\(label)")
+        app.swipeDown(velocity: .fast)              // close the Export sheet
+        pause(1.5)
+        return ok
+    }
+
+    func testVoiceOverFlow() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_probe"]
+        let env = ProcessInfo.processInfo.environment
+        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_PROJECT", "CUTSELL_PROBE_API"] {
+            if let value = env[key] { app.launchEnvironment[key] = value }
+        }
+        app.launchEnvironment["CUTSELL_PROBE_STATE"] = "b18_vo"
+        app.launchEnvironment["CUTSELL_PROBE_FAKE_MIC"] = "1"
+        app.launch()
+        check(element("timelineV4").waitForExistence(timeout: 120), "editor open on a real cut")
+        _ = wait(90) { self.element("editorPlay").exists && self.element("editorPlay").isEnabled }
+        pause(4)
+        shot("vo_editor_open")
+        log("start \(editorState())")
+
+        // (d) baseline export (no voice): the workflow compares the video's sound with the one after
+        _ = waitExport("before")
+
+        // (a) record in 2 steps: countdown 3·2·1, Enhance voice, Stop → Play / Retake / Save
+        element("b17Step").tap(); pause(0.6)                       // cursor at 1 s
+        editorTool("voiceOver")
+        check(element("voiceRecordSheet").waitForExistence(timeout: 10), "a) step 1: Recording voice-over sheet")
+        check(element("enhanceVoice").exists, "a) Enhance voice switch")
+        shot("vo_step1")
+        element("voiceRecord").tap()
+        check(element("voiceCountdown").waitForExistence(timeout: 3), "a) countdown 3·2·1 over the video")
+        pause(0.4)
+        shot("vo_countdown")
+        check(element("liveWave").waitForExistence(timeout: 6), "a) recording (live wave)")
+        pause(2)
+        element("voicePause").tap(); pause(1); element("voicePause").tap()      // pause / resume
+        pause(2)
+        shot("vo_recording")
+        element("voiceFinish").tap()
+        check(element("voiceReviewSheet").waitForExistence(timeout: 5), "a) step 2: Play / Retake / Save")
+        check(element("voicePlay").exists && element("voiceRetake").exists && element("voiceSave").exists, "a) Play · Retake · Save")
+        element("voicePlay").tap(); pause(1.5)
+        shot("vo_step2")
+        element("voiceRetake").tap()
+        check(element("voiceRecordSheet").waitForExistence(timeout: 5), "a) Retake back to step 1")
+        element("voiceRecord").tap()
+        _ = element("liveWave").waitForExistence(timeout: 6)
+        pause(5)
+        element("voiceFinish").tap()
+        _ = element("voiceSave").waitForExistence(timeout: 5)
+        element("voiceSave").tap()
+        check(wait(30) { self.voices().count == 1 }, "a) Save puts the voice on the timeline", editorState())
+        _ = wait(60) { self.element("voiceBlock").exists }
+        shot("vo_saved")
+        log("saved \(voices())")
+
+        // (c) panel of the selected voice-over (Figma 1119:1634)
+        element("voiceBlock").tap(); pause(1)
+        check(element("voiceClipPanel").waitForExistence(timeout: 5), "c) voice-over panel")
+        for id in ["lowerVideoSound", "voiceMute", "cleanUpToggle", "recordAgain", "voiceDelete"] {
+            check(element(id).exists, "c) \(id)")
+        }
+        element("lowerVideoSound").tap(); pause(1)
+        check(voices().first?.contains("d") == true, "c) Lower video sound on", voices().joined(separator: ","))
+        shot("vo_panel")
+
+        // (b) timeline: move, trim, split, delete, undo
+        let before = voices().first ?? ""
+        let block = element("voiceBlock")
+        let start = block.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.6, thenDragTo: start.withOffset(CGVector(dx: 60, dy: 0)))
+        pause(1.5)
+        let moved = voices().first ?? ""
+        check(moved != before && moved.split(separator: "+").first != before.split(separator: "+").first, "b) moved by dragging", "\(before) → \(moved)")
+        if !element("audioTrimEnd").exists { element("voiceBlock").tap(); pause(0.8) }
+        let handle = element("audioTrimEnd")
+        if handle.exists {
+            let h = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            h.press(forDuration: 0.1, thenDragTo: h.withOffset(CGVector(dx: -30, dy: 0)))
+            pause(1.5)
+        }
+        let trimmed = voices().first ?? ""
+        check(handle.exists && trimmed != moved, "b) end edge trimmed", "\(moved) → \(trimmed)")
+        shot("vo_moved_trimmed")
+        // cursor into the middle of the voice, then Split
+        let parts = trimmed.split(separator: "+")
+        let vStart = Double(parts.first ?? "0") ?? 0
+        let vLen = Double(parts.count > 1 ? String(parts[1].prefix { "0123456789.".contains($0) }) : "0") ?? 0
+        element("b18Start").tap(); pause(0.5)
+        let target = vStart + vLen / 2
+        for _ in 0..<Int(target) { element("b17Step").tap(); pause(0.25) }
+        if target - Double(Int(target)) >= 0.5 { element("b18Half").tap(); pause(0.3) }
+        if !(editorState().contains("sel=voice")) { element("voiceBlock").tap(); pause(0.8) }
+        editorTool("split")
+        check(wait(10) { self.voices().count == 2 }, "b) Split cuts the voice in two", voices().joined(separator: ","))
+        shot("vo_split")
+        let pieces = app.descendants(matching: .any).matching(identifier: "voiceBlock")
+        if pieces.count > 1 { pieces.element(boundBy: 1).tap(); pause(0.8) }
+        if element("voiceDelete").exists { element("voiceDelete").tap() } else { editorTool("delete") }
+        check(wait(10) { self.voices().count == 1 }, "b) a piece deleted", voices().joined(separator: ","))
+        element("editorUndo").tap()
+        check(wait(10) { self.voices().count == 2 }, "b) Undo brings it back", voices().joined(separator: ","))
+        shot("vo_undo")
+
+        // (c) Record again on the first piece
+        app.descendants(matching: .any).matching(identifier: "voiceBlock").element(boundBy: 0).tap(); pause(1)
+        if element("recordAgain").waitForExistence(timeout: 5) {
+            element("recordAgain").tap()
+            if element("voiceRecord").waitForExistence(timeout: 5) {
+                element("voiceRecord").tap()
+                _ = element("liveWave").waitForExistence(timeout: 6)
+                pause(3)
+                element("voiceFinish").tap()
+                _ = element("voiceSave").waitForExistence(timeout: 5)
+                element("voiceSave").tap()
+            }
+        }
+        check(wait(30) { self.voices().count == 2 }, "c) Record again replaces that voice (still 2)", voices().joined(separator: ","))
+        log("before export \(voices())")
+        // make sure every piece lowers the video sound for the export check
+        for i in 0..<app.descendants(matching: .any).matching(identifier: "voiceBlock").count {
+            app.descendants(matching: .any).matching(identifier: "voiceBlock").element(boundBy: i).tap(); pause(0.8)
+            if let v = voices().sorted().dropFirst(i).first, !v.contains("d"), element("lowerVideoSound").exists {
+                element("lowerVideoSound").tap(); pause(0.8)
+            }
+        }
+        log("export with \(voices())")
+        shot("vo_before_export")
+
+        // (d) export with the voice
+        _ = waitExport("after")
+        log("end \(editorState())")
         done()
     }
 

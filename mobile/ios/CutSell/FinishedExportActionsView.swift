@@ -97,6 +97,10 @@ struct FinishedExportActionsView: View {
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: temporary, to: destination)
             localURL = destination
+            #if DEBUG
+            // Simulator probe only: the workflow reads the finished file to check the voice-over in the export.
+            if ProcessInfo.processInfo.environment["CUTSELL_PROBE_STATE"] != nil { NSLog("CUTSELLEXPORTURL %@", remoteURL.absoluteString) }
+            #endif
             // D-133: bounded, diagnostics-only "result received" flag --
             // never the actual (possibly signed) result URL string.
             CutSellDiagnostics.log("result_received", ["received": "true"])

@@ -14,6 +14,8 @@ struct HomeHubView: View {
     @State private var voiceOverSoon = false
 
     private var recent: [Project] { Array(appState.projects.prefix(3)) }
+    /// Turns on the "Faceless video" row once that flow is built.
+    static let facelessVideoReady = false
 
     var body: some View {
         ZStack {
@@ -38,8 +40,12 @@ struct HomeHubView: View {
                     mixRow
                     rowCard(icon: "HubCamera", title: "Record with CutSell",
                             subtitle: "Camera with clips · 60s · 3m · 10m", id: "hubRecord", action: onRecord)
-                    rowCard(icon: "HubMic", title: "Voice Over project",
-                            subtitle: "Record your voice over photos or clips", id: "hubVoiceOver") { voiceOverSoon = true }
+                    // "Faceless video" (Figma 1139:2814, renamed 21 Oct): product photos or clips + her voice, no camera.
+                    // Hidden until the flow exists (today the button could only say "coming soon").
+                    if Self.facelessVideoReady {
+                        rowCard(icon: "HubMic", title: "Faceless video",
+                                subtitle: "Product photos or clips + your voice. No camera.", id: "hubFaceless") { voiceOverSoon = true }
+                    }
 
                     HStack {
                         Text("Recent cuts")
@@ -79,7 +85,7 @@ struct HomeHubView: View {
                 CutTracker.shared.follow(project: project)
             }
         }
-        .alert("Voice Over project", isPresented: $voiceOverSoon) {
+        .alert("Faceless video", isPresented: $voiceOverSoon) {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Coming soon. For now you can record a voice over inside the editor of any cut.")

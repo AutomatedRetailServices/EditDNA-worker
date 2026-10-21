@@ -163,7 +163,10 @@ struct EditorV4View: View {
         let overlays = model.overlaysOnScreen.map { String(format: "%@:%.2f-%.2f:w%.2f:r%.0f%@", $0.kind == .video ? "video" : "photo",
                                                           $0.start, $0.end, $0.width, $0.style.rotation, $0.uploading != nil ? "u" : "") }
         let pending = keyPending.map { String(format: "%.3f/%.1f", $0.scale, $0.rotation) } ?? "none"
+        let voices = model.audioClips.filter { $0.kind == .voice }.sorted { $0.start < $1.start }
+            .map { String(format: "%.2f+%.2f%@%@%@v%.2f", $0.start, $0.length, $0.duckVideo ? "d" : "", $0.clean ? "c" : "", $0.muted ? "m" : "", $0.volume) }
         return "ai=\(marks.filter(\.isAI).count) user=\(marks.filter { !$0.isAI }.count) sounds=\(sounds.joined(separator: ",")) "
+            + "voices=\(voices.joined(separator: ",")) "
             + "muted_clips=\(mutedClips) user_scales=\(keys.joined(separator: ",")) user_rot=\(rotations.joined(separator: ",")) "
             + "auto_zoom=\(model.autoZoomEnabled) overlays=\(overlays.joined(separator: ",")) sel=\(selectionName) pending=\(pending) "
             + String(format: "vv=%.2f t=%.2f zoom=%.3f rot=%.1f ", model.videoVolume, playback.currentTime, shown.scale, shown.rotation)

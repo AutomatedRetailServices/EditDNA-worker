@@ -1,0 +1,204 @@
+name: CutSell iOS voice-over probe
+
+# Voice-over on a real cut (Simulator, real touches): record in 2 steps (countdown, Enhance voice, Stop -> Play /
+# Retake / Save), the voice on the timeline (select, drag, trim, Split, delete, undo), the voice panel (volume, Lower
+# video sound, Clean up voice, Record again, Delete), and Export before / after -- the exported sound is measured here
+# (the 1 kHz test voice in its place, the video's own sound lower under it). One short synthetic cut on the live
+# server; the test "microphone" is a tone (no microphone on this machine). Frames and numbers only (vo/).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/voiceover]
+
+concurrency:
+  group: cutsell-ios-voiceover-probe
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+
+      - name: Add the UI test target (probe only) and build for testing
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen ffmpeg >/dev/null
+          cat >> project.yml <<'YML'
+            CutSellUITests:
+              type: bundle.ui-testing
+              platform: iOS
+              sources:
+                - CutSellUITests
+              dependencies:
+                - target: CutSell
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app.uitests
+                  GENERATE_INFOPLIST_FILE: YES
+                  TEST_TARGET_NAME: CutSell
+          schemes:
+            CutSellUITests:
+              build:
+                targets:
+                  CutSell: all
+                  CutSellUITests: [test]
+              test:
+                config: Debug
+                targets:
+                  - CutSellUITests
+          YML
+          xcodegen generate
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          print(c[-1][2])')"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          set +e
+          xcodebuild build-for-testing -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -8 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          exit $status
+
+      - name: Make a short spoken test clip
+        run: |
+          say -v Samantha -o "$RUNNER_TEMP/speech.aiff" "Hi everyone. Today I want to show you my favorite water bottle. It keeps drinks cold for twenty four hours. It fits in any car cup holder. And right now it is on sale in my shop. Grab yours today."
+          ffmpeg -loglevel error -f lavfi -i color=c=0x203060:s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" -vf "noise=alls=14:allf=t+u" \
+            -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac "$RUNNER_TEMP/probe.mp4"
+          ls -la "$RUNNER_TEMP/probe.mp4"
+
+      - name: Make one cut on the live server (same calls as the app)
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          API = "https://cutsell-api.onrender.com"; T = None
+          video = os.path.join(os.environ["RUNNER_TEMP"], "probe.mp4")
+          def call(m, p, b=None, q=""):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=120) as x: return json.load(x)
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          p = call("POST", "/v1/projects", {"user_id": u, "title": "copy_9E4975E5-7A1B"}); pid = p["project_id"]
+          data = open(video, "rb").read()
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "probe.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(data)})
+          parts = []
+          for n in range(1, st["part_count"] + 1):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{n}/presign", {"project_id": pid, "user_id": u})
+              req = urllib.request.Request(sg["upload_url"], data=data[(n-1)*st["part_size"]: n*st["part_size"]], method="PUT")
+              req.add_header("Content-Type", "")
+              with urllib.request.urlopen(req, timeout=300) as r: parts.append({"part_number": n, "etag": r.headers["ETag"]})
+          done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+          job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": False, "language_hint": None,
+                     "sources": [{"original_name": "probe.mp4", "uri": done["source_uri"], "source_order": 0, "duration_sec": 20.0}]})
+          t0 = time.time()
+          while True:
+              j = call("GET", f"/v1/jobs/{job['job_id']}")
+              if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 900: break
+              time.sleep(5)
+          proj = call("GET", f"/v1/projects/{pid}", q=f"?user_id={u}")
+          print(f"::notice title=cut::job {j['state']} in {int(time.time()-t0)} s, project {proj['state']}")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"PROBE_TOKEN={T}\nPROBE_USER={u}\nPROBE_PROJECT={pid}\n")
+          PY
+
+      - name: Voice-over on the real cut (XCUITest)
+        working-directory: mobile/ios
+        run: |
+          mkdir -p "$RUNNER_TEMP/vo"
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl ui "$SIM_UDID" appearance dark || true
+          xcrun simctl privacy "$SIM_UDID" grant microphone ai.cutsell.app || true
+          start=$(date '+%Y-%m-%d %H:%M:%S')
+          set +e
+          TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
+          TEST_RUNNER_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+          TEST_RUNNER_B24_OUT="$RUNNER_TEMP/vo" \
+            xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+              -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/testVoiceOverFlow \
+              CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
+          echo "TEST_STATUS=$?" >> "$GITHUB_ENV"
+          set -e
+          grep -E "B24UI|error:|failed|passed" "$RUNNER_TEMP/test.log" | grep -v Bearer | tail -80 > "$RUNNER_TEMP/vo/xctest.txt" || true
+          xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
+            --predicate 'eventMessage CONTAINS "CUTSELLEXPORTURL"' 2>/dev/null | grep -oE 'CUTSELLEXPORTURL [^ ]+' \
+            | awk '{print $2}' > "$RUNNER_TEMP/export_urls.txt" || true
+          echo "export links found: $(wc -l < "$RUNNER_TEMP/export_urls.txt")"
+          while IFS= read -r line; do echo "::notice title=vo::$line"; done < <(sed 's/^B24UI *//' "$RUNNER_TEMP/vo/b24_ui_log.txt" 2>/dev/null | grep -E "PASS|FAIL|saved|export with" | cut -c1-500)
+
+      - name: Measure the exported sound (voice in place, video sound lowered)
+        run: |
+          cd "$RUNNER_TEMP"
+          n=0; while IFS= read -r url; do n=$((n+1)); curl -s -L -o "export_$n.mp4" "$url"; done < export_urls.txt
+          ls -la export_*.mp4 || true
+          python3 - <<'PY' > "$RUNNER_TEMP/vo/export_check.txt"
+          import os, re, subprocess
+          tmp = os.environ["RUNNER_TEMP"]
+          log = open(f"{tmp}/vo/b24_ui_log.txt").read() if os.path.exists(f"{tmp}/vo/b24_ui_log.txt") else ""
+          m = re.findall(r"export with \[(.*?)\]", log)
+          voices = re.findall(r'"([0-9.]+)\+([0-9.]+)([dcm]*)v', m[-1]) if m else []
+          files = sorted(f for f in os.listdir(tmp) if f.startswith("export_") and f.endswith(".mp4"))
+          print("exports:", files, "voices:", voices)
+          if len(files) < 2 or not voices:
+              print("RESULT: not enough data"); raise SystemExit
+          before, after = f"{tmp}/{files[0]}", f"{tmp}/{files[-1]}"
+          def level(path, a, b, af):
+              out = subprocess.run(["ffmpeg", "-v", "info", "-ss", f"{a:.2f}", "-to", f"{b:.2f}", "-i", path, "-vn", "-af",
+                                    af + ",volumedetect", "-f", "null", "-"], capture_output=True, text=True).stderr
+              v = re.findall(r"mean_volume: (-?[0-9.]+) dB", out)
+              return float(v[-1]) if v else None
+          tone = "bandpass=f=1000:width_type=h:w=40,bandpass=f=1000:width_type=h:w=40"
+          speech = "lowpass=f=600,lowpass=f=600,lowpass=f=600"
+          ok = True
+          for s, l, flags in voices:
+              s, l = float(s), float(l)
+              a, b = s + 0.3, s + l - 0.3
+              if b - a < 0.4: continue
+              t0, t1 = level(before, a, b, tone), level(after, a, b, tone)
+              p0, p1 = level(before, a, b, speech), level(after, a, b, speech)
+              print(f"voice {s:.2f}-{s+l:.2f} {flags}: 1 kHz voice {t0} -> {t1} dB (+{(t1 or 0)-(t0 or 0):.1f}); "
+                    f"video speech {p0} -> {p1} dB ({(p1 or 0)-(p0 or 0):+.1f})")
+              ok &= t1 is not None and t0 is not None and t1 - t0 > 15
+              if "d" in flags: ok &= p1 is not None and p0 is not None and p1 - p0 < -6
+          # outside the voices the video's sound is unchanged
+          ends = sorted((float(s), float(s) + float(l)) for s, l, _ in voices)
+          gap = (0.2, max(0.5, ends[0][0] - 0.4))
+          q0, q1 = level(before, *gap, speech), level(after, *gap, speech)
+          print(f"outside the voice {gap[0]:.1f}-{gap[1]:.1f}s: video speech {q0} -> {q1} dB")
+          ok &= q0 is not None and q1 is not None and abs(q1 - q0) < 2.5
+          print("RESULT:", "PASS" if ok else "FAIL")
+          PY
+          cat "$RUNNER_TEMP/vo/export_check.txt"
+          rm -f "$RUNNER_TEMP"/export_*.mp4 "$RUNNER_TEMP/export_urls.txt"
+
+      - name: Frames and numbers to design-screenshots (vo/), never a video
+        if: always()
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
+          rm -rf vo && mkdir -p vo
+          cp "$RUNNER_TEMP"/vo/*.png vo/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/vo/*.txt vo/ 2>/dev/null || true
+          find vo -type f \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4a' -o -iname '*.wav' \) -delete
+          sed -i '' -E 's/(Bearer|token|X-Amz-[A-Za-z]*)=?[^ ]*/\1 <hidden>/g' vo/*.txt 2>/dev/null || true
+          echo "source commit: ${{ github.sha }} test status: ${TEST_STATUS:-?}" > vo/SOURCE.txt
+          git add -A vo
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "voice-over probe for ${{ github.sha }}" || true
+          git push --quiet origin design-screenshots
