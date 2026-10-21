@@ -37,7 +37,7 @@ struct PlanView: View {
         .onChange(of: week.requestedDay) { _, day in
             guard let day else { return }
             week.requestedDay = nil
-            path = [.week, .day(day)]
+            if path.last != .day(day) { path = [.week, .day(day)] }        // already on that day: stay there
         }
         .onAppear {
             if let day = week.requestedDay { week.requestedDay = nil; path = [.week, .day(day)] }
