@@ -780,7 +780,8 @@ struct TimelineV4: View {
             // "+" only when the row already has a voice: right after the last one and its label.
             if let lastEnd {
                 let labelEnd = labels.map { $0.x + $0.width }.max() ?? 0
-                let px = max(Self.cursorX + 4, x(lastEnd) + 6, labelEnd + 8)
+                // Room for the end trim handle: a drag on the handle must never land on "+" (iPhone probe, 21 Oct).
+                let px = max(Self.cursorX + 4, x(lastEnd) + 22, labelEnd + 8)
                 if px < width - 24 {
                     plusButton(action: onAddVoice, label: "Add voice-over")
                         .offset(x: px, y: 3)
@@ -970,7 +971,7 @@ struct TimelineV4: View {
             }
             // "+" on the top row once there is something: the next overlay can go on a new layer.
             if isTop, let lastEnd = ends.max() {
-                let px = max(Self.cursorX + 4, x(lastEnd) + 6)
+                let px = max(Self.cursorX + 4, x(lastEnd) + 22)
                 if px < width - 24 {
                     plusButton(action: onAddOverlay, label: "Add a photo or video")
                         .offset(x: px, y: 3)

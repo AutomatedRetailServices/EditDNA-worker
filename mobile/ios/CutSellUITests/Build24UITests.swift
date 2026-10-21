@@ -516,8 +516,9 @@ final class Build24UITests: XCTestCase {
 
     private func editorState() -> String { let e = element("b17State"); return e.exists ? e.label : "no-state" }
     private func voices() -> [String] {
-        guard let range = editorState().range(of: "voices=") else { return [] }
-        let rest = editorState()[range.upperBound...].split(separator: " ").first.map(String.init) ?? ""
+        let st = editorState()
+        guard let range = st.range(of: "voices=") else { return [] }
+        let rest = String(st[range.upperBound...].prefix { $0 != " " })      // "voices= muted…" = none
         return rest.isEmpty ? [] : rest.split(separator: ",").map(String.init)
     }
     private func editorTool(_ name: String) {
