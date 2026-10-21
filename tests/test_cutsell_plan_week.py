@@ -363,3 +363,19 @@ def test_the_flex_rules_hold_on_many_random_libraries():
         for s in week["slots"]:
             days[s["date"]] = days.get(s["date"], 0) + 1
         assert all(n <= per_day for n in days.values())
+
+
+def test_the_api_gives_one_videos_caption_and_posted_state(monkeypatch, r):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from cutsell_app import plan_routes
+    ids = _library()
+    post_plan.set_caption("u1", ids["single1"], "So gentle #cerave", source="ai")
+    app = FastAPI()
+    app.include_router(plan_routes.router)
+    client = TestClient(app)
+    got = client.get("/v1/plan/video", params={"user_id": "u1", "project_id": ids["single1"]}).json()
+    assert got["caption"] == "So gentle #cerave" and got["posted_at"] is None
+    client.post("/v1/plan/posted", json={"user_id": "u1", "project_id": ids["single1"]})
+    assert client.get("/v1/plan/video", params={"user_id": "u1", "project_id": ids["single1"]}).json()["posted_at"]
+    assert client.get("/v1/plan/video", params={"user_id": "u1", "project_id": "nope"}).status_code == 404

@@ -154,3 +154,12 @@ def mark_personal(payload: PersonalRequest):
     if payload.personal:
         _guard(lambda: post_plan.remove(payload.user_id, payload.project_id))
     return _view(payload.user_id)
+
+
+@router.get("/video")
+def get_video(user_id: str, project_id: str):
+    """One video's posting state (the Export screen's "Post to TikTok": its caption, posted or not)."""
+    _owned(user_id, project_id)
+    entry = _guard(lambda: post_plan.video(user_id, project_id))
+    return {"project_id": project_id, "caption": entry.get("caption"), "caption_source": entry.get("caption_source"),
+            "posted_at": entry.get("posted_at"), "personal": bool(entry.get("personal"))}
