@@ -102,6 +102,19 @@ final class AppState: ObservableObject {
     }
 
     func refreshProjects() async throws {
+        #if DEBUG
+        // Simulator probe only: an account with a few cuts (Edits tiles, Recent cuts, the ••• menu).
+        if ProcessInfo.processInfo.arguments.contains("-CutSellProjectsMock") {
+            let month = String(ISO8601DateFormatter().string(from: Date()).prefix(7))
+            projects = (0..<7).map { i in
+                Project(projectID: "mock-\(i)", userID: "mock", title: ["Perfume", "Glass of water", "Baby shoes", "Henley",
+                                                                         "Retractable Straps", "Cotton knit pants", "CutSell.ai"][i],
+                        state: i == 2 ? "draft" : "draft_ready", latestJobID: nil, sourceCount: 1, updatedAt: nil,
+                        createdAt: "\(month)-0\(i + 1)T10:00:00Z")
+            }
+            return
+        }
+        #endif
         guard let session else { return }
         let response: ProjectListResponse = try await api.request(
             "/v1/projects",

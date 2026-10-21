@@ -470,7 +470,7 @@ final class Build24UITests: XCTestCase {
     /// Week (videos of the 4 origins) → move a video → Day: caption edit / copy, Share to TikTok (share sheet with the
     /// video), Save, Mark as posted → rebuild keeps it posted → a "Time to post" reminder opens its day.
     func testCreateHub() throws {
-        launchApp(fresh: true)
+        launchApp(fresh: true, extra: ["-CutSellProjectsMock"])
         pause(2)
         shot("create_hub")
         check(element("planMeter").exists, "meter X / N cuts · Plan", element("planMeter").label)
@@ -525,7 +525,7 @@ final class Build24UITests: XCTestCase {
     }
 
     func testPersonalMenu() throws {
-        launchApp(fresh: true, extra: ["-CutSellPlanMock"])
+        launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock"])
         element("tab_edits").tap()
         let options = app.descendants(matching: .any).matching(identifier: "editTileMenuReady")
         check(options.firstMatch.waitForExistence(timeout: 30), "a Ready video's ••• in Edits",
