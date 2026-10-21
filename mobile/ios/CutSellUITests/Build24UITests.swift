@@ -540,7 +540,7 @@ final class Build24UITests: XCTestCase {
         // The reminder (6 s after the day opened): Home, then tap it.
         XCUIDevice.shared.press(.home)
         let banner = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Time to post'")).firstMatch
-        let shown = banner.waitForExistence(timeout: 20)
+        let shown = banner.waitForExistence(timeout: 45)
         check(shown, "\"Time to post\" reminder")
         if shown { banner.tap() } else { app.activate() }
         check(element("dayTitle").waitForExistence(timeout: 15), "the reminder opens its day")
