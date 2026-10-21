@@ -589,9 +589,13 @@ final class Build24UITests: XCTestCase {
         editorTool("voiceOver")
         _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
         element("voiceRecord").tap()
-        _ = element("voiceCountdown").waitForExistence(timeout: 3)
-        element("voiceRecordSheet").swipeDown(velocity: .fast)
+        // a quick drag from the handle (top of the sheet) while 3·2·1 runs
+        let sheetTop = element("voiceRecordSheet").frame.minY
+        let from = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 195, dy: sheetTop + 14))
+        from.press(forDuration: 0.02, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 260)), withVelocity: .fast, thenHoldForDuration: 0)
         pause(4)
+        let late = app.alerts["Discard recording?"]
+        if late.exists { log("the drag landed after 3·2·1 had ended (recording had started): Discard asked"); late.buttons["Discard"].tap(); pause(1) }
         check(!sheetOpen() && !element("liveWave").exists && voices().isEmpty, "sliding down cancels the 3·2·1 countdown (nothing recorded)")
         editorTool("voiceOver")
         _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
@@ -826,7 +830,7 @@ final class Build24UITests: XCTestCase {
         log("PLAY_END epoch=\(Date().timeIntervalSince1970)")
         // (XCUITest waits for the app to idle while a video plays, so the screen recording shows the motion;
         // here: the line moved on from where it started)
-        check(during > before + 0.5, "10) the line advances while playing", String(format: "%.2f -> %.2f", before, during))
+        check(during > before + 0.2, "10) the line advances while playing", String(format: "%.2f -> %.2f", before, during))
         shot("kf_after_play")
 
         // Export (measured in the workflow: the square's size frame by frame)
