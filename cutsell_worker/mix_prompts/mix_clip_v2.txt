@@ -33,11 +33,11 @@ Also, for the words that stay:
 - "fix": a word the speech recognizer clearly misheard (mostly brand and product names, spelled officially). Give the
   clip number, the line number, the word as written and the corrected word. Only clear mistakes.
 - "zoom": key moments for a soft camera push-in: "hook" (the strongest opening words of a hook clip), "product" (where
-  she names or shows the product), "price" (a price or discount), "cta" (the call to action). At most one per clip.
+  she names or shows the product), "price" (a price or discount), "cta" (the call to action), "look" (she points at something: "look at this", "mira esto"), "benefit" (the strongest thing the product does for you). At most one per clip.
   Give the clip number, the line number, the exact word where it starts, and the kind.
 
 Answer with JSON only:
 {"clips": [{"clip": 1, "hide": [[from_line, to_line, "r|a|n"]], "trim": [[line, "exact words to remove"]]}],
  "fix": [[clip, line, "heard", "correct"]],
- "zoom": [[clip, line, "word", "hook|product|price|cta"]]}
+ "zoom": [[clip, line, "word", "hook|product|price|cta|look|benefit"]]}
 List every clip, even with empty "hide" and "trim".

@@ -432,3 +432,31 @@ def test_api_round_trip_keeps_every_build17_field(monkeypatch):
     assert result_to_dict(draft_from_dict(parsed))["keyframes"] == parsed["keyframes"]
     bad = dict(draft, keyframes=[{"keyframe_id": "x", "target": "video", "source_time": 1, "scale": 9}])
     assert client.put("/v1/projects/p1/draft", json={"user_id": "u1", "expected_revision": 2, "draft": bad}).status_code == 422
+
+
+def test_keyframes_glide_across_a_join_like_capcut(tmp_path, media, store):
+    """21 Oct: two clips (source 0-2 s and 3-5 s -> timeline 0-2 and 2-4), ◇ 100 % at source 1.0 (timeline 1.0),
+    130 % at source 4.0 (timeline 3.0), back to 100 % ... The zoom grows through the join: no jump, no snap back."""
+    src = {"s1": media["square"]}
+    clips = [_clip("c1", 0.0, 2.0), _clip("c2", 3.0, 5.0)]
+    out = _export(tmp_path, _draft(clips, keyframes=[_vk("k1", 1.0, 1.0), _vk("k2", 4.0, 1.3)]), src, name="join.mp4")
+    row = H // 2
+    widths = [_bright_width(_frame(out, t), row) for t in (0.5, 1.5, 1.9, 2.1, 2.5, 3.5)]
+    assert widths[0] == pytest.approx(300, abs=14) and widths[-1] == pytest.approx(390, abs=16)
+    assert all(b >= a - 4 for a, b in zip(widths, widths[1:])), widths     # always growing
+    assert abs(widths[3] - widths[2]) < 20, widths                           # across the join: no jump
+    assert 310 < widths[2] < 380, widths                                     # mid-zoom at the join
+
+
+def test_100_130_100_with_three_keyframes(tmp_path, media, store):
+    src = {"s1": media["square"]}
+    keys = [_vk("k1", 0.5, 1.0), _vk("k2", 2.0, 1.3), _vk("k3", 3.5, 1.0)]
+    out = _export(tmp_path, _draft([_clip("c1", 0.0, 4.0)], keyframes=keys), src, name="kf3.mp4")
+    row = H // 2
+    widths = [_bright_width(_frame(out, t / 10), row) for t in range(2, 40, 3)]
+    peak = widths.index(max(widths))
+    assert max(widths) == pytest.approx(390, abs=16) and widths[0] == pytest.approx(300, abs=14)
+    assert widths[-1] == pytest.approx(300, abs=14)
+    steps = [b - a for a, b in zip(widths, widths[1:])]
+    assert all(s >= -4 for s in steps[:peak]) and all(s <= 4 for s in steps[peak:]), widths   # in, then out
+    assert max(abs(s) for s in steps) < 45, widths                                              # never a jump

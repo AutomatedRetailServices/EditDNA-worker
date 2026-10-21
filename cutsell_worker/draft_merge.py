@@ -247,6 +247,22 @@ def _merge_zooms(old: Mapping[str, Any], new: Mapping[str, Any]) -> list:
     return user + ai
 
 
+def _refresh_ai_keyframes(merged: dict, new: Mapping[str, Any], old: Mapping[str, Any]) -> None:
+    """21 Oct (Auto Zoom AI): a draft that already carries the `keyframes` list ignores `zoom_keyframes`, so a new
+    cut's AI zooms never showed ("Keyframes: 0 (0 from Auto Zoom AI)"). The AI keyframes in that list are the AI's:
+    they are replaced by the new cut's zooms (four keyframes each); the creator's own keyframes stay as they are,
+    and a zoom the creator deleted (`zoom_removed`) never comes back."""
+    if not isinstance(merged.get("keyframes"), list):
+        return
+    from .keyframes import keyframe_to_dict, zoom_to_keyframes
+    tombstones = list(old.get("zoom_removed") or ())
+    own = [deepcopy(k) for k in merged["keyframes"] if not (isinstance(k, dict) and str(k.get("origin") or "user") == "ai")]
+    fresh = [keyframe_to_dict(k) for z in new.get("zoom_keyframes") or () if isinstance(z, dict)
+             and str(z.get("origin") or "ai") == "ai" and not is_tombstoned_zoom(z, tombstones)
+             for k in zoom_to_keyframes(z)]
+    merged["keyframes"] = own + fresh
+
+
 def keep_creator_cut(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, Any]:
     """The creator has edited this draft: their cut (`selected`, `alternates`, `discarded`) and
     every editor setting stay exactly as they are; only what belongs to the AI is refreshed --
@@ -255,6 +271,7 @@ def keep_creator_cut(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str
     zooms = _merge_zooms(old, new)
     if zooms or "zoom_keyframes" in merged:
         merged["zoom_keyframes"] = zooms
+    _refresh_ai_keyframes(merged, new, old)
     diagnostics = deepcopy(dict(new.get("diagnostics") or {}))
     diagnostics["reprocess_merge"] = {"merged_with_previous_draft": True, "kept_creator_cut": True}
     merged["diagnostics"] = diagnostics
@@ -319,6 +336,7 @@ def merge_reprocessed_draft(old: Mapping[str, Any] | None, new: Mapping[str, Any
     zooms = _merge_zooms(old, new)
     if zooms or "zoom_keyframes" in merged:
         merged["zoom_keyframes"] = zooms
+    _refresh_ai_keyframes(merged, new, old)
 
     # 4. keep the creator's timed items valid on the new timeline
     duration = _timeline_duration(merged.get("selected"))

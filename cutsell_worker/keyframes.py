@@ -12,16 +12,20 @@ Draft field `keyframes` (a list; when the key is present it replaces the legacy 
     rotation      degrees (-720..720), on top of the clip's / overlay's own rotation
     origin        "ai" (Auto Zoom AI: drawn only while auto_zoom_enabled) | "user"
     kind, group   informational (the AI moment, the four keyframes of one AI zoom)
+    curve         how the value moves from this keyframe to the next: "ease_in_out" (default),
+                  "linear", "ease_in", "ease_out"
 
-Interpolation (the iPhone preview uses the same rule): inside one video clip -- or one overlay --
-the keyframes are sorted by time; before the first and after the last the value is held; between
-two keyframes each value moves with a smoothstep ease  v = a + (b - a) * u*u*(3 - 2u). A video
-clip without keyframes is not transformed. Video offsets are limited to what the zoom allows
-(|x| <= (scale - 1) / 2), so the picture never shows an empty edge from panning.
+Interpolation (the iPhone preview uses the same rule) -- 21 Oct, CapCut: the VIDEO keyframes form ONE
+track over the whole edited video (each keyframe sits where its source moment plays on the timeline),
+so the picture moves smoothly across the cut's joins and never jumps. Before the first keyframe and
+after the last the value is held; between two keyframes each value moves with the first one's curve
+(ease in-out = smoothstep v = a + (b - a) * u*u*(3 - 2u)). An overlay's keyframes are its own track.
+Video offsets are limited to what the zoom allows (|x| <= (scale - 1) / 2), so the picture never
+shows an empty edge from panning.
 
-An Auto Zoom AI push-in (legacy `zoom_keyframes`: source_time, duration, scale) is exactly four
-keyframes: 1.0 at t, scale at t + r, scale at t + d - r, 1.0 at t + d, with r = min(0.35, d / 3)
--- the same curve the renderer always drew.
+An Auto Zoom AI push-in (legacy `zoom_keyframes`: source_time, duration, scale) is four keyframes --
+zoom in, hold, zoom out: 1.0 at t, scale at t + r, scale at t + d - r, 1.0 at t + d, with
+r = min(0.4, d / 3).
 """
 from __future__ import annotations
 
@@ -34,7 +38,8 @@ VIDEO_SCALE_RANGE = (1.0, 5.0)
 OVERLAY_SCALE_RANGE = (0.2, 5.0)
 OFFSET_RANGE = (-1.0, 1.0)
 ROTATION_RANGE = (-720.0, 720.0)
-ZOOM_RAMP_SEC = 0.35
+ZOOM_RAMP_SEC = 0.4
+CURVES = ("ease_in_out", "linear", "ease_in", "ease_out")
 #: At most this many keyframes are turned into one ffmpeg expression (per clip / overlay).
 MAX_EXPRESSION_KEYFRAMES = 48
 
@@ -54,10 +59,11 @@ class TransformKeyframe:
     origin: str = "user"
     kind: str = "key"
     group: str = ""
+    curve: str = "ease_in_out"
 
 
-#: One point of a track: (time, scale, x, y, rotation).
-Point = tuple[float, float, float, float, float]
+#: One point of a track: (time, scale, x, y, rotation[, curve]) -- curve index into CURVES, default 0.
+Point = tuple
 
 
 def _number(item: dict, key: str, default: float, low: float, high: float) -> float:
@@ -90,6 +96,7 @@ def keyframe_from_dict(item) -> TransformKeyframe:
         origin="ai" if str(item.get("origin") or "user") == "ai" else "user",
         kind=str(item.get("kind") or "key")[:32],
         group=str(item.get("group") or "")[:120],
+        curve=str(item.get("curve") or "ease_in_out") if str(item.get("curve") or "ease_in_out") in CURVES else "ease_in_out",
     )
     if target == "video":
         source = str(item.get("source_asset_id") or "")
@@ -122,6 +129,8 @@ def keyframe_to_dict(keyframe: TransformKeyframe) -> dict:
             "origin": keyframe.origin, "kind": keyframe.kind}
     if keyframe.group:
         data["group"] = keyframe.group
+    if keyframe.curve != "ease_in_out":
+        data["curve"] = keyframe.curve
     if keyframe.target == "video":
         data.update(source_asset_id=keyframe.source_asset_id, source_time=round(keyframe.source_time, 3))
     else:
@@ -163,7 +172,7 @@ def video_track(keyframes: Iterable[TransformKeyframe], *, source_asset_id: str,
                 end: float) -> tuple[Point, ...]:
     """The keyframes of one video clip (source window start..end), as points in SOURCE seconds."""
     points = sorted(
-        (float(k.source_time), float(k.scale), float(k.x), float(k.y), float(k.rotation))
+        (float(k.source_time), float(k.scale), float(k.x), float(k.y), float(k.rotation), _curve_index(k.curve))
         for k in keyframes
         if k.target == "video" and k.source_asset_id in ("", source_asset_id)
         and float(start) - 1e-6 <= float(k.source_time) <= float(end) + 1e-6
@@ -171,17 +180,80 @@ def video_track(keyframes: Iterable[TransformKeyframe], *, source_asset_id: str,
     return tuple(points[:MAX_EXPRESSION_KEYFRAMES])
 
 
+def _curve_index(curve: str) -> int:
+    return CURVES.index(curve) if curve in CURVES else 0
+
+
+@dataclass(frozen=True)
+class ClipWindow:
+    """One kept clip on the edited timeline: its source window and where it starts on the timeline."""
+    source_asset_id: str
+    start: float
+    end: float
+    timeline_start: float
+    speed: float = 1.0
+
+
+def clip_windows(clips) -> tuple[ClipWindow, ...]:
+    """The kept clips in order, each with its place on the edited timeline (duration = (end - start) / speed)."""
+    out, t = [], 0.0
+    for clip in clips:
+        speed = float(getattr(clip, "speed", 1.0) or 1.0)
+        start, end = float(clip.start), float(clip.end)
+        out.append(ClipWindow(str(clip.source_asset_id), start, end, t, speed))
+        t += max(0.0, end - start) / speed
+    return tuple(out)
+
+
+def timeline_track(keyframes: Iterable[TransformKeyframe], windows: Sequence[ClipWindow]) -> tuple[Point, ...]:
+    """All video keyframes as ONE track on the edited timeline: (timeline time, scale, x, y, rotation, curve).
+    A keyframe whose source moment is not played (cut out) is left out."""
+    points = []
+    for k in keyframes:
+        if k.target != "video":
+            continue
+        for w in windows:
+            if k.source_asset_id in ("", w.source_asset_id) and w.start - 1e-6 <= float(k.source_time) <= w.end + 1e-6:
+                at = w.timeline_start + (float(k.source_time) - w.start) / w.speed
+                points.append((at, float(k.scale), float(k.x), float(k.y), float(k.rotation), _curve_index(k.curve)))
+                break
+    return tuple(sorted(points)[:MAX_KEYFRAMES])
+
+
+def clip_track(track: Sequence[Point], window: ClipWindow) -> tuple[Point, ...]:
+    """The timeline track seen from one clip, in that clip's SOURCE seconds: the keyframes inside it plus the
+    nearest one on each side (outside its window). Interpolating these inside the window gives exactly the
+    timeline curve -- so the export moves across the clip's joins like the preview, never jumps."""
+    if not track:
+        return ()
+    end_t = window.timeline_start + (window.end - window.start) / window.speed
+    first = max([i for i, p in enumerate(track) if p[0] <= window.timeline_start + 1e-9] or [0])
+    last = min([i for i, p in enumerate(track) if p[0] >= end_t - 1e-9] or [len(track) - 1])
+    chosen = track[first:last + 1][:MAX_EXPRESSION_KEYFRAMES]
+    return tuple((window.start + (p[0] - window.timeline_start) * window.speed,) + tuple(p[1:]) for p in chosen)
+
+
 def overlay_track(keyframes: Iterable[TransformKeyframe], *, overlay_id: str) -> tuple[Point, ...]:
     points = sorted(
-        (float(k.time), float(k.scale), float(k.x), float(k.y), float(k.rotation))
+        (float(k.time), float(k.scale), float(k.x), float(k.y), float(k.rotation), _curve_index(k.curve))
         for k in keyframes if k.target == "overlay" and k.overlay_id == overlay_id
     )
     return tuple(points[:MAX_EXPRESSION_KEYFRAMES])
 
 
-def _ease(u: float) -> float:
+def _ease(u: float, curve: int = 0) -> float:
     u = max(0.0, min(1.0, u))
+    if curve == 1:
+        return u
+    if curve == 2:
+        return u * u
+    if curve == 3:
+        return u * (2.0 - u)
     return u * u * (3.0 - 2.0 * u)
+
+
+def _curve_of(point) -> int:
+    return int(point[5]) if len(point) > 5 else 0
 
 
 def value_at(points: Sequence[Point], time: float, field: int) -> float:
@@ -196,7 +268,7 @@ def value_at(points: Sequence[Point], time: float, field: int) -> float:
         if a[0] <= time <= b[0]:
             span = b[0] - a[0]
             u = 0.0 if span <= 1e-9 else (time - a[0]) / span
-            return a[field] + (b[field] - a[field]) * _ease(u)
+            return a[field] + (b[field] - a[field]) * _ease(u, _curve_of(a))
     return points[-1][field]
 
 
@@ -216,6 +288,9 @@ def expression(points: Sequence[Point], field: int, *, offset: float = 0.0, var:
     for a, b in reversed(list(zip(points, points[1:]))):
         span = max(1e-6, b[0] - a[0])
         u = f"clip(({time}-{a[0]:.4f})/{span:.4f},0,1)"
-        piece = f"({a[field]:.5f}+({b[field] - a[field]:.5f})*{u}*{u}*(3-2*{u}))"
+        curve = _curve_of(a)
+        shaped = (u if curve == 1 else f"{u}*{u}" if curve == 2 else f"{u}*(2-{u})" if curve == 3
+                  else f"{u}*{u}*(3-2*{u})")
+        piece = f"({a[field]:.5f}+({b[field] - a[field]:.5f})*{shaped})"
         expr = f"if(lt({time},{b[0]:.4f}),{piece},{expr})"
     return f"if(lt({time},{points[0][0]:.4f}),{points[0][field]:.5f},{expr})"

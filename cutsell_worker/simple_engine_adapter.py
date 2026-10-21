@@ -44,8 +44,9 @@ def _words_inside(words, start: float, end: float):
 ROLL_MAX_SEC = 0.06
 ROLL_WORD_MARGIN_SEC = 0.02
 # Auto Zoom AI: soft push-ins on key moments.
-ZOOM_SCALE = {"hook": 1.08, "product": 1.10, "price": 1.12, "cta": 1.08}
-ZOOM_LEAD_SEC, ZOOM_MAX_SEC, ZOOM_MIN_SEC = 0.10, 1.8, 0.8
+# 21 Oct: zoom in ~0.4 s, hold, zoom out ~0.4 s; 110-125 %, centred (keyframes.zoom_to_keyframes).
+ZOOM_SCALE = {"hook": 1.12, "product": 1.18, "price": 1.20, "cta": 1.12, "look": 1.22, "benefit": 1.15}
+ZOOM_LEAD_SEC, ZOOM_MAX_SEC, ZOOM_MIN_SEC = 0.10, 2.2, 0.9
 ZOOM_EDGE_SEC = 0.30          # never during a join
 ZOOM_MIN_SPACING_SEC = 3.0
 
@@ -62,22 +63,36 @@ def _rolls(split: Mapping, words, duration: float) -> tuple[float, float]:
     return round(pre, 3), round(post, 3)
 
 
-def _zoom_keyframes(source, moments, splits) -> list[ZoomKeyframe]:
-    """Key moments -> zooms inside kept parts, away from joins, at most one every 3 s."""
+def _zoom_keyframes(source, moments, splits, log: list | None = None) -> list[ZoomKeyframe]:
+    """Key moments -> zooms inside kept parts, away from joins, at most one every 3 s. A moment near the end
+    of its part starts its zoom earlier (still inside the part) instead of being dropped. `log` (optional)
+    gets one row per moment: the word, its kind and what became of it (diagnostics: why a cut has N zooms)."""
     visible = [(float(s["start"]), float(s["end"])) for s in splits if s["visible"]]
     out: list[ZoomKeyframe] = []
+
+    def note(moment, result):
+        if log is not None:
+            log.append({"s": round(float(moment["s"]), 3), "word": str(moment.get("w", "")), "kind": str(moment["kind"]),
+                        "zoom": result})
+
     for moment in sorted(moments, key=lambda m: float(m["s"])):
         t = float(moment["s"]) - ZOOM_LEAD_SEC
         part = next(((a, b) for a, b in visible if a <= float(moment["s"]) <= b), None)
         if part is None:
+            note(moment, "cut_out")
             continue
         a, b = part
         t = max(t, a + ZOOM_EDGE_SEC)
+        if b - ZOOM_EDGE_SEC - t < ZOOM_MIN_SEC:
+            t = max(a + ZOOM_EDGE_SEC, b - ZOOM_EDGE_SEC - ZOOM_MIN_SEC)
         length = min(ZOOM_MAX_SEC, b - ZOOM_EDGE_SEC - t)
         if length < ZOOM_MIN_SEC:
+            note(moment, "part_too_short")
             continue
         if out and t - out[-1].source_time < ZOOM_MIN_SPACING_SEC:
+            note(moment, "too_close")
             continue
+        note(moment, "added")
         kind = str(moment["kind"])
         out.append(ZoomKeyframe(
             keyframe_id=f"z-{source.source_order:03d}-{len(out) + 1:02d}",
@@ -195,7 +210,8 @@ def process_with_simple_engine(
                         source=source, split=split, words=inside, selected=False,
                     ))
 
-            zoom_keyframes.extend(_zoom_keyframes(source, out.get("moments") or [], out["splits"]))
+            zoom_log: list = []
+            zoom_keyframes.extend(_zoom_keyframes(source, out.get("moments") or [], out["splits"], zoom_log))
 
             # captions are on the cut timeline of THIS source; shift them onto the whole draft timeline
             shifted = [{"w": c["w"], "s": round(c["s"] + timeline_offset, 3), "e": round(c["e"] + timeline_offset, 3)}
@@ -216,6 +232,7 @@ def process_with_simple_engine(
                 "log": out["log"],
                 "usage": out["usage"],
                 "prompt_cache": bulk,
+                "zoom_moments": zoom_log,
             })
 
     if not selected:

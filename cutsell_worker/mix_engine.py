@@ -42,7 +42,7 @@ FADE_SEC = 0.03                 # audio fade at every edge of a kept part: no cl
 TARGET_LUFS, TARGET_TP, TARGET_LRA = -16.0, -1.5, 11.0
 FPS = 30
 CANVAS_PORTRAIT, CANVAS_LANDSCAPE = (1080, 1920), (1920, 1080)
-ZOOM_KINDS = ("hook", "product", "price", "cta")
+ZOOM_KINDS = ("hook", "product", "price", "cta", "look", "benefit")
 
 LLMCall = Callable[[dict], "tuple[str, dict]"]
 

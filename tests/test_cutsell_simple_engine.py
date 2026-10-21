@@ -642,8 +642,8 @@ def test_auto_zoom_keyframes_come_from_the_existing_word_fix_call(video):
     assert calls == len(FakeLLM().prompts) or calls == 4      # same four calls as before: no extra call
     keys = result.draft.zoom_keyframes
     assert result.draft.auto_zoom_enabled is True and keys
-    assert {k.kind for k in keys} <= {"hook", "product", "price", "cta"}       # unknown kinds dropped
-    assert all(1.0 < k.scale <= 1.12 and 0.8 <= k.duration <= 1.8 for k in keys)
+    assert {k.kind for k in keys} <= {"hook", "product", "price", "cta", "look", "benefit"}       # unknown kinds dropped
+    assert all(1.10 <= k.scale <= 1.25 and 0.9 <= k.duration <= 2.2 for k in keys)   # 21 Oct: 110-125 %
     assert all(b.source_time - a.source_time >= 3.0 for a, b in zip(keys, keys[1:]))
     for k in keys:   # inside a kept clip and away from its joins
         assert any(c.start + 0.3 - 1e-6 <= k.source_time and k.source_time + k.duration <= c.end - 0.3 + 1e-6
