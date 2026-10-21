@@ -87,7 +87,7 @@ final class Build24UITests: XCTestCase {
         // The whole app (four tabs + start-up steps), with the probe's session.
         app.launchArguments = ["-CutSellScreen", "app_probe"] + extra
         let env = ProcessInfo.processInfo.environment
-        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_API"] {
+        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_API", "CUTSELL_PLAN_FIXTURE"] {
             if let value = env[key] { app.launchEnvironment[key] = value }
         }
         app.launch()
@@ -527,7 +527,7 @@ final class Build24UITests: XCTestCase {
     func testPersonalMenu() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellProjectsMock"])
         element("tab_edits").tap()
-        let options = app.descendants(matching: .any).matching(identifier: "editTileMenuReady")
+        let options = app.buttons.matching(identifier: "editTileMenuReady")
         check(options.firstMatch.waitForExistence(timeout: 30), "a Ready video's ••• in Edits",
               "\(options.count) · all tiles \(app.descendants(matching: .any).matching(identifier: "editTileMenu").count)")
         guard options.count > 0 else { return done() }
@@ -537,9 +537,10 @@ final class Build24UITests: XCTestCase {
         while index < min(options.count, 12) {
             options.element(boundBy: index).tap()
             if app.buttons["Personal · don't plan"].waitForExistence(timeout: 3) { found = true; break }
-            app.tap(); pause(0.5)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap(); pause(0.5)
             index += 1
         }
+        if !found { shot("personal_menu_missing"); log("on screen: \(screenTexts()) · buttons: \(app.buttons.allElementsBoundByIndex.prefix(25).map(\.label))") }
         check(found, "••• shows Personal · don't plan")
         guard found else { return done() }
         shot("personal_menu")
@@ -552,7 +553,7 @@ final class Build24UITests: XCTestCase {
         pause(1.5)
         options.element(boundBy: index).tap()
         check(app.buttons["Personal · don't plan"].waitForExistence(timeout: 5), "back in Plan: Personal · don't plan")
-        app.tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
         // the video is still in Edits after being marked personal
         check(options.count > index, "personal videos stay in Edits")
         done()
