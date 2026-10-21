@@ -184,10 +184,14 @@ struct ProjectsView: View {
                         } else {
                             LazyVGrid(columns: columns, spacing: 8) {
                                 ForEach(shownProjects) { project in
-                                    NavigationLink(value: project) {
-                                        EditTile(project: project) { projectPendingDelete = project }
+                                    // The ••• menu sits OVER the link (not inside it): a tap on ••• opens the menu, never the cut.
+                                    ZStack(alignment: .topTrailing) {
+                                        NavigationLink(value: project) {
+                                            EditTile(project: project, showsMenu: false) { projectPendingDelete = project }
+                                        }
+                                        .buttonStyle(.plain)
+                                        EditTileMenu(project: project) { projectPendingDelete = project }
                                     }
-                                    .buttonStyle(.plain)
                                 }
                             }
                             .padding(.top, 10)
@@ -477,6 +481,7 @@ struct ProjectsView: View {
 /// One saved cut in the Edits grid (Figma tile: status dot, "•••" menu, radius 12).
 struct EditTile: View {
     let project: Project
+    var showsMenu: Bool = true
     let onDelete: () -> Void
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var thumbnails = ThumbnailStore.shared
@@ -510,25 +515,7 @@ struct EditTile: View {
                     .padding(10)
             }
             .overlay(alignment: .topTrailing) {
-                Menu {
-                    if isReady {
-                        let personal = plan.isPersonal(project.projectID)
-                        Button(personal ? "Use in Plan" : "Personal · don't plan") {
-                            Task {
-                                do { try await plan.setPersonal(project.projectID, !personal, session: appState.session) }
-                                catch { plan.lastError = error.localizedDescription }
-                            }
-                        }
-                    }
-                    Button("Delete", role: .destructive, action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 28)
-                }
-                .accessibilityLabel("Options for \(project.title)")
-                .accessibilityIdentifier(isReady ? "editTileMenuReady" : "editTileMenu")
+                if showsMenu { EditTileMenu(project: project, onDelete: onDelete) }
             }
             .overlay {
                 if isProcessing {
@@ -660,5 +647,37 @@ struct EditsFilterChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+
+/// The "•••" of an Edits tile: Personal · don't plan / Use in Plan (Ready cuts), Delete.
+struct EditTileMenu: View {
+    let project: Project
+    let onDelete: () -> Void
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject private var plan = PlanWeekStore.shared
+
+    var body: some View {
+        Menu {
+            if project.state == "draft_ready" {
+                let personal = plan.isPersonal(project.projectID)
+                Button(personal ? "Use in Plan" : "Personal · don't plan") {
+                    Task {
+                        do { try await plan.setPersonal(project.projectID, !personal, session: appState.session) }
+                        catch { plan.lastError = error.localizedDescription }
+                    }
+                }
+            }
+            Button("Delete", role: .destructive, action: onDelete)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 28)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Options for \(project.title)")
+        .accessibilityIdentifier(project.state == "draft_ready" ? "editTileMenuReady" : "editTileMenu")
     }
 }
