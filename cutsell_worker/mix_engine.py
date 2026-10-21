@@ -372,6 +372,33 @@ def tighten_edges(parts: list[tuple[float, float]], words: list[dict], audio_pat
     return out or parts
 
 
+def drop_hidden_words(parts: list[tuple[float, float]], words: list[dict], lab) -> list[tuple[float, float]]:
+    """A word the clip's labels hide never plays. The finishing can glue a hidden line back into a kept part when the
+    recognizer gives the words back to back (no gap: "people. Ready? Set. These" -- the gap reads as silence and
+    'spoken words are kept' restores it). Each kept part is split around its hidden words, at word boundaries."""
+    mid = lambda w: (w["s"] + w["e"]) / 2
+    out = []
+    for a, b in parts:
+        inside = [k for k, w in enumerate(words) if a <= mid(w) <= b]
+        if not any(lab[k][0] != "keep" for k in inside):
+            out.append((a, b))
+            continue
+        runs, cur = [], []
+        for k in inside:
+            if lab[k][0] == "keep":
+                cur.append(k)
+            elif cur:
+                runs.append(cur); cur = []
+        if cur:
+            runs.append(cur)
+        for run in runs:
+            ra = a if run[0] == inside[0] else float(words[run[0]]["s"])
+            rb = b if run[-1] == inside[-1] else float(words[run[-1]]["e"])
+            if rb - ra > 0.05:
+                out.append((round(ra, 3), round(rb, 3)))
+    return out
+
+
 def kept_parts(splits) -> list[tuple[float, float]]:
     return [(float(s["start"]), float(s["end"])) for s in splits if s["visible"] and s["end"] - s["start"] > 0.05]
 

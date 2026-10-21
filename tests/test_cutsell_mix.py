@@ -430,3 +430,32 @@ def test_the_normal_cut_does_not_hide_camera_cues():
     from cutsell_worker.simple_engine import engine as E
     words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Ready? Set. These are great.".split())]
     assert all(st == "keep" for st, _ in E.labels({"hide": [], "trim": []}, words, E.lines_of(words)))
+
+
+def test_a_hidden_cue_said_back_to_back_with_her_words_is_cut_out(tmp_path):
+    """Production clip Be2 (21 Oct): Deepgram gave "people. Ready? Set. These" with no gap; the finishing read the
+    hidden run as silence and glued it back. A hidden word never plays."""
+    import numpy as np
+    import wave
+    from cutsell_worker import mix_engine as engine
+    from cutsell_worker.simple_engine import engine as E
+    spec = [("That's okay.", 0.4, 1.28), ("Ugh.", 1.44, 2.0), ("Too many people.", 2.0, 2.64), ("Ready?", 2.64, 3.04),
+            ("Set.", 3.04, 3.52), ("These are the Okay.", 3.52, 5.12)]
+    words = []
+    for text, a, b in spec:
+        ws = text.split()
+        d = (b - a) / len(ws)
+        words += [{"w": w, "s": round(a + i * d, 3), "e": round(a + (i + 1) * d, 3)} for i, w in enumerate(ws)]
+    rate, dur = 16000, 6.0
+    x = 0.002 * np.random.default_rng(0).standard_normal(int(dur * rate))
+    for w in words:
+        a, b = int(w["s"] * rate), int(w["e"] * rate)
+        x[a:b] += 0.3 * np.sin(2 * np.pi * 200 * np.arange(b - a) / rate)
+    path = str(tmp_path / "be2.wav")
+    with wave.open(path, "wb") as f:
+        f.setnchannels(1); f.setsampwidth(2); f.setframerate(rate)
+        f.writeframes((np.clip(x, -1, 1) * 32767).astype(np.int16).tobytes())
+    lab = engine.clip_labels({"clips": [{"clip": 1, "hide": [], "trim": []}]}, 0, words, E.lines_of(words))
+    parts = engine.drop_hidden_words(engine.kept_parts(engine.finish_clip(words, lab, dur, path)), words, lab)
+    kept = " ".join(w["w"] for w in words if any(a <= (w["s"] + w["e"]) / 2 <= b for a, b in parts))
+    assert kept == "That's okay. Ugh. Too many people. These are the Okay."
