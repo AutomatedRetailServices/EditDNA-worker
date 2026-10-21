@@ -148,6 +148,10 @@ jobs:
           xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
             --predicate 'eventMessage CONTAINS "CUTSELLEXPORTURL"' 2>/dev/null | grep -oE 'CUTSELLEXPORTURL [^ ]+' \
             | awk '{print $2}' > "$RUNNER_TEMP/export_urls.txt" || true
+          # why an export stops (the app's own export log lines, links and tokens removed)
+          xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
+            --predicate 'process == "CutSell" AND (eventMessage CONTAINS[c] "export" OR eventMessage CONTAINS[c] "render")' 2>/dev/null \
+            | grep -viE "CUTSELLEXPORTURL" | sed -E 's#https?://[^ ]+#<link>#g; s/(Bearer|token)[^ ]*/\1 <hidden>/g' | tail -60 > "$RUNNER_TEMP/vo/app_export_log.txt" || true
           while IFS= read -r line; do echo "::notice title=kf::$line"; done < <(sed 's/^B24UI *//' "$RUNNER_TEMP/vo/b24_ui_log.txt" 2>/dev/null | grep -E "PASS|FAIL|keyframes|auto zoom" | cut -c1-500)
           # the playback part of the screen recording (white line in the middle, zoom moving)
           s=$(python3 - <<'PY'

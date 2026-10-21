@@ -726,9 +726,11 @@ final class Build24UITests: XCTestCase {
     // MARK: Keyframes like CapCut on a real cut: ◇, framing anywhere makes a ◇, ‹ ›, curve, smooth, centred line
 
     private func stateField(_ name: String) -> String? {
-        let st = editorState()
-        guard let r = st.range(of: name + "=") else { return nil }
-        return st[r.upperBound...].split(separator: " ").first.map(String.init)
+        // whole field names only ("zoom=" must not read "auto_zoom=", "t=" not "user_rot=")
+        for part in editorState().split(separator: " ") where part.hasPrefix(name + "=") {
+            return String(part.dropFirst(name.count + 1))
+        }
+        return nil
     }
     private func stateNumber(_ name: String) -> Double? { stateField(name).flatMap(Double.init) }
     private func seekTo(_ seconds: Double) {

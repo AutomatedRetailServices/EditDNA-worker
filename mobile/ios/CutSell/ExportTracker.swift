@@ -102,6 +102,7 @@ final class ExportTracker: ObservableObject {
                 CutSellDiagnostics.log("export_render_done", ["job_id": jobID, "seconds": String(format: "%.1f", seconds)])
             case "failed", "canceled":
                 let parts = (status.error ?? "unknown").split(separator: ":", maxSplits: 1).map(String.init)
+                NSLog("CUTSELLEXPORT failed %@", String((status.error ?? "unknown").prefix(300)))
                 CutSellDiagnostics.log("export_failed", ["job_id": jobID, "state": status.state,
                                                          "step": parts.count == 2 ? parts[0] : "server",
                                                          "reason": parts.last ?? "unknown",
