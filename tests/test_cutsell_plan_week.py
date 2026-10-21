@@ -280,7 +280,10 @@ def test_the_api_marks_a_video_personal_and_takes_it_out_of_the_week(monkeypatch
     week = client.post("/v1/plan/week/build", json={"user_id": "u1"}).json()["week"]
     pid = week["slots"][0]["project_id"]
     view = client.post("/v1/plan/personal", json={"user_id": "u1", "project_id": pid}).json()
-    assert pid not in {s["project_id"] for s in view["week"]["slots"]}
+    assert pid not in {s["project_id"] for s in view["week"]["slots"]} and view["personal"] == [pid]
     rebuilt = client.post("/v1/plan/week/build", json={"user_id": "u1"}).json()["week"]
     assert pid not in {s["project_id"] for s in rebuilt["slots"]}
+    assert client.get("/v1/plan", params={"user_id": "u1"}).json()["personal"] == [pid]
+    back = client.post("/v1/plan/personal", json={"user_id": "u1", "project_id": pid, "personal": False}).json()
+    assert back["personal"] == []
     assert client.post("/v1/plan/personal", json={"user_id": "u1", "project_id": "nope"}).status_code == 404

@@ -456,6 +456,7 @@ def view(user_id: str, projects: list[dict], *, client=None, now: Optional[datet
                                                          "duration_sec", "title")}})
     missing = shortfall(slots, plan["prefs"], today) if week else None
     return {"prefs": plan["prefs"], "today": today.isoformat(),
+            "personal": sorted(pid for pid, v in plan["videos"].items() if v.get("personal")),
             "summary": {"ready": len(unposted), "products": len(products), "per_day": per_day,
                         "covers_days": len(unposted) // max(1, per_day)},
             "week": {"start": week["start"], "built_at": week.get("built_at"), "slots": slots, "missing": missing}
