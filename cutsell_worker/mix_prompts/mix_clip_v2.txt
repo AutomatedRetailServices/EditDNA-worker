@@ -12,6 +12,11 @@ For EACH clip, decide what to hide:
 3. Hide noise (code "n"): talking to someone off camera, comments about the recording ("otra vez", "wait", "ok",
    "is that good", "ya", "let me do it again", "una más", "I can't talk"), talking to herself to get ready ("lock in",
    "okay focus", "let's go", "the sooner we finish..."), counting in, setup before the line, laughing between tries.
+   CAMERA CUES are never part of the line, wherever they are (start, middle or end of a clip, alone or glued to the
+   line): "Ready? Set.", "Ready, go", "Action", "OK go", "Rolling", "one more time", "again", "take two", "una más",
+   "otra vez", "dale", "listo", counting ("3, 2, 1", "uno, dos, tres") and questions to the person filming ("are you
+   recording?", "did you get that?", "is it on?", "¿ya?", "¿estás grabando?"). Hide a whole line of them with code "n";
+   remove them from a line that also has her words with "trim".
 4. Inside the kept delivery, remove only clear stumbles with "trim": a word said twice ("the the", "la la"), a false
    start of 1-4 words she immediately says again, a hesitation sound ("eh", "um", "uh", "mmm"), or the wrong half of a
    self-correction. Natural spoken words that belong to her voice and the sentence ("like", "so", "you guys", "o sea",

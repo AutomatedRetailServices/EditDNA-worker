@@ -226,10 +226,45 @@ def ask(clips: list[dict], *, call: Optional[LLMCall] = None, model: Optional[st
     raise RuntimeError(f"mix_clip answer unreadable: {last}")
 
 
+# Camera cues (Mix only, never the normal cut): a sentence made only of these is hidden whatever the AI answered.
+CUE_WORDS = {"ready", "set", "go", "action", "rolling", "again", "okay", "ok", "alright", "listo", "lista", "dale", "ya",
+             "accion", "acción", "vale", "and", "y"}
+CUE_STRONG = {"ready", "set", "go", "action", "rolling", "again", "listo", "lista", "dale", "accion", "acción"}
+COUNT_WORDS = {"one", "two", "three", "four", "five", "uno", "dos", "tres", "cuatro", "cinco", "1", "2", "3", "4", "5"}
+CUE_PHRASES = {"one more time", "one more", "take two", "again please", "una más", "una mas", "una vez más", "una vez mas",
+               "otra vez", "otra más", "otra mas", "are you recording", "is it recording", "is it on", "are we rolling",
+               "did you get that", "did you get it", "are you ready", "you ready", "ready set", "ready set go",
+               "ok go", "okay go", "estás grabando", "estas grabando", "ya estás grabando", "ya estas grabando",
+               "me grabaste", "ya", "lista ya", "listo ya"}
+
+
+def is_camera_cue(tokens: list[str]) -> bool:
+    toks = [t.strip("'") for t in tokens if t.strip("'")]
+    if not toks:
+        return False
+    if " ".join(toks) in CUE_PHRASES:
+        return True
+    if all(t in COUNT_WORDS for t in toks) and len(toks) >= 2:
+        return True                                           # "three, two, one", "uno dos tres"
+    pool = CUE_WORDS | COUNT_WORDS
+    return all(t in pool for t in toks) and any(t in CUE_STRONG for t in toks)
+
+
+def hide_cues(words: list[dict], units: list[list[int]], lab: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Hide every sentence of a Mix clip that is only a camera cue ("Ready? Set.", "Action", "OK go", "one more time",
+    a count, "are you recording?"). Never empties a clip."""
+    out = list(lab)
+    for u in units:
+        if u and is_camera_cue([_engine._norm(words[k]["w"]) for k in u]):
+            for k in u:
+                out[k] = ("hide", "ruido")
+    return out if any(st == "keep" for st, _ in out) else list(lab)
+
+
 def clip_labels(answer: dict, index: int, words: list[dict], units: list[list[int]]) -> list[tuple[str, str]]:
     """Labels for clip number index+1. A clip the answer would empty completely keeps everything (WHEN UNCERTAIN, KEEP)."""
     own = next((c for c in answer.get("clips") or [] if _int(c.get("clip")) == index + 1), None) or {}
-    lab = _engine.labels({"hide": own.get("hide") or [], "trim": own.get("trim") or []}, words, units)
+    lab = hide_cues(words, units, _engine.labels({"hide": own.get("hide") or [], "trim": own.get("trim") or []}, words, units))
     if words and not any(st == "keep" for st, _ in lab):
         lab = [("keep", "se queda")] * len(words)
     return lab

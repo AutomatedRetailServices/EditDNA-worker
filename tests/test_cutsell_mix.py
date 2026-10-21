@@ -402,3 +402,31 @@ def test_tighten_edges_leaves_an_edge_alone_when_the_voice_goes_on_past_the_word
     words = [{"w": "late", "s": 1.4, "e": 1.8}]                    # stamp 0.9 s after the voice starts
     (a, b), = engine.tighten_edges([(0.0, 3.5)], words, audio)
     assert (a, b) == (0.0, 3.5)                                      # voice past both searches: both edges kept
+
+
+def test_camera_cues_are_hidden_in_a_mix_clip_and_her_lines_are_not():
+    from cutsell_worker import mix_engine as engine
+    from cutsell_worker.simple_engine import engine as E
+    cue = lambda text: engine.is_camera_cue([E._norm(t) for t in text.split()])
+    for text in ("Ready? Set.", "Ready.", "Set.", "Action!", "OK, go.", "Okay go", "Rolling.", "One more time.",
+                 "Again.", "Take two.", "Three, two, one.", "Uno, dos, tres.", "Are you recording?", "Did you get that?",
+                 "¿Ya?", "¿Estás grabando?", "Otra vez.", "Una más.", "Dale.", "Listo, ya.", "And action."):
+        assert cue(text), text
+    for text in ("Let's go shopping.", "Set it and forget it.", "Ready to glow?", "Go grab yours.", "Two bags.",
+                 "Okay.", "One, two, three steps and you're done.", "I'm ready for summer.", "Ya llegó el verano.",
+                 "Dale un toque de color."):
+        assert not cue(text), text
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in
+             enumerate("Ready? Set. These are the Rhino straps. One more time.".split())]
+    units = E.lines_of(words)
+    lab = engine.clip_labels({"clips": [{"clip": 1, "hide": [], "trim": []}]}, 0, words, units)
+    kept = " ".join(w["w"] for w, (st, _) in zip(words, lab) if st == "keep")
+    assert kept == "These are the Rhino straps."
+    only = [{"w": "Action!", "s": 0.0, "e": 0.4}]                               # never empties a clip
+    assert engine.clip_labels({"clips": []}, 0, only, E.lines_of(only))[0][0] == "keep"
+
+
+def test_the_normal_cut_does_not_hide_camera_cues():
+    from cutsell_worker.simple_engine import engine as E
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate("Ready? Set. These are great.".split())]
+    assert all(st == "keep" for st, _ in E.labels({"hide": [], "trim": []}, words, E.lines_of(words)))
