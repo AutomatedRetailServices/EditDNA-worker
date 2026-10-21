@@ -1,44 +1,44 @@
-B24UI    21.4 PASS editor open on a real cut
-B24UI    26.4 start curves= key_btn=add ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B24UI    63.9 PASS export before finished
-B24UI    76.1 PASS sheet opens
-B24UI    76.4 PASS no X on the sheet (Figma)
-B24UI    79.0 PASS close: slide down from the handle before recording → editor, no change
-B24UI    85.1 PASS close: swipe down before recording
-B24UI    91.4 PASS close: tap outside before recording
-B24UI   102.6 PASS sliding down cancels the 3·2·1 countdown (nothing recorded)
-B24UI   114.7 PASS closing mid-recording asks Discard recording?
-B24UI   117.2 PASS Keep recording: still recording
-B24UI   121.2 PASS closing with an unsaved take asks Discard recording?
-B24UI   123.2 PASS Discard: back to the editor, nothing saved
-B24UI   127.6 PASS a) step 1: Recording voice-over sheet
-B24UI   127.8 PASS a) Enhance voice switch
-B24UI   129.8 PASS a) countdown 3·2·1 over the video
-B24UI   133.0 PASS a) recording (live wave)
-B24UI   141.7 PASS a) step 2: Play / Retake / Save
-B24UI   142.4 PASS a) Play · Retake · Save
-B24UI   147.0 PASS a) Retake back to step 1
-B24UI   170.0 PASS a) Save puts the voice on the timeline · curves= key_btn=add ai=8 user=0 sounds= voices=4.00+5.57cv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=4.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B24UI   170.5 saved ["4.00+5.57cv1.00"]
-B24UI   173.2 PASS c) voice-over panel
-B24UI   173.3 PASS c) lowerVideoSound
-B24UI   173.4 PASS c) cleanUpToggle
-B24UI   173.5 PASS c) recordAgain
-B24UI   173.6 PASS c) panelClose
-B24UI   173.8 PASS c) voiceDelete
-B24UI   175.5 PASS c) Lower video sound on · 4.00+5.57dcv1.00
-B24UI   179.5 PASS b) moved by dragging · 4.00+5.57dcv1.00 → 6.00+5.57dcv1.00
-B24UI   183.4 PASS b) edge trimmed (start edge dragged in) · 6.00+5.57dcv1.00 → 6.43+5.14dcv1.00
-B24UI   196.0 PASS b) Split cuts the voice in two · 6.43+2.57dcv1.00,9.00+2.57dcv1.00
-B24UI   199.0 PASS b) a piece deleted · 6.43+2.57dcv1.00
-B24UI   203.7 PASS b) Undo brings it back · 6.43+2.57dcv1.00,9.00+2.57dcv1.00
-B24UI   219.7 PASS c) Record again replaces that voice (still 2) · 6.43+2.57dcv1.00,9.00+2.57dcv1.00
-B24UI   219.9 before export ["6.43+2.57dcv1.00", "9.00+2.57dcv1.00"]
-B24UI   223.4 export with ["6.43+2.57dcv1.00", "9.00+2.57dcv1.00"]
-B24UI   267.6 PASS export after finished
-B24UI   274.7 end curves= key_btn=add ai=8 user=0 sounds= voices=6.43+3.97dcv1.00,9.00+2.57dcv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=voice pending=none vv=1.00 t=9.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
-B24UI   274.7 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testVoiceOverFlow]' passed (275.646 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-21 23:12:49.914.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-21 23:12:49.914.
-Test Suite 'Selected tests' passed at 2026-10-21 23:12:49.915.
+B24UI    20.2 PASS editor open on a real cut
+B24UI    28.2 start curves= key_btn=add ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI    54.3 PASS export before finished
+B24UI    69.4 PASS sheet opens
+B24UI    70.0 PASS no X on the sheet (Figma)
+B24UI    72.5 PASS close: slide down from the handle before recording → editor, no change
+B24UI    79.3 PASS close: swipe down before recording
+B24UI    95.1 PASS close: tap outside before recording
+B24UI   125.0 PASS sliding down cancels the 3·2·1 countdown (nothing recorded)
+B24UI   142.7 PASS closing mid-recording asks Discard recording?
+B24UI   145.7 PASS Keep recording: still recording
+B24UI   152.4 PASS closing with an unsaved take asks Discard recording?
+B24UI   154.7 PASS Discard: back to the editor, nothing saved
+B24UI   160.9 PASS a) step 1: Recording voice-over sheet
+B24UI   161.6 PASS a) Enhance voice switch
+B24UI   166.1 PASS a) countdown 3·2·1 over the video
+B24UI   176.9 PASS a) recording (live wave)
+B24UI   191.7 PASS a) step 2: Play / Retake / Save
+B24UI   193.2 PASS a) Play · Retake · Save
+B24UI   199.9 PASS a) Retake back to step 1
+B24UI   230.0 PASS a) Save puts the voice on the timeline · curves= key_btn=add ai=8 user=0 sounds= voices=4.00+5.88cv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=4.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI   230.8 saved ["4.00+5.88cv1.00"]
+B24UI   233.7 PASS c) voice-over panel
+B24UI   234.0 PASS c) lowerVideoSound
+B24UI   234.3 PASS c) cleanUpToggle
+B24UI   234.5 PASS c) recordAgain
+B24UI   234.8 PASS c) panelClose
+B24UI   235.0 PASS c) voiceDelete
+B24UI   237.2 PASS c) Lower video sound on · 4.00+5.88dcv1.00
+B24UI   242.9 PASS b) moved by dragging · 4.00+5.88dcv1.00 → 6.33+5.88dcv1.00
+B24UI   247.9 PASS b) edge trimmed (start edge dragged in) · 6.33+5.88dcv1.00 → 6.71+5.49dcv1.00
+B24UI   261.6 PASS b) Split cuts the voice in two · 6.71+2.29dcv1.00,9.00+3.20dcv1.00
+B24UI   265.0 PASS b) a piece deleted · 6.71+2.29dcv1.00
+B24UI   268.6 PASS b) Undo brings it back · 6.71+2.29dcv1.00,9.00+3.20dcv1.00
+B24UI   284.7 PASS c) Record again replaces that voice (still 2) · 6.71+2.29dcv1.00,9.00+3.20dcv1.00
+B24UI   285.1 before export ["6.71+2.29dcv1.00", "9.00+3.20dcv1.00"]
+B24UI   288.5 export with ["6.71+2.29dcv1.00", "9.00+3.20dcv1.00"]
+B24UI   332.0 PASS export after finished
+B24UI   339.7 end curves= key_btn=add ai=8 user=0 sounds= voices=6.71+3.83dcv1.00,9.00+3.20dcv1.00 muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=voice pending=none vv=1.00 t=9.00 zoom=1.101 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI   339.7 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testVoiceOverFlow]' passed (340.357 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-21 23:31:36.580.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-21 23:31:36.580.
+Test Suite 'Selected tests' passed at 2026-10-21 23:31:36.581.
