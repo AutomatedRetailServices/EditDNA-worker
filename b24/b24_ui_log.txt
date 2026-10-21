@@ -1,56 +1,18 @@
-B24UI    17.1 PASS Plan · This week card
-B24UI    17.5 PASS no SOON any more
-B24UI    19.9 PASS Plan my week · Goal
-B24UI    22.3 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
-B24UI    27.1 PASS Week built
-B24UI    28.8 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
-B24UI    29.4 PASS the days without videos: New Mix ›
-B24UI    37.5 PASS move sheet
-B24UI    40.2 PASS still 9 videos after the move
-B24UI    42.5 PASS Day
-B24UI    42.8 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
-B24UI    58.3 PASS her caption saved · My own caption #mine #tiktokshop
-B24UI    61.2 PASS Copy
-B24UI    69.9 PASS Share to TikTok opens the share sheet with the video
-B24UI    77.9 PASS Mark as posted · ✓  Posted
-B24UI   104.3 FAIL "Time to post" reminder
-B24UI   105.8 PASS the reminder opens its day
-B24UI   116.5 PASS week built again
-B24UI   119.6 PASS posted stays posted after rebuilding
-B24UI   119.6 FAILURES: "Time to post" reminder
-B24UI    20.5 PASS Create is for one video (no Bulk, no Mix)
-B24UI    22.6 PASS Plan · New Mix
-B24UI    23.2 PASS Plan · Bulk and This week
-B24UI    30.7 Photos access allowed
-B24UI    31.9 PASS Plan · Bulk opens the gallery
-B24UI    37.0 PASS Mix setup
-B24UI    39.3 PASS a product chosen · CeraVe · Hydrating Cleanser
-B24UI    48.1 PASS gallery says Add 3 clips · Add 3 clips
-B24UI    49.9 PASS section 0 has its 3 clips
-B24UI    57.5 PASS gallery says Add 2 clips · Add 2 clips
-B24UI    58.7 PASS section 1 has its 2 clips
-B24UI    68.9 PASS gallery says Add 2 clips · Add 2 clips
-B24UI    70.5 PASS section 2 has its 2 clips
-B24UI    80.9 PASS gallery says Add 2 clips · Add 2 clips
-B24UI    82.1 PASS section 3 has its 2 clips
-B24UI    83.2 PASS 9 clips in 4 sections
-B24UI    83.3 PASS 24 videos · about N s each · 24 videos · about 146 s each
-B24UI   107.2 PASS section renamed · Results
-B24UI   109.3 PASS section added
-B24UI   115.9 PASS section deleted
-B24UI   122.9 PASS section moved up · CTA
-B24UI   129.3 PASS section moved back · CTA
-B24UI   131.5 PASS How many videos? sheet
-B24UI   134.0 PASS preview of the first 4 videos
-B24UI   134.2 PASS 12 chosen · Make 12 videos
-B24UI   138.6 PASS Mix group in Processing
-B24UI   139.1 PASS Processing shows this Mix only
-B24UI   140.2 PASS Mix · 12 videos · Mix · 12 videos
-B24UI   143.8 PASS Plan · In progress shows the Mix · MIX, Mix, 2 of 12 ready, 2/12
-B24UI   147.9 PASS In progress → Edits · Processing (this Mix)
-B24UI   151.3 PASS Mix results
-B24UI   176.2 PASS Mix ready banner · ✦  Mix ready: 12 videos from 9 clips
-B24UI   176.4 PASS MIX tiles with their code · 12
-B24UI   177.4 PASS Brand · Mix · 12 videos · CeraVe · Mix · 12 videos
-B24UI   181.7 PASS Export all · 12 videos saved to Photos
-B24UI   181.9 FAILURES: none
+B24UI    22.6 PASS Plan · This week card
+B24UI    23.9 PASS no SOON any more
+B24UI    27.3 PASS Plan my week · Goal
+B24UI    30.2 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
+B24UI    34.7 PASS Week built
+B24UI    35.5 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
+B24UI    36.2 PASS the days without videos: New Mix ›
+B24UI    44.4 PASS move sheet
+B24UI    48.8 PASS still 9 videos after the move
+B24UI    51.9 PASS Day
+B24UI    53.2 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
+B24UI    76.3 PASS her caption saved · My own caption #mine #tiktokshop
+B24UI    78.7 PASS Copy
+B24UI    89.5 PASS Share to TikTok opens the share sheet with the video
+B24UI    98.2 PASS Mark as posted · ✓  Posted
+B24UI   106.1 PASS "Time to post" reminder
+B24UI   127.0 FAIL the reminder opens its day
+B24UI   169.8 FAIL week built again
