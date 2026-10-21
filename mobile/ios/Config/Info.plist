@@ -7,6 +7,30 @@
 	     generated from project.yml (GENERATE_INFOPLIST_FILE = YES) and merged with this file. -->
 	<key>CutSellAPIBaseURL</key>
 	<string>$(CUTSELL_API_BASE_URL)</string>
+	<!-- Post to TikTok: see if the TikTok app is there (and TikTok Share Kit, once CutSell has a client key). -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tiktokopensdk</string>
+		<string>tiktoksharesdk</string>
+		<string>snssdk1233</string>
+		<string>snssdk1180</string>
+		<string>tiktok</string>
+	</array>
+	<key>TikTokClientKey</key>
+	<string>$(TIKTOK_CLIENT_KEY)</string>
+	<key>CutSellTikTokRedirectURI</key>
+	<string>$(TIKTOK_REDIRECT_URI)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>tiktok-share-kit</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(TIKTOK_CLIENT_KEY)</string>
+			</array>
+		</dict>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<!-- Build 24: iOS may wake CutSell now and then to check cuts still being made and say when

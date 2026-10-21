@@ -3,6 +3,10 @@ import SwiftUI
 
 struct FinishedExportActionsView: View {
     let remoteURL: URL
+    var projectID: String? = nil
+    var session: CutSellSession? = nil
+    @ObservedObject private var poster = TikTokPoster.shared
+    @State private var notice: String?
 
     @State private var localURL: URL?
     @State private var isDownloading = false
@@ -13,6 +17,19 @@ struct FinishedExportActionsView: View {
     var body: some View {
         VStack(spacing: 10) {
             if let localURL {
+                if let projectID {
+                    // Post to TikTok: video to Photos, caption copied, TikTok opens (Share Kit once TikTok approves).
+                    PostToTikTokButton(title: poster.busy ? "Opening TikTok…" : "Post to TikTok") {
+                        Task {
+                            let caption = await PlanWeekStore.shared.caption(for: projectID, session: session)
+                            await poster.post(video: localURL, caption: caption, projectID: projectID,
+                                              onNotice: { notice = $0 }) {
+                                try? await PlanWeekStore.shared.markPosted(projectID: projectID, session: session)
+                            }
+                        }
+                    }
+                    .disabled(poster.busy)
+                }
                 HStack(spacing: 10) {
                     ShareLink(item: localURL) {
                         Label("Share", systemImage: "square.and.arrow.up")
@@ -49,6 +66,9 @@ struct FinishedExportActionsView: View {
                 .disabled(isDownloading)
             }
 
+            if let notice {
+                Text(notice).font(.caption).foregroundStyle(CS.cyan).accessibilityIdentifier("exportNotice")
+            }
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)

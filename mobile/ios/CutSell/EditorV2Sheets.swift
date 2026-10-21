@@ -334,7 +334,7 @@ struct ExportSheet: View {
                         .font(CS.inter(12)).foregroundStyle(CS.textMutedF).multilineTextAlignment(.center)
                 }
                 if let urlString = job.result?["download_url"]?.stringValue, let url = URL(string: urlString) {
-                    FinishedExportActionsView(remoteURL: url)
+                    FinishedExportActionsView(remoteURL: url, projectID: model.project.projectID, session: model.session)
                 }
             } else {
                 Text("Getting your video ready…").font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)

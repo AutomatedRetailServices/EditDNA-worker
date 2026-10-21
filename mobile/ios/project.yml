@@ -1,4 +1,8 @@
 name: CutSell
+packages:
+  TikTokOpenSDK:
+    url: https://github.com/tiktok/tiktok-opensdk-ios
+    from: 2.0.0
 options:
   bundleIdPrefix: ai.cutsell
   developmentLanguage: en
@@ -29,6 +33,11 @@ targets:
       # editor preview and the exported video use exactly the same letters. One copy in the repo.
       - path: ../../cutsell_worker/fonts
         buildPhase: resources
+    dependencies:
+      - package: TikTokOpenSDK
+        product: TikTokOpenSDKCore
+      - package: TikTokOpenSDK
+        product: TikTokOpenShareSDK
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app
@@ -41,6 +50,10 @@ targets:
         # "Sign in with Apple" capability (Apple Developer account).
         CODE_SIGN_ENTITLEMENTS: Config/CutSell.entitlements
         TARGETED_DEVICE_FAMILY: "1"
+        # TikTok Share Kit (Post to TikTok). Set by the TestFlight workflow from the secrets TIKTOK_CLIENT_KEY and
+        # TIKTOK_REDIRECT_URI once TikTok gives CutSell a client key; "unset" = the path that needs no approval.
+        TIKTOK_CLIENT_KEY: unset
+        TIKTOK_REDIRECT_URI: unset
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: CutSell

@@ -86,3 +86,16 @@ def test_plan_goal_v2_is_flexible():
         assert text in plan, text
     assert "goalPerDay_" not in plan and '"Morning"' in plan            # the old 1/2/3/4+ selector is gone
     assert "Set(slots.compactMap(\\.productID))" in plan                   # no product is not a product
+
+
+def test_post_to_tiktok():
+    root = Path(__file__).resolve().parents[1] / "mobile" / "ios"
+    poster = (root / "CutSell" / "TikTokPoster.swift").read_text()
+    for text in ("Caption copied, paste it in TikTok", "https://apps.apple.com/app/id835599320", "Did you post it?", "Yes, posted",
+                 "Not yet", "TikTokShareRequest(localIdentifiers:", "canImport(TikTokOpenShareSDK)"):
+        assert text in poster, text
+    assert "PostToTikTokButton(" in (root / "CutSell" / "PlanWeekView.swift").read_text()
+    assert "PostToTikTokButton(" in (root / "CutSell" / "FinishedExportActionsView.swift").read_text()
+    plist = (root / "Config" / "Info.plist").read_text()
+    assert "<string>tiktoksharesdk</string>" in plist and "$(TIKTOK_CLIENT_KEY)" in plist
+    assert "tiktok-opensdk-ios" in (root / "project.yml").read_text()

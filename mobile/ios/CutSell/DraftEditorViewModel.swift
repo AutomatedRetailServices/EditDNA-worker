@@ -44,7 +44,7 @@ final class DraftEditorViewModel: ObservableObject {
 
     let project: Project
     private let api = APIClient.shared
-    private let session: CutSellSession
+    let session: CutSellSession
 
     init(project: Project, session: CutSellSession) {
         self.project = project

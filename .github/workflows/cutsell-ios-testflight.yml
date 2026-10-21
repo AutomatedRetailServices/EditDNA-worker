@@ -29,6 +29,9 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # TikTok Share Kit (optional): without these the app uses Post to TikTok without approval (Photos + caption + open TikTok)
+      TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+      TIKTOK_REDIRECT_URI: ${{ secrets.TIKTOK_REDIRECT_URI }}
       BUNDLE_ID: ai.cutsell.app
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
@@ -86,6 +89,7 @@ jobs:
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" AD_HOC_CODE_SIGNING_ALLOWED=YES \
             PROVISIONING_PROFILE_SPECIFIER="" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            TIKTOK_CLIENT_KEY="${TIKTOK_CLIENT_KEY:-unset}" TIKTOK_REDIRECT_URI="${TIKTOK_REDIRECT_URI:-unset}" \
             archive > "$RUNNER_TEMP/archive.log" 2>&1
           status=$?
           grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)" "$RUNNER_TEMP/archive.log" | sort -u | head -40

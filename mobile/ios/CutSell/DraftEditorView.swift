@@ -157,7 +157,7 @@ struct DraftEditorView: View {
 
                                 if let urlString = export.result?["download_url"]?.stringValue,
                                    let url = URL(string: urlString) {
-                                    FinishedExportActionsView(remoteURL: url)
+                                    FinishedExportActionsView(remoteURL: url, projectID: model.project.projectID, session: model.session)
                                 }
                             }
                         }

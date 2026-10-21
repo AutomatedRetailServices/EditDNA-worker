@@ -54,6 +54,10 @@ struct CutSellApp: App {
     private var mainRoot: some View {
         // The AI notice is presented by AIConsentCenter itself (on top of any cover or sheet).
         RootView()
+                .onOpenURL { TikTokPoster.handle($0) }            // TikTok Share Kit answers here
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL { TikTokPoster.handle(url) }
+                }
                 .environmentObject(appState)
                 .environmentObject(notificationCenter)
                 .task {

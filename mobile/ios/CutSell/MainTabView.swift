@@ -75,6 +75,7 @@ struct MainTabView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: queue.readyToast?.projectID)
+        .tiktokReturnPrompt()                      // "Did you post it?" after Post to TikTok
         .overlay(alignment: .top) {
             if let projectID = tracker.readyBanner {
                 ReadyBanner {

@@ -511,6 +511,45 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// Plan · Day → Post to TikTok: video to Photos, caption copied with the notice, TikTok (here its App Store page,
+    /// the simulator has no TikTok) → back in CutSell "Did you post it?" → Yes, posted.
+    func testPostToTikTok() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock"])
+        element("tab_plan").tap()
+        let card = element("planMyWeek")
+        check(card.waitForExistence(timeout: 20), "Plan card")
+        card.tap()
+        check(element("goalBuild").waitForExistence(timeout: 10), "Goal")
+        element("goalBuild").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
+        let firstDay = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDay_'")).firstMatch
+        check(firstDay.waitForExistence(timeout: 15), "week built")
+        firstDay.tap()
+        let post = element("postToTikTok")
+        check(post.waitForExistence(timeout: 10), "Day: big Post to TikTok button")
+        check(element("dayShare").exists && element("dayShare").label.contains("Share"), "Share below it")
+        shot("day_post_to_tiktok")
+        post.tap()
+        allowPhotos()
+        let copied = app.staticTexts["Caption copied, paste it in TikTok"]
+        check(copied.waitForExistence(timeout: 60), "Caption copied, paste it in TikTok")
+        shot("day_caption_copied")
+        // TikTok (or its App Store page) takes over; then she comes back to CutSell.
+        _ = wait(20) { self.app.state != .runningForeground }
+        log("left CutSell for TikTok / App Store: \(app.state != .runningForeground)")
+        pause(2)
+        app.activate()
+        let ask = app.alerts["Did you post it?"]
+        check(ask.waitForExistence(timeout: 15), "back from TikTok: Did you post it?")
+        shot("did_you_post_it")
+        check(ask.buttons["Yes, posted"].exists && ask.buttons["Not yet"].exists, "Yes, posted / Not yet")
+        ask.buttons["Yes, posted"].tap()
+        check(wait(10) { self.element("dayPosted").label.contains("Posted") }, "Yes, posted marks it posted", element("dayPosted").label)
+        shot("day_posted")
+        done()
+    }
+
     /// Her real library (plan computed read-only on the server with the new rules), shown by the app.
     func testPlanRealData() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock"])
@@ -652,7 +691,7 @@ final class Build24UITests: XCTestCase {
         check(element("dayNotice").label == "Caption copied", "Copy")
         element("dayShare").tap()
         let sheet = app.otherElements["ActivityListView"]
-        check(wait(30) { sheet.exists || self.app.buttons["Save Video"].exists }, "Share to TikTok opens the share sheet with the video")
+        check(wait(30) { sheet.exists || self.app.buttons["Save Video"].exists }, "Share opens the share sheet with the video")
         shot("plan_share")
         // Close the share sheet (its × or a swipe down) until the Day is usable again.
         for _ in 0..<4 where !element("dayPosted").isHittable {

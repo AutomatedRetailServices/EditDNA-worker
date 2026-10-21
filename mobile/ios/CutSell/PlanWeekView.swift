@@ -239,6 +239,29 @@ final class PlanWeekStore: ObservableObject {
         PostReminders.shared.schedule(state)
     }
 
+    /// One video's posting caption (Export · Post to TikTok). nil when there is none or the server is older.
+    func caption(for projectID: String, session: CutSellSession?) async -> String? {
+        if let slot = state?.week?.slots.first(where: { $0.projectID == projectID }), let caption = slot.caption { return caption }
+        if mock { return "So good on my skin ✨ #tiktokshop" }
+        guard let session else { return nil }
+        struct Video: Decodable { let caption: String? }
+        let video: Video? = try? await APIClient.shared.request(
+            "/v1/plan/video", query: [URLQueryItem(name: "user_id", value: session.userID), URLQueryItem(name: "project_id", value: projectID)],
+            timeout: 15)
+        return video?.caption
+    }
+
+    /// "Did you post it? → Yes, posted" for any video (Export screen too).
+    func markPosted(projectID: String, session: CutSellSession?) async throws {
+        if let slot = state?.week?.slots.first(where: { $0.projectID == projectID }) { try await markPosted(slot, session: session); return }
+        if mock { return }
+        guard let session else { throw APIError.invalidResponse }
+        struct Body: Encodable { let user_id: String; let project_id: String; let posted: Bool }
+        state = try await APIClient.shared.request("/v1/plan/posted", method: "POST",
+                                                   body: Body(user_id: session.userID, project_id: projectID, posted: true))
+        PostReminders.shared.schedule(state)
+    }
+
     func markPosted(_ slot: PlanSlot, session: CutSellSession?) async throws {
         if mock {
             if let i = mockSlots.firstIndex(where: { $0.projectID == slot.projectID }) { mockSlots[i].postedAt = "now" }
@@ -1230,14 +1253,13 @@ struct PlanDayView: View {
 
     private func actions(_ slot: PlanSlot) -> some View {
         VStack(spacing: 10) {
-            Button { Task { await share(slot) } } label: {
-                Text(exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Share to TikTok")
-                    .font(CS.sf(15, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
-                    .background(Capsule().fill(PlanStyle.cta))
-                    .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
+            PostToTikTokButton(title: exporter.progress[slot.projectID].map { "Preparing… \(Int($0 * 100)) %" } ?? "Post to TikTok") {
+                Task { await postToTikTok(slot) }
             }
             .disabled(busy)
-            .accessibilityIdentifier("dayShare")
+            Button { Task { await share(slot) } } label: { outline("Share") }
+                .disabled(busy)
+                .accessibilityIdentifier("dayShare")
             HStack(spacing: 8) {
                 Button { Task { await save(slot) } } label: { outline("Save to Photos") }.disabled(busy)
                     .accessibilityIdentifier("daySave")
@@ -1279,6 +1301,22 @@ struct PlanDayView: View {
         guard let prefs = store.state?.prefs else { return false }
         if prefs.times != nil { return prefs.remind ?? true }
         return prefs.reminders.contains { $0.on && $0.time == slot.time }
+    }
+
+    /// Post to TikTok: the video (exported at night, or now with its %) to Photos, the caption copied, TikTok opens.
+    /// Back in CutSell, "Did you post it? → Yes, posted" marks it posted.
+    private func postToTikTok(_ slot: PlanSlot) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let file = try await exporter.file(for: slot.projectID, session: appState.session)
+            current = slot.projectID
+            await TikTokPoster.shared.post(video: file, caption: slot.caption, projectID: slot.projectID, onNotice: { notice = $0 }) {
+                try? await store.markPosted(slot, session: appState.session)
+            }
+        } catch {
+            notice = "The video couldn’t be prepared. Check your connection and try again."
+        }
     }
 
     /// The video file (exported at night, or now with its %), the caption copied: the iPhone's share sheet (TikTok…).
