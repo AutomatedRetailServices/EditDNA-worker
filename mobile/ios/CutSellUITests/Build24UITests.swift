@@ -469,6 +469,44 @@ final class Build24UITests: XCTestCase {
     /// Plan my week (Figma 1138:2749 / 2798 / 2872) with an in-memory plan (-CutSellPlanMock): Goal → Build my week →
     /// Week (videos of the 4 origins) → move a video → Day: caption edit / copy, Share to TikTok (share sheet with the
     /// video), Save, Mark as posted → rebuild keeps it posted → a "Time to post" reminder opens its day.
+    func testPersonalMenu() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock"])
+        element("tab_edits").tap()
+        let options = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Options for'"))
+        check(options.firstMatch.waitForExistence(timeout: 30), "a video's ••• in Edits", "\(options.count)")
+        guard options.count > 0 else { return done() }
+        // the first Ready video: its menu has "Personal · don't plan"
+        var index = 0
+        var found = false
+        while index < min(options.count, 12) {
+            options.element(boundBy: index).tap()
+            if app.buttons["Personal · don't plan"].waitForExistence(timeout: 3) { found = true; break }
+            app.tap(); pause(0.5)
+            index += 1
+        }
+        check(found, "••• shows Personal · don't plan")
+        guard found else { return done() }
+        shot("personal_menu")
+        app.buttons["Personal · don't plan"].tap()
+        pause(1.5)
+        options.element(boundBy: index).tap()
+        check(app.buttons["Use in Plan"].waitForExistence(timeout: 5), "after marking it: Use in Plan")
+        shot("personal_menu_marked")
+        app.buttons["Use in Plan"].tap()
+        pause(1.5)
+        options.element(boundBy: index).tap()
+        check(app.buttons["Personal · don't plan"].waitForExistence(timeout: 5), "back in Plan: Personal · don't plan")
+        app.tap()
+        // the video is still in Edits after being marked personal
+        check(options.count > index, "personal videos stay in Edits")
+        done()
+    }
+
+    private func done() {
+        log("FAILURES: \(failures.isEmpty ? "none" : failures.joined(separator: " | "))")
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: " | "))
+    }
+
     func testPlanWeekFlow() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock", "-CutSellPlanTestReminder"])
         element("tab_plan").tap()

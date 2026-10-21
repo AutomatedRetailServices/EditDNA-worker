@@ -60,3 +60,11 @@ def test_plan_my_week_screens():
     assert "SOON" not in plan and "Plan my week ›" in plan and "path = week.hasWeek ? [.week] : [.goal]" in plan
     info = (IOS.parent / "Config" / "Info.plist").read_text()
     assert "ai.cutsell.app.prefetch-posts" in info and "<string>processing</string>" in info
+
+
+def test_edits_menu_marks_a_video_personal_through_the_plan_route():
+    root = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    tiles = (root / "ProjectsView.swift").read_text()
+    store = (root / "PlanWeekView.swift").read_text()
+    assert "Personal · don't plan" in tiles and "Use in Plan" in tiles
+    assert '"/v1/plan/personal"' in store and "var personal: [String]?" in store

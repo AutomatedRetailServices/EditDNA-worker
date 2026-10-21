@@ -453,6 +453,7 @@ struct ProjectsView: View {
             await refreshPendingCuts()
             await refreshCatalog()
             await mixCenter.refresh(session: appState.session)
+            await PlanWeekStore.shared.refresh(session: appState.session)   // the ••• menu knows her personal videos
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -479,6 +480,7 @@ struct EditTile: View {
     let onDelete: () -> Void
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var thumbnails = ThumbnailStore.shared
+    @ObservedObject private var plan = PlanWeekStore.shared
 
     private var isReady: Bool { project.state == "draft_ready" }
     private var isProcessing: Bool { Project.processingStates.contains(project.state) }
@@ -509,6 +511,15 @@ struct EditTile: View {
             }
             .overlay(alignment: .topTrailing) {
                 Menu {
+                    if isReady {
+                        let personal = plan.isPersonal(project.projectID)
+                        Button(personal ? "Use in Plan" : "Personal · don't plan") {
+                            Task {
+                                do { try await plan.setPersonal(project.projectID, !personal, session: appState.session) }
+                                catch { plan.lastError = error.localizedDescription }
+                            }
+                        }
+                    }
                     Button("Delete", role: .destructive, action: onDelete)
                 } label: {
                     Image(systemName: "ellipsis")

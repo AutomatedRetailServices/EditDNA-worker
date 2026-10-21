@@ -68,6 +68,8 @@ struct PlanState: Codable, Hashable {
     let today: String
     let summary: PlanSummary
     var week: PlanWeek?
+    /// Her personal videos (seen in Edits, never planned). Absent on an older server.
+    var personal: [String]? = nil
 }
 
 enum PlanDay {
@@ -117,6 +119,24 @@ final class PlanWeekStore: ObservableObject {
     private var mockBuilt = false
 
     var hasWeek: Bool { !(state?.week?.slots.isEmpty ?? true) }
+    private var mockPersonal: Set<String> = []
+
+    func isPersonal(_ projectID: String) -> Bool { state?.personal?.contains(projectID) ?? false }
+
+    /// Edits ••• → "Personal · don't plan" / "Use in Plan" (POST /v1/plan/personal).
+    func setPersonal(_ projectID: String, _ personal: Bool, session: CutSellSession?) async throws {
+        if mock {
+            if personal { mockPersonal.insert(projectID); mockSlots.removeAll { $0.projectID == projectID } }
+            else { mockPersonal.remove(projectID) }
+            state = mockState(); return
+        }
+        guard let session else { throw APIError.invalidResponse }
+        struct Body: Encodable { let user_id: String; let project_id: String; let personal: Bool }
+        state = try await APIClient.shared.request("/v1/plan/personal", method: "POST",
+                                                   body: Body(user_id: session.userID, project_id: projectID, personal: personal))
+        PostReminders.shared.schedule(state)
+        CutSellDiagnostics.log("plan_personal", ["personal": personal ? "1" : "0"])
+    }
 
     /// A stable color dot per product (the same product, the same color everywhere).
     func dot(for slot: PlanSlot) -> String {
@@ -218,7 +238,8 @@ final class PlanWeekStore: ObservableObject {
         let week = mockBuilt ? PlanWeek(start: mockSlots.first?.date ?? today, slots: mockSlots, missing: mockMissing()) : nil
         return PlanState(prefs: mockPrefs, today: today,
                          summary: PlanSummary(ready: ready, products: 5, perDay: mockPrefs.perDay,
-                                              coversDays: ready / max(1, mockPrefs.perDay)), week: week)
+                                              coversDays: ready / max(1, mockPrefs.perDay)), week: week,
+                         personal: mockPersonal.sorted())
     }
 
     private func mockBuild() {
