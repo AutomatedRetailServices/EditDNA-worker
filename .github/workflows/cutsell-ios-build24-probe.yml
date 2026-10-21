@@ -115,7 +115,7 @@ jobs:
           echo "dummynet out proto tcp from any to any port 443 pipe 1" | sudo pfctl -f - 2>&1 | tail -2 || true
           sudo pfctl -E 2>&1 | tail -1 || true
           status=0
-          for t in ${{ inputs.tests || 'testPlanWeekFlow testMixFlow' }}; do
+          for t in ${{ inputs.tests || 'testPlanWeekFlow' }}; do
             start=$(date '+%Y-%m-%d %H:%M:%S')
             set +e
             TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \

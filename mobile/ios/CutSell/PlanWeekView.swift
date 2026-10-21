@@ -915,11 +915,10 @@ struct PlanDayView: View {
         .sheet(isPresented: Binding(get: { shareItems != nil }, set: { if !$0 { shareItems = nil } })) {
             ShareSheet(items: shareItems ?? []).ignoresSafeArea()
         }
-        .task {
-            // Simulator probe: one "Time to post" reminder a few seconds after the day opens.
+        // Simulator probe: one "Time to post" reminder a few seconds after CutSell goes to the background.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
             if ProcessInfo.processInfo.arguments.contains("-CutSellPlanTestReminder"), let slot = focus {
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-                PostReminders.shared.test(slot, seconds: 6)
+                PostReminders.shared.test(slot, seconds: 4)
             }
         }
         .alert("Edit caption", isPresented: $editing) {
