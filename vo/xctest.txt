@@ -1,0 +1,14 @@
+B24UI    20.7 PASS editor open on a real cut
+B24UI    28.2 start curves= key_btn=add ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI    53.7 PASS export before finished
+B24UI    74.6 PASS sheet opens
+B24UI    75.0 PASS no X on the sheet (Figma)
+B24UI    83.3 PASS close: slide down from the handle before recording → editor, no change
+B24UI   174.5 PASS close: swipe down before recording
+B24UI   185.0 PASS close: tap outside before recording
+B24UI   223.9 FAIL sliding down cancels the 3·2·1 countdown (nothing recorded)
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:538: error: -[CutSellUITests.Build24UITests testVoiceOverFlow] : Failed to not hittable: Button, {{96.0, 841.0}, {53.0, 51.0}}, identifier: 'tool_voiceOver', label: 'Voice Over'
+Test Case '-[CutSellUITests.Build24UITests testVoiceOverFlow]' failed (254.743 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-21 22:51:36.094.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 22:51:36.095.
+Test Suite 'Selected tests' failed at 2026-10-21 22:51:36.096.
