@@ -290,7 +290,8 @@ def clip_labels(answer: dict, index: int, words: list[dict], units: list[list[in
     own = next((c for c in answer.get("clips") or [] if _int(c.get("clip")) == index + 1), None) or {}
     lab = hide_cues(words, units, _engine.labels({"hide": own.get("hide") or [], "trim": own.get("trim") or []}, words, units))
     if words and not any(st == "keep" for st, _ in lab):
-        lab = [("keep", "se queda")] * len(words)
+        # the answer would empty the clip: everything stays (WHEN UNCERTAIN, KEEP) -- except camera cues
+        lab = hide_cues(words, units, [("keep", "se queda")] * len(words))
     return lab
 
 

@@ -473,3 +473,15 @@ def test_a_cue_glued_to_her_sentence_with_commas_is_hidden_and_her_words_stay():
     assert kept("Okay, go grab yours.") == "Okay, go grab yours."
     assert kept("Ready, set, glow is my favorite toner.") == "glow is my favorite toner."
     assert kept("I love it, ready for summer.") == "I love it, ready for summer."
+
+
+def test_a_clip_the_ai_would_empty_keeps_her_words_but_not_the_camera_cues():
+    """Production clip Be2 (21 Oct): Sonnet hid every line; the keep-everything fallback brought "Ready? Set." back."""
+    from cutsell_worker import mix_engine as engine
+    from cutsell_worker.simple_engine import engine as E
+    words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in
+             enumerate("That's okay. Ugh. Too many people. Ready? Set. These are the Okay.".split())]
+    units = E.lines_of(words)
+    lab = engine.clip_labels({"clips": [{"clip": 1, "hide": [[1, len(units), "n"]], "trim": []}]}, 0, words, units)
+    assert " ".join(w["w"] for w, (st, _) in zip(words, lab) if st == "keep") == \
+        "That's okay. Ugh. Too many people. These are the Okay."
