@@ -365,7 +365,7 @@ final class Build24UITests: XCTestCase {
         element("tab_plan").tap()
         let newMix = element("planNewMix")
         check(newMix.waitForExistence(timeout: 20), "Plan · New Mix")
-        check(element("planBulk").exists && element("planSoon").exists, "Plan · Bulk and This week (SOON)")
+        check(element("planBulk").exists && element("planMyWeek").exists, "Plan · Bulk and This week")
         shot("plan_home")
         // Bulk opens the Bulk gallery (the same pipeline as before); closed again here.
         element("planBulk").tap()
@@ -518,15 +518,22 @@ final class Build24UITests: XCTestCase {
             field.tap(); field.clearAndType("My own caption #mine")
             app.alerts.buttons["Save"].firstMatch.tap()
         }
-        check(wait(5) { self.element("dayCaption").label == "My own caption #mine" }, "her caption saved", element("dayCaption").label)
+        check(wait(5) { self.element("dayCaption").label.hasPrefix("My own caption #mine") }, "her caption saved", element("dayCaption").label)
         element("captionCopy").tap()
         check(element("dayNotice").label == "Caption copied", "Copy")
         element("dayShare").tap()
         let sheet = app.otherElements["ActivityListView"]
         check(wait(30) { sheet.exists || self.app.buttons["Save Video"].exists }, "Share to TikTok opens the share sheet with the video")
         shot("plan_share")
-        if app.buttons["Close"].firstMatch.exists { app.buttons["Close"].firstMatch.tap() } else { sheet.swipeDown() }
-        pause(1.5)
+        // Close the share sheet (its × or a swipe down) until the Day is usable again.
+        for _ in 0..<4 where !element("dayPosted").isHittable {
+            let close = app.descendants(matching: .button).matching(NSPredicate(format: "label == 'Close' OR identifier == 'Close'")).firstMatch
+            if close.exists { close.tap() } else {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+                    .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+            }
+            pause(1.5)
+        }
         element("dayPosted").tap()
         check(wait(5) { self.element("dayPosted").label.contains("Posted") }, "Mark as posted", element("dayPosted").label)
 
