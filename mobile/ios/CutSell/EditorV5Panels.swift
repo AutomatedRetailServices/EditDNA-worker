@@ -702,6 +702,18 @@ struct VoiceOverSheetV5: View {
             if step == .record { recordStep } else { reviewStep }
             Spacer(minLength: 0)
         }
+        .overlay(alignment: .topTrailing) {
+            // Close (like the other panels); also cancels the 3 · 2 · 1 countdown.
+            Button(action: onCancel) {
+                Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(Color(hex: 0xA3B2D6))
+                    .frame(width: 30, height: 30).background(Circle().fill(Color(hex: 0x14203A)))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 12).padding(.trailing, 14)
+            .disabled(saving)
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("voiceClose")
+        }
         .frame(maxWidth: .infinity)
         .frame(height: Self.height(step), alignment: .top)
         .background(Color(hex: 0x060D1F, opacity: 0.98), in: RoundedRectangle(cornerRadius: 26, style: .continuous))

@@ -569,8 +569,47 @@ final class Build24UITests: XCTestCase {
         // (d) baseline export (no voice): the workflow compares the video's sound with the one after
         _ = waitExport("before")
 
-        // (a) record in 2 steps: countdown 3·2·1, Enhance voice, Stop → Play / Retake / Save
+        // Closing the sheet (iPhone report, build 31): X, swipe down, tap outside; countdown cancel; discard asks first
         element("b17Step").tap(); pause(0.6)                       // cursor at 1 s
+        let sheetOpen = { self.element("voiceRecordSheet").exists || self.element("voiceReviewSheet").exists }
+        editorTool("voiceOver")
+        check(element("voiceRecordSheet").waitForExistence(timeout: 10), "sheet opens")
+        element("voiceClose").tap()
+        check(wait(3) { !sheetOpen() } && voices().isEmpty, "close: X before recording → editor, no change")
+        editorTool("voiceOver")
+        _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
+        element("voiceRecordSheet").swipeDown(velocity: .fast)
+        check(wait(3) { !sheetOpen() } && voices().isEmpty, "close: swipe down before recording")
+        editorTool("voiceOver")
+        _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+        check(wait(3) { !sheetOpen() } && voices().isEmpty, "close: tap outside before recording")
+        editorTool("voiceOver")
+        _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
+        element("voiceRecord").tap()
+        _ = element("voiceCountdown").waitForExistence(timeout: 3)
+        element("voiceClose").tap()
+        pause(4)
+        check(!sheetOpen() && !element("liveWave").exists && voices().isEmpty, "X cancels the 3·2·1 countdown (nothing recorded)")
+        editorTool("voiceOver")
+        _ = element("voiceRecordSheet").waitForExistence(timeout: 5)
+        element("voiceRecord").tap()
+        _ = element("liveWave").waitForExistence(timeout: 6)
+        pause(1.5)
+        element("voiceClose").tap()
+        let discard = app.alerts["Discard recording?"]
+        check(discard.waitForExistence(timeout: 3), "closing mid-recording asks Discard recording?")
+        shot("vo_discard_alert")
+        discard.buttons["Keep recording"].tap(); pause(1)
+        check(element("liveWave").exists, "Keep recording: still recording")
+        element("voiceFinish").tap()
+        _ = element("voiceReviewSheet").waitForExistence(timeout: 5)
+        element("voiceReviewSheet").swipeDown(velocity: .fast)
+        check(discard.waitForExistence(timeout: 3), "closing with an unsaved take asks Discard recording?")
+        discard.buttons["Discard"].tap()
+        check(wait(3) { !sheetOpen() } && voices().isEmpty, "Discard: back to the editor, nothing saved")
+
+        // (a) record in 2 steps: countdown 3·2·1, Enhance voice, Stop → Play / Retake / Save
         editorTool("voiceOver")
         check(element("voiceRecordSheet").waitForExistence(timeout: 10), "a) step 1: Recording voice-over sheet")
         check(element("enhanceVoice").exists, "a) Enhance voice switch")

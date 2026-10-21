@@ -32,6 +32,10 @@ struct EditorV4View: View {
     @State private var card: EditorPanelKind?
     /// 3 · 2 · 1 over the video before a voice-over records.
     @State private var countdown: Int?
+    /// The voice-over sheet follows a finger dragging it down; past 80 pt it asks to close.
+    @State private var voiceSheetDrag: CGFloat = 0
+    /// "Discard recording?" (closing with a take in progress or not saved).
+    @State private var confirmDiscardVoice = false
     /// "Record again" on a voice-over: the take replaces that one.
     @State private var recordAgainID: String?
     @State private var musicPicker = false
@@ -88,9 +92,13 @@ struct EditorV4View: View {
             }
             .ignoresSafeArea(.container, edges: .bottom)
             if isVoicePanel {
-                // Figma 1119:2316 / 1120:4: the voice-over sheet in two steps, over the timeline.
+                // Figma 1119:2316 / 1120:4: the voice-over sheet in two steps, over the timeline. It closes like the
+                // other panels: drag it down, tap outside it, or its X (a take in progress asks first).
                 VStack(spacing: 0) {
-                    Spacer(minLength: 0)
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { requestCloseVoiceSheet() }
+                        .accessibilityIdentifier("voiceSheetOutside")
                     VoiceOverSheetV5(model: model, recorder: recorder, start: playback.currentTime, replacing: recordAgainID,
                                      countdown: $countdown) { outcome in
                         panel = .none
@@ -102,12 +110,26 @@ struct EditorV4View: View {
                                                    : "Voiceover \(max(1, number)) added · tap ↶ to undo", undo: true))
                         }
                     } onCancel: {
-                        cancelVoiceSheet()
+                        requestCloseVoiceSheet()
                     }
                     .padding(.horizontal, 1)
+                    .offset(y: max(0, voiceSheetDrag))
+                    .gesture(DragGesture(minimumDistance: 12)
+                        .onChanged { voiceSheetDrag = $0.translation.height }
+                        .onEnded { value in
+                            let close = value.translation.height > 80 || value.predictedEndTranslation.height > 200
+                            withAnimation(.easeOut(duration: 0.2)) { voiceSheetDrag = 0 }
+                            if close { requestCloseVoiceSheet() }
+                        })
                 }
                 .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.move(edge: .bottom))
+                .alert("Discard recording?", isPresented: $confirmDiscardVoice) {
+                    Button("Discard", role: .destructive) { cancelVoiceSheet() }
+                    Button("Keep recording", role: .cancel) {}
+                } message: {
+                    Text("Your voice-over hasn’t been saved.")
+                }
             }
             if panel == .micPermission {
                 micPermissionCard
@@ -1489,6 +1511,18 @@ struct EditorV4View: View {
 
     private func openGallery(photos: Bool) {
         sheet = photos ? .overlayPhoto : .overlay
+    }
+
+    /// Closing the voice-over sheet: before recording it just closes (nothing changes); during the countdown it is
+    /// cancelled; with a take recording or not saved yet it asks "Discard recording?" -- it never saves by itself.
+    private func requestCloseVoiceSheet() {
+        if countdown != nil {
+            cancelVoiceSheet()
+        } else if recorder.state == .recording || recorder.recordedURL != nil {
+            confirmDiscardVoice = true
+        } else {
+            cancelVoiceSheet()
+        }
     }
 
     private func cancelVoiceSheet() {
