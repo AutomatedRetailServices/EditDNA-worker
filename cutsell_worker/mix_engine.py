@@ -255,9 +255,33 @@ def hide_cues(words: list[dict], units: list[list[int]], lab: list[tuple[str, st
     a count, "are you recording?"). Never empties a clip."""
     out = list(lab)
     for u in units:
-        if u and is_camera_cue([_engine._norm(words[k]["w"]) for k in u]):
+        if not u:
+            continue
+        if is_camera_cue([_engine._norm(words[k]["w"]) for k in u]):
             for k in u:
                 out[k] = ("hide", "ruido")
+            continue
+        # a cue glued to her sentence with commas ("Ready, set, these are the...", "...link below, one more time"):
+        # the comma-separated pieces at the start or the end of the sentence that are cues are hidden
+        chunks, cur = [], []
+        for k in u:
+            cur.append(k)
+            if str(words[k]["w"]).rstrip().endswith(","):
+                chunks.append(cur); cur = []
+        if cur:
+            chunks.append(cur)
+        if len(chunks) < 2:
+            continue
+        cue = lambda c: is_camera_cue([_engine._norm(words[k]["w"]) for k in c])
+        i, j = 0, len(chunks) - 1
+        while i < j and cue(chunks[i]):
+            for k in chunks[i]:
+                out[k] = ("hide", "ruido")
+            i += 1
+        while j > i and cue(chunks[j]):
+            for k in chunks[j]:
+                out[k] = ("hide", "ruido")
+            j -= 1
     return out if any(st == "keep" for st, _ in out) else list(lab)
 
 

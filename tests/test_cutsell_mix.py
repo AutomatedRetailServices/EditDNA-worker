@@ -459,3 +459,17 @@ def test_a_hidden_cue_said_back_to_back_with_her_words_is_cut_out(tmp_path):
     parts = engine.drop_hidden_words(engine.kept_parts(engine.finish_clip(words, lab, dur, path)), words, lab)
     kept = " ".join(w["w"] for w in words if any(a <= (w["s"] + w["e"]) / 2 <= b for a, b in parts))
     assert kept == "That's okay. Ugh. Too many people. These are the Okay."
+
+
+def test_a_cue_glued_to_her_sentence_with_commas_is_hidden_and_her_words_stay():
+    from cutsell_worker import mix_engine as engine
+    from cutsell_worker.simple_engine import engine as E
+    def kept(text):
+        words = [{"w": w, "s": i * 0.3, "e": i * 0.3 + 0.25} for i, w in enumerate(text.split())]
+        lab = engine.clip_labels({"clips": [{"clip": 1, "hide": [], "trim": []}]}, 0, words, E.lines_of(words))
+        return " ".join(w["w"] for w, (st, _) in zip(words, lab) if st == "keep")
+    assert kept("Too many people. Ready, set, these are the straps.") == "Too many people. these are the straps."
+    assert kept("Grab yours below, one more time.") == "Grab yours below,"
+    assert kept("Okay, go grab yours.") == "Okay, go grab yours."
+    assert kept("Ready, set, glow is my favorite toner.") == "glow is my favorite toner."
+    assert kept("I love it, ready for summer.") == "I love it, ready for summer."
