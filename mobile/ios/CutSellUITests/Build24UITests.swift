@@ -660,15 +660,16 @@ final class Build24UITests: XCTestCase {
         pause(1.5)
         let moved = voices().first ?? ""
         check(moved != before && moved.split(separator: "+").first != before.split(separator: "+").first, "b) moved by dragging", "\(before) → \(moved)")
-        if !element("audioTrimEnd").exists { element("voiceBlock").tap(); pause(0.8) }
-        let handle = element("audioTrimEnd")
+        // the voice now runs past the right side of the screen: its START edge is the one in view
+        if !element("audioTrimStart").exists { element("voiceBlock").tap(); pause(0.8) }
+        let handle = element("audioTrimStart")
         if handle.exists {
             let h = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            h.press(forDuration: 0.1, thenDragTo: h.withOffset(CGVector(dx: -30, dy: 0)))
+            h.press(forDuration: 0.1, thenDragTo: h.withOffset(CGVector(dx: 30, dy: 0)))
             pause(1.5)
         }
         let trimmed = voices().first ?? ""
-        check(handle.exists && trimmed != moved, "b) end edge trimmed", "\(moved) → \(trimmed)")
+        check(handle.exists && trimmed != moved, "b) edge trimmed (start edge dragged in)", "\(moved) → \(trimmed)")
         shot("vo_moved_trimmed")
         // cursor into the middle of the voice, then Split
         let parts = trimmed.split(separator: "+")
