@@ -1,15 +1,41 @@
-B24UI    33.5 PASS meter X / N cuts · Plan · 7 / 30 cuts ·, Plan
-B24UI    34.3 PASS Upload videos · single chip
-B24UI    35.4 PASS Upload videos · bulk chip
-B24UI    36.0 PASS Upload videos · combine chip
-B24UI    36.6 PASS Mix row
-B24UI    37.3 PASS Record with CutSell + Voice Over project
-B24UI    37.4 PASS Recent cuts · See all in Edits
-B24UI    39.7 PASS Mix row opens Mix · Setup
-B24UI    50.7 Photos access allowed
-B24UI    52.9 PASS gallery mode picker
-B24UI    53.0 PASS gallery shows Single
-B24UI    53.1 PASS gallery shows Bulk
-B24UI    53.2 PASS gallery shows Combine
-B24UI    53.3 PASS Bulk chip opened the gallery in Bulk
-B24UI    53.6 FAILURES: none
+B24UI    41.1 PASS Plan card
+B24UI    48.2 PASS Goal
+B24UI    59.6 PASS week built
+B24UI    65.5 PASS Day: big Post to TikTok button
+B24UI    67.8 PASS Share below it
+B24UI    94.3 Photos access allowed
+B24UI    95.5 PASS Caption copied, paste it in TikTok
+B24UI   113.5 left CutSell for TikTok / App Store: true
+B24UI   145.2 PASS back from TikTok: Did you post it?
+B24UI   148.2 PASS Yes, posted / Not yet
+B24UI   166.1 PASS Yes, posted marks it posted · ✓  Posted
+B24UI   166.6 FAILURES: none
+B24UI    34.6 PASS Plan · This week card
+B24UI    35.2 PASS no SOON any more
+B24UI    38.3 PASS Plan my week · Goal
+B24UI    38.8 PASS HOW MANY VIDEOS starts at all usable · 9
+B24UI    40.6 PASS − takes one away · 8
+B24UI    42.1 PASS + adds one (never above the usable videos) · 9
+B24UI    44.0 PASS + stops at all usable · 9
+B24UI    45.8 PASS no 1/2/3/4+ and no Morning/Evening/Night
+B24UI    52.0 PASS + Time adds a time · 3 times = 3 videos per day. Tap a time to change it.
+B24UI    55.4 PASS a time can be changed or deleted
+B24UI    58.4 PASS time deleted · 2 times = 2 videos per day. Tap a time to change it.
+B24UI    59.9 PASS START: Tomorrow · Tomorrow · Thu 22, Change
+B24UI    61.3 PASS live summary N videos · X per day · Y days · ✦  9 videos · 2 per day · 5 days, Thu 22 → Mon 26 · 6 products
+B24UI    69.7 PASS Week built
+B24UI    70.4 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
+B24UI    71.7 PASS all 9 fit (no ends-early note)
+B24UI    81.4 PASS move sheet
+B24UI    85.4 PASS still 9 videos after the move
+B24UI    88.8 PASS Day
+B24UI    90.1 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
+B24UI   106.2 PASS her caption saved · My own caption #mine #tiktokshop
+B24UI   107.8 PASS Copy
+B24UI   113.1 PASS Share opens the share sheet with the video
+B24UI   124.6 PASS Mark as posted · ✓  Posted
+B24UI   134.9 PASS "Time to post" reminder
+B24UI   140.8 PASS the reminder opens its day
+B24UI   149.3 PASS week built again
+B24UI   151.2 PASS posted stays posted after rebuilding
+B24UI   151.2 FAILURES: none

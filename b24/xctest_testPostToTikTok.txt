@@ -1,0 +1,16 @@
+B24UI    41.1 PASS Plan card
+B24UI    48.2 PASS Goal
+B24UI    59.6 PASS week built
+B24UI    65.5 PASS Day: big Post to TikTok button
+B24UI    67.8 PASS Share below it
+B24UI    94.3 Photos access allowed
+B24UI    95.5 PASS Caption copied, paste it in TikTok
+B24UI   113.5 left CutSell for TikTok / App Store: true
+B24UI   145.2 PASS back from TikTok: Did you post it?
+B24UI   148.2 PASS Yes, posted / Not yet
+B24UI   166.1 PASS Yes, posted marks it posted · ✓  Posted
+B24UI   166.6 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testPostToTikTok]' passed (168.312 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-21 21:26:11.115.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-21 21:26:11.117.
+Test Suite 'Selected tests' passed at 2026-10-21 21:26:11.118.
