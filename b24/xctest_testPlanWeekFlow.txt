@@ -1,23 +1,24 @@
-B24UI    17.8 PASS Plan · This week card
-B24UI    18.0 PASS no SOON any more
-B24UI    20.6 PASS Plan my week · Goal
-B24UI    27.8 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
-B24UI    33.1 PASS Week built
-B24UI    33.3 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
-B24UI    33.4 PASS the days without videos: New Mix ›
-B24UI    39.6 PASS move sheet
-B24UI    42.2 PASS still 9 videos after the move
-B24UI    45.2 PASS Day
-B24UI    45.5 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
-B24UI    64.0 PASS her caption saved · My own caption #mine #tiktokshop
-B24UI    64.8 PASS Copy
-B24UI    75.2 PASS Share to TikTok opens the share sheet with the video
-B24UI    81.4 PASS Mark as posted · ✓  Posted
-B24UI    92.3 PASS "Time to post" reminder
-B24UI   111.0 FAIL the reminder opens its day
-B24UI   148.8 FAIL week built again
-/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:554: error: -[CutSellUITests.Build24UITests testPlanWeekFlow] : Failed to tap "weekDay_2026-10-21" Other: No matches found for first query match sequence: `Descendants matching type Any` -> `Elements matching predicate 'identifier BEGINSWITH "weekDay_"'`, given input App element pid: 17027
-Test Case '-[CutSellUITests.Build24UITests testPlanWeekFlow]' failed (154.349 seconds).
-Test Suite 'Build24UITests' failed at 2026-10-21 01:32:01.841.
-Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 01:32:01.841.
-Test Suite 'Selected tests' failed at 2026-10-21 01:32:01.841.
+B24UI    18.0 PASS Plan · This week card
+B24UI    18.3 PASS no SOON any more
+B24UI    20.7 PASS Plan my week · Goal
+B24UI    23.8 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
+B24UI    28.3 PASS Week built
+B24UI    28.7 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
+B24UI    29.0 PASS the days without videos: New Mix ›
+B24UI    36.2 PASS move sheet
+B24UI    39.3 PASS still 9 videos after the move
+B24UI    41.6 PASS Day
+B24UI    42.5 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
+B24UI    60.5 PASS her caption saved · My own caption #mine #tiktokshop
+B24UI    61.7 PASS Copy
+B24UI    65.7 PASS Share to TikTok opens the share sheet with the video
+B24UI    72.6 PASS Mark as posted · ✓  Posted
+B24UI    83.4 PASS "Time to post" reminder
+B24UI    88.0 PASS the reminder opens its day
+B24UI    95.7 PASS week built again
+B24UI    97.1 PASS posted stays posted after rebuilding
+B24UI    97.1 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testPlanWeekFlow]' passed (97.640 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-21 01:48:47.542.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-21 01:48:47.543.
+Test Suite 'Selected tests' passed at 2026-10-21 01:48:47.543.
