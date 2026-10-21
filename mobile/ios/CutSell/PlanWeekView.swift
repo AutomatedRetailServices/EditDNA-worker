@@ -674,11 +674,12 @@ struct TimePickerSheet: View {
 struct PlanWeekView: View {
     let onNewMix: () -> Void
     let onSettings: () -> Void
+    /// One navigation path for the whole Plan tab (a reminder can open a day from anywhere).
+    let onOpenDay: (String) -> Void
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = PlanWeekStore.shared
     @ObservedObject private var thumbnails = ThumbnailStore.shared
-    @State private var openDay: String?
     @State private var moving: PlanSlot?
 
     private var days: [String] { Array(Set((store.state?.week?.slots ?? []).map(\.date))).sorted() }
@@ -729,9 +730,6 @@ struct PlanWeekView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(.dark)
-        .navigationDestination(item: Binding(get: { openDay.map { DayRoute(id: $0) } }, set: { openDay = $0?.id })) { route in
-            PlanDayView(day: route.id).environmentObject(appState)
-        }
         .sheet(item: $moving) { slot in
             MoveSlotSheet(slot: slot).environmentObject(appState)
                 .presentationDetents([.height(420)])
@@ -758,7 +756,7 @@ struct PlanWeekView: View {
         let slots = (store.state?.week?.slots ?? []).filter { $0.date == day }
         let isToday = day == store.state?.today
         let allPosted = !slots.isEmpty && slots.allSatisfy { $0.postedAt != nil }
-        return Button { openDay = day } label: {
+        return Button { onOpenDay(day) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Text(PlanDay.short(day)).font(CS.inter(14, .bold)).foregroundStyle(.white)

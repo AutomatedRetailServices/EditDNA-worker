@@ -25,7 +25,8 @@ struct PlanView: View {
                     case .goal:
                         PlanGoalView(onBuilt: { path = [.week] }).environmentObject(appState)
                     case .week:
-                        PlanWeekView(onNewMix: { showingMix = true }, onSettings: { path.append(.goal) }).environmentObject(appState)
+                        PlanWeekView(onNewMix: { showingMix = true }, onSettings: { path.append(.goal) },
+                                     onOpenDay: { path.append(.day($0)) }).environmentObject(appState)
                     case .day(let day):
                         PlanDayView(day: day).environmentObject(appState)
                     }
