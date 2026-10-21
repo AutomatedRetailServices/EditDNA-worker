@@ -1,0 +1,27 @@
+B24UI    29.1 PASS editor open on a real cut
+B24UI    33.6 start curves= key_btn=add ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI    34.0 auto zoom ◇ from the engine: ai=8 auto_zoom=true
+B24UI    46.2 PASS 2) ◇ adds a keyframe at the line (100 %) · curves=ease_in_out key_btn=delete ai=8 user=1 sounds= voices= muted_clips=0 user_scales=1.00 user_rot=0 auto_zoom=false overlays= sel=none pending=none vv=1.00 t=0.50 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI    47.0 PASS 5) on a ◇ the button removes it
+B24UI    54.8 PASS off a ◇ the button adds
+B24UI    59.1 PASS 3) pinch away from a ◇ makes a keyframe there · curves=ease_in_out,ease_in_out key_btn=delete ai=8 user=2 sounds= voices= muted_clips=0 user_scales=1.00,1.27 user_rot=0,12 auto_zoom=false overlays= sel=none pending=none vv=1.00 t=2.00 zoom=1.266 rot=11.9 playing=false session=Playback/MoviePlayback
+B24UI    60.3 FAIL second keyframe zoomed in · zoom 1.000
+B24UI    71.3 PASS third keyframe back out by pinching · curves=ease_in_out,ease_in_out,ease_in_out key_btn=delete ai=8 user=3 sounds= voices= muted_clips=0 user_scales=1.00,1.27,1.00 user_rot=0,12,12 auto_zoom=false overlays= sel=none pending=none vv=1.00 t=3.50 zoom=1.000 rot=11.9 playing=false session=Playback/MoviePlayback
+B24UI    72.0 keyframes 1.00,1.27,1.00
+B24UI    97.3 PASS 8) held before the first ◇ · -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000
+B24UI    97.3 FAIL 4) smooth in then out (ease in-out), never a jump · -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000 -1.0:-1.000
+B24UI   104.4 FAIL 6) ‹ › go to the previous / next ◇ · -1.00 -1.00 -1.00
+B24UI   107.0 PASS 7) tapping a ◇ shows Linear / Ease in / Ease out / Ease in-out
+B24UI   109.4 PASS 7) curve saved on that ◇ · ease_in_out,linear,ease_in_out
+B24UI   112.2 PLAY_START epoch=1792619334.97124
+B24UI   125.4 PLAY_END epoch=1792619348.170666
+B24UI   125.4 FAIL 10) the line advances while playing · -1.00:-1.000 -1.00:-1.000 -1.00:-1.000 -1.00:-1.000 -1.00:-1.000 -1.00:-1.000 -1.00:-1.000 -1.00:-1.000
+B24UI   548.4 FAIL export keyframes finished
+B24UI   619.5 auto zoom on: ai=8 auto_zoom=false
+B24UI   619.9 end curves=ease_in_out,ease_in_out,ease_in_out key_btn=add ai=8 user=3 sounds= voices= muted_clips=0 user_scales=1.00,1.27,1.00 user_rot=0,12,12 auto_zoom=false overlays= sel=keyframe pending=none vv=1.00 t=2.14 zoom=1.260 rot=11.9 playing=false session=Playback/MoviePlayback
+B24UI   619.9 FAILURES: second keyframe zoomed in | 4) smooth in then out (ease in-out), never a jump | 6) ‹ › go to the previous / next ◇ | 10) the line advances while playing | export keyframes finished
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:935: error: -[CutSellUITests.Build24UITests testKeyframesCapCut] : XCTAssertTrue failed - second keyframe zoomed in | 4) smooth in then out (ease in-out), never a jump | 6) ‹ › go to the previous / next ◇ | 10) the line advances while playing | export keyframes finished
+Test Case '-[CutSellUITests.Build24UITests testKeyframesCapCut]' failed (622.277 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-21 21:57:25.116.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 21:57:25.119.
+Test Suite 'Selected tests' failed at 2026-10-21 21:57:25.120.
