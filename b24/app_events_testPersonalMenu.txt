@@ -1,1 +1,1 @@
-editor_opened local_video=no seconds=4.9
+editor_opened local_video=no seconds=4.3

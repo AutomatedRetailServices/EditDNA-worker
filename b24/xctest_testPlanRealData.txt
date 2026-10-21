@@ -1,10 +1,10 @@
-B24UI    24.7 PASS her plan data given to the simulator
-B24UI    27.4 PASS Plan card
-B24UI    30.8 PASS Goal v2
-B24UI    32.3 goal: count 9 · ✦  9 videos · 2 per day · 5 days, Thu 22 → Tue 27 · 6 products · 2 times = 2 videos per day. Tap a time to change it.
-B24UI    39.5 PASS her plan built · 9 videos · 6 products · 2 per day
-B24UI    49.2 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testPlanRealData]' passed (49.730 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-21 15:26:11.029.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-21 15:26:11.029.
-Test Suite 'Selected tests' passed at 2026-10-21 15:26:11.030.
+B24UI    44.8 PASS her plan data given to the simulator
+B24UI    51.9 PASS Plan card
+B24UI    58.9 PASS Goal v2
+B24UI    61.0 goal: count 11 · ✦  11 videos · 3 per day · 4 days, Thu 22 → Tue 27 · 7 products · 3 times = 3 videos per day. Tap a time to change it.
+B24UI    67.5 PASS her plan built · 11 videos · 7 products · 3 per day
+B24UI    76.9 FAILURES: none
+Test Case '-[CutSellUITests.Build24UITests testPlanRealData]' passed (77.367 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-21 15:49:52.337.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-21 15:49:52.338.
+Test Suite 'Selected tests' passed at 2026-10-21 15:49:52.339.
