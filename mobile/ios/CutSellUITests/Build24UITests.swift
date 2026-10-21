@@ -71,9 +71,19 @@ final class Build24UITests: XCTestCase {
     }
 
     private func allowPhotos() {
+        // The Photos prompt can come up late (a busy simulator): wait up to 60 s for it or for the gallery, in
+        // SpringBoard, in the app and in the Photos picker service; an interruption monitor catches it too.
+        let monitor = addUIInterruptionMonitor(withDescription: "Photos access") { alert in
+            for label in ["Allow Full Access", "Allow Access to All Photos", "Allow"] where alert.buttons[label].exists {
+                alert.buttons[label].tap(); return true
+            }
+            return false
+        }
+        defer { removeUIInterruptionMonitor(monitor) }
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for _ in 0..<30 {
-            for source in [springboard, app!] {
+        let photosService = XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow")
+        for _ in 0..<60 {
+            for source in [springboard, app!, photosService] {
                 let allow = source.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Full Access")).firstMatch
                 if allow.exists { allow.tap(); log("Photos access allowed"); return }
             }
@@ -488,7 +498,11 @@ final class Build24UITests: XCTestCase {
         element("hubMode_bulk").tap()
         allowPhotos()
         let picker = element("createModePicker")
-        check(picker.waitForExistence(timeout: 20), "gallery mode picker")
+        if !picker.waitForExistence(timeout: 20) {
+            app.swipeUp(velocity: .slow)                 // nudges the interruption monitor if the prompt is still up
+            allowPhotos()
+        }
+        check(picker.waitForExistence(timeout: 30), "gallery mode picker")
         for title in ["Single", "Bulk", "Combine"] {
             check(picker.buttons[title].exists || app.buttons[title].exists, "gallery shows \(title)")
         }
