@@ -87,6 +87,16 @@ def enqueue_mix(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmi
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
 
+def enqueue_captions(payload: dict, *, queue=None, timeout: int = 900) -> QueueSubmission:
+    """Plan my week: posting captions for planned videos that do not have one yet (written once)."""
+    target = queue or get_queue()
+    job = target.enqueue("cutsell_worker.post_captions.run_caption_job", payload, job_timeout=timeout,
+                         result_ttl=86400, failure_ttl=86400,
+                         meta={"user_id": str(payload.get("user_id") or ""), "captions": True})
+    threading.Thread(target=wake_worker, name="wake-worker", daemon=True).start()
+    return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+
+
 def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
     target = queue or get_queue()
     job = target.enqueue(

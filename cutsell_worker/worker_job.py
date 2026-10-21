@@ -714,6 +714,18 @@ def run_flow_b_job(payload: dict) -> dict:
                     video_path=None if first.source_asset_id in audio_only else local_paths.get(first.source_asset_id),
                     duration=measured_by_source.get(first.source_asset_id),
                 )
+                # Plan my week: where this video came from, and its posting caption (written once, Haiku, after
+                # the cut and its brand / product; never able to change or fail the cut).
+                try:
+                    from .post_plan import record_source
+                    from .simple_engine_adapter import is_bulk
+                    record_source(request.user_id, request.project_id,
+                                  "combine" if len(request.sources) > 1 else "bulk" if is_bulk(request.sources) else "single")
+                except Exception:
+                    pass
+                from .post_captions import caption_once
+                serialized["post_caption"] = caption_once(user_id=request.user_id, project_id=request.project_id,
+                                                          draft=serialized["draft"])
             publish("draft_ready", 100)
             return serialized
     except Exception as exc:

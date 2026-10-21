@@ -377,7 +377,25 @@ def _combo_phase(user_id, mix_id, record, deps, work: Path) -> dict:
     record = _set(user_id, mix_id, deps, finish)
     if done and not record.get("announced"):
         _announce(user_id, record, deps)
+        _captions(user_id, record, deps)
     return record
+
+
+def _captions(user_id, record, deps):
+    """Plan my week: each video of the Mix is a Mix video, with its posting caption written once (Haiku)."""
+    if deps.after_combo is not _after_combo:
+        return                                      # tests / probes that do not store real projects
+    from .post_captions import caption_once
+    from .post_plan import record_source
+
+    def one(combo):
+        try:
+            record_source(user_id, combo["project_id"], "mix")
+            caption_once(user_id=user_id, project_id=combo["project_id"])
+        except Exception:
+            pass
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(one, record["combos"]))
 
 
 def _combo_state(d, n, state, **extra):

@@ -12,6 +12,7 @@ from cutsell_app.auth_routes import router as auth_router
 from cutsell_app.batch_routes import router as batch_router
 from cutsell_app.catalog_routes import router as catalog_router
 from cutsell_app.mix_routes import router as mix_router
+from cutsell_app.plan_routes import router as plan_router
 from cutsell_app.feedback_routes import router as feedback_router
 from cutsell_app.job_retry_routes import router as job_retry_router
 from cutsell_app.multipart_routes import router as multipart_router
@@ -71,6 +72,7 @@ app.include_router(feedback_router)
 app.include_router(batch_router)
 app.include_router(catalog_router)
 app.include_router(mix_router)
+app.include_router(plan_router)
 app.include_router(notification_router)
 app.include_router(pending_review_router)
 app.include_router(clean_audio_router)
@@ -386,7 +388,8 @@ def submit_flow_b(payload: FlowBSubmitRequest):
 @app.get("/v1/capabilities")
 def capabilities():
     """What this server can do (the app checks before using a newer flow; an older server answers 404)."""
-    return {"audio_first": True, "video_ready": True, "idempotent_multipart_complete": True, "mix": True}
+    return {"audio_first": True, "video_ready": True, "idempotent_multipart_complete": True, "mix": True,
+            "plan_week": True}
 
 
 class VideoReadyRequest(BaseModel):
