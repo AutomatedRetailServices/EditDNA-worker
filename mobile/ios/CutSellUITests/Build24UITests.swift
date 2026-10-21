@@ -469,11 +469,40 @@ final class Build24UITests: XCTestCase {
     /// Plan my week (Figma 1138:2749 / 2798 / 2872) with an in-memory plan (-CutSellPlanMock): Goal → Build my week →
     /// Week (videos of the 4 origins) → move a video → Day: caption edit / copy, Share to TikTok (share sheet with the
     /// video), Save, Mark as posted → rebuild keeps it posted → a "Time to post" reminder opens its day.
+    func testCreateHub() throws {
+        launchApp(fresh: true)
+        pause(2)
+        shot("create_hub")
+        check(element("planMeter").exists, "meter X / N cuts · Plan", element("planMeter").label)
+        for mode in ["single", "bulk", "combine"] { check(element("hubMode_\(mode)").exists, "Upload videos · \(mode) chip") }
+        check(element("hubMix").exists, "Mix row")
+        check(element("hubRecord").exists && element("hubVoiceOver").exists, "Record with CutSell + Voice Over project")
+        check(app.buttons["See all in Edits"].exists, "Recent cuts · See all in Edits")
+        // Mix row → Mix · Setup (the same screen as New Mix in Plan)
+        element("hubMix").tap()
+        check(element("mixProduct").waitForExistence(timeout: 15), "Mix row opens Mix · Setup")
+        shot("create_mix_setup")
+        element("mixClose").tap()
+        pause(1)
+        // Bulk → the gallery, with Single · Bulk · Combine at the bottom (Figma 484:214)
+        element("hubMode_bulk").tap()
+        allowPhotos()
+        let picker = element("createModePicker")
+        check(picker.waitForExistence(timeout: 20), "gallery mode picker")
+        for title in ["Single", "Bulk", "Combine"] {
+            check(picker.buttons[title].exists || app.buttons[title].exists, "gallery shows \(title)")
+        }
+        check(app.staticTexts["Each video becomes a separate edit."].exists, "Bulk chip opened the gallery in Bulk")
+        shot("create_gallery_bulk")
+        done()
+    }
+
     func testPersonalMenu() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock"])
         element("tab_edits").tap()
-        let options = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Options for'"))
-        check(options.firstMatch.waitForExistence(timeout: 30), "a video's ••• in Edits", "\(options.count)")
+        let options = app.descendants(matching: .any).matching(identifier: "editTileMenuReady")
+        check(options.firstMatch.waitForExistence(timeout: 30), "a Ready video's ••• in Edits",
+              "\(options.count) · all tiles \(app.descendants(matching: .any).matching(identifier: "editTileMenu").count)")
         guard options.count > 0 else { return done() }
         // the first Ready video: its menu has "Personal · don't plan"
         var index = 0

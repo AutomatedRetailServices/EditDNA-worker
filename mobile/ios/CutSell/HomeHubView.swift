@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Create tab start screen (Figma 03_Create "Create v2/Home Hub", node 1068:22).
-/// The plan meter ("7 / 30 cuts · Plan") is left out until plans exist: no invented numbers.
+/// Create tab start screen (Figma 03_Create "Create v3/Home Hub · Mix", node 1139:2814 = Home Hub 1068:22 + a Mix row).
 struct HomeHubView: View {
     let onUpload: (CreateMode) -> Void
+    var onMix: () -> Void = {}
     let onRecord: () -> Void
     let onOpenProject: (Project) -> Void
     let selectTab: (MainTab) -> Void
@@ -35,6 +35,7 @@ struct HomeHubView: View {
                     .padding(.bottom, 4)
 
                     uploadCard
+                    mixRow
                     rowCard(icon: "HubCamera", title: "Record with CutSell",
                             subtitle: "Camera with clips · 60s · 3m · 10m", id: "hubRecord", action: onRecord)
                     rowCard(icon: "HubMic", title: "Voice Over project",
@@ -135,8 +136,7 @@ struct HomeHubView: View {
             .contentShape(Rectangle())
             .onTapGesture { onUpload(.single) }
                 HStack(spacing: 6) {
-                    // Create is for ONE video; Bulk and Mix are in Plan.
-                    ForEach([CreateMode.single, .combine], id: \.self) { mode in
+                    ForEach([CreateMode.single, .bulk, .combine], id: \.self) { mode in
                         Button { onUpload(mode) } label: {
                             Text(mode.title)
                                 .font(CS.inter(12, .semibold))
@@ -159,6 +159,36 @@ struct HomeHubView: View {
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("hubUpload")
+    }
+
+    /// Figma 1139:2886 "Mix": opens Mix · Setup (the same screen as New Mix in Plan).
+    private var mixRow: some View {
+        Button(action: onMix) {
+            HStack(spacing: 14) {
+                Text("⊞")
+                    .font(CS.inter(18, .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(CS.brandFull, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Mix")
+                        .font(CS.inter(16, .bold))
+                        .foregroundStyle(CS.textPrimaryF)
+                    Text("Hooks × bodies × CTAs → many videos")
+                        .font(CS.inter(13))
+                        .foregroundStyle(CS.textMutedF)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image("HubChevron").resizable().frame(width: 20, height: 20)
+            }
+            .padding(16)
+            .background(CS.surfaceCard, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("hubMix")
     }
 
     private func rowCard(icon: String, title: String, subtitle: String, id: String, action: @escaping () -> Void) -> some View {

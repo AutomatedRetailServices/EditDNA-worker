@@ -32,7 +32,7 @@ def test_mix_in_edits_and_products():
     products = read("ProductsView.swift")
     assert "Mix ready: \\(total) videos from" in products and "Export all" in products and 'mixCode = "mix_code"' in products
     hub = read("HomeHubView.swift")
-    assert "ForEach([CreateMode.single, .combine]" in hub and "onMix" not in hub
+    assert "ForEach([CreateMode.single, .bulk, .combine]" in hub and "onMix" in hub   # Figma 1139:2814 (21 Oct)
     assert "$0.state != Project.mixContainerState" in read("AppState.swift")
 
 
@@ -43,7 +43,7 @@ def test_plan_home_has_mix_bulk_in_progress_and_soon():
         assert text in plan
     assert "MixSetupView(" in plan and "queue.requestedCreateMode = .bulk" in plan and "queue.focus = focus" in plan
     assert "struct PlanView" not in read("MainTabView.swift")
-    assert "allowedModes: route.mode == .bulk ? [.bulk] : [.single, .combine]" in read("CreateFlowView.swift")
+    assert "allowedModes: CreateMode.allCases" in read("CreateFlowView.swift")             # Figma 484:214
 
 
 def test_plan_my_week_screens():
@@ -68,3 +68,11 @@ def test_edits_menu_marks_a_video_personal_through_the_plan_route():
     store = (root / "PlanWeekView.swift").read_text()
     assert "Personal · don't plan" in tiles and "Use in Plan" in tiles
     assert '"/v1/plan/personal"' in store and "var personal: [String]?" in store
+
+
+def test_create_hub_is_the_figma_mix_hub():
+    root = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    hub = (root / "HomeHubView.swift").read_text()
+    flow = (root / "CreateFlowView.swift").read_text()
+    assert "[CreateMode.single, .bulk, .combine]" in hub and '"hubMix"' in hub and "Hooks × bodies × CTAs → many videos" in hub
+    assert "MixSetupView(" in flow and "allowedModes: CreateMode.allCases" in flow

@@ -11,6 +11,7 @@ struct CreateFlowView: View {
     @StateObject private var submitter = CutSubmitter()
     @ObservedObject private var queue = ProcessingQueue.shared
     @State private var showingCamera = false
+    @State private var showingMix = false
     @State private var afterCamera: AfterCamera?
     @State private var showingGallery = false
     @State private var galleryMode: CreateMode = .single
@@ -50,6 +51,7 @@ struct CreateFlowView: View {
         NavigationStack(path: $path) {
             HomeHubView(
                 onUpload: { mode in galleryMode = mode; showingGallery = true },
+                onMix: { showingMix = true },
                 onRecord: { showingCamera = true },
                 onOpenProject: { path.append($0) },
                 selectTab: selectTab
@@ -81,6 +83,16 @@ struct CreateFlowView: View {
             queue.requestedCreateMode = nil
             galleryMode = mode
             showingGallery = true
+        }
+        // Create · Mix row: the same Mix · Setup as New Mix in Plan.
+        .fullScreenCover(isPresented: $showingMix) {
+            MixSetupView(onClose: { showingMix = false }, onStarted: { summary in
+                showingMix = false
+                queue.requestedMix = summary
+                queue.focus = summary.mixID
+                openEditsProcessing()
+            })
+            .environmentObject(appState)
         }
         .fullScreenCover(isPresented: $showingCamera, onDismiss: {
             switch afterCamera {
@@ -127,8 +139,8 @@ struct CreateFlowView: View {
                     showingGallery = false
                 },
                 initialMode: route.mode,
-                // Create is for ONE video (one clip, or several clips made into one); Bulk lives in Plan.
-                allowedModes: route.mode == .bulk ? [.bulk] : [.single, .combine]
+                // Figma 484:214: Single · Bulk · Combine at the bottom of the gallery.
+                allowedModes: CreateMode.allCases
             )
         }
         .fullScreenCover(item: $job, onDismiss: {

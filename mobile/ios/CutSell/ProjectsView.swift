@@ -528,6 +528,7 @@ struct EditTile: View {
                         .frame(width: 34, height: 28)
                 }
                 .accessibilityLabel("Options for \(project.title)")
+                .accessibilityIdentifier(isReady ? "editTileMenuReady" : "editTileMenu")
             }
             .overlay {
                 if isProcessing {
@@ -544,7 +545,8 @@ struct EditTile: View {
                     .padding(.bottom, 8)
             }
             .contentShape(Rectangle())
-            .accessibilityElement(children: .combine)
+            // .contain (not .combine): the ••• menu stays its own button for VoiceOver and the UI tests
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("\(project.title), \(isReady ? "ready" : isProcessing ? "processing" : "draft")")
     }
 }
