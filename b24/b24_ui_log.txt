@@ -1,20 +1,18 @@
-B24UI    18.1 PASS Plan · This week card
-B24UI    19.2 PASS no SOON any more
-B24UI    22.7 PASS Plan my week · Goal
-B24UI    26.6 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
-B24UI    30.6 PASS Week built
-B24UI    31.0 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
-B24UI    31.2 PASS the days without videos: New Mix ›
-B24UI    37.7 PASS move sheet
-B24UI    40.4 PASS still 9 videos after the move
-B24UI    43.0 PASS Day
-B24UI    43.7 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
-B24UI    61.0 PASS her caption saved · My own caption #mine #tiktokshop
-B24UI    64.3 PASS Copy
-B24UI    77.6 PASS Share to TikTok opens the share sheet with the video
-B24UI    89.1 PASS Mark as posted · ✓  Posted
-B24UI   138.1 FAIL "Time to post" reminder
-B24UI   142.8 PASS the reminder opens its day
-B24UI   157.0 PASS week built again
-B24UI   158.5 PASS posted stays posted after rebuilding
-B24UI   158.6 FAILURES: "Time to post" reminder
+B24UI    17.8 PASS Plan · This week card
+B24UI    18.0 PASS no SOON any more
+B24UI    20.6 PASS Plan my week · Goal
+B24UI    27.8 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
+B24UI    33.1 PASS Week built
+B24UI    33.3 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
+B24UI    33.4 PASS the days without videos: New Mix ›
+B24UI    39.6 PASS move sheet
+B24UI    42.2 PASS still 9 videos after the move
+B24UI    45.2 PASS Day
+B24UI    45.5 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
+B24UI    64.0 PASS her caption saved · My own caption #mine #tiktokshop
+B24UI    64.8 PASS Copy
+B24UI    75.2 PASS Share to TikTok opens the share sheet with the video
+B24UI    81.4 PASS Mark as posted · ✓  Posted
+B24UI    92.3 PASS "Time to post" reminder
+B24UI   111.0 FAIL the reminder opens its day
+B24UI   148.8 FAIL week built again
