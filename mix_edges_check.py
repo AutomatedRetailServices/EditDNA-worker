@@ -9,7 +9,7 @@ import time
 
 import modal
 
-app = modal.App("cutsell-mix-v2-check")
+app = modal.App("cutsell-mix-edges-check")
 secret = modal.Secret.from_name("cutsell-worker")
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -114,6 +114,17 @@ def probe():
             before.append({"error": exc.__class__.__name__})
     report["before"] = before
 
+    def edges(rec):
+        out = {}
+        for cid, c in (rec.get("clips") or {}).items():
+            caps = c.get("captions") or []
+            dur = sum(b - a for a, b in c.get("parts") or []) or c.get("kept_sec") or 0
+            if caps:
+                out[cid] = {"label": c.get("label"), "lead": round(caps[0]["s"], 3), "tail": round(dur - caps[-1]["e"], 3),
+                            "first": caps[0]["w"], "last": caps[-1]["w"]}
+        return out
+    report["edges_before"] = edges(mix_rec)
+
     # ---- the new code on fake Redis
     fake = fakeredis.FakeRedis()
     for module in (project_store, draft_store, mix_store, catalog):
@@ -197,6 +208,7 @@ def probe():
                         "max_abs_s": round(deltas[-1], 3) if deltas else None,
                         "captions": " ".join(c["w"] for c in m["captions"]),
                         "heard": " ".join(h["w"] for h in heard)})
+        report["_rec_" + label] = rec
         report[label] = {"state": out["state"], "videos": out["ready"], "seconds": round(time.time() - t0, 1),
                          "usage": rec.get("usage"), "timing": rec.get("timing"),
                          "clips": {cid: {k: c.get(k) for k in ("label", "language", "heard_twice", "duration", "kept_sec",
@@ -211,12 +223,14 @@ def probe():
                                                                        "duration_sec")} for c in s["clips"]]}
                 for s in mix_rec["sections"]]
         run(same, "same_clips_v2", "en")
+        report["edges_after"] = edges(report.pop("_rec_same_clips_v2"))
     except Exception:
         import traceback
         report["errors"].append("same: " + traceback.format_exc()[-800:])
 
-    # ---- (b) a Spanish Mix from her Spanish recording
+    # ---- (b) Spanish Mix: done in the previous run
     try:
+        raise StopIteration
         local = download_source(spanish_src, str(work / "es.mov"))
         heard = asr.transcribe_words(asr.extract_audio(local, str(work / "es.mp3")))
         words = [w for w in heard["words"] if w["e"] > w["s"]]
@@ -250,7 +264,7 @@ def probe():
         run([{"name": n, "clips": cs} for n, cs in sections.items()], "spanish_v2", "es")
     except Exception:
         import traceback
-        report["errors"].append("spanish: " + traceback.format_exc()[-800:])
+        pass
     report["probe_seconds"] = round(time.time() - t_all, 1)
     return report
 

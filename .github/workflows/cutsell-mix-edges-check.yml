@@ -1,16 +1,16 @@
-name: CutSell Mix v2 check (read-only)
+name: CutSell Mix edges check (read-only)
 
 # Ephemeral `modal run` of tok_eval.py: tokens per Claude call on the Gold words. Nothing is deployed;
 # nothing is written to Redis or storage. The report is encrypted to a public key before it leaves the runner.
 on:
   push:
-    branches: ['probe/mix-v2-check']
+    branches: ['probe/mix-edges-check']
 permissions:
   contents: write
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Check
@@ -19,7 +19,7 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           pip install -q modal
-          timeout 1720 modal run mix_v2_check.py || echo "::warning::stopped at the time limit"
+          timeout 1200 modal run mix_edges_check.py || echo "::warning::stopped at the time limit"
           cat > pub.pem <<'KEY'
           -----BEGIN PUBLIC KEY-----
           MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAlZotqgbNtP3sdy7aLID+
