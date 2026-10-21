@@ -96,6 +96,15 @@ def set_caption(user_id: str, project_id: str, caption: str, *, source: str, log
     return update(user_id, change, client=client)
 
 
+def set_personal(user_id: str, project_ids: list[str], *, personal: bool = True, client=None) -> int:
+    """A personal video (not for selling) is never put in a week. Hers to set and clear."""
+    def change(data):
+        for pid in project_ids:
+            data["videos"].setdefault(pid, {})["personal"] = bool(personal)
+        return len(project_ids)
+    return update(user_id, change, client=client)
+
+
 def mark_posted(user_id: str, project_id: str, *, posted: bool = True, client=None) -> dict:
     def change(data):
         entry = data["videos"].setdefault(project_id, {})
@@ -149,6 +158,8 @@ def candidates(user_id: str, projects: list[dict], *, client=None, plan: dict | 
         pid = str(project.get("project_id"))
         link = catalog["videos"].get(pid) or {}
         entry = plan["videos"].get(pid) or {}
+        if entry.get("personal"):
+            continue                                   # personal: never planned
         product = catalog["products"].get(link.get("product_id") or "") or {}
         brand = (catalog["brands"].get(product.get("brand_id") or "") or {}).get("name")
         seconds = sum(float(s.get("duration_sec") or 0) for s in project.get("sources") or [] if isinstance(s, dict))

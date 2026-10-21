@@ -133,3 +133,19 @@ def put_caption(payload: CaptionRequest):
     _owned(payload.user_id, payload.project_id)
     _guard(lambda: post_plan.set_caption(payload.user_id, payload.project_id, payload.caption, source="user"))
     return {"project_id": payload.project_id, "caption": payload.caption.strip(), "caption_source": "user"}
+
+
+class PersonalRequest(BaseModel):
+    user_id: str
+    project_id: str
+    personal: bool = True
+
+
+@router.post("/personal")
+def mark_personal(payload: PersonalRequest):
+    """A personal video is never put in a week (and leaves the current week); `personal: false` brings it back."""
+    _owned(payload.user_id, payload.project_id)
+    _guard(lambda: post_plan.set_personal(payload.user_id, [payload.project_id], personal=payload.personal))
+    if payload.personal:
+        _guard(lambda: post_plan.remove(payload.user_id, payload.project_id))
+    return _view(payload.user_id)
