@@ -515,7 +515,7 @@ def _with_orientation(chain_head: str, label: str, segment: RenderSegment) -> st
 
 
 MAX_ZOOMS_PER_SEGMENT = 6
-_ZOOM_RAMP_SEC = 0.35
+_ZOOM_RAMP_SEC = 0.4   # = keyframes.ZOOM_RAMP_SEC (21 Oct)
 
 
 def _zoom_expression(segment: RenderSegment) -> str | None:

@@ -340,7 +340,7 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
     source's sound, used for every clip with Clean up voice (the clip's own, or the whole video's).
     A clip that asks for it while it is missing raises (only when the mapping is given): the export never silently plays the
     uncleaned sound."""
-    from .keyframes import active as active_keyframes, clamp_offset, video_track
+    from .keyframes import active as active_keyframes, clamp_offset, clip_track, clip_windows, timeline_track
     output = []
     keyframes_set = bool(getattr(draft, "keyframes_set", False))
     transform = (active_keyframes(tuple(getattr(draft, "keyframes", ()) or ()),
@@ -354,7 +354,11 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
     if tombstones and zooms:
         zooms = tuple(k for k in zooms if not is_tombstoned_zoom(k, tombstones))
     durations = _source_durations(local_paths)
-    for clip in draft.selected:
+    # 21 Oct (CapCut keyframes): the video keyframes are ONE track over the whole edited video, so
+    # the picture moves smoothly across joins; each clip draws its own piece of that track.
+    windows = clip_windows(draft.selected)
+    track = timeline_track(transform, windows) if transform else ()
+    for index, clip in enumerate(draft.selected):
         path = local_paths.get(clip.source_asset_id)
         if not path:
             raise ValueError(f"missing source path for selected clip {clip.clip_id}")
@@ -425,9 +429,8 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str],
             ),
             speed=speed,
             transform_keyframes=tuple(
-                (t, s, clamp_offset(s, x), clamp_offset(s, y), r)
-                for t, s, x, y, r in video_track(transform, source_asset_id=clip.source_asset_id,
-                                                 start=float(clip.start), end=float(clip.end))
+                (p[0], p[1], clamp_offset(p[1], p[2]), clamp_offset(p[1], p[3])) + tuple(p[4:])
+                for p in clip_track(track, windows[index])
             ),
             clean_audio_path=_clean_path(clip, draft, clean_audio_paths),
         ))

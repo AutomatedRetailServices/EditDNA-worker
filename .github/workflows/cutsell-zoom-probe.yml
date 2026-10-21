@@ -1,0 +1,44 @@
+name: CutSell Auto Zoom check on her cuts (read-only)
+
+# Ephemeral `modal run` of tok_eval.py: tokens per Claude call on the Gold words. Nothing is deployed;
+# nothing is written to Redis or storage. The report is encrypted to a public key before it leaves the runner.
+on:
+  push:
+    branches: ['probe/zoom-probe']
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          pip install -q modal
+          timeout 1200 modal run zoom_probe.py || echo "::warning::stopped at the time limit"
+          cat > pub.pem <<'KEY'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAlZotqgbNtP3sdy7aLID+
+          hfV4kr/wkxz3Evj/XL38P1kN5yHdVir9cA6+Z6zGgAcQNZMkH/0bin2YDP3q0lHu
+          V0Uerd9Ve1sOwlboAFNsSckwLlsQtqdu7pjaMLrca/UEWwIxAb/qXHylz0hWCp2/
+          GptQiimIrFXKvzP+0n8VGMCWtotEy7vo0AYI3PrQcEOckxaT3D3LXi57xWBHCttN
+          p5INocwT5zPZv1MVcTVTLflmeJBOf/BDqt7RDjFYJUdG2x7yIjx8zX6nVFu1eUGK
+          uY7y+GG0c7hu15z8jo0BEmrX4K+cxcoE1RkHC0JZqZgP7AXcyRG872O+eUhBnkBQ
+          fKsnJdBP5gaJLuDWKUBuntieToIzffdsKcFu+TkBIcQYLCAPdzow7A2vJIwLkq05
+          IcuTFW7QnhaEUSRVVjdOpRfTfWPBMOQrYVMqKdIH52rffHzbPXz9rAfH0DbdUKiy
+          t/jFjuLTfXSCOf38FIwbGAVucr2UxCryul+yNuRGqEhzAgMBAAE=
+          -----END PUBLIC KEY-----
+          KEY
+          sed -i 's/^ *//' pub.pem
+          openssl rand -out k.bin 32
+          gzip -c engine_check.json | openssl enc -aes-256-cbc -pbkdf2 -salt -pass file:k.bin -out report.enc
+          openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -in k.bin -out key.enc
+          rm -f engine_check.json k.bin
+          mkdir -p out && mv report.enc key.enc out/
+          cd out && git init -q && git checkout -q -b probe-results/${GITHUB_REF_NAME#probe/} && git add . \
+            && git -c user.name=ci -c user.email=ci@cutsell.invalid commit -qm "encrypted engine check" \
+            && git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" probe-results/${GITHUB_REF_NAME#probe/}

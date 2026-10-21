@@ -34,7 +34,7 @@ SALE_REVIEW_PROMPT = (_HERE / "prompts" / "sale_review_v1.txt").read_text(encodi
 # - sale review: JSON-only without "why" proposed fixes almost twice as often (14 vs 8 of 52) and changed cuts.
 SALE_REVIEW_KINDS = ("restart", "mixed")          # measured on the Gold: never made a sales video worse
 SALE_REVIEW_ALL_KINDS = ("restart", "mixed", "repeat", "missing")   # "repeat" / "missing": measured, not enabled
-ZOOM_KINDS = ("hook", "product", "price", "cta")
+ZOOM_KINDS = ("hook", "product", "price", "cta", "look", "benefit")
 BREATH_AFTER, BREATH_BEFORE = 0.30, 0.15         # natural pause kept around each kept phrase (s), silence only
 
 OV = 0.08                                   # audio crossfade assumed at every junction (s)
@@ -795,4 +795,4 @@ def process(words, duration, audio_path, video_path=None, run: int = 0, scene_cu
         log["revision_venta"] = info["sale_review"]
     return {"engine": VERSION, "duration": float(duration), "cut_duration": cut_duration, "passes": info["passes"],
             "splits": splits, "captions": caps, "caption_groups": caption_groups(caps), "log": log, "usage": info["usage"],
-            "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"]} for m in moments]}
+            "moments": [{"i": m["i"], "kind": m["kind"], "s": words[m["i"]]["s"], "w": words[m["i"]]["w"]} for m in moments]}
