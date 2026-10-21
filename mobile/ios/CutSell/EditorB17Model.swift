@@ -11,9 +11,11 @@ import MediaToolbox
 //   selected[]       clean_voice
 //   draft            master_volume (0–2) · master_muted
 //
-// Interpolation is the server's: inside one video clip (or one overlay) keyframes are sorted by time,
-// the value is held before the first and after the last, and between two keyframes it moves with a
-// smoothstep ease. Video pans are limited to what the zoom allows (|x| <= (scale - 1) / 2).
+// Interpolation is the server's (21 Oct, CapCut): the video keyframes are ONE track over the whole edited
+// video (each sits where its source moment plays), so the picture moves smoothly across joins; an
+// overlay's keyframes are its own track. The value is held before the first and after the last, and
+// between two keyframes it moves with the first one's curve (ease in-out by default, or linear /
+// ease in / ease out). Video pans are limited to what the zoom allows (|x| <= (scale - 1) / 2).
 
 /// A framing: zoom, position (fractions of the frame) and a clockwise turn in degrees.
 struct TransformValue: Equatable {
@@ -46,6 +48,29 @@ struct TransformValue: Equatable {
     }
 }
 
+/// How the value moves from a keyframe to the next one (keyframes.CURVES on the server).
+enum KeyframeCurve: String, CaseIterable, Identifiable {
+    case easeInOut = "ease_in_out", linear, easeIn = "ease_in", easeOut = "ease_out"
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .linear: return "Linear"
+        case .easeIn: return "Ease in"
+        case .easeOut: return "Ease out"
+        case .easeInOut: return "Ease in-out"
+        }
+    }
+    func apply(_ u: Double) -> Double {
+        let v = max(0, min(1, u))
+        switch self {
+        case .linear: return v
+        case .easeIn: return v * v
+        case .easeOut: return v * (2 - v)
+        case .easeInOut: return v * v * (3 - 2 * v)
+        }
+    }
+}
+
 struct TransformKeyframe: Identifiable, Equatable {
     enum Target: String { case video, overlay }
 
@@ -59,6 +84,7 @@ struct TransformKeyframe: Identifiable, Equatable {
     var origin = "user"
     var kind = "key"
     var group = ""
+    var curve = KeyframeCurve.easeInOut
 
     var isAI: Bool { origin == "ai" }
 
@@ -78,6 +104,7 @@ struct TransformKeyframe: Identifiable, Equatable {
         origin = object["origin"]?.stringValue == "ai" ? "ai" : "user"
         kind = object["kind"]?.stringValue ?? "key"
         group = object["group"]?.stringValue ?? ""
+        curve = KeyframeCurve(rawValue: object["curve"]?.stringValue ?? "") ?? .easeInOut
         if target == .video {
             sourceAssetID = object["source_asset_id"]?.stringValue ?? ""
             sourceTime = object["source_time"]?.doubleValue ?? 0
@@ -97,6 +124,7 @@ struct TransformKeyframe: Identifiable, Equatable {
             "origin": .string(origin), "kind": .string(kind),
         ]
         if !group.isEmpty { object["group"] = .string(group) }
+        if curve != .easeInOut { object["curve"] = .string(curve.rawValue) }
         if target == .video {
             object["source_asset_id"] = .string(sourceAssetID)
             object["source_time"] = r(sourceTime, 1000)
@@ -116,12 +144,17 @@ enum KeyframeMath {
 
     /// The server's keyframes.value_at, for all four values at once.
     static func value(_ points: [(time: Double, value: TransformValue)], at time: Double) -> TransformValue {
+        value(points.map { ($0.time, $0.value, KeyframeCurve.easeInOut) }, at: time)
+    }
+
+    /// The same with each keyframe's curve (the curve of the keyframe a move starts from).
+    static func value(_ points: [(time: Double, value: TransformValue, curve: KeyframeCurve)], at time: Double) -> TransformValue {
         guard let first = points.first, let last = points.last else { return .identity }
         if time <= first.time { return first.value }
         if time >= last.time { return last.value }
         for (a, b) in zip(points, points.dropFirst()) where a.time <= time && time <= b.time {
             let span = b.time - a.time
-            let e = span <= 1e-9 ? 0 : ease((time - a.time) / span)
+            let e = span <= 1e-9 ? 0 : a.curve.apply((time - a.time) / span)
             return TransformValue(scale: a.value.scale + (b.value.scale - a.value.scale) * e,
                                   x: a.value.x + (b.value.x - a.value.x) * e,
                                   y: a.value.y + (b.value.y - a.value.y) * e,
@@ -137,7 +170,7 @@ enum KeyframeMath {
         let d = zoom["duration"]?.doubleValue ?? 1.5
         let s = zoom["scale"]?.doubleValue ?? 1.08
         let base = zoom["keyframe_id"]?.stringValue ?? "z\(Int(t * 1000))"
-        let r = min(0.35, d / 3)
+        let r = min(0.4, d / 3)   // zoom in ~0.4 s, hold, zoom out ~0.4 s
         let steps: [(Double, Double)] = [(t, 1), (t + r, s), (t + d - r, s), (t + d, 1)]
         return steps.enumerated().map { index, step in
             var key = TransformKeyframe(id: "\(base)-\(index + 1)", target: .video, value: TransformValue(scale: step.1))
@@ -205,19 +238,24 @@ extension DraftEditorViewModel {
 
     /// A cut made by the engine has its Auto Zoom AI push-ins as `zoom_keyframes`: they become
     /// normal keyframes once (one save), so the creator can move, edit or delete them like any other.
+    /// 21 Oct: a draft that already had keyframes (the creator's, or adopted earlier) still gets the AI
+    /// push-ins it does not carry yet -- "Keyframes: 0 (0 from Auto Zoom AI)" came from this guard.
+    /// A push-in the creator deleted (`zoom_removed`) never comes back.
     func adoptLegacyZoomKeyframes() {
-        guard !keyframesSet else { return }
         let zooms = displayDraft?["zoom_keyframes"]?.arrayValue?.compactMap(\.objectValue) ?? []
         guard !zooms.isEmpty else { return }
+        let have = Set(transformKeyframes.map(\.group).filter { !$0.isEmpty })
         let removed = displayDraft?["zoom_removed"]?.arrayValue?.compactMap(\.objectValue) ?? []
         let live = zooms.filter { zoom in
             let source = zoom["source_asset_id"]?.stringValue ?? ""
             let time = zoom["source_time"]?.doubleValue ?? -99
-            return !removed.contains { ($0["source_asset_id"]?.stringValue ?? "") == source
+            let group = zoom["keyframe_id"]?.stringValue ?? "z\(Int(time * 1000))"
+            return !have.contains(group) && !removed.contains { ($0["source_asset_id"]?.stringValue ?? "") == source
                 && abs(($0["source_time"]?.doubleValue ?? -1) - time) <= 0.25 }
         }
         let keys = live.flatMap(KeyframeMath.keyframes(fromZoom:))
-        applyDraftChange { object in object["keyframes"] = .array(keys.map { .object($0.json) }) }
+        guard !keys.isEmpty || !keyframesSet else { return }
+        applyDraftChange { object in Self.setKeyframes(&object) { $0 + keys } }
         #if DEBUG
         NSLog("CUTSELLB17 adopt_ai_zooms zooms=%d keyframes=%d marks=%d auto_zoom=%@", zooms.count, keys.count,
               videoKeyframeMarks.count, autoZoomEnabled ? "on" : "off")
@@ -255,13 +293,64 @@ extension DraftEditorViewModel {
         return windows.first { time >= $0.start && time < $0.end } ?? (time >= (windows.last?.end ?? 0) - 0.01 ? windows.last : nil)
     }
 
+    /// Every drawn video keyframe on the edited timeline, in order: ONE track for the whole video
+    /// (the server's keyframes.timeline_track) -- the framing glides across joins, never jumps.
+    var videoTrack: [(time: Double, value: TransformValue, curve: KeyframeCurve)] {
+        var points: [(time: Double, value: TransformValue, curve: KeyframeCurve)] = []
+        let windows = EditorTracks.clipWindows(self)
+        let active = activeKeyframes.filter { $0.target == .video }
+        guard !active.isEmpty else { return [] }
+        for key in active {
+            guard let window = windows.first(where: { w in
+                let sourceEnd = w.sourceStart + (w.end - w.start) * w.speed
+                return (key.sourceAssetID.isEmpty || key.sourceAssetID == (w.sourceID ?? ""))
+                    && key.sourceTime >= w.sourceStart - 1e-6 && key.sourceTime <= sourceEnd + 1e-6
+            }) else { continue }
+            points.append((window.time(ofSource: key.sourceTime), key.value, key.curve))
+        }
+        return points.sorted { $0.time < $1.time }
+    }
+
     /// The video's framing at timeline `time` (the export's perspective warp).
     func videoTransform(at time: Double) -> TransformValue {
-        guard let window = clipWindow(at: time) else { return .identity }
-        let keys = videoKeyframes(clipID: window.clipID)
-        guard !keys.isEmpty else { return .identity }
-        let source = window.source(at: min(time, window.end))
-        return KeyframeMath.value(keys.map { ($0.sourceTime, $0.value) }, at: source).clampedForVideo
+        let track = videoTrack
+        guard !track.isEmpty else { return .identity }
+        return KeyframeMath.value(track, at: time).clampedForVideo
+    }
+
+    /// The ◇ before / after the white line (‹ ›), for the target's own keyframes.
+    func neighbourKeyframe(of target: KeyframeTarget, from time: Double, forward: Bool) -> KeyframeMark? {
+        let marks: [KeyframeMark]
+        switch target {
+        case .video: marks = videoKeyframeMarks.filter { !$0.isAI || autoZoomEnabled }
+        case .overlay(let id): marks = overlayKeyframeMarks(overlayID: id)
+        }
+        return forward ? marks.first { $0.time > time + 0.05 } : marks.last { $0.time < time - 0.05 }
+    }
+
+    /// The target has at least one ◇: a framing made with the fingers then becomes a keyframe at
+    /// the white line by itself (CapCut).
+    func hasKeyframes(_ target: KeyframeTarget) -> Bool {
+        switch target {
+        case .video: return activeKeyframes.contains { $0.target == .video }
+        case .overlay(let id): return !overlayKeyframes(overlayID: id).isEmpty
+        }
+    }
+
+    func keyframeCurve(id: String) -> KeyframeCurve {
+        transformKeyframes.first { $0.id == id }?.curve ?? .easeInOut
+    }
+
+    func setKeyframeCurve(id: String, _ curve: KeyframeCurve) {
+        CutSellDiagnostics.log("keyframe_curve", ["curve": curve.rawValue])
+        applyDraftChange { object in
+            Self.setKeyframes(&object) { keys in keys.map { key in
+                guard key.id == id else { return key }
+                var changed = key
+                changed.curve = curve
+                return changed
+            } }
+        }
     }
 
     /// An overlay's framing at timeline `time` (on top of its own place, size and turn).
@@ -269,7 +358,7 @@ extension DraftEditorViewModel {
         guard let overlay = overlaysOnScreen.first(where: { $0.id == id }) else { return .identity }
         let keys = overlayKeyframes(overlayID: id)
         guard !keys.isEmpty else { return .identity }
-        return KeyframeMath.value(keys.map { ($0.time, $0.value) }, at: time - overlay.start).clampedForOverlay
+        return KeyframeMath.value(keys.map { ($0.time, $0.value, $0.curve) }, at: time - overlay.start).clampedForOverlay
     }
 
     /// Every video ◇ on the edited timeline (AI ones dimmed while Auto Zoom AI is off).
@@ -374,8 +463,24 @@ extension DraftEditorViewModel {
     }
 
     func deleteKeyframe(id: String) {
-        CutSellDiagnostics.log("keyframe_deleted", ["ai": String(transformKeyframes.first { $0.id == id }?.isAI ?? false)])
-        applyDraftChange { object in Self.setKeyframes(&object) { $0.filter { $0.id != id } } }
+        let key = transformKeyframes.first { $0.id == id }
+        CutSellDiagnostics.log("keyframe_deleted", ["ai": String(key?.isAI ?? false)])
+        // The last ◇ of an AI push-in: that push-in is deleted for good (a new cut never adds it back).
+        let zoom: [String: JSONValue]? = {
+            guard let key, key.isAI, !key.group.isEmpty,
+                  !transformKeyframes.contains(where: { $0.id != id && $0.group == key.group }) else { return nil }
+            return displayDraft?["zoom_keyframes"]?.arrayValue?.compactMap(\.objectValue)
+                .first { $0["keyframe_id"]?.stringValue == key.group }
+        }()
+        applyDraftChange { object in
+            Self.setKeyframes(&object) { $0.filter { $0.id != id } }
+            if let zoom {
+                var removed = object["zoom_removed"]?.arrayValue ?? []
+                removed.append(.object(["source_asset_id": zoom["source_asset_id"] ?? .string(""),
+                                        "source_time": zoom["source_time"] ?? .number(0)]))
+                object["zoom_removed"] = .array(removed)
+            }
+        }
     }
 
     // MARK: Volume and Mute per clip, or for the whole video

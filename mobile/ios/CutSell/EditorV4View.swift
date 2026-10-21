@@ -84,6 +84,9 @@ struct EditorV4View: View {
                         controlsRow
                             .padding(.top, 9)
                             .padding(.bottom, 9)
+                            .overlay(alignment: .top) {
+                                if case .zoom(let id)? = selection { curveBar(id).offset(y: -30) }
+                            }
                     }
                     bottomArea
                         .frame(maxHeight: .infinity, alignment: .top)
@@ -159,6 +162,7 @@ struct EditorV4View: View {
                             if let peak = ProbeMedia.firstAIPlateau(model.videoKeyframeMarks) { playback.seek(to: peak) }
                         }
                         probeButton("b18Reload") { Task { await model.load() } }
+                        probeButton("b18AutoZoom") { Task { await model.setAutoZoom(!model.autoZoomEnabled) } }
                         probeButton("b18AddPhoto") {
                             if let url = ProbeMedia.makePhoto() { model.addOverlay(fileURL: url, at: playback.currentTime) }
                         }
@@ -187,7 +191,9 @@ struct EditorV4View: View {
         let pending = keyPending.map { String(format: "%.3f/%.1f", $0.scale, $0.rotation) } ?? "none"
         let voices = model.audioClips.filter { $0.kind == .voice }.sorted { $0.start < $1.start }
             .map { String(format: "%.2f+%.2f%@%@%@v%.2f", $0.start, $0.length, $0.duckVideo ? "d" : "", $0.clean ? "c" : "", $0.muted ? "m" : "", $0.volume) }
-        return "ai=\(marks.filter(\.isAI).count) user=\(marks.filter { !$0.isAI }.count) sounds=\(sounds.joined(separator: ",")) "
+        let curves = model.transformKeyframes.filter { !$0.isAI }.map(\.curve.rawValue)
+        return "curves=\(curves.joined(separator: ",")) key_btn=\(keyframeUnderCursor != nil ? "delete" : "add") "
+            + "ai=\(marks.filter(\.isAI).count) user=\(marks.filter { !$0.isAI }.count) sounds=\(sounds.joined(separator: ",")) "
             + "voices=\(voices.joined(separator: ",")) "
             + "muted_clips=\(mutedClips) user_scales=\(keys.joined(separator: ",")) user_rot=\(rotations.joined(separator: ",")) "
             + "auto_zoom=\(model.autoZoomEnabled) overlays=\(overlays.joined(separator: ",")) sel=\(selectionName) pending=\(pending) "
@@ -1026,8 +1032,14 @@ struct EditorV4View: View {
             .accessibilityIdentifier("editorPlay")
             HStack(spacing: 0) {
                 Spacer()
+                if let target = keyTarget, model.hasKeyframes(target) {
+                    arrow("chevron.left", "Previous keyframe", id: "editorKeyPrev") { jumpKeyframe(forward: false) }
+                }
                 keyframeControl
                     .accessibilityIdentifier("editorKeyframe")
+                if let target = keyTarget, model.hasKeyframes(target) {
+                    arrow("chevron.right", "Next keyframe", id: "editorKeyNext") { jumpKeyframe(forward: true) }
+                }
                 control("Ed4CtlUndo", "Undo") { Task { await model.undo() } }
                     .accessibilityIdentifier("editorUndo")
                     .padding(.leading, 0)
@@ -1057,6 +1069,52 @@ struct EditorV4View: View {
         .frame(width: 36, height: 24)
         .accessibilityLabel(onKey ? "Delete keyframe" : "Add keyframe")
         .accessibilityValue(onKey ? "filled" : "empty")
+    }
+
+    /// ‹ › : the white line jumps to the previous / next ◇ (CapCut).
+    private func arrow(_ symbol: String, _ label: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0x1769FF))
+                .frame(width: 24, height: 36).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 24, height: 24)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(id)
+    }
+
+    private func jumpKeyframe(forward: Bool) {
+        guard let target = keyTarget else { return }
+        playback.pause()
+        guard let mark = model.neighbourKeyframe(of: target, from: playback.currentTime, forward: forward) else {
+            show(.message(forward ? "No keyframe after this point" : "No keyframe before this point"))
+            return
+        }
+        clearKeyPending()
+        playback.seek(to: mark.time)
+    }
+
+    /// Tapping a ◇: how the move from it to the next one goes (Linear / Ease in / Ease out / Ease in-out).
+    private func curveBar(_ id: String) -> some View {
+        let current = model.keyframeCurve(id: id)
+        return HStack(spacing: 6) {
+            Text("Curve").font(.system(size: 11, weight: .semibold)).foregroundStyle(CS.textMutedF)
+            ForEach(KeyframeCurve.allCases.reversed()) { curve in
+                Button { model.setKeyframeCurve(id: id, curve) } label: {
+                    Text(curve.title).font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(curve == current ? Color.white : CS.textPrimaryF)
+                        .padding(.horizontal, 9).frame(height: 24)
+                        .background(Capsule().fill(curve == current ? Color(hex: 0x1769FF) : Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("keyCurve_\(curve.rawValue)")
+                .accessibilityValue(curve == current ? "selected" : "")
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Capsule().fill(Color(hex: 0x081226).opacity(0.92)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("keyCurveBar")
     }
 
     private func control(_ image: String, _ label: String, action: @escaping () -> Void) -> some View {
@@ -1135,6 +1193,12 @@ struct EditorV4View: View {
         if let mark = model.keyframe(at: at, target: target) {
             model.updateKeyframe(id: mark.id, value: value)
             clearKeyPending()
+            return
+        }
+        // CapCut: once the target has a ◇, framing anywhere else makes a new ◇ right there.
+        if model.hasKeyframes(target), model.addKeyframe(target: target, at: at, value: value) != nil {
+            clearKeyPending()
+            show(.message("Keyframe added at \(EditorTime.short(at)) · tap ↶ to undo", undo: true))
             return
         }
         keyPending = value

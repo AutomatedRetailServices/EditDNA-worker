@@ -722,6 +722,115 @@ final class Build24UITests: XCTestCase {
 
     /// Plan · Day → Post to TikTok: video to Photos, caption copied with the notice, TikTok (here its App Store page,
     /// the simulator has no TikTok) → back in CutSell "Did you post it?" → Yes, posted.
+    // MARK: Keyframes like CapCut on a real cut: ◇, framing anywhere makes a ◇, ‹ ›, curve, smooth, centred line
+
+    private func stateField(_ name: String) -> String? {
+        let st = editorState()
+        guard let r = st.range(of: name + "=") else { return nil }
+        return st[r.upperBound...].split(separator: " ").first.map(String.init)
+    }
+    private func stateNumber(_ name: String) -> Double? { stateField(name).flatMap(Double.init) }
+    private func seekTo(_ seconds: Double) {
+        element("b18Start").tap(); pause(0.4)
+        for _ in 0..<Int(seconds) { element("b17Step").tap(); pause(0.2) }
+        if seconds - Double(Int(seconds)) >= 0.5 { element("b18Half").tap(); pause(0.3) }
+        pause(0.4)
+    }
+
+    func testKeyframesCapCut() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_probe"]
+        let env = ProcessInfo.processInfo.environment
+        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_PROJECT", "CUTSELL_PROBE_API"] {
+            if let value = env[key] { app.launchEnvironment[key] = value }
+        }
+        app.launchEnvironment["CUTSELL_PROBE_STATE"] = "b18_kf"
+        app.launch()
+        check(element("timelineV4").waitForExistence(timeout: 120), "editor open on a real cut")
+        _ = wait(90) { self.element("editorPlay").exists && self.element("editorPlay").isEnabled }
+        pause(4)
+        log("start \(editorState())")
+        // The cut's own Auto Zoom AI ◇ (the engine marks key moments): how many, before anything else.
+        log("auto zoom ◇ from the engine: ai=\(stateField("ai") ?? "?") auto_zoom=\(stateField("auto_zoom") ?? "?")")
+        if stateField("auto_zoom") == "true" { element("b18AutoZoom").tap() }   // AI zooms off: only her ◇ move the picture
+        pause(1)
+        shot("kf_open")
+
+        // 1-2. clip under the line, ◇ keeps the current framing (100 %)
+        seekTo(0.5)
+        element("editorKeyframe").tap()
+        check(wait(8) { self.stateField("user") == "1" }, "2) ◇ adds a keyframe at the line (100 %)", editorState())
+        check(stateField("key_btn") == "delete", "5) on a ◇ the button removes it")
+        // 3. move the line, pinch: the keyframe is made there by itself (no ◇ tap)
+        seekTo(2.0)
+        check(stateField("key_btn") == "add", "off a ◇ the button adds")
+        element("editorVideo").pinch(withScale: 1.32, velocity: 1.0)
+        check(wait(8) { self.stateField("user") == "2" }, "3) pinch away from a ◇ makes a keyframe there", editorState())
+        let peak = stateNumber("zoom") ?? 1
+        check(peak > 1.15, "second keyframe zoomed in", String(format: "zoom %.3f", peak))
+        seekTo(3.5)
+        element("editorVideo").pinch(withScale: 1 / 1.6, velocity: -1.0)
+        check(wait(8) { self.stateField("user") == "3" }, "third keyframe back out by pinching", editorState())
+        log("keyframes \(stateField("user_scales") ?? "?")")
+        shot("kf_three")
+
+        // 4 + 8. the framing between and outside the ◇ (what the preview and the export show)
+        seekTo(0)
+        var samples: [(Double, Double)] = []
+        for i in 0..<9 {
+            if i > 0 { element("b18Half").tap(); pause(0.35) }
+            samples.append((stateNumber("t") ?? -1, stateNumber("zoom") ?? -1))
+        }
+        let text = samples.map { String(format: "%.1f:%.3f", $0.0, $0.1) }.joined(separator: " ")
+        let zooms = samples.map(\.1)
+        let top = zooms.firstIndex(of: zooms.max() ?? 0) ?? 0
+        let steps = zip(zooms, zooms.dropFirst()).map { $1 - $0 }
+        check(abs(zooms[0] - zooms[1]) < 0.005, "8) held before the first ◇", text)
+        check(steps.prefix(top).allSatisfy { $0 >= -0.003 } && steps.dropFirst(top).allSatisfy { $0 <= 0.003 }
+              && (steps.map(abs).max() ?? 1) < 0.2 && zooms.max()! > 1.15,
+              "4) smooth in then out (ease in-out), never a jump", text)
+
+        // 6. ‹ › jump between the ◇
+        seekTo(3.0)
+        element("editorKeyPrev").tap(); pause(0.6)
+        let prevT = stateNumber("t") ?? -1
+        element("editorKeyPrev").tap(); pause(0.6)
+        let prev2 = stateNumber("t") ?? -1
+        element("editorKeyNext").tap(); pause(0.6)
+        let nextT = stateNumber("t") ?? -1
+        check(abs(prevT - 2.0) < 0.15 && abs(prev2 - 0.5) < 0.15 && abs(nextT - 2.0) < 0.15, "6) ‹ › go to the previous / next ◇",
+              String(format: "%.2f %.2f %.2f", prevT, prev2, nextT))
+
+        // 7. tap a ◇ on the timeline: curve
+        let diamonds = app.descendants(matching: .any).matching(identifier: "userKeyframe")
+        if diamonds.count > 1 { diamonds.element(boundBy: 1).tap(); pause(0.8) }
+        check(element("keyCurveBar").waitForExistence(timeout: 4), "7) tapping a ◇ shows Linear / Ease in / Ease out / Ease in-out")
+        shot("kf_curve")
+        element("keyCurve_linear").tap(); pause(0.8)
+        check((stateField("curves") ?? "").contains("linear"), "7) curve saved on that ◇", stateField("curves") ?? "")
+        element("keyCurve_ease_in_out").tap(); pause(0.8)
+
+        // 10. playback: the line stays in the middle, the timeline slides under it, the zoom moves
+        seekTo(0)
+        log("PLAY_START epoch=\(Date().timeIntervalSince1970)")
+        element("editorPlay").tap()
+        var played: [String] = []
+        for _ in 0..<8 { pause(0.5); played.append(String(format: "%.2f:%.3f", stateNumber("t") ?? -1, stateNumber("zoom") ?? -1)) }
+        element("editorPlay").tap()
+        log("PLAY_END epoch=\(Date().timeIntervalSince1970)")
+        let times = played.compactMap { Double($0.split(separator: ":")[0]) }
+        check(zip(times, times.dropFirst()).allSatisfy { $1 > $0 }, "10) the line advances while playing", played.joined(separator: " "))
+        shot("kf_after_play")
+
+        // Export (measured in the workflow: the square's size frame by frame)
+        _ = waitExport("keyframes")
+        // 9. Auto Zoom AI back on: its ◇ (in, hold, out) next to hers
+        element("b18AutoZoom").tap(); pause(1.5)
+        log("auto zoom on: ai=\(stateField("ai") ?? "?") auto_zoom=\(stateField("auto_zoom") ?? "?")")
+        log("end \(editorState())")
+        done()
+    }
+
     func testPostToTikTok() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock"])
         element("tab_plan").tap()

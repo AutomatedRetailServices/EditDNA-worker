@@ -1,0 +1,217 @@
+name: CutSell iOS keyframes probe
+
+# Voice-over on a real cut (Simulator, real touches): record in 2 steps (countdown, Enhance voice, Stop -> Play /
+# Retake / Save), the voice on the timeline (select, drag, trim, Split, delete, undo), the voice panel (volume, Lower
+# video sound, Clean up voice, Record again, Delete), and Export before / after -- the exported sound is measured here
+# (the 1 kHz test voice in its place, the video's own sound lower under it). One short synthetic cut on the live
+# server; the test "microphone" is a tone (no microphone on this machine). Frames and numbers only (vo/).
+
+
+# Keyframes like CapCut on a real cut (Simulator, real touches): ◇ at the white line, pinch away from a ◇ makes one,
+# ‹ › between them, curve per ◇, smooth ease in-out between them (preview numbers), the white line in the middle while
+# playing, and the Export measured here frame by frame (a white square's size = the zoom). The screen is recorded
+# while it plays; the recording and the export go to the run's artifacts (never into the repo).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [probe/keyframes]
+
+concurrency:
+  group: cutsell-ios-keyframes-probe
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          latest="$(ls -d /Applications/Xcode*.app | grep -vi beta | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+
+      - name: Add the UI test target (probe only) and build for testing
+        working-directory: mobile/ios
+        run: |
+          brew install xcodegen ffmpeg >/dev/null
+          cat >> project.yml <<'YML'
+            CutSellUITests:
+              type: bundle.ui-testing
+              platform: iOS
+              sources:
+                - CutSellUITests
+              dependencies:
+                - target: CutSell
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app.uitests
+                  GENERATE_INFOPLIST_FILE: YES
+                  TEST_TARGET_NAME: CutSell
+          schemes:
+            CutSellUITests:
+              build:
+                targets:
+                  CutSell: all
+                  CutSellUITests: [test]
+              test:
+                config: Debug
+                targets:
+                  - CutSellUITests
+          YML
+          xcodegen generate
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          c=sorted((r,x["name"],x["udid"]) for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone"))
+          print(c[-1][2])')"
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+          set +e
+          xcodebuild build-for-testing -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+            -destination "id=$udid" -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            SWIFT_OPTIMIZATION_LEVEL=-O SWIFT_COMPILATION_MODE=wholemodule > "$RUNNER_TEMP/build.log" 2>&1
+          status=$?
+          grep -E "error:" "$RUNNER_TEMP/build.log" | sort -u | head -8 | while IFS= read -r l; do echo "::error title=build::$(echo "$l" | sed 's#.*/mobile/ios/##' | cut -c1-300)"; done
+          exit $status
+
+      - name: Make a short spoken test clip (a white square in the middle measures the zoom)
+        run: |
+          say -v Samantha -o "$RUNNER_TEMP/speech.aiff" "Hi everyone. Look at this. My favorite water bottle keeps drinks cold for twenty four hours, and it fits in any cup holder. It is twenty dollars in my shop right now. Grab yours today."
+          ffmpeg -loglevel error -f lavfi -i color=c=0x203060:s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" \
+            -vf "drawbox=x=260:y=540:w=200:h=200:color=white:t=fill,noise=alls=10:allf=t+u" \
+            -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac "$RUNNER_TEMP/probe.mp4"
+          ls -la "$RUNNER_TEMP/probe.mp4"
+
+      - name: Make one cut on the live server (same calls as the app)
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          API = "https://cutsell-api.onrender.com"; T = None
+          video = os.path.join(os.environ["RUNNER_TEMP"], "probe.mp4")
+          def call(m, p, b=None, q=""):
+              r = urllib.request.Request(API + p + q, method=m, data=None if b is None else json.dumps(b).encode(),
+                  headers={"content-type": "application/json", **({"authorization": "Bearer " + T} if T else {})})
+              with urllib.request.urlopen(r, timeout=120) as x: return json.load(x)
+          s = call("POST", "/v1/auth/session"); T = s["access_token"]; u = s["user_id"]
+          print("::add-mask::" + T)
+          p = call("POST", "/v1/projects", {"user_id": u, "title": "copy_9E4975E5-7A1B"}); pid = p["project_id"]
+          data = open(video, "rb").read()
+          st = call("POST", "/v1/uploads/multipart/start", {"project_id": pid, "user_id": u, "original_name": "probe.mp4",
+                    "content_type": "video/mp4", "size_bytes": len(data)})
+          parts = []
+          for n in range(1, st["part_count"] + 1):
+              sg = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/parts/{n}/presign", {"project_id": pid, "user_id": u})
+              req = urllib.request.Request(sg["upload_url"], data=data[(n-1)*st["part_size"]: n*st["part_size"]], method="PUT")
+              req.add_header("Content-Type", "")
+              with urllib.request.urlopen(req, timeout=300) as r: parts.append({"part_number": n, "etag": r.headers["ETag"]})
+          done = call("POST", f"/v1/uploads/multipart/{st['upload_id']}/complete", {"project_id": pid, "user_id": u, "parts": parts})
+          job = call("POST", "/v1/flow-b/jobs", {"project_id": pid, "user_id": u, "audio_overlap": False, "language_hint": None,
+                     "sources": [{"original_name": "probe.mp4", "uri": done["source_uri"], "source_order": 0, "duration_sec": 20.0}]})
+          t0 = time.time()
+          while True:
+              j = call("GET", f"/v1/jobs/{job['job_id']}")
+              if j["state"] in ("finished", "failed", "canceled") or time.time() - t0 > 900: break
+              time.sleep(5)
+          proj = call("GET", f"/v1/projects/{pid}", q=f"?user_id={u}")
+          print(f"::notice title=cut::job {j['state']} in {int(time.time()-t0)} s, project {proj['state']}")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"PROBE_TOKEN={T}\nPROBE_USER={u}\nPROBE_PROJECT={pid}\n")
+          PY
+
+      - name: Keyframes on the real cut (XCUITest, screen recorded)
+        working-directory: mobile/ios
+        run: |
+          mkdir -p "$RUNNER_TEMP/vo" "$RUNNER_TEMP/art"
+          xcrun simctl boot "$SIM_UDID" || true
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcrun simctl ui "$SIM_UDID" appearance dark || true
+          xcrun simctl io "$SIM_UDID" recordVideo --codec h264 --force "$RUNNER_TEMP/screen.mp4" &
+          rec=$!
+          python3 -c 'import time; print(time.time())' > "$RUNNER_TEMP/rec_start.txt"
+          start=$(date '+%Y-%m-%d %H:%M:%S')
+          set +e
+          TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
+          TEST_RUNNER_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
+          TEST_RUNNER_B24_OUT="$RUNNER_TEMP/vo" \
+            xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
+              -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/testKeyframesCapCut \
+              CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
+          echo "TEST_STATUS=$?" >> "$GITHUB_ENV"
+          kill -INT $rec; sleep 4
+          set -e
+          grep -E "B24UI|error:|failed|passed" "$RUNNER_TEMP/test.log" | grep -v Bearer | tail -80 > "$RUNNER_TEMP/vo/xctest.txt" || true
+          xcrun simctl spawn "$SIM_UDID" log show --start "$start" --style compact \
+            --predicate 'eventMessage CONTAINS "CUTSELLEXPORTURL"' 2>/dev/null | grep -oE 'CUTSELLEXPORTURL [^ ]+' \
+            | awk '{print $2}' > "$RUNNER_TEMP/export_urls.txt" || true
+          while IFS= read -r line; do echo "::notice title=kf::$line"; done < <(sed 's/^B24UI *//' "$RUNNER_TEMP/vo/b24_ui_log.txt" 2>/dev/null | grep -E "PASS|FAIL|keyframes|auto zoom" | cut -c1-500)
+          # the playback part of the screen recording (white line in the middle, zoom moving)
+          s=$(python3 - <<'PY'
+          import os, re
+          t = os.environ["RUNNER_TEMP"]
+          log = open(f"{t}/vo/b24_ui_log.txt").read() if os.path.exists(f"{t}/vo/b24_ui_log.txt") else ""
+          m = re.search(r"PLAY_START epoch=([0-9.]+)", log)
+          r0 = float(open(f"{t}/rec_start.txt").read())
+          print(max(0, float(m.group(1)) - r0 - 1.5) if m else 0)
+          PY
+          )
+          ffmpeg -loglevel error -ss "$s" -i "$RUNNER_TEMP/screen.mp4" -t 9 -vf "scale=590:-2" -c:v libx264 -pix_fmt yuv420p -an "$RUNNER_TEMP/art/keyframes_playback.mp4" || true
+          ffmpeg -loglevel error -i "$RUNNER_TEMP/screen.mp4" -vf "scale=390:-2" -c:v libx264 -crf 30 -pix_fmt yuv420p -an "$RUNNER_TEMP/art/whole_test_screen.mp4" || true
+
+      - name: Measure the export (white square size = zoom, every 0.1 s)
+        run: |
+          cd "$RUNNER_TEMP"
+          n=0; while IFS= read -r url; do n=$((n+1)); curl -s -L -o "art/export_$n.mp4" "$url"; done < export_urls.txt
+          python3 - <<'PY' > "$RUNNER_TEMP/vo/export_check.txt"
+          import os, subprocess
+          t = os.environ["RUNNER_TEMP"]
+          files = sorted(f for f in os.listdir(f"{t}/art") if f.startswith("export_"))
+          if not files:
+              print("RESULT: no export"); raise SystemExit
+          path = f"{t}/art/{files[-1]}"
+          w, h = 270, 480
+          raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-t", "5", "-vf", f"fps=10,scale={w}:{h},format=gray",
+                                "-f", "rawvideo", "-"], capture_output=True).stdout
+          rows = []
+          for i in range(len(raw) // (w * h)):
+              fr = raw[i * w * h:(i + 1) * w * h]
+              line = fr[(h // 2) * w:(h // 2 + 1) * w]
+              rows.append(sum(1 for v in line if v > 200) / w)
+          base = sorted(rows[:5])[2] if rows else 0
+          zoom = [r / base if base else 0 for r in rows]
+          print("zoom every 0.1 s:", " ".join(f"{z:.2f}" for z in zoom))
+          steps = [b - a for a, b in zip(zoom, zoom[1:])]
+          print(f"max zoom {max(zoom):.2f}; biggest step between frames 0.1 s apart: {max(abs(s) for s in steps):.3f}")
+          print("RESULT:", "PASS" if max(zoom) > 1.15 and max(abs(s) for s in steps) < 0.08 else "CHECK")
+          PY
+          cat "$RUNNER_TEMP/vo/export_check.txt"
+          rm -f export_urls.txt
+
+      - name: Recording and export (artifact, never in the repo)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyframes-probe
+          path: ${{ runner.temp }}/art
+          retention-days: 7
+
+      - name: Frames and numbers to design-screenshots (kf/), never a video
+        if: always()
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/out"
+          git clone --quiet --branch design-screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+          cd "$dir"
+          rm -rf kf && mkdir -p kf
+          cp "$RUNNER_TEMP"/vo/*.png kf/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/vo/*.txt kf/ 2>/dev/null || true
+          find kf -type f \( -iname '*.mp4' -o -iname '*.mov' -o -iname '*.m4a' -o -iname '*.wav' \) -delete
+          sed -i '' -E 's/(Bearer|token|X-Amz-[A-Za-z]*)=?[^ ]*/\1 <hidden>/g' kf/*.txt 2>/dev/null || true
+          echo "source commit: ${{ github.sha }} test status: ${TEST_STATUS:-?}" > kf/SOURCE.txt
+          git add -A kf
+          git -c user.name="cutsell-ci" -c user.email="ci@cutsell.invalid" commit --quiet -m "keyframes probe for ${{ github.sha }}" || true
+          git push --quiet origin design-screenshots

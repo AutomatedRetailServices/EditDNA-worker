@@ -85,11 +85,10 @@ struct TimelineV4: View {
             let pps = pixelsPerSecond
             let height = timelineHeight
             let scrollY = min(rowScroll, maxRowScroll)
-            // The tracks slide under the fixed cursor until the end of the cut reaches the right side;
-            // from there the cut stays in view and the cursor walks to its end (never an empty timeline).
-            let scroll = Self.scrollTime(now: now, duration: duration, width: width, pixelsPerSecond: pps)
-            let cursorAt = Self.cursorX + CGFloat(now - scroll) * pps
-            let x: (Double) -> CGFloat = { seconds in Self.cursorX + CGFloat(seconds - scroll) * pps }
+            // 21 Oct (CapCut): the white line stays in the middle of the tracks and the tracks slide under
+            // it -- while playing and while scrubbing, from the first frame to the last.
+            let cursorAt = Self.playheadX(width: width)
+            let x: (Double) -> CGFloat = { seconds in cursorAt + CGFloat(seconds - now) * pps }
             ZStack(alignment: .topLeading) {
                 Color(hex: 0x081226)
                 timeLabel(now).offset(x: 16, y: 6)
@@ -190,6 +189,9 @@ struct TimelineV4: View {
 
     /// Time shown at the cursor's resting place: the playhead, but never so far that the cut's end
     /// leaves the right part of the timeline (the room before the video "+").
+    /// Where the white line stands: the middle of the tracks (right of the icon column), as in CapCut.
+    static func playheadX(width: CGFloat) -> CGFloat { cursorX + max(0, width - cursorX) / 2 }
+
     static func scrollTime(now: Double, duration: Double, width: CGFloat, pixelsPerSecond: CGFloat) -> Double {
         let visible = Double(max(40, width - cursorX - 40) / pixelsPerSecond)
         return min(now, max(0, duration - visible))
@@ -327,8 +329,8 @@ struct TimelineV4: View {
 
     private func ruler(width: CGFloat, x: @escaping (Double) -> CGFloat) -> some View {
         let step = Self.labelStep(pixelsPerSecond)
-        let now = Self.scrollTime(now: playback.currentTime, duration: duration, width: width, pixelsPerSecond: pixelsPerSecond)
-        let first = max(0, Int((now - Double(Self.cursorX / pixelsPerSecond)) / step) - 1)
+        let now = playback.currentTime
+        let first = max(0, Int((now - Double(Self.playheadX(width: width) / pixelsPerSecond)) / step) - 1)
         let last = Int((now + Double(width / pixelsPerSecond)) / step) + 1
         return ZStack(alignment: .topLeading) {
             ForEach(first...max(first, last), id: \.self) { index in
