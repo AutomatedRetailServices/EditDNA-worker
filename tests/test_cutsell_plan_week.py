@@ -253,3 +253,34 @@ def test_a_combine_of_the_same_two_recordings_in_another_order_is_the_same_recor
     assert post_plan.same_recording(sorted(a), sorted(b))
     assert not post_plan.same_recording([(52.0, "pull it latch it")], [(97.5, "pull it latch it")])
     assert not post_plan.same_recording([(50.0, "")], [(50.0, "")])                 # nothing heard: never merged
+
+
+def test_personal_videos_are_never_planned(r):
+    ids = _library()
+    personal = ids["single1"]
+    post_plan.set_personal("u1", [personal])
+    videos = post_plan.candidates("u1", _projects())
+    assert personal not in {v["project_id"] for v in videos}
+    now = datetime(2026, 10, 19, 14, tzinfo=timezone.utc)
+    week = post_plan.build_week("u1", _projects(), now=now)
+    assert personal not in {s["project_id"] for s in week["slots"]}
+    post_plan.set_personal("u1", [personal], personal=False)
+    assert personal in {v["project_id"] for v in post_plan.candidates("u1", _projects())}
+
+
+def test_the_api_marks_a_video_personal_and_takes_it_out_of_the_week(monkeypatch, r):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from cutsell_app import plan_routes
+    monkeypatch.setattr(plan_routes, "_caption_missing", lambda user, view: None)
+    _library()
+    app = FastAPI()
+    app.include_router(plan_routes.router)
+    client = TestClient(app)
+    week = client.post("/v1/plan/week/build", json={"user_id": "u1"}).json()["week"]
+    pid = week["slots"][0]["project_id"]
+    view = client.post("/v1/plan/personal", json={"user_id": "u1", "project_id": pid}).json()
+    assert pid not in {s["project_id"] for s in view["week"]["slots"]}
+    rebuilt = client.post("/v1/plan/week/build", json={"user_id": "u1"}).json()["week"]
+    assert pid not in {s["project_id"] for s in rebuilt["slots"]}
+    assert client.post("/v1/plan/personal", json={"user_id": "u1", "project_id": "nope"}).status_code == 404
