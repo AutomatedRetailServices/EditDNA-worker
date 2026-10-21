@@ -52,6 +52,24 @@ def probe():
             mix_rec = mix_store.load(TEST_USER, p["project_id"], client=prod)
     report["prod_clip_language"] = {cid: c.get("language") for cid, c in (mix_rec or {}).get("clips", {}).items()}
 
+    user = None
+    for key in prod.scan_iter("cutsell:v1:draft:*", count=500):
+        snap = json.loads(prod.get(key))
+        if hashlib.sha256(str(snap.get("user_id")).encode()).hexdigest()[:8] == REAL_USER:
+            user = snap["user_id"]
+            break
+    data = catalog.load(user, client=prod)
+    rhino = next(pid for pid, p in data["products"].items() if "Retractable" in (p.get("name") or ""))
+    recs = {}
+    for pid, v in data["videos"].items():
+        if v.get("product_id") != rhino:
+            continue
+        snap = get_draft_snapshot(user_id=user, project_id=pid, client=prod)
+        src = (snap.get("sources") or [{}])[0]
+        dur = round(float(src.get("duration_sec") or 0))
+        if src.get("uri") and dur not in recs:
+            recs[dur] = src["uri"]
+    report["rhino_recordings_sec"] = sorted(recs)
     # ---- the fixed job on fake Redis
     fake = fakeredis.FakeRedis()
     for module in (project_store, draft_store, mix_store, catalog):
@@ -136,31 +154,13 @@ def probe():
         same = [{"name": s["name"], "clips": [{k: c.get(k) for k in ("clip_id", "uri", "audio_uri", "original_name",
                                                                        "duration_sec")} for c in s["clips"]]}
                 for s in mix_rec["sections"]]
-        run(same, "same_clips_fixed")
+        pass  # done in run 39582249400
     except Exception as exc:
         import traceback
         report["errors"].append("same: " + traceback.format_exc()[-800:])
 
     # ---- (b) two DIFFERENT Rhino recordings of hers (distinct spoken text / length)
     try:
-        user = None
-        for key in prod.scan_iter("cutsell:v1:draft:*", count=500):
-            snap = json.loads(prod.get(key))
-            if hashlib.sha256(str(snap.get("user_id")).encode()).hexdigest()[:8] == REAL_USER:
-                user = snap["user_id"]
-                break
-        data = catalog.load(user, client=prod)
-        rhino = next(pid for pid, p in data["products"].items() if "Retractable" in (p.get("name") or ""))
-        recs = {}
-        for pid, v in data["videos"].items():
-            if v.get("product_id") != rhino:
-                continue
-            snap = get_draft_snapshot(user_id=user, project_id=pid, client=prod)
-            src = (snap.get("sources") or [{}])[0]
-            dur = round(float(src.get("duration_sec") or 0))
-            if src.get("uri") and dur not in recs:
-                recs[dur] = src["uri"]
-        report["rhino_recordings_sec"] = sorted(recs)
         vids = []
         for i, (dur, uri) in enumerate(sorted(recs.items())[:2]):
             local = download_source(uri, str(work / f"r{i}.mov"))
