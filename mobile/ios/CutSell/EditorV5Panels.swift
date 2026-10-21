@@ -800,7 +800,7 @@ struct VoiceOverSheetV5: View {
         }
         // No X (Figma 1119:2316 / 1120:4): it closes by sliding down from the handle or tapping outside it.
         .frame(maxWidth: .infinity)
-        .frame(height: Self.height(step), alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(hex: 0x060D1F, opacity: 0.98), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(Color(hex: 0x294D85, opacity: 0.9), lineWidth: 1.5))
         .onChange(of: recorder.recordedURL) { _, url in if url != nil { step = .review } }
@@ -822,7 +822,7 @@ struct VoiceOverSheetV5: View {
             }
             .padding(.top, 14)
             Text(isRecording ? (recorder.isPaused ? "Paused · " : "● REC · ") + VoiceRecorder.formatted(recorder.elapsed)
-                             : (countdown != nil ? "Get ready…" : "Add your voice to this video"))
+                             : "Add your voice to this video")
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: 0x9EB5DB)).monospacedDigit()
                 .padding(.top, 4)
             HStack(alignment: .center, spacing: 12) {
@@ -878,7 +878,7 @@ struct VoiceOverSheetV5: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .disabled(countdown != nil)
+                    .allowsHitTesting(countdown == nil)        // stays bright during 3 · 2 · 1 (Figma)
                     .accessibilityLabel(isRecording ? "Recording" : "Record")
                     .accessibilityIdentifier("voiceRecord")
                 }
@@ -1035,7 +1035,7 @@ struct CountdownOverlayV5: View {
     var body: some View {
         // Figma 1119:2316: the ring sits high on the video (28 pt under its top edge), over the picture itself.
         ZStack(alignment: .top) {
-            Color.clear
+            Color.black.opacity(0.35)          // Figma: the video is dimmed under 3 · 2 · 1
             VStack(spacing: 14) {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.15), lineWidth: 6)

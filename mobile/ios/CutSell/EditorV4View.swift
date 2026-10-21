@@ -97,6 +97,11 @@ struct EditorV4View: View {
             if isVoicePanel {
                 // Figma 1119:2316 / 1120:4: the voice-over sheet in two steps, over the timeline. It closes like the
                 // other panels: drag it down, tap outside it, or its X (a take in progress asks first).
+                GeometryReader { geo in
+                // Figma 1120:4: the sheet starts right under the 472 pt video (nothing of the editor between them);
+                // the taller record step (1119:2316) overlaps the video's bottom.
+                let videoBottom = 48 + 8 + max(200, min(472, geo.size.height - 48 - 8))
+                let sheetHeight = max(VoiceOverSheetV5.height(recorder.recordedURL != nil ? .review : .record), geo.size.height - videoBottom)
                 VStack(spacing: 0) {
                     Color.black.opacity(0.001)
                         .contentShape(Rectangle())
@@ -115,6 +120,7 @@ struct EditorV4View: View {
                     } onCancel: {
                         requestCloseVoiceSheet()
                     }
+                    .frame(height: sheetHeight)
                     .padding(.horizontal, 1)
                     .offset(y: max(0, voiceSheetDrag))
                     .gesture(DragGesture(minimumDistance: 12)
@@ -124,6 +130,7 @@ struct EditorV4View: View {
                             withAnimation(.easeOut(duration: 0.2)) { voiceSheetDrag = 0 }
                             if close { requestCloseVoiceSheet() }
                         })
+                }
                 }
                 .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.move(edge: .bottom))
