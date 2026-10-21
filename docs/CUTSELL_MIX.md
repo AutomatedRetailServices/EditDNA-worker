@@ -33,3 +33,7 @@ Haiku vs Sonnet on mix_clip: Haiku 3.7x cheaper and more consistent on retakes (
 Worker: redeploy the previous commit (Mix code is only reached through `/v1/mix/*` and Mix projects).
 API: redeploy the previous commit; `/v1/capabilities` then has no `mix` and the app's Mix screen fails to start
 cleanly ("Your Mix couldn't start").
+
+## Production check (21 Oct, after deploying a0ab25c)
+- Production Mix with the 3+2+2+2 test clips: 24/24 videos Ready in 178 s. 0 clicks at 72 joins. Every part at -16.0 to -16.1 LUFS. Captions within a median of 0.01–0.06 s of a fresh transcription.
+- Defect found: 1 of the 9 clips (6 s, English), heard alone, came back as Dutch, so it lost its words. Fix on `fix/mix-language`: any clip not heard in the Mix's language (the language most of its words were heard in) is heard again in that language. Not deployed yet; waiting for permission.
