@@ -1,0 +1,8 @@
+B24UI    48.0 PASS a Ready video's ••• in Edits · 12 · all tiles 2
+B24UI    53.7 FAIL ••• shows Personal · don't plan
+B24UI    53.7 FAILURES: ••• shows Personal · don't plan
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:563: error: -[CutSellUITests.Build24UITests testPersonalMenu] : XCTAssertTrue failed - ••• shows Personal · don't plan
+Test Case '-[CutSellUITests.Build24UITests testPersonalMenu]' failed (55.225 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-21 15:33:02.705.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 15:33:02.706.
+Test Suite 'Selected tests' failed at 2026-10-21 15:33:02.707.
