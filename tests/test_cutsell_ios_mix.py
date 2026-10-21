@@ -48,7 +48,7 @@ def test_plan_home_has_mix_bulk_in_progress_and_soon():
 
 def test_plan_my_week_screens():
     week = read("PlanWeekView.swift")
-    for text in ("Plan my week", "VIDEOS PER DAY", "DAYS", "REMINDERS", "Build my week", "This week", "Settings", "POSTED", "TODAY",
+    for text in ("Plan my week", "HOW MANY VIDEOS", "DAYS", "Remind me at each time", "Build my plan", "This week", "Settings", "POSTED", "TODAY",
                  "New Mix ›", "✦ SUGGESTED CAPTION", "Share to TikTok", "Save to Photos", "✓  Mark as posted", "Time to post: "):
         assert text in week
     for path in ('"/v1/plan"', '"/v1/plan/prefs"', '"/v1/plan/week/build"', '"/v1/plan/slots/move"', '"/v1/plan/slots/remove"',
@@ -76,3 +76,13 @@ def test_create_hub_is_the_figma_mix_hub():
     flow = (root / "CreateFlowView.swift").read_text()
     assert "[CreateMode.single, .bulk, .combine]" in hub and '"hubMix"' in hub and "Hooks × bodies × CTAs → many videos" in hub
     assert "MixSetupView(" in flow and "allowedModes: CreateMode.allCases" in flow
+
+
+def test_plan_goal_v2_is_flexible():
+    root = Path(__file__).resolve().parents[1] / "mobile" / "ios" / "CutSell"
+    plan = (root / "PlanWeekView.swift").read_text()
+    for text in ("HOW MANY VIDEOS", "POSTING TIMES · ANY TIME YOU WANT", "+ Time", "Remind me at each time", "Build my plan",
+                 "START", "Delete this time", "static let maxTimes = 8"):
+        assert text in plan, text
+    assert "goalPerDay_" not in plan and '"Morning"' in plan            # the old 1/2/3/4+ selector is gone
+    assert "Set(slots.compactMap(\\.productID))" in plan                   # no product is not a product

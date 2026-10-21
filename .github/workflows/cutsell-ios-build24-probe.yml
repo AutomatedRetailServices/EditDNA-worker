@@ -11,6 +11,9 @@ on:
       tests:
         description: "Tests to run (space separated)"
         default: "testLeaveAndCloseAtEachStage testBulkSheetAndProcessingTab"
+      plan_fixture:
+        description: "testPlanRealData: base64 JSON of her plan (computed read-only on the server)"
+        default: ""
   push:
     branches: [probe/build24]
 
@@ -120,6 +123,7 @@ jobs:
             set +e
             TEST_RUNNER_CUTSELL_PROBE_TOKEN="$PROBE_TOKEN" TEST_RUNNER_CUTSELL_PROBE_USER="$PROBE_USER" \
             TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" TEST_RUNNER_B24_OUT="$RUNNER_TEMP/b24" \
+            TEST_RUNNER_CUTSELL_PLAN_FIXTURE="${{ inputs.plan_fixture }}" \
               xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
                 -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/$t \
                 CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test_$t.log" 2>&1

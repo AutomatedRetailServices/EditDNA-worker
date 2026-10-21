@@ -17,7 +17,19 @@ struct PlanPrefs: Codable, Hashable {
     var days: [Int]           // Monday = 0
     var reminders: [PlanReminder]
     var tz: String?
-    enum CodingKeys: String, CodingKey { case perDay = "per_day", days, reminders, tz }
+    // Goal v2 (flexible, Figma 1140:2773): her own posting times (one video each), how many videos, start day, reminders
+    var times: [String]? = nil
+    var count: Int? = nil
+    var start: String? = nil
+    var remind: Bool? = nil
+    enum CodingKeys: String, CodingKey { case perDay = "per_day", days, reminders, tz, times, count, start, remind }
+
+    /// The posting times: hers (Goal v2), else the old reminders that are on.
+    var postingTimes: [String] {
+        if let times, !times.isEmpty { return times.sorted() }
+        let on = reminders.filter(\.on).map(\.time).sorted()
+        return on.isEmpty ? ["09:00", "19:00"] : Array(on.prefix(max(1, perDay)))
+    }
 }
 
 struct PlanSlot: Codable, Hashable, Identifiable {
@@ -53,14 +65,22 @@ struct PlanWeek: Codable, Hashable {
     let start: String
     var slots: [PlanSlot]
     let missing: PlanMissing?
+    // Goal v2: the plan's last day, how many videos she asked for and how many fit the rules
+    var end: String? = nil
+    var flex: Bool? = nil
+    var asked: Int? = nil
+    var placed: Int? = nil
+    var endsEarly: Bool? = nil
+    enum CodingKeys: String, CodingKey { case start, slots, missing, end, flex, asked, placed, endsEarly = "ends_early" }
 }
 
 struct PlanSummary: Codable, Hashable {
     let ready: Int
     let products: Int
+    var noProduct: Int? = nil          // videos without a product: "no product", never counted as products
     let perDay: Int
     let coversDays: Int
-    enum CodingKeys: String, CodingKey { case ready, products, perDay = "per_day", coversDays = "covers_days" }
+    enum CodingKeys: String, CodingKey { case ready, products, noProduct = "no_product", perDay = "per_day", coversDays = "covers_days" }
 }
 
 struct PlanState: Codable, Hashable {
@@ -145,7 +165,18 @@ final class PlanWeekStore: ObservableObject {
         return PlanDay.dots[index % PlanDay.dots.count]
     }
 
+    /// Simulator only (-CutSellPlanMock + CUTSELL_PLAN_FIXTURE): her real plan computed read-only on the server,
+    /// before and after "Build my plan" (base64 JSON {"before": PlanState, "after": PlanState}).
+    private lazy var fixture: (before: PlanState, after: PlanState)? = {
+        guard mock, let raw = ProcessInfo.processInfo.environment["CUTSELL_PLAN_FIXTURE"], let data = Data(base64Encoded: raw) else { return nil }
+        struct Pair: Decodable { let before: PlanState; let after: PlanState }
+        guard let pair = try? JSONDecoder().decode(Pair.self, from: data) else { return nil }
+        return (pair.before, pair.after)
+    }()
+    private var fixtureBuilt = false
+
     func refresh(session: CutSellSession?) async {
+        if let fixture { state = fixtureBuilt ? fixture.after : fixture.before; return }
         if mock { state = mockState(); return }
         guard let session else { return }
         do {
@@ -158,15 +189,21 @@ final class PlanWeekStore: ObservableObject {
     }
 
     func savePrefs(_ prefs: PlanPrefs, session: CutSellSession?) async throws {
+        if fixture != nil { return }
         if mock { mockPrefs = prefs; state = mockState(); return }
         guard let session else { throw APIError.invalidResponse }
-        struct Body: Encodable { let user_id: String; let per_day: Int; let days: [Int]; let reminders: [PlanReminder]; let tz: String }
+        struct Body: Encodable {
+            let user_id: String; let days: [Int]; let tz: String
+            let times: [String]; let count: Int?; let start: String?; let remind: Bool
+        }
         state = try await APIClient.shared.request("/v1/plan/prefs", method: "PUT",
-                                                   body: Body(user_id: session.userID, per_day: prefs.perDay, days: prefs.days,
-                                                              reminders: prefs.reminders, tz: TimeZone.current.identifier))
+                                                   body: Body(user_id: session.userID, days: prefs.days, tz: TimeZone.current.identifier,
+                                                              times: prefs.postingTimes, count: prefs.count, start: prefs.start,
+                                                              remind: prefs.remind ?? true))
     }
 
     func build(session: CutSellSession?) async throws {
+        if let fixture { fixtureBuilt = true; state = fixture.after; PostReminders.shared.schedule(state); return }
         if mock { mockBuild(); state = mockState(); PostReminders.shared.schedule(state); return }
         guard let session else { throw APIError.invalidResponse }
         struct Body: Encodable { let user_id: String }
@@ -235,9 +272,12 @@ final class PlanWeekStore: ObservableObject {
     private func mockState() -> PlanState {
         let today = PlanDay.iso.string(from: Date())
         let ready = 9 - mockSlots.filter { $0.postedAt != nil }.count
-        let week = mockBuilt ? PlanWeek(start: mockSlots.first?.date ?? today, slots: mockSlots, missing: mockMissing()) : nil
+        let flex = mockPrefs.times != nil
+        let week = mockBuilt ? PlanWeek(start: mockSlots.first?.date ?? today, slots: mockSlots, missing: flex ? nil : mockMissing(),
+                                        end: mockSlots.last?.date, flex: flex, asked: mockSlots.count, placed: mockSlots.count,
+                                        endsEarly: false) : nil
         return PlanState(prefs: mockPrefs, today: today,
-                         summary: PlanSummary(ready: ready, products: 5, perDay: mockPrefs.perDay,
+                         summary: PlanSummary(ready: ready, products: 6, noProduct: 0, perDay: mockPrefs.postingTimes.count,
                                               coversDays: ready / max(1, mockPrefs.perDay)), week: week,
                          personal: mockPersonal.sorted())
     }
@@ -250,14 +290,15 @@ final class PlanWeekStore: ObservableObject {
             ("Rhino", "Power Bank", "p4", "bulk", nil), ("Glow Recipe", "Watermelon Toner", "p5", "mix", "H2 · B1 · C2"),
             ("CeraVe", "Moisturizing Cream", "p6", "single", nil)]
         let calendar = Calendar(identifier: .gregorian)
-        let times = mockPrefs.reminders.filter(\.on).map(\.time).sorted()
-        var day = calendar.startOfDay(for: Date())
+        let times = mockPrefs.postingTimes
+        let wanted = min(mockPrefs.count ?? library.count, library.count)
+        var day = calendar.startOfDay(for: mockPrefs.start.flatMap { PlanDay.date($0) } ?? Date())
         var out: [PlanSlot] = []
         var k = 0
-        while k < library.count {
+        while k < wanted {
             let weekday = (calendar.component(.weekday, from: day) + 5) % 7
             if mockPrefs.days.contains(weekday) {
-                for time in times.prefix(mockPrefs.perDay) where k < library.count {
+                for time in times where k < wanted {
                     let v = library[k]
                     out.append(PlanSlot(date: PlanDay.iso.string(from: day), time: time, projectID: "plan_\(k)", pinned: false,
                                         product: v.1, brand: v.0, productID: v.2, mixCode: v.4, source: v.3, postedAt: nil,
@@ -435,7 +476,9 @@ final class PostReminders: NSObject, UNUserNotificationCenterDelegate {
             let old = requests.map(\.identifier).filter { $0.hasPrefix(Self.prefix) }
             center.removePendingNotificationRequests(withIdentifiers: old)
             guard let state, let week = state.week else { return }
-            let on = Set(state.prefs.reminders.filter(\.on).map(\.time))
+            // Goal v2: "Remind me at each time" (one reminder per planned video); old Goal: the reminders that are on
+            let on = state.prefs.times != nil ? ((state.prefs.remind ?? true) ? Set(week.slots.map(\.time)) : [])
+                                              : Set(state.prefs.reminders.filter(\.on).map(\.time))
             for slot in week.slots where slot.postedAt == nil && on.contains(slot.time) {
                 guard let day = PlanDay.date(slot.date) else { continue }
                 let parts = slot.time.split(separator: ":").compactMap { Int($0) }
@@ -503,25 +546,30 @@ struct PlanBackButton: View {
     }
 }
 
-// MARK: - Plan my week · Goal (Figma 1138:2749)
+// MARK: - Plan my week · Goal v2 (flexible, Figma 12_Prototype 1140:2773)
 
 struct PlanGoalView: View {
     let onBuilt: () -> Void
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = PlanWeekStore.shared
-    @State private var prefs = PlanPrefs(perDay: 2, days: [0, 1, 2, 3, 4, 5],
-                                         reminders: [PlanReminder(label: "Morning", time: "09:00", on: true),
-                                                     PlanReminder(label: "Evening", time: "19:00", on: true),
-                                                     PlanReminder(label: "Night", time: "22:00", on: false)], tz: nil)
+    @State private var count = 1
+    @State private var times: [String] = ["09:00", "19:00"]
+    @State private var days: [Int] = [0, 1, 2, 3, 4]
+    @State private var start = PlanGoalView.tomorrow()
+    @State private var remind = true
     @State private var loaded = false
     @State private var building = false
-    @State private var editingTime: Int?
+    @State private var editing: TimeEdit?
+    @State private var pickingStart = false
     @State private var errorMessage: String?
+    @State private var endedEarly: String?
 
+    static let maxTimes = 8
     private var ready: Int { store.state?.summary.ready ?? 0 }
     private var products: Int { store.state?.summary.products ?? 0 }
-    private var coverDays: Int { ready / max(1, prefs.perDay) }
+    private var noProduct: Int { store.state?.summary.noProduct ?? 0 }
+    private var perDay: Int { max(1, times.count) }
 
     var body: some View {
         ZStack {
@@ -529,23 +577,46 @@ struct PlanGoalView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     PlanBackButton(title: "Plan") { dismiss() }.padding(.top, 8)
-                    Text("Plan my week").font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
-                    Text("Tell us how often you post. We’ll spread your ready videos so every day has variety.")
-                        .font(CS.inter(13)).foregroundStyle(PlanStyle.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
-                    label("VIDEOS PER DAY").padding(.top, 26)
-                    HStack(spacing: 8) {
-                        ForEach(1...4, id: \.self) { n in
-                            pill(n == 4 ? "4+" : "\(n)", on: prefs.perDay == n, height: 38) { prefs.perDay = n }
-                                .accessibilityIdentifier("goalPerDay_\(n)")
+                    Text("Plan my week").font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 14)
+                    Text("Pick how many videos and when. We spread them so every day has variety.")
+                        .font(CS.inter(13)).foregroundStyle(PlanStyle.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+
+                    label("HOW MANY VIDEOS").padding(.top, 20)
+                    howMany.padding(.top, 8)
+
+                    label("POSTING TIMES · ANY TIME YOU WANT").padding(.top, 18)
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), alignment: .leading, spacing: 6) {
+                        ForEach(Array(times.enumerated()), id: \.element) { index, time in
+                            Button { editing = TimeEdit(id: index) } label: {
+                                Text(PlanDay.clock(time)).font(CS.inter(13, .semibold)).foregroundStyle(.white).lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity).frame(height: 44)
+                                    .background(Capsule().fill(CS.brandFull))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("goalTime_\(index)")
+                        }
+                        if times.count < Self.maxTimes {
+                            Button { editing = TimeEdit(id: -1) } label: {
+                                Text("+ Time").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                                    .frame(maxWidth: .infinity).frame(height: 44)
+                                    .overlay(Capsule().strokeBorder(Color(hex: 0x596685), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("goalAddTime")
                         }
                     }
                     .padding(.top, 8)
-                    label("DAYS").padding(.top, 26)
+                    Text("\(times.count) time\(times.count == 1 ? "" : "s") = \(times.count) video\(times.count == 1 ? "" : "s") per day. Tap a time to change it.")
+                        .font(CS.inter(11)).foregroundStyle(PlanStyle.muted).padding(.top, 8)
+                        .accessibilityIdentifier("goalTimesHelp")
+
+                    label("DAYS").padding(.top, 22)
                     HStack(spacing: 6) {
                         ForEach(0..<7, id: \.self) { d in
-                            let on = prefs.days.contains(d)
+                            let on = days.contains(d)
                             Button {
-                                if on { if prefs.days.count > 1 { prefs.days.removeAll { $0 == d } } } else { prefs.days = (prefs.days + [d]).sorted() }
+                                if on { if days.count > 1 { days.removeAll { $0 == d } } } else { days = (days + [d]).sorted() }
                             } label: {
                                 Text(["M", "T", "W", "T", "F", "S", "S"][d]).font(CS.inter(14, .bold))
                                     .foregroundStyle(on ? .white : PlanStyle.muted)
@@ -559,34 +630,49 @@ struct PlanGoalView: View {
                         }
                     }
                     .padding(.top, 8)
-                    label("REMINDERS").padding(.top, 22)
-                    VStack(spacing: 8) {
-                        ForEach(Array(prefs.reminders.enumerated()), id: \.offset) { index, reminder in reminderRow(index, reminder) }
+
+                    label("START").padding(.top, 18)
+                    Button { pickingStart = true } label: {
+                        HStack {
+                            Text(startText).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                            Spacer()
+                            Text("Change").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                        }
+                        .padding(.horizontal, 15).frame(height: 48)
+                        .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
                     }
+                    .buttonStyle(.plain)
                     .padding(.top, 8)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("✦  You have \(ready) ready video\(ready == 1 ? "" : "s") from \(products) product\(products == 1 ? "" : "s").")
-                            .font(CS.inter(13, .semibold)).foregroundStyle(.white)
-                        Text("That covers \(coverDays) day\(coverDays == 1 ? "" : "s") at \(prefs.perDay) per day.")
-                            .font(CS.inter(12)).foregroundStyle(PlanStyle.muted).padding(.leading, 20)
+                    .accessibilityIdentifier("goalStart")
+
+                    HStack {
+                        Text("Remind me at each time").font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                        Spacer()
+                        Button { remind.toggle() } label: {
+                            Image(remind ? "PlanToggleOn" : "PlanToggleOff").resizable().frame(width: 44, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("goalRemind")
+                        .accessibilityValue(remind ? "on" : "off")
                     }
-                    .padding(.horizontal, 13).padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1))
-                    .padding(.top, 20)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("goalSummary")
+                    .padding(.horizontal, 15).frame(height: 52)
+                    .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+                    .padding(.top, 12)
+
+                    summaryBox.padding(.top, 14)
+
                     Button { Task { await build() } } label: {
                         Group {
-                            if building { ProgressView().tint(.white) } else { Text("Build my week").font(CS.sf(15, .semibold)) }
+                            if building { ProgressView().tint(.white) } else { Text("Build my plan").font(CS.sf(15, .semibold)) }
                         }
                         .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 50)
                         .background(Capsule().fill(PlanStyle.cta))
                         .shadow(color: Color(hex: 0x1969FF).opacity(0.25), radius: 9, y: 6)
                     }
-                    .disabled(building)
-                    .padding(.top, 26)
+                    .disabled(building || ready == 0)
+                    .padding(.top, 18)
                     .accessibilityIdentifier("goalBuild")
                 }
                 .padding(.horizontal, 20)
@@ -597,82 +683,198 @@ struct PlanGoalView: View {
         .preferredColorScheme(.dark)
         .task {
             await store.refresh(session: appState.session)
-            if !loaded, let current = store.state?.prefs { prefs = current; loaded = true }
+            guard !loaded else { return }
+            loaded = true
+            if let prefs = store.state?.prefs {
+                times = prefs.postingTimes
+                days = prefs.days.isEmpty ? [0, 1, 2, 3, 4] : prefs.days
+                remind = prefs.remind ?? true
+                if let saved = prefs.start, saved > PlanDay.iso.string(from: Date()) { start = saved }
+            }
+            count = max(1, min(store.state?.prefs.count ?? ready, max(ready, 1)))
         }
-        .sheet(item: Binding(get: { editingTime.map { TimeEdit(id: $0) } }, set: { editingTime = $0?.id })) { edit in
-            TimePickerSheet(time: prefs.reminders[edit.id].time) { prefs.reminders[edit.id].time = $0 }
-                .presentationDetents([.height(320)])
+        .onChange(of: ready) { _, value in if count > value || count == 0 { count = max(1, value) } }
+        .sheet(item: $editing) { edit in
+            TimePickerSheet(time: edit.id >= 0 ? times[edit.id] : (times.last.map(Self.later) ?? "09:00"),
+                            title: edit.id >= 0 ? "Change time" : "Add a time",
+                            onDelete: edit.id >= 0 && times.count > 1 ? { times.remove(at: edit.id) } : nil) { value in
+                var next = times
+                if edit.id >= 0 { next[edit.id] = value } else { next.append(value) }
+                times = Array(Set(next)).sorted().prefix(Self.maxTimes).map { $0 }
+            }
+            .presentationDetents([.height(edit.id >= 0 ? 380 : 330)])
+            .presentationBackground(Color(hex: 0x0D121F))
+        }
+        .sheet(isPresented: $pickingStart) {
+            StartDateSheet(day: start) { start = $0 }
+                .presentationDetents([.height(470)])
                 .presentationBackground(Color(hex: 0x0D121F))
         }
         .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(errorMessage ?? "") }
+        .alert("Your plan ends early", isPresented: Binding(get: { endedEarly != nil }, set: { if !$0 { endedEarly = nil; onBuilt() } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(endedEarly ?? "") }
     }
 
     struct TimeEdit: Identifiable { let id: Int }
+
+    private var howMany: some View {
+        HStack {
+            Button { count = max(1, count - 1) } label: {
+                Text("−").font(CS.inter(20, .bold)).foregroundStyle(.white)
+                    .frame(width: 40, height: 40).background(Circle().fill(Color(hex: 0x1F2638)))
+            }
+            .buttonStyle(.plain)
+            .disabled(count <= 1)
+            .accessibilityIdentifier("goalMinus")
+            Spacer()
+            VStack(spacing: 2) {
+                Text("\(count)").font(CS.inter(28, .bold)).foregroundStyle(.white).accessibilityIdentifier("goalCount")
+                Text("of \(ready) ready video\(ready == 1 ? "" : "s")").font(CS.inter(11)).foregroundStyle(PlanStyle.muted)
+            }
+            Spacer()
+            Button { count = min(max(ready, 1), count + 1) } label: {
+                Text("+").font(CS.inter(20, .bold)).foregroundStyle(.white)
+                    .frame(width: 40, height: 40).background(Circle().fill(CS.brandFull))
+            }
+            .buttonStyle(.plain)
+            .disabled(count >= ready)
+            .accessibilityIdentifier("goalPlus")
+        }
+        .padding(.horizontal, 13)
+        .frame(height: 74)
+        .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+    }
+
+    /// "✦  11 videos · 3 per day · 4 days" / "Thu 22 → Tue 27 · 6 products"
+    private var summaryBox: some View {
+        let dates = Self.planDays(count: count, perDay: perDay, days: days, start: start)
+        let range = dates.isEmpty ? "" : "\(Self.dayLabel(dates.first!)) → \(Self.dayLabel(dates.last!))"
+        var line2 = range + " · \(products) product\(products == 1 ? "" : "s")"
+        if noProduct > 0 { line2 += " · \(noProduct) without a product" }
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("✦  \(count) video\(count == 1 ? "" : "s") · \(perDay) per day · \(dates.count) day\(dates.count == 1 ? "" : "s")")
+                .font(CS.inter(14, .semibold)).foregroundStyle(.white)
+            Text(line2).font(CS.inter(12)).foregroundStyle(PlanStyle.muted).padding(.leading, 20)
+        }
+        .padding(.horizontal, 13).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color(hex: 0x19E5FF), lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("goalSummary")
+    }
 
     private func label(_ text: String) -> some View {
         Text(text).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
     }
 
-    private func pill(_ title: String, on: Bool, height: CGFloat, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).font(CS.inter(14, .semibold)).foregroundStyle(on ? .white : PlanStyle.muted)
-                .frame(maxWidth: .infinity).frame(height: height)
-                .background { if on { Capsule().fill(CS.brandFull) } else { Capsule().fill(PlanStyle.card) } }
-                .overlay(Capsule().stroke(on ? .clear : PlanStyle.border, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
+    private var startText: String {
+        let today = PlanDay.iso.string(from: Date())
+        let prefix = start == today ? "Today · " : start == Self.tomorrow() ? "Tomorrow · " : ""
+        return prefix + Self.dayLabel(start)
     }
 
-    private func reminderRow(_ index: Int, _ reminder: PlanReminder) -> some View {
-        HStack {
-            Button { editingTime = index } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(reminder.label).font(CS.inter(14, .semibold)).foregroundStyle(.white)
-                    Text(PlanDay.clock(reminder.time)).font(CS.inter(12)).foregroundStyle(PlanStyle.muted)
-                }
-            }
-            .buttonStyle(.plain)
-            Spacer()
-            Button { prefs.reminders[index].on.toggle() } label: {
-                Image(reminder.on ? "PlanToggleOn" : "PlanToggleOff").resizable().frame(width: 44, height: 26)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("goalReminder_\(index)")
+    /// The days the plan uses: her days from `start`, `perDay` videos each, until `count` videos.
+    static func planDays(count: Int, perDay: Int, days: [Int], start: String) -> [String] {
+        guard count > 0, !days.isEmpty, var day = PlanDay.date(start) else { return [] }
+        let calendar = Calendar(identifier: .gregorian)
+        var out: [String] = []
+        var left = count
+        var guardDays = 0
+        while left > 0 && guardDays < 400 {
+            let weekday = (calendar.component(.weekday, from: day) + 5) % 7      // Monday = 0
+            if days.contains(weekday) { out.append(PlanDay.iso.string(from: day)); left -= perDay }
+            day = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+            guardDays += 1
         }
-        .padding(.horizontal, 15)
-        .frame(height: 52)
-        .background(PlanStyle.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(PlanStyle.border, lineWidth: 1))
+        return out
+    }
+
+    /// "Thu 22"
+    static func dayLabel(_ day: String) -> String {
+        guard let d = PlanDay.date(day) else { return day }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "EEE d"
+        return f.string(from: d)
+    }
+
+    static func tomorrow() -> String {
+        PlanDay.iso.string(from: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date())
+    }
+
+    /// A new time: one hour after the last one (stays within the day).
+    static func later(_ time: String) -> String {
+        let parts = time.split(separator: ":").compactMap { Int($0) }
+        return String(format: "%02d:%02d", min(23, (parts.first ?? 9) + 1), parts.count > 1 ? parts[1] : 0)
     }
 
     private func build() async {
         building = true
         defer { building = false }
+        var prefs = store.state?.prefs ?? PlanPrefs(perDay: perDay, days: days, reminders: [], tz: nil)
+        prefs.times = times
+        prefs.perDay = perDay
+        prefs.days = days
+        prefs.count = count
+        prefs.start = start
+        prefs.remind = remind
         do {
             try await store.savePrefs(prefs, session: appState.session)
             try await store.build(session: appState.session)
-            if prefs.reminders.contains(where: \.on) {
+            if remind {
                 _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-                PostReminders.shared.schedule(store.state)
             }
+            PostReminders.shared.schedule(store.state)
             PostPrefetch.schedule()
-            onBuilt()
+            if let week = store.state?.week, week.endsEarly == true {
+                let placed = week.placed ?? week.slots.count
+                let end = week.end.map(Self.dayLabel) ?? ""
+                endedEarly = "\(placed) of \(week.asked ?? count) videos fit\(end.isEmpty ? "" : " — the plan ends \(end)"). The rest would put the same product back to back."
+            } else {
+                onBuilt()
+            }
         } catch {
-            errorMessage = "Your week couldn’t be built. Check your connection and try again."
+            errorMessage = "Your plan couldn’t be built. Check your connection and try again."
         }
+    }
+}
+
+/// START · Change: a day from today on.
+struct StartDateSheet: View {
+    let day: String
+    let onDone: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var value = Date()
+
+    var body: some View {
+        VStack(spacing: 10) {
+            DatePicker("", selection: $value, in: Calendar.current.startOfDay(for: Date())..., displayedComponents: .date)
+                .datePickerStyle(.graphical).labelsHidden().tint(CS.cyan)
+            Button("Save") { onDone(PlanDay.iso.string(from: value)); dismiss() }
+                .font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
+                .accessibilityIdentifier("startSave")
+        }
+        .padding(16)
+        .preferredColorScheme(.dark)
+        .onAppear { value = PlanDay.date(day) ?? Date() }
     }
 }
 
 struct TimePickerSheet: View {
     let time: String
+    var title: String? = nil
+    /// "Delete this time" (Goal v2: tapping a time lets her change it or remove it).
+    var onDelete: (() -> Void)? = nil
     let onDone: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var value = Date()
 
     var body: some View {
         VStack(spacing: 12) {
+            if let title { Text(title).font(CS.inter(15, .semibold)).foregroundStyle(.white) }
             DatePicker("", selection: $value, displayedComponents: .hourAndMinute).datePickerStyle(.wheel).labelsHidden()
             Button("Save") {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: value)
@@ -680,6 +882,12 @@ struct TimePickerSheet: View {
                 dismiss()
             }
             .font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
+            .accessibilityIdentifier("timeSave")
+            if let onDelete {
+                Button("Delete this time", role: .destructive) { onDelete(); dismiss() }
+                    .font(CS.inter(14, .semibold))
+                    .accessibilityIdentifier("timeDelete")
+            }
         }
         .padding(.top, 20)
         .preferredColorScheme(.dark)
@@ -743,6 +951,11 @@ struct PlanWeekView: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("weekMissing")
                     }
+                    if let week = store.state?.week, week.endsEarly == true {
+                        Text("Plan ends early: \(week.placed ?? week.slots.count) of \(week.asked ?? 0) videos fit without the same product back to back.")
+                            .font(CS.inter(12)).foregroundStyle(Color(hex: 0xFFB840)).padding(.top, 10)
+                            .accessibilityIdentifier("weekEndsEarly")
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
@@ -769,8 +982,9 @@ struct PlanWeekView: View {
 
     private var subtitle: String {
         let slots = store.state?.week?.slots ?? []
-        let products = Set(slots.map { $0.productID ?? $0.projectID }).count
-        return "\(slots.count) video\(slots.count == 1 ? "" : "s") · \(products) product\(products == 1 ? "" : "s") · \(store.state?.prefs.perDay ?? 1) per day"
+        let products = Set(slots.compactMap(\.productID)).count            // a video without a product is not a product
+        let perDay = store.state?.prefs.postingTimes.count ?? 1
+        return "\(slots.count) video\(slots.count == 1 ? "" : "s") · \(products) product\(products == 1 ? "" : "s") · \(perDay) per day"
     }
 
     private func dayCard(_ day: String) -> some View {
@@ -790,9 +1004,17 @@ struct PlanWeekView: View {
                     }
                     Spacer()
                 }
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(slots) { slot in slotCell(slot, highlight: isToday || !allPosted && slot.postedAt == nil) }
-                    if slots.count < 2 { Spacer(minLength: 0) }
+                if slots.count > 3 {                       // Goal v2: up to 8 times a day -> the day scrolls sideways
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 8) {
+                            ForEach(slots) { slot in slotCell(slot, highlight: isToday || !allPosted && slot.postedAt == nil).frame(width: 96) }
+                        }
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(slots) { slot in slotCell(slot, highlight: isToday || !allPosted && slot.postedAt == nil) }
+                        if slots.count < 2 { Spacer(minLength: 0) }
+                    }
                 }
             }
             .padding(13)
@@ -1054,7 +1276,9 @@ struct PlanDayView: View {
     }
 
     private func reminderOn(_ slot: PlanSlot) -> Bool {
-        store.state?.prefs.reminders.contains { $0.on && $0.time == slot.time } ?? false
+        guard let prefs = store.state?.prefs else { return false }
+        if prefs.times != nil { return prefs.remind ?? true }
+        return prefs.reminders.contains { $0.on && $0.time == slot.time }
     }
 
     /// The video file (exported at night, or now with its %), the caption copied: the iPhone's share sheet (TikTok…).

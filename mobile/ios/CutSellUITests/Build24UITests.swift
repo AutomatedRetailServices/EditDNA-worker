@@ -64,7 +64,7 @@ final class Build24UITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["-CutSellScreen", "create_probe"]
         let env = ProcessInfo.processInfo.environment
-        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_API"] {
+        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_API", "CUTSELL_PLAN_FIXTURE"] {
             if let value = env[key] { app.launchEnvironment[key] = value }
         }
         app.launch()
@@ -497,6 +497,33 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    /// Her real library (plan computed read-only on the server with the new rules), shown by the app.
+    func testPlanRealData() throws {
+        launchApp(fresh: true, extra: ["-CutSellPlanMock"])
+        check(ProcessInfo.processInfo.environment["CUTSELL_PLAN_FIXTURE"] != nil, "her plan data given to the simulator")
+        element("tab_plan").tap()
+        let card = element("planMyWeek")
+        check(card.waitForExistence(timeout: 20), "Plan card")
+        card.tap()
+        check(element("goalBuild").waitForExistence(timeout: 10), "Goal v2")
+        pause(1)
+        log("goal: count \(element("goalCount").label) · \(element("goalSummary").label) · \(element("goalTimesHelp").label)")
+        shot("real_goal")
+        element("goalBuild").tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.buttons["Allow"].waitForExistence(timeout: 5) { springboard.buttons["Allow"].tap() }
+        let subtitle = element("weekSubtitle")
+        check(subtitle.waitForExistence(timeout: 15), "her plan built", subtitle.label)
+        pause(1)
+        shot("real_week")
+        app.swipeUp(); pause(1)
+        shot("real_week_more")
+        app.swipeDown(); pause(1)
+        let first = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'weekDay_'")).firstMatch
+        if first.exists { first.tap(); pause(2); shot("real_day") }
+        done()
+    }
+
     func testPersonalMenu() throws {
         launchApp(fresh: true, extra: ["-CutSellPlanMock"])
         element("tab_edits").tap()
@@ -544,11 +571,31 @@ final class Build24UITests: XCTestCase {
         check(!element("planSoon").exists, "no SOON any more")
         card.tap()
         check(element("goalBuild").waitForExistence(timeout: 10), "Plan my week · Goal")
-        element("goalPerDay_2").tap()
-        element("goalReminder_2").tap()                       // Night on
+        // Goal v2 (Figma 1140:2773): how many videos, free times, days, start, remind
+        let count = element("goalCount")
+        check(count.label == "9", "HOW MANY VIDEOS starts at all usable", count.label)
+        element("goalMinus").tap(); pause(0.3)
+        check(count.label == "8", "− takes one away", count.label)
+        element("goalPlus").tap(); pause(0.3)
+        check(count.label == "9", "+ adds one (never above the usable videos)", count.label)
+        element("goalPlus").tap(); pause(0.3)
+        check(count.label == "9", "+ stops at all usable", count.label)
+        check(!element("goalPerDay_2").exists && !element("goalReminder_2").exists, "no 1/2/3/4+ and no Morning/Evening/Night")
+        element("goalAddTime").tap()
+        if element("timeSave").waitForExistence(timeout: 5) { element("timeSave").tap() }
+        pause(1)
+        check(element("goalTimesHelp").label.hasPrefix("3 times = 3 videos per day"), "+ Time adds a time", element("goalTimesHelp").label)
+        shot("plan_goal_three_times")
+        element("goalTime_0").tap()
+        check(element("timeDelete").waitForExistence(timeout: 5), "a time can be changed or deleted")
+        element("timeDelete").tap()
+        pause(1)
+        check(element("goalTimesHelp").label.hasPrefix("2 times = 2 videos per day"), "time deleted", element("goalTimesHelp").label)
         element("goalDay_6").tap()                            // Sunday on
+        check(element("goalStart").label.contains("Tomorrow"), "START: Tomorrow", element("goalStart").label)
         shot("plan_goal")
-        check(element("goalSummary").label.contains("ready video"), "X ready videos cover Y days", element("goalSummary").label)
+        check(element("goalSummary").label.contains("9 videos · 2 per day"), "live summary N videos · X per day · Y days",
+              element("goalSummary").label)
         element("goalBuild").tap()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = springboard.buttons["Allow"]
@@ -556,7 +603,7 @@ final class Build24UITests: XCTestCase {
         let subtitle = element("weekSubtitle")
         check(subtitle.waitForExistence(timeout: 15), "Week built")
         check(subtitle.label.hasPrefix("9 videos"), "9 videos in the week", subtitle.label)
-        check(element("weekMissing").exists, "the days without videos: New Mix ›")
+        check(!element("weekEndsEarly").exists, "all 9 fit (no ends-early note)")
         shot("plan_week")
 
         // Move one video (long press → Move).
