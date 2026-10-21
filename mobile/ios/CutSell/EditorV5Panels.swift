@@ -724,6 +724,7 @@ struct VoiceOverSheetV5: View {
         }
         .onAppear { if recorder.recordedURL != nil { step = .review } }
         .onDisappear { listener.stop() }
+        .accessibilityElement(children: .contain)       // its buttons keep their own names (VoiceOver, UI tests)
         .accessibilityIdentifier(step == .record ? "voiceRecordSheet" : "voiceReviewSheet")
     }
 
