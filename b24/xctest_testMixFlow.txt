@@ -1,40 +1,40 @@
-B24UI    24.4 PASS Create is for one video (no Bulk, no Mix)
-B24UI    26.1 PASS Plan · New Mix
-B24UI    26.3 PASS Plan · Bulk and This week (SOON)
-B24UI    34.4 Photos access allowed
-B24UI    35.6 PASS Plan · Bulk opens the gallery
-B24UI    40.3 PASS Mix setup
-B24UI    43.9 PASS a product chosen · CeraVe · Hydrating Cleanser
-B24UI    55.0 PASS gallery says Add 3 clips · Add 3 clips
-B24UI    57.8 PASS section 0 has its 3 clips
-B24UI    70.6 PASS gallery says Add 2 clips · Add 2 clips
-B24UI    72.2 PASS section 1 has its 2 clips
-B24UI   110.1 PASS gallery says Add 2 clips · Add 2 clips
-B24UI   111.3 PASS section 2 has its 2 clips
-B24UI   120.7 PASS gallery says Add 2 clips · Add 2 clips
-B24UI   122.4 PASS section 3 has its 2 clips
-B24UI   123.5 PASS 9 clips in 4 sections
-B24UI   123.7 PASS 24 videos · about N s each · 24 videos · about 146 s each
-B24UI   143.2 PASS section renamed · Results
-B24UI   146.1 PASS section added
-B24UI   152.8 PASS section deleted
-B24UI   160.4 PASS section moved up · CTA
-B24UI   168.2 PASS section moved back · CTA
-B24UI   170.1 PASS How many videos? sheet
-B24UI   172.6 PASS preview of the first 4 videos
-B24UI   173.0 PASS 12 chosen · Make 12 videos
-B24UI   181.1 PASS Mix group in Processing
-B24UI   181.7 PASS Processing shows this Mix only
-B24UI   183.0 PASS Mix · 12 videos · Mix · 12 videos
-B24UI   186.5 PASS Plan · In progress shows the Mix · MIX, Mix, 3 of 12 ready, 3/12
-B24UI   189.0 PASS In progress → Edits · Processing (this Mix)
-B24UI   192.0 PASS Mix results
-B24UI   213.7 PASS Mix ready banner · ✦  Mix ready: 12 videos from 9 clips
-B24UI   214.0 PASS MIX tiles with their code · 12
-B24UI   214.7 PASS Brand · Mix · 12 videos · CeraVe · Mix · 12 videos
-B24UI   221.1 PASS Export all · 12 videos saved to Photos
-B24UI   221.4 FAILURES: none
-Test Case '-[CutSellUITests.Build24UITests testMixFlow]' passed (222.053 seconds).
-Test Suite 'Build24UITests' passed at 2026-10-20 20:31:26.663.
-Test Suite 'CutSellUITests.xctest' passed at 2026-10-20 20:31:26.664.
-Test Suite 'Selected tests' passed at 2026-10-20 20:31:26.666.
+B24UI    13.4 PASS Create is for one video (no Bulk, no Mix)
+B24UI    15.2 PASS Plan · New Mix
+B24UI    16.0 FAIL Plan · Bulk and This week (SOON)
+B24UI    23.0 Photos access allowed
+B24UI    24.1 PASS Plan · Bulk opens the gallery
+B24UI    29.6 PASS Mix setup
+B24UI    32.1 PASS a product chosen · CeraVe · Hydrating Cleanser
+B24UI    42.1 PASS gallery says Add 3 clips · Add 3 clips
+B24UI    44.3 PASS section 0 has its 3 clips
+B24UI    54.9 PASS gallery says Add 2 clips · Add 2 clips
+B24UI    56.8 PASS section 1 has its 2 clips
+B24UI    66.3 PASS gallery says Add 2 clips · Add 2 clips
+B24UI    67.6 PASS section 2 has its 2 clips
+B24UI    78.1 PASS gallery says Add 2 clips · Add 2 clips
+B24UI    79.1 PASS section 3 has its 2 clips
+B24UI    80.2 PASS 9 clips in 4 sections
+B24UI    80.3 PASS 24 videos · about N s each · 24 videos · about 146 s each
+B24UI    99.3 PASS section renamed · Results
+B24UI   101.1 PASS section added
+B24UI   107.2 PASS section deleted
+B24UI   112.8 PASS section moved up · CTA
+B24UI   118.2 PASS section moved back · CTA
+B24UI   119.7 PASS How many videos? sheet
+B24UI   121.9 PASS preview of the first 4 videos
+B24UI   122.1 PASS 12 chosen · Make 12 videos
+B24UI   125.5 PASS Mix group in Processing
+B24UI   125.7 PASS Processing shows this Mix only
+B24UI   126.2 PASS Mix · 12 videos · Mix · 12 videos
+B24UI   128.6 PASS Plan · In progress shows the Mix · MIX, Mix, 1 of 12 ready, 1/12
+B24UI   130.4 PASS In progress → Edits · Processing (this Mix)
+B24UI   132.7 PASS Mix results
+B24UI   160.5 PASS Mix ready banner · ✦  Mix ready: 12 videos from 9 clips
+B24UI   160.7 PASS MIX tiles with their code · 12
+B24UI   161.0 PASS Brand · Mix · 12 videos · CeraVe · Mix · 12 videos
+B24UI   164.4 PASS Export all · 12 videos saved to Photos
+B24UI   164.6 FAILURES: Plan · Bulk and This week (SOON)
+Test Case '-[CutSellUITests.Build24UITests testMixFlow]' passed (165.123 seconds).
+Test Suite 'Build24UITests' passed at 2026-10-21 00:31:21.051.
+Test Suite 'CutSellUITests.xctest' passed at 2026-10-21 00:31:21.051.
+Test Suite 'Selected tests' passed at 2026-10-21 00:31:21.052.

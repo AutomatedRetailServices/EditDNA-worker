@@ -1,0 +1,20 @@
+B24UI    24.1 PASS Plan · This week card
+B24UI    25.4 PASS no SOON any more
+B24UI    29.2 PASS Plan my week · Goal
+B24UI    33.5 PASS X ready videos cover Y days · ✦  You have 9 ready videos from 5 products., That covers 4 days at 2 per day.
+    t =    42.34s Failed to construct element query matching interruption. Interrupting element Alert, foreground application Application 'com.apple.springboard', element application: (null). If your test failed after this unhandled interruption, please file a bug and attach your .xcresult bundle.
+B24UI    44.6 PASS Week built
+B24UI    44.9 PASS 9 videos in the week · 9 videos · 6 products · 2 per day
+B24UI    45.1 PASS the days without videos: New Mix ›
+B24UI    52.2 PASS move sheet
+B24UI    55.0 PASS still 9 videos after the move
+B24UI    57.2 PASS Day
+B24UI    57.6 PASS suggested caption · So good on my skin ✨ #cerave #tiktokshop
+B24UI    78.8 FAIL her caption saved · My own caption #mine #tiktokshop
+B24UI    79.9 PASS Copy
+B24UI    86.9 PASS Share to TikTok opens the share sheet with the video
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:530: error: -[CutSellUITests.Build24UITests testPlanWeekFlow] : Failed to not hittable: Button, {{214.0, 505.7}, {186.0, 46.0}}, identifier: 'dayPosted', label: '✓  Mark as posted'
+Test Case '-[CutSellUITests.Build24UITests testPlanWeekFlow]' failed (102.906 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-21 00:27:27.478.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 00:27:27.479.
+Test Suite 'Selected tests' failed at 2026-10-21 00:27:27.480.
