@@ -313,3 +313,26 @@ def test_a_short_clip_heard_empty_is_heard_again_in_the_mix_language(r, tmp_path
     record = mix_store.load(user, mix_id, client=r)
     assert out["state"] == "ready" and "en" in asked
     assert record["clips"]["s0c1"]["words"] == 4 and record["clips"]["s0c1"]["captions"]
+
+
+def test_a_clip_heard_in_the_wrong_language_is_heard_again_in_the_mix_language(r, tmp_path):
+    """Production, 21 Oct: a 6 s English clip heard alone came back as Dutch ("Deze is er.") and the clip lost its words."""
+    user, mix_id, files = _mix(r, tmp_path, counts=(2, 1, 1, 1))
+    deps, calls, _ = _deps(r, files, tmp_path)
+    plain = deps.transcribe
+    asked = []
+
+    def transcribe(audio, **k):
+        asked.append((Path(audio).stem.replace("-voice", ""), k.get("language_hint")))
+        if "s1c0" in audio and not k.get("language_hint"):
+            return {"language": "nl", "words": [{"w": "Deze", "s": 0.2, "e": 0.5}, {"w": "is", "s": 0.5, "e": 0.7},
+                                                 {"w": "er.", "s": 0.7, "e": 0.9}]}
+        return plain(audio, **k)
+
+    deps.transcribe = transcribe
+    out = mix_job.run_mix_job({"user_id": user, "mix_id": mix_id}, deps)
+    record = mix_store.load(user, mix_id, client=r)
+    assert out["state"] == "ready"
+    assert ("s1c0", "en") in asked and record["clips"]["s1c0"]["language"] == "en"
+    assert "Deze" not in " ".join(w["w"] for w in record["clips"]["s1c0"]["captions"])
+    assert [a for a in asked if a[1]] == [("s1c0", "en")]              # the clips heard right are not paid twice
