@@ -1,0 +1,20 @@
+B24UI    22.0 PASS meter X / N cuts · Plan · 7 / 30 cuts ·, Plan
+B24UI    22.4 PASS Upload videos · single chip
+B24UI    22.6 PASS Upload videos · bulk chip
+B24UI    22.9 PASS Upload videos · combine chip
+B24UI    23.1 PASS Mix row
+B24UI    23.4 PASS Record with CutSell + Voice Over project
+B24UI    23.5 PASS Recent cuts · See all in Edits
+B24UI    25.7 PASS Mix row opens Mix · Setup
+B24UI   101.5 Photos access allowed
+B24UI   123.6 FAIL gallery mode picker
+B24UI   124.1 PASS gallery shows Single
+B24UI   124.5 PASS gallery shows Bulk
+B24UI   124.9 PASS gallery shows Combine
+B24UI   125.0 FAIL Bulk chip opened the gallery in Bulk
+B24UI   125.3 FAILURES: gallery mode picker | Bulk chip opened the gallery in Bulk
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:564: error: -[CutSellUITests.Build24UITests testCreateHub] : XCTAssertTrue failed - gallery mode picker | Bulk chip opened the gallery in Bulk
+Test Case '-[CutSellUITests.Build24UITests testCreateHub]' failed (128.892 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-21 16:26:16.495.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 16:26:16.497.
+Test Suite 'Selected tests' failed at 2026-10-21 16:26:16.498.
