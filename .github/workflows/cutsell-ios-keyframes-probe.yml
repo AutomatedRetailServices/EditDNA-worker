@@ -83,7 +83,7 @@ jobs:
         run: |
           say -v Samantha -o "$RUNNER_TEMP/speech.aiff" "Hi everyone. Look at this. My favorite water bottle keeps drinks cold for twenty four hours, and it fits in any cup holder. It is twenty dollars in my shop right now. Grab yours today."
           ffmpeg -loglevel error -f lavfi -i color=c=0x203060:s=720x1280:r=30 -i "$RUNNER_TEMP/speech.aiff" \
-            -vf "drawbox=x=260:y=540:w=200:h=200:color=white:t=fill,drawbox=x='mod(t*240,720)':y=1080:w=120:h=120:color=0xE04080:t=fill,noise=alls=10:allf=t+u" \
+            -vf "drawbox=x=260:y=540:w=200:h=200:color=white:t=fill,drawbox=x='mod(t*300,720)-150':y=150:w=300:h=300:color=0xE04080:t=fill,drawbox=x='720-mod(t*260,870)':y=900:w=260:h=260:color=0x40E0A0:t=fill,noise=alls=24:allf=t+u" \
             -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac "$RUNNER_TEMP/probe.mp4"
           ls -la "$RUNNER_TEMP/probe.mp4"
 
