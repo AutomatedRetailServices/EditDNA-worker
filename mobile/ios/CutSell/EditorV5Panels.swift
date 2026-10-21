@@ -748,7 +748,7 @@ struct VoiceOverSheetV5: View {
                 }
                 Spacer(minLength: 4)
                 Toggle("", isOn: $enhance).labelsHidden().tint(CS.cyan)
-                    .disabled(isRecording || countdown != nil)
+                    .allowsHitTesting(!(isRecording || countdown != nil))   // stays bright (Figma), just not changeable
                     .accessibilityIdentifier("enhanceVoice")
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -776,7 +776,7 @@ struct VoiceOverSheetV5: View {
                                 }
                             }
                         }
-                        .frame(width: 48, height: 48).opacity(isRecording ? 1 : 0.45)
+                        .frame(width: 48, height: 48)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("voicePause")
@@ -804,7 +804,7 @@ struct VoiceOverSheetV5: View {
                             Circle().stroke(Color(hex: 0xFF3861), lineWidth: 1.5)
                             RoundedRectangle(cornerRadius: 5).fill(Color(hex: 0xFF3861)).frame(width: 20, height: 20)
                         }
-                        .frame(width: 48, height: 48).opacity(isRecording ? 1 : 0.45)
+                        .frame(width: 48, height: 48)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("voiceFinish")
@@ -855,21 +855,32 @@ struct VoiceOverSheetV5: View {
             .padding(.top, 14)
             Text("Preview your recording before saving.")
                 .font(.system(size: 13)).foregroundStyle(Color(hex: 0x8FA8D1)).padding(.top, 4)
+            // Figma 1120:91 (Waveform/MinimalPeaks): 310 x 34 box, 42 rounded peaks, blue = heard, light = still to hear.
             GeometryReader { proxy in
                 let progress = listener.duration > 0 ? listener.time / listener.duration : 0
-                ZStack(alignment: .leading) {
-                    PlayedWave(samples: samples, progress: progress)
-                    Rectangle().fill(.white).frame(width: 2, height: 30).offset(x: proxy.size.width * CGFloat(progress))
+                let peaks = MinimalPeaks.values(samples, count: 42)
+                let pitch = (proxy.size.width - 8) / CGFloat(peaks.count)
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(peaks.enumerated()), id: \.offset) { index, level in
+                        let h = max(6, 26 * CGFloat(level))
+                        RoundedRectangle(cornerRadius: 1.6)
+                            .fill(Double(index) / Double(peaks.count) < progress ? Color(hex: 0x1677FF) : Color(hex: 0xD7DCE5))
+                            .frame(width: 3.2, height: h)
+                            .offset(x: 4.4 + CGFloat(index) * pitch, y: (34 - h) / 2)
+                    }
+                    RoundedRectangle(cornerRadius: 0.75).fill(Color(hex: 0xF4F6FA))
+                        .frame(width: 1.5, height: 28)
+                        .offset(x: max(0, min(proxy.size.width - 1.5, proxy.size.width * CGFloat(progress))), y: 3)
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0).onEnded { value in
                     listener.seek(fraction: Double(value.location.x / max(1, proxy.size.width)))
                 })
             }
-            .frame(height: 30)
-            .padding(.horizontal, 12).padding(.vertical, 2)
-            .background(Color(hex: 0x0C1730), in: RoundedRectangle(cornerRadius: 8))
-            .padding(.horizontal, 40).padding(.top, 18)
+            .frame(height: 34)
+            .background(Color(hex: 0x10182A), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x26334D), lineWidth: 1))
+            .padding(.horizontal, 40).padding(.top, 24)
             .accessibilityIdentifier("reviewWave")
             HStack {
                 Text(VoiceRecorder.formatted(listener.time))
@@ -937,8 +948,9 @@ struct CountdownOverlayV5: View {
     @State private var progress: CGFloat = 0
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.35)
+        // Figma 1119:2316: the ring sits high on the video (28 pt under its top edge), over the picture itself.
+        ZStack(alignment: .top) {
+            Color.clear
             VStack(spacing: 14) {
                 ZStack {
                     Circle().stroke(Color.white.opacity(0.15), lineWidth: 6)
@@ -952,6 +964,7 @@ struct CountdownOverlayV5: View {
                 Text("Recording starts in \(value) second\(value == 1 ? "" : "s")")
                     .font(.system(size: 13)).foregroundStyle(CS.textSecondaryF)
             }
+            .padding(.top, 28)
         }
         .onAppear { restart() }
         .onChange(of: value) { _, _ in restart() }
@@ -985,4 +998,20 @@ enum MusicImport {
     }
 
     static let types: [UTType] = [.audio, .mp3, .mpeg4Audio, .wav, .aiff]
+}
+
+
+/// Figma's "MinimalPeaks" waveform: the take's loudness as `count` peaks (0.25 ... 1), so quiet parts are short
+/// and loud parts tall, like the design.
+enum MinimalPeaks {
+    static func values(_ samples: [Float], count: Int) -> [Float] {
+        guard !samples.isEmpty else { return Array(repeating: 0.4, count: count) }
+        let top = max(samples.max() ?? 1, 0.0001)
+        return (0..<count).map { i in
+            let a = i * samples.count / count, b = max(a + 1, (i + 1) * samples.count / count)
+            let slice = samples[a..<min(b, samples.count)]
+            let peak = (slice.max() ?? 0) / top
+            return 0.25 + 0.75 * peak
+        }
+    }
 }

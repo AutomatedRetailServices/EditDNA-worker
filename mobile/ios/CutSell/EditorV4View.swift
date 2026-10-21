@@ -233,7 +233,10 @@ struct EditorV4View: View {
         case .captions: return controls + 1 + TimelineV4.height + toolbar
         // Style (Figma 1054:2497): no controls; the panel sits where the controls and timeline were.
         case .style: return controls + 1 + TimelineV4.height + toolbar
-        case .none, .micPermission, .voiceRecord, .voiceReview:
+        // Figma 1119:2316 / 1120:4: with the voice-over sheet up the video keeps its full 472 pt and the sheet
+        // covers the controls and the timeline (nothing of the editor shows between the video and the sheet).
+        case .voiceRecord, .voiceReview: return 0
+        case .none, .micPermission:
             // A tall panel makes the video smaller, so the timeline stays in view (Editor v5).
             return controls + 1 + TimelineV4.height(for: model, compact: card != nil) + toolbar + cardHeight
         }

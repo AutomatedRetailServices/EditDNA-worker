@@ -168,7 +168,7 @@ final class VoiceRecorder: ObservableObject {
         }
         buffer.frameLength = buffer.frameCapacity
         let data = buffer.floatChannelData![0]
-        for i in 0..<Int(buffer.frameLength) { data[i] = Float(0.5 * sin(2 * .pi * 1000 * Double(i) / rate)) }
+        for i in 0..<Int(buffer.frameLength) { let t = Double(i) / rate; data[i] = Float(0.5 * (0.35 + 0.65 * abs(sin(2 * .pi * 0.9 * t))) * sin(2 * .pi * 1000 * t)) }   // a spoken-like rise and fall
         do { try file.write(from: buffer) } catch { state = .failed("The take couldn't be saved."); return }
         state = .recorded(url)
     }
