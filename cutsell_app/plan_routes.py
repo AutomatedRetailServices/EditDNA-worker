@@ -61,6 +61,11 @@ class PrefsRequest(BaseModel):
     days: list[int] | None = None
     reminders: list[Reminder] | None = Field(default=None, max_length=6)
     tz: str | None = None
+    # Goal v2 (flexible): her posting times (one video each, at most 8), how many videos, from which day, reminders
+    times: list[str] | None = Field(default=None, min_length=1, max_length=post_plan.MAX_TIMES)
+    count: int | None = Field(default=None, ge=1, le=1000)
+    start: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    remind: bool | None = None
 
 
 @router.put("/prefs")

@@ -24,7 +24,9 @@ DEFAULT_PREFS = {"per_day": 2, "days": [0, 1, 2, 3, 4, 5], "tz": "America/New_Yo
                                {"label": "Evening", "time": "19:00", "on": True},
                                {"label": "Night", "time": "22:00", "on": False}]}
 EXTRA_TIMES = ["09:00", "13:00", "19:00", "21:00"]
-MAX_PER_DAY = 4
+MAX_PER_DAY = 4                 # the old Goal screen (1/2/3/4+)
+MAX_TIMES = 8                   # Goal v2: free posting times, at most 8 a day (times = videos per day)
+MAX_PLAN_DAYS = 120
 SOURCES = ("single", "combine", "bulk", "mix")
 
 
@@ -123,6 +125,18 @@ def set_prefs(user_id: str, prefs: dict, *, client=None) -> dict:
         if "tz" in prefs:
             ZoneInfo(str(prefs["tz"]))                       # unknown zone -> error
             clean["tz"] = str(prefs["tz"])
+        if "times" in prefs and prefs["times"] is not None:
+            times = sorted({_clock(t) for t in prefs["times"]})[:MAX_TIMES]
+            if not times:
+                raise ValueError("at least one posting time")
+            clean["times"] = times
+            clean["per_day"] = len(times)
+        if "count" in prefs:
+            clean["count"] = max(1, int(prefs["count"])) if prefs["count"] is not None else None
+        if "start" in prefs:
+            clean["start"] = date.fromisoformat(str(prefs["start"])).isoformat() if prefs["start"] else None
+        if "remind" in prefs and prefs["remind"] is not None:
+            clean["remind"] = bool(prefs["remind"])
         if "reminders" in prefs:
             rows = []
             for row in prefs["reminders"][:6]:
@@ -265,8 +279,16 @@ def week_start(today: date) -> date:
     return today - timedelta(days=today.weekday())
 
 
+def _clock(value) -> str:
+    hh, mm = str(value).split(":")[:2]
+    return f"{int(hh) % 24:02d}:{int(mm) % 60:02d}"
+
+
 def slot_times(prefs: dict) -> list[str]:
-    """Clock times of the day's slots: her reminders that are on, then the usual times, earliest first."""
+    """Clock times of the day's slots. Goal v2: her own times (one video each). Old Goal: her reminders that are on,
+    then the usual times, earliest first."""
+    if prefs.get("times"):
+        return sorted({_clock(t) for t in prefs["times"]})[:MAX_TIMES]
     n = max(1, min(MAX_PER_DAY, int(prefs.get("per_day") or 1)))
     times = sorted({r["time"] for r in prefs.get("reminders") or [] if r.get("on")})
     for extra in EXTRA_TIMES:
@@ -355,6 +377,84 @@ def build(videos: list[dict], prefs: dict, today: date, *, keep: list[dict] | No
     return {"start": start.isoformat(), "slots": slots, "missing": shortfall(slots, prefs, today)}
 
 
+def build_flex(videos: list[dict], prefs: dict, today: date, *, keep: list[dict] | None = None) -> dict:
+    """Goal v2: `count` videos from `start` (never before today), one per posting time on her days, same rules as
+    the week (never the same product twice in a row, a Mix's videos on different days and never the same hook two
+    days in a row). Posted slots and slots she moved stay. Fewer videos placed than asked -> the plan ends early and
+    says so (`asked`, `placed`, `ends_early`)."""
+    times = slot_times(prefs)
+    active = sorted({int(d) for d in prefs.get("days") or []}) or list(range(7))
+    start = max(today, date.fromisoformat(prefs["start"])) if prefs.get("start") else today
+    by_id = {v["project_id"]: v for v in videos}
+    kept = []
+    for slot in keep or []:
+        video = by_id.get(slot.get("project_id") or "")
+        if not video:
+            continue
+        d = date.fromisoformat(slot["date"])
+        if video.get("posted_at") and d >= start - timedelta(days=7):
+            kept.append(dict(slot))                                   # what she posted stays in view
+        elif slot.get("pinned") and d >= today:
+            kept.append(dict(slot))                                   # moved by her: stays where she put it
+    taken = {s["project_id"] for s in kept}
+    pool = sorted((v for v in videos if not v.get("posted_at") and v["project_id"] not in taken),
+                  key=lambda v: (v.get("created_at") or "", v["project_id"]))
+    pinned_open = sum(1 for s in kept if not by_id[s["project_id"]].get("posted_at"))
+    usable = len(pool) + pinned_open
+    asked = min(int(prefs.get("count") or usable), usable)
+    to_place = max(0, asked - pinned_open)
+    slots = list(kept)
+
+    def neighbours(d: date, t: str):
+        ordered = sorted(slots, key=lambda s: (s["date"], s["time"]))
+        before = [s for s in ordered if (s["date"], s["time"]) < (d.isoformat(), t)]
+        after = [s for s in ordered if (s["date"], s["time"]) > (d.isoformat(), t)]
+        return (before[-1] if before else None), (after[0] if after else None)
+
+    def allowed(v: dict, d: date, t: str) -> bool:
+        for other in neighbours(d, t):
+            if other and other.get("project_id") in by_id and _product_key(by_id[other["project_id"]]) == _product_key(v):
+                return False
+        if v.get("mix_id"):
+            for s in slots:
+                o = by_id.get(s.get("project_id") or "")
+                if not o or o.get("mix_id") != v["mix_id"]:
+                    continue
+                gap = abs((date.fromisoformat(s["date"]) - d).days)
+                if gap == 0 or (gap == 1 and _hook(o) == _hook(v)):
+                    return False
+        return True
+
+    placed, idle_days, d = 0, 0, start
+    end = start + timedelta(days=MAX_PLAN_DAYS)
+    while placed < to_place and pool and d <= end and idle_days < 14:
+        if d.weekday() in active:
+            used = {s["time"] for s in slots if s["date"] == d.isoformat()}
+            before = placed
+            for t in times:
+                if placed >= to_place or not pool or t in used:
+                    continue
+                options = [v for v in pool if allowed(v, d, t)]
+                counts: dict[str, int] = {}
+                for v in pool:
+                    counts[_product_key(v)] = counts.get(_product_key(v), 0) + 1
+                crowded = [k for k, n in counts.items() if n > 1 and n >= len(pool) - n]
+                urgent = [v for v in options if _product_key(v) in crowded]
+                choice = (urgent or options or [None])[0]
+                if choice:
+                    pool.remove(choice)
+                    slots.append({"date": d.isoformat(), "time": t, "project_id": choice["project_id"], "pinned": False})
+                    placed += 1
+            idle_days = 0 if placed > before else idle_days + 1
+        d += timedelta(days=1)
+    slots.sort(key=lambda s: (s["date"], s["time"]))
+    planned = [s for s in slots if date.fromisoformat(s["date"]) >= start]
+    last = max((s["date"] for s in planned), default=start.isoformat())
+    total = placed + pinned_open
+    return {"start": start.isoformat(), "end": last, "flex": True, "slots": slots, "asked": asked, "placed": total,
+            "ends_early": total < asked, "missing": None}
+
+
 def shortfall(slots: list[dict], prefs: dict, today: date) -> dict:
     """Days from today with fewer videos than she posts per day, and how many videos would fill them."""
     start = week_start(today)
@@ -398,8 +498,11 @@ def build_week(user_id: str, projects: list[dict], *, client=None, now: Optional
     videos = candidates(user_id, projects, client=client, plan=plan)
     today = today_for(plan["prefs"], now)
     previous = (plan.get("week") or {})
-    keep = previous.get("slots") if previous.get("start") == week_start(today).isoformat() else []
-    week = build(videos, plan["prefs"], today, keep=keep)
+    if plan["prefs"].get("times"):                       # Goal v2 (flexible): her count, times, days and start
+        week = build_flex(videos, plan["prefs"], today, keep=previous.get("slots") or [])
+    else:
+        keep = previous.get("slots") if previous.get("start") == week_start(today).isoformat() else []
+        week = build(videos, plan["prefs"], today, keep=keep)
     week["built_at"] = _now()
 
     def change(data):
@@ -444,9 +547,15 @@ def view(user_id: str, projects: list[dict], *, client=None, now: Optional[datet
     by_id = {v["project_id"]: v for v in videos}
     today = today_for(plan["prefs"], now)
     unposted = [v for v in videos if not v.get("posted_at")]
-    products = {_product_key(v) for v in unposted}
+    products = {v["product_id"] for v in unposted if v.get("product_id")}          # a video without a product is
+    no_product = sum(1 for v in unposted if not v.get("product_id"))              # "no product", not a product
     per_day = len(slot_times(plan["prefs"]))
-    week = plan.get("week") if (plan.get("week") or {}).get("start") == week_start(today).isoformat() else None
+    stored = plan.get("week") or {}
+    if stored.get("flex"):
+        week = stored if stored.get("end", "") >= today.isoformat() or any(
+            s.get("project_id") in by_id and not by_id[s["project_id"]].get("posted_at") for s in stored.get("slots") or []) else None
+    else:
+        week = stored if stored.get("start") == week_start(today).isoformat() else None
     slots = []
     for slot in (week or {}).get("slots") or []:
         v = by_id.get(slot.get("project_id") or "")
@@ -454,10 +563,11 @@ def view(user_id: str, projects: list[dict], *, client=None, now: Optional[datet
             slots.append({**slot, **{k: v.get(k) for k in ("product", "brand", "product_id", "mix_id", "mix_code",
                                                          "source", "posted_at", "caption", "caption_source",
                                                          "duration_sec", "title")}})
-    missing = shortfall(slots, plan["prefs"], today) if week else None
+    missing = shortfall(slots, plan["prefs"], today) if week and not week.get("flex") else None
     return {"prefs": plan["prefs"], "today": today.isoformat(),
             "personal": sorted(pid for pid, v in plan["videos"].items() if v.get("personal")),
-            "summary": {"ready": len(unposted), "products": len(products), "per_day": per_day,
+            "summary": {"ready": len(unposted), "products": len(products), "no_product": no_product, "per_day": per_day,
                         "covers_days": len(unposted) // max(1, per_day)},
-            "week": {"start": week["start"], "built_at": week.get("built_at"), "slots": slots, "missing": missing}
+            "week": {"start": week["start"], "built_at": week.get("built_at"), "slots": slots, "missing": missing,
+                     **({k: week.get(k) for k in ("end", "flex", "asked", "placed", "ends_early")} if week.get("flex") else {})}
             if week else None}

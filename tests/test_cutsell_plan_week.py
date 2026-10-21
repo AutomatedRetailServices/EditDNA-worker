@@ -287,3 +287,79 @@ def test_the_api_marks_a_video_personal_and_takes_it_out_of_the_week(monkeypatch
     back = client.post("/v1/plan/personal", json={"user_id": "u1", "project_id": pid, "personal": False}).json()
     assert back["personal"] == []
     assert client.post("/v1/plan/personal", json={"user_id": "u1", "project_id": "nope"}).status_code == 404
+
+
+# ---------------------------------------------------------------- Goal v2 (flexible)
+
+def test_flex_plan_places_the_count_from_start_on_her_days_and_times(r):
+    ids = _library()
+    now = datetime(2026, 10, 21, 14, tzinfo=timezone.utc)                       # Wednesday 10 AM in New York
+    post_plan.set_prefs("u1", {"times": ["18:45", "08:15", "12:30"], "days": [0, 1, 2, 3, 4], "count": 7,
+                               "start": "2026-10-22", "remind": True})
+    week = post_plan.build_week("u1", _projects(), now=now)
+    assert week["flex"] and week["asked"] == 7 and week["placed"] == 7 and not week["ends_early"]
+    dates = sorted({s["date"] for s in week["slots"]})
+    assert dates == ["2026-10-22", "2026-10-23", "2026-10-26"]                   # Thu, Fri, (no weekend), Mon
+    assert [s["time"] for s in week["slots"][:3]] == ["08:15", "12:30", "18:45"]
+    videos = post_plan.candidates("u1", _projects())
+    assert post_plan.check(week["slots"], videos) == []
+    view = post_plan.view("u1", _projects(), now=now)
+    assert view["week"]["end"] == "2026-10-26" and view["prefs"]["per_day"] == 3 and view["prefs"]["remind"] is True
+    assert ids["processing"] not in {s["project_id"] for s in week["slots"]}
+
+
+def test_flex_plan_ends_early_and_says_so_when_the_rules_leave_videos_out(r):
+    user = "u6"
+    cerave = product_catalog.create(user, brand="CeraVe", product="Cleanser")["product_id"]
+    vids = [_video(user, f"c{i}") for i in range(3)]
+    product_catalog.assign(user, vids, product_id=cerave)                      # one product only
+    post_plan.set_prefs(user, {"times": ["09:00", "13:00"], "days": [0, 1, 2, 3, 4, 5, 6], "count": 3})
+    week = post_plan.build_week(user, _projects(user), now=datetime(2026, 10, 21, 14, tzinfo=timezone.utc))
+    # one product only: two of its videos would always sit side by side -> 1 placed, the plan says it ends early
+    assert week["asked"] == 3 and week["placed"] == 1 and week["ends_early"] is True
+    assert post_plan.check(week["slots"], post_plan.candidates(user, _projects(user))) == []
+
+
+def test_videos_without_a_product_are_counted_as_no_product_not_as_products(r):
+    user = "u7"
+    cerave = product_catalog.create(user, brand="CeraVe", product="Cleanser")["product_id"]
+    tagged = [_video(user, f"c{i}") for i in range(2)]
+    product_catalog.assign(user, tagged, product_id=cerave)
+    for i in range(3):
+        _video(user, f"x{i}")
+    summary = post_plan.view(user, _projects(user))["summary"]
+    assert summary["ready"] == 5 and summary["products"] == 1 and summary["no_product"] == 3
+
+
+def test_flex_times_are_cleaned_and_capped_at_eight():
+    import pytest as _pytest
+    prefs = {"times": ["9:5", "09:05", "23:59"] + [f"1{i}:00" for i in range(9)]}
+    assert post_plan.slot_times(prefs) == sorted({"09:05", "23:59"} | {f"1{i}:00" for i in range(9)})[:8]
+
+
+def test_the_flex_rules_hold_on_many_random_libraries():
+    import random
+    from datetime import timedelta as _td
+    rng = random.Random(11)
+    for trial in range(300):
+        videos = []
+        for k in range(rng.randint(0, 20)):
+            product = f"p{rng.randint(0, 5)}" if rng.random() < 0.8 else None
+            mix = f"m{rng.randint(0, 1)}" if rng.random() < 0.3 else None
+            videos.append({"project_id": f"v{k}", "product_id": product, "created_at": f"2026-10-{rng.randint(1, 18):02d}",
+                           "mix_id": mix, "mix_code": f"H{rng.randint(1, 3)} · B1 · C1" if mix else None, "posted_at": None})
+        prefs = {"times": [f"{rng.randint(6, 23):02d}:{rng.choice(['00', '15', '30', '45'])}" for _ in range(rng.randint(1, 8))],
+                 "days": rng.sample(range(7), rng.randint(1, 7)), "count": rng.randint(1, 25),
+                 "start": (MONDAY + _td(days=rng.randint(0, 9))).isoformat()}
+        today = MONDAY + _td(days=rng.randint(0, 6))
+        week = post_plan.build_flex(videos, prefs, today)
+        assert post_plan.check(week["slots"], videos) == [], trial
+        assert len({s["project_id"] for s in week["slots"]}) == len(week["slots"])
+        assert week["placed"] <= week["asked"] <= max(1, len(videos)) and week["ends_early"] == (week["placed"] < week["asked"])
+        assert all(s["date"] >= max(today.isoformat(), prefs["start"]) for s in week["slots"])
+        assert all(date.fromisoformat(s["date"]).weekday() in prefs["days"] for s in week["slots"])
+        per_day = len(post_plan.slot_times(prefs))
+        days = {}
+        for s in week["slots"]:
+            days[s["date"]] = days.get(s["date"], 0) + 1
+        assert all(n <= per_day for n in days.values())
