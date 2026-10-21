@@ -1,0 +1,35 @@
+B24UI    77.3 PASS editor open on a real cut
+B24UI    83.2 start ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=3.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI   126.4 PASS export before finished
+B24UI   140.5 PASS sheet opens
+B24UI   143.1 FAIL close: X before recording → editor, no change
+B24UI   150.5 FAIL close: swipe down before recording
+B24UI   158.3 FAIL close: tap outside before recording
+B24UI   172.2 FAIL X cancels the 3·2·1 countdown (nothing recorded)
+B24UI   196.5 PASS closing mid-recording asks Discard recording?
+B24UI   200.4 PASS Keep recording: still recording
+B24UI   206.5 PASS closing with an unsaved take asks Discard recording?
+B24UI   214.1 FAIL Discard: back to the editor, nothing saved
+B24UI   221.2 PASS a) step 1: Recording voice-over sheet
+B24UI   221.5 PASS a) Enhance voice switch
+B24UI   224.2 PASS a) countdown 3·2·1 over the video
+B24UI   226.6 PASS a) recording (live wave)
+B24UI   238.1 PASS a) step 2: Play / Retake / Save
+B24UI   240.1 PASS a) Play · Retake · Save
+B24UI   245.6 PASS a) Retake back to step 1
+B24UI   260.2 PASS a) Save puts the voice on the timeline · ai=8 user=0 sounds= voices= muted_clips=0 user_scales= user_rot= auto_zoom=true overlays= sel=none pending=none vv=1.00 t=4.00 zoom=1.000 rot=0.0 playing=false session=Playback/MoviePlayback
+B24UI   269.5 saved ["4.00+5.69cv1.00"]
+B24UI   273.0 PASS c) voice-over panel
+B24UI   273.2 PASS c) lowerVideoSound
+B24UI   273.3 PASS c) voiceMute
+B24UI   273.5 PASS c) cleanUpToggle
+B24UI   273.6 PASS c) recordAgain
+B24UI   273.7 PASS c) voiceDelete
+B24UI   276.1 PASS c) Lower video sound on · 4.00+5.69dcv1.00
+B24UI   281.1 PASS b) moved by dragging · 4.00+5.69dcv1.00 → 6.00+5.69dcv1.00
+B24UI   287.9 FAIL b) end edge trimmed · 6.00+5.69dcv1.00 → 6.00+5.69dcv1.00
+/Users/runner/work/EditDNA-worker/EditDNA-worker/mobile/ios/CutSellUITests/Build24UITests.swift:537: error: -[CutSellUITests.Build24UITests testVoiceOverFlow] : Failed to not hittable: Button, {{4.0, 841.0}, {53.0, 51.0}}, identifier: 'tool_split', label: 'Split'
+Test Case '-[CutSellUITests.Build24UITests testVoiceOverFlow]' failed (319.330 seconds).
+Test Suite 'Build24UITests' failed at 2026-10-21 21:57:10.252.
+Test Suite 'CutSellUITests.xctest' failed at 2026-10-21 21:57:10.255.
+Test Suite 'Selected tests' failed at 2026-10-21 21:57:10.255.
