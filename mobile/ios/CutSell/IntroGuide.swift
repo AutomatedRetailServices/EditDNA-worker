@@ -83,6 +83,7 @@ struct IntroView: View {
                     ForEach(introSlides.indices, id: \.self) { i in
                         slideView(introSlides[i])
                             .tag(i)
+                            .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("intro_page_\(i + 1)")
                     }
                 }
@@ -115,6 +116,8 @@ struct IntroView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // .contain keeps each control's own id (intro_next, intro_skip).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("introView")
     }
 
@@ -275,6 +278,7 @@ struct GuidePage: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("guidePage")
     }
 
@@ -318,6 +322,7 @@ struct GuidePage: View {
                     }
                 }
                 .padding(.bottom, 14)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("guide_steps_\(topic.id)")
             }
             if divider { Rectangle().fill(YouStyle.border).frame(height: 1) }
