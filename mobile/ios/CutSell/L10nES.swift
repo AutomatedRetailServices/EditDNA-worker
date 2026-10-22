@@ -277,7 +277,7 @@ enum L10nES {
         "Edit {} draft{} in bulk": "Editar {} borrador{} juntos",
         "Editing keeps going on our servers even if you close the app. We’ll notify you as each cut is ready.": "La edición sigue en nuestros servidores aunque cierres la app. Te avisamos cuando cada corte esté listo.",
         "Editing time saved": "Tiempo de edición ahorrado",
-        "Edits": "Ediciones",
+        "Edits": "Editar",
         "Edits processed": "Ediciones procesadas",
         "Email": "Correo",
         "Enhance voice": "Mejorar voz",
