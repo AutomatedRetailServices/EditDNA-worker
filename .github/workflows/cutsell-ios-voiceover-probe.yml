@@ -130,7 +130,7 @@ jobs:
           TEST_RUNNER_CUTSELL_PROBE_PROJECT="$PROBE_PROJECT" TEST_RUNNER_CUTSELL_PROBE_API="https://cutsell-api.onrender.com" \
           TEST_RUNNER_B24_OUT="$RUNNER_TEMP/vo" \
             xcodebuild test-without-building -project CutSell.xcodeproj -scheme CutSellUITests -sdk iphonesimulator \
-              -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/testVoiceOverFlow \
+              -destination "id=$SIM_UDID" -derivedDataPath build -only-testing:CutSellUITests/Build24UITests/testVoiceOverFlow -only-testing:CutSellUITests/Build24UITests/testSpanishEditor \
               CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/test.log" 2>&1
           echo "TEST_STATUS=$?" >> "$GITHUB_ENV"
           set -e

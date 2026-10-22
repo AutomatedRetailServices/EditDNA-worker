@@ -64,7 +64,7 @@ struct CameraCaptureView: View {
                 Spacer()
 
                 if let error = camera.errorMessage {
-                    Text(error)
+                    Text(L10n.tr(error))
                         .font(.footnote)
                         .multilineTextAlignment(.center)
                         .padding()
@@ -74,7 +74,7 @@ struct CameraCaptureView: View {
 
                 Picker("Recording length", selection: $preset) {
                     ForEach(RecordingPreset.allCases) { item in
-                        Text(item.title).tag(item)
+                        Text(L10n.tr(item.title)).tag(item)
                     }
                 }
                 .pickerStyle(.segmented)

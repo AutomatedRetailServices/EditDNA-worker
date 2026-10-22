@@ -131,9 +131,9 @@ struct VoiceOverView: View {
                                 syncSplitTime()
                             } label: {
                                 HStack {
-                                    Text(assetLabel(for: placement))
+                                    Text(L10n.tr(assetLabel(for: placement)))
                                     Spacer()
-                                    Text(String(format: "%.1fs–%.1fs", placement.timelineStartSec, placement.timelineEndSec))
+                                    Text(L10n.tr(String(format: "%.1fs–%.1fs", placement.timelineStartSec, placement.timelineEndSec)))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if placement.placementID == selectedPlacementID {
@@ -236,7 +236,7 @@ struct VoiceOverView: View {
             .alert("CutSell", isPresented: Binding(
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
+            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
         }
     }
 
@@ -255,7 +255,7 @@ struct VoiceOverView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if case .failed(let message) = recorder.state {
-                Text(message).font(.caption).foregroundStyle(.red)
+                Text(L10n.tr(message)).font(.caption).foregroundStyle(.red)
             }
             if recorder.state == .permissionDenied {
                 Text("CutSell can't use the microphone. Turn it on in Settings > CutSell > Microphone.")
@@ -302,7 +302,7 @@ struct VoiceOverView: View {
             .buttonStyle(.bordered)
         }
         if let recordNotice {
-            Text(recordNotice).font(.caption).foregroundStyle(.secondary)
+            Text(L10n.tr(recordNotice)).font(.caption).foregroundStyle(.secondary)
         }
     }
 

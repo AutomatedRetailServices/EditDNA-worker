@@ -468,7 +468,7 @@ struct GalleryPickerView: View {
 
     private var bottomPanel: some View {
         VStack(spacing: 0) {
-            Text(mode.selectedText(selection.count))
+            Text(L10n.tr(mode.selectedText(selection.count)))
                 .font(CS.inter(14))
                 .foregroundStyle(CS.textCaption)
                 .padding(.top, 16)
@@ -476,7 +476,7 @@ struct GalleryPickerView: View {
                 SegmentedPill(options: allowedModes, selection: $mode) { $0.title }
                     .padding(.top, 14)
                     .accessibilityIdentifier("createModePicker")
-                Text(mode.helper)
+                Text(L10n.tr(mode.helper))
                     .font(CS.inter(13))
                     .foregroundStyle(CS.textSecondary)
                     .padding(.top, 14)

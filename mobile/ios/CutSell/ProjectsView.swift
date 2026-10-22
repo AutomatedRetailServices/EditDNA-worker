@@ -278,7 +278,7 @@ struct ProjectsView: View {
             .alert("CutSell", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
         }
         .tint(CS.cyan)
     }
@@ -305,7 +305,7 @@ struct ProjectsView: View {
             .padding(.top, 16)
             if let focus = queue.focus {
                 HStack {
-                    Text(mixCenter.mixes.contains { $0.mixID == focus } ? "Showing this Mix" : "Showing this Bulk")
+                    Text(L10n.tr(mixCenter.mixes.contains { $0.mixID == focus } ? "Showing this Mix" : "Showing this Bulk"))
                         .font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD))
                     Spacer()
                     Button("Show all") { queue.focus = nil }
@@ -391,7 +391,7 @@ struct ProjectsView: View {
             Image(systemName: "arrow.clockwise.icloud")
                 .foregroundStyle(CS.cyan)
             VStack(alignment: .leading, spacing: 3) {
-                Text(pending.title.isEmpty ? "Interrupted Cut" : pending.title)
+                Text(L10n.tr(pending.title.isEmpty ? "Interrupted Cut" : pending.title))
                     .font(CS.inter(14, .semibold))
                     .foregroundStyle(.white)
                 Text("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload")
@@ -414,10 +414,10 @@ struct ProjectsView: View {
                 .overlay(Image("EmptyPlay").resizable().frame(width: 44, height: 44))
                 .frame(width: 90, height: 160)
             VStack(alignment: .leading, spacing: 8) {
-                Text(emptyTitle)
+                Text(L10n.tr(emptyTitle))
                     .font(CS.inter(19, .semibold))
                     .foregroundStyle(.white)
-                Text(emptyMessage)
+                Text(L10n.tr(emptyMessage))
                     .font(CS.inter(13))
                     .foregroundStyle(Color(hex: 0x99B2E0))
                     .fixedSize(horizontal: false, vertical: true)
@@ -628,7 +628,7 @@ struct EditsFilterChip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
+            Text(L10n.tr(title))
                 .font(CS.sf(12, .semibold))
                 .foregroundStyle(Color(hex: 0xF0F7FF))
                 .lineLimit(1)

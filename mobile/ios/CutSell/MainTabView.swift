@@ -147,8 +147,8 @@ struct ReadyBanner: View {
         HStack(spacing: 12) {
             Image("ProcessingLogo").resizable().frame(width: 34, height: 34).blendMode(.screen)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(CS.inter(15, .semibold)).foregroundStyle(.white)
-                Text(subtitle).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+                Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(.white)
+                Text(L10n.tr(subtitle)).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
             }
             Spacer()
             Button(action: onDismiss) {
@@ -187,7 +187,7 @@ struct CSTabBar: View {
                             .scaledToFit()
                             .frame(width: 44, height: 44)
                             .shadow(color: isActive ? CS.cyan.opacity(0.75) : .clear, radius: 8)
-                        Text(item.title)
+                        Text(L10n.tr(item.title))
                             .font(CS.inter(13, isActive ? .semibold : .regular))
                             .foregroundStyle(isActive ? CS.cyan : CS.textTab)
                     }

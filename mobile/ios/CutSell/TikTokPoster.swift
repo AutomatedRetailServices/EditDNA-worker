@@ -158,7 +158,7 @@ struct PostToTikTokButton: View {
                 if UIImage(named: "TikTokLogo") != nil {
                     Image("TikTokLogo").resizable().scaledToFit().frame(height: 22)
                 }
-                Text(title).font(CS.sf(16, .semibold))
+                Text(L10n.tr(title)).font(CS.sf(16, .semibold))
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity).frame(height: 54)

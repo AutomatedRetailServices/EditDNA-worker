@@ -90,7 +90,7 @@ private struct TextOverlayRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "textformat")
-            Text(text).lineLimit(1)
+            Text(L10n.tr(text)).lineLimit(1)
             Spacer()
             Menu {
                 Button("Top") { Task { await model.updateTextOverlay(id: id, x: 0.5, y: 0.15) } }
@@ -123,7 +123,7 @@ private struct MediaOverlayRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: kind == "photo" ? "photo" : "video")
-            Text(kind.capitalized + " overlay")
+            Text(L10n.tr(kind.capitalized + " overlay"))
             Spacer()
             Menu {
                 Button("Top left") { Task { await model.updateMediaOverlay(id: id, x: 0.25, y: 0.25) } }

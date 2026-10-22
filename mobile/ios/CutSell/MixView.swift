@@ -406,7 +406,7 @@ struct MixSetupView: View {
                 Color.black.opacity(0.7).ignoresSafeArea()
                 VStack(spacing: 14) {
                     ProgressView().tint(CS.cyan)
-                    Text(submitter.step.isEmpty ? "Preparing your Mix…" : submitter.step)
+                    Text(L10n.tr(submitter.step.isEmpty ? "Preparing your Mix…" : submitter.step))
                         .font(CS.inter(14, .semibold)).foregroundStyle(.white).multilineTextAlignment(.center)
                     Text("Keep CutSell open until the audio is sent. The videos keep uploading in the background.")
                         .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD)).multilineTextAlignment(.center)
@@ -467,7 +467,7 @@ struct MixSetupView: View {
         }
         .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
-        } message: { Text(errorMessage ?? "") }
+        } message: { Text(L10n.tr(errorMessage ?? "")) }
     }
 
     struct SectionRef: Identifiable { let id: UUID }
@@ -482,7 +482,7 @@ struct MixSetupView: View {
                         .accessibilityIdentifier("mixProductName")
                 }
                 Spacer()
-                Text(product == nil ? "Choose" : "Change").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
+                Text(L10n.tr(product == nil ? "Choose" : "Change")).font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
             }
             .padding(.horizontal, 15)
             .frame(height: 54)
@@ -566,7 +566,7 @@ struct MixSetupView: View {
             Rectangle().fill(Color(hex: 0x262E42)).frame(height: 1)
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(filled ? "\(total) video\(total == 1 ? "" : "s") · about \(averageSeconds) s each" : "Add clips to every part")
+                    Text(L10n.tr(filled ? "\(total) video\(total == 1 ? "" : "s") · about \(averageSeconds) s each" : "Add clips to every part"))
                         .font(CS.inter(15, .semibold)).foregroundStyle(.white)
                         .accessibilityIdentifier("mixSummary")
                     Text(formula).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1).minimumScaleFactor(0.8)
@@ -688,7 +688,7 @@ struct MixHowManySheet: View {
                 ForEach((plan?.videos ?? []).prefix(4)) { video in
                     HStack(spacing: 0) {
                         Text("Video \(video.n)").font(CS.inter(13, .semibold)).foregroundStyle(.white).frame(width: 72, alignment: .leading)
-                        Text(video.names.joined(separator: " · ")).font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD))
+                        Text(L10n.tr(video.names.joined(separator: " · "))).font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD))
                             .lineLimit(1).minimumScaleFactor(0.8)
                         Spacer(minLength: 0)
                     }
@@ -732,7 +732,7 @@ struct MixHowManySheet: View {
 
     private func pill(_ title: String, selected: Bool, width: CGFloat, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+            Text(L10n.tr(title)).font(CS.inter(14, .semibold)).foregroundStyle(.white)
                 .frame(width: width, height: 40)
                 .background {
                     if selected { Capsule().fill(CS.brandFull) } else { Capsule().fill(Color(hex: 0x0F1726)) }
@@ -801,7 +801,7 @@ struct MixProductPicker: View {
         }
         .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
-        } message: { Text(errorMessage ?? "") }
+        } message: { Text(L10n.tr(errorMessage ?? "")) }
     }
 
     private func create() async {
@@ -839,7 +839,7 @@ struct MixGroupRow: View {
                             .font(CS.inter(12)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1)
                     }
                     Spacer()
-                    Text(mix.failedClips.isEmpty ? "\(mix.ready) of \(mix.total) ready" : "Needs a retry")
+                    Text(L10n.tr(mix.failedClips.isEmpty ? "\(mix.ready) of \(mix.total) ready" : "Needs a retry"))
                         .font(CS.inter(12, .semibold))
                         .foregroundStyle(mix.failedClips.isEmpty ? CS.cyan : Color(hex: 0xFFB840))
                         .accessibilityIdentifier("mixGroupProgress")

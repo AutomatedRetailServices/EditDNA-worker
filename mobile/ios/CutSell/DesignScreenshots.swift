@@ -36,6 +36,8 @@ struct DesignScreenshotRoot: View {
         content
             .environmentObject(appState)
             .environmentObject(notificationCenter)
+            .environmentObject(L10n.shared)
+            .environment(\.locale, L10n.locale)
             .preferredColorScheme(.dark)
             .onAppear {
                 appState.isBootstrapping = false
@@ -180,9 +182,11 @@ private struct AppProbe: View {
     @EnvironmentObject private var appState: AppState
     @State private var ready = false
 
+    @ObservedObject private var language = L10n.shared
+
     var body: some View {
         Group {
-            if ready { MainTabView() } else { ProgressView("Probe…") }
+            if ready { MainTabView(initialTab: L10n.takeReopenTab() ?? .create).id(language.code) } else { ProgressView("Probe…") }
         }
         .task {
             let env = ProcessInfo.processInfo.environment

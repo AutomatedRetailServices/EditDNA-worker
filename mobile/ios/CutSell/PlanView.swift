@@ -140,8 +140,8 @@ struct PlanView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(hex: 0x1F2638))
                         }
                     }
-                Text(title).font(CS.inter(16, .bold)).foregroundStyle(.white).padding(.top, 12)
-                Text(subtitle).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
+                Text(L10n.tr(title)).font(CS.inter(16, .bold)).foregroundStyle(.white).padding(.top, 12)
+                Text(L10n.tr(subtitle)).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 4)
                 Spacer(minLength: 0)
             }
@@ -165,14 +165,14 @@ struct PlanView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(tag == .mix ? "MIX" : "BULK").font(CS.inter(9, .bold)).foregroundStyle(.white)
+                    Text(L10n.tr(tag == .mix ? "MIX" : "BULK")).font(CS.inter(9, .bold)).foregroundStyle(.white)
                         .frame(width: tag == .mix ? 35 : 42, height: 18)
                         .background {
                             if tag == .mix { Capsule().fill(CS.brandFull) } else { Capsule().fill(Color(hex: 0x1F2638)) }
                         }
-                    Text(title).font(CS.inter(14, .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(L10n.tr(title)).font(CS.inter(14, .semibold)).foregroundStyle(.white).lineLimit(1)
                 }
-                Text(detail).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1).padding(.top, 6)
+                Text(L10n.tr(detail)).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD)).lineLimit(1).padding(.top, 6)
                 HStack(spacing: 0) {
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
@@ -206,7 +206,7 @@ struct PlanView: View {
         let todayKey = PlanDay.iso.string(from: today)
         let todays = slots.filter { $0.date == todayKey && $0.postedAt == nil }
         let name = DateFormatter()
-        name.locale = Locale(identifier: "en_US")
+        name.locale = L10n.locale
         name.dateFormat = "EEE"
         return VStack(alignment: .leading, spacing: 0) {
             Text("This week").font(CS.inter(16, .semibold)).foregroundStyle(.white)
@@ -216,7 +216,7 @@ struct PlanView: View {
                     let key = PlanDay.iso.string(from: day)
                     Button { if week.hasWeek, slots.contains(where: { $0.date == key }) { path = [.week, .day(key)] } } label: {
                         VStack(spacing: 2) {
-                            Text(name.string(from: day)).font(CS.inter(11, .semibold)).foregroundStyle(.white)
+                            Text(name.string(from: day).replacingOccurrences(of: ".", with: "").capitalizedFirst).font(CS.inter(11, .semibold)).foregroundStyle(.white)
                             Text("\(calendar.component(.day, from: day))").font(CS.inter(14, .bold)).foregroundStyle(.white)
                             HStack(spacing: 2) {
                                 ForEach(slots.filter { $0.date == key }.prefix(4)) { slot in
@@ -243,9 +243,9 @@ struct PlanView: View {
             .padding(.top, 11)
             Button { path = week.hasWeek ? [.week] : [.goal] } label: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(cardTitle(todays: todays)).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr(cardTitle(todays: todays))).font(CS.inter(14, .semibold)).foregroundStyle(.white)
                         .accessibilityIdentifier("planWeekCardTitle")
-                    Text(cardBody(slots: slots)).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
+                    Text(L10n.tr(cardBody(slots: slots))).font(CS.inter(11)).foregroundStyle(Color(hex: 0x99A3BD))
                         .fixedSize(horizontal: false, vertical: true)
                     Text("Plan my week ›").font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan)
                         .padding(.top, 2)

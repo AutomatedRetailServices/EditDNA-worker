@@ -431,7 +431,7 @@ struct EditorV4View: View {
             .alert("CutSell", isPresented: errorShown) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(DraftEditorViewModel.plainWords(model.errorMessage))
+                Text(L10n.tr(DraftEditorViewModel.plainWords(model.errorMessage)))
             }
     }
 
@@ -746,7 +746,7 @@ struct EditorV4View: View {
             if playback.isBuilding && !playback.isReady {
                 ProgressView().tint(CS.cyan)
             } else if let message = playback.message, !playback.isReady {
-                Text(message).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
+                Text(L10n.tr(message)).font(CS.inter(12)).foregroundStyle(CS.textSecondaryF)
                     .multilineTextAlignment(.center).padding(20)
             }
         }
@@ -982,7 +982,7 @@ struct EditorV4View: View {
                 let start = item["start"]?.doubleValue ?? 0
                 let end = item["end"]?.doubleValue ?? start
                 if playback.currentTime >= start && playback.currentTime < end {
-                    Text(item["text"]?.stringValue ?? "")
+                    Text(L10n.tr(item["text"]?.stringValue ?? ""))
                         .font(CS.inter(CGFloat(18 * (item["scale"]?.doubleValue ?? 1)), .bold))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.6), radius: 2)
@@ -1120,7 +1120,7 @@ struct EditorV4View: View {
             Text("Curve").font(.system(size: 11, weight: .semibold)).foregroundStyle(CS.textMutedF)
             ForEach(KeyframeCurve.allCases.reversed()) { curve in
                 Button { model.setKeyframeCurve(id: id, curve) } label: {
-                    Text(curve.title).font(.system(size: 11, weight: .semibold))
+                    Text(L10n.tr(curve.title)).font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(curve == current ? Color.white : CS.textPrimaryF)
                         .padding(.horizontal, 9).frame(height: 24)
                         .background(Capsule().fill(curve == current ? Color(hex: 0x1769FF) : Color.white.opacity(0.08)))
@@ -1739,7 +1739,7 @@ struct EditorV4View: View {
     }
 
     private func hintPill(_ text: String) -> some View {
-        Text(text)
+        Text(L10n.tr(text))
             .font(CS.inter(11, .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 14).frame(height: 26)
@@ -1800,7 +1800,7 @@ struct EditorV4View: View {
     static func highlightedText(_ text: String, color: Color?) -> Text {
         let words = text.split(separator: " ").map(String.init)
         guard let color, let lit = words.max(by: { $0.count < $1.count }) else {
-            return Text(text).foregroundColor(.white)
+            return Text(L10n.tr(text)).foregroundColor(.white)
         }
         var result = Text("")
         var done = false
@@ -1887,7 +1887,7 @@ struct ToolbarV4: View {
                             } else {
                                 Image(tool.icon).resizable().frame(width: 34, height: 34)
                             }
-                            Text(tool.title)
+                            Text(L10n.tr(tool.title))
                                 .font(CS.inter(10.5, .medium))
                                 .foregroundStyle(active == tool ? CS.cyan : CS.textSecondaryF)
                                 .lineLimit(1)
@@ -1969,7 +1969,7 @@ struct SoundPanelV4: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(value > 0.001 ? "Mute" : "Sound on")
-            Text(title).font(CS.inter(11, .semibold)).foregroundStyle(.white).fixedSize()
+            Text(L10n.tr(title)).font(CS.inter(11, .semibold)).foregroundStyle(.white).fixedSize()
             SoundSlider(value: $value, maximum: maximum, onCommit: onCommit)
                 .frame(height: 30)
             Text(SoundSlider.percentText(value))
@@ -2067,7 +2067,7 @@ private struct ToastPillV4: View {
 
     var body: some View {
         HStack {
-            Text(toast.text)
+            Text(L10n.tr(toast.text))
                 .font(CS.inter(13, .medium))
                 .foregroundStyle(.white)
                 .lineLimit(2)

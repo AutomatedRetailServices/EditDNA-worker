@@ -512,6 +512,70 @@ final class Build24UITests: XCTestCase {
         done()
     }
 
+    // MARK: Language: You → Language (Automatic · English · Español); the main screens in Spanish
+
+    func testLanguage() throws {
+        launchApp(fresh: true, extra: ["-CutSellProjectsMock"])
+        pause(2)
+        element("tab_you").tap()
+        let card = element("languageCard")
+        for _ in 0..<4 where !card.isHittable { app.swipeUp(velocity: .slow); pause(0.5) }
+        check(card.exists, "You → Language card")
+        check(element("language_automatic").exists && element("language_en").exists && element("language_es").exists,
+              "Automatic · English · Español")
+        check(element("language_automatic").isSelected, "Automatic is the default")
+        shot("you_language_english")
+        element("language_es").tap()
+        pause(2)
+        let spanish = app.staticTexts["Idioma"].waitForExistence(timeout: 8)
+        check(spanish, "Español: the app re-draws in Spanish at once, still on You")
+        for _ in 0..<4 where !element("languageCard").isHittable { app.swipeUp(velocity: .slow); pause(0.5) }
+        check(element("language_es").isSelected, "Español is checked")
+        shot("you_language_espanol")
+        app.swipeDown(velocity: .fast); pause(0.6)
+        shot("you_espanol_top")
+        for (tab, word, name) in [("create", "Subir videos", "crear"), ("edits", "Ediciones", "ediciones"), ("plan", "Plan", "plan")] {
+            element("tab_\(tab)").tap(); pause(2)
+            check(app.staticTexts[word].exists || app.buttons[word].exists, "\(tab) in Spanish", word)
+            shot("es_\(name)")
+        }
+        element("hubMix").tap()
+        if element("mixProduct").waitForExistence(timeout: 15) { shot("es_mix_setup"); element("mixClose").tap(); pause(1) }
+        element("hubMode_bulk").tap()
+        allowPhotos()
+        if element("createModePicker").waitForExistence(timeout: 30) {
+            check(app.staticTexts["Cada video se vuelve una edición aparte."].exists, "gallery helper in Spanish")
+            shot("es_gallery")
+        }
+        done()
+    }
+
+    /// The editor in Spanish (a real cut; Automatic follows CUTSELL_LANGUAGE=es on the probe iPhone).
+    func testSpanishEditor() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-CutSellScreen", "editor_probe"]
+        let env = ProcessInfo.processInfo.environment
+        for key in ["CUTSELL_PROBE_TOKEN", "CUTSELL_PROBE_USER", "CUTSELL_PROBE_PROJECT", "CUTSELL_PROBE_API"] {
+            if let value = env[key] { app.launchEnvironment[key] = value }
+        }
+        app.launchEnvironment["CUTSELL_PROBE_STATE"] = "b18_es"
+        app.launchEnvironment["CUTSELL_LANGUAGE"] = "es"
+        app.launch()
+        check(element("timelineV4").waitForExistence(timeout: 120), "editor open on a real cut")
+        _ = wait(90) { self.element("editorPlay").exists && self.element("editorPlay").isEnabled }
+        pause(3)
+        check(app.staticTexts["Dividir"].exists && app.staticTexts["Exportar"].exists || app.buttons["Exportar"].exists, "editor tools in Spanish")
+        shot("es_editor")
+        editorTool("voiceOver")
+        if element("voiceRecordSheet").waitForExistence(timeout: 10) {
+            check(app.staticTexts["Añade tu voz a este video"].exists, "voice-over sheet in Spanish")
+            shot("es_voiceover")
+            element("voiceRecordSheet").swipeDown(velocity: .fast); pause(1)
+        }
+        editorTool("captions"); pause(1.5); shot("es_captions")
+        done()
+    }
+
     // MARK: Voice-over on a real cut (editor probe): record in 2 steps, timeline, panel, export
 
     private func editorState() -> String { let e = element("b17State"); return e.exists ? e.label : "no-state" }

@@ -74,7 +74,7 @@ struct CaptionsPanelView: View {
             } else if enabled && currentLook == .box {
                 boxVariantRow
             }
-            Text(hint)
+            Text(L10n.tr(hint))
                 .font(.system(size: 10))
                 .foregroundStyle(CaptionPanelColours.hint)
                 .frame(maxWidth: .infinity)
@@ -99,7 +99,7 @@ struct CaptionsPanelView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(CaptionPanelColours.title)
             Spacer()
-            Text(enabled ? "On" : "Off")
+            Text(L10n.tr(enabled ? "On" : "Off"))
                 .font(.system(size: 12))
                 .foregroundStyle(CaptionPanelColours.label)
             Toggle("Captions", isOn: Binding(
@@ -147,7 +147,7 @@ struct CaptionsPanelView: View {
         return VStack(spacing: 4) {
             sample(look)
                 .frame(height: 24)
-            Text(title(of: look))
+            Text(L10n.tr(title(of: look)))
                 .font(.system(size: 10))
                 .foregroundStyle(CaptionPanelColours.label)
         }
@@ -319,7 +319,7 @@ struct CaptionsPanelView: View {
                     .frame(width: 24, height: 18)
                     .background(box)
                     .overlay(Rectangle().stroke(CaptionPanelColours.sampleEdge, lineWidth: 0.5))
-                Text(title)
+                Text(L10n.tr(title))
                     .font(.system(size: 10))
                     .foregroundStyle(CaptionPanelColours.chipText)
                     .lineLimit(1)

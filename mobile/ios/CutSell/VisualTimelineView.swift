@@ -123,9 +123,9 @@ private struct TimelineClipCell: View {
             HStack(spacing: 6) {
                 Text("#\(index + 1)").fontWeight(.semibold)
                 if let role = clip["semantic_role"]?.stringValue, role.lowercased() != "other", !role.isEmpty {
-                    Text(role.capitalized)
+                    Text(L10n.tr(role.capitalized))
                 }
-                Text(String(format: "%.1fs", duration))
+                Text(L10n.tr(String(format: "%.1fs", duration)))
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -173,7 +173,7 @@ private struct TimelineClipInspector: View {
                             } label: {
                                 VStack(alignment: .leading) {
                                     Text("Take \(index + 1)")
-                                    Text(alternate["text"]?.stringValue ?? "Alternate take")
+                                    Text(L10n.tr(alternate["text"]?.stringValue ?? "Alternate take"))
                                 }
                             }
                         }
@@ -200,7 +200,7 @@ private struct TimelineClipInspector: View {
                     HStack {
                         Text("Trim")
                         Spacer()
-                        Text(String(format: "%.2f – %.2f", trimStart, trimEnd))
+                        Text(L10n.tr(String(format: "%.2f – %.2f", trimStart, trimEnd)))
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                     }

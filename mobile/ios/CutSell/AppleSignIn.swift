@@ -31,7 +31,7 @@ struct AppleSignInButton: View {
                 if isWorking { ProgressView() }
             }
             if let errorMessage {
-                Text(errorMessage)
+                Text(L10n.tr(errorMessage))
                     .font(.footnote)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)

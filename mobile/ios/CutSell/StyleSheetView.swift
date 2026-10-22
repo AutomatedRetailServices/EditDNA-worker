@@ -61,8 +61,8 @@ struct StyleToggleRow: View {
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
-                Text(subtitle).font(.system(size: 12)).foregroundStyle(CS.textMutedF)
+                Text(L10n.tr(title)).font(.system(size: 15, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                Text(L10n.tr(subtitle)).font(.system(size: 12)).foregroundStyle(CS.textMutedF)
                     .lineLimit(1).minimumScaleFactor(0.85)
             }
             Spacer(minLength: 0)

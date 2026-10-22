@@ -917,7 +917,7 @@ struct TimelineV4: View {
                 let left = x(item.start)
                 let itemWidth = max(10, CGFloat(item.end - item.start) * pixelsPerSecond - 2)
                 if left + itemWidth > 0, left < width + 20 {
-                    Text(item.title)
+                    Text(L10n.tr(item.title))
                         .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                         .padding(.horizontal, 7)
                         .frame(width: itemWidth, height: 30, alignment: .leading)
@@ -1165,7 +1165,7 @@ struct VoiceLabelV4: View {
             } else if status == .failed {
                 Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
             }
-            Text(title)
+            Text(L10n.tr(title))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
@@ -1241,7 +1241,7 @@ struct SoundBlockV5: View {
         HStack(spacing: 4) {
             Image(systemName: muted ? "speaker.slash.fill" : (isMusic ? "music.note" : "waveform"))
                 .font(.system(size: 9, weight: .bold))
-            Text(title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+            Text(L10n.tr(title)).font(.system(size: 10, weight: .semibold)).lineLimit(1)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
@@ -1312,7 +1312,7 @@ struct OverlayBlockV4: View {
                 LinearGradient(colors: [CS.cyan.opacity(0.45), Color(hex: 0x1769FF, opacity: 0.45),
                                         Color(hex: 0x7C3AED, opacity: 0.45), Color(hex: 0xFF21D7, opacity: 0.45)],
                                startPoint: .leading, endPoint: .trailing)
-                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                Text(L10n.tr(title)).font(.system(size: 12, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
                     .lineLimit(1).padding(.leading, 8)
             }
             if let progress = item.uploading {
@@ -1453,7 +1453,7 @@ struct VoiceBlockV4: View {
             } else if status == .failed {
                 Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
             }
-            Text(title)
+            Text(L10n.tr(title))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)

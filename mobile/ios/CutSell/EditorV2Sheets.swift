@@ -135,11 +135,11 @@ struct VoiceOverRecordSheet: View {
             Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 10)
             HStack(spacing: 10) {
                 Image("EdMic").resizable().renderingMode(.template).foregroundStyle(CS.magenta).frame(width: 20, height: 20)
-                Text(recordedURL == nil ? "Recording voice-over" : "Voice-over")
+                Text(L10n.tr(recordedURL == nil ? "Recording voice-over" : "Voice-over"))
                     .font(CS.inter(19, .bold)).foregroundStyle(.white)
             }
             .padding(.top, 20)
-            Text(recordedURL == nil ? "Add your voice to this video" : "Preview your recording before saving.")
+            Text(L10n.tr(recordedURL == nil ? "Add your voice to this video" : "Preview your recording before saving."))
                 .font(CS.inter(13, .semibold))
                 .foregroundStyle(CS.textSecondaryF)
                 .padding(.top, 6)
@@ -196,7 +196,7 @@ struct VoiceOverRecordSheet: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("voiceRecordButton")
-                    Text(recorder.state == .recording ? "Tap to stop" : "Tap to record")
+                    Text(L10n.tr(recorder.state == .recording ? "Tap to stop" : "Tap to record"))
                         .font(CS.inter(11)).foregroundStyle(CS.textSecondaryF)
                 }
 
@@ -211,7 +211,7 @@ struct VoiceOverRecordSheet: View {
             case .permissionDenied:
                 Text("Allow the microphone in Settings to record.").font(CS.inter(12)).foregroundStyle(CS.error)
             case .failed(let message):
-                Text(message).font(CS.inter(12)).foregroundStyle(CS.error)
+                Text(L10n.tr(message)).font(CS.inter(12)).foregroundStyle(CS.error)
             default:
                 EmptyView()
             }
@@ -259,13 +259,13 @@ struct VoiceOverRecordSheet: View {
                     .overlay(Circle().stroke(stroke, lineWidth: 2))
             }
             .buttonStyle(.plain)
-            Text(label).font(CS.inter(11)).foregroundStyle(CS.textSecondaryF)
+            Text(L10n.tr(label)).font(CS.inter(11)).foregroundStyle(CS.textSecondaryF)
         }
     }
 
     private func pill(_ title: String, icon: String, border: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: icon)
+            Label(L10n.tr(title), systemImage: icon)
                 .font(CS.inter(15, .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity).frame(height: 46)
@@ -311,10 +311,10 @@ struct ExportSheet: View {
             Text("Export").font(CS.inter(22, .bold)).foregroundStyle(.white)
             if let problem = model.exportError {
                 // Build 27: an export that could not start says why, in plain words, with Try again.
-                Text(problem).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF).multilineTextAlignment(.center)
+                Text(L10n.tr(problem)).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF).multilineTextAlignment(.center)
                     .accessibilityIdentifier("exportError")
             } else if let preparing = model.exportPreparing {
-                Text(preparing).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                Text(L10n.tr(preparing)).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                 ProgressView(value: 0, total: 100).tint(CS.cyan)
             } else if let job = model.exportJob {
                 if job.state == "finished" {
@@ -324,7 +324,7 @@ struct ExportSheet: View {
                 } else {
                     let percent = Self.shownPercent(job)
                     HStack {
-                        Text(Self.stageText(job)).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
+                        Text(L10n.tr(Self.stageText(job))).font(CS.inter(14)).foregroundStyle(CS.textSecondaryF)
                         Spacer()
                         Text("\(percent)%").font(CS.inter(16, .bold)).monospacedDigit().foregroundStyle(CS.cyan)
                             .accessibilityIdentifier("exportPercent")

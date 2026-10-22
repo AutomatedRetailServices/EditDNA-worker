@@ -169,7 +169,7 @@ struct PrimaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
+            Text(L10n.tr(title))
                 .font(CS.inter(fontSize, .semibold))
                 .foregroundStyle(textColor)
                 .frame(maxWidth: .infinity)
@@ -193,7 +193,7 @@ struct SecondaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
+            Text(L10n.tr(title))
                 .font(CS.inter(fontSize, .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -221,7 +221,7 @@ struct SegmentedPill<Option: Hashable>: View {
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) { selection = option }
                 } label: {
-                    Text(title(option))
+                    Text(L10n.tr(title(option)))
                         .font(CS.inter(15, isSelected ? .semibold : .medium))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -253,10 +253,10 @@ struct OptionCard: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
-                Text(title)
+                Text(L10n.tr(title))
                     .font(CS.inter(15, .semibold))
                     .foregroundStyle(.white)
-                Text(subtitle)
+                Text(L10n.tr(subtitle))
                     .font(CS.inter(10))
                     .foregroundStyle(CS.textMuted)
             }
@@ -281,7 +281,7 @@ struct FilterChip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
+            Text(L10n.tr(title))
                 .font(CS.inter(13, .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
@@ -344,7 +344,7 @@ struct CheckboxRow: View {
                         Image("IconCheck").resizable().frame(width: 14, height: 14)
                     }
                 }
-                Text(title)
+                Text(L10n.tr(title))
                     .font(CS.inter(13))
                     .foregroundStyle(.white)
                 Spacer(minLength: 0)

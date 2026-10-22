@@ -69,7 +69,7 @@ struct DraftPlaybackView: View {
                         .foregroundStyle(.secondary)
                 }
             } else if let message = playback.message {
-                Text(message)
+                Text(L10n.tr(message))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

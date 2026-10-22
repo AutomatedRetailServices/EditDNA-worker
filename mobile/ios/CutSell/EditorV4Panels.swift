@@ -117,7 +117,7 @@ struct CaptionStylePanel: View {
                     }
                 }
                 .font(CS.inter(16, .bold))
-                Text(item.rawValue.capitalized).font(CS.inter(10)).foregroundStyle(CS.textSecondaryF)
+                Text(L10n.tr(item.rawValue.capitalized)).font(CS.inter(10)).foregroundStyle(CS.textSecondaryF)
             }
             .frame(maxWidth: .infinity).frame(height: 54)
             .background(Color(hex: 0x060B18), in: RoundedRectangle(cornerRadius: 12))
@@ -162,7 +162,7 @@ struct CaptionStylePanel: View {
                     .frame(width: 22, height: 16)
                     .background(dark ? Color.black : Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 2))
                     .overlay(RoundedRectangle(cornerRadius: 2).stroke(Color.white.opacity(0.6), lineWidth: 0.5))
-                Text(title).font(CS.inter(10)).foregroundStyle(selected ? .white : CS.textMutedF).lineLimit(1)
+                Text(L10n.tr(title)).font(CS.inter(10)).foregroundStyle(selected ? .white : CS.textMutedF).lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
@@ -266,7 +266,7 @@ struct VoiceOverPanel: View {
             }
             .frame(height: 28)
             .padding(.top, 15)
-            Text(statusLine)
+            Text(L10n.tr(statusLine))
                 .font(CS.inter(13, .bold)).foregroundStyle(Color(hex: 0x9EB5DB))
                 .monospacedDigit()
                 .padding(.top, 4)
@@ -332,7 +332,7 @@ struct VoiceOverPanel: View {
             case .permissionDenied:
                 Text("Allow the microphone in Settings to record.").font(CS.inter(11)).foregroundStyle(CS.error)
             case .failed(let message):
-                Text(message).font(CS.inter(11)).foregroundStyle(CS.error).lineLimit(1)
+                Text(L10n.tr(message)).font(CS.inter(11)).foregroundStyle(CS.error).lineLimit(1)
             default:
                 EmptyView()
             }
@@ -347,7 +347,7 @@ struct VoiceOverPanel: View {
     private func control<Content: View>(label: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 8) {
             ZStack { content() }.frame(height: 86)
-            Text(label).font(CS.inter(10, .medium)).foregroundStyle(Color(hex: 0xA3B2D6))
+            Text(L10n.tr(label)).font(CS.inter(10, .medium)).foregroundStyle(Color(hex: 0xA3B2D6))
                 .lineLimit(1).minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity)
@@ -442,7 +442,7 @@ struct VoiceOverPanel: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: listener.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 13, weight: .bold)).foregroundStyle(CS.cyan)
-                        Text(listener.isPlaying ? "Pause" : "Play").font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                        Text(L10n.tr(listener.isPlaying ? "Pause" : "Play")).font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
                     }
                     .frame(width: 100, height: 46)
                     .background(Color(hex: 0x0F081A), in: RoundedRectangle(cornerRadius: 14))
@@ -466,7 +466,7 @@ struct VoiceOverPanel: View {
                 .accessibilityIdentifier("voiceRetake")
                 Spacer(minLength: 0)
                 Button { if let url = takeURL { Task { await save(url) } } } label: {
-                    Text(saving ? "Saving…" : "✓  Save").font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
+                    Text(L10n.tr(saving ? "Saving…" : "✓  Save")).font(CS.inter(14, .semibold)).foregroundStyle(Color(hex: 0xF7FAFF))
                         .frame(width: 112, height: 46)
                         .background(LinearGradient(colors: [Color(hex: 0x0AD6FF), Color(hex: 0x3366FF), Color(hex: 0xF01FD6)], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
                 }
@@ -650,7 +650,7 @@ struct OverlayGallerySheet: View {
             if sampleTiles {
                 Capsule().fill(Color(hex: 0x3A5280)).frame(width: 40, height: 4).padding(.top, 8)
                 ZStack {
-                    Text(title).font(CS.inter(17, .bold)).foregroundStyle(.white)
+                    Text(L10n.tr(title)).font(CS.inter(17, .bold)).foregroundStyle(.white)
                     HStack {
                         Button("Cancel") { dismiss() }.font(CS.inter(15)).foregroundStyle(CS.cyan)
                         Spacer()
@@ -665,7 +665,7 @@ struct OverlayGallerySheet: View {
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(index == 1 ? CS.cyan : .clear, lineWidth: 2))
                             .overlay(alignment: .bottomTrailing) {
                                 if index == 1 || index == 5 {
-                                    Text(index == 1 ? "0:08" : "0:15").font(CS.inter(10, .semibold)).foregroundStyle(.white).padding(5)
+                                    Text(L10n.tr(index == 1 ? "0:08" : "0:15")).font(CS.inter(10, .semibold)).foregroundStyle(.white).padding(5)
                                 }
                             }
                     }
@@ -699,7 +699,7 @@ struct OverlayGallerySheet: View {
     private func progressCard(_ value: Double) -> some View {
         VStack(spacing: 10) {
             ProgressView(value: value).tint(CS.cyan).frame(width: 180)
-            Text(value < 0.02 ? "Getting it ready…" : "Getting it from iCloud… \(Int((value * 100).rounded()))%")
+            Text(L10n.tr(value < 0.02 ? "Getting it ready…" : "Getting it from iCloud… \(Int((value * 100).rounded()))%"))
                 .font(CS.inter(14, .medium)).monospacedDigit().foregroundStyle(.white)
                 .accessibilityIdentifier("galleryProgress")
         }
@@ -709,7 +709,7 @@ struct OverlayGallerySheet: View {
 
     private func problemCard(_ text: String) -> some View {
         VStack(spacing: 12) {
-            Text(text).font(CS.inter(14)).foregroundStyle(.white).multilineTextAlignment(.center)
+            Text(L10n.tr(text)).font(CS.inter(14)).foregroundStyle(.white).multilineTextAlignment(.center)
             Button("OK") { problem = nil }.font(CS.inter(15, .semibold)).foregroundStyle(CS.cyan)
         }
         .padding(22)

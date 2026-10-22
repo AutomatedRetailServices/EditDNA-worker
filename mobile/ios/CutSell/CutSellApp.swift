@@ -36,6 +36,7 @@ struct CutSellApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appState = AppState()
     @StateObject private var notificationCenter = NotificationCenterModel()
+    @StateObject private var language = L10n.shared
 
     var body: some Scene {
         WindowGroup {
@@ -54,6 +55,10 @@ struct CutSellApp: App {
     private var mainRoot: some View {
         // The AI notice is presented by AIConsentCenter itself (on top of any cover or sheet).
         RootView()
+                // You → Language: the whole app re-draws in the new language at once.
+                .id(language.code)
+                .environment(\.locale, L10n.locale)
+                .environmentObject(language)
                 .onOpenURL { TikTokPoster.handle($0) }            // TikTok Share Kit answers here
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     if let url = activity.webpageURL { TikTokPoster.handle(url) }
@@ -113,7 +118,7 @@ struct RootView: View {
                 ContentUnavailableView {
                     Label("Couldn’t start CutSell", systemImage: "exclamationmark.triangle")
                 } description: {
-                    Text(error)
+                    Text(L10n.tr(error))
                 } actions: {
                     Button("Try Again") {
                         Task { await appState.bootstrap() }
@@ -123,7 +128,7 @@ struct RootView: View {
             } else if appState.needsSignIn {
                 WelcomeView()
             } else {
-                MainTabView()
+                MainTabView(initialTab: L10n.takeReopenTab() ?? .create)
             }
         }
         .preferredColorScheme(.dark)
@@ -136,7 +141,7 @@ struct RootView: View {
         ) {
             Button("OK", role: .cancel) { appState.accountNotice = nil }
         } message: {
-            Text(appState.accountNotice ?? "")
+            Text(L10n.tr(appState.accountNotice ?? ""))
         }
     }
 }

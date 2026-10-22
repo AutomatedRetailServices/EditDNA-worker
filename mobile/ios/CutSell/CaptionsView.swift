@@ -57,7 +57,7 @@ struct CaptionsView: View {
                             ForEach(clips, id: \.self) { clip in
                                 let id = clip["clip_id"]?.stringValue ?? ""
                                 let label = clip["caption_text"]?.stringValue ?? clip["text"]?.stringValue ?? "Clip"
-                                Text(label).tag(Optional(id)).lineLimit(1)
+                                Text(L10n.tr(label)).tag(Optional(id)).lineLimit(1)
                             }
                         }
                         .accessibilityIdentifier("captions.clipPicker")
@@ -111,7 +111,7 @@ struct CaptionsView: View {
             .alert("CutSell", isPresented: Binding(
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
+            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
         }
     }
 

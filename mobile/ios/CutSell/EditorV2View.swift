@@ -86,7 +86,7 @@ struct EditorV2View: View {
         .alert("CutSell", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
-        )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
+        )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
     }
 
     // MARK: Top
@@ -173,7 +173,7 @@ struct EditorV2View: View {
                 .padding(.bottom, 12)
                 .transition(.opacity)
             } else if let selection {
-                Text(selection.pillTitle)
+                Text(L10n.tr(selection.pillTitle))
                     .font(CS.inter(12, .medium))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 22)
@@ -240,7 +240,7 @@ struct EditorV2View: View {
         Button(action: action) {
             VStack(spacing: 2) {
                 icon.frame(width: 42, height: 42)
-                Text(title)
+                Text(L10n.tr(title))
                     .font(CS.inter(10, .medium))
                     .foregroundStyle(Color(hex: 0xEDF5FF))
                     .multilineTextAlignment(.center)
@@ -523,7 +523,7 @@ struct EditorTracks: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Mute clip").font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
                         .lineLimit(1).fixedSize()
-                    Text(allMuted ? "muted" : "audio").font(CS.sf(9)).foregroundStyle(Color(hex: 0x8CA8D6))
+                    Text(L10n.tr(allMuted ? "muted" : "audio")).font(CS.sf(9)).foregroundStyle(Color(hex: 0x8CA8D6))
                         .lineLimit(1).fixedSize()
                 }
                 Spacer(minLength: 0)
@@ -540,7 +540,7 @@ struct EditorTracks: View {
         HStack(spacing: 6) {
             Image(icon).resizable().frame(width: iconSize, height: iconSize)
                 .frame(width: 24)
-            Text(title).font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
+            Text(L10n.tr(title)).font(CS.sf(10, .semibold)).foregroundStyle(Color(hex: 0xEBF2FF))
                 .lineLimit(1).fixedSize()
             Spacer(minLength: 0)
         }
@@ -640,7 +640,7 @@ struct EditorTracks: View {
                 let start = entry.item["start"]?.doubleValue ?? 0
                 let end = entry.item["end"]?.doubleValue ?? start + 1
                 let isSelected = selection == .overlay(id, isText: entry.isText)
-                Text(entry.isText ? (entry.item["text"]?.stringValue ?? "Text") : (entry.item["kind"]?.stringValue ?? "Media").capitalized)
+                Text(L10n.tr(entry.isText ? (entry.item["text"]?.stringValue ?? "Text") : (entry.item["kind"]?.stringValue ?? "Media").capitalized))
                     .font(CS.sf(11, .semibold))
                     .foregroundStyle(entry.isText ? .white : Color(hex: 0xD10F1A))
                     .lineLimit(1)
@@ -829,7 +829,7 @@ private struct ToastPill: View {
 
     var body: some View {
         HStack {
-            Text(toast.text)
+            Text(L10n.tr(toast.text))
                 .font(CS.inter(13, .medium))
                 .foregroundStyle(.white)
                 .lineLimit(2)
@@ -938,8 +938,9 @@ enum CutNaming {
 
     static func dated(_ date: Date = Date()) -> String {
         let formatter = DateFormatter()
+        formatter.locale = L10n.locale
         formatter.setLocalizedDateFormatFromTemplate("d MMM")
-        return "Cut \(formatter.string(from: date))"
+        return L10n.tr("Cut \(formatter.string(from: date).replacingOccurrences(of: ".", with: ""))")
     }
 
     static func readable(project: Project) -> String {

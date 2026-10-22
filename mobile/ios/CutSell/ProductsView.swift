@@ -408,7 +408,7 @@ struct ProductDetailView: View {
                     }
                     .padding(.top, 8)
                     HStack(alignment: .firstTextBaseline) {
-                        Text(detail?.name ?? " ").font(CS.inter(26, .bold)).foregroundStyle(.white).lineLimit(2)
+                        Text(L10n.tr(detail?.name ?? " ")).font(CS.inter(26, .bold)).foregroundStyle(.white).lineLimit(2)
                             .accessibilityIdentifier("productTitle")
                         Spacer(minLength: 8)
                         Button { newName = detail?.name ?? ""; renaming = true } label: {
@@ -417,7 +417,7 @@ struct ProductDetailView: View {
                         .accessibilityIdentifier("productRename")
                     }
                     .padding(.top, 12)
-                    Text(subtitle).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 4)
+                    Text(L10n.tr(subtitle)).font(CS.inter(13)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 4)
                         .accessibilityIdentifier("productSubtitle")
 
                     if route.mixID != nil {
@@ -455,7 +455,7 @@ struct ProductDetailView: View {
                                 selecting.toggle(); selected = []
                             }
                         } label: {
-                            Text(selecting ? (selected.isEmpty ? "Cancel" : "Move \(selected.count)") : "Select")
+                            Text(L10n.tr(selecting ? (selected.isEmpty ? "Cancel" : "Move \(selected.count)") : "Select"))
                                 .font(CS.inter(15, .semibold)).foregroundStyle(.white)
                                 .frame(width: 110, height: 50)
                                 .overlay(Capsule().stroke(Color(hex: 0x596685), lineWidth: 1))
@@ -490,7 +490,7 @@ struct ProductDetailView: View {
                     }
                     .padding(.top, 22)
                     if let message = exporter.message {
-                        Text(message).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 10)
+                        Text(L10n.tr(message)).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 10)
                             .accessibilityIdentifier("mixExportMessage")
                     }
                 }
@@ -516,7 +516,7 @@ struct ProductDetailView: View {
         }
         .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
-        } message: { Text(errorMessage ?? "") }
+        } message: { Text(L10n.tr(errorMessage ?? "")) }
     }
 
     private var readyMixVideos: [CatalogProductVideo] {
@@ -530,7 +530,7 @@ struct ProductDetailView: View {
         let ready = mix?.ready ?? mixVideos.filter { $0.bucket != "processing" }.count
         let text = ready >= total ? "✦  Mix ready: \(total) videos from \(mix?.clipCount ?? 0) clips"
             : "✦  Making your Mix: \(ready) of \(total) ready"
-        return Text(text).font(CS.inter(13, .semibold)).foregroundStyle(.white)
+        return Text(L10n.tr(text)).font(CS.inter(13, .semibold)).foregroundStyle(.white)
             .padding(.horizontal, 12.5)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(Color(hex: 0x121A2B), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -682,7 +682,7 @@ struct AssignProductSheet: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("✦ SUGGESTED FROM THE VIDEO").font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
-                        Text(label).font(CS.inter(15, .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(L10n.tr(label)).font(CS.inter(15, .semibold)).foregroundStyle(.white).lineLimit(1)
                     }
                     Spacer()
                     Button { Task { await move(brand: suggestion.brand, product: suggestion.product) } } label: {
@@ -702,7 +702,7 @@ struct AssignProductSheet: View {
                 .padding(.top, 18)
             }
 
-            Text(store.allProducts.isEmpty ? "You have no products yet" : "Or choose one of your products")
+            Text(L10n.tr(store.allProducts.isEmpty ? "You have no products yet" : "Or choose one of your products"))
                 .font(CS.inter(12, .semibold)).foregroundStyle(Color(hex: 0x99A3BD)).padding(.top, 16)
 
             ScrollView {
@@ -763,7 +763,7 @@ struct AssignProductSheet: View {
         }
         .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
-        } message: { Text(errorMessage ?? "") }
+        } message: { Text(L10n.tr(errorMessage ?? "")) }
         .task { await store.refresh(session: appState.session, projects: appState.projects) }
     }
 

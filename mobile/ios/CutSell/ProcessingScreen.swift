@@ -151,10 +151,10 @@ struct ProcessingContent: View {
             .padding(.top, 4)
 
             VStack(spacing: 0) {
-                Text(failed ? "This cut needs another try" : "Hold on…")
+                Text(L10n.tr(failed ? "This cut needs another try" : "Hold on…"))
                     .font(CS.sf(failed ? 26 : 32, .semibold))
                     .foregroundStyle(Color(hex: 0xC4D6F7))
-                Text(failed ? "Something went wrong on our side." : "We’re saving you hours per day…")
+                Text(L10n.tr(failed ? "Something went wrong on our side." : "We’re saving you hours per day…"))
                     .font(CS.sf(18, .semibold))
                     .foregroundStyle(Color(hex: 0xC4D6F7))
             }
@@ -166,11 +166,11 @@ struct ProcessingContent: View {
                 .padding(.vertical, 6)
 
             VStack(spacing: 6) {
-                Text(stage.title)
+                Text(L10n.tr(stage.title))
                     .accessibilityIdentifier("processingStage")
                     .font(CS.sf(16, .semibold))
                     .foregroundStyle(Color(hex: 0xF2F7FF))
-                Text(stage.percent >= 0 ? "\(stage.percent)%" : "…")
+                Text(L10n.tr(stage.percent >= 0 ? "\(stage.percent)%" : "…"))
                     .font(CS.sf(24, .semibold))
                     .foregroundStyle(CS.cyan)
                     .contentTransition(.numericText())
@@ -179,7 +179,7 @@ struct ProcessingContent: View {
                 // Build 25: no "Step x of 8" text or step dots (Single, Bulk and Combine): the stage
                 // name and its % are enough.
                 if let background {
-                    Text(background)
+                    Text(L10n.tr(background))
                         .font(CS.sf(13))
                         .foregroundStyle(CS.textSecondaryF)
                         .multilineTextAlignment(.center)
@@ -189,7 +189,7 @@ struct ProcessingContent: View {
                 }
                 if let stalled {
                     VStack(spacing: 8) {
-                        Text(stalled)
+                        Text(L10n.tr(stalled))
                             .font(CS.sf(13))
                             .foregroundStyle(Color(hex: 0xFFC48A))
                             .multilineTextAlignment(.center)
@@ -207,7 +207,7 @@ struct ProcessingContent: View {
             Spacer(minLength: 8)
 
             VStack(spacing: 12) {
-                Text(uploading ? "Your video keeps uploading if you leave this screen or CutSell." : "Processing continues if you leave this screen.")
+                Text(L10n.tr(uploading ? "Your video keeps uploading if you leave this screen or CutSell." : "Processing continues if you leave this screen."))
                     .font(CS.sf(13))
                     .foregroundStyle(Color(hex: 0xB8D1F5))
                     .frame(maxWidth: .infinity)
@@ -509,7 +509,7 @@ struct ReadyContent: View {
         VStack(spacing: 4) {
             Image(icon).resizable().frame(width: 20, height: 20)
             Text(value).font(CS.sf(19, .semibold)).foregroundStyle(.white)
-            Text(label).font(CS.sf(11)).foregroundStyle(Color(hex: 0x8F9CB8))
+            Text(L10n.tr(label)).font(CS.sf(11)).foregroundStyle(Color(hex: 0x8F9CB8))
         }
         .frame(maxWidth: .infinity)
     }

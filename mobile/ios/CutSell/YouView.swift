@@ -6,6 +6,7 @@ struct YouView: View {
 
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notificationCenter: NotificationCenterModel
+    @EnvironmentObject private var language: L10n
     @State private var showingNotifications = false
     @State private var showingLogout = false
     @State private var showingDeleteAccount = false
@@ -49,7 +50,7 @@ struct YouView: View {
                         .font(CS.inter(34, .semibold))
                         .foregroundStyle(.white)
                         .padding(.top, 14)
-                    Text(isApple ? "Signed in with Apple." : "Using CutSell without an account.")
+                    Text(L10n.tr(isApple ? "Signed in with Apple." : "Using CutSell without an account."))
                         .font(CS.inter(14))
                         .foregroundStyle(CS.textSecondary)
                         .padding(.top, 4)
@@ -77,6 +78,43 @@ struct YouView: View {
                     .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
                     .padding(.top, 28)
+
+                    // Language: Automatic (the iPhone's language) · English · Español.
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Language").font(CS.inter(13, .semibold)).foregroundStyle(CS.textMuted)
+                            .padding(.bottom, 6)
+                        ForEach(AppLanguage.allCases) { option in
+                            Button { pickLanguage(option) } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(verbatim: option.title).font(CS.inter(15, .medium)).foregroundStyle(.white)
+                                        if option == .automatic {
+                                            Text("Follows your iPhone's language").font(CS.inter(12)).foregroundStyle(CS.textSecondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    if language.choice == option {
+                                        Image(systemName: "checkmark").font(.system(size: 15, weight: .bold)).foregroundStyle(CS.cyan)
+                                    }
+                                }
+                                .frame(minHeight: 46)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(language.choice == option ? .isSelected : [])
+                            .accessibilityIdentifier("language_\(option.rawValue)")
+                            if option != AppLanguage.allCases.last {
+                                Rectangle().fill(Color(hex: 0x14478C, opacity: 0.6)).frame(height: 1)
+                            }
+                        }
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(hex: 0x040812, opacity: 0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color(hex: 0x14478C), lineWidth: 1))
+                    .padding(.top, 14)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("languageCard")
 
                     // Privacy Policy and Terms of Use, inside the app.
                     VStack(alignment: .leading, spacing: 12) {
@@ -133,7 +171,12 @@ struct YouView: View {
         .alert("CutSell", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
-        )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+        )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
+    }
+
+    private func pickLanguage(_ option: AppLanguage) {
+        guard option != language.choice else { return }
+        language.set(option, reopen: .you)
     }
 
     private func versionTapped() {
@@ -162,7 +205,7 @@ struct NotificationInboxView: View {
                                 .foregroundStyle(item.kind.contains("failed") ? CS.alert : CS.cyan)
                                 .frame(width: 24)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(title(item.kind)).font(.headline)
+                                Text(L10n.tr(title(item.kind))).font(.headline)
                                 Text(item.projectID).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }

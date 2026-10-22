@@ -22,7 +22,7 @@ struct ProcessingView: View {
             Image(systemName: "wand.and.stars")
                 .font(.system(size: 48))
 
-            Text(stageTitle)
+            Text(L10n.tr(stageTitle))
                 .font(.title2.bold())
 
             ProgressView(value: Double(job?.progress ?? fallbackProgress) / 100)
@@ -38,7 +38,7 @@ struct ProcessingView: View {
                 .padding(.horizontal, 36)
 
             if let errorMessage {
-                Text(errorMessage).foregroundStyle(.red).font(.footnote)
+                Text(L10n.tr(errorMessage)).foregroundStyle(.red).font(.footnote)
                 Button("Try again") { Task { await pollOnce() } }
             }
 

@@ -101,20 +101,21 @@ enum PlanDay {
     /// "Tue 21"
     static func short(_ day: String) -> String {
         guard let d = date(day) else { return day }
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "EEE d"
-        return f.string(from: d)
+        let f = DateFormatter(); f.locale = L10n.locale; f.dateFormat = "EEE d"
+        return f.string(from: d).replacingOccurrences(of: ".", with: "").capitalizedFirst
     }
     static func weekdayName(_ day: String) -> String {
         guard let d = date(day) else { return day }
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "EEE"
-        return f.string(from: d)
+        let f = DateFormatter(); f.locale = L10n.locale; f.dateFormat = "EEE"
+        return f.string(from: d).replacingOccurrences(of: ".", with: "").capitalizedFirst
     }
     /// "09:00" -> "9:00 AM"
     static func clock(_ time: String) -> String {
         let parts = time.split(separator: ":").compactMap { Int($0) }
         guard parts.count >= 2 else { return time }
         let hour = parts[0] % 12 == 0 ? 12 : parts[0] % 12
-        return String(format: "%d:%02d %@", hour, parts[1], parts[0] < 12 ? "AM" : "PM")
+        let es = L10nState.code == "es"
+        return String(format: "%d:%02d %@", hour, parts[1], parts[0] < 12 ? (es ? "a. m." : "AM") : (es ? "p. m." : "PM"))
     }
     static let dots = ["PlanDotCyan", "PlanDotMagenta", "PlanDotGreen", "PlanDotAmber"]
 }
@@ -657,7 +658,7 @@ struct PlanGoalView: View {
                     label("START").padding(.top, 18)
                     Button { pickingStart = true } label: {
                         HStack {
-                            Text(startText).font(CS.inter(14, .semibold)).foregroundStyle(.white)
+                            Text(L10n.tr(startText)).font(CS.inter(14, .semibold)).foregroundStyle(.white)
                             Spacer()
                             Text("Change").font(CS.inter(13, .semibold)).foregroundStyle(CS.cyan)
                         }
@@ -735,10 +736,10 @@ struct PlanGoalView: View {
         }
         .alert("CutSell", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
-        } message: { Text(errorMessage ?? "") }
+        } message: { Text(L10n.tr(errorMessage ?? "")) }
         .alert("Your plan ends early", isPresented: Binding(get: { endedEarly != nil }, set: { if !$0 { endedEarly = nil; onBuilt() } })) {
             Button("OK", role: .cancel) {}
-        } message: { Text(endedEarly ?? "") }
+        } message: { Text(L10n.tr(endedEarly ?? "")) }
     }
 
     struct TimeEdit: Identifiable { let id: Int }
@@ -781,7 +782,7 @@ struct PlanGoalView: View {
         return VStack(alignment: .leading, spacing: 4) {
             Text("✦  \(count) video\(count == 1 ? "" : "s") · \(perDay) per day · \(dates.count) day\(dates.count == 1 ? "" : "s")")
                 .font(CS.inter(14, .semibold)).foregroundStyle(.white)
-            Text(line2).font(CS.inter(12)).foregroundStyle(PlanStyle.muted).padding(.leading, 20)
+            Text(L10n.tr(line2)).font(CS.inter(12)).foregroundStyle(PlanStyle.muted).padding(.leading, 20)
         }
         .padding(.horizontal, 13).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -792,7 +793,7 @@ struct PlanGoalView: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
+        Text(L10n.tr(text)).font(CS.inter(10, .bold)).foregroundStyle(CS.cyan)
     }
 
     private var startText: String {
@@ -820,8 +821,8 @@ struct PlanGoalView: View {
     /// "Thu 22"
     static func dayLabel(_ day: String) -> String {
         guard let d = PlanDay.date(day) else { return day }
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US"); f.dateFormat = "EEE d"
-        return f.string(from: d)
+        let f = DateFormatter(); f.locale = L10n.locale; f.dateFormat = "EEE d"
+        return f.string(from: d).replacingOccurrences(of: ".", with: "").capitalizedFirst
     }
 
     static func tomorrow() -> String {
@@ -897,7 +898,7 @@ struct TimePickerSheet: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            if let title { Text(title).font(CS.inter(15, .semibold)).foregroundStyle(.white) }
+            if let title { Text(L10n.tr(title)).font(CS.inter(15, .semibold)).foregroundStyle(.white) }
             DatePicker("", selection: $value, displayedComponents: .hourAndMinute).datePickerStyle(.wheel).labelsHidden()
             Button("Save") {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: value)
@@ -949,7 +950,7 @@ struct PlanWeekView: View {
                     }
                     .padding(.top, 8)
                     Text("This week").font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
-                    Text(subtitle).font(CS.inter(13)).foregroundStyle(PlanStyle.muted).padding(.top, 6)
+                    Text(L10n.tr(subtitle)).font(CS.inter(13)).foregroundStyle(PlanStyle.muted).padding(.top, 6)
                         .accessibilityIdentifier("weekSubtitle")
                     VStack(spacing: 8) {
                         ForEach(days, id: \.self) { day in dayCard(day) }
@@ -1060,9 +1061,9 @@ struct PlanWeekView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Image(store.dot(for: slot)).resizable().frame(width: 7, height: 7)
-                    Text(slot.brand ?? "No product").font(CS.inter(11, .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(11, .semibold)).foregroundStyle(.white).lineLimit(1)
                 }
-                Text(slot.product ?? slot.mixCode ?? "Video").font(CS.inter(11)).foregroundStyle(PlanStyle.muted).lineLimit(2)
+                Text(L10n.tr(slot.product ?? slot.mixCode ?? "Video")).font(CS.inter(11)).foregroundStyle(PlanStyle.muted).lineLimit(2)
                 Text(PlanDay.clock(slot.time)).font(CS.inter(11, .semibold))
                     .foregroundStyle(slot.postedAt == nil && highlight ? CS.cyan : PlanStyle.muted)
             }
@@ -1108,7 +1109,7 @@ struct MoveSlotSheet: View {
                     .background(Capsule().fill(PlanStyle.cta))
             }
             .accessibilityIdentifier("moveSave")
-            if let errorMessage { Text(errorMessage).font(CS.inter(12)).foregroundStyle(CS.error) }
+            if let errorMessage { Text(L10n.tr(errorMessage)).font(CS.inter(12)).foregroundStyle(CS.error) }
             Spacer()
         }
         .padding(.horizontal, 23)
@@ -1152,7 +1153,7 @@ struct PlanDayView: View {
                         .font(CS.inter(28, .bold)).foregroundStyle(.white).padding(.top, 18)
                         .accessibilityIdentifier("dayTitle")
                     let left = slots.filter { $0.postedAt == nil }.count
-                    Text(left == 0 ? "Everything is posted 🎉" : "\(left) video\(left == 1 ? "" : "s") to post")
+                    Text(L10n.tr(left == 0 ? "Everything is posted 🎉" : "\(left) video\(left == 1 ? "" : "s") to post"))
                         .font(CS.inter(13)).foregroundStyle(PlanStyle.muted).padding(.top, 6)
                     if let slot = focus {
                         mainCard(slot).padding(.top, 14)
@@ -1166,7 +1167,7 @@ struct PlanDayView: View {
                         }
                     }
                     if let notice {
-                        Text(notice).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 14)
+                        Text(L10n.tr(notice)).font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 14)
                             .accessibilityIdentifier("dayNotice")
                     }
                 }
@@ -1207,18 +1208,18 @@ struct PlanDayView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
                     Image(store.dot(for: slot)).resizable().frame(width: 8, height: 8)
-                    Text(slot.brand ?? "No product").font(CS.inter(13, .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(13, .semibold)).foregroundStyle(.white).lineLimit(1)
                 }
-                Text(slot.product ?? "Video").font(CS.inter(15, .bold)).foregroundStyle(.white).lineLimit(2).padding(.top, 3)
+                Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(15, .bold)).foregroundStyle(.white).lineLimit(2).padding(.top, 3)
                     .accessibilityIdentifier("dayProduct")
                 Text(PlanDay.clock(slot.time) + (reminderOn(slot) ? " · reminder on" : ""))
                     .font(CS.inter(12, .semibold)).foregroundStyle(CS.cyan).padding(.top, 6)
                 Text([slot.mixCode, ProductDetailView.length(slot.durationSec)].compactMap { $0 }.joined(separator: " · "))
                     .font(CS.inter(11)).foregroundStyle(PlanStyle.muted).padding(.top, 6)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(slot.captionSource == "user" ? "✦ YOUR CAPTION" : "✦ SUGGESTED CAPTION")
+                    Text(L10n.tr(slot.captionSource == "user" ? "✦ YOUR CAPTION" : "✦ SUGGESTED CAPTION"))
                         .font(CS.inter(9, .bold)).foregroundStyle(CS.cyan)
-                    Text(slot.caption ?? "Writing your caption…").font(CS.inter(11)).foregroundStyle(.white)
+                    Text(L10n.tr(slot.caption ?? "Writing your caption…")).font(CS.inter(11)).foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("dayCaption")
                     Spacer(minLength: 0)
@@ -1271,7 +1272,7 @@ struct PlanDayView: View {
     }
 
     private func outline(_ title: String) -> some View {
-        Text(title).font(CS.inter(13, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 46)
+        Text(L10n.tr(title)).font(CS.inter(13, .semibold)).foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 46)
             .overlay(Capsule().stroke(Color(hex: 0x596685), lineWidth: 1))
     }
 
@@ -1283,10 +1284,10 @@ struct PlanDayView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Image(store.dot(for: slot)).resizable().frame(width: 8, height: 8)
-                    Text(slot.brand ?? "No product").font(CS.inter(12, .semibold)).foregroundStyle(.white)
+                    Text(L10n.tr(slot.brand ?? "No product")).font(CS.inter(12, .semibold)).foregroundStyle(.white)
                 }
-                Text(slot.product ?? "Video").font(CS.inter(14, .bold)).foregroundStyle(.white).lineLimit(1)
-                Text(slot.postedAt != nil ? "Posted" : slot.caption == nil ? "Writing caption…" : "Caption ready")
+                Text(L10n.tr(slot.product ?? "Video")).font(CS.inter(14, .bold)).foregroundStyle(.white).lineLimit(1)
+                Text(L10n.tr(slot.postedAt != nil ? "Posted" : slot.caption == nil ? "Writing caption…" : "Caption ready"))
                     .font(CS.inter(11)).foregroundStyle(PlanStyle.muted)
             }
             Spacer()

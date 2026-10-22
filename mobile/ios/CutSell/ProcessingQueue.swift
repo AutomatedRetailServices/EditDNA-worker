@@ -168,7 +168,7 @@ struct QueueRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(String(format: "%02d", order))
+            Text(L10n.tr(String(format: "%02d", order)))
                 .font(CS.inter(11, .bold))
                 .foregroundStyle(orderColor)
                 .frame(width: 28, height: 28)
@@ -187,7 +187,7 @@ struct QueueRowView: View {
                         .font(CS.inter(11, .medium))
                         .foregroundStyle(CS.textSecondaryF)
                     Spacer(minLength: 6)
-                    Text(statusText)
+                    Text(L10n.tr(statusText))
                         .font(CS.inter(10, .semibold))
                         .foregroundStyle(statusColor)
                         .accessibilityIdentifier("queueRowStatus")
@@ -369,10 +369,10 @@ struct BulkStartedSheet: View {
 
     private func card(title: String, subtitle: String, highlighted: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
+            Text(L10n.tr(title))
                 .font(CS.inter(15, .semibold))
                 .foregroundStyle(highlighted ? CS.cyan : .white)
-            Text(subtitle)
+            Text(L10n.tr(subtitle))
                 .font(CS.inter(11))
                 .foregroundStyle(Color(hex: 0x99A3BD))
                 .fixedSize(horizontal: false, vertical: true)

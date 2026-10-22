@@ -264,7 +264,7 @@ struct TimelineEditorView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: track.systemImage).font(.caption2)
-                Text(track.title).font(.caption).fontWeight(.semibold)
+                Text(L10n.tr(track.title)).font(.caption).fontWeight(.semibold)
             }
             .foregroundStyle(.secondary)
 
@@ -528,7 +528,7 @@ private struct TimelineRowCell: View {
                 RoundedRectangle(cornerRadius: 7)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
             }
-            Text(item.label)
+            Text(L10n.tr(item.label))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

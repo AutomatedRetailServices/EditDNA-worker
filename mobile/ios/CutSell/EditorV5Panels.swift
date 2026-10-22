@@ -53,9 +53,9 @@ struct PanelCardV5<Accessory: View, Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
-                Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(CS.textPrimaryF).lineLimit(1)
+                Text(L10n.tr(title)).font(.system(size: 17, weight: .semibold)).foregroundStyle(CS.textPrimaryF).lineLimit(1)
                 if !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 14)).foregroundStyle(CS.textSecondaryF).lineLimit(1)
+                    Text(L10n.tr(subtitle)).font(.system(size: 14)).foregroundStyle(CS.textSecondaryF).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 accessory()
@@ -99,7 +99,7 @@ struct PillButtonV5: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage).font(.system(size: 14, weight: .semibold))
-                Text(title).font(.system(size: 15, weight: .medium)).lineLimit(1).minimumScaleFactor(0.85)
+                Text(L10n.tr(title)).font(.system(size: 15, weight: .medium)).lineLimit(1).minimumScaleFactor(0.85)
             }
             .foregroundStyle(destructive ? Color(hex: 0xFF4D6D) : .white)
             .padding(.horizontal, 14)
@@ -184,7 +184,7 @@ struct OverlayAddPanelV5: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(icon).resizable().frame(width: 26, height: 26)
-                Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
+                Text(L10n.tr(title)).font(.system(size: 16, weight: .semibold)).foregroundStyle(CS.textPrimaryF)
             }
             .frame(maxWidth: .infinity).frame(height: 52)
             .background(Color(hex: 0x0A1326), in: RoundedRectangle(cornerRadius: 14))
@@ -288,7 +288,7 @@ struct OverlayPanelV5: View {
                     }
                 }
                 .frame(width: 36, height: 36)
-                Text(title).font(.system(size: 10.5, weight: .medium))
+                Text(L10n.tr(title)).font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(isOn ? CS.cyan : CS.textSecondaryF)
             }
             .frame(width: 52)
@@ -305,7 +305,7 @@ struct OverlayPanelV5: View {
                 LayoutMiniPhone(layout: layout)
                     .frame(width: 33.6, height: 53.76)
                     .overlay(RoundedRectangle(cornerRadius: 6.7).stroke(chosen ? Color.white : .clear, lineWidth: 1.7))
-                Text(layout.title).font(.system(size: 8.8, weight: .medium))
+                Text(L10n.tr(layout.title)).font(.system(size: 8.8, weight: .medium))
                     .foregroundStyle(chosen ? CS.cyan : CS.textSecondaryF).lineLimit(1).fixedSize()
             }
             .frame(width: 52)
@@ -321,7 +321,7 @@ struct OverlayPanelV5: View {
             ForEach(OverlayEdge.allCases) { edge in
                 let chosen = style.edge == edge
                 Button { model.setOverlayStyle(id: overlayID) { $0.edge = edge } } label: {
-                    Text(edge.title).font(.system(size: 13, weight: .medium))
+                    Text(L10n.tr(edge.title)).font(.system(size: 13, weight: .medium))
                         .foregroundStyle(chosen ? .white : CS.textSecondaryF)
                         .frame(maxWidth: .infinity).frame(height: 28)
                         .background { if chosen { Capsule().fill(Tornasol.horizontal) } }
@@ -385,7 +385,7 @@ struct VolumePanelV5: View {
             HStack(spacing: 12) {
                 GradientSliderV5(value: $value, maximum: 2) { model.setVolume(target, value) }
                     .opacity(muted ? 0.45 : 1)
-                Text(muted ? "Muted" : "\(Int((value * 100).rounded()))%")
+                Text(L10n.tr(muted ? "Muted" : "\(Int((value * 100).rounded()))%"))
                     .font(.system(size: 15, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
                     .frame(width: 58, alignment: .trailing)
                     .accessibilityIdentifier("volumePercent")
@@ -505,7 +505,7 @@ struct VoiceClipPanelV5: View {
                 .frame(width: 30, height: 30)
                 .overlay(Image("VoPanelMic").resizable().frame(width: 18, height: 18))
                 .offset(x: 15, y: 13)
-            Text(clip.map { model.title(of: $0) } ?? "Voiceover")
+            Text(L10n.tr(clip.map { model.title(of: $0) } ?? "Voiceover"))
                 .font(.system(size: 16, weight: .semibold)).foregroundStyle(CS.textPrimaryF).lineLimit(1)
                 .frame(width: 96, alignment: .leading)
                 .offset(x: 53, y: 12)
@@ -581,7 +581,7 @@ struct VoiceClipPanelV5: View {
                     Image(icon).resizable().frame(width: 20, height: 20)
                 }
                 .frame(width: 36, height: 36)
-                Text(label).font(.system(size: 10.5, weight: .medium)).multilineTextAlignment(.center)
+                Text(L10n.tr(label)).font(.system(size: 10.5, weight: .medium)).multilineTextAlignment(.center)
                     .lineSpacing(0).foregroundStyle(on ? Color(hex: 0x19E6FF) : Self.secondary)
                     .fixedSize()
             }
@@ -733,7 +733,7 @@ struct AudioPanelV5: View {
                         } else {
                             ProgressView().controlSize(.small).tint(.white)
                         }
-                        Text(ready ? "Add at playhead" : "Getting sound…").font(.system(size: 15, weight: .medium))
+                        Text(L10n.tr(ready ? "Add at playhead" : "Getting sound…")).font(.system(size: 15, weight: .medium))
                     }
                     .foregroundStyle(.white).padding(.horizontal, 14).frame(height: 36)
                     .background(Color(hex: 0x1769FF).opacity(ready ? 1 : 0.55), in: RoundedRectangle(cornerRadius: 12))
@@ -905,7 +905,7 @@ struct VoiceOverSheetV5: View {
     private func control<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 8) {
             ZStack { content() }.frame(height: 88)
-            Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(Color(hex: 0xA3B2D6)).lineLimit(1)
+            Text(L10n.tr(label)).font(.system(size: 10, weight: .medium)).foregroundStyle(Color(hex: 0xA3B2D6)).lineLimit(1)
         }
         .frame(maxWidth: .infinity)
     }

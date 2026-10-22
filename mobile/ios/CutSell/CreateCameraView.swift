@@ -150,7 +150,7 @@ struct CreateCameraView: View {
                 Spacer()
 
                 if let error = camera.errorMessage {
-                    Text(error)
+                    Text(L10n.tr(error))
                         .font(CS.sf(13, .medium))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
@@ -220,7 +220,7 @@ struct CreateCameraView: View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(image).resizable().frame(width: size.width, height: size.height)
-                Text(title)
+                Text(L10n.tr(title))
                     .font(CS.sf(13, .semibold))
                     .foregroundStyle(.white)
             }
@@ -236,7 +236,7 @@ struct CreateCameraView: View {
                 Button {
                     preset = item
                 } label: {
-                    Text(item.title)
+                    Text(L10n.tr(item.title))
                         .font(CS.sf(isSelected ? 16 : 15, isSelected ? .bold : .semibold))
                         .foregroundStyle(.white)
                         .frame(width: isSelected ? 84 : 54, height: 42)

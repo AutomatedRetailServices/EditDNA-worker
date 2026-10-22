@@ -41,7 +41,7 @@ struct DraftEditorView: View {
             } else if let model = holder.model, !model.isLoading, model.snapshot == nil, model.errorMessage != nil {
                 VStack(spacing: 14) {
                     Text("Couldn’t open this cut").font(CS.inter(18, .semibold)).foregroundStyle(.white)
-                    Text(model.errorMessage.map { DraftEditorViewModel.plainWords($0) } ?? "Please try again.").font(CS.inter(13)).foregroundStyle(CS.textSecondaryF)
+                    Text(L10n.tr(model.errorMessage.map { DraftEditorViewModel.plainWords($0) } ?? "Please try again.")).font(CS.inter(13)).foregroundStyle(CS.textSecondaryF)
                         .multilineTextAlignment(.center)
                     PrimaryButton(title: "Try again", height: 48, cornerRadius: 14, fontSize: 15) {
                         Task { await model.load() }
@@ -149,7 +149,7 @@ struct DraftEditorView: View {
 
                             if let export = model.exportJob {
                                 HStack {
-                                    Text(export.state.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    Text(L10n.tr(export.state.replacingOccurrences(of: "_", with: " ").capitalized))
                                     Spacer()
                                     if let progress = export.progress { Text("\(progress)%").monospacedDigit() }
                                 }
@@ -190,7 +190,7 @@ struct DraftEditorView: View {
         .alert("CutSell", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
-        )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
+        )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
     }
 }
 
@@ -209,7 +209,7 @@ private struct ReorderList: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 22)
-                    Text(clip?["caption_text"]?.stringValue ?? clip?["text"]?.stringValue ?? "Clip")
+                    Text(L10n.tr(clip?["caption_text"]?.stringValue ?? clip?["text"]?.stringValue ?? "Clip"))
                         .lineLimit(1)
                     Spacer()
                     HStack(spacing: 4) {

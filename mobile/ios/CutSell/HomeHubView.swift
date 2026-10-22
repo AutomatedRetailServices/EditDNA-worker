@@ -144,7 +144,7 @@ struct HomeHubView: View {
                 HStack(spacing: 6) {
                     ForEach([CreateMode.single, .bulk, .combine], id: \.self) { mode in
                         Button { onUpload(mode) } label: {
-                            Text(mode.title)
+                            Text(L10n.tr(mode.title))
                                 .font(CS.inter(12, .semibold))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 10)
@@ -207,10 +207,10 @@ struct HomeHubView: View {
                     .background(CS.surfaceControl, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(CS.borderDefault, lineWidth: 1))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
+                    Text(L10n.tr(title))
                         .font(CS.inter(16, .bold))
                         .foregroundStyle(CS.textPrimaryF)
-                    Text(subtitle)
+                    Text(L10n.tr(subtitle))
                         .font(CS.inter(13))
                         .foregroundStyle(CS.textMutedF)
                         .multilineTextAlignment(.leading)

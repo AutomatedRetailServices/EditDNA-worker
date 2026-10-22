@@ -102,9 +102,9 @@ struct OverlayView: View {
                                 selectedOverlayID = overlay["overlay_id"]?.stringValue
                             } label: {
                                 HStack {
-                                    Text((overlay["kind"]?.stringValue ?? "overlay").capitalized)
+                                    Text(L10n.tr((overlay["kind"]?.stringValue ?? "overlay").capitalized))
                                     Spacer()
-                                    Text(String(format: "%.1fs–%.1fs", overlay["start"]?.doubleValue ?? 0, overlay["end"]?.doubleValue ?? 0))
+                                    Text(L10n.tr(String(format: "%.1fs–%.1fs", overlay["start"]?.doubleValue ?? 0, overlay["end"]?.doubleValue ?? 0)))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if overlay["overlay_id"]?.stringValue == selectedOverlayID {
@@ -188,7 +188,7 @@ struct OverlayView: View {
             .alert("CutSell", isPresented: Binding(
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "") }
+            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(model.errorMessage ?? "")) }
         }
     }
 
@@ -313,7 +313,7 @@ private struct CommitSlider: View {
 
     var body: some View {
         HStack {
-            Text(label)
+            Text(L10n.tr(label))
             Slider(value: $localValue, in: range, onEditingChanged: { editing in
                 if !editing { Task { await onCommit(localValue) } }
             })

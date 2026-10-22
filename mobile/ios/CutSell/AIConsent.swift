@@ -125,7 +125,7 @@ struct AIConsentSheet: View {
     private func row(_ name: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(CS.cyan).frame(width: 6, height: 6).padding(.top, 7)
-            (Text(name).bold().foregroundColor(.white) + Text(" — \(text)").foregroundColor(CS.textSecondaryF))
+            (Text(L10n.tr(name)).bold().foregroundColor(.white) + Text(" — \(text)").foregroundColor(CS.textSecondaryF))
                 .font(CS.inter(14)).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -163,7 +163,7 @@ struct LegalView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(Color(hex: 0x050814).ignoresSafeArea())
-            .navigationTitle(document.title)
+            .navigationTitle(L10n.tr(document.title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }

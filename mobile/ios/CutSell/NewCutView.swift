@@ -44,7 +44,7 @@ struct NewCutView: View {
             Form {
                 Section("Create") {
                     Picker("Mode", selection: $mode) {
-                        ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+                        ForEach(Mode.allCases) { Text(L10n.tr($0.rawValue)).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .disabled(resumeProjectID != nil || isImportingFromPhotos)
@@ -76,7 +76,7 @@ struct NewCutView: View {
                     if isImportingFromPhotos {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text(importStatusText)
+                            Text(L10n.tr(importStatusText))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -98,7 +98,7 @@ struct NewCutView: View {
                                 .foregroundStyle(.secondary)
                             VStack(alignment: .leading) {
                                 Text(item.name).lineLimit(1)
-                                Text(duration(item.duration)).font(.caption).foregroundStyle(.secondary)
+                                Text(L10n.tr(duration(item.duration))).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Text("\(index + 1)").font(.caption.monospacedDigit())
@@ -127,7 +127,7 @@ struct NewCutView: View {
                 if isSubmitting {
                     Section {
                         ProgressView(value: submitter.progress)
-                        Text(submitter.statusText).font(.caption).foregroundStyle(.secondary)
+                        Text(L10n.tr(submitter.statusText)).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -147,7 +147,7 @@ struct NewCutView: View {
             .alert("Couldn’t create cut", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
-            )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+            )) { Button("OK", role: .cancel) {} } message: { Text(L10n.tr(errorMessage ?? "")) }
         }
     }
 

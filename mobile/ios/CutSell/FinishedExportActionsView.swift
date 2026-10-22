@@ -67,10 +67,10 @@ struct FinishedExportActionsView: View {
             }
 
             if let notice {
-                Text(notice).font(.caption).foregroundStyle(CS.cyan).accessibilityIdentifier("exportNotice")
+                Text(L10n.tr(notice)).font(.caption).foregroundStyle(CS.cyan).accessibilityIdentifier("exportNotice")
             }
             if let errorMessage {
-                Text(errorMessage)
+                Text(L10n.tr(errorMessage))
                     .font(.caption)
                     .foregroundStyle(.red)
                 if localURL == nil {
